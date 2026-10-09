@@ -191,6 +191,62 @@ Additions to contract version 1, opt-in by the request's `predicate`:
   later increment, not served yet): with `long_search: "paths"` a predicate is 400 `invalid_request`; with
   `"anchors"` (the default) a long pattern keeps its anchors' answer and its selection is `not_started`.
 
+**Multi-graph servers and `in_ram` (in the build since round C, 2026-10-09; SPEC §24,
+`SPEC-labeled-traversal-core.md` §6.1 and §10.3).** The owner: pattern search and traversal on a multi-graph server
+follow `/search` ("the same logic as for the general search"). Additions to contract version 1; a request without
+`graphs` and `in_ram` to a single-graph server answers as before.
+- **Selection.** `POST /pattern` on a multi-graph server takes `/search`'s `graphs`: a non-empty list of names of
+  the server's graph list. Each selected (graph, annotation) pair is answered as a single-graph server answers the
+  request, with its own deadline, caps, memory account and work budgets (the request's budgets apply per pair).
+  Without `graphs`, every name of a server that lists at most 10; above 10, 400 `invalid_request`. The service
+  sends **one graph per request**, one task per chunk (`graphs: ["{label}-{i}/{N}"]`, §3.1 item 3), as for
+  `/search`. On a single-graph server `graphs` is 400 `invalid_request`.
+- **The answer is an envelope**: `{pattern_contract_version: 1, graphs: [the names answered, in byte order],
+  answers: [...], timing: {elapsed_ms}}`. Each entry of `answers` is the single-graph answer (SPEC §8) of one pair
+  plus `graph` (the name it was selected by), `graph_path`, `annotation_path` and `index_fp` (`null` without a
+  manifest in the list). The job unwraps it per task and merges as in §3.1 item 2: counts of different pairs are
+  counts of different graphs. A refusal of any pair refuses the whole request with that pair's refusal, as
+  `/search` fails on one graph; with one graph per request a refusal stays with its chunk. The texts of several
+  pairs are written together under the latest pair's deadline, so a request naming many graphs can answer 503
+  `deadline` where each alone would not.
+- **Labels across chunks.** §3.1 item 2 keeps label counts per task. A label's counts and occurrences may be
+  summed over the chunks of a server only where its `GET /capabilities` states `graph_summary.columns_disjoint:
+  true` (no column name in two pairs: chunks that partition the samples); `shared_columns` counts the names that
+  are not.
+- **Capabilities.** `GET /capabilities` of a multi-graph server lists `"pattern"` in `features`, `routes.pattern`
+  and `routes.pattern_capabilities = "GET /pattern/capabilities?graph={name}[&graph_path={path}]"`, the block
+  without a graph (its graph fields `null`; `available` true when some pair is served), and `graph_summary`:
+  `{columns_disjoint, shared_columns, pairs: [{graph, graph_path, annotation_path, index_ns, index_fp, k,
+  graph_mode, available, unavailable_reason, mask, counting, traversal: {regime, num_labels, has_coordinates,
+  has_coord_to_header, supports_trace}}]}`, one entry per (name, pair), computed at start-up: one probe learns
+  every chunk (about 0.5 KB per entry: a list of thousands of chunks makes a document of megabytes; cache it).
+  Gate each chunk on its own pair: its `graph_summary` entry, or `GET /pattern/capabilities?graph=NAME` (the
+  pair's full block with `graph` and `graph_path`; without `graph` a 400). `GET /traverse/capabilities?graph=NAME`
+  carries the same block with `details`. A pair's `available: false` keeps its `unavailable_reason` (item 6);
+  an unmasked chunk (the SRA-like chunks run without a mask, decision #23) answers `counting: "upper_bound"`, its
+  dummy fraction sampled when the server starts.
+- **`in_ram`** (a boolean; another value is a 400, `invalid_request` on `/pattern`) is accepted by `/pattern`,
+  `/traverse` and `/resolve` exactly as by `/search`: on a multi-graph server running on mmap the pair is loaded
+  into RAM for the request when its files fit `--mem-cap-gb` (one pool, and `/search`'s wait, for all routes'
+  loads), else it is served from the mapped index; a single-graph server, or one that holds its graphs in RAM, serves what it holds.
+  Both GET capabilities routes state it (`in_ram: {routes, loads, mem_cap_gb, budgets_start: "after_load"}`; the
+  block's `in_ram: "accepted"`, `resident_only: false`). The request's **budgets start after the load** (time,
+  memory, work, an attempt's bound); `timing.load_ms` states the wait and the load. `load_ms: 0` means nothing was
+  loaded, without the reason (above the cap, no `--mmap`, one graph): only the server's log says which. Whether to
+  send `in_ram` is the service's high-throughput rule, as for `/search`. A traversal's load also builds the reverse
+  index of the chunk's record headers (seconds on a chunk with millions of records, `traversal.has_coord_to_header`;
+  inside `load_ms`, outside the budgets).
+- **Traversal: `graphs: [name]`.** `/traverse` and `/resolve` take `graphs` with one name as an alias of `graph`
+  (both fields, a list of another length, or `graphs` on a single-graph server: 400, no code). With `graphs`, a
+  seed the chunk does not hold, fully or in part, is a **200 per-seed result**, not the request's 400:
+  `outcome.walks: "not_in_graph"`, `not_in_graph: {kmers, kmers_present}` (the seed's k-mers, and those this chunk
+  has), the `error` text, no arms and no graphlet, `usage.per_seed[].outcome: "not_in_graph"`; the other seeds are
+  walked. The traversal job fans out to every chunk without a presence check, as for `/search`, and reads
+  `not_in_graph` as "no walk on this chunk", never as a failure. With `graph` the 400 stays.
+- **Codes**: `resident_only` is retired (no build answers it any more; an older one may: pass it through);
+  `multi_graph_later_increment` is answered by no route of this build; `budget_split` stays 400
+  `later_increment`.
+
 ## 2. When
 
 | backend milestone | content | state |
@@ -199,7 +255,7 @@ Additions to contract version 1, opt-in by the request's `predicate`:
 | 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | in the build (SPEC §14), with fixtures |
 | 4 | patterns longer than k (extension), per-label `support`, `require_support`; opt-in: only a request with `long_search: "paths"` gets paths (new fields `sequence`, `anchor_kmer`; `kmer` keeps its meaning), every other request keeps today's anchor-only answer (SPEC §12.1) | in the build (2026-10-08, SPEC §17), with fixtures (`paths*`, `support_unavailable`) |
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b for patterns of at most k bases in the build (2026-10-08, SPEC §19), with fixtures (`predicate_*`); predicates on long patterns with the supported-path search (5s), later |
-| 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
+| 6 | multi-graph servers: `graphs` as `/search` selects, one answer per pair tagged with its pair and `index_fp`, `in_ram`, `graph_summary` (the merged view is the service's, §3.1 item 2); the real-index benchmark | multi-graph serving in the build (round C, 2026-10-09, SPEC §24), with fixtures (`multi_graph_*`, `in_ram_single_graph`, `graphs_single_graph`); first on the owner's local test bed of Logan chunks; the benchmark later |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
 | mask | refseq33m-experimental's graph has no `.edgemask` file. Since the owner's decision #16 (2026-10-08) the route answers without it: `mask: absent`, `counting: "upper_bound"`, counts `bounds` with an `estimate` where they cannot be proven, lists exact (before, it answered `mask_required`). For exact counts the owner runs `metagraph transform --mask-dummy` once on mex (decision #18: in a staging-only directory, on the host rather than in the 128 GiB container: it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows, the annotation and `index_fp` stay (decision #17: the mask is derived data); `/stats` `graph.nodes` becomes the k-mer count and a `.bloom` beside the graph starts loading; the block then says `counting: "exact"`. `--pattern-build-mask` (the mask built in memory at every start-up) is for small indexes, not for refseq33m | the route answers from the `update.sh` that deploys it; exact counts after the mask (#18) |
 | fixtures | with milestone 1's freeze commit, as for level 6: the capabilities block on both routes, one answer per mode and per `withheld` reason, an error slot, from the mini index, under `api/python/tests/data/traverse/pattern/`, so your unit tests do not wait for a host | with milestone 1 |
@@ -233,8 +289,9 @@ capabilities block are what to build on.
    are contexts, never labels.
 3. **(required)** A chunked database is many graphs on one multi-graph server process, selected per task through
    `graphs: ["{label}-{i}/{N}"]` as `/search` does (`app/download_depth.py`, `enumerate_leaf_specs`). The job type
-   is built and tested on refseq33m-experimental (one graph) with backend milestone 1; serving the chunked
-   databases waits for backend milestone 6, which keeps `graphs` exactly as `/search` selects a shard.
+   is built and tested on refseq33m-experimental (one graph) with backend milestone 1; the chunked databases
+   with backend milestone 6, which keeps `graphs` exactly as `/search` selects a shard (in the build since round
+   C, §1 "Multi-graph servers"; served once a multi-graph server with this build is deployed).
 4. **(required)** Admission by the queue, **shared with search and traversal** (the owner: "traverse, pattern
    match and normal search need to share the pool inside async and inside the sync server"): the per-database
    queues, `META_DB_CAPS` and the distributed semaphore count search, pattern and traversal calls against one cap

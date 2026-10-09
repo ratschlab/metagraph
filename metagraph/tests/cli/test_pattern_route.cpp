@@ -267,7 +267,14 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"genetic_code\": 1.5}", 400, "invalid_request" },
         { "{" + p + ", \"genetic_code\": null}", 400, "invalid_request" },
         { "{" + p + ", \"genetic_code\": true}", 400, "invalid_request" },
-        { "{" + p + ", \"in_ram\": true}", 400, "resident_only" },
+        // in_ram (a boolean, as /search's) is the server's: accepted here, whatever its value
+        { "{" + p + ", \"in_ram\": true}", 200, "" },
+        { "{" + p + ", \"in_ram\": false}", 200, "" },
+        { "{" + p + ", \"in_ram\": 1}", 400, "invalid_request" },
+        { "{" + p + ", \"in_ram\": null}", 400, "invalid_request" },
+        // graphs selects a multi-graph server's graphs, which strips it: on one graph a 400
+        { "{" + p + ", \"graphs\": [\"a\"]}", 400, "invalid_request" },
+        { "{" + p + ", \"budget_split\": 1}", 400, "later_increment" },
         { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": false}}", 200, "" },
         // output.paths is accepted with either value and changes nothing (a path result
         // always carries its node path)
@@ -331,15 +338,22 @@ TEST(PatternRoute, RefusalOrder) {
     auto g = tiny();
     const std::string p = "\"patterns\": [{\"dna\": \"AACG\"}]";
     const std::vector<std::tuple<std::string, std::string, std::string>> cases = {
-        // 6 before 7: a later-increment field before the patterns
-        { "{\"patterns\": \"x\", \"graphs\": 1}", "later_increment", "request.graphs" },
+        // 6 before 7: a later-increment field, graphs or a malformed in_ram before the patterns
+        { "{\"patterns\": \"x\", \"budget_split\": 1}", "later_increment",
+          "request.budget_split" },
+        { "{\"patterns\": \"x\", \"graphs\": 1}", "invalid_request", "request.graphs" },
+        { "{\"patterns\": \"x\", \"in_ram\": 1}", "invalid_request", "request.in_ram" },
+        { "{\"patterns\": \"x\", \"in_ram\": true}", "invalid_request",
+          "request.patterns" },
         // (predicate is served: checked at the end of step 8)
         { "{\"patterns\": \"x\", \"predicate\": 1}", "invalid_request", "request.patterns" },
-        // 6, alphabetical: graphs < in_ram; in_ram < max_paths
-        { "{" + p + ", \"in_ram\": true, \"graphs\": []}", "later_increment", "request.graphs" },
-        { "{" + p + ", \"in_ram\": true, \"max_paths\": 1}", "resident_only", "request.in_ram" },
+        // 6, alphabetical: budget_split < graphs < in_ram; in_ram < max_paths
+        { "{" + p + ", \"graphs\": [], \"budget_split\": 1}", "later_increment",
+          "request.budget_split" },
+        { "{" + p + ", \"in_ram\": 1, \"graphs\": []}", "invalid_request", "request.graphs" },
+        { "{" + p + ", \"in_ram\": 1, \"max_paths\": 0}", "invalid_request", "request.in_ram" },
         // (long_search is served: checked after the patterns, step 8)
-        { "{" + p + ", \"in_ram\": true, \"long_search\": \"paths\"}", "resident_only",
+        { "{" + p + ", \"in_ram\": 1, \"long_search\": \"x\"}", "invalid_request",
           "request.in_ram" },
         { "{\"patterns\": \"x\", \"long_search\": \"x\"}", "invalid_request",
           "request.patterns" },

@@ -434,6 +434,50 @@ def full_block(available, reason=None, mask=None, counting=None):
     return run
 
 
+def multi_capabilities(doc):
+    """GET /capabilities of a multi-graph server: /pattern served (feature, routes with
+    ?graph=), the block the contract and the caps without a graph, available, and graph_summary
+    with the pair, its mask and counting, and columns_disjoint"""
+    check('pattern' in doc['features'], doc['features'])
+    check(doc['routes']['pattern'] == 'POST /pattern', doc['routes'])
+    check(doc['routes']['pattern_capabilities']
+          == 'GET /pattern/capabilities?graph={name}[&graph_path={path}]', doc['routes'])
+    b = doc['pattern']
+    check(b['available'] is True and b['unavailable_reason'] is None, b)
+    check(all(b[f] is None for f in LOADING_NULL), b)
+    summary = doc['graph_summary']
+    check(summary['columns_disjoint'] is True and summary['shared_columns'] == 0, summary)
+    check([p['graph'] for p in summary['pairs']] == [MULTI_GRAPH_NAME], summary)
+    pair = summary['pairs'][0]
+    check((pair['available'], pair['mask'], pair['counting'], pair['graph_mode'], pair['k'])
+          == (True, 'file', 'exact', 'basic', MINI_K), pair)
+
+
+def names_the_pair(doc):
+    """The block of one pair of a multi-graph server names it (graph, graph_path)"""
+    check(doc['graph'] == MULTI_GRAPH_NAME and doc['graph_path'].endswith(MINI_GRAPH), doc)
+
+
+def multi_answers(*per_answer):
+    """POST /pattern on a multi-graph server: one answer per selected pair, each tagged with
+    its pair and checked by its own check"""
+    def run(answer):
+        check(len(answer['answers']) == len(per_answer), len(answer['answers']))
+        check(answer['graphs'] == sorted({a['graph'] for a in answer['answers']}), answer['graphs'])
+        for a, c in zip(answer['answers'], per_answer):
+            check(a['graph'] == MULTI_GRAPH_NAME and a['graph_path'].endswith(MINI_GRAPH)
+                  and a['annotation_path'].endswith(MINI_ANNO) and a['index_fp'] is None, a)
+            c(a)
+    return run
+
+
+def load_ms(value):
+    """timing.load_ms: the time before the work began (in_ram); 0 when nothing was loaded"""
+    def run(answer):
+        check(answer['timing'].get('load_ms') == value, answer['timing'])
+    return run
+
+
 def details(doc):
     """The block of GET /traverse/capabilities names the route of the full block."""
     check(doc['pattern']['details'] == 'GET /pattern/capabilities', doc['pattern'])
@@ -547,16 +591,24 @@ FIXTURES = [
         'the same server on the route of the full block',
         full_block(True, mask='built_at_load', counting='exact')),
     get('capabilities_multi_graph', 'multi', '/capabilities',
-        'a multi-graph server: no `pattern` feature or route; the block says '
-        'multi_graph_later_increment and nothing else',
-        expect_all(features(False), caps_block(False, 'multi_graph_later_increment'))),
+        'a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block '
+        'with the contract and the caps and no graph (available: a pair is served), and '
+        'graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, '
+        'traversal; columns_disjoint)',
+        multi_capabilities),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
-        'the multi-graph server probed for one graph: the same reduced block, with `details`',
-        expect_all(caps_block(False, 'multi_graph_later_increment'), details)),
-    get('pattern_capabilities_multi_graph', 'multi', '/pattern/capabilities',
-        'the multi-graph server on the route of the full block: 200, the same reduced block',
-        full_block(False, 'multi_graph_later_increment')),
+        'the multi-graph server probed for one pair: that pair\'s full block, with `details`',
+        expect_all(caps_block(True, mask='file', counting='exact'), details)),
+    get('pattern_capabilities_multi_graph', 'multi',
+        '/pattern/capabilities?graph=' + MULTI_GRAPH_NAME,
+        'the multi-graph server on the route of the full block: the block of the pair '
+        '?graph= selects, naming it (graph, graph_path)',
+        expect_all(full_block(True, mask='file', counting='exact'), names_the_pair)),
+    get('pattern_capabilities_multi_graph_no_graph', 'multi', '/pattern/capabilities',
+        'the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)',
+        lambda doc: check(set(doc) == {'error'} and 'needs ?graph=' in doc['error'], doc),
+        status=400),
     get('traverse_capabilities_primary', 'primary', '/traverse/capabilities',
         'a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], '
         'strand_stated false, placement none_canonical, annotation unbudgeted (column)',
@@ -1423,19 +1475,38 @@ FIXTURES = [
          'names, so it needs one (served with a predicate since increment 5b; 400 '
          'later_increment before, fixture later_increment_labels)',
          refused('invalid_request')),
-    post('later_increment_graphs', 'masked',
+    post('later_increment_budget_split', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'budget_split': 'even'}, 400,
+         '400 later_increment: budget_split (how a multi-graph request would split its budgets) '
+         'is refused by name, whatever its value; graphs is served (multi_graph_count)',
+         refused('later_increment')),
+    post('graphs_single_graph', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [INDEX_NAME]}, 400,
-         '400 later_increment: the request field graphs (multi-graph selection) is refused by '
-         'name, whatever its value',
-         refused('later_increment')),
-    post('resident_only', 'masked',
-         {'patterns': [p(NDM_F)], 'mode': 'count', 'in_ram': False}, 400,
-         '400 resident_only: in_ram, whatever its value (the route never loads an index)',
-         refused('resident_only')),
-    post('multi_graph', 'multi',
-         {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
-         '400 later_increment on a multi-graph server, whatever the request',
-         refused('later_increment')),
+         '400 invalid_request: graphs (a multi-graph server\'s selection) on a single-graph '
+         'server, which hosts one graph',
+         refused('invalid_request')),
+    post('in_ram_single_graph', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'in_ram': True}, 200,
+         'in_ram accepted, as /search\'s: a single-graph server answers from the index it '
+         'holds, timing.load_ms 0',
+         expect_all(entries(exact(24)), load_ms(0))),
+    post('multi_graph_count', 'multi',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [MULTI_GRAPH_NAME]}, 200,
+         'a multi-graph server answers the graphs a request names (graphs, as /search): one '
+         'answer per pair, each the single-graph answer tagged with graph, graph_path, '
+         'annotation_path and index_fp',
+         multi_answers(entries(exact(24)))),
+    post('multi_graph_in_ram', 'multi',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [MULTI_GRAPH_NAME],
+          'in_ram': True}, 200,
+         'in_ram on a multi-graph server that loaded its graphs into RAM (no --mmap): served '
+         'from them, timing.load_ms 0; on mmap the pair is loaded for the request and its '
+         'budget starts after the load',
+         multi_answers(expect_all(entries(exact(24)), load_ms(0)))),
+    post('multi_graph_unknown', 'multi',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': ['nope']}, 400,
+         '400 invalid_request: a name the graph list does not have',
+         refused('invalid_request')),
     post('representation_unsupported', 'hash',
          {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
          '400 representation_unsupported: a graph the engine does not recognise (a hash graph), '
@@ -1482,7 +1553,7 @@ SERVERS = {
                        'start-up)',
     'multi': 'server_query {work}/graphs.csv --index-release ' + INDEX_RELEASE
              + '  (one line: ' + MULTI_GRAPH_NAME + ',{work}/masked/graph_k31.dbg,'
-               '{work}/masked/' + MINI_ANNO + ')',
+               '{work}/masked/' + MINI_ANNO + '; its graphs loaded into RAM, no --mmap)',
     'primary': 'server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg'
                ' --index-name ' + PRIMARY_NAME + ' --index-release ' + INDEX_RELEASE
                + '  (a PRIMARY graph of ' + ' and '.join(PRIMARY_RECORDS)
@@ -1714,6 +1785,12 @@ def blanked(answer):
             for v in x:
                 walk(v)
     walk(a)
+    if isinstance(a, dict) and isinstance(a.get('answers'), list):
+        # a multi-graph server's answer: its time, and each pair's answer as one of its own
+        if isinstance(a.get('timing'), dict):
+            a['timing']['elapsed_ms'] = BLANK
+        a['answers'] = [blanked(x) for x in a['answers']]
+        return a
     if isinstance(a, dict) and isinstance(a.get('patterns'), list):
         if isinstance(a.get('timing'), dict):
             a['timing']['elapsed_ms'] = BLANK

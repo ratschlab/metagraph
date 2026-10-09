@@ -5,5 +5,8 @@
   }
  ],
  "mode": "count",
- "in_ram": false
+ "graphs": [
+  "mini_refseq"
+ ],
+ "in_ram": true
 }

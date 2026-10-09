@@ -553,7 +553,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 1. `|sequence| ≥ k`; every character is in `graph.alphabet()` minus `'$'` after the build's case mapping
    (DNA builds: upper-case; `N` is invalid in DNA builds). The first invalid position is reported.
 2. `nodes = map_to_nodes_sequentially(walk graph, sequence)`; every node ≠ npos, otherwise the seed is rejected
-   with its `graph_runs` (a partially present sequence is never treated as one seed).
+   with its `graph_runs` (a partially present sequence is never treated as one seed). A request that selected its
+   graph with `graphs` (§10.3, multi-graph mode: the fan-out of `/search`, which sends each seed to graphs that
+   need not hold it) gets such a seed as its result instead — `{"seed": {…}, "error": "Seed is not fully present
+   in the graph; graph runs: …", "not_in_graph": {"kmers": n, "kmers_present": p}, "limitations": […],
+   "outcome": {"walks": "not_in_graph", …}}`, no arms, no graphlet, `p` the seed's k-mers this graph has (0: none;
+   a partially present seed is answered so too) — and the other seeds are traversed; `limitations` is empty but
+   for `memory_bound_soft` under a memory budget, and a request with `output.coordinates` states `coordinates:
+   null` with its reason, as for a failed seed.
 3. Every seed label must resolve (else the request is rejected naming the label). Each label must support every
    seed k-mer under `support`; labels that do not are **dropped** with `{reason: seed_unsupported, runs}`. A seed
    with no remaining label is rejected. `validated_seed_id` is computed over the remaining labels; a supplied
@@ -630,7 +637,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
    traversed as usual. The `derivation` entry names the request field that would get past the cause (§7.0); a
    client distinguishes the two shapes by `outcome.walks` (or the presence of `error`). Everything that
    *is* the caller's own doing still fails the whole request with HTTP 400: a malformed seed (too short, invalid
-   character, not fully present in the graph), an unknown or duplicate **explicit** label, and every strategy error.
+   character, not fully present in the graph — but with `graphs`, step 2), an unknown or duplicate **explicit**
+   label, and every strategy error.
 5. The seed is never rewritten.
 6. The permitted universe is `P = seed labels ∪ extra`. A seed whose `validated_seed_id` repeats an earlier seed
    of the same request is traversed again and its result carries `duplicate: true` (the `duplicate_of` reference
@@ -2600,9 +2608,11 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     In multi-graph mode `mode` is `"multi"`, `graphs` the sorted list of the graph list's names, `align` is in
     neither `features` nor `routes` (it answers 400 there), and `routes.traverse_capabilities` is
     `"GET /traverse/capabilities?graph={name}[&graph_path={path}]"`. `server_instance` is the attempts' (below).
-    A single-graph server also lists the pattern search: `pattern` in `features`, `routes.pattern` and
-    `routes.pattern_capabilities` (`"GET /pattern/capabilities"`), and the `pattern` block
-    (`SPEC-pattern-search.md` §10, §23).
+    Both modes list the pattern search: `pattern` in `features`, `routes.pattern` and
+    `routes.pattern_capabilities` (`"GET /pattern/capabilities"`; in multi-graph mode
+    `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the `pattern` block
+    (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
+    in multi-graph mode, `graph_summary` (`null` in single-graph mode; below, multi-graph mode).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
@@ -2906,8 +2916,41 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     cannot choose among them (list each annotation under a name of its own); when it lists several graphs,
     `graph_path` must name one of them (else 400 listing the graphs), and is refused like the above when that
     graph has several annotations under the name. There is **no union oracle**: a traversal reads one pair. The
-    pair is not echoed (its identity is); a name with one pair ignores `graph_path`. `in_ram` deployments are
-    rejected. The release id is server-wide (`--index-release ID`), in both modes.
+    pair is not echoed (its identity is); a name with one pair ignores `graph_path`. The release id is
+    server-wide (`--index-release ID`), in both modes.
+  - **`graphs: [name]`** (the owner's decision of 2026-10-09): `/search`'s field, accepted by `/traverse` and
+    `/resolve` as an alias of `graph` (one name: a traversal reads one graph; `graph_path` selects as above). With
+    both fields, a list that is not one name, or on a single-graph server, 400. A request that selects with
+    `graphs` is a fan-out's — the service sends `/traverse` to every selected chunk, without a presence check, as
+    it sends `/search` — so a seed the chunk does not hold (or holds in part) is its result, `outcome.walks:
+    "not_in_graph"` with `not_in_graph.kmers_present` (§6.1 step 2), not the whole request's 400; with `graph` the
+    400 stays.
+  - **`in_ram`** (the owner's decisions of 2026-10-09): `/traverse` and `/resolve` accept it exactly as `/search`:
+    on a multi-graph server that runs on mmap, `in_ram: true` loads the selected pair into RAM for the request when
+    its graph and annotation fit `--mem-cap-gb` (the load waits until that much of it is free — one pool with
+    `/search`'s and `/pattern`'s loads, `/search`'s unbounded wait —, holds it while the request runs and frees it
+    after; the reverse index of its headers is built in the load, as at start-up: seconds on a chunk with millions
+    of records, inside `load_ms`); a pair above the cap, a server that loaded its
+    graphs into RAM, and a single-graph server serve from the index they hold. The request's **budgets start after
+    the load**: a `/traverse`'s time budgets, its memory and work budgets and its attempt's bound (`usage.bound`
+    states the load as `load_ms`; the bound is `load + n_seeds × T + allowance`, the hard cap still counted from
+    the header), a `/resolve`'s `bounds.time_budget_ms`. `timing.load_ms` (top level, with `in_ram`; a
+    `/traverse` with `output.timing`) states the wait and the load, 0 when nothing was loaded. The HTTP server's
+    content timeout counts both. A malformed request is refused before its load; the wait is abandoned when the
+    client leaves or the server stops (nothing written), and a cancel of an attempt that waits takes effect when
+    its work begins (its seeds not started). The loaded copy states the pair's identity: `index_fp` and
+    `index_meta_fp` are per (graph, annotation) pair.
+  - **`GET /capabilities`** of a multi-graph server (the owner's decision of 2026-10-09): `graph_summary`, so that
+    a service learns every pair with one probe — `{columns_disjoint, shared_columns, pairs: [{graph, graph_path,
+    annotation_path, index_ns, index_fp, k, graph_mode, available, unavailable_reason, mask, counting, traversal:
+    {regime, num_labels, has_coordinates, has_coord_to_header, supports_trace}}]}`, one entry per (name, pair),
+    the names in byte order, computed once at start-up (the schema is `SPEC-pattern-search.md` §24.4; about 470
+    bytes per entry, which makes the route's document large on a long graph list). `columns_disjoint`:
+    no column name is a column of two distinct pairs — the chunks of an index partition its samples —, which
+    licenses summing a label's counts and occurrences over the pairs; `shared_columns` counts the names that are
+    not (the start-up log names one). `null` on a single-graph server. Both GET routes state `in_ram`:
+    `{"routes": ["pattern", "resolve", "search", "traverse"], "loads": <a multi-graph server on mmap with
+    --mem-cap-gb above 0>, "mem_cap_gb": <--mem-cap-gb>, "budgets_start": "after_load"}`.
   - **`GET /traverse/capabilities?graph=<name>[&graph_path=<path>]`** (feature level 3; a 400 before): the probe of
     the pair those parameters select by the rules above (percent-decoded values), with `graph` and `graph_path`
     (the pair's graph) added; without `graph` a 400 (`Bad request: in multi-graph mode GET /traverse/capabilities

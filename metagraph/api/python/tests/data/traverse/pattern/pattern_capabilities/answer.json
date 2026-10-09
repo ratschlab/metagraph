@@ -67,6 +67,7 @@
  ],
  "graph_cleaned": "unknown",
  "graph_mode": "basic",
+ "in_ram": "accepted",
  "k": 31,
  "kinds": [
   "dna",
@@ -138,7 +139,7 @@
  ],
  "protein_rule": "SPEC-pattern-search.md section 12.2",
  "records_shorter_than_k": "not_indexed",
- "resident_only": true,
+ "resident_only": false,
  "scopes": [
   "suffix",
   "any_offset"

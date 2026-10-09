@@ -82,6 +82,19 @@ int write_dummy_mask(const std::string &graph_path, const Config &config) {
                  counts.seconds, get_num_threads(), counts.edges, counts.source_dummy,
                  counts.sink_dummy, counts.kmers);
 
+    // The full check of what the pattern search assumes of a mask (no edge with W = $ valid),
+    // made once here, where the mask is written: a server checks a sample of those edges at
+    // load (check_mask_at_load), not every one of them
+    timer.reset();
+    const uint64_t valid_sentinels = graph.count_valid_sentinel_edges();
+    if (valid_sentinels) {
+        logger->error("--mask-dummy: the mask built marks {} edges with W = $ valid, which no "
+                      "dummy-edge mask may: nothing was written", valid_sentinels);
+        return 1;
+    }
+    logger->info("Mask checked in {:.3f} s: no edge with W = $ is marked valid",
+                 timer.elapsed());
+
     // written to a temporary file in the same directory and renamed over the target, so that a
     // loader never reads a partial mask: DBGSuccinct::load refuses the graph with a mask it
     // cannot parse (one it cannot open is skipped with a warning), and an interrupted run would

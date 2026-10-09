@@ -381,6 +381,16 @@ struct TraverseLimits {
     // Tests: the cache's retention rule (RowDiffCache::keeps: checkpoint, successors,
     // narrow_bytes) instead of its defaults; what it keeps never changes a response
     std::optional<std::tuple<uint32_t, uint32_t, uint64_t>> path_cache_retention;
+    // Not a cap: a seed with a k-mer the graph does not have fails the whole request (400) when
+    // false; when true — a request that selected its graph with `graphs`, the fan-out of /search
+    // over a server's graphs, which sends each seed to graphs that may not hold it — the seed's
+    // result states it (outcome.walks "not_in_graph", not_in_graph {kmers, kmers_present}) and
+    // the other seeds are traversed
+    bool not_in_graph_per_seed = false;
+    // Not a cap: the time the request waited for and spent loading its index into RAM
+    // (`in_ram`) before its work began; the attempt's bound starts after it (usage.bound.load_ms)
+    // and timing.load_ms states it. None without `in_ram`
+    std::optional<double> load_ms;
 };
 
 // The results of a /traverse response written as text, one per seed, as each was built

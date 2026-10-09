@@ -1,4 +1,0 @@
-{
- "code": "resident_only",
- "error": "request.in_ram: /pattern serves the resident index only and never loads one inside a request (a load cannot be stopped at the deadline)"
-}

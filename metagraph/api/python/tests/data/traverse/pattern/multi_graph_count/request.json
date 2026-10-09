@@ -4,5 +4,8 @@
    "dna": "GGTTTGGCGATCTGGTTTTC"
   }
  ],
- "mode": "count"
+ "mode": "count",
+ "graphs": [
+  "mini_refseq"
+ ]
 }

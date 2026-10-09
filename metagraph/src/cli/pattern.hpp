@@ -27,7 +27,8 @@
  *    longer than k under long_search "anchors" keeps its anchors' answer, its selection
  *    not_started; with long_search "paths" a predicate is refused (a predicate selects among
  *    supported paths, which are not served);
- *  - single-graph servers only;
+ *  - one graph per call: a multi-graph server calls it once per (graph, annotation) pair a
+ *    request selects (`graphs`, as /search's) and concatenates the answers (server.cpp);
  *  - graphs with their dummy-edge mask (counting "exact") and without it (counting
  *    "upper_bound"): a count is then the bounds [lower, U], U the BOSS entries of its ranges
  *    (source dummies among them), with the additive estimate U x f (f the graph's sampled dummy
@@ -68,7 +69,7 @@ struct IndexIdentity;
 
 /**
  * A refusal of a whole /pattern request: the HTTP status and the body {"error", "code"}
- * (400 invalid_request, later_increment, resident_only and the graph support reasons of
+ * (400 invalid_request, later_increment and the graph support reasons of
  * route_support, alphabet_untested and mask_invalid among them; 503 deadline). The server
  * answers it as is (HttpError); the CLI writes the same body and exits 1. A refusal of one
  * pattern is not this: it is the `error` of that pattern's slot in a 200 answer.
@@ -185,8 +186,10 @@ using DummyFraction = graph::pattern::RealFraction;
  * The dummy fraction of the graph |anno_graph| serves when the pattern search counts on it
  * without a dummy-edge mask (counting "upper_bound"); nullopt when it has its mask (counting
  * "exact"), or is not a succinct graph. Sampled once per graph and kept: in the loading thread
- * (sample_dummy_fraction_at_load), or at the first call for a graph not loaded that way.
- * Thread-safe.
+ * (sample_dummy_fraction_at_load; every graph a server serves is loaded that way, so no request
+ * samples), or at the first call for a graph not loaded that way. Thread-safe: the sample is
+ * drawn outside the registry's lock (two first calls on one graph may both draw it, the same
+ * draws, and one is kept), so a reader of another graph's fraction never waits for it.
  */
 std::optional<DummyFraction> dummy_fraction(const graph::AnnotatedDBG &anno_graph);
 

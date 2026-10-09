@@ -492,32 +492,6 @@ const GraphPair& select_traverse_pair(const std::string &name, const std::string
                          + "); pass 'graph_path' to pick one");
 }
 
-/**
- * The (graph, annotation) pair of a POST /resolve or /traverse request: the single index, or in
- * multi-graph mode the one its "graph" (and "graph_path") fields select.
- */
-const graph::AnnotatedDBG&
-resolve_traverse_index(const Json::Value &json, const Config &config,
-                       const std::shared_future<std::unique_ptr<graph::AnnotatedDBG>> &anno_graph,
-                       const GraphIndexes &indexes,
-                       const VectorMap<GraphPair, std::unique_ptr<graph::AnnotatedDBG>> &graphs_cache) {
-    if (config.fnames.empty()) {
-        if (json.isMember("graph") || json.isMember("graph_path")) {
-            throw InvalidRequest("Bad request: this server hosts a single graph; "
-                                 "remove the 'graph' / 'graph_path' field");
-        }
-        return *anno_graph.get();
-    }
-    if (!json.isMember("graph") || !json["graph"].isString())
-        throw InvalidRequest("Bad request: 'graph' (index name) is required in multi-graph mode");
-    std::string wanted;
-    const bool has_path = json.isMember("graph_path") && json["graph_path"].isString();
-    if (has_path)
-        wanted = json["graph_path"].asString();
-    return *graphs_cache.at(select_traverse_pair(json["graph"].asString(),
-                                                 has_path ? &wanted : nullptr, indexes));
-}
-
 std::vector<std::string> filter_graphs_from_list(
         const GraphIndexes &indexes,
         const Json::Value &content_json,
@@ -550,6 +524,79 @@ std::vector<std::string> filter_graphs_from_list(
 }
 
 
+namespace {
+
+// A request abandoned while it waited for the memory to load its index (`in_ram`): its client
+// is gone, or the server stops; nothing was loaded, nothing is written
+class LoadAbandoned : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
+
+/**
+ * The index one request of a traversal or pattern route reads on a multi-graph server: the
+ * pair's resident index, or (`in_ram` on a server on mmap, the pair within --mem-cap-gb) its
+ * own copy loaded into RAM for it under a reservation of the server's LoadReservations (the
+ * rule and the wait of /search), freed and released when the lease ends. |load_ms|: what the
+ * request spent before its work could begin, waiting for the memory and loading (0 without a
+ * load); the request's budgets start after it.
+ */
+class IndexLease {
+  public:
+    explicit IndexLease(const AnnotatedDBG &resident, InRamPlan plan)
+          : index_(&resident), plan_(plan) {}
+    IndexLease(std::unique_ptr<AnnotatedDBG> loaded, LoadReservations *reservations,
+               size_t bytes, double load_ms)
+          : loaded_(std::move(loaded)), index_(loaded_.get()), plan_(InRamPlan::LOAD),
+            reservations_(reservations), bytes_(bytes), load_ms_(load_ms) {}
+    ~IndexLease() {
+        loaded_.reset();
+        if (reservations_)
+            reservations_->release(bytes_);
+    }
+    IndexLease(const IndexLease&) = delete;
+    IndexLease& operator=(const IndexLease&) = delete;
+
+    const AnnotatedDBG& index() const { return *index_; }
+    InRamPlan plan() const { return plan_; }
+    double load_ms() const { return load_ms_; }
+
+  private:
+    std::unique_ptr<AnnotatedDBG> loaded_;
+    const AnnotatedDBG *index_;
+    InRamPlan plan_;
+    LoadReservations *reservations_ = nullptr;
+    size_t bytes_ = 0;
+    double load_ms_ = 0;
+};
+
+// The parameters of a GET probe of one pair on a multi-graph server (?graph=<name>
+// [&graph_path=<path>]), refused as GET /traverse/capabilities refuses them (|route| names the
+// route in the messages)
+std::pair<std::string, std::optional<std::string>>
+probe_parameters(const SimpleWeb::CaseInsensitiveMultimap &query, const std::string &route) {
+    std::optional<std::string> name, graph_path;
+    for (const auto &[key, value] : query) {
+        std::optional<std::string> *slot = key == "graph" ? &name
+                                         : key == "graph_path" ? &graph_path : nullptr;
+        if (!slot) {
+            throw InvalidRequest("Bad request: unknown parameter '" + key + "' of GET "
+                                 + route + " (graph, graph_path)");
+        }
+        if (*slot)
+            throw InvalidRequest("Bad request: the parameter '" + key + "' is given twice");
+        *slot = value;
+    }
+    if (!name) {
+        throw InvalidRequest("Bad request: in multi-graph mode GET " + route + " "
+                             "needs ?graph=<name> (and graph_path=<path> when the name "
+                             "spans several graphs); GET /capabilities lists the graphs");
+    }
+    return { *name, graph_path };
+}
+
+} // namespace
+
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
 // index loads rather than by the first request naming a header: on refseq33m (33M headers)
 // that request would spend seconds in it (9.3 s), inside its time budget and outside every
@@ -562,6 +609,117 @@ static void build_header_index(const graph::AnnotatedDBG &index) {
     const size_t headers = coord_to_header->build_header_index();
     logger->info("[Server] Sequence header index built: {} headers in {:.1f} s", headers,
                  timer.elapsed());
+}
+
+// The pairs of a multi-graph server in the order its answers list them: the names in byte
+// order, each name's pairs in the graph list's order, a pair listed twice under a name once
+static std::vector<std::pair<std::string, GraphPair>>
+ordered_pairs(const GraphIndexes &indexes, const std::vector<std::string> &names) {
+    std::vector<std::pair<std::string, GraphPair>> pairs;
+    for (const std::string &name : names) {
+        const size_t first = pairs.size();
+        for (const GraphPair &pair : indexes.at(name)) {
+            if (std::none_of(pairs.begin() + first, pairs.end(),
+                             [&](const auto &p) { return p.second == pair; })) {
+                pairs.emplace_back(name, pair);
+            }
+        }
+    }
+    return pairs;
+}
+
+static std::vector<std::string> sorted_names(const GraphIndexes &indexes) {
+    std::vector<std::string> names;
+    for (const auto &[name, _] : indexes) {
+        names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+/**
+ * GET /capabilities' graph_summary of a multi-graph server, computed once at start-up, so that
+ * a service learns every pair with one probe: per (name, pair), in ordered_pairs' order, the
+ * pair (graph, graph_path, annotation_path), its identity (index_ns, index_fp), k, and what the
+ * pattern search makes of it — graph_mode, available and unavailable_reason, mask and counting,
+ * as its GET /pattern/capabilities?graph= block states them (the dummy fraction of a pair
+ * without its mask, sampled at load, is its block's only) — and what a traversal reads
+ * (regime, num_labels, has_coordinates, has_coord_to_header, supports_trace, as every
+ * /traverse response states them); and whether the pairs' columns are disjoint
+ * (column_overlap), which licenses summing a label's counts and occurrences over the pairs
+ */
+static Json::Value multi_graph_summary(
+        const GraphIndexes &indexes,
+        const VectorMap<GraphPair, std::unique_ptr<AnnotatedDBG>> &graphs_cache,
+        const std::map<GraphPair, IndexIdentity> &identities) {
+    Timer timer;
+    Json::Value summary;
+    Json::Value pairs(Json::arrayValue);
+    uint64_t masked = 0;
+    for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
+        const AnnotatedDBG &index = *graphs_cache.at(pair);
+        const DeBruijnGraph &graph = index.get_graph();
+        const IndexIdentity &id = identities.at(pair);
+        Json::Value p;
+        p["graph"] = name;
+        p["graph_path"] = pair.first;
+        p["annotation_path"] = pair.second;
+        p["index_ns"] = string_or_null(id.name);
+        p["index_fp"] = string_or_null(id.fp);
+        p["k"] = uint_json(graph.get_k());
+        // the pattern search, as the pair's block states it (pattern_capabilities_json)
+        const graph::pattern::GraphSupport support = route_support(graph);
+        const bool recognised = support.supported || support.reason == "alphabet_unsupported"
+                                    || support.reason == "alphabet_untested"
+                                    || support.reason == "mask_invalid";
+        p["available"] = support.supported;
+        p["unavailable_reason"] = support.supported ? Json::Value()
+                                                    : Json::Value(support.reason);
+        p["graph_mode"] = recognised ? Json::Value(to_string(support.mode)) : Json::Value();
+        p["mask"] = !recognised ? Json::Value()
+                  : !support.mask_present ? Json::Value("absent")
+                  : mask_built_at_load(graph) ? Json::Value("built_at_load")
+                                              : Json::Value("file");
+        p["counting"] = !support.supported ? Json::Value()
+                      : support.mask_present ? Json::Value("exact")
+                                             : Json::Value("upper_bound");
+        masked += recognised && support.mask_present;
+        // what a traversal reads, as the capabilities of every /traverse response state it
+        const graph::traversal::LabelOracle oracle(index);
+        Json::Value t;
+        t["regime"] = to_string(oracle.regime());
+        t["num_labels"] = uint_json(oracle.num_columns());
+        t["has_coordinates"] = oracle.has_coordinates();
+        t["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
+        t["supports_trace"] = oracle.has_coordinates()
+                && oracle.regime() == graph::traversal::Regime::BASIC;
+        p["traversal"] = std::move(t);
+        pairs.append(std::move(p));
+    }
+    // the columns of every pair (each pair once, whatever names list it)
+    std::vector<std::vector<std::string>> columns;
+    for (const auto &[pair, index] : graphs_cache) {
+        columns.push_back(index->get_annotator().get_label_encoder().get_labels());
+    }
+    const ColumnOverlap overlap = column_overlap(columns);
+    summary["columns_disjoint"] = overlap.disjoint;
+    summary["shared_columns"] = uint_json(overlap.shared);
+    summary["pairs"] = std::move(pairs);
+    if (overlap.disjoint) {
+        logger->info("[Server] The {} columns of the {} (graph, annotation) pairs are disjoint: "
+                     "a label's counts can be summed over them", overlap.columns,
+                     graphs_cache.size());
+    } else {
+        logger->info("[Server] {} of the {} column names are columns of more than one (graph, "
+                     "annotation) pair (one of them: '{}'): columns_disjoint false, a label's "
+                     "counts must not be summed over the pairs", overlap.shared,
+                     overlap.columns, overlap.example);
+    }
+    logger->info("[Server] Pattern search: {} of the {} pairs with a dummy-edge mask (exact "
+                 "counts); the others count upper bounds with estimates, their dummy fraction "
+                 "sampled at load. Summary computed in {:.3f} s", masked,
+                 summary["pairs"].size(), timer.elapsed());
+    return summary;
 }
 
 int run_server(Config *config) {
@@ -607,17 +765,27 @@ int run_server(Config *config) {
                          graph, fmt::join(loaded, ", "));
         }
     };
+    // per (graph, annotation) pair: its name and manifest digest from the graph list, its meta
+    // fingerprint computed on first use, from the resident index or a copy of it loaded for a
+    // request (`in_ram`: the same files, the same identity)
     std::mutex identities_mutex;
-    std::map<const AnnotatedDBG*, IndexIdentity> identities;
-    auto identity_of = [&](const AnnotatedDBG &index) -> IndexIdentity {
-        if (config->fnames.empty())
-            return single_identity;
+    std::map<GraphPair, IndexIdentity> pair_identities;
+    std::map<const AnnotatedDBG*, GraphPair> resident_pairs;
+    auto identity_of_pair = [&](const GraphPair &pair, const AnnotatedDBG &index) {
         std::lock_guard<std::mutex> lock(identities_mutex);
-        IndexIdentity &id = identities[&index];
+        IndexIdentity &id = pair_identities[pair];
         if (id.meta_fp.empty())
             id.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(index));
         return id;
     };
+    auto identity_of = [&](const AnnotatedDBG &index) -> IndexIdentity {
+        if (config->fnames.empty())
+            return single_identity;
+        return identity_of_pair(resident_pairs.at(&index), index);
+    };
+    // the multi-graph server's per-pair summary of GET /capabilities and whether its pairs'
+    // columns are disjoint, computed once its indexes are loaded
+    Json::Value graph_summary;
 
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
@@ -756,9 +924,18 @@ int run_server(Config *config) {
 
         logger->info("[Server] Loading {} unique graph(s)...", unique_graph_paths.size());
         std::vector<std::shared_ptr<DeBruijnGraph>> loaded_graphs(unique_graph_paths.size());
+        // each graph prepared for the pattern search in its loading thread, as a single-graph
+        // server prepares its graph: its mask checked on a sample of its W = $ edges
+        // (sub-second), and the dummy fraction of a graph without a mask sampled (10,000
+        // entries), so that no request pays for it inside its deadline
+        PatternPreparation list_preparation;
+        list_preparation.check_mask = true;
+        list_preparation.sample_fraction = true;
+        list_preparation.progress = false;
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
         for (size_t i = 0; i < unique_graph_paths.size(); ++i) {
             loaded_graphs[i] = load_critical_dbg(unique_graph_paths[i]);
+            prepare_pattern_graph(loaded_graphs[i], unique_graph_paths[i], list_preparation);
         }
 
         logger->info("[Server] Loading {} annotation(s)...", graphs_cache.size());
@@ -778,10 +955,12 @@ int run_server(Config *config) {
         // every response computed on a pair states its identity
         for (const auto &[pair, index] : graphs_cache) {
             const auto &[name, fp] = pair_identity.at(pair);
-            IndexIdentity &id = identities[index.get()];
+            IndexIdentity &id = pair_identities[pair];
             id.name = name;
             id.fp = fp;
+            resident_pairs[index.get()] = pair;
         }
+        graph_summary = multi_graph_summary(indexes, graphs_cache, pair_identities);
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
         // Dynamic per-request loads (in_ram path) should always be in RAM.
@@ -789,10 +968,10 @@ int run_server(Config *config) {
     }
 
     size_t memory_all = config->memory_available * 1e9;
-    size_t memory_left = memory_all;
+    // the memory lent to per-request loads (`in_ram`, every route that reads an index): a load
+    // waits until its files' size is free (--mem-cap-gb)
+    LoadReservations reservations(memory_all);
     std::atomic<size_t> graphs_being_queried = 0;
-    std::condition_variable space_cv;
-    std::mutex space_mutex;
 
     // the actual server
     HttpServer server;
@@ -834,12 +1013,8 @@ int run_server(Config *config) {
                             auto release_memory = [&]() {
                                 if (!index_size_reserved)
                                     return;
-                                {
-                                    std::unique_lock<std::mutex> lock(space_mutex);
-                                    memory_left += index_size_reserved;
-                                }
+                                reservations.release(index_size_reserved);
                                 index_size_reserved = 0;
-                                space_cv.notify_all();
                             };
                             try {
                                 std::unique_ptr<AnnotatedDBG> index_loaded;
@@ -858,13 +1033,7 @@ int run_server(Config *config) {
                                 }
                                 Timer timer;
                                 if (in_ram) {
-                                    {
-                                        std::unique_lock<std::mutex> lock(space_mutex);
-                                        space_cv.wait(lock, [&]() {
-                                            return memory_left >= index_size;
-                                        });
-                                        memory_left -= index_size;
-                                    }
+                                    reservations.reserve(index_size);
                                     index_size_reserved = index_size;
                                     logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
                                                   request_id, graph_fname, index_size / 1e9);
@@ -940,11 +1109,188 @@ int run_server(Config *config) {
         return [r = request.get(), &shutdown]() { return shutdown.stopping() || client_gone(*r); };
     };
 
+    // The index of a /resolve, /traverse or /pattern request on |pair| of a multi-graph server:
+    // the resident one, or with `in_ram` (in_ram_plan, /search's rule: the server on mmap, the
+    // pair's files within --mem-cap-gb) a copy loaded into RAM for the request once its memory
+    // is reserved (/search's wait, abandoned when |gone| answers true: LoadAbandoned), prepared
+    // as the resident one was — for /pattern its mask checked and its dummy fraction sampled,
+    // for the traversal routes the reverse index of its headers built — so that the request's
+    // work, and its budgets, start on a ready index after the load
+    auto lease_index = [&](const GraphPair &pair, bool in_ram, size_t request_id,
+                           const std::function<bool()> &gone, bool for_pattern) {
+        const AnnotatedDBG &resident = *graphs_cache.at(pair);
+        const size_t bytes = in_ram && loaded_with_mmap
+                ? std::filesystem::file_size(pair.first) + std::filesystem::file_size(pair.second)
+                : 0;
+        const InRamPlan plan = in_ram_plan(in_ram, loaded_with_mmap, bytes, memory_all);
+        if (plan == InRamPlan::RESIDENT_TOO_LARGE) {
+            logger->warn("Request {}: Graph of size {} GB is too large to fit into RAM (reserved "
+                         "memory: {} GB). It will be queried with mmap", request_id,
+                         bytes / 1e9, memory_all / 1e9);
+        }
+        if (plan != InRamPlan::LOAD)
+            return std::make_unique<IndexLease>(resident, plan);
+        Timer timer;
+        if (!reservations.reserve(bytes, gone)) {
+            throw LoadAbandoned("the client closed its connection (or the server stops) while "
+                                "the request waited for the memory to load its index");
+        }
+        std::unique_ptr<AnnotatedDBG> loaded;
+        try {
+            logger->trace("Request {}: Loading graph {} of size {} GB to RAM...", request_id,
+                          pair.first, bytes / 1e9);
+            Config config_copy = *config;
+            config_copy.infbase = pair.first;
+            config_copy.infbase_annotators = { pair.second };
+            PatternPreparation preparation;
+            preparation.check_mask = for_pattern;
+            preparation.sample_fraction = for_pattern;
+            preparation.progress = false;
+            loaded = initialize_annotated_dbg(config_copy, preparation);
+            if (!for_pattern)
+                build_header_index(*loaded);
+        } catch (...) {
+            reservations.release(bytes);
+            throw;
+        }
+        const double load_ms = timer.elapsed() * 1000;
+        logger->info("[Server] Request {}: ({}, {}) loaded into RAM for it in {:.0f} ms (the "
+                     "wait for its {:.3f} GB included)", request_id, pair.first, pair.second,
+                     load_ms, bytes / 1e9);
+        return std::make_unique<IndexLease>(std::move(loaded), &reservations, bytes, load_ms);
+    };
+
+    /**
+     * POST /pattern on a multi-graph server, as /search: the request's `graphs` (every name
+     * when there are at most 10 and it names none), each pair of each name answered as one
+     * single-graph request would be (its own deadline, caps and memory account, starting after
+     * its index is loaded for it with `in_ram`), in parallel on the graphs' pool; the answers
+     * concatenated in ordered_pairs' order, each tagged with its pair (graph, graph_path,
+     * annotation_path) and its index_fp. A refusal of any pair refuses the request (the first
+     * in that order; the other pairs are stopped at their next clock reading). The answer is
+     * written by the latest of the pairs' deadlines, past it 503 deadline (|delivery|)
+     */
+    auto multi_graph_pattern = [&](const std::string &content, size_t request_id,
+                                   const std::function<bool()> &gone,
+                                   PatternDelivery *delivery) {
+        Timer timer;
+        Json::Value json = parse_pattern_body(content);
+        if (!json.isObject())
+            throw PatternRefusal(400, "invalid_request", "request: expected an object");
+        std::vector<std::string> names;
+        std::optional<bool> in_ram;
+        try {
+            names = pattern_graph_names(json, sorted_names(indexes));
+            in_ram = in_ram_field(json);
+        } catch (const std::invalid_argument &e) {
+            throw PatternRefusal(400, "invalid_request", e.what());
+        }
+        // each pair's request: the body without the selection
+        json.removeMember("graphs");
+        const auto targets = ordered_pairs(indexes, names);
+        logger->info("[Server] Request {}: /pattern on {} pair(s) of {} graph name(s){}",
+                     request_id, targets.size(), names.size(),
+                     in_ram.value_or(false) ? ", in_ram" : "");
+
+        struct Slot {
+            Json::Value answer;
+            std::optional<PatternRefusal> refusal;
+            std::exception_ptr error;
+            bool aborted = false;
+            graph::pattern::Deadline::Clock::time_point start;
+            double budget_ms = 0;
+        };
+        std::vector<Slot> slots(targets.size());
+        // a refused pair stops the others: the request is refused whatever they answer
+        std::atomic<bool> failed { false };
+        auto stop = [&]() { return failed.load() || gone(); };
+        std::vector<std::shared_future<void>> futures;
+        for (size_t i = 0; i < targets.size(); ++i) {
+            futures.push_back(graphs_pool.enqueue([&, i]() {
+                Slot &slot = slots[i];
+                const auto &[name, pair] = targets[i];
+                try {
+                    if (stop()) {
+                        slot.aborted = true;
+                        return;
+                    }
+                    const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
+                                                   stop, /* for_pattern */ true);
+                    const IndexIdentity identity = identity_of_pair(pair, lease->index());
+                    PatternDelivery own;
+                    own.set_abort(stop);
+                    slot.start = graph::pattern::Deadline::Clock::now();
+                    Json::Value answer = process_pattern_request(json, lease->index(), *config,
+                                                                 &identity, &own);
+                    slot.budget_ms = answer["limits"]["time_budget_ms"].asDouble();
+                    if (in_ram)
+                        answer["timing"]["load_ms"] = lease->load_ms();
+                    answer["graph"] = name;
+                    answer["graph_path"] = pair.first;
+                    answer["annotation_path"] = pair.second;
+                    answer["index_fp"] = string_or_null(identity.fp);
+                    slot.answer = std::move(answer);
+                } catch (const PatternRefusal &e) {
+                    slot.refusal = e;
+                    failed = true;
+                } catch (const graph::pattern::Aborted &) {
+                    slot.aborted = true;
+                } catch (const LoadAbandoned &) {
+                    slot.aborted = true;
+                } catch (...) {
+                    slot.error = std::current_exception();
+                    failed = true;
+                }
+            }));
+        }
+        for (auto &future : futures) {
+            future.wait();
+        }
+        for (Slot &slot : slots) {
+            if (slot.refusal)
+                throw *slot.refusal;
+            if (slot.error)
+                std::rethrow_exception(slot.error);
+        }
+        for (const Slot &slot : slots) {
+            if (slot.aborted)
+                throw graph::pattern::Aborted();
+        }
+        // the deadline of the writing: the latest of the pairs'
+        const Slot *latest = nullptr;
+        for (const Slot &slot : slots) {
+            if (!latest || slot.start + std::chrono::duration<double, std::milli>(slot.budget_ms)
+                    > latest->start + std::chrono::duration<double, std::milli>(latest->budget_ms)) {
+                latest = &slot;
+            }
+        }
+        if (latest) {
+            delivery->set_deadline(graph::pattern::Deadline(
+                    latest->start, latest->budget_ms,
+                    static_cast<double>(config->pattern_finalize_ms)));
+        }
+        Json::Value out;
+        out["pattern_contract_version"] = graph::pattern::kPatternContractVersion;
+        Json::Value graphs(Json::arrayValue);
+        for (const std::string &name : names) {
+            graphs.append(name);
+        }
+        out["graphs"] = std::move(graphs);
+        Json::Value answers(Json::arrayValue);
+        for (Slot &slot : slots) {
+            answers.append(std::move(slot.answer));
+        }
+        out["answers"] = std::move(answers);
+        out["timing"]["elapsed_ms"] = timer.elapsed() * 1000;
+        delivery->check();
+        return out;
+    };
+
     // Count, and extract without reading annotation, the graph contexts of short motifs and
-    // IUPAC patterns (DESIGN-pattern-search.md; pattern.hpp). Single-graph servers only: the
-    // multi-graph fan-out with its barriers is not served (§8). Every refusal is {"error",
-    // "code"}; the answer is written under the request's own deadline (its finalisation
-    // reserve), past which it is 503 "deadline", never a partial answer.
+    // IUPAC patterns (DESIGN-pattern-search.md; pattern.hpp): on the single graph, or on a
+    // multi-graph server on the graphs a request selects (multi_graph_pattern). Every refusal
+    // is {"error", "code"}; an answer is written under the request's own deadline (its
+    // finalisation reserve), past which it is 503 "deadline", never a partial answer.
     server.resource["^/pattern$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> request) {
         // what the route throws, in the server's terms: a refusal as its HTTP answer, an
@@ -975,19 +1321,22 @@ int run_server(Config *config) {
         control.check = [&]() { translated([&]() { delivery.check(); }); };
         // the time to compress is inside the reserve: the traversal routes' faster level
         control.compression_level = config->traverse_compression_level;
-        process_request(response, request, num_requests++, [&](const std::string &content) {
+        const size_t request_id = num_requests++;
+        process_request(response, request, request_id, [&](const std::string &content) {
             return translated([&]() {
-                if (config->fnames.size()) {
-                    throw PatternRefusal(400, "later_increment",
-                                         "pattern: not served by this build on a multi-graph "
-                                         "server");
-                }
+                if (config->fnames.size())
+                    return multi_graph_pattern(content, request_id, gone, &delivery);
                 if (anno_graph.wait_for(0s) != std::future_status::ready)
                     throw CurrentlyInitializingError();
                 const AnnotatedDBG &index = *anno_graph.get();
                 const IndexIdentity identity = identity_of(index);
-                return process_pattern_request(parse_pattern_body(content), index, *config,
-                                               &identity, &delivery);
+                const Json::Value json = parse_pattern_body(content);
+                Json::Value answer = process_pattern_request(json, index, *config, &identity,
+                                                             &delivery);
+                // in_ram: a single-graph server's index is the one it holds, nothing is loaded
+                if (json.isObject() && json.isMember("in_ram"))
+                    answer["timing"]["load_ms"] = 0.0;
+                return answer;
             });
         }, /* compact */ true, &control);
     };
@@ -1053,19 +1402,43 @@ int run_server(Config *config) {
                 throw as_http(e);
             }
         };
-        process_request(response, request, num_requests++, [&](const std::string &content) {
+        const size_t request_id = num_requests++;
+        process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
             Json::Value json = parse_json_string(content);
-            const auto &index = resolve_traverse_index(json, *config, anno_graph,
-                                                       indexes, graphs_cache);
-            const IndexIdentity identity = identity_of(index);
+            const bool multi = !config->fnames.empty();
+            const GraphSelection selection = traverse_graph_selection(json, multi);
+            const std::optional<bool> in_ram = in_ram_field(json);
+            std::unique_ptr<IndexLease> lease;
+            IndexIdentity identity = single_identity;
+            if (multi) {
+                const GraphPair &pair = select_traverse_pair(
+                        selection.name, selection.graph_path ? &*selection.graph_path : nullptr,
+                        indexes);
+                // a malformed request is refused before its index is loaded for it
+                if (in_ram.value_or(false) && loaded_with_mmap)
+                    parse_resolve_request(json);
+                try {
+                    lease = lease_index(pair, in_ram.value_or(false), request_id,
+                                        gone_of(request), /* for_pattern */ false);
+                } catch (const LoadAbandoned &e) {
+                    throw ClientGone(e.what());
+                }
+                identity = identity_of_pair(pair, lease->index());
+            }
+            const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
             // a client that is gone is not answered: abandoned between the request's phases
             try {
-                return process_resolve_request(json, index, config->index_release,
-                                               config->resolve_max_query_bp, &identity,
-                                               gone_of(request), resolve_time, &delivery);
+                Json::Value out = process_resolve_request(json, index, config->index_release,
+                                                          config->resolve_max_query_bp,
+                                                          &identity, gone_of(request),
+                                                          resolve_time, &delivery);
+                // in_ram: the time before the work began, waiting for and loading its index
+                if (in_ram)
+                    out["timing"]["load_ms"] = lease ? lease->load_ms() : 0.0;
+                return out;
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             } catch (const ResolveDeadline &e) {
@@ -1221,8 +1594,25 @@ int run_server(Config *config) {
                 throw HttpError(409, std::move(body));
             }
             try {
-                const auto &index = resolve_traverse_index(json, *config, anno_graph,
-                                                           indexes, graphs_cache);
+                const bool multi = !config->fnames.empty();
+                const GraphSelection selection = traverse_graph_selection(json, multi);
+                const std::optional<bool> in_ram = in_ram_field(json);
+                std::unique_ptr<IndexLease> lease;
+                IndexIdentity identity = single_identity;
+                if (multi) {
+                    const GraphPair &pair = select_traverse_pair(
+                            selection.name,
+                            selection.graph_path ? &*selection.graph_path : nullptr, indexes);
+                    // a malformed request is refused before its index is loaded for it
+                    if (in_ram.value_or(false) && loaded_with_mmap)
+                        parse_traverse_request(json);
+                    // the wait for the memory is abandoned when the client is gone or the server
+                    // stops; a cancel takes effect when the work begins (its seeds not started)
+                    lease = lease_index(pair, in_ram.value_or(false), request_id,
+                                        gone_of(request), /* for_pattern */ false);
+                    identity = identity_of_pair(pair, lease->index());
+                }
+                const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
                 TraverseLimits limits;
                 limits.max_time_ms = config->traverse_max_time_ms;
                 limits.max_seeds = config->traverse_max_seeds;
@@ -1232,9 +1622,15 @@ int run_server(Config *config) {
                 limits.max_work_units = config->traverse_max_work_units;
                 limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
                 limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
-                const IndexIdentity identity = identity_of(index);
+                // a request that names its graph as /search does (`graphs`), sending its seeds to
+                // graphs that need not hold them: a seed a graph does not hold is its result
+                limits.not_in_graph_per_seed = selection.via_graphs;
+                if (in_ram)
+                    limits.load_ms = lease ? lease->load_ms() : 0.0;
                 return process_traverse_request(json, index, config->index_release, limits,
                                                 &identity, attempt.get(), &texts);
+            } catch (const LoadAbandoned &e) {
+                throw ClientGone(e.what());
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             } catch (const AttemptAtBound &e) {
@@ -1333,6 +1729,20 @@ int run_server(Config *config) {
         return d;
     };
 
+    // `in_ram` (both capabilities routes): the routes that accept it (/search's field: the
+    // index loaded into RAM for the request), whether this server loads one for such a request
+    // (a multi-graph server on mmap with --mem-cap-gb above 0; the others serve the index they
+    // hold), the memory it lends to such loads, and that a request's budgets start after its
+    // load (timing.load_ms states the load)
+    auto in_ram_json = [&]() {
+        Json::Value r;
+        r["routes"] = strings_json({ "pattern", "resolve", "search", "traverse" });
+        r["loads"] = !config->fnames.empty() && loaded_with_mmap && memory_all > 0;
+        r["mem_cap_gb"] = number_json(config->memory_available);
+        r["budgets_start"] = "after_load";
+        return r;
+    };
+
     // The keys both capabilities routes state alike: which walk a response gives (every
     // /traverse response names it too); the ledger-managed attempts (requests with
     // attempt_id): how they are named, cancelled, queried, kept and bounded
@@ -1347,6 +1757,7 @@ int run_server(Config *config) {
         (*c)["content_encodings"] = encodings_json();
         (*c)["compression_level"] = config->traverse_compression_level;
         (*c)["deadline_check"] = deadline_check_json();
+        (*c)["in_ram"] = in_ram_json();
         (*c)["resolve"] = resolve_capabilities_json(resolve_time);
     };
 
@@ -1391,7 +1802,7 @@ int run_server(Config *config) {
         // the pattern search (SPEC-pattern-search.md §23): here because this is the document a
         // service's probe reads; the full block with `details`, the route of the full block
         caps["pattern"] = pattern_traverse_block(pattern_capabilities_json(
-                &index, pattern_limits(*config), !config->fnames.empty()));
+                &index, pattern_limits(*config), /* multi_graph */ false));
         return caps;
     };
 
@@ -1416,28 +1827,12 @@ int run_server(Config *config) {
             // Multi-graph mode: the probe of one (graph, annotation) pair, selected by the
             // request fields' rules (?graph=<name>, and graph_path=<path> when the name spans
             // several graphs); it states which pair it describes
-            std::optional<std::string> name, graph_path;
-            for (const auto &[key, value] : query) {
-                std::optional<std::string> *slot = key == "graph" ? &name
-                                                 : key == "graph_path" ? &graph_path : nullptr;
-                if (!slot) {
-                    throw InvalidRequest("Bad request: unknown parameter '" + key + "' of GET "
-                                         "/traverse/capabilities (graph, graph_path)");
-                }
-                if (*slot)
-                    throw InvalidRequest("Bad request: the parameter '" + key + "' is given twice");
-                *slot = value;
-            }
-            if (!name) {
-                throw InvalidRequest("Bad request: in multi-graph mode GET /traverse/capabilities "
-                                     "needs ?graph=<name> (and graph_path=<path> when the name "
-                                     "spans several graphs); GET /capabilities lists the graphs");
-            }
-            const GraphPair &pair = select_traverse_pair(*name, graph_path ? &*graph_path : nullptr,
+            const auto [name, graph_path] = probe_parameters(query, "/traverse/capabilities");
+            const GraphPair &pair = select_traverse_pair(name, graph_path ? &*graph_path : nullptr,
                                                          indexes);
             const AnnotatedDBG &index = *graphs_cache.at(pair);
             Json::Value caps = probe_json(index, identity_of(index));
-            caps["graph"] = *name;
+            caps["graph"] = name;
             caps["graph_path"] = pair.first;
             return caps;
         }, /* compact */ true, &traversal_io);
@@ -1445,24 +1840,34 @@ int run_server(Config *config) {
 
     // The full pattern block (SPEC-pattern-search.md §23): answered while the single index
     // loads (available null, the graph fields null), so that a client learns the contract and
-    // the caps before the index is ready; a multi-graph server answers that it is not served
-    // there. The parameters that would select a graph are refused on a single-graph server, as
-    // on /traverse/capabilities; any other is ignored
+    // the caps before the index is ready. The parameters that would select a graph are refused
+    // on a single-graph server, as on /traverse/capabilities; any other is ignored. A
+    // multi-graph server answers the block of one pair, selected as /traverse/capabilities
+    // selects it (?graph=<name>[&graph_path=<path>]), naming it (graph, graph_path)
     server.resource["^/pattern/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                            shared_ptr<HttpServer::Request> request) {
         process_request(response, request, num_requests++, [&](const std::string&) {
             const bool multi = !config->fnames.empty();
-            if (!multi) {
-                for (const auto &[key, value] : request->parse_query_string()) {
-                    if (key == "graph" || key == "graph_path") {
-                        throw InvalidRequest("Bad request: this server hosts a single graph; "
-                                             "remove the 'graph' / 'graph_path' parameter");
-                    }
+            const auto query = request->parse_query_string();
+            if (multi) {
+                const auto [name, graph_path] = probe_parameters(query, "/pattern/capabilities");
+                const GraphPair &pair = select_traverse_pair(
+                        name, graph_path ? &*graph_path : nullptr, indexes);
+                Json::Value block = pattern_capabilities_json(
+                        graphs_cache.at(pair).get(), pattern_limits(*config), false);
+                block["graph"] = name;
+                block["graph_path"] = pair.first;
+                return block;
+            }
+            for (const auto &[key, value] : query) {
+                if (key == "graph" || key == "graph_path") {
+                    throw InvalidRequest("Bad request: this server hosts a single graph; "
+                                         "remove the 'graph' / 'graph_path' parameter");
                 }
             }
-            const bool ready = !multi && anno_graph.wait_for(0s) == std::future_status::ready;
+            const bool ready = anno_graph.wait_for(0s) == std::future_status::ready;
             return pattern_capabilities_json(ready ? anno_graph.get().get() : nullptr,
-                                             pattern_limits(*config), multi);
+                                             pattern_limits(*config), false);
         }, /* compact */ true, &traversal_io);
     };
 
@@ -1499,14 +1904,15 @@ int run_server(Config *config) {
             for (const char *f : { "resolve", "traverse", "attempts" }) {
                 features.append(f);
             }
-            if (!multi) {
-                // listed like align: a multi-graph server answers /pattern with 400; whether
-                // this graph can be searched is pattern.available (a client gates on both).
-                // The full pattern block's own route beside it (SPEC-pattern-search.md §23)
-                routes["pattern"] = "POST /pattern";
-                routes["pattern_capabilities"] = "GET /pattern/capabilities";
-                features.append("pattern");
-            }
+            // whether a graph can be searched is pattern.available (single-graph) or its
+            // graph_summary entry's available (multi-graph); a client gates on both. The full
+            // pattern block's own route beside it (SPEC-pattern-search.md §23), per pair on a
+            // multi-graph server
+            routes["pattern"] = "POST /pattern";
+            routes["pattern_capabilities"] = multi
+                ? "GET /pattern/capabilities?graph={name}[&graph_path={path}]"
+                : "GET /pattern/capabilities";
+            features.append("pattern");
             c["features"] = std::move(features);
             if (multi) {
                 std::vector<std::string> names;
@@ -1526,10 +1932,28 @@ int run_server(Config *config) {
             // a multi-graph server loads every index before it listens
             c["ready"] = multi || anno_graph.wait_for(0s) == std::future_status::ready;
             // the pattern search (DESIGN-pattern-search.md §7.3): its graph fields are null
-            // while the single index loads
+            // while the single index loads. On a multi-graph server they are per pair
+            // (graph_summary; GET /pattern/capabilities?graph=), and the block states the
+            // contract and the caps with `available` true when /pattern serves one pair at least
             c["pattern"] = pattern_capabilities_json(
                     !multi && c["ready"].asBool() ? anno_graph.get().get() : nullptr,
-                    pattern_limits(*config), multi);
+                    pattern_limits(*config), false);
+            if (multi) {
+                // available when a pair is served; else the first pair's reason (each pair's is
+                // in graph_summary)
+                Json::Value reason;
+                bool any = false;
+                for (const Json::Value &pair : graph_summary["pairs"]) {
+                    any |= pair["available"].asBool();
+                    if (reason.isNull())
+                        reason = pair["unavailable_reason"];
+                }
+                c["pattern"]["available"] = any;
+                c["pattern"]["unavailable_reason"] = any ? Json::Value() : reason;
+            }
+            // per pair, so that a service learns a multi-graph server with one probe; null on a
+            // single-graph server (pattern and GET /traverse/capabilities describe its graph)
+            c["graph_summary"] = multi ? graph_summary : Json::Value();
             c["release"] = config->index_release;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;

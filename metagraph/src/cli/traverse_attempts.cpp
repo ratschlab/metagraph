@@ -251,15 +251,19 @@ std::string Attempt::iso(Clock::time_point t) const {
                                             t - received_));
 }
 
-void Attempt::set_bound(size_t seeds, double time_budget_ms, uint64_t memory_budget) {
+void Attempt::set_bound(size_t seeds, double time_budget_ms, uint64_t memory_budget,
+                        std::optional<double> load_ms) {
     std::lock_guard<std::mutex> lock(mutex_);
     memory_budget_ = memory_budget;
     // a non-positive budget means "no extension" (the walk of such a seed ends at once); the
-    // allowance covers reading it
+    // allowance covers reading it. A load of the index for the request comes before its work
+    // and before its budgets (the transport's hard cap counts it)
     const double t = time_budget_ms > 0 ? time_budget_ms : 0;
-    const double raw = static_cast<double>(seeds) * t + settings_.allowance_ms;
+    const double load = load_ms && *load_ms > 0 ? *load_ms : 0;
+    const double raw = load + static_cast<double>(seeds) * t + settings_.allowance_ms;
     bound_seeds_ = seeds;
     bound_time_budget_ms_ = t;
+    bound_load_ms_ = load_ms;
     capped_ = settings_.hard_cap_ms > 0 && !(raw <= settings_.hard_cap_ms);
     bound_ms_ = capped_ ? settings_.hard_cap_ms : raw;
     bound_set_ = true;
@@ -586,6 +590,9 @@ Json::Value Attempt::bound_json() const {
     b["seeds"] = uint_json(bound_seeds_);
     b["time_budget_ms"] = bound_set_ ? Json::Value(bound_time_budget_ms_) : Json::Value();
     b["allowance_ms"] = ceil_ms_json(settings_.allowance_ms);
+    // a request that loaded its index into RAM (`in_ram`): the time before its work began
+    if (bound_load_ms_)
+        b["load_ms"] = ceil_ms_json(*bound_load_ms_);
     // When the walk-until stopped the walk, the walk-until in force then: where the seeds
     // stopped being walked (the walk stopped at its first poll that read the clock after it,
     // usage.stopped_at). Otherwise the lowest walk-until the walk's clock-reading polls checked

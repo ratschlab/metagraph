@@ -165,7 +165,11 @@ UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped
 # them: primary_unwrapped (server_query and the CLI always wrap a PRIMARY graph in
 # CanonicalDBG; only an embedding reaches it) and alphabet_unsupported (the BOSS alphabet is
 # the build's: a graph of another alphabet does not load).
-UNPRODUCIBLE = ('primary_unwrapped', 'alphabet_unsupported')
+UNPRODUCIBLE = ('primary_unwrapped', 'alphabet_unsupported',
+                # the block pattern_capabilities_json writes for a multi-graph server that does
+                # not serve /pattern: since multi-graph servers serve it (SPEC §24), no route of
+                # this build asks for that block
+                'multi_graph_later_increment')
 # The ones a server of this build gives but no stored fixture holds, each with the index it
 # needs: named here rather than left out of the expected sets, so that the coverage tests list
 # every code without a fixture. Every other code has a fixture.
@@ -183,7 +187,11 @@ RETIRED = {
     'mask_required': 'a graph without its dummy-edge mask is served, its counts upper bounds '
                      'with an estimate (capabilities counting upper_bound; the unmasked_* '
                      'fixtures)',
+    'resident_only': 'in_ram is accepted, as /search accepts it (the in_ram_single_graph and '
+                     'multi_graph_in_ram fixtures)',
 }
+# the retired codes that were unavailable reasons too (resident_only was a refusal only)
+RETIRED_REASONS = {'mask_required'}
 # The alphabet the route serves (pattern.cpp alphabet_refusal): on any other the alphabet's
 # reason comes first, mask or none
 SERVED_ALPHABET = '$ACGT'
@@ -211,7 +219,9 @@ SCHEMA = {
                 'max_occurrences_per_label', 'allow_unbudgeted_annotation',
                 'long_search', 'max_paths', 'require_support', 'genetic_code',
                 # a predicate (SPEC §19.2)
-                'predicate', 'max_predicate_contexts', 'max_predicate_work', 'predicate_strands'],
+                'predicate', 'max_predicate_contexts', 'max_predicate_work', 'predicate_strands',
+                # the server's (SPEC §24): the graphs of a multi-graph server, the load into RAM
+                'graphs', 'in_ram'],
     'request_pattern': ['id', 'dna', 'iupac', 'protein'],
     'request_output': ['labels', 'occurrences', 'paths'],
     'refusal': ['error', 'code'],
@@ -233,7 +243,9 @@ SCHEMA = {
                # the labels of paths (SPEC §12.1)
                'label_intersection_ms', 'verification_ms',
                # a predicate (SPEC §19.10)
-               'selection_ms'],
+               'selection_ms',
+               # in_ram (SPEC §24)
+               'load_ms'],
     'entry': ['id', 'kind', 'pattern', 'length', 'residues', 'genetic_code', 'information_bits',
               'anchor_information_bits', 'min_anchor_information_bits', 'error', 'mode', 'scope',
               'strands', 'palindromic', 'counts', 'work', 'stop',
@@ -284,7 +296,9 @@ SCHEMA = {
                      # the delivery rates and the prose references (SPEC §10.2)
                      'delivery_mbps',
                      # a predicate (SPEC §19.12)
-                     'predicate'],
+                     'predicate',
+                     # in_ram accepted (SPEC §24)
+                     'in_ram'],
     'delivery_mbps': ['build', 'compress'],
     # a predicate (SPEC §19): the predicate's operators (each a one-member object), the
     # answer's predicate block, an entry's selection, and the capabilities' predicate object
@@ -293,7 +307,17 @@ SCHEMA = {
                         'strands'],
     'selection': ['pass', 'support', 'access'],
     'capabilities_predicate': ['operators', 'strands', 'access'],
-    'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
+    # a multi-graph server (SPEC §24): its answer, the tags of each pair's answer, the block of
+    # one pair (GET /pattern/capabilities?graph=), and GET /capabilities' graph_summary
+    'answer_multi': ['pattern_contract_version', 'graphs', 'answers', 'timing'],
+    'answer_pair': ['graph', 'graph_path', 'annotation_path', 'index_fp'],
+    'capabilities_pair': ['graph', 'graph_path'],
+    'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs'],
+    'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
+                           'graph_mode', 'available', 'unavailable_reason', 'mask', 'counting',
+                           'traversal'],
+    'graph_summary_traversal': ['regime', 'num_labels', 'has_coordinates',
+                                'has_coord_to_header', 'supports_trace'],
     # the block of GET /traverse/capabilities (SPEC §23): the gate fields and the route of the
     # full block
     'pattern_gate': None,
@@ -1090,12 +1114,36 @@ class Checker:
                 self.ok(request['genetic_code'] in capabilities['genetic_codes'],
                         'request.genetic_code', 'a table of the capabilities')
 
-        self.timing(a['timing'], 'timing')
+        # in_ram (SPEC §24): the time before the work began, waiting for and loading the index
+        self.timing(a['timing'], 'timing', load='in_ram' in request)
         self.ok(len(a['patterns']) == len(request['patterns']), 'patterns',
                 'one entry per request pattern')
         for i, (entry, asked) in enumerate(zip(a['patterns'], request['patterns'])):
             self.entry(entry, asked, request, a, f'patterns[{i}]')
         self.budget(a, request, limits)
+
+    def multi_answer(self, a, request, pairs):
+        """A multi-graph server's answer (SPEC §24): the names answered, one answer per pair
+        (|pairs| per name on the fixture server) each tagged with its pair and its index_fp, and
+        the request's time"""
+        self.keys(a, SCHEMA['answer_multi'], 'answer')
+        self.ok(a['pattern_contract_version'] == 1, 'pattern_contract_version')
+        asked = request.get('graphs')
+        self.ok(a['graphs'] == sorted(set(asked)) if asked is not None
+                else a['graphs'] == sorted(a['graphs']), 'graphs',
+                'the names, deduplicated, in byte order')
+        self.ok(len(a['answers']) == pairs * len(a['graphs']), 'answers', 'one per pair')
+        self.keys(a['timing'], ['elapsed_ms'], 'timing')
+        names = [x['graph'] for x in a['answers']]
+        self.ok(names == sorted(names) and set(names) == set(a['graphs']), 'answers',
+                'in the order of the names')
+        for i, x in enumerate(a['answers']):
+            path = f'answers[{i}]'
+            self.ok(set(SCHEMA['answer_pair']) <= set(x), path, 'tagged with its pair')
+            self.ok(isinstance(x['graph_path'], str) and isinstance(x['annotation_path'], str),
+                    path + '.graph_path')
+            self.ok(x['index_fp'] == x['index']['index_fp'], path + '.index_fp',
+                    'the pair\'s index_fp')
 
     def budget(self, a, request, limits):
         """SPEC §7.6, one budget per request: the steps of all patterns sum to at most max_steps,
@@ -1157,8 +1205,9 @@ class Checker:
                     out.append((f'{unit}.{key}.{k}', v))
         return out
 
-    def timing(self, t, path, labelled=False, extension=False, selection=False):
-        self.keys(t, ['elapsed_ms'] + (['label_discovery_ms', 'placement_ms'] if labelled else [])
+    def timing(self, t, path, labelled=False, extension=False, selection=False, load=False):
+        self.keys(t, ['elapsed_ms'] + (['load_ms'] if load else [])
+                  + (['label_discovery_ms', 'placement_ms'] if labelled else [])
                   + (['extension_ms'] if extension else [])
                   + (['label_intersection_ms', 'verification_ms'] if labelled and extension
                      else [])
@@ -2164,13 +2213,16 @@ class Checker:
 
     # ------------------------------------------------------------- capabilities
 
-    def block(self, b, path, multi):
-        if multi:
-            self.keys(b, SCHEMA['capabilities_multi'], path)
-            self.ok(b == {'pattern_contract_version': 1, 'available': False,
-                          'unavailable_reason': 'multi_graph_later_increment'}, path)
-            return
+    def block(self, b, path, server_wide=False):
+        """The full block (SPEC §10.2). |server_wide|: GET /capabilities of a multi-graph
+        server (SPEC §24), the contract and the caps without a graph (its graph fields null,
+        as while a single index loads), available whether a pair is served"""
         self.keys(b, SCHEMA['capabilities'], path)
+        if server_wide:
+            self.ok(b['available'] in (True, False), path + '.available', 'known')
+            for f in GRAPH_FIELDS:
+                self.ok(b[f] is None, f'{path}.{f}', 'per pair on a multi-graph server')
+            self.ok(b['predicate']['access'] is None, path + '.predicate.access')
         self.ok(b['pattern_contract_version'] == 1, path + '.pattern_contract_version')
         self.ok(b['available'] in (True, False, None), path + '.available')
         if b['available'] is False:
@@ -2243,7 +2295,13 @@ class Checker:
                 and b['finalize_reserve_ms'] < b['default_time_budget_ms']
                 <= b['caps']['time_budget_ms'], path + '.default_time_budget_ms')
         self.ok(isinstance(b['caps_rule'], str), path + '.caps_rule')
-        self.ok(b['resident_only'] is True, path + '.resident_only')
+        # in_ram is accepted, as /search accepts it (SPEC §24): the index is loaded for the
+        # request where the server runs on mmap
+        self.ok(b['resident_only'] is False and b['in_ram'] == 'accepted',
+                path + '.resident_only', 'in_ram accepted')
+        if server_wide:
+            # the graph fields are the pairs' (graph_summary, the pairs' own blocks)
+            return
         # SPEC §10.2: how an available graph counts, and the dummy fraction its estimates rest
         # on; null when the graph is not served (or loading)
         if b['available'] is True:
@@ -2326,6 +2384,18 @@ class TestPatternFixtures(unittest.TestCase):
         cls.fixtures = cls.index['fixtures']
         cls.bodies = {name: (load(name, 'request.json'), load(name, 'answer.json'))
                       for name in cls.fixtures}
+        # a multi-graph server's answers (SPEC §24) as stored; the checks of every answer see
+        # the answer of the fixture server's one pair, the pair's tags taken off, which is
+        # the single-graph answer (test_multi_graph_answers checks the envelope)
+        cls.multi_answers = {}
+        for name, f in cls.fixtures.items():
+            request, answer = cls.bodies[name]
+            if f['method'] == 'POST' and f['status'] == 200 and 'answers' in answer:
+                cls.multi_answers[name] = answer
+                assert len(answer['answers']) == 1, name
+                pair = {k: v for k, v in answer['answers'][0].items()
+                        if k not in SCHEMA['answer_pair']}
+                cls.bodies[name] = (request, pair)
 
     def full_block(self, name):
         """The full pattern block of GET fixture |name| (SPEC §23): the document of
@@ -2336,16 +2406,18 @@ class TestPatternFixtures(unittest.TestCase):
         if f['status'] != 200:
             return None
         if f['path'].split('?')[0] == '/pattern/capabilities':
-            return doc
+            # a multi-graph server's names its pair (SPEC §24)
+            return {k: v for k, v in doc.items() if k not in SCHEMA['capabilities_pair']}
         return {k: v for k, v in doc['pattern'].items() if k != 'details'}
 
     def capabilities_of(self, server):
-        """The full pattern block of the server a fixture ran on (its first GET fixture
-        answered by the loaded server)."""
+        """The full pattern block of the graph a fixture's answers were computed on: the first
+        GET fixture of its server that describes a graph (a multi-graph server's GET
+        /capabilities describes none: its pair's block is the probe's)."""
         for name, f in self.fixtures.items():
             if f['server'] == server and f['method'] == 'GET' and not f['hand_made']:
                 b = self.full_block(name)
-                if b is not None:
+                if b is not None and b['k'] is not None:
                     return b
         return None
 
@@ -2453,35 +2525,75 @@ class TestPatternFixtures(unittest.TestCase):
         multi = f['server'] == 'multi'
         route = f['path'].split('?')[0]
         if f['status'] != 200:
-            check.ok(route == '/pattern/capabilities' and f['status'] == 400 and not multi
-                     and re.search(r'[?&]graph(_path)?=', f['path']), 'status',
-                     'only ?graph= on a single-graph server is refused')
+            # a single-graph server refuses ?graph= (it has one), a multi-graph server a request
+            # without it (which pair?), both as /traverse/capabilities does
+            selects = bool(re.search(r'[?&]graph(_path)?=', f['path']))
+            check.ok(route == '/pattern/capabilities' and f['status'] == 400
+                     and selects is not multi, 'status',
+                     'only ?graph= on a single-graph server, or none on a multi-graph one, is '
+                     'refused')
             check.keys(doc, ['error'], 'answer')
-            check.ok(isinstance(doc['error'], str) and 'single graph' in doc['error'],
+            check.ok(isinstance(doc['error'], str)
+                     and ('needs ?graph=<name>' if multi else 'single graph') in doc['error'],
                      'answer.error')
             return
         if route == '/pattern/capabilities':
-            check.block(doc, 'pattern', multi)
+            if multi:
+                # the pair ?graph= selected, named (SPEC §24)
+                check.ok(set(SCHEMA['capabilities_pair']) <= set(doc), 'answer',
+                         'the pair named')
+                check.ok(re.search(r'[?&]graph=([^&]+)', f['path']).group(1) == doc['graph'],
+                         'graph', 'the name ?graph= gave')
+                doc = {k: v for k, v in doc.items() if k not in SCHEMA['capabilities_pair']}
+            check.block(doc, 'pattern')
             return
         b = doc['pattern']
         if route == '/traverse/capabilities':
             check.ok(b.get('details') == DETAILS, 'pattern.details', DETAILS)
-            check.ok(set(GATE_KEYS) & set(SCHEMA['capabilities_multi' if multi else
-                                                  'capabilities'])
-                     <= set(b), 'pattern', 'every gate field of the block')
+            check.ok(set(GATE_KEYS) <= set(b), 'pattern', 'every gate field of the block')
             b = {k: v for k, v in b.items() if k != 'details'}
         else:
             check.ok(route == '/capabilities', 'path')
             check.ok('details' not in b, 'pattern.details', 'only on /traverse/capabilities')
-        check.block(b, 'pattern', multi)
+        check.block(b, 'pattern', server_wide=multi and route == '/capabilities')
         if route == '/capabilities':
             check.ok(doc['mode'] == ('multi' if multi else 'single'), 'mode')
-            listed = not multi
-            check.ok(('pattern' in doc['features']) is listed, 'features')
-            check.ok(doc['routes'].get('pattern') == ('POST /pattern' if listed else None),
-                     'routes.pattern')
-            check.ok(doc['routes'].get('pattern_capabilities') == (DETAILS if listed else None),
+            check.ok('pattern' in doc['features'], 'features')
+            check.ok(doc['routes'].get('pattern') == 'POST /pattern', 'routes.pattern')
+            check.ok(doc['routes'].get('pattern_capabilities')
+                     == (DETAILS + '?graph={name}[&graph_path={path}]' if multi else DETAILS),
                      'routes.pattern_capabilities')
+            if not multi:
+                check.ok(doc['graph_summary'] is None, 'graph_summary', 'null on one graph')
+                return
+            # SPEC §24: every pair of the list, what the pattern search and a traversal make
+            # of it, and whether their columns are disjoint
+            summary = doc['graph_summary']
+            check.keys(summary, SCHEMA['graph_summary'], 'graph_summary')
+            check.ok(isinstance(summary['columns_disjoint'], bool)
+                     and is_int(summary['shared_columns'])
+                     and summary['columns_disjoint'] is (summary['shared_columns'] == 0),
+                     'graph_summary', 'disjoint exactly when no column is shared')
+            names = [p['graph'] for p in summary['pairs']]
+            check.ok(names == sorted(names) and set(names) == set(doc['graphs']),
+                     'graph_summary.pairs', 'every name of the list, in order')
+            for i, p in enumerate(summary['pairs']):
+                path = f'graph_summary.pairs[{i}]'
+                check.keys(p, SCHEMA['graph_summary_pair'], path)
+                check.keys(p['traversal'], SCHEMA['graph_summary_traversal'], path + '.traversal')
+                check.ok(is_int(p['k']) and p['k'] >= 2, path + '.k')
+                if p['available']:
+                    check.ok(p['unavailable_reason'] is None, path + '.unavailable_reason')
+                    check.ok(p['counting'] == ('upper_bound' if p['mask'] == 'absent'
+                                               else 'exact'), path + '.counting')
+                else:
+                    check.one_of(p['unavailable_reason'], UNAVAILABLE, path + '.unavailable_reason')
+                    check.ok(p['counting'] is None, path + '.counting')
+                check.ok(p['mask'] is None or p['mask'] in MASKS, path + '.mask')
+                check.ok(p['graph_mode'] is None or p['graph_mode'] in GRAPH_MODES,
+                         path + '.graph_mode')
+            check.ok(b['available'] is any(p['available'] for p in summary['pairs']),
+                     'pattern.available', 'whether a pair is served')
 
     def test_the_block_is_the_same_on_both_routes(self):
         """SPEC §23: on every fixture server the full block is the same on /capabilities and
@@ -2493,12 +2605,22 @@ class TestPatternFixtures(unittest.TestCase):
                 by_server.setdefault(f['server'], []).append(name)
         routes = set()
         for server, names in by_server.items():
-            full = self.full_block(names[0])
+            full = self.capabilities_of(server)
             for name in names:
                 with self.subTest(fixture=name):
-                    self.assertEqual(full, self.full_block(name))
                     route = self.fixtures[name]['path'].split('?')[0]
                     routes.add(route)
+                    if server == 'multi' and route == '/capabilities':
+                        # a multi-graph server's own block: its pair's without a graph (SPEC
+                        # §24), as pattern_capabilities_json writes it without one, and
+                        # available since its pair is served
+                        expected = copy.deepcopy(full)
+                        for f in GRAPH_FIELDS:
+                            expected[f] = None
+                        expected['predicate']['access'] = None
+                        self.assertEqual(expected, self.full_block(name))
+                        continue
+                    self.assertEqual(full, self.full_block(name))
                     if route != '/traverse/capabilities':
                         continue
                     b = self.bodies[name][1]['pattern']
@@ -2613,11 +2735,91 @@ class TestPatternFixtures(unittest.TestCase):
             with self.subTest(fixture=name, says=says):
                 with self.assertRaisesRegex(AssertionError, says):
                     run(name, mutate)
-        # a 400 where the route answers: on the multi-graph server
+        # a 400 where the route answers: ?graph= on the multi-graph server, none on a single one
         f = dict(self.fixtures['pattern_capabilities_graph_param'], server='multi')
         with self.assertRaisesRegex(AssertionError, 'only \\?graph='):
             self.capabilities_document(Checker(Raising(), 'multi'), f,
                                        self.bodies['pattern_capabilities_graph_param'][1])
+        f = dict(self.fixtures['pattern_capabilities_multi_graph_no_graph'], server='masked')
+        with self.assertRaisesRegex(AssertionError, 'only \\?graph='):
+            self.capabilities_document(
+                Checker(Raising(), 'single'), f,
+                self.bodies['pattern_capabilities_multi_graph_no_graph'][1])
+
+    def test_multi_graph_answers(self):
+        """SPEC §24: a multi-graph server's answers are the pair answers, tagged; each rule
+        refuses an answer that breaks it -- a tag missing, another index_fp, the names
+        unsorted or another count of answers, a field of the envelope more."""
+        self.assertTrue(self.multi_answers, 'the multi-graph fixtures')
+
+        def run(name, mutate=None):
+            a = copy.deepcopy(self.multi_answers[name])
+            if mutate:
+                mutate(a)
+            Checker(Raising(), name).multi_answer(a, self.bodies[name][0], 1)
+
+        for name, a in self.multi_answers.items():
+            run(name)
+            # the answer the other checks read is the pair's without its tags
+            pair = {k: v for k, v in a['answers'][0].items() if k not in SCHEMA['answer_pair']}
+            self.assertEqual(pair, self.bodies[name][1], name)
+        name = 'multi_graph_count'
+        cases = [
+            (lambda a: a['answers'][0].pop('annotation_path'), 'tagged'),
+            (lambda a: a['answers'][0].update(index_fp='0' * 64), 'index_fp'),
+            (lambda a: a['graphs'].append('a_name'), 'byte order'),
+            (lambda a: a['answers'].append(copy.deepcopy(a['answers'][0])), 'one per pair'),
+            (lambda a: a.update(index={}), 'fields'),
+            (lambda a: a['timing'].update(load_ms=0), 'fields'),
+        ]
+        for mutate, says in cases:
+            with self.subTest(says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+
+    def test_multi_graph_capabilities_refuse_what_v1_never_answers(self):
+        """SPEC §24: GET /capabilities of a multi-graph server and its blocks per pair; each
+        rule refuses a document that breaks it -- a graph field set in the server-wide block,
+        availability that no pair has, a summary pair's counting against its mask, a pair
+        missing from the summary, columns_disjoint against shared_columns, the routes without
+        ?graph=, a pair's block not naming its pair, and the 400 without ?graph= carrying a
+        code."""
+        def run(name, mutate=None):
+            doc = copy.deepcopy(self.bodies[name][1])
+            if mutate:
+                mutate(doc)
+            self.capabilities_document(Checker(Raising(), name), self.fixtures[name], doc)
+
+        def summary_pair(**fields):
+            def m(doc):
+                doc['graph_summary']['pairs'][0].update(fields)
+            return m
+
+        cases = [
+            ('capabilities_multi_graph', lambda d: d['pattern'].update(k=31), 'per pair'),
+            ('capabilities_multi_graph', summary_pair(available=False,
+                                                      unavailable_reason='mask_invalid',
+                                                      counting=None),
+             'whether a pair is served'),
+            ('capabilities_multi_graph', summary_pair(counting='upper_bound'), 'counting'),
+            ('capabilities_multi_graph', lambda d: d['graph_summary']['pairs'].clear(),
+             'every name'),
+            ('capabilities_multi_graph', lambda d: d['graph_summary'].update(shared_columns=2),
+             'disjoint exactly'),
+            ('capabilities_multi_graph', summary_pair(traversal={}), 'fields'),
+            ('capabilities_multi_graph',
+             lambda d: d['routes'].update(pattern_capabilities=DETAILS), 'pattern_capabilities'),
+            ('capabilities', lambda d: d.update(graph_summary={}), 'null on one graph'),
+            ('pattern_capabilities_multi_graph', lambda d: d.pop('graph'), 'the pair named'),
+            ('pattern_capabilities_multi_graph', lambda d: d.update(graph='x'), 'the name'),
+            ('pattern_capabilities_multi_graph_no_graph',
+             lambda d: d.update(code='invalid_request'), 'fields'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                run(name)
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
 
     def test_requests_and_answers_agree(self):
         """What a fixture's request asks is what its answer states."""
@@ -2732,10 +2934,11 @@ class TestPatternFixtures(unittest.TestCase):
         # code); the retired mask_required has none either (RETIRED)
         without_fixture = {'mask_invalid', 'alphabet_untested'}
         self.assertEqual(without_fixture, set(NO_FIXTURE))
-        self.assertEqual({'mask_required'}, set(RETIRED))
-        self.assertEqual((set(REFUSALS) | {'initializing'}) - set(UNPRODUCIBLE)
+        self.assertEqual({'mask_required', 'resident_only'}, set(RETIRED))
+        unproducible = set(UNPRODUCIBLE) & set(REFUSALS)
+        self.assertEqual((set(REFUSALS) | {'initializing'}) - unproducible
                          - without_fixture - set(RETIRED), seen['refusal'])
-        self.assertEqual(without_fixture | set(UNPRODUCIBLE) | set(RETIRED),
+        self.assertEqual(without_fixture | unproducible | set(RETIRED),
                          set(REFUSALS) - seen['refusal'], 'the refusal codes without a fixture')
         self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
         # the extension's stops
@@ -2804,9 +3007,10 @@ class TestPatternFixtures(unittest.TestCase):
                 seen['mask'].setdefault(b['mask'], set()).add(route)
         without_fixture = {'mask_invalid', 'alphabet_untested'}
         self.assertEqual(without_fixture, set(NO_FIXTURE))
-        self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE) - without_fixture - set(RETIRED),
+        self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE) - without_fixture
+                         - RETIRED_REASONS,
                          set(seen['unavailable']))
-        self.assertEqual(without_fixture | set(UNPRODUCIBLE) | set(RETIRED),
+        self.assertEqual(without_fixture | set(UNPRODUCIBLE) | RETIRED_REASONS,
                          set(UNAVAILABLE) - set(seen['unavailable']),
                          'the unavailable reasons without a fixture')
         self.assertEqual(set(COUNTINGS), set(seen['counting']))
@@ -2857,7 +3061,8 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertFalse(set(RETIRED) & (literal | support | unavailable | assigned),
                          'a retired code is still written')
         self.assertEqual(set(REFUSALS), literal | support | set(RETIRED))
-        self.assertEqual(set(UNAVAILABLE), support | unavailable | set(RETIRED))
+        self.assertLessEqual(RETIRED_REASONS, set(RETIRED))
+        self.assertEqual(set(UNAVAILABLE), support | unavailable | RETIRED_REASONS)
         # the slot codes: the engine's PatternError code (bad_alphabet; stop_unsupported is
         # retired) and its refusals of a parsed pattern (information_below_floor,
         # scope_unsupported)

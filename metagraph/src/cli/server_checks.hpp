@@ -1,8 +1,11 @@
 #ifndef __METAGRAPH_SERVER_CHECKS_HPP__
 #define __METAGRAPH_SERVER_CHECKS_HPP__
 
+#include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -193,6 +196,96 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
                       const std::function<std::string(const GraphListEntry &)> &fingerprint,
                       const std::function<std::vector<std::string>(const GraphListEntry &)>
                               &inventory = nullptr);
+
+// ---------------------------------------------------------------- multi-graph servers
+
+/**
+ * The memory a server lends to per-request loads of an index into RAM (`in_ram`, the rule of
+ * /search): at most |capacity| bytes (--mem-cap-gb) reserved at once. reserve() waits until
+ * |bytes| are free, then takes them; release() gives them back and wakes the waiters. A
+ * reservation larger than the capacity never fits: the caller serves such a request from the
+ * resident (memory-mapped) index instead (in_ram_plan). Thread-safe.
+ */
+class LoadReservations {
+  public:
+    explicit LoadReservations(size_t capacity) : capacity_(capacity), left_(capacity) {}
+    size_t capacity() const { return capacity_; }
+    // Waits until |bytes| (at most capacity()) are free and takes them: true. |gone|, when
+    // given, is asked every |poll_ms| while it waits; true abandons the wait (false, nothing
+    // taken). Without it the wait is /search's: until the memory is free
+    bool reserve(size_t bytes, const std::function<bool()> &gone = nullptr,
+                 uint64_t poll_ms = 100);
+    void release(size_t bytes);
+    // the bytes free now
+    size_t left() const;
+
+  private:
+    const size_t capacity_;
+    size_t left_;
+    mutable std::mutex mutex_;
+    std::condition_variable freed_;
+};
+
+// How a request is served by one (graph, annotation) pair of a multi-graph server
+enum class InRamPlan {
+    RESIDENT,             // without in_ram (or false): the index the server holds
+    RESIDENT_IN_RAM,      // in_ram, and the server loaded its indexes into RAM (no --mmap)
+    RESIDENT_TOO_LARGE,   // in_ram, and the pair's files exceed the capacity (--mem-cap-gb)
+    LOAD,                 // in_ram on a server on mmap: the pair is loaded into RAM for it
+};
+// /search's rule: a load when |in_ram| is asked, the server runs on mmap, and the pair's files
+// (|bytes|: the graph's and the annotation's sizes) fit |capacity|
+InRamPlan in_ram_plan(bool in_ram, bool server_on_mmap, size_t bytes, size_t capacity);
+const char* to_string(InRamPlan plan);
+
+// A request's `in_ram`: none when absent, its value when a boolean; throws
+// std::invalid_argument ("request.in_ram: expected a boolean") for any other value
+std::optional<bool> in_ram_field(const Json::Value &request);
+
+/**
+ * The graph a POST /resolve or /traverse request selects (the request's fields; the pair is
+ * then chosen by the graph list's rules, select_traverse_pair): |name| and |graph_path|
+ * (when given as a string); |via_graphs| when the request named it with `graphs` ([name], the
+ * form /search takes), which also makes a seed the graph does not hold a per-seed result
+ * (TraverseLimits::not_in_graph_per_seed). On a single-graph server (|multi_graph| false)
+ * `graph` and `graph_path`, then `graphs`, are refused, and nothing is selected (|name| empty).
+ * Throws std::invalid_argument with the message a 400 states.
+ */
+struct GraphSelection {
+    std::string name;
+    std::optional<std::string> graph_path;
+    bool via_graphs = false;
+};
+GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_graph);
+
+/**
+ * The names a POST /pattern request selects on a multi-graph server (/search's rule): its
+ * `graphs`, a non-empty array of names of the graph list, deduplicated and sorted; without
+ * `graphs`, every name of |known| when there are at most |max_without_graphs| of them. Throws
+ * std::invalid_argument naming the problem (an unknown name, a wrong type, an empty list, a
+ * server with more names and no `graphs`).
+ */
+std::vector<std::string> pattern_graph_names(const Json::Value &request,
+                                             const std::vector<std::string> &known,
+                                             size_t max_without_graphs = 10);
+
+/**
+ * Whether the column names of a multi-graph server's annotations are disjoint: each name a
+ * column of one (graph, annotation) pair only, so that a label's counts and occurrences
+ * summed over the pairs count each column once (the chunks of an index that partition its
+ * samples). |columns|[i] are the column names of pair i (a pair listed twice is passed once).
+ * |shared|: the distinct names found in more than one pair; |example|: one of them (the
+ * smallest), "" when disjoint. The names are grouped by |hash| (std::hash when null; tests
+ * pass a weak one), every group compared on the names themselves.
+ */
+struct ColumnOverlap {
+    bool disjoint = true;
+    uint64_t shared = 0;
+    uint64_t columns = 0;
+    std::string example;
+};
+ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &columns,
+                             const std::function<size_t(const std::string&)> &hash = nullptr);
 
 } // namespace cli
 } // namespace mtg

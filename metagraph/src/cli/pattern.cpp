@@ -46,7 +46,7 @@ constexpr const char *kDefaultProjection = "none";
 // Request fields that are not served (§7.1): refused by name, any value (null included), rather
 // than reported as unknown, so that the answer says what to wait for
 const char *const kLaterIncrementFields[] = {
-    "graphs", "budget_split",
+    "budget_split",
 };
 
 // long_search: "anchors", the default, answers a pattern longer than k by its anchors; "paths"
@@ -227,11 +227,14 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         throw invalid("request: expected an object");
 
     for (const std::string &name : json.getMemberNames()) {
-        if (name == "in_ram") {
-            throw PatternRefusal(400, "resident_only",
-                                 "request.in_ram: /pattern serves the resident index only and "
-                                 "never loads one inside a request (a load cannot be stopped at "
-                                 "the deadline)");
+        // `in_ram` (as /search's: the server loads the index into RAM for the request when it
+        // runs on mmap, before the request's deadline starts) is read by the server; a
+        // multi-graph server reads `graphs` too and passes neither here
+        if (name == "in_ram" && !json[name].isBool())
+            throw invalid("request.in_ram: expected a boolean");
+        if (name == "graphs") {
+            throw invalid("request.graphs: this server hosts a single graph; remove the "
+                          "'graphs' field");
         }
         for (const char *field : kLaterIncrementFields) {
             if (name == field)
@@ -241,6 +244,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
 
     Fields f(json, "request");
     ParsedRequest req;
+    f.has("in_ram");
 
     if (!f.has("patterns"))
         throw invalid("request.patterns: required: a list of 1 to "
@@ -929,23 +933,39 @@ std::shared_ptr<const DBGSuccinct> succinct_of(std::shared_ptr<const DeBruijnGra
     return std::dynamic_pointer_cast<const DBGSuccinct>(graph);
 }
 
-// the kept fraction of |dbg_succ|, sampled now when there is none; the caller holds
-// dummy_fractions_mutex
-const DummyFraction& fraction_of(const std::shared_ptr<const DBGSuccinct> &dbg_succ,
-                                 bool *sampled = nullptr) {
+// the kept fraction of |dbg_succ|, or null; the caller holds dummy_fractions_mutex
+const DummyFraction* kept_fraction(const std::shared_ptr<const DBGSuccinct> &dbg_succ) {
     for (auto it = dummy_fractions.begin(); it != dummy_fractions.end(); ) {
         if (auto held = it->first.lock()) {
             if (held == dbg_succ)
-                return it->second;
+                return &it->second;
             ++it;
         } else {
             it = dummy_fractions.erase(it);
         }
     }
+    return nullptr;
+}
+
+// the fraction of |dbg_succ|: the kept one, else sampled now and kept (|sampled| set). The
+// sample is drawn without the registry's lock, so that graphs loading in parallel sample in
+// parallel and no reader of another graph's fraction waits for it; two threads sampling one
+// graph draw the same entries (the seed is fixed by the graph), and the first kept is used
+DummyFraction fraction_of(const std::shared_ptr<const DBGSuccinct> &dbg_succ,
+                          bool *sampled = nullptr) {
+    {
+        std::lock_guard<std::mutex> lock(dummy_fractions_mutex);
+        if (const DummyFraction *f = kept_fraction(dbg_succ))
+            return *f;
+    }
+    const DummyFraction f = sample_real_fraction(*dbg_succ);
+    std::lock_guard<std::mutex> lock(dummy_fractions_mutex);
+    if (const DummyFraction *kept = kept_fraction(dbg_succ))
+        return *kept;
+    dummy_fractions.emplace_back(dbg_succ, f);
     if (sampled)
         *sampled = true;
-    dummy_fractions.emplace_back(dbg_succ, sample_real_fraction(*dbg_succ));
-    return dummy_fractions.back().second;
+    return f;
 }
 
 } // namespace
@@ -955,7 +975,6 @@ std::optional<DummyFraction> dummy_fraction(const AnnotatedDBG &anno_graph) {
     auto dbg_succ = graph ? succinct_of(graph) : nullptr;
     if (!dbg_succ || dbg_succ->get_mask())
         return std::nullopt;
-    std::lock_guard<std::mutex> lock(dummy_fractions_mutex);
     return fraction_of(dbg_succ);
 }
 
@@ -965,12 +984,8 @@ void sample_dummy_fraction_at_load(const std::shared_ptr<DeBruijnGraph> &graph,
     if (!dbg_succ || dbg_succ->get_mask())
         return;
     bool sampled = false;
-    DummyFraction f;
     const auto start = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lock(dummy_fractions_mutex);
-        f = fraction_of(dbg_succ, &sampled);
-    }
+    const DummyFraction f = fraction_of(dbg_succ, &sampled);
     if (!sampled)
         return;
     logger->log(stdout_reserved ? spdlog::level::trace : spdlog::level::info,
@@ -1904,7 +1919,10 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["default_strands"] = to_string(Strands::BOTH);
     p["graph_cleaned"] = "unknown";
     p["records_shorter_than_k"] = "not_indexed";
-    p["resident_only"] = true;
+    // `in_ram` is accepted (a request may ask for its index in RAM, as on /search); whether
+    // this server loads one is GET /capabilities' in_ram.loads
+    p["resident_only"] = false;
+    p["in_ram"] = "accepted";
     Json::Value caps;
     caps["max_contexts"] = uint_json(limits.max_contexts);
     caps["max_anchors"] = uint_json(limits.max_anchors);

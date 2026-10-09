@@ -611,11 +611,12 @@ work, early enough for the answer it holds, and serialises it, with `stop: {phas
 and the relations of §3. If serialisation itself overruns the reserve, the answer is the
 explicit outcome 503 `deadline`, as a `/traverse` attempt past its bound; nothing partial is sent as if whole.
 
-**Resident indexes only.** The route serves the graphs resident in the process (mmap or RAM, as loaded at
-start-up or by an earlier `/search` with `in_ram`); it never loads an index inside a request, because a
-synchronous load cannot be interrupted at the deadline. `in_ram` is refused on `/pattern` (400), and on a
-multi-graph server a shard whose index is not resident answers at once with `stop: not_resident` for that shard,
-counted as a stopped shard in the barriers of §5.2. The capabilities list which graphs are resident.
+**Loads as `/search` loads (`in_ram`).** The owner's decision of 2026-10-09: the route follows `/search`'s
+choices ("some indexes are loaded in RAM and some not"). Every production server maps its graphs at start-up
+(`--mmap`); `in_ram: true` loads the selected pair into RAM for the request when it fits `--mem-cap-gb`, with
+`/search`'s reservation and wait, and the request's resource limits (time, memory, work) apply to its work only,
+after the load, which is unavoidable and cannot be interrupted at the deadline; `timing.load_ms` states it (SPEC
+§24.2). Without `in_ram` the route serves the index the process holds.
 
 **Memory and work per shard.** Each shard's search gets a fixed share of `max_memory_mb` (equal shares, or the
 request's `budget_split`), its own `DecodeBudget` (single-thread-owned, as the class requires), and its own
@@ -874,7 +875,8 @@ contract version 1: SPEC §1, §13).
 no annotation read; it is the cheapest retrieval and the one a client should ask for first.
 
 Exactly one of `dna`, `iupac`, `protein` per pattern; at most `--pattern-max-patterns` (default 16) per request;
-`id` optional. Unknown fields are refused (400), as `/traverse` refuses them; so is `in_ram` (§5.3). The route
+`id` optional. Unknown fields are refused (400), as `/traverse` refuses them; `in_ram` is accepted as `/search`
+accepts it (§5.3). The route
 name avoids the `/search` prefix on purpose: the server matches `^/search` without an end anchor
 (`server.cpp:768`).
 
@@ -984,9 +986,15 @@ them (§9).
 
 ## 8. Multi-graph servers
 
-`/pattern` fans out over the shards of the named graphs as `/search` does (`server.cpp:790-885`: one task per
-(graph, annotation) pair on `graphs_pool`), through a helper factored out of that loop and used by both routes.
-Differences from `/search`'s merge, all deliberate:
+As decided (the owner, 2026-10-09: "the same logic as for the general search", "no new recipe"; SPEC §24):
+`/pattern` takes `/search`'s `graphs`, answers each selected (graph, annotation) pair as a single-graph server
+answers it (its own deadline, caps and memory account: the request's budgets apply per pair), in parallel on
+`graphs_pool`, and returns the answers concatenated, each tagged with its pair and `index_fp`. The requester
+merges, as the search service merges `/search`'s answers of a chunked database, sending one graph per request
+(PROMPT §3.1 items 2 and 3); `GET /capabilities` states every pair (`graph_summary`) and whether the pairs' columns
+are disjoint, which licenses summing a label's counts over them.
+
+The merged answer below was the earlier design; it is not built:
 
 - every result carries its shard: `graph`, `index_fp` and `release`, so node ids and columns are scoped; a column
   present in two shards is two results, and `labels` counts (shard, column) pairs, stated by `per_shard: true`;

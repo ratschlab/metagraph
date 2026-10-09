@@ -919,7 +919,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             # the masked graph counts exactly, no dummy fraction
             'counting': 'exact', 'dummy_fraction': None,
             'graph_cleaned': 'unknown', 'records_shorter_than_k': 'not_indexed',
-            'resident_only': True, 'caps': DEFAULT_CAPS,
+            # in_ram accepted (as /search's): the budgets start after a load
+            'resident_only': False, 'in_ram': 'accepted', 'caps': DEFAULT_CAPS,
             'default_time_budget_ms': DEFAULT_TIME_MS,
             'finalize_reserve_ms': DEFAULT_FINALIZE_MS,
             # the delivery rates as numbers (MB/s), the prose rules SPEC references
@@ -2559,10 +2560,11 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
              'write a taxid as "562"'),
             ({'patterns': p, 'predicate': {'any': [str(i) for i in range(10001)]}},
              'predicate_too_large', '10001 names'),
-            ({'patterns': p, 'graphs': ['x']}, 'later_increment', 'graphs'),
+            ({'patterns': p, 'graphs': ['x']}, 'invalid_request', 'single graph'),
+            ({'patterns': p, 'budget_split': 1}, 'later_increment', 'budget_split'),
             ({'patterns': [{'protein': 'MKV'}], 'genetic_code': 7}, 'genetic_code_unknown',
              'genetic_code'),
-            ({'patterns': p, 'in_ram': False}, 'resident_only', 'in_ram'),
+            ({'patterns': p, 'in_ram': 'yes'}, 'invalid_request', 'in_ram'),
         ]
         for payload, code, words in cases:
             ret = server.post('pattern', payload)
@@ -2827,7 +2829,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             ('a retrieval', {'patterns': [{'dna': 'ACGAC'}]}, 200, None),
             ('not JSON', '{', 400, 'invalid_request'),
             ('no patterns', {'patterns': []}, 400, 'invalid_request'),
-            ('a later increment', {'patterns': [{'dna': 'ACGAC'}], 'graphs': ['x']}, 400,
+            ('a later increment', {'patterns': [{'dna': 'ACGAC'}], 'budget_split': 1}, 400,
              'later_increment'),
             # refused once the request is parsed (the column annotation has no budgeted reads)
             ('unbudgeted labels', {'patterns': [{'dna': 'ACGAC'}], 'output': {'labels': 'all'}},
@@ -2845,35 +2847,57 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         self.pattern(server, {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'})
 
     def test_multi_graph_server(self):
+        """A multi-graph server answers /pattern as /search: the graphs a request names, each
+        pair answered as on a single-graph server and tagged with its pair; the full block per
+        pair on /pattern/capabilities?graph= and in the probe; the server-wide block on
+        /capabilities with the per-pair summary (test_multigraph.py covers the rest)."""
         d = self.tempdir.name
         csv = os.path.join(d, 'graphs.csv')
         with open(csv, 'w') as f:
             f.write(f'G1,{self.graph_basic},{self.anno_basic}\n')
         server = Server(METAGRAPH, [csv], os.path.join(d, 'server_multi.log'))
+        single = Server(METAGRAPH, ['-i', self.graph_basic, '-a', self.anno_basic],
+                        os.path.join(d, 'server_multi_single.log'))
         try:
-            ret = server.post('pattern', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'})
-            self.assertEqual(400, ret.status_code)
-            self.assertEqual({'error': 'pattern: not served by this build on a multi-graph server',
-                              'code': 'later_increment'}, ret.json())
-            # nor is this refusal written to a client that left
+            request = {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'}
+            ret = server.post('pattern', dict(request, graphs=['G1']))
+            self.assertEqual(200, ret.status_code, ret.text)
+            out = ret.json()
+            self.assertEqual(['G1'], out['graphs'])
+            self.assertEqual(1, len(out['answers']))
+            answer = out['answers'][0]
+            self.assertEqual(('G1', self.graph_basic, self.anno_basic, None),
+                             (answer['graph'], answer['graph_path'], answer['annotation_path'],
+                              answer['index_fp']))
+            # the pair's answer is the single-graph server's on the same files
+            alone = single.post('pattern', request).json()
+            for a in (answer, alone):
+                a.pop('timing')
+            for key in ('graph', 'graph_path', 'annotation_path', 'index_fp'):
+                answer.pop(key)
+            self.assertEqual(alone, answer)
+            # nor is a refusal written to a client that left
             self.assertEqual(b'', half_closed_request(
-                server.port, 'pattern', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'}))
+                server.port, 'pattern', dict(request, graphs=['nope'])))
             caps = server.get('capabilities').json()
-            self.assertNotIn('pattern', caps['features'])
-            self.assertNotIn('pattern', caps['routes'])
-            self.assertNotIn('pattern_capabilities', caps['routes'])
-            multi_block = {'pattern_contract_version': 1, 'available': False,
-                           'unavailable_reason': 'multi_graph_later_increment'}
-            self.assertEqual(multi_block, caps['pattern'])
+            self.assertIn('pattern', caps['features'])
+            self.assertEqual('POST /pattern', caps['routes']['pattern'])
+            self.assertEqual('GET /pattern/capabilities?graph={name}[&graph_path={path}]',
+                             caps['routes']['pattern_capabilities'])
+            self.assertTrue(caps['pattern']['available'])
+            self.assertIsNone(caps['pattern']['k'])
+            self.assertEqual(['G1'], [p['graph'] for p in caps['graph_summary']['pairs']])
+            block = server.get('pattern/capabilities?graph=G1').json()
+            self.assertEqual(('G1', self.graph_basic), (block.pop('graph'), block.pop('graph_path')))
+            self.assertEqual(single.get('pattern/capabilities').json(), block)
             probe = server.get('traverse/capabilities?graph=G1').json()
-            self.assertEqual(dict(multi_block, details='GET /pattern/capabilities'),
-                             probe['pattern'])
-            # the route of the full block answers the same block, whatever the query
-            for query in ('', '?graph=G1', '?graph_path=x'):
-                ret = server.get('pattern/capabilities' + query)
-                self.assertEqual((200, multi_block), (ret.status_code, ret.json()), query)
+            self.assertEqual(dict(block, details='GET /pattern/capabilities'), probe['pattern'])
+            ret = server.get('pattern/capabilities')
+            self.assertEqual(400, ret.status_code)
+            self.assertIn('needs ?graph=<name>', ret.json()['error'])
         finally:
             server.stop()
+            single.stop()
 
     def test_deadline_caps_under_the_content_timeout(self):
         """A route deadline past the server's 900 s content timeout would be accepted and the
@@ -3243,10 +3267,14 @@ class TestPatternRegression(TestingBase):
         for key in a:
             if key not in ('features', 'routes'):
                 self.assertEqual(a[key], b[key], key)
-        # the two stated gains: `pattern` (this route) and `resolve`, the block of /resolve's
+        # the stated gains: `pattern` (this route) and `resolve`, the block of /resolve's
         # opt-in bounds.time_budget_ms (SPEC-labeled-traversal-core.md §4.5): a capabilities
-        # block, not a feature, since /resolve is listed already
-        self.assertEqual(set(a) | {'pattern', 'resolve'}, set(b))
+        # block, not a feature, since /resolve is listed already; `in_ram` (accepted as /search
+        # accepts it) and `graph_summary` (null on a single-graph server), SPEC-pattern-search.md
+        # §24
+        self.assertEqual(set(a) | {'pattern', 'resolve', 'in_ram', 'graph_summary'}, set(b))
+        self.assertIsNone(b['graph_summary'])
+        self.assertFalse(b['in_ram']['loads'])
         self.assertTrue(b['resolve']['time_budget']['accepted'])
         self.assertIsNone(b['resolve']['time_budget']['default'])
         # the probe gains the same two blocks and nothing else
@@ -3257,6 +3285,7 @@ class TestPatternRegression(TestingBase):
         self.assertEqual(dict(new_caps['pattern'], details='GET /pattern/capabilities'),
                          b.pop('pattern'))
         self.assertEqual(new_caps['resolve'], b.pop('resolve'))
+        self.assertEqual(new_caps['in_ram'], b.pop('in_ram'))
         self.assertEqual(a, b)
 
 

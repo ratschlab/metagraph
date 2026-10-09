@@ -1,0 +1,4 @@
+{
+ "code": "invalid_request",
+ "error": "request.graphs: unknown graph 'nope' (GET /capabilities lists the graphs)"
+}

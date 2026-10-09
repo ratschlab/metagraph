@@ -1107,8 +1107,12 @@ void Walker::validate_seed() {
     assert(nodes_.size() == seq.size() - k_ + 1);
     if (std::find(nodes_.begin(), nodes_.end(), npos) != nodes_.end()) {
         const auto runs = runs_of(nodes_.size(), [&](uint64_t i) { return nodes_[i] != npos; });
-        throw std::invalid_argument("Seed is not fully present in the graph; graph runs: "
-                                    + encode_runs(runs, nodes_.size()));
+        uint64_t present = 0;
+        for (const KmerInterval &run : runs) {
+            present += run.size();
+        }
+        throw SeedNotInGraph("Seed is not fully present in the graph; graph runs: "
+                             + encode_runs(runs, nodes_.size()), nodes_.size(), present);
     }
     result_.seed_id = seed_.seed_id;
     result_.length_bp = seq.size();

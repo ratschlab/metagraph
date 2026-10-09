@@ -20,6 +20,24 @@ namespace graph {
 namespace traversal {
 
 /**
+ * A seed with a k-mer the graph does not have (spec §6.1 step 2), raised before any annotation
+ * is read: |kmers| the seed's k-mers, |present| those the graph has. A request error where the
+ * caller chose the graph for its seeds (the whole request fails); where it sent the seeds to
+ * every graph of a server without knowing which holds them, the caller states it per seed.
+ */
+class SeedNotInGraph : public std::invalid_argument {
+  public:
+    SeedNotInGraph(const std::string &what, uint64_t kmers, uint64_t present)
+          : std::invalid_argument(what), kmers_(kmers), present_(present) {}
+    uint64_t kmers() const { return kmers_; }
+    uint64_t present() const { return present_; }
+
+  private:
+    uint64_t kmers_;
+    uint64_t present_;
+};
+
+/**
  * The permitted set could not be DERIVED from a seed (Seed::labels empty): nothing
  * carries every k-mer of it, the derivation ran out of the time budget, the candidate
  * set of the cheapest seed k-mer is too wide to materialise, or the derived names are

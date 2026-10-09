@@ -637,9 +637,8 @@ Config::Config(int argc, char *argv[]) {
         std::cerr << "Error: --force applies only to transform --mask-dummy" << std::endl;
         print_usage_and_exit = true;
     }
-    // the mask is built where the graph is loaded at start-up: one graph (-i / -a) of
-    // server_query or pattern. A graph list's graphs are loaded by requests, and /pattern is
-    // not served on them, so the flag would do nothing there
+    // the mask is built where one graph (-i / -a) of server_query or pattern is loaded at
+    // start-up; a graph list's graphs are served with the masks beside them or without one
     if (pattern_build_mask
             && !(identity == PATTERN || (identity == SERVER_QUERY && fnames.empty()))) {
         std::cerr << "Error: --pattern-build-mask applies to server_query with one graph "

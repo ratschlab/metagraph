@@ -265,8 +265,13 @@ class Attempt {
     // walked.
     // Set once the request is parsed; before that the hard cap alone bounds the attempt.
     // |memory_budget|: the request's bounds.max_memory_mb in bytes, 0 for none (the soft
-    // excess is observed under one, and what was held is bounded by it)
-    void set_bound(size_t seeds, double time_budget_ms, uint64_t memory_budget = 0);
+    // excess is observed under one, and what was held is bounded by it). |load_ms|: the time
+    // the request waited for and spent loading its index into RAM (`in_ram`) before its work
+    // began, which the budgets do not count: the bound is min(load + n_seeds x T + allowance,
+    // hard cap), the hard cap still counted from the header (usage.bound.load_ms states it;
+    // none without such a load)
+    void set_bound(size_t seeds, double time_budget_ms, uint64_t memory_budget = 0,
+                   std::optional<double> load_ms = std::nullopt);
     double bound_ms() const { return bound_ms_; }
     double walk_until_ms() const { return walk_until_ms_; }
     bool enforced() const { return enforced_ && managed(); }
@@ -405,6 +410,7 @@ class Attempt {
     double walk_until_ms_ = 0;
     bool bound_set_ = false;
     bool capped_ = false;
+    std::optional<double> bound_load_ms_;
     uint64_t memory_budget_ = 0;
 
     std::atomic<uint8_t> stop_ { 0 };

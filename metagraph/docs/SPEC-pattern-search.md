@@ -89,7 +89,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | the dummy-edge mask (§4: required) | graphs with it (`counting: "exact"`: every count of a completed discovery `exact`) and, since the owner's decision #16 of 2026-10-08, without it (`counting: "upper_bound"`: counts `exact` where provable, otherwise `bounds` with an additive `estimate`; lists exact; §7.4, §18). The mask is derived data of the graph, not part of `index_fp` (decision #17, §10.2) |
 | labels, placement, occurrences (§4.3) | read only with `output.labels: "all"` (or `"predicate_only"`, §19) in a retrieval mode (increment 3, §14): labels on every index, placement on BASIC indexes with coordinates; otherwise none read and their counts `unknown`. A predicate's selection reads the rows of the contexts it tests in every mode (§19), its own labels only |
 | per-label `support` for paths, `require_support` (§4.3) | served with `long_search: "paths"` (increment 4, §12.1): `label_intersection` or `record_verified` per label; a context of L ≤ k has `support: "kmer"` |
-| multi-graph servers (§8) | 400 `later_increment`; the block says `multi_graph_later_increment` |
+| multi-graph servers (§8) | served as `/search` serves them (§24): `graphs` selects, each pair answered as on one graph, the answers concatenated and tagged |
 | the deadline with a finalisation reserve, 503 `deadline` (§5.3) | as designed; the annotation reads are work and stop at the work time (§14.4) |
 
 ## 2. Terms
@@ -140,8 +140,10 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   asks once more after the answer or the error is built (outside review GPT-2, finding 4). A 503 `deadline`
   still reaches a client that is there. A request abandoned while it waited for a thread is dropped at its first
   such reading or check.
-- Single-graph servers only (`server_query -i GRAPH -a ANNOTATION`). A multi-graph server (`server_query
-  GRAPHS.csv`) answers every `/pattern` request with 400 `later_increment` (§6).
+- A single-graph server (`server_query -i GRAPH -a ANNOTATION`) answers on its graph. A multi-graph server
+  (`server_query GRAPHS.csv`) answers as `/search` does (§24): the graphs a request names (`graphs`), each
+  (graph, annotation) pair answered as a single-graph server answers it, the answers concatenated, each tagged
+  with its pair and `index_fp`. Both accept `in_ram` (§24).
 - `metagraph pattern -i GRAPH -a ANNOTATION [--json] REQUEST.json ...` answers each request file as the server
   would, under the same `--pattern-*` flags: the answer on stdout; a refusal's body on stdout and exit status 1.
   A request file that fails otherwise gets the body the server's 400 without a code has (`{"error": …}`, §6),
@@ -179,13 +181,16 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `max_predicate_contexts` | integer ≥ 0 | `caps.max_predicate_contexts` (100,000) | increment 5b, per pattern: the compute admission of the selection, the raw contexts it may test (§19.6); lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
 | `max_predicate_work` | integer ≥ 1 | `caps.max_predicate_work` (10⁸) | increment 5b, per **request**: the work of the selection (its row reads, reverse-complement lookups and decisions) in the oracle's units (§19.9), a budget of its own beside `max_annotation_work`; lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
 | `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate |
+| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, as `/search`'s (§24): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
+| `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
 
 - An integer is a JSON number with an integral value (`5.0` is 5). A negative or fractional value is 400
   `invalid_request`, except for `genetic_code`: a fractional value is 400 `invalid_request`, any integer (a
   negative one included) that is not an NCBI translation table id is 400 `genetic_code_unknown` (§6).
 - A field this version does not know is 400 `invalid_request` ("unknown field"), never ignored. Fields of
   later increments are refused by name with 400 `later_increment`, whatever their value, `null` included
-  (§4.4); `in_ram` with 400 `resident_only`.
+  (§4.4); an `in_ram` that is not a boolean, and `graphs` on a single-graph server, with 400 `invalid_request`
+  (§24; `in_ram` was 400 `resident_only` and `graphs` 400 `later_increment` before multi-graph servers answered).
 - The information floor is server policy (`--pattern-min-information-bits`), not a request field (§7.8).
 - The six fields of increment 3 are accepted with every mode and projection; they bound only the reads of
   `output.labels: "all"` in a retrieval mode (with a predicate, `max_memory_mb` and
@@ -236,8 +241,9 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 
 ### 4.4 Fields of later increments
 
-Refused by name (400 `later_increment`), whatever their value: `graphs`, `budget_split`. So that a request
-written for a later increment is told what to wait for, not answered as if the field were absent.
+Refused by name (400 `later_increment`), whatever their value: `budget_split`. So that a request written for a
+later increment is told what to wait for, not answered as if the field were absent. (`graphs` was refused so
+until multi-graph servers answered `/pattern`, §24.)
 
 `predicate`, `max_predicate_contexts` and `max_predicate_work` were refused so until increment 5b, which serves
 them with `predicate_strands` and `output.labels: "predicate_only"` (§19); `"predicate_only"` without a
@@ -309,14 +315,15 @@ server lowers them, so that a direct caller is not refused for a budget the host
 
 A request is refused by the first check it fails, in this order:
 
-1. multi-graph server: 400 `later_increment`, whatever the body;
+1. multi-graph server: the order of §24 (the body, `graphs`, `in_ram`, then each pair from step 4 on);
 2. the single index still loading: 503, no `code` (§6);
 3. the body is not one RFC 8259 JSON text (§3: a comment, a trailing comma, anything after the value, a
    duplicated member name, nesting deeper than 1,000): 400 `invalid_request`;
 4. the graph (`PatternSearch::support`): 400 with the graph's reason (`mask_invalid`, `alphabet_untested`,
    `representation_unsupported`, …, §6), whatever the body asks; a graph without its mask passes (§7.4);
 5. the body is not an object: 400 `invalid_request`;
-6. a later-increment field (§4.4, top level) or `in_ram`, in the alphabetical order of the body's field names;
+6. a later-increment field (§4.4, top level), `graphs` (single-graph server) or an `in_ram` that is not a
+   boolean, in the alphabetical order of the body's field names;
 7. `patterns` (presence, list, length), then each pattern in order (`id`, exactly one of `dna` / `iupac` /
    `protein`, its type, an unknown field); a pattern's alphabet is not a refusal (§8.9);
 8. `mode`, `output` (`labels`, `occurrences`, `paths`, an unknown field), `scope`, `strands`,
@@ -350,13 +357,13 @@ The body is `{"error": <message>, "code": <code>}`, except the 503 during loadin
 | status | `code` | when | what a client does |
 |---|---|---|---|
 | 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`, a `long_search` value not served (`"supported_paths"` included) | fix the request |
-| 400 | `later_increment` | a field of §4.4 (`graphs`, `budget_split`); a multi-graph server | wait for the increment the capabilities will announce |
+| 400 | `later_increment` | a field of §4.4 (`budget_split`) | wait for the increment the capabilities will announce |
 | 400 | `predicate_too_large` | increment 5b: the predicate's lists name more than `caps.max_predicate_labels` names (10,000 by default; a name in two lists counted twice); the message names the count and the cap (§19.3) | send at most `caps.max_predicate_labels` names; split the cohort |
 | 400 | `support_unavailable` | increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a retrieval mode, on an index that cannot verify a path in one record: not BASIC, no coordinates, or no record mapping (no `.seqs`, or `--no-coord-mapping`); capabilities `support` is then not `record_verified`. The message names the index's best support and placement | ask without `require_support`: each label of a path then states its support (`label_intersection` there) |
 | 400 | `genetic_code_unknown` | increment 5: `genetic_code` is an integer that is not an NCBI translation table id (1–6, 9–16, 21–33; 7 and 8 were merged into 4 and 1, 17–20 are unassigned); the message names the ids | send one of the capabilities' `genetic_codes`, or omit it (1, the standard code) |
-| 400 | `resident_only` | `in_ram`, any value: the route never loads an index inside a request (design §5.3) | drop `in_ram` |
+| 400 | `resident_only` | **retired** (§24): `in_ram` is accepted as `/search` accepts it; builds before multi-graph servers answered refused it, any value | a client of version 1 keeps handling it (an older host): drop `in_ram` |
 | 400 | `mask_required` | **retired** (the owner's decision #16 of 2026-10-08): no build since answers it. A graph loaded without its dummy-edge mask (`.edgemask`) is answered, its counts `exact` where provable and otherwise `bounds` with an `estimate` (`counting: "upper_bound"`, §7.4); builds of version 1 before the decision refused such a graph with this code | a client of version 1 keeps handling it (an older host): its operator creates the mask (`metagraph transform --mask-dummy` once, then a restart; or `--pattern-build-mask`), or updates the build |
-| 400 | `mask_invalid` | the graph's `.edgemask` marks valid a dummy edge whose last symbol (W) is `$`, as `metagraph extend` of earlier builds wrote it on a masked graph, or a stale mask left beside a rebuilt graph; counts on such a graph could be overstated, `exact` included (the owner's decision of 2026-10-07). Checked once when the graph is loaded (the start-up log names the edges found); a mask built at load (`--pattern-build-mask`) is not checked. A graph without a mask is not checked and not refused (§7.4) | the host's operator masks the graph again (`metagraph transform --mask-dummy --force`), then restarts the server; the capabilities say `available: false`, `unavailable_reason: "mask_invalid"` meanwhile |
+| 400 | `mask_invalid` | the graph's `.edgemask` marks valid a dummy edge whose last symbol (W) is `$`, as `metagraph extend` of earlier builds wrote it on a masked graph, or a stale mask left beside a rebuilt graph; counts on such a graph could be overstated, `exact` included (the owner's decision of 2026-10-07). Checked when the graph is loaded, on a sample of its W = `$` edges (§24; the start-up log names what was found; the full check is made where a mask is written, `transform --mask-dummy`); a mask built at load (`--pattern-build-mask`) is not checked. A graph without a mask is not checked and not refused (§7.4) | the host's operator masks the graph again (`metagraph transform --mask-dummy --force`), then restarts the server; the capabilities say `available: false`, `unavailable_reason: "mask_invalid"` meanwhile |
 | 400 | `representation_unsupported` | not a succinct graph (nor a PRIMARY one wrapped in `CanonicalDBG`), or k < 2 | none: this host has no pattern search |
 | 400 | `primary_unwrapped` | a PRIMARY graph not wrapped in `CanonicalDBG` (the server always wraps; CLI or embedding misuse) | none |
 | 400 | `alphabet_untested` | the graph's alphabet is `$ACGTN` (a DNA5 build): no DNA5 build has passed the pattern tests yet (the owner's decision of 2026-10-07; §8.2), with its mask or without | none on this build; a later build that passes them serves it |
@@ -894,6 +901,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `label_intersection_ms` | number | review GPT-3 (§18), entries of a pattern longer than k with `long_search: "paths"` and `labels: "all"`: the intersection of the label lists of each path's rows (§12.1). Varies between runs |
 | `verification_ms` | number | likewise: the verification of the labels carrying the paths — the chains' join, their record placement, the runs kept for the output (§12.1) — apart from `placement_ms`, the coordinates' reads; the loop's time also where nothing is verified (no coordinates). Varies between runs |
 | `selection_ms` | number | increment 5b, every answered entry of a request with a predicate: the selection pass (its lookups, reads and decisions; 0 where it did not run). Varies between runs |
+| `load_ms` | number | top level, a request with `in_ram` (§24): the time before the deadline started, the wait for the memory and the load of the index into RAM; `0` when nothing was loaded (a server that holds its indexes in RAM, a single-graph server, a pair above `--mem-cap-gb`). Varies between runs |
 
 ### 8.5 A pattern's entry
 
@@ -1139,9 +1147,10 @@ It costs no step.
 ### 10.1 Where the block is
 
 - **`GET /pattern/capabilities`** (§23): the full block of §10.2, the document itself (not wrapped in an object).
-- **`GET /capabilities`**: on a single-graph server, `"pattern"` in `features`, `routes.pattern =
-  "POST /pattern"`, `routes.pattern_capabilities = "GET /pattern/capabilities"`, and the full block as its
-  `pattern` member. The feature and the routes are listed whether or not this graph can be searched (as `align`
+- **`GET /capabilities`**: `"pattern"` in `features`, `routes.pattern = "POST /pattern"`,
+  `routes.pattern_capabilities = "GET /pattern/capabilities"` (on a multi-graph server
+  `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the full block as its `pattern` member (on a
+  multi-graph server without a graph, §24). The feature and the routes are listed whether or not this graph can be searched (as `align`
   is); `pattern.available` says whether it can. A client gates on both.
 - **`GET /traverse/capabilities`** (the document the service's probe reads): its `pattern` member is the gate
   block (§23): every field a client gates on, with the full block's value, and `details: "GET
@@ -1150,10 +1159,12 @@ It costs no step.
 - While the single index loads, `/pattern/capabilities` answers 200 with the block's graph fields `null`
   (`available: null`), `/capabilities` with `ready: false` and the same block; `/traverse/capabilities` answers
   503.
-- On a multi-graph server: no `pattern` feature or route; the block on `/pattern/capabilities` (whatever its
-  query), on `/capabilities` and on `/traverse/capabilities?graph=NAME` (there with `details`) is
-  `{pattern_contract_version: 1, available: false, unavailable_reason: "multi_graph_later_increment"}` and
-  nothing else.
+- On a multi-graph server (§24): the block of one pair on `/pattern/capabilities?graph=NAME[&graph_path=PATH]`
+  (naming it: `graph`, `graph_path`) and on `/traverse/capabilities?graph=NAME` (there with `details`); on
+  `/capabilities` the block without a graph (its graph fields `null`, `available` whether a pair is served),
+  beside `graph_summary`, every pair's `available`, `mask`, `counting`, `k`, `graph_mode` and identity. Builds
+  before §24 answered `{pattern_contract_version: 1, available: false, unavailable_reason:
+  "multi_graph_later_increment"}` there.
 
 ### 10.2 The block, field by field
 
@@ -1161,8 +1172,8 @@ It costs no step.
 | field | type | version 1 | meaning |
 |---|---|---|---|
 | `pattern_contract_version` | integer | 1 | §1 |
-| `available` | boolean \| null | | `true`: `/pattern` answers on this graph, with its mask or without it (`counting`); `false`: not on this graph as loaded (`unavailable_reason`): `mask_invalid` clears when the server is restarted after the graph was masked again (`transform --mask-dummy --force`), `multi_graph_later_increment` with the increment that serves multi-graph servers, `alphabet_untested` with a build that has passed the pattern tests on DNA5 (an older build's `mask_required` when the server is restarted after the mask exists); the other reasons are permanent for this graph; `null`: the index is loading |
-| `unavailable_reason` | string \| null | | `mask_invalid`, `representation_unsupported`, `primary_unwrapped`, `alphabet_untested`, `alphabet_unsupported`, `multi_graph_later_increment`; `mask_required` is retired (§6: builds of version 1 before the owner's decision #16 state it; this one never does). A later build may add others: pass an unknown one through, §1; `null` when available or loading |
+| `available` | boolean \| null | | `true`: `/pattern` answers on this graph, with its mask or without it (`counting`); `false`: not on this graph as loaded (`unavailable_reason`): `mask_invalid` clears when the server is restarted after the graph was masked again (`transform --mask-dummy --force`), `multi_graph_later_increment` (builds before §24) with a build that serves multi-graph servers, `alphabet_untested` with a build that has passed the pattern tests on DNA5 (an older build's `mask_required` when the server is restarted after the mask exists); the other reasons are permanent for this graph; `null`: the index is loading |
+| `unavailable_reason` | string \| null | | `mask_invalid`, `representation_unsupported`, `primary_unwrapped`, `alphabet_untested`, `alphabet_unsupported`, `multi_graph_later_increment` (builds before §24; this one writes it for no route); `mask_required` is retired (§6: builds of version 1 before the owner's decision #16 state it; this one never does). A later build may add others: pass an unknown one through, §1; `null` when available or loading |
 | `modes` | list | `["count", "all_or_count", "partial"]` | §7.5 |
 | `default_mode` | string | `"all_or_count"` | an omitted `mode` |
 | `projections` | list | `["none", "all", "predicate_only"]` | the `output.labels` values served **now**; gate label projections on this list (`"all"` since increment 3, `"predicate_only"` since increment 5b, with a predicate; `["none"]` before increment 3) |
@@ -1185,7 +1196,8 @@ It costs no step.
 | `default_strands` | string | `"both"` | |
 | `graph_cleaned` | string | `"unknown"` | whether graph cleaning may have pruned k-mers (design §3); not known in version 1 |
 | `records_shorter_than_k` | string | `"not_indexed"` | such records have no k-mer |
-| `resident_only` | boolean | `true` | the route never loads an index (`in_ram` refused) |
+| `resident_only` | boolean | `false` | `true` in builds before §24, which refused `in_ram`; kept for a client that reads it |
+| `in_ram` | string | `"accepted"` | §24: `in_ram` is accepted, as `/search` accepts it; whether this server loads an index for it is `GET /capabilities`' `in_ram.loads` |
 | `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not); increment 5b: `max_predicate_contexts`, `max_predicate_work` and `max_predicate_labels` (no request field: the names a predicate may list, §19.3) |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
@@ -1240,15 +1252,15 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
   counts on such a graph could be overstated, `exact` included. Such a mask, or a stale one, is refused (the owner's decision of
   2026-10-07): a mask that marks valid a dummy edge whose W is `$` makes the graph `available: false` with
   `mask_invalid`, and every request 400 `mask_invalid`, until the graph is masked again (`metagraph transform
-  --mask-dummy --force`) and the server restarted. Beyond that check a `file` mask is trusted as written. A mask
+  --mask-dummy --force`) and the server restarted. The check is a sample of the graph's W = `$` edges at every
+  load (§24: sub-second where the full count read the whole W column, 25 minutes on a busy host); the full check
+  is made where a mask is written (`transform --mask-dummy` refuses to write a mask that fails it). Beyond that
+  check a `file` mask is trusted as written. A mask
   written by `build --mask-dummy`, `transform --mask-dummy` or `--pattern-build-mask` is correct.
 
-<!-- schema: capabilities_multi -->
-| field | type | meaning |
-|---|---|---|
-| `pattern_contract_version` | integer | 1 |
-| `available` | boolean | `false` |
-| `unavailable_reason` | string | `multi_graph_later_increment` |
+A multi-graph server's blocks are §24's: the full block per pair, and on `GET /capabilities` the full block
+without a graph. (The three-field block `{pattern_contract_version, available: false, unavailable_reason:
+"multi_graph_later_increment"}` of builds before §24 is answered by no route of this build.)
 
 ### 10.3 How a client gates
 
@@ -1364,7 +1376,8 @@ kept as the first stop, then the output's time stop).
 How a client merges answers is in `PROMPT-search-service-pattern.md` §3.1 item 2, not in a fixture.
 
 The route of the full block (§23) has its own: `pattern_capabilities` (the masked server), `_unmasked`,
-`_built_at_load` and `_multi_graph` (each equal to its server's `/capabilities` block), `_graph_param` (the 400 of
+`_built_at_load` and `_multi_graph` (each equal to its server's `/capabilities` block; the multi-graph server's,
+`?graph=`, to its pair's block in the probe), `_multi_graph_no_graph` (the 400 without `?graph=` there), `_graph_param` (the 400 of
 `?graph=` on a single-graph server) and `pattern_capabilities_loading`, a third hand-made body: the masked server's
 block as the code writes it while the index loads (200, the graph fields `null`), which no server gives on demand.
 
@@ -1454,7 +1467,7 @@ a client may use it. (Milestone 1b, the edge mask, is in this build and its fixt
 | 5: peptides — **served in this build (§12.2)** | `patterns[i].protein`, `genetic_code`; the stop `*` since the owner's decision #19 (§18) | `kind: "protein"` with `residues` and `genetic_code` (instances name the codons); note `no_stop_codon` (§18; the slot error `stop_unsupported`, answered by `4596bb3b` only, is retired); 400 `genetic_code_unknown` | `kinds` gains `"protein"`; `protein_residues` (with `*` since §18), `genetic_codes`, `default_genetic_code`, `protein_rule` |
 | 5b: predicates, patterns of L ≤ k — **served in this build (§19)** | `predicate`, `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`, `output.labels: "predicate_only"` | the top-level `predicate` block (normal form, names, known, `unknown_labels`, `vacuous`, scope, strands); per entry `selection` (`pass`, `support`, `access`), `counts.tested` and `counts.selected` (relations §19.7), `absence_filter`, `work.predicate_rows`, `predicate_units`, `predicate_lookups`, `timing.selection_ms`, `rows_refused` with phase `selection`; results the selected contexts, with `selection_labels` under a projection that reads labels; `withheld` `predicate_above_threshold`, `selected_above_threshold`, `predicate_budget`; `cut` `max_predicate_contexts`, `max_predicate_work`; `stop` phase `selection`, reasons `max_predicate_work`, `max_predicate_contexts`; notes `predicate_constant`, `projection_not_read`; 400 `predicate_too_large` | `projections` gains `"predicate_only"` (`projections_later_increment` `[]`); `caps.max_predicate_contexts`, `max_predicate_work`, `max_predicate_labels`; `predicate` {operators, strands, access} |
 | 5s and 5b's L > k part: supported paths | `long_search: "supported_paths"`, `supported_paths_level`; a predicate on supported paths | `counts.supported_paths`; the selection of the supported walks (strand-consistent: a label supports a walk on one strand as a whole) | `long_search` gains `"supported_paths"` |
-| 6: multi-graph | `graphs` (as `/search` names graphs and chunks), `budget_split` | each result carries `graph`, `index_fp`, `release`; counts `by_shard` with `per_shard`; `stop` and `withheld` gain the shard; the merged order of design §8 | the block on multi-graph servers becomes available, with the resident graphs |
+| 6: multi-graph — **`graphs` served (§24)**, as `/search` serves it: one answer per pair, tagged; the service merges | `graphs` (as `/search` names graphs and chunks); `budget_split` (not served) | each pair's answer carries `graph`, `graph_path`, `annotation_path`, `index_fp`; a merged view (`by_shard`, `per_shard`, the merged order of design §8) is the requester's | the block per pair (`?graph=`), `graph_summary` on `GET /capabilities` |
 
 - What stays: every field of §8 with its type and meaning; the relations and their algebra; the absence licences
   of §9; the order of §7.9; the refusal envelope `{error, code}`; the answer to a request that does not use a
@@ -3056,10 +3069,12 @@ fields a client gates on.
     and re-probes for availability, never reading `null` as `false`. A query parameter `graph` or `graph_path` is
     a 400 `{"error": "Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path'
     parameter"}`, as on `/traverse/capabilities`; any other parameter is ignored.
-  - On a multi-graph server (pattern search is not served there): 200 with the `capabilities_multi` block
-    (§10.2), whatever the query.
+  - On a multi-graph server (§24): the block of the pair `?graph=NAME[&graph_path=PATH]` selects (selected as
+    `/traverse/capabilities` selects it), with `graph` and `graph_path` naming it; without `graph` a 400 naming
+    the parameter, an unknown or repeated parameter a 400, as there.
 - **`GET /capabilities`** keeps the full block as its `pattern` member, and its `routes` gain
-  `"pattern_capabilities": "GET /pattern/capabilities"` on a single-graph server (beside `routes.pattern`).
+  `"pattern_capabilities": "GET /pattern/capabilities"` (on a multi-graph server
+  `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`, §24) beside `routes.pattern`.
 - **`GET /traverse/capabilities`**: its `pattern` member is the **gate block**, `pattern_traverse_block` of the full
   block: every field of the table below with the full block's value, and `details: "GET /pattern/capabilities"`,
   where the full block is. 503 while the single index loads, as before.
@@ -3141,3 +3156,172 @@ which `test_pattern_fixtures.py` compares with this table. The full block's fiel
 - Fixtures (§11): `pattern_capabilities`, `pattern_capabilities_unmasked`, `pattern_capabilities_built_at_load`,
   `pattern_capabilities_multi_graph`, `pattern_capabilities_graph_param` (400) and the hand-made
   `pattern_capabilities_loading`; the capabilities bodies of every fixture server regenerated.
+
+## 24. Multi-graph servers and `in_ram`
+
+The owner's decisions of 2026-10-09: pattern search on a multi-graph server follows `/search` ("the same logic as
+for the general search", "no new recipe"): the same `graphs` selection, one answer per chunk, each tagged with its
+chunk, the requester merges. `in_ram` is honoured exactly as `/search` honours it, and the request's resource
+limits (time, memory) apply to its work only, not to the load ("which is unavoidable"). One graph per request is
+how the search service uses it; the route serves any number.
+
+### 24.1 `graphs`: what a request selects
+
+- `graphs` names graphs of the server's graph list (`server_query GRAPHS.csv`, whose lines are `name,graph_path,
+  annotation_path[,manifest_path[,index_ns]]`, SPEC-labeled-traversal-core.md §10.3), as `/search`'s field does:
+  a non-empty list of names, deduplicated; without it, every name of a server that lists at most 10 (`/search`'s
+  rule), else 400 `invalid_request`. A name can list several (graph, annotation) pairs (the chunks of an index):
+  each is answered.
+- The pairs are answered in this order: the names in byte order, each name's pairs in the list's order, a pair
+  listed twice under one name once (a pair listed under two names is answered under each).
+- Each pair is answered as a single-graph server answers the request without `graphs` (§3 to §19, the pair's own
+  graph and annotation): its own deadline (`time_budget_ms`, starting when its work starts, after a load §24.2),
+  its own caps, memory account and work budgets — the request's budgets apply per pair, as if each were its own
+  request. The pairs run in parallel on the server's graph pool (`-p` threads, shared with `/search`).
+- The order of the checks (§5 step 1): the body is one JSON text (§3) and an object (400 `invalid_request`);
+  `graphs` (400 `invalid_request`: not a non-empty list of names, an unknown name, or absent on a server of more
+  than 10 names); an `in_ram` that is not a boolean (400 `invalid_request`); then each pair from §5 step 4 on (the
+  graph's support, the request's fields, …). A refusal of a pair refuses the request with that refusal — the first
+  in the answers' order among those refused; the other pairs stop at their next clock reading — as `/search`
+  fails a request when one of its graphs fails.
+- The answer is written by the latest of the pairs' deadlines; past it, 503 `deadline` (§7.6). With one graph this
+  is the single-graph rule exactly. The texts of several pairs are written together, each pair's work having kept
+  back the time for its own text only, so a request naming many graphs can reach the 503 where each alone would
+  not: name one graph per request where the answer is large.
+- A client that left is not answered (§3), at any point: while a load waits for memory, during the work, while
+  the answer is written.
+
+<!-- schema: answer_multi -->
+| field | type | meaning |
+|---|---|---|
+| `pattern_contract_version` | integer | 1 |
+| `graphs` | list of strings | the names answered: `graphs` deduplicated (every name without it), in byte order |
+| `answers` | list of objects | one per pair, in the order above: the answer of §8 on that pair, with the fields of `answer_pair` |
+| `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included. Varies between runs |
+
+<!-- schema: answer_pair -->
+| field | type | meaning |
+|---|---|---|
+| `graph` | string | the name the pair was selected by |
+| `graph_path` | string | the pair's graph, as the list spells it |
+| `annotation_path` | string | the pair's annotation, likewise |
+| `index_fp` | string \| null | the pair's index identity (its `index.index_fp`): what a requester merging the answers of several pairs, or of several requests, joins on; `null` without a manifest in the list (joins unverifiable) |
+
+A requester merges the answers (`PROMPT-search-service-pattern.md` §3.1 item 2): counts of different pairs are
+counts of different graphs. A label's counts and occurrences summed over pairs are each column's once only when
+the server states `columns_disjoint: true` (§24.4).
+
+### 24.2 `in_ram`
+
+- `in_ram: true` loads the selected pair into RAM for the request, exactly as `/search` does: on a multi-graph
+  server that runs on mmap (`--mmap`; every production server does), when the pair's files (graph and annotation)
+  fit `--mem-cap-gb` (0 by default: nothing fits). The load waits until that much of `--mem-cap-gb` is free (one
+  pool for `/search`'s loads and these routes'; `/search`'s wait, without a bound), holds it while the request
+  runs, and frees it after. A pair above the cap is served from the mapped index (logged); a server that loaded
+  its graphs into RAM (no `--mmap`) and a single-graph server serve from the index they hold. `in_ram: false`, or
+  no field: the index the server holds.
+- The copy is prepared as the resident index was at start-up before the work starts: its mask checked (§24.5) and,
+  without a mask, its dummy fraction sampled (in RAM, milliseconds); its identity is the pair's (`index_fp` per
+  (graph, annotation) pair, so a per-request load states the same `index`).
+- **The budgets start after the load**: the deadline (`time_budget_ms`, the finalisation reserve), the caps and
+  the memory account apply to the work only. `timing.load_ms` (top level) states the time before the deadline
+  started, the wait for the memory and the load; `0` when nothing was loaded, without the reason (a pair above the
+  cap, a server without `--mmap`, a single-graph server: the server's log names it, as for `/search`); absent
+  without `in_ram`. The HTTP
+  server's content timeout (900 s, §3) counts both: a load that outlasts it leaves the request unanswered (the
+  connection closed), as for `/search`.
+- A request is checked after its load, as `/search`'s is: a malformed body with `in_ram: true` is refused once its
+  pair is loaded.
+- The capabilities state it: the block's `in_ram: "accepted"` and `resident_only: false` (§10.2), and
+  `GET /capabilities`' `in_ram` (which routes accept it, whether this server loads, `--mem-cap-gb`,
+  `budgets_start: "after_load"`; SPEC-labeled-traversal-core.md §10.3).
+
+### 24.3 The block per pair
+
+- `GET /pattern/capabilities?graph=NAME[&graph_path=PATH]`: the full block (§10.2) of the pair the parameters
+  select, selected as `/traverse/capabilities` selects it (a name over several graphs needs `graph_path`; a graph
+  with several annotations under the name is refused), with the fields of `capabilities_pair`. Without `graph`: 400
+  `{"error": "Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and
+  graph_path=<path> when the name spans several graphs); GET /capabilities lists the graphs"}`; an unknown or
+  repeated parameter: 400.
+- `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's block with
+  `details` (§23).
+- `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the
+  graph fields and `predicate.access` `null`), with `available` `true` when a pair is served (else `false`, with
+  the first pair's reason); the pairs are `graph_summary`'s.
+
+<!-- schema: capabilities_pair -->
+| field | type | meaning |
+|---|---|---|
+| `graph` | string | the name `?graph=` gave |
+| `graph_path` | string | the pair's graph, as the list spells it |
+
+### 24.4 `graph_summary` and `columns_disjoint` (`GET /capabilities`)
+
+So that a service learns a many-graph server with one probe, `GET /capabilities` of a multi-graph server states
+every pair, computed once at start-up (`null` on a single-graph server, whose graph `pattern` and
+`/traverse/capabilities` describe). It is the large part of that document there: about 470 bytes per entry, so
+8.8 KB for 7 pairs and about a megabyte for a list of two thousand chunks (a name over many chunks repeats each
+chunk's entry); a client caches it:
+
+<!-- schema: graph_summary -->
+| field | type | meaning |
+|---|---|---|
+| `columns_disjoint` | boolean | no column name is a column of two pairs (each pair counted once, whatever names list it): a label's counts and occurrences summed over the pairs count each column once — the chunks of an index that partition its samples |
+| `shared_columns` | integer | the column names of more than one pair (0 exactly when disjoint); the start-up log names one |
+| `pairs` | list of objects | one per (name, pair), in §24.1's order (a pair under two names twice): `graph_summary_pair` |
+
+<!-- schema: graph_summary_pair -->
+| field | type | meaning |
+|---|---|---|
+| `graph` | string | the name |
+| `graph_path` | string | the pair's graph |
+| `annotation_path` | string | the pair's annotation |
+| `index_ns` | string \| null | the list's `index_ns` column |
+| `index_fp` | string \| null | the pair's manifest digest (its `index_fp`) |
+| `k` | integer | the graph's k |
+| `graph_mode` | string \| null | as its block's (§10.2) |
+| `available` | boolean | whether `/pattern` answers on it, as its block's |
+| `unavailable_reason` | string \| null | as its block's |
+| `mask` | string \| null | as its block's |
+| `counting` | string \| null | as its block's (its `dummy_fraction`, sampled at load, is its block's only) |
+| `traversal` | object | `graph_summary_traversal`: what `/traverse` and `/resolve` read on it |
+
+<!-- schema: graph_summary_traversal -->
+| field | type | meaning |
+|---|---|---|
+| `regime` | string | `basic`, `canonical` or `primary`, as every `/traverse` response's capabilities state it |
+| `num_labels` | integer | the annotation's columns |
+| `has_coordinates` | boolean | the annotation has k-mer coordinates |
+| `has_coord_to_header` | boolean | the record mapping (`.seqs`) is loaded |
+| `supports_trace` | boolean | `support: "trace"` and record coordinates are served (coordinates on a BASIC graph) |
+
+### 24.5 The mask check at load
+
+The check of §6's `mask_invalid` reads a sample: the main dummy edge and 128 edges with W = `$` (plain or marked)
+drawn uniformly with replacement by `std::mt19937_64` seeded with the graph's number of edges (the dummy fraction's
+generator: the same edges in every process), each looked up in the mask; every such edge when there are at most
+128. A sampled edge marked valid makes the graph `mask_invalid`, as before. It is sub-second on a cold, busy host,
+where the full count — a select on W per edge with W = `$` — took 25 minutes once. A mask that marks only a few
+such edges valid can pass it: the full check is made once where a mask is written (`metagraph transform
+--mask-dummy` refuses to write a mask that fails it), not at every start, and there is no background check (the
+owner's decision of 2026-10-09). A multi-graph server checks every listed graph in its loading thread at start-up,
+and samples there the dummy fraction of each graph without its mask (10,000 entries, §18), as a single-graph
+server does: no request pays for a sample inside its deadline, at the cost of the samples at start-up (graphs
+loading in parallel sample in parallel; about a second each on a warm page cache, more on a cold mapped one).
+
+### 24.6 What changed (contract version 1)
+
+- `POST /pattern` on a multi-graph server answers (it was 400 `later_increment`); `graphs` is served there and on a
+  single-graph server is 400 `invalid_request` (it was 400 `later_increment`).
+- `in_ram` is accepted (it was 400 `resident_only`, now retired); `timing.load_ms` with it.
+- The block: `resident_only: false`, the new `in_ram: "accepted"`; a multi-graph server's block per pair
+  (`graph`, `graph_path` on `/pattern/capabilities`), and on `GET /capabilities` the `pattern` feature, its routes
+  with `?graph=`, the block without a graph and `graph_summary`. `multi_graph_later_increment` is answered by no
+  route.
+- A request without `graphs` and `in_ram` to a single-graph server is answered byte for byte as before (`timing`
+  apart).
+- Fixtures (§11): `multi_graph_count`, `multi_graph_in_ram`, `multi_graph_unknown`, `in_ram_single_graph`,
+  `graphs_single_graph`, `pattern_capabilities_multi_graph_no_graph`; the multi-graph capabilities bodies
+  regenerated; `later_increment_graphs`, `resident_only` and `multi_graph` removed (their requests are answered
+  otherwise now).

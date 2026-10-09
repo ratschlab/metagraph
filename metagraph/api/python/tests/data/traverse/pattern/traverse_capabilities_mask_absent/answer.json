@@ -51,7 +51,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "dbacc94231df5190",
+  "server_instance": "41599438c0a09385",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -107,6 +107,17 @@
  "graphlet_format": 1,
  "has_coord_to_header": true,
  "has_coordinates": true,
+ "in_ram": {
+  "budgets_start": "after_load",
+  "loads": false,
+  "mem_cap_gb": 0,
+  "routes": [
+   "pattern",
+   "resolve",
+   "search",
+   "traverse"
+  ]
+ },
  "index_fp": null,
  "index_meta_fp": "7d99e33ed7315c3d",
  "index_ns": "mini_refseq",
@@ -202,6 +213,7 @@
   ],
   "graph_cleaned": "unknown",
   "graph_mode": "basic",
+  "in_ram": "accepted",
   "k": 31,
   "kinds": [
    "dna",
@@ -273,7 +285,7 @@
   ],
   "protein_rule": "SPEC-pattern-search.md section 12.2",
   "records_shorter_than_k": "not_indexed",
-  "resident_only": true,
+  "resident_only": false,
   "scopes": [
    "suffix",
    "any_offset"

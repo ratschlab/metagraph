@@ -38,9 +38,10 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 - `capabilities_built_at_load` (GET /capabilities, 200, built_at_load): the mini index as built, served with --pattern-build-mask: the block available, mask built_at_load (the mask built in memory at start-up), counting exact, otherwise as with the file
 - `traverse_capabilities_built_at_load` (GET /traverse/capabilities, 200, built_at_load): the same server on the probe route
 - `pattern_capabilities_built_at_load` (GET /pattern/capabilities, 200, built_at_load): the same server on the route of the full block
-- `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: no `pattern` feature or route; the block says multi_graph_later_increment and nothing else
-- `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one graph: the same reduced block, with `details`
-- `pattern_capabilities_multi_graph` (GET /pattern/capabilities, 200, multi): the multi-graph server on the route of the full block: 200, the same reduced block
+- `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), and graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint)
+- `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one pair: that pair's full block, with `details`
+- `pattern_capabilities_multi_graph` (GET /pattern/capabilities, 200, multi): the multi-graph server on the route of the full block: the block of the pair ?graph= selects, naming it (graph, graph_path)
+- `pattern_capabilities_multi_graph_no_graph` (GET /pattern/capabilities, 400, multi): the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)
 - `traverse_capabilities_primary` (GET /traverse/capabilities, 200, primary): a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], strand_stated false, placement none_canonical, annotation unbudgeted (column)
 - `capabilities_representation_unsupported` (GET /capabilities, 200, hash): a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set
 - `traverse_capabilities_representation_unsupported` (GET /traverse/capabilities, 200, hash): the same hash-graph server on the probe route
@@ -141,9 +142,12 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 - `unknown_field` (POST /pattern, 400, masked): 400 invalid_request: a field nothing reads is refused, never ignored
 - `too_many_patterns` (POST /pattern, 400, masked): 400 invalid_request: more patterns than the server's max_patterns (16): a list is refused, never cut
 - `predicate_only_without_predicate` (POST /pattern, 400, masked): 400 invalid_request: output.labels "predicate_only" returns the labels a predicate names, so it needs one (served with a predicate since increment 5b; 400 later_increment before, fixture later_increment_labels)
-- `later_increment_graphs` (POST /pattern, 400, masked): 400 later_increment: the request field graphs (multi-graph selection) is refused by name, whatever its value
-- `resident_only` (POST /pattern, 400, masked): 400 resident_only: in_ram, whatever its value (the route never loads an index)
-- `multi_graph` (POST /pattern, 400, multi): 400 later_increment on a multi-graph server, whatever the request
+- `later_increment_budget_split` (POST /pattern, 400, masked): 400 later_increment: budget_split (how a multi-graph request would split its budgets) is refused by name, whatever its value; graphs is served (multi_graph_count)
+- `graphs_single_graph` (POST /pattern, 400, masked): 400 invalid_request: graphs (a multi-graph server's selection) on a single-graph server, which hosts one graph
+- `in_ram_single_graph` (POST /pattern, 200, masked): in_ram accepted, as /search's: a single-graph server answers from the index it holds, timing.load_ms 0
+- `multi_graph_count` (POST /pattern, 200, multi): a multi-graph server answers the graphs a request names (graphs, as /search): one answer per pair, each the single-graph answer tagged with graph, graph_path, annotation_path and index_fp
+- `multi_graph_in_ram` (POST /pattern, 200, multi): in_ram on a multi-graph server that loaded its graphs into RAM (no --mmap): served from them, timing.load_ms 0; on mmap the pair is loaded for the request and its budget starts after the load
+- `multi_graph_unknown` (POST /pattern, 400, multi): 400 invalid_request: a name the graph list does not have
 - `representation_unsupported` (POST /pattern, 400, hash): 400 representation_unsupported: a graph the engine does not recognise (a hash graph), whatever the request asks
 - `deadline_503` (POST /pattern, 503, masked): HAND-MADE: 503 deadline, the answer could not be written by time_budget_ms (nothing partial is sent)
 - `initializing_503` (POST /pattern, 503, masked): HAND-MADE: 503 while the index loads (every route; no code; Retry-After: 60)

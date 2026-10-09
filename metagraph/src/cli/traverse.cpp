@@ -223,9 +223,12 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     req.release = s.str("release", "");
     // Routing fields: consumed by the server before parsing (resolve_traverse_index). They
     // are still checked and declared here, or the unknown-field check would reject every
-    // multi-graph request.
+    // multi-graph request. `graphs` ([name], /search's form of `graph`) and `in_ram` (load the
+    // index into RAM for the request, as /search does) likewise
     s.str("graph", "");
     s.str("graph_path", "");
+    s.strings("graphs");
+    s.boolean("in_ram", false);
     // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
     // the same rule); declared here so that strict parsing accepts them
@@ -469,9 +472,11 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
 ResolveRequest parse_resolve_request(const Json::Value &json) {
     ResolveRequest req;
     Strict s(json, "request");
-    // see parse_traverse_request: routing fields are handled by the server
+    // see parse_traverse_request: routing fields and in_ram are handled by the server
     s.str("graph", "");
     s.str("graph_path", "");
+    s.strings("graphs");
+    s.boolean("in_ram", false);
     req.sequence = s.str("sequence", "");
     if (req.sequence.empty()) throw InvalidRequest("request.sequence is required");
     req.options.labels = s.strings("labels");
@@ -4827,6 +4832,31 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     return rj;
 }
 
+// A seed with a k-mer the graph does not have, in a request that sent its seeds to graphs that
+// need not hold them (TraverseLimits::not_in_graph_per_seed): no walk, outcome.walks
+// "not_in_graph", the walker's message as `error` (the graph runs of its k-mers) and
+// not_in_graph {kmers, kmers_present} — 0 present: none of it is in this graph; some: only
+// part of it, which is not a seed here (§6.1 step 2) — in the shape of a failed seed, without
+// a limitation: no knob of the request would get past it. Under a memory budget it states
+// memory_bound_soft, as every result does
+static Json::Value not_in_graph_seed_to_json(const Seed &seed, const SeedNotInGraph &e,
+                                             const Strategy &st, bool decode_charged,
+                                             const char *coordinates_reason) {
+    Json::Value rj = failed_seed_head(seed, labels_derived_from_seed(seed, st.label_mode),
+                                      e.what());
+    Json::Value absent;
+    absent["kmers"] = uint_json(e.kmers());
+    absent["kmers_present"] = uint_json(e.present());
+    rj["not_in_graph"] = std::move(absent);
+    Json::Value lims(Json::arrayValue);
+    append_failed_memory(&lims, st, seed, 0, decode_charged);
+    rj["limitations"] = std::move(lims);
+    rj["outcome"] = outcome_of(rj, true);
+    rj["outcome"]["walks"] = "not_in_graph";
+    state_no_coordinates(&rj, coordinates_reason);
+    return rj;
+}
+
 // A request with attempt_id outside the server (the CLI, a test): its usage is stated as the
 // server states it, with the bound computed but not enforced (no lease to protect)
 static const std::string& local_instance() {
@@ -4927,7 +4957,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     // server's clamp) plus the server's allowance, under the HTTP server's cap
     if (attempt) {
         attempt->set_bound(req.seeds.size(), req.strategy.time_budget_ms,
-                           req.strategy.max_memory_bytes);
+                           req.strategy.max_memory_bytes, limits.load_ms);
         attempt->set_delivery_detail(req.detail);
     }
 
@@ -5249,6 +5279,23 @@ Json::Value process_traverse_request(const Json::Value &json,
             // abandoned is the attempt's (GET /traverse/attempt states it)
             walked("abandoned", "client_gone");
             throw;
+        } catch (const SeedNotInGraph &e) {
+            if (!limits.not_in_graph_per_seed) {
+                // the whole request fails (400), as every malformed seed fails it
+                walked("failed", "");
+                throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
+                                     + "': " + e.what());
+            }
+            // a graph of a fan-out that does not hold the seed: stated per seed, the other
+            // seeds traversed
+            walked("not_in_graph", "", true);
+            Json::Value absent = not_in_graph_seed_to_json(seed, e, req.strategy,
+                                                           oracle.decode_charged(),
+                                                           no_coordinates);
+            append(std::move(absent), 0);
+            delivered("not_in_graph");
+            oracle.sync_path_cache_counters();
+            per_seed(oracle.counters());
         } catch (const std::invalid_argument &e) {
             // the whole request fails (400); what the seed consumed is still the attempt's
             walked("failed", "");
@@ -5271,6 +5318,10 @@ Json::Value process_traverse_request(const Json::Value &json,
         Json::Value t;
         t["elapsed_ms"] = timer.elapsed() * 1000;
         t["serialize_ms"] = serialize_seconds * 1000;
+        // a request with in_ram: the time before its work began, waiting for and loading its
+        // index into RAM (0: served by the index the server holds)
+        if (limits.load_ms)
+            t["load_ms"] = *limits.load_ms;
         out["timing"] = std::move(t);
     }
     return out;

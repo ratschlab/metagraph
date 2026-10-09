@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <filesystem>
 #include <limits>
 #include <map>
@@ -10,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
+#include <tuple>
 #include <vector>
 
 #include <netinet/in.h>
@@ -731,6 +733,200 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     logger->info("[Server] Request {} processing time: {:.3f} sec, response size: {:.1f} KB, "
                  "finished in {:.3f} sec",
                  request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
+}
+
+// ---------------------------------------------------------------- multi-graph servers
+
+bool LoadReservations::reserve(size_t bytes, const std::function<bool()> &gone,
+                               uint64_t poll_ms) {
+    assert(bytes <= capacity_);
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!gone) {
+        freed_.wait(lock, [&]() { return left_ >= bytes; });
+    } else {
+        while (left_ < bytes) {
+            // asked without the lock: a socket's peek, a flag
+            lock.unlock();
+            const bool abandoned = gone();
+            lock.lock();
+            if (abandoned)
+                return false;
+            if (left_ >= bytes)
+                break;
+            freed_.wait_for(lock, std::chrono::milliseconds(poll_ms));
+        }
+    }
+    left_ -= bytes;
+    return true;
+}
+
+void LoadReservations::release(size_t bytes) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        left_ += bytes;
+        assert(left_ <= capacity_);
+    }
+    freed_.notify_all();
+}
+
+size_t LoadReservations::left() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return left_;
+}
+
+InRamPlan in_ram_plan(bool in_ram, bool server_on_mmap, size_t bytes, size_t capacity) {
+    if (!in_ram)
+        return InRamPlan::RESIDENT;
+    // a server that loaded its indexes into RAM has them there already
+    if (!server_on_mmap)
+        return InRamPlan::RESIDENT_IN_RAM;
+    if (bytes > capacity)
+        return InRamPlan::RESIDENT_TOO_LARGE;
+    return InRamPlan::LOAD;
+}
+
+const char* to_string(InRamPlan plan) {
+    switch (plan) {
+        case InRamPlan::RESIDENT: return "resident";
+        case InRamPlan::RESIDENT_IN_RAM: return "resident_in_ram";
+        case InRamPlan::RESIDENT_TOO_LARGE: return "resident_too_large";
+        case InRamPlan::LOAD: return "load";
+    }
+    return "";
+}
+
+std::optional<bool> in_ram_field(const Json::Value &request) {
+    if (!request.isObject() || !request.isMember("in_ram"))
+        return std::nullopt;
+    if (!request["in_ram"].isBool())
+        throw std::invalid_argument("request.in_ram: expected a boolean");
+    return request["in_ram"].asBool();
+}
+
+GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_graph) {
+    GraphSelection selection;
+    if (!request.isObject())
+        return selection;
+    if (!multi_graph) {
+        if (request.isMember("graph") || request.isMember("graph_path")) {
+            throw std::invalid_argument("Bad request: this server hosts a single graph; "
+                                        "remove the 'graph' / 'graph_path' field");
+        }
+        if (request.isMember("graphs")) {
+            throw std::invalid_argument("Bad request: this server hosts a single graph; "
+                                        "remove the 'graphs' field");
+        }
+        return selection;
+    }
+    if (request.isMember("graphs")) {
+        // /search's field, one name: a traversal reads one graph
+        const Json::Value &graphs = request["graphs"];
+        if (request.isMember("graph")) {
+            throw std::invalid_argument("Bad request: give the graph as 'graph' or as "
+                                        "'graphs', not both");
+        }
+        if (!graphs.isArray() || graphs.size() != 1 || !graphs[0].isString()) {
+            throw std::invalid_argument("Bad request: 'graphs' names the one graph a traversal "
+                                        "reads: expected [name]");
+        }
+        selection.name = graphs[0].asString();
+        selection.via_graphs = true;
+    } else {
+        if (!request.isMember("graph") || !request["graph"].isString())
+            throw std::invalid_argument("Bad request: 'graph' (index name) is required in "
+                                        "multi-graph mode");
+        selection.name = request["graph"].asString();
+    }
+    if (request.isMember("graph_path") && request["graph_path"].isString())
+        selection.graph_path = request["graph_path"].asString();
+    return selection;
+}
+
+std::vector<std::string> pattern_graph_names(const Json::Value &request,
+                                             const std::vector<std::string> &known,
+                                             size_t max_without_graphs) {
+    std::vector<std::string> names;
+    if (request.isObject() && request.isMember("graphs")) {
+        const Json::Value &graphs = request["graphs"];
+        const std::string expected = "request.graphs: expected a non-empty array of graph names "
+                                     "(GET /capabilities lists them)";
+        if (!graphs.isArray() || graphs.empty())
+            throw std::invalid_argument(expected);
+        for (const Json::Value &name : graphs) {
+            if (!name.isString())
+                throw std::invalid_argument(expected);
+            names.push_back(name.asString());
+        }
+        for (const std::string &name : names) {
+            if (std::find(known.begin(), known.end(), name) == known.end()) {
+                throw std::invalid_argument("request.graphs: unknown graph '" + name
+                                            + "' (GET /capabilities lists the graphs)");
+            }
+        }
+    } else {
+        if (known.size() > max_without_graphs) {
+            throw std::invalid_argument("request.graphs: required on this server, which hosts "
+                                        + std::to_string(known.size()) + " graph names (more "
+                                        "than " + std::to_string(max_without_graphs)
+                                        + "; GET /capabilities lists them)");
+        }
+        names = known;
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
+}
+
+ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &columns,
+                             const std::function<size_t(const std::string&)> &hash_of) {
+    // the names by their hash, every collision resolved on the names themselves: 16 bytes per
+    // column beside the names the annotations hold anyway
+    struct Entry {
+        size_t hash;
+        uint32_t pair;
+        uint32_t column;
+    };
+    ColumnOverlap result;
+    std::vector<Entry> entries;
+    for (const auto &names : columns) {
+        result.columns += names.size();
+    }
+    entries.reserve(result.columns);
+    const std::function<size_t(const std::string&)> hash
+            = hash_of ? hash_of : std::function<size_t(const std::string&)>(std::hash<std::string>());
+    for (size_t p = 0; p < columns.size(); ++p) {
+        for (size_t c = 0; c < columns[p].size(); ++c) {
+            entries.push_back({ hash(columns[p][c]), static_cast<uint32_t>(p),
+                                static_cast<uint32_t>(c) });
+        }
+    }
+    std::sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) {
+        return std::tie(a.hash, a.pair, a.column) < std::tie(b.hash, b.pair, b.column);
+    });
+    for (size_t i = 0; i < entries.size(); ) {
+        size_t j = i + 1;
+        while (j < entries.size() && entries[j].hash == entries[i].hash) {
+            ++j;
+        }
+        if (entries[j - 1].pair != entries[i].pair) {
+            // names of several pairs share this hash: which of them are one name
+            std::map<std::string, std::vector<uint32_t>> pairs_of;
+            for (size_t e = i; e < j; ++e) {
+                pairs_of[columns[entries[e].pair][entries[e].column]].push_back(entries[e].pair);
+            }
+            for (auto &[name, pairs] : pairs_of) {
+                std::sort(pairs.begin(), pairs.end());
+                if (pairs.front() == pairs.back())
+                    continue;
+                ++result.shared;
+                if (result.example.empty() || name < result.example)
+                    result.example = name;
+            }
+        }
+        i = j;
+    }
+    result.disjoint = !result.shared;
+    return result;
 }
 
 } // namespace cli
