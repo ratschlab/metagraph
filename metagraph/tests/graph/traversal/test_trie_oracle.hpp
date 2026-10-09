@@ -1155,14 +1155,14 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
         return false;
     };
     // one label end: |route| the label's own route to it, |reason| how it ended there,
-    // |joined| whether the route passed a join (the end is then under the united history)
+    // |joined| whether the route passed a join (the end is then under the united history).
+    // An end past the exhaustive trie's depth is checked only for its route to that depth.
     auto check_end = [&](std::string route, const std::string &l,
-                         std::optional<EndReason> reason, bool joined, const std::string &where) {
+                         EndReason reason, bool joined, const std::string &where) {
         rep.checked++;
-        if (route.size() > depth) {
+        const bool past_depth = route.size() > depth;
+        if (past_depth)
             route.resize(depth);
-            reason.reset();
-        }
         // 1. route support
         if (!supported(route, l)) {
             problems.push_back(what + ": the route of " + l + " to " + where + " (" + shown(route)
@@ -1171,7 +1171,7 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
             return;
         }
         // 2. termination
-        if (!reason || is_cut(*reason))
+        if (past_depth || is_cut(reason))
             return;
         auto it = full.find(route);
         const bool a_ends_here = it != full.end() && it->second.count(l);
@@ -1180,10 +1180,10 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
             if (auto kt = jt->second.find(l); kt != jt->second.end())
                 a_reason = kt->second;
         }
-        if (joined && is_block(*reason)) {
+        if (joined && is_block(reason)) {
             // the trie evaluated the same node's successors (unless its own claim ended
             // there unknowing), so it has the seed-node successor on record too
-            if (*reason == EndReason::REACHED_SEED
+            if (reason == EndReason::REACHED_SEED
                     && !blocked_in_trie(A, aa, route, l, EndReason::REACHED_SEED)
                     && !(a_reason && is_unknown_end(*a_reason))) {
                 problems.push_back(what + ": the merged run ends " + l + " at " + where + " ("
@@ -1196,15 +1196,15 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
         if (!a_ends_here) {
             problems.push_back(what + ": the merged run ends " + l + " at " + where + " ("
                                + shown(route) + ", " + bp(route.size()) + " bp) with "
-                               + to_string(*reason) + " while the exhaustive trie continues it: "
+                               + to_string(reason) + " while the exhaustive trie continues it: "
                                  "an INVENTED end");
             return;
         }
         if (a_reason && !is_unknown_end(*a_reason)
-                && std::string(to_string(*a_reason)) != to_string(*reason)) {
+                && std::string(to_string(*a_reason)) != to_string(reason)) {
             problems.push_back(what + ": " + l + " ends at " + where + " for different reasons: "
                                "exhaustive " + to_string(*a_reason) + ", merged "
-                               + to_string(*reason));
+                               + to_string(reason));
         }
     };
     check_leaf_records(merged, ma, what, &problems);

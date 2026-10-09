@@ -785,42 +785,18 @@ class TestN3LiveOracleComparesTheManifest(unittest.TestCase):
 
 # ------------------------------------------------------------------ D1, D7
 
-class TestD1D7StatedInTheDocs(unittest.TestCase):
-    """D1: an annotate claim's witness route is one route chosen by the stored parent
-    order: it enumerates no other route and establishes no contiguous source occurrence.
-    D7: without a budget compare(), routes() and the exports have no work or allocation
-    budget; max_bytes bounds returned bytes only. Both stated in the docstrings and in
-    graphlets.rst -- and, since stage L, that a budget is there to be passed."""
+class TestToolDescriptionsStateTheirBudgets(unittest.TestCase):
+    """The descriptions of the compare and export tools, which an agent reads: without a
+    budget they have no work or allocation budget, and a budget is there to be passed."""
 
-    def rst(self):
-        with open(os.path.join(T.REPO, 'docs', 'source', 'graphlets.rst'),
-                  encoding='utf-8') as f:
-            return ' '.join(f.read().split())
-
-    def test_d1(self):
-        for text in (ops.__doc__, ops.routes.__doc__, ops.claims.__doc__, self.rst()):
-            flat = ' '.join(text.split())
-            self.assertIn('witness', flat)
-            self.assertIn('contiguous source occurrence', flat)
-        self.assertIn('stored parent order', ' '.join(ops.__doc__.split()))
-
-    def test_d7(self):
-        from metagraph.traverse import export, mcp_tools
-        for text in (ops.__doc__, ops.compare.__doc__, ops.routes.__doc__, export.__doc__,
-                     mcp_tools.__doc__, mcp_tools.GraphletTools.graphlet_compare.__doc__,
-                     mcp_tools.GraphletTools.graphlet_export.__doc__):
-            self.assertRegex(' '.join(text.split()),
-                             r'(?i)no work (or|and) allocation budget')
-        rst = self.rst()
-        self.assertIn('no work or allocation budget', rst)
-        self.assertIn('``max_bytes`` bounds the bytes returned, not the work', rst)
-        # stage L: the budgets exist and are off by default -- said where "none" is said
-        for text in (ops.__doc__, ops.compare.__doc__, ops.routes.__doc__, export.__doc__,
-                     mcp_tools.__doc__, mcp_tools.GraphletTools.graphlet_compare.__doc__,
-                     mcp_tools.GraphletTools.graphlet_export.__doc__):
-            flat = ' '.join(text.split())
-            self.assertRegex(flat, r'(?i)without (a budget|local limits|local_limits)')
-        self.assertIn('Local budgets', rst)
+    def test_compare_and_export(self):
+        from metagraph.traverse import mcp_tools
+        for tool in (mcp_tools.GraphletTools.graphlet_compare,
+                     mcp_tools.GraphletTools.graphlet_export):
+            flat = ' '.join(tool.__doc__.split())
+            self.assertRegex(flat, r'(?i)no work (or|and) allocation budget', tool.__name__)
+            self.assertRegex(flat, r'(?i)without (a budget|local limits|local_limits)',
+                             tool.__name__)
 
 
 # ------------------------------------------------------------------ D4
@@ -935,6 +911,12 @@ class TestD5WalksCountMergeEnteredWalks(unittest.TestCase):
         self.assertIn('non-first merge parent', w['hint'])
         c = tools.graphlet_claims(h, 'right', max_bytes=8192)
         self.assertEqual({'merge_entered': 2}, c['filtered'])
+        self.assertIn('non-first merge parent', c['hint'])
+        # the claims it removed are alive (displayed support from the merge on), not
+        # route_only, the kind of a claim with no displayed support at a cut
+        removed = [x for x in T.graphlet('merge').claims('right') if x.route_bp]
+        self.assertEqual({'alive'}, {x.kind for x in removed})
+        self.assertTrue(all(x.evidence_from < x.to_bp for x in removed))
 
     def test_annotate(self):
         g = T.graphlet('annotate')

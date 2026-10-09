@@ -37,6 +37,7 @@ against the server's tables.
 """
 
 import copy
+import gzip
 import json
 import math
 import os
@@ -2286,6 +2287,13 @@ class Checker:
             self.ok(b['placement'] == 'none_canonical', path + '.placement')
 
 
+class Raising:
+    """The Checker's test case for the mutation tests: a rule that fails raises."""
+
+    def fail(self, message):
+        raise AssertionError(message)
+
+
 class TestPatternFixtures(unittest.TestCase):
 
     @classmethod
@@ -2301,6 +2309,23 @@ class TestPatternFixtures(unittest.TestCase):
             if f['server'] == server and f['method'] == 'GET':
                 return self.bodies[name][1]['pattern']
         return None
+
+    def check_stored(self, name, mutate=None):
+        """Checker.answer on fixture |name|'s answer, changed by |mutate| first."""
+        request, answer = self.bodies[name]
+        answer = copy.deepcopy(answer)
+        if mutate:
+            mutate(answer)
+        Checker(Raising(), name).answer(answer, request,
+                                        self.capabilities_of(self.fixtures[name]['server']))
+
+    def assertRefusesMutations(self, cases):
+        """Each (fixture, mutate, words): the changed answer fails a rule whose message matches
+        |words| -- the rules the stored answers pass are not vacuous."""
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    self.check_stored(name, mutate)
 
     def test_spec_names_the_fields(self):
         if not os.path.isfile(SPEC):
@@ -2539,12 +2564,8 @@ class TestPatternFixtures(unittest.TestCase):
         request, answer = self.bodies[name]
         capabilities = self.capabilities_of(self.fixtures[name]['server'])
 
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
         def check(a):
-            Checker(Stub(), name).answer(a, request, capabilities)
+            Checker(Raising(), name).answer(a, request, capabilities)
 
         check(answer)
         for i in (0, 1):
@@ -2571,25 +2592,37 @@ class TestPatternFixtures(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'after a time-limited one'):
             check(a)
 
-    def test_every_unavailable_reason_has_a_capabilities_fixture(self):
-        """Every unavailable reason but the unproducible ones and the ones named as without a
-        fixture (NO_FIXTURE), on both capabilities routes."""
-        seen = {}
+    def test_every_capability_value_has_a_capabilities_fixture(self):
+        """On both capabilities routes: every unavailable reason but the unproducible ones and
+        the ones named as without a fixture (NO_FIXTURE); every counting (owner decision #16:
+        exact with a mask file or built at load, upper_bound without, with its dummy_fraction;
+        the answers of each server state the same, checked in Checker.answer); and every mask
+        value (file, built_at_load and absent, DESIGN §4)."""
+        seen = {'unavailable': {}, 'counting': {}, 'mask': {}}
         for name, f in self.fixtures.items():
             if f['method'] != 'GET':
                 continue
+            route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
             b = self.bodies[name][1]['pattern']
             if b['available'] is False:
-                route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
-                seen.setdefault(b['unavailable_reason'], set()).add(route)
+                seen['unavailable'].setdefault(b['unavailable_reason'], set()).add(route)
+            if b.get('counting') is not None:
+                seen['counting'].setdefault(b['counting'], set()).add(route)
+            # (a multi-graph server and a graph the engine does not recognise state no mask)
+            if b.get('mask') is not None:
+                seen['mask'].setdefault(b['mask'], set()).add(route)
         without_fixture = {'mask_invalid', 'alphabet_untested'}
         self.assertEqual(without_fixture, set(NO_FIXTURE))
         self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE) - without_fixture - set(RETIRED),
-                         set(seen))
+                         set(seen['unavailable']))
         self.assertEqual(without_fixture | set(UNPRODUCIBLE) | set(RETIRED),
-                         set(UNAVAILABLE) - set(seen), 'the unavailable reasons without a fixture')
-        for reason, routes in seen.items():
-            self.assertEqual({'probe', 'capabilities'}, routes, reason)
+                         set(UNAVAILABLE) - set(seen['unavailable']),
+                         'the unavailable reasons without a fixture')
+        self.assertEqual(set(COUNTINGS), set(seen['counting']))
+        self.assertEqual(set(MASKS), set(seen['mask']))
+        for kind, values in seen.items():
+            for value, routes in values.items():
+                self.assertEqual({'probe', 'capabilities'}, routes, (kind, value))
 
     def test_the_codes_are_the_sources(self):
         """REFUSALS and UNAVAILABLE are the codes the server's sources write (review GPT-2 of
@@ -2656,18 +2689,15 @@ class TestPatternFixtures(unittest.TestCase):
         d = os.path.join(HERE, 'data', 'traverse', 'pattern_validator', 'by_label_null_partial')
         with open(os.path.join(d, 'request.json')) as f:
             request = json.load(f)
-        with open(os.path.join(d, 'answer.json')) as f:
+        # stored gzipped: one label name of 512 KiB
+        with gzip.open(os.path.join(d, 'answer.json.gz'), 'rt') as f:
             answer = json.load(f)
         e = answer['patterns'][1]
         self.assertEqual((None, {'phase': 'output', 'reason': 'max_memory'}, 'exact'),
                          (e['by_label'], e['stop'], e['counts']['labels']['relation']))
 
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
         def check(a, req=request):
-            Checker(Stub(), 'by_label_null_partial').answer(a, req)
+            Checker(Raising(), 'by_label_null_partial').answer(a, req)
 
         check(answer)
         # what v1 never answers: a label listed without by_label
@@ -2686,12 +2716,8 @@ class TestPatternFixtures(unittest.TestCase):
         the capabilities block of such a server (a DNA5 graph without a mask included) -- are
         accepted (review GPT-2 of 2026-10-08, finding 6: none is stored, see NO_FIXTURE),
         and the rules they rest on still refuse what v1 never answers."""
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
         def refusal(code, status=400):
-            check = Checker(Stub(), f'hand-made {code}')
+            check = Checker(Raising(), f'hand-made {code}')
             self.refusal(check, {'status': status, 'headers': {}},
                          {'error': f'pattern: the graph is not served ({code})', 'code': code})
 
@@ -2703,7 +2729,7 @@ class TestPatternFixtures(unittest.TestCase):
             if b['available'] is not True and 'counting' not in fields:
                 # a graph not served states no counting (owner decision #16)
                 b['counting'] = None
-            Checker(Stub(), 'hand-made capabilities').block(b, 'pattern', False)
+            Checker(Raising(), 'hand-made capabilities').block(b, 'pattern', False)
 
         for code in ('mask_invalid', 'alphabet_untested'):
             refusal(code)
@@ -2752,22 +2778,10 @@ class TestPatternFixtures(unittest.TestCase):
         require_support, a stopped extension stated exact, a peptide's bits, a peptide's
         instance off its codons, a stop refused as bad_alphabet, a path's excluded count stated
         over truncated rows or withheld over complete ones."""
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
-        def check(name, mutate=None):
-            request, answer = self.bodies[name]
-            answer = copy.deepcopy(answer)
-            if mutate:
-                mutate(answer)
-            Checker(Stub(), name).answer(answer, request,
-                                         self.capabilities_of(self.fixtures[name]['server']))
-
         for name in ('paths', 'paths_labels', 'paths_require_support', 'paths_stop_at_max_paths',
                      'peptide', 'peptide_paths', 'peptide_bad_residue', 'paths_global',
                      'paths_primary'):
-            check(name)
+            self.check_stored(name)
 
         def first_path(a):
             return a['patterns'][0]['results'][0]
@@ -2814,10 +2828,7 @@ class TestPatternFixtures(unittest.TestCase):
              lambda a: a['patterns'][1]['results'][0].update(labels_excluded_unverified=None),
              'undecided only when the verification was not done'),
         ]
-        for name, mutate, says in cases:
-            with self.subTest(fixture=name, says=says):
-                with self.assertRaisesRegex(AssertionError, says):
-                    check(name, mutate)
+        self.assertRefusesMutations(cases)
 
     def test_hand_made_bodies_are_the_codes(self):
         """The two hand-made 503 bodies are written by the code as stored here."""
@@ -2865,22 +2876,6 @@ class TestPatternFixtures(unittest.TestCase):
             with open(PATTERN_CPP, encoding='utf-8') as f:
                 self.assertNotIn('support.reason == "mask_required"', f.read())
 
-    def test_every_counting_has_a_capabilities_fixture(self):
-        """Owner decision #16: counting exact (mask file, built_at_load) and upper_bound (mask
-        absent, with its dummy_fraction), each on both capabilities routes, and the answers of
-        each server state the same counting and dummy fraction (checked in Checker.answer)."""
-        seen = {}
-        for name, f in self.fixtures.items():
-            if f['method'] != 'GET':
-                continue
-            b = self.bodies[name][1]['pattern']
-            if b.get('counting') is not None:
-                route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
-                seen.setdefault(b['counting'], set()).add(route)
-        self.assertEqual(set(COUNTINGS), set(seen))
-        for counting, routes in seen.items():
-            self.assertEqual({'probe', 'capabilities'}, routes, counting)
-
     def test_unmasked_and_stop_rules_refuse_what_v1_never_answers(self):
         """SPEC §18 (owner decisions #16 and #19): the stored answers without the mask and with
         the stop '*' pass, and each rule they rest on refuses an answer that breaks it: an
@@ -2891,18 +2886,6 @@ class TestPatternFixtures(unittest.TestCase):
         peptide with a context, and the unsearched peptide after a stop stated stopped; and
         (owner decision #24) bounds left on a pattern with no more unchecked candidates than the
         server's max_checked_entries."""
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
-        def check(name, mutate=None):
-            request, answer = self.bodies[name]
-            answer = copy.deepcopy(answer)
-            if mutate:
-                mutate(answer)
-            Checker(Stub(), name).answer(answer, request,
-                                         self.capabilities_of(self.fixtures[name]['server']))
-
         def total(a, i=0):
             c = a['patterns'][i]['counts']
             return c.get('contexts') or c['anchors']
@@ -2912,7 +2895,7 @@ class TestPatternFixtures(unittest.TestCase):
                      'unmasked_checked', 'unmasked_checked_dummies',
                      'peptide_stop', 'peptide_no_stop_codon', 'peptide_no_stop_codon_after_stop',
                      'peptide_bad_residue'):
-            check(name)
+            self.check_stored(name)
 
         def drop_note(i, note):
             return lambda a: a['patterns'][i]['notes'].remove(note)
@@ -2964,10 +2947,7 @@ class TestPatternFixtures(unittest.TestCase):
             # unchecked candidates in bounds [2, 32]) by the server that checks 50
             ('unmasked_checked', unchecked_start, 'they are checked, exact'),
         ]
-        for name, mutate, says in cases:
-            with self.subTest(fixture=name, says=says):
-                with self.assertRaisesRegex(AssertionError, says):
-                    check(name, mutate)
+        self.assertRefusesMutations(cases)
         # a masked graph never states bounds without a stop, nor threshold_upper_bound
         request, answer = self.bodies['count']
         a = copy.deepcopy(answer)
@@ -2976,11 +2956,11 @@ class TestPatternFixtures(unittest.TestCase):
                 + list(c['by_strand'].values()):
             x.update(relation='bounds', lower=x['value'], upper=x['value'])
         with self.assertRaisesRegex(AssertionError, 'without a stop is exact'):
-            Checker(Stub(), 'count').answer(a, request, self.capabilities_of('masked'))
+            Checker(Raising(), 'count').answer(a, request, self.capabilities_of('masked'))
         a = copy.deepcopy(answer)
         a['patterns'][0]['notes'].append('threshold_upper_bound')
         with self.assertRaisesRegex(AssertionError, 'only on a graph without its mask'):
-            Checker(Stub(), 'count').answer(a, request, self.capabilities_of('masked'))
+            Checker(Raising(), 'count').answer(a, request, self.capabilities_of('masked'))
 
     def test_round_fix3_rules_refuse_what_v1_never_answers(self):
         """SPEC §18 (review GPT-3, round fix3, and the owner's decision P9): the stored bodies
@@ -2991,18 +2971,6 @@ class TestPatternFixtures(unittest.TestCase):
         without coordinates; low_complexity_pattern beside a stop; time_limited without a stop
         on a pattern its diagnostic reads whole; and capabilities whose prose fields are not
         references in ASCII, or whose delivery rates are not numbers."""
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
-        def check(name, mutate=None):
-            request, answer = self.bodies[name]
-            answer = copy.deepcopy(answer)
-            if mutate:
-                mutate(answer)
-            Checker(Stub(), name).answer(answer, request,
-                                         self.capabilities_of(self.fixtures[name]['server']))
-
         def work(i, **fields):
             return lambda a: a['patterns'][i]['work'].update(fields)
 
@@ -3016,7 +2984,7 @@ class TestPatternFixtures(unittest.TestCase):
 
         for name in ('paths', 'paths_labels', 'paths_global', 'paths_anchors_above_threshold',
                      'labels_all', 'count_low_complexity', 'count'):
-            check(name)
+            self.check_stored(name)
         cases = [
             ('paths', drop(0, 'work', 'extension_anchors'), 'fields'),
             ('paths', drop(0, 'work', 'extension_branches'), 'fields'),
@@ -3044,10 +3012,7 @@ class TestPatternFixtures(unittest.TestCase):
             ('count', lambda a: a['patterns'][0].update(determinism='time_limited'),
              'time_limited without a time stop'),
         ]
-        for name, mutate, says in cases:
-            with self.subTest(fixture=name, says=says):
-                with self.assertRaisesRegex(AssertionError, says):
-                    check(name, mutate)
+        self.assertRefusesMutations(cases)
         # the capabilities (P9)
         for field, value, says in (('caps_rule', 'max_contexts ... see the SPEC', 'reference'),
                                    ('protein_rule', 'SPEC-pattern-search.md sections §12.2',
@@ -3059,7 +3024,7 @@ class TestPatternFixtures(unittest.TestCase):
             b[field] = value
             with self.subTest(field=field, value=value):
                 with self.assertRaisesRegex(AssertionError, says):
-                    Checker(Stub(), 'capabilities').block(b, 'pattern', False)
+                    Checker(Raising(), 'capabilities').block(b, 'pattern', False)
 
     def test_predicate_rules_refuse_what_v1_never_answers(self):
         """SPEC §19 (increment 5b): the stored bodies pass, and each rule refuses an answer that
@@ -3075,18 +3040,6 @@ class TestPatternFixtures(unittest.TestCase):
         projection_not_read where they do not apply, annotation_not_read on a predicate answer;
         the selection's fields in an answer without a predicate; and capabilities whose predicate
         object is not this build's."""
-        class Stub:
-            def fail(self, message):
-                raise AssertionError(message)
-
-        def check(name, mutate=None):
-            request, answer = self.bodies[name]
-            answer = copy.deepcopy(answer)
-            if mutate:
-                mutate(answer)
-            Checker(Stub(), name).answer(answer, request,
-                                         self.capabilities_of(self.fixtures[name]['server']))
-
         def entry(i, **fields):
             return lambda a: a['patterns'][i].update(fields)
 
@@ -3106,7 +3059,7 @@ class TestPatternFixtures(unittest.TestCase):
                  and self.fixtures[n]['status'] == 200]
         self.assertGreaterEqual(len(names), 19)
         for name in names:
-            check(name)
+            self.check_stored(name)
         cases = [
             ('predicate_filter', lambda a: a.pop('predicate'), 'fields'),
             ('count', lambda a: a.update(predicate=None), 'fields'),
@@ -3178,10 +3131,7 @@ class TestPatternFixtures(unittest.TestCase):
              'as requested'),
             ('predicate_filter', lambda a: a['limits'].pop('max_predicate_labels'), 'fields'),
         ]
-        for name, mutate, says in cases:
-            with self.subTest(fixture=name, says=says):
-                with self.assertRaisesRegex(AssertionError, says):
-                    check(name, mutate)
+        self.assertRefusesMutations(cases)
         # the capabilities (§19.12)
         for field, value, says in (('operators', ['any', 'all'], 'operators'),
                                    ('strands', ['either'], 'strands'),
@@ -3190,24 +3140,11 @@ class TestPatternFixtures(unittest.TestCase):
             b['predicate'][field] = value
             with self.subTest(field=field, value=value):
                 with self.assertRaisesRegex(AssertionError, says):
-                    Checker(Stub(), 'capabilities').block(b, 'pattern', False)
+                    Checker(Raising(), 'capabilities').block(b, 'pattern', False)
         b = copy.deepcopy(self.capabilities_of('masked'))
         b['projections_later_increment'] = ['predicate_only']
         with self.assertRaisesRegex(AssertionError, 'projections'):
-            Checker(Stub(), 'capabilities').block(b, 'pattern', False)
-
-    def test_every_mask_value_has_a_capabilities_fixture(self):
-        """file, built_at_load and absent (DESIGN §4), each on both capabilities routes."""
-        seen = {}
-        for name, f in self.fixtures.items():
-            # (a multi-graph server and a graph the engine does not recognise state no mask)
-            mask = self.bodies[name][1]['pattern'].get('mask') if f['method'] == 'GET' else None
-            if mask is not None:
-                route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
-                seen.setdefault(mask, set()).add(route)
-        self.assertEqual(set(MASKS), set(seen))
-        for mask in ('file', 'built_at_load', 'absent'):
-            self.assertEqual({'probe', 'capabilities'}, seen[mask], mask)
+            Checker(Raising(), 'capabilities').block(b, 'pattern', False)
 
     def test_documents_state_the_built_deadline(self):
         """The route's default deadline and its cap, as the SPEC and the service's request

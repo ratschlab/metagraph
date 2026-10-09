@@ -1507,18 +1507,18 @@ it to 32 KiB (W2's library part). Not changed, owner decision pending (review 6)
 
 ## 26.5 Measurements
 
-**M1 — the D4 gate, by regime, and C-N2.** Two measures per trace cell (`gate_cell` in `test_mini_refseq.cpp`): the
+**M1 — the D4 gate, by regime, and C-N2.** Two measures per trace cell (`gate_cell` in `benchmarks/traversal/bench_traversal_measurements.cpp`): the
 depth at the stop (`complete_to_bp` over both arms) under memory budgets of 50% and 75% of the cell's own opt-out
 peak, exact bytes, with against without coordinates at cap 16; and — since that ratio is relative to the opt-out
 walk and drops a cell whose opt-out walk fails at depth 0 too (the review of W2) — what **completing** takes: the
 smallest whole-MiB budget that holds the walk with and without coordinates, and what the walk with coordinates does
 at the budget that completes it without them. Cells, all to 3,000 bp, details `full` and `graphlet`:
-mini_refseq (`MiniRefSeq.DISABLED_CoordinatesDepthAtTheStop`: 7 seeds — blaNDM both ways, three 200-bp windows of
+mini_refseq (`BM_TraversalCoordinatesDepthAtTheStop`: 7 seeds — blaNDM both ways, three 200-bp windows of
 its carriers, two repeat windows — × 8 strategies — branch limits 0 and 2, switch costs 0.5 and 1 at limits 0 and 2
 within a loss budget of 2, column labels at limit 2 with and without a switch); its column cells again under the
 **refseq33m projection** (every run's and seed label's list priced at the cap of 16 occurrences, as refseq33m's
 taxid columns of many genomes give; mini_refseq's taxid columns reach 12 chains a run at most); and the fixtures
-of revision 4 (`MiniRefSeqWide.DISABLED_CoordinatesDepthByRegime`): `scripts/traversal/make_column_coord_fixtures.sh`
+of revision 4 (`BM_TraversalCoordinatesDepthByRegime`): `scripts/traversal/make_column_coord_fixtures.sh`
 — `coord_lockstep`, 200 columns of one shared 3,000-bp sequence, 16 records each (one path, 200 runs of 16 chains an
 arm), and `coord_divcol`, 100 columns of their own sequences around a shared 600-bp core, 16 records each (seeds in
 the core: a split into a branch a column at each end of it; and in a flank: one column) — and the wide fixture
@@ -1550,7 +1550,7 @@ the core: a split into a branch a column at each end of it; and in a flank: one 
   56 cells — 8 in `sw0.5b2`, 6 in `sw1b2`, 7 in `col_sw0.5b2`, none without a branch allowance. Marking (a) is
   enough; the exact chain set (b) is not needed now.
 
-**M2 — the wide fixture** (`MiniRefSeqWide.DISABLED_CoordinateReserveOnTheWideFixture` on
+**M2 — the wide fixture** (`BM_TraversalCoordinateReserveOnTheWideFixture` on
 `scripts/traversal/make_wide_coord_fixture.sh`: one 3,000-bp sequence in 5,000 records under one column, labelled
 `wide.fa` — annotated on the relative name since the review of W2, which found the column's label, and with it the
 column rows' bytes, to be the absolute path of wherever the fixture was built —, row-diff anchors every 1,000 rows;
@@ -1610,9 +1610,9 @@ in place of `16`); the accounts are the same, since each run holds one chain and
   the same in both. A server maximum (`--traverse-max-memory-mb`, ops note O2) is the budget of every request
   without a smaller one, so on such a server every `tree` and `full` response keeps the arrival order and only
   `graphlet` and `summary` show the rule — the price of option (a), stated so that the owner weighs it (§26.9). Pinned: `WalkerTest.MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain` (with the chain
-  charged under a budget the same route is first whichever labels it carries; without either, the majority) and
-  `MiniRefSeq.MemoryStopsDoNotDependOnTheDisplayedParent` (win200_03 right at 8 and 2 MiB in `tree`, `full` and
-  `graphlet`: level 5's `complete_to_bp`, 2,782, 2,740, 3,779, 815, 800, 1,048). The owner may prefer the other
+  charged under a budget the same route is first whichever labels it carries; without either, the majority); on
+  mini_refseq, win200_03 right at 8 and 2 MiB in `tree`, `full` and `graphlet` keeps level 5's `complete_to_bp`
+  (2,782, 2,740, 3,779, 815, 800, 1,048). The owner may prefer the other
   trade (the rule everywhere, stops moving shallower in `tree` / `full` under a memory budget): it is the one
   condition in `Walker::merge_level` (`majority_first`), §26.9.
 - **The annotate rule compares the parents' own segments, not the walks they display.** A parent that is itself a

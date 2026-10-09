@@ -256,9 +256,9 @@ one is in a 2.6 MB body), no `edge_reuse_rc` end anywhere, and no UHGG cell wher
 switch actually happens. `snapshot` fetches these three live from seeds it derives, and
 stages them under `<scratch>/offline_derived/`.
 
-The 11 recorded skips are data-driven:
+The 13 recorded skips are data-driven:
 
-- 9 cells have no merge-derived support, so `c_routes` skips;
+- 10 cells have no merge-derived support, so `c_routes` skips;
 - the contig-end keep cell has no `label_lost` end inside a segment, so `b_lost` skips;
 - the time-budgeted cell skips `to_json` and `invariants`, because its two fetches
   stopped apart; `full_invariants` runs instead.
@@ -276,104 +276,3 @@ python3 offline.py snapshot     # rebuild: needs the cache; servers only for der
 runs every check offline on the new set and records what ran. If any check fails, the
 old fixtures are kept. When an intended library change alters an oracle plan, rebuild
 while the servers run and review the diff of `manifest.json`.
-
-## Latest results
-
-From the runs of 2026-10-02 and 2026-10-03, on the 581-cell cache. The cache was
-refilled from the fixed `build_debug` servers after the server fixes; all 581 cells are
-ok. Against the pre-fix cache, the 546 deterministic cells show 0 unexplained
-differences.
-
-**Whole suite, final** (both fix rounds applied):
-
-| run | tests | result |
-|---|---:|---|
-| `discover -p 'test_*.py'` in `tests/real` | 9,436 | OK, skipped=655, 0 expected failures, 0 unexpected successes |
-| `METAGRAPH_REAL_SLOW=1 test_real_scale` | 22 | OK, 0 skipped (the 5 former expected failures B1 ×2, B2 ×2, B3 now pass) |
-| `test_real_ops` / `test_real_agent` reruns after the review fixes | 32 / 75 | OK / OK |
-| unit suite `api/python/tests -p 'test_traverse_*.py'` incl. the offline module | 519 | OK, skipped=11 (5.5 s) |
-| offline module alone (servers stopped, no scratch) | 270 | OK, skipped=11 (0.7 s): 249 strict checks, 48 recorded answers |
-
-**Per module, first full run** (2026-10-02, before the fixes):
-
-| module | tests | passed | skipped | expected failures | time |
-|---|---:|---:|---:|---:|---|
-| `test_real_conformance` | 5,231 | 5,139 | 92 | 0 | 398 s, 1.3 GB peak |
-| `test_real_oracle` | 4,032 | 3,444 | 549 | 39 | first fill about 15 min (SRA) and about 5 min (UHGG); replay 47 s offline |
-| `test_real_ops` | 32 | 28 | 0 | 4 | 219 s |
-| `test_real_continuations` | 17 | 15 | 0 | 2 | 56 s |
-| `test_real_agent` + `test_real_fuzz` | 93 | 85 | 0 | 8 | 271 s |
-| `test_real_scale` (slow) | 22 | 17 | 0 | 5 | 460 s |
-
-Every expected failure above was a product bug; all are fixed and their tests are plain
-tests now. Conformance skips: 70 are `time_tight` comparisons (35 cells × 2) and 22 are
-full JSON over 40 MB (11 cells; their body-only checks ran).
-
-**Oracle by area, first run** (passed / skipped / expected failures):
-
-| area | passed | skipped | xfail | skips are… |
-|---|---:|---:|---:|---|
-| `a_present` | 566 | 15 | 0 | `no_sequences` cells whose leaves all end semantically |
-| `b_claims` | 539 | 7 | 0 | UHGG `annotate_merge` with empty `claims()` (BUG-ANNOT-CLAIMS, fixed) |
-| `b_lost` | 128 | 228 | 0 | no `label_lost` end inside a segment |
-| `b_walks` | 546 | 0 | 0 | |
-| `b_stretch` | 181 | 0 | 0 | |
-| `b_maximal` | 162 | 0 | 19 | (BUG-ANNOT-CLAIMS, fixed) |
-| `c_routes` | 70 | 295 | 0 | no merge-derived support |
-| `d_annotate` | 181 | 0 | 0 | |
-| `e_direct` | 544 | 2 | 0 | |
-| `e_library` | 524 | 2 | 20 | (BUG-ANNOT-ROUTES, fixed) |
-
-Facts `/resolve` confirmed in that run, over 596 seed results (about 25 Mbp queried):
-
-- 4,449 walk molecules fully in the graph.
-- 11,361 claim stretches: 1,010 starting at a merge, 11 entered by a switch, 176 also
-  under trace.
-- 1,228 negative checks at `label_lost` ends.
-- 700 `route_only` claims with their routes.
-- 13,112 annotate label sets.
-- 4,758 `direct_bp` routes.
-- 4,182 top walks, covering 227,663 label stretches.
-- 2,852 independently computed maximal stretches.
-
-**Scale, the design §7 reference case** (`sra_rand50_00__beam20_10k`: 3.51 MB body,
-18,685 walks; Python 3.14):
-
-- parse 0.62 s;
-- traced heap 54 MB (peak 96 MB);
-- `dump` 0.32 s, `to_json` 1.55 s (equal to the server's 72 MB full JSON);
-- `walks()` 0.76 s;
-- `to_fasta` 0.52 s (75 MB), `to_gfa` 2.66 s (52 MB).
-
-The fitted exponents against W stay at or below 0.96 on the beam-20 ladder (11 cells,
-15 KB to 31.75 MB of body). Compare of walks, which was quadratic (B1), is now 1.13
-(r² 0.99). After the B2 fix (first round), the worst-case ratio of `memory_bytes()` to the
-traced heap was 1.003 (it had been 0.35 to 0.67), and an 8 MB store held 7.85 MB.
-
-**Product bugs this suite found**, all fixed. Regression tests are in
-`../test_traverse_regressions.py`, `../test_traverse_review.py` and the C++ suites.
-
-Parser and tools:
-
-- BUG-1: an integer of thousands of digits reached `int()`.
-- BUG-2: a lone surrogate in a label name.
-- BUG-3: the `traverse_continue` dry run did not fit its ceiling, and its hint named a
-  parameter the tool did not take.
-- BUG-4: a `result_too_large` answer larger than `max_bytes`.
-- BUG-5: run errors did not name their line.
-
-Library:
-
-- BUG-ANNOT-CLAIMS and BUG-ANNOT-ROUTES: annotate with merge, claims and routes through
-  non-first parents.
-- B1: compare cost the whole trie.
-- B2: `memory_bytes()` undercounted.
-- B3: one `graphlet_walks` page cost a full ranking.
-
-Server:
-
-- SRV-ROUTE-BP-CLONE: split clones lost `route_bp`.
-- SRV-ANNOT-CONT-LABELS: annotate continuation labels were not taken from the tail's
-  own k-mers, so the lists came out too small.
-
-The external review of `cb9eac2d` was handled on top of these; see the review tests.

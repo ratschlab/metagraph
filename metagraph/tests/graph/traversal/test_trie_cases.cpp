@@ -6,6 +6,7 @@
 #include <random>
 #include <set>
 #include <sstream>
+#include <type_traits>
 
 #include "tests/test_helpers.hpp"
 #include "tests/graph/all/test_dbg_helpers.hpp"
@@ -260,9 +261,24 @@ TYPED_TEST(TrieCases, Fork) {
         expect_leaves(r, { "A", "B" }, kRight, { { P, { "A" } }, { Q, { "B" } } }, c.radius, where);
         expect_leaves(r, { "A", "B" }, kLeft, { { "", { "A", "B" } } }, c.radius, where);
         expect_leaves(r, { "A" }, kRight, { { P, { "A" } } }, c.radius, where);
-        ASSERT_EQ(1u, r.T.arms[kRight].splits.size()) << where;
-        EXPECT_EQ(0u, r.T.arms[kRight].splits[0].at_bp) << where;
-        EXPECT_FALSE(r.T.arms[kRight].splits[0].ambiguous) << where;
+        const ArmResult &t = r.T.arms[kRight];
+        ASSERT_EQ(1u, t.splits.size()) << where;
+        EXPECT_EQ(0u, t.splits[0].at_bp) << where;
+        EXPECT_FALSE(t.splits[0].ambiguous) << where;
+        // the trie's view of the fork: the boundary carried by both labels, one per branch,
+        // nothing cut; the per-label summary read off the recorded sets
+        EXPECT_EQ(0u, t.nodes_labels_truncated) << where;
+        EXPECT_EQ(2u, t.max_labels_at_node) << where;
+        EXPECT_EQ(2u, t.splits[0].labels_before) << where;
+        ASSERT_EQ(2u, t.splits[0].branches.size()) << where;
+        for (const auto &br : t.splits[0].branches) {
+            EXPECT_EQ(1u, br.labels_distinct) << where;
+            EXPECT_EQ(br.labels, t.segments[br.segment].labels_start) << where;
+        }
+        for (LabelId l = 0; l < 2; ++l) {
+            EXPECT_EQ(P.size(), r.T.label_summary[l][kRight].direct_bp) << where;
+            EXPECT_EQ(P.size(), r.T.label_summary[l][kRight].reach_bp) << where;
+        }
         // a divergence in constrain mode: one lineage per child, not ambiguous
         const ArmResult &ab = r.A.at({ "A", "B" }).arms[kRight];
         ASSERT_EQ(1u, ab.splits.size()) << where;
@@ -610,6 +626,10 @@ TYPED_TEST(TrieCases, EvenKPalindromicNode) {
 // uncapped, the contract holds for a hundred labels and a hundred leaves.
 TYPED_TEST(TrieCases, HundredLabels) {
     CASE_TYPES;
+    // one graph and annotation type: what costs here is the labels, which every type keeps
+    // alike (the other cases run on both)
+    if (!std::is_same_v<Graph, DBGSuccinct>)
+        GTEST_SKIP() << "run on DBGSuccinct with ColumnCompressed only";
     const size_t n = 100;
     std::vector<size_t> lengths { 30, 20, 20, 20, 20 };
     for (size_t i = 0; i < n; ++i) lengths.push_back(12);

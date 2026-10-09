@@ -284,7 +284,8 @@ class LabelOracle {
      * previous one's (a single-copy gene in consecutive genomes) one select. The ranges are
      * only used once two coordinates in a row fell into one or adjacent sequences, and only
      * for lists of 8 coordinates or more: scattered coordinates and short lists
-     * are mapped as map_coord maps them, at its cost (LabelOracleCoordRuns.DISABLED_Benchmark,
+     * are mapped as map_coord maps them, at its cost (BM_TraversalCoordRuns in
+     * benchmarks/traversal/bench_traversal_measurements.cpp,
      * 2,000 sequences: runs of 7 at 22 ns a coordinate against 42-46 for map_coord, single
      * copies in consecutive sequences at 32-35 ns against 48, scattered ones at 40-42 against
      * 39-42; ranges used unconditionally are 1.3-1.5 times slower than map_coord there).

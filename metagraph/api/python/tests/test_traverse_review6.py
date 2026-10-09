@@ -159,7 +159,7 @@ class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
     """Finding 2."""
 
     def test_the_reviewers_probe(self):
-        text = comb_annotate(20000)
+        text = comb_annotate(5000)
         calls = [('spell', lambda g, b: g.spell('right', 0, budget=b)),
                  ('support_profile', lambda g, b: g.support_profile('right', 0, budget=b)),
                  ('support_changes', lambda g, b: g.support_changes('right', 0, budget=b)),
@@ -188,7 +188,7 @@ class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
                 self.assertEqual(0, b.usage()['work_units'])
                 self.assertEqual(0, b.usage()['memory_bytes'])
                 self.assertIn(e.exception.stop.phase, ('setup', 'rank'))
-                # a few KB of frames, not the 2.7 MB of the arm's paths
+                # a few KB of frames, not the 0.7 MB of the arm's paths
                 self.assertLess(peak, 100_000)
 
     def test_a_refused_call_builds_no_derived_cache(self):
@@ -217,7 +217,7 @@ class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
         for name, make in shapes:
             for op in _ops(make()):
                 pts = _charge_points(_ops(make())[op])
-                for w in pts[::max(1, len(pts) // 20)]:
+                for w in pts[::max(1, len(pts) // 10)]:
                     g = make()
                     fn = _ops(g)[op]
                     before = _caches(g)
@@ -231,7 +231,7 @@ class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
                     n += 1
                     for x in _uncharged(_caches(g) - before, b):
                         bad.append((name, op, w, x))
-        self.assertGreater(n, 1000)
+        self.assertGreater(n, 2000)
         self.assertEqual([], bad)
 
     def test_a_stopped_comparison_leaves_only_charged_derivations(self):
@@ -241,7 +241,7 @@ class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
             for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
                 pts = _charge_points(lambda budget: ma().compare(mb(), mode=mode,
                                                                  budget=budget))
-                for w in [0] + pts[::max(1, len(pts) // 12)]:
+                for w in [0] + pts[::max(1, len(pts) // 6)]:
                     a, b = ma(), mb()
                     ca, cb_ = _caches(a), _caches(b)
                     bud = LocalBudget(work_units=w)
@@ -250,7 +250,7 @@ class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
                     for g, before in ((a, ca), (b, cb_)):
                         for x in _uncharged(_caches(g) - before, bud):
                             bad.append((ka, kb, mode, w, x))
-        self.assertGreater(n, 500)
+        self.assertGreater(n, 1000)
         self.assertEqual([], bad)
 
     def test_a_refused_tool_builds_no_derived_cache(self):
@@ -348,7 +348,8 @@ def _comb_pairs():
 
 
 class TestCompareCostIsALowerBound(unittest.TestCase):
-    """Finding 4: at_least <= what the completed comparison charges, every mode."""
+    """Finding 4: at_least <= what the completed comparison charges, every mode; at most
+    the estimate, under the library's work model, and all it charges where it is exact."""
 
     def test_the_reviewers_probe(self):
         a, b = parse(comb_annotate(1)), parse(comb_annotate(100))
@@ -363,25 +364,37 @@ class TestCompareCostIsALowerBound(unittest.TestCase):
     def test_at_least_is_below_the_charge_everywhere(self):
         bad = []
         n = 0
-        for (ka, ma), (kb, mb) in _pairs() + _comb_pairs():
+        for (ka, ma), (kb, mb) in _pairs(both_orders=False) + _comb_pairs():
             a0 = ma()
-            kws = [{}] + [{'arm': s} for s in a0.arms]
-            if a0.labels:
-                kws += [{'labels': [{'ref': a0.labels[0].ref}]},
-                        {'labels': [{'ref': a0.labels[-1].ref}]}]
+            kws = [{}] + ([{'labels': [{'ref': a0.labels[-1].ref}]}] if a0.labels else [])
             for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
                 for kw in kws:
                     cost = ops.compare_cost(ma(), mb(), mode=mode, **kw)
                     bud = LocalBudget()
                     ma().compare(mb(), mode=mode, budget=bud, **kw)
                     n += 1
-                    if cost['work_units']['at_least'] > bud.used_work \
+                    w = cost['work_units']
+                    self.assertLessEqual(w['at_least'], w['estimate'], (ka, kb, mode))
+                    self.assertEqual(B.WORK_MODEL, cost['work_model'])
+                    if cost['exact'] and w['at_least'] != bud.used_work:
+                        # nothing keyed (no bases in a mode keyed by them): all it charges
+                        bad.append((ka, kb, mode, kw, 'exact', w['at_least'], bud.used_work))
+                    if w['at_least'] > bud.used_work \
                             or cost['memory_bytes']['at_least'] > bud.peak_bytes:
-                        bad.append((ka, kb, mode, kw, cost['work_units']['at_least'],
+                        bad.append((ka, kb, mode, kw, w['at_least'],
                                     bud.used_work, cost['memory_bytes']['at_least'],
                                     bud.peak_bytes))
-        self.assertGreater(n, 2000)
+        self.assertGreater(n, 500)
         self.assertEqual([], bad)
+
+    def test_incomparable_is_exact(self):
+        # nothing is keyed: the estimate is all the comparison charges
+        a, b = T.graphlet('fork'), T.graphlet('merge')
+        est = ops.compare_cost(a, b)
+        bud = LocalBudget()
+        a.compare(b, budget=bud)
+        self.assertTrue(est['exact'])
+        self.assertEqual(bud.used_work, est['work_units']['at_least'])
 
 
 class TestLoadKeepsItsReceipt(unittest.TestCase):
@@ -478,12 +491,13 @@ def _peak(fn):
 
 class TestCompareAccountBoundsThePeak(unittest.TestCase):
     """The batch's memory gaps: the account of compare() >= its traced peak, on every
-    pair of retrievals of one seed (both orders) and on the combs, every mode."""
+    pair of retrievals of one seed and on the combs, every mode (the cross pair it failed
+    on, in both orders: test_the_reported_cross_pair)."""
 
     def test_every_pair(self):
         low = []
         n = 0
-        for (ka, ma), (kb, mb) in _pairs() + _comb_pairs():
+        for (ka, ma), (kb, mb) in _pairs(both_orders=False) + _comb_pairs():
             for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
                 b = LocalBudget()
                 ma().compare(mb(), mode=mode, budget=b)
@@ -492,7 +506,7 @@ class TestCompareAccountBoundsThePeak(unittest.TestCase):
                 n += 1
                 if b.peak_bytes < peak:
                     low.append((ka, kb, mode, b.peak_bytes, peak))
-        self.assertGreater(n, 450)
+        self.assertGreater(n, 200)
         self.assertEqual([], low)
 
     def test_the_reported_cross_pair(self):

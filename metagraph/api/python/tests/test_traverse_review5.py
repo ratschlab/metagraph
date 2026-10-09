@@ -779,10 +779,16 @@ class TestP10WalkStrategies(unittest.TestCase):
                                 self.assertEqual(want, got, (it[0], steps))
                                 self.assertEqual(sorted(set(tg)), list(got))
                                 self.assertEqual(len(got), len({id(c) for c, _ in got.values()}))
-                            # the bases alone, for the callers that read only them
+                            # the bases alone, for the callers that read only them, and
+                            # the chains alone, a list of its own per target
                             self.assertEqual({t: (None, w) for t, (_, w) in want.items()},
                                              derive.walk_batch(a, tg, chains=False),
                                              (it[0], steps))
+                            chains = derive.walk_batch(a, tg, spell=False)
+                            self.assertEqual({t: (c, None) for t, (c, _) in want.items()},
+                                             chains, (it[0], steps))
+                            self.assertEqual(len(chains),
+                                             len({id(c) for c, _ in chains.values()}))
                             n += 1
         finally:
             derive._EACH_STEPS = saved

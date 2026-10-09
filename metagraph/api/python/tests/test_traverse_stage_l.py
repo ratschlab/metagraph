@@ -457,28 +457,6 @@ class TestCompare(unittest.TestCase):
         self.assertGreater(n, 50)
         self.assertTrue({'keys:a', 'keys:b'} <= phases, phases)
 
-    def test_compare_cost(self):
-        for x, y in self.pairs():
-            for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
-                est = ops.compare_cost(fresh(x), fresh(y), mode=mode)
-                b = LocalBudget()
-                fresh(x).compare(fresh(y), mode=mode, budget=b)
-                w = est['work_units']
-                self.assertLessEqual(w['at_least'], b.used_work, (x[0], mode))
-                self.assertLessEqual(w['at_least'], w['estimate'])
-                self.assertEqual(B.WORK_MODEL, est['work_model'])
-                if est['exact']:
-                    # nothing keyed (no bases in a mode keyed by them): all it charges
-                    self.assertEqual(b.used_work, w['at_least'])
-        # incomparable: nothing is keyed, and the estimate is exact
-        a, b_ = T.graphlet('fork'), T.graphlet('merge')
-        est = ops.compare_cost(a, b_)
-        bb = LocalBudget()
-        a.compare(b_, budget=bb)
-        self.assertTrue(est['exact'])
-        self.assertEqual(bb.used_work, est['work_units']['at_least'])
-
-
 class TestExports(unittest.TestCase):
     """T-L10 / L4: a stopped export returns no text, a stopped save writes no file."""
 

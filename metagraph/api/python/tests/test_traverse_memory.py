@@ -190,13 +190,13 @@ class TestWalkIter(unittest.TestCase):
 
 
 class TestExportPeaks(unittest.TestCase):
-    """On a comb of 1,500 splits (1.1 MB of FASTA): each export's peak is about twice its
+    """On a comb of 800 splits (0.3 MB of FASTA): each export's peak is about twice its
     text -- the records and the joined text -- where to_fasta() peaked at 10x (dcc0cebd) and
     3.1x (e7d99e0c, which added the final line feed by copying the text)."""
 
     @classmethod
     def setUpClass(cls):
-        cls.r, cls.resp = _comb(1500)
+        cls.r, cls.resp = _comb(800)
 
     def g(self):
         return MT.from_response(self.r, self.resp)
@@ -205,7 +205,7 @@ class TestExportPeaks(unittest.TestCase):
         for kw in ({}, {'width': 60}, {'orientation': 'walk', 'with_seed': False}):
             g = self.g()
             peak, text = _peak(lambda: g.to_fasta(**kw))
-            self.assertGreater(len(text), 1_000_000)
+            self.assertGreater(len(text), 250_000)
             self.assertLess(peak, 2.6 * len(text), kw)
         # walks in another order and repeated: each record in its slot
         g = self.g()

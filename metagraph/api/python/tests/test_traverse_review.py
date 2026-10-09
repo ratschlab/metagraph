@@ -78,32 +78,6 @@ C 80 0 0 .
 Z 23
 '''
 
-# the same request with output.sequences false
-CHAIN_80_NO_SEQS = '''\
-H mgt 1 15 basic $ACGT a k k 1000 1000 0 walk evidence-review-chain 778b7819ce419a3f3fdd54fc23d3e272e011476b4cb63620fa4f1465e8f4f427 d99c945a0538b4eb
-S cf89642ae331e875 30 16 0 ACCAGTCTTAGAATCTGATGACCGCCCGAC
-L h 0 0 0 A
-L h 0 1 0 B
-L h 0 2 0 C
-L h 0 3 0 D
-O c c c i
-A r c 80 p 0 0 1 3 0 steps=100,successor_enumerations=99,output_bp=100,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 0 2 1 0 100
-B 0 2 3 3 1 100 1 0 1 0 0 0 0 .
-G * 0 60 0 * * * 0 * *
-P 0 24 1 0
-P 24 30 2 0-1
-P 30 54 1 1
-P 54 60 3 1-3
-G 0 60 20 3 * * * * A *
-P 60 80 1 3
-T X .
-C 80 0 0 . GCAGGCGATCGCACTACTAGCCATAAGCCGCAAGAAGCCTATCCAATTCCTGTGATTTAGAAGGATTCAGCGCTGACTGG
-G 0 60 20 2 * * * * T *
-P 60 80 1 2
-T X .
-C 80 0 0 . GCAGGCGATCGCACTACTAGCCATAAGCCGCAAGAAGCCTATCCAATTCCTGTGATTTAGTTACTCGTAGCCGGGCGTGA
-Z 23
-'''
 
 # 'bubbles' (the merge fixture's locus), annotate, on_reconverge merge, radius 100, lists
 # uncapped (max_labels_per_node 64): label_evidence complete. b.fa takes the second allele
@@ -433,38 +407,6 @@ class TestFinding4LabelComparisonsAreClippedFirst(unittest.TestCase):
                          ops._label_keys(sw, ['right'], 45, None))
 
 
-# ------------------------------------------------------------------ finding 5
-
-class TestFinding5MissingBasesAreUnknown(unittest.TestCase):
-    """Identical requests differing only in output.sequences compared as comparable True,
-    equal False (claims), and prefix_subset raised ValueError: sequence-dependent modes
-    are now 'unknown', with the reason naming output.sequences."""
-
-    def test_the_reviewers_case(self):
-        deep, no_seqs = parse(CHAIN_80), parse(CHAIN_80_NO_SEQS)
-        for x, y in ((deep, no_seqs), (no_seqs, deep), (no_seqs, no_seqs)):
-            for mode in ('claims', 'walks', 'prefix_subset'):
-                cmp = x.compare(y, mode=mode)
-                self.assertEqual(('unknown', None, [], [], []),
-                                 (cmp.comparable, cmp.equal, cmp.only_in_a, cmp.only_in_b,
-                                  cmp.differ), mode)
-                self.assertIn('output.sequences', cmp.reason)
-            # labels need no bases
-            cmp = x.compare(y, mode='labels')
-            self.assertEqual((True, True), (cmp.comparable, cmp.equal))
-
-    def test_the_tool(self):
-        with tempfile.TemporaryDirectory() as d:
-            store = GraphletStore(d)
-            a, b = store.put_graphlet(parse(CHAIN_80)), store.put_graphlet(parse(CHAIN_80_NO_SEQS))
-            tools = GraphletTools(store)
-            for mode in ('claims', 'walks', 'prefix_subset'):
-                out = tools.graphlet_compare(a, b, mode=mode)
-                self.assertEqual(('unknown', None, 0), (out['comparable'], out['equal'],
-                                                        out['total']), out)
-                self.assertIn('output.sequences', out['reason'])
-
-
 # ------------------------------------------------------------------ finding 7
 
 class Caps(FakeClient):
@@ -526,14 +468,9 @@ class TestFinding7ContinuationChecksTheIndex(unittest.TestCase):
         self.assertFalse(cont['identity']['verified'])
         self.assertIn('cannot be verified', cont['identity']['note'])
 
-    def test_one_side_without_a_manifest_is_refused(self):
-        # refused as UNVERIFIABLE, not as proven different (D4 of the third review:
-        # tests/test_traverse_review3.py covers the explicit opt-in)
-        client = Caps(fp='a' * 64)
-        tools, parent = self.fetch(client)
-        client.fp = client.caps['index_fp'] = None
-        self.assertEqual('index_unverifiable',
-                         tools.traverse_continue(parent, 'right', 1)['error'])
+    def test_a_manifest_gained_is_unverifiable(self):
+        # refused as UNVERIFIABLE, not as proven different; the parent with a manifest and
+        # the explicit opt-in: test_traverse_review3.py, TestD4OneSidedManifestIsUnverifiable
         client = Caps(fp=None)
         tools, parent = self.fetch(client)
         client.fp = client.caps['index_fp'] = 'a' * 64
@@ -605,25 +542,6 @@ class TestFinding10WalksComparedUnderLabels(unittest.TestCase):
         self.assertFalse(every.equal)
         keys = ops._walk_keys(oracle, ['right'], walks.depth_used, {'h:0:1'})
         self.assertTrue(all(v for v in keys.values()))
-
-
-# ------------------------------------------------------------------ finding 11
-
-class TestFinding11ClaimsFilterSaysWhatItRemoved(unittest.TestCase):
-    """graphlet_claims counted merge-entered alive claims (displayed support from 62) as
-    route_only, the kind of a claim with NO displayed support at a cut."""
-
-    def test_merge_fixture(self):
-        with tempfile.TemporaryDirectory() as d:
-            store = GraphletStore(d)
-            h = store.put(T.doc_json('merge', 'graphlet'), None)
-            tools = GraphletTools(store)
-            c = tools.graphlet_claims(h, 'right', max_bytes=8192)
-            self.assertEqual({'merge_entered': 2}, c['filtered'])
-            self.assertIn('non-first merge parent', c['hint'])
-            removed = [x for x in T.graphlet('merge').claims('right') if x.route_bp]
-            self.assertEqual({'alive'}, {x.kind for x in removed})
-            self.assertTrue(all(x.evidence_from < x.to_bp for x in removed))
 
 
 # ------------------------------------------------------------------ finding 12

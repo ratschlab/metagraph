@@ -2436,9 +2436,9 @@ masked twin's and k − 1 steps per candidate; at E − 1 and 0 the answer witho
 `all_or_count`, `partial`, the extension, step stops at three points of the check),
 `TinyBlocksOfLongPatternsAndPeptides`; the route's `PatternRoute.UnmaskedTinyBlocksAreExact` (three modes, both limits, every mode of
 request) and `PatternMaskUnmasked.CheckedEntriesFlag` (the flag through the real Config and loader, refusals);
-`integration_tests/test_pattern.py` `test_unmasked_tiny_blocks_are_exact` (the mini: the default server against
-the masked one and the server with the check off, both scopes and strand settings, three modes, long patterns
-behind a leading N, the step stop) and the CLI with the flag.
+`integration_tests/test_pattern.py` `test_unmasked_against_the_masked` (the mini: the default server against
+the masked one and the server with the check off: counts, lists and labels, a pattern's few unchecked candidates
+each tested at the default limit) and the CLI with the flag.
 
 **Stated limitations:** the limit counts candidates, not the pattern's U: on a wrapped PRIMARY graph a candidate
 enters both orientations' counts, so `upper` − `lower` there can be up to twice the number checked; a cut
@@ -2590,8 +2590,8 @@ labels and paths, and the extension not admitted) and `PatternRoute.Capabilities
 named, the rates as configured); the integration's `assertPaths` (`extension_anchors` and `extension_branches`
 against the graph-walk oracle `Records.branchings`, the distinct rows against the paths' k-mers,
 `verification_steps` at least n × the labels carrying the paths), `assertLabelled` (the distinct rows),
-`test_capabilities` and `test_capabilities_byte_budget` (the three mini servers, both routes, at most
-32,768 − 1,024 bytes). Each engine and retrieval test fails on a mutant without its fix.
+`test_capabilities` and the validator's `test_capabilities_documents_keep_a_kibibyte` (every stored capabilities
+document, which `pattern_fixtures.py --check` keeps equal to what the servers send, at most 32,768 − 1,024 bytes). Each engine and retrieval test fails on a mutant without its fix.
 
 **Stated limitations:**
 - Discovery still reads the clock every 4,096 steps: cold on refseq33m about 12 µs a step (4.5 million steps in
@@ -2940,8 +2940,8 @@ Added to the `pattern` block (§10.2, both routes): `projections` lists `"predic
 §10.2) states the operators, the strands and the access. A client offers predicates where `projections` lists
 `"predicate_only"`, sends at most `caps.max_predicate_labels` names and `predicate_strands` from
 `predicate.strands`. Measured on the mini: the largest document, the unmasked server's `/traverse/capabilities`,
-grew by 285 bytes, from 31,085 to 31,370 as the server writes it, 374 under the budget of 32,768 − 1,024
-(`test_capabilities_byte_budget`); the validator's measure from above (floats counted at 24 characters) is 31,504,
+grew by 285 bytes, from 31,085 to 31,370 as the server writes it, 374 under the budget of 32,768 − 1,024;
+the validator's measure from above (floats counted at 24 characters) is 31,504,
 240 under it (`test_capabilities_documents_keep_a_kibibyte`); the masked server's is 31,251 (31,368 from above).
 
 ### 19.13 Worked examples (the mini index, this build)

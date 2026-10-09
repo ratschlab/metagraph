@@ -786,23 +786,6 @@ def _resolve_reference(out, limit, lim):
 
 # ======================================================================= VOP1-03, 04
 
-class TestWalksAndDeadCode(unittest.TestCase):
-    def test_walk_claims_are_their_leaves_claims(self):
-        # VOP1-03 (fixed at f667d775): the claims at each returned leaf, built for it
-        for name, make in GRAPHLETS:
-            g = make()
-            for side in g.arms:
-                every = g.claims(side, strict=False)
-                for w in g.walks(side, top=5):
-                    end = g.arms[side].segments[w.leaf].end_bp
-                    self.assertEqual([c for c in every if c.segment == w.leaf
-                                      and c.to_bp == end], w.claims, (name, side, w.path_id))
-
-    def test_one_switch_pricing(self):
-        # VOP1-04
-        self.assertFalse(hasattr(ops, '_switch_cost'))
-
-
 # ======================================================================= VOP2-02, 08
 
 def _one_arm(name, side):

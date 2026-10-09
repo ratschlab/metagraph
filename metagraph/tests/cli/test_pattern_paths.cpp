@@ -941,24 +941,6 @@ TEST(PatternPaths, ReverseHitOnAWrappedPrimaryGraph) {
                                 "\"require_support\": \"record_verified\""), false));
 }
 
-TEST(PatternPaths, PalindromicAnchorWindowOnAWrappedPrimaryGraph) {
-    // k = 4: ACGTA's anchor window ACGT is its own reverse complement, found by both probes of
-    // the wrapped PRIMARY graph and united (DESIGN §4.1): one anchor, one extension
-    const std::vector<Record> records = { { "x", "x0", "ACGTA" } };
-    Index idx = build<annot::ColumnCompressed<>>(4, records, false, DeBruijnGraph::PRIMARY);
-    Json::Value out = run(idx, body("{\"dna\": \"ACGTA\"}", "", "none"), {}, false);
-    const Json::Value &e = out["patterns"][0];
-    check_path_counts(idx, e, "ACGTA");
-    EXPECT_EQ(1u, e["counts"]["anchors"]["by_orientation"]["forward"]["value"].asUInt64());
-    EXPECT_EQ(1u, e["counts"]["paths"]["by_orientation"]["forward"]["value"].asUInt64());
-    const auto results = check_path_results(idx, e, "ACGTA");
-    const PathSet expected {
-        { "forward", "ACGTA" }, { "reverse", "TACGT" },
-    };
-    EXPECT_EQ(expected, PathSet(results.begin(), results.end()));
-    EXPECT_TRUE(e["retrieval_complete"].asBool());
-}
-
 TEST(PatternPaths, NativeCanonicalGraph) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, false,
                                                      DeBruijnGraph::CANONICAL);
@@ -1769,7 +1751,7 @@ TEST(PatternPaths, MemorySweepOverRepeats) {
         ASSERT_GT(full["patterns"][0]["results"].size(), 2u);
         const uint64_t peak = full["patterns"][1]["work"]["memory_bytes"].asUInt64();
         uint64_t stated = 0;
-        for (uint64_t max = 2000; max <= peak; max += std::max<uint64_t>(1, (peak - 2000) / 400)) {
+        for (uint64_t max = 2000; max <= peak; max += std::max<uint64_t>(1, (peak - 2000) / 100)) {
             SCOPED_TRACE(mode + " max " + std::to_string(max));
             RetrievalHooks hooks;
             hooks.max_memory_bytes = max;

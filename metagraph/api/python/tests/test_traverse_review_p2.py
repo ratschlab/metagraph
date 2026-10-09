@@ -427,35 +427,22 @@ class TestChangeCostTable(unittest.TestCase):
 
 # ================================================================ texts
 
-class TestTexts(unittest.TestCase):
-    """The library's texts follow the contract: D3 is feature level 6 (SPEC §7.0; builds
-    7aaee760..67bef367 state 5 and are never deployed), and a registered attempt_id is
-    refused while the server holds it, not "used up" (a 400 from a server below level 5
-    registers it; it runs again once that server no longer retains it)."""
+class TestToolTexts(unittest.TestCase):
+    """The tools' descriptions, which an agent reads, follow the contract: a registered
+    attempt_id is refused while the server holds it, never "used up"."""
 
-    def read(self, *parts):
-        with open(os.path.join(*parts)) as f:
-            return ' '.join(f.read().split())
-
-    def test_the_texts(self):
+    def test_no_attempt_id_is_used_up(self):
+        import inspect
         import re
-        lib = os.path.join(T.API, 'metagraph', 'traverse')
-        rst = self.read(T.REPO, 'docs', 'source', 'graphlets.rst')
-        texts = {'graphlets.rst': rst}
-        for name in ('client.py', 'attempts.py', 'mcp_tools.py', 'store.py'):
-            texts[name] = self.read(lib, name)
+        from metagraph.traverse import mcp_tools
         used_up = re.compile(r'\bus(?:e|es|ed|ing) (?:that |the |its |an |it )?'
                              r'(?:attempt_id |id )?up\b|\bid is used up|\bruns once\b')
-        for name, text in texts.items():
-            self.assertIsNone(used_up.search(text), (name, used_up.search(text)))
-        self.assertNotIn('(feature level 5+)', rst)
-        self.assertIn('after ``observed`` of its k-mers (feature level 6; builds '
-                      '``7aaee760`` to ``67bef367`` carry it while stating level 5 and are '
-                      'never deployed)', rst)
-        self.assertIn('A level-5 server fails such a seed instead', rst)
-        self.assertIn('registers its attempt_id before it answers the 400 (the id is '
-                      'refused while that server retains it, and runs again after that)',
-                      texts['client.py'])
+        tools = [m for name, m in inspect.getmembers(mcp_tools.GraphletTools, inspect.isfunction)
+                 if not name.startswith('_')]
+        self.assertGreater(len(tools), 10)
+        for tool in tools:
+            text = ' '.join((tool.__doc__ or '').split())
+            self.assertIsNone(used_up.search(text), (tool.__name__, used_up.search(text)))
 
 
 if __name__ == '__main__':

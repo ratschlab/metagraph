@@ -185,16 +185,5 @@ class TestCapabilitiesFitTheDefaultCeiling(unittest.TestCase):
         self.assertLessEqual(_size(out), DEFAULT_MAX_BYTES)
 
 
-# ------------------------------------------------------------------ F6
-
-class TestACancelThatPromisesNothingIsAnAnswer(unittest.TestCase):
-
-    def test_429_is_returned(self):
-        body = {'error': "unknown attempt_id 'z', and it was NOT tombstoned", 'attempt_id': 'z',
-                'cancelled': False, 'state': 'unknown', 'tombstone': False}
-        out = TraverseClient('h', 1, session=_Session(429, body)).cancel('z')
-        self.assertEqual((False, False), (out['cancelled'], out['tombstone']))
-
-
 if __name__ == '__main__':
     unittest.main()

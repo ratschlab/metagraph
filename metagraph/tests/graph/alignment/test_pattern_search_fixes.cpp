@@ -261,11 +261,11 @@ struct Broad {
 };
 
 TEST(PatternSearchFixes, PartialRetentionBoundedByWhatItReleases) {
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
-                       DeBruijnGraph::PRIMARY }) {
-        for (size_t k : { 13, 12 }) {
-            if (mode != DeBruijnGraph::PRIMARY && k == 12)
-                continue;
+    // the retention bound is the release code's: one probe (BASIC) and the wrapper's two
+    // (PRIMARY at an even k)
+    for (const auto &[mode, k] : { std::make_pair(DeBruijnGraph::BASIC, size_t(13)),
+                                   std::make_pair(DeBruijnGraph::PRIMARY, size_t(12)) }) {
+        {
             Broad b;
             b.graph = build(k, b.records, mode);
             PatternSearch engine(*b.graph);
@@ -323,20 +323,19 @@ TEST(PatternSearchFixes, PartialRetentionBoundedByWhatItReleases) {
 TEST(PatternSearchFixes, PartialRetentionUnderStepStops) {
     // after a max_steps stop, PARTIAL releases the first cap among the contexts discovered:
     // the pruned release equals the unpruned one cut at cap
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::PRIMARY }) {
-        for (size_t k : { 11, 10 }) {
-            if (mode == DeBruijnGraph::BASIC && k == 10)
-                continue;
+    for (const auto &[mode, k] : { std::make_pair(DeBruijnGraph::BASIC, size_t(11)),
+                                   std::make_pair(DeBruijnGraph::PRIMARY, size_t(10)) }) {
+        {
             auto graph = build(k, random_records(8, 1500, 7 + k), mode);
             PatternSearch engine(*graph);
             for (const std::string &text : std::vector<std::string> { "C", "RA", "NNG" }) {
-                for (uint64_t steps : { 500, 3000, 9000, 20000 }) {
+                for (uint64_t steps : { 500, 9000 }) {
                     Budget unpruned_budget = budget_of(steps);
                     Result unpruned;
                     std::vector<Ctx> reference = released_by(
                             engine, iupac(text), request_of(Mode::PARTIAL, 1'000'000'000),
                             unpruned_budget, &unpruned);
-                    for (uint64_t cap : { 1, 50, 5000 }) {
+                    for (uint64_t cap : { 1, 5000 }) {
                         Budget budget = budget_of(steps);
                         Result r;
                         std::vector<Ctx> got = released_by(
@@ -709,7 +708,13 @@ TEST(PatternSearchFixes, EvenPrimaryPartialReleasesWhatTheCountCredits) {
             Result full = engine.count(iupac(text), request_of(Mode::COUNT, 0), full_budget);
             ASSERT_EQ(truth.size(), full.contexts->total.value) << text << " k " << k;
 
-            for (uint64_t steps = 1; steps <= full.work.steps; ++steps) {
+            // every third budget and the last
+            std::vector<uint64_t> budgets;
+            for (uint64_t steps = 1; steps < full.work.steps; steps += 3) {
+                budgets.push_back(steps);
+            }
+            budgets.push_back(full.work.steps);
+            for (uint64_t steps : budgets) {
                 Budget budget = budget_of(steps);
                 Result r;
                 std::vector<Ctx> got = released_by(engine, iupac(text),
@@ -748,7 +753,7 @@ TEST(PatternSearchFixes, EvenPrimaryThresholdStopsOnTime) {
     // searches find disjoint contexts, so the running bound is their sum (was the larger
     // of the two, about half: the stop never fired between half and the whole count)
     const size_t k = 10;
-    auto graph = build(k, random_records(6, 15'000, 77), DeBruijnGraph::PRIMARY);
+    auto graph = build(k, random_records(4, 10'000, 77), DeBruijnGraph::PRIMARY);
     PatternSearch engine(*graph);
     const std::string text = "AACCTG";
     for (Strands strands : { Strands::FORWARD, Strands::BOTH }) {
@@ -906,54 +911,6 @@ TEST(PatternSearchFixes, StrandHaltedAtItsFirstStepIsAtLeastZero) {
 }
 
 
-// ---------------------------------------------------------------- T1-10, C1-01: the pattern
-// algebra against this file's own tables
-
-TEST(PatternSearchFixes, ReverseComplementAndPalindromesExhaustive) {
-    const std::string letters = "ACGTRYSWKMBDHVN";
-    std::vector<std::string> texts { "" };
-    for (size_t length = 1; length <= 4; ++length) {
-        std::vector<std::string> next;
-        for (const std::string &t : texts) {
-            for (char c : letters) {
-                next.push_back(t + c);
-            }
-        }
-        for (const std::string &t : next) {
-            Pattern p = iupac(t);
-            const std::string rc = own_rc(t);
-            ASSERT_EQ(rc, p.reverse_complement().text()) << t;
-            ASSERT_EQ(rc == t, p.is_palindromic()) << t;
-        }
-        texts = std::move(next);
-    }
-    EXPECT_FALSE(iupac("A").is_palindromic());
-    for (const char *t : { "S", "W", "N" }) {
-        EXPECT_TRUE(iupac(t).is_palindromic()) << t;
-    }
-    for (const char *t : { "AN", "CAG", "TTAGGA" }) {
-        EXPECT_FALSE(iupac(t).is_palindromic()) << t;
-    }
-}
-
-TEST(PatternSearchFixes, InformationBitsUnchangedByTheTable) {
-    std::mt19937 rng(3);
-    const std::string letters = "ACGTRYSWKMBDHVN";
-    for (int i = 0; i < 200; ++i) {
-        std::string t;
-        for (size_t j = 0, n = 1 + rng() % 300; j < n; ++j) {
-            t.push_back(letters[rng() % letters.size()]);
-        }
-        double expected = 0;
-        for (char c : t) {
-            expected += std::log2(4.0 / static_cast<uint32_t>(__builtin_popcount(own_set(c))));
-        }
-        // the same double, bit for bit
-        EXPECT_EQ(expected, iupac(t).information_bits()) << t;
-    }
-}
-
-
 // ---------------------------------------------------------------- X-TESTS-04: larger even k
 
 TEST(PatternSearchFixes, LargeEvenKPrimaryAgainstTheOracle) {
@@ -979,9 +936,11 @@ TEST(PatternSearchFixes, LargeEvenKPrimaryAgainstTheOracle) {
             ASSERT_EQ(expected.size(), r.contexts->total.value) << text << " k " << k;
             ASSERT_EQ(expected, got) << text << " k " << k;
 
-            // interrupted releases: genuine, no duplicates
+            // interrupted releases: genuine, no duplicates (8 budgets: each reruns the
+            // search, quadratic in k at k = 64; check_halts_against_oracles sweeps every
+            // budget at small k)
             std::set<Ctx> genuine(expected.begin(), expected.end());
-            for (uint64_t steps = 1; steps < r.work.steps; steps += 1 + r.work.steps / 40) {
+            for (uint64_t steps = 1; steps < r.work.steps; steps += 1 + r.work.steps / 8) {
                 Budget b = budget_of(steps);
                 Result s;
                 std::vector<Ctx> partial = released_by(

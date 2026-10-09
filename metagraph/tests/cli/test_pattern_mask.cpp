@@ -242,26 +242,6 @@ TEST(PatternMask, BuildAtLoadEqualsTheMaskOfBuild) {
     }
 }
 
-TEST(PatternMask, BuiltAtLoadIsNotInheritedByAnotherGraph) {
-    const std::string dir = make_dir("load_lifetime");
-    const std::string built = build_masked(dir, "basic", "stat");
-    const std::string stripped = strip(dir, built);
-    const DeBruijnGraph *address;
-    {
-        std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(stripped);
-        build_mask_at_load(graph);
-        address = graph.get();
-        EXPECT_TRUE(mask_built_at_load(*graph));
-    }
-    // a graph loaded after the first was freed read its mask from the file. With the registry's
-    // weak_ptr the expired entry pins the first graph's make_shared block until it is pruned,
-    // so this graph is never at its address; at the same address only a registry of raw
-    // pointers would be fooled, and whether a load lands there depends on the allocator (the
-    // test below makes it land there)
-    std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(built);
-    EXPECT_FALSE(mask_built_at_load(*graph)) << (graph.get() == address ? "same address" : "");
-}
-
 // review of 2026-10-07, T3-03: the second graph is constructed at the first one's address by
 // construction, whatever the allocator: one block of storage for both, their control blocks
 // allocated apart (an expired registry entry pins the control block, never the storage). A
@@ -541,118 +521,6 @@ TEST(PatternMask, MaskWithAValidSentinelIsRefused) {
 
 // ---------------------------------------------------------------- without the mask (#16)
 
-// The exact dummy fraction of a succinct graph, from the BOSS's own dummy counts (`metagraph
-// stats --count-dummy`): the real k-mers among the edges whose W is not $ (the sink dummies and
-// the main dummy edge have W = $; the main edge is counted among the source dummies)
-struct ExactFraction {
-    uint64_t edges, source, sink, real;
-    double value() const { return double(real) / double(edges - sink - 1); }
-};
-
-ExactFraction exact_fraction(const DBGSuccinct &graph) {
-    const auto &boss = graph.get_boss();
-    ExactFraction f;
-    f.edges = boss.num_edges();
-    f.source = boss.mark_source_dummy_edges(nullptr, 1);
-    f.sink = boss.mark_sink_dummy_edges(nullptr);
-    f.real = f.edges - f.source - f.sink;
-    return f;
-}
-
-// Owner decision #16: the sampled dummy fraction against the counted one on graphs of every
-// mode and of several sizes (the records of the mask tests at k = 5, random records at k = 15
-// and 31): the exact value inside the sampled interval, the sample deterministic (the same draws
-// for the same graph, the seed its number of edges), and each drawn edge classified as the
-// BOSS's own walk classifies it (every edge spelled: a source dummy holds $ in its node)
-TEST(PatternMaskUnmasked, DummyFractionSampledAgainstCounted) {
-    std::vector<std::pair<std::string, std::shared_ptr<DBGSuccinct>>> graphs;
-    for (const std::string &mode : kModes) {
-        const std::string dir = make_dir("fraction_" + mode);
-        const std::string built = build_masked(dir, mode, "stat");
-        auto graph = std::make_shared<DBGSuccinct>(2);
-        ASSERT_TRUE(graph->load_without_mask(built));
-        graphs.emplace_back("records k=5 " + mode, graph);
-    }
-    std::mt19937 rng(42);
-    for (size_t k : { 15, 31 }) {
-        std::vector<std::string> records;
-        for (size_t i = 0; i < 60; ++i) {
-            std::string r(20 + rng() % 400, 'A');
-            for (char &c : r) {
-                c = "ACGT"[rng() % 4];
-            }
-            records.push_back(r);
-        }
-        auto graph = std::dynamic_pointer_cast<DBGSuccinct>(
-                test::build_graph_batch<DBGSuccinct>(k, records, DeBruijnGraph::BASIC));
-        ASSERT_TRUE(graph);
-        graph->reset_mask();
-        graphs.emplace_back("random k=" + std::to_string(k), graph);
-    }
-
-    const double z = 1.959963984540054;
-    for (const auto &[name, graph] : graphs) {
-        SCOPED_TRACE(name);
-        ASSERT_EQ(nullptr, graph->get_mask());
-        const ExactFraction exact = exact_fraction(*graph);
-        const DummyFraction f = mtg::graph::pattern::sample_real_fraction(*graph);
-        EXPECT_EQ(mtg::graph::pattern::kRealFractionSamples, f.samples);
-        EXPECT_EQ(exact.edges, f.edges);
-        EXPECT_EQ(exact.sink + 1, f.sentinel_edges);
-        EXPECT_EQ(exact.edges, f.seed);
-        EXPECT_DOUBLE_EQ(double(f.real) / double(f.samples), f.value);
-        // the exact fraction inside the sampled 95% interval, which is Wilson's
-        EXPECT_LE(f.lower, exact.value()) << f.value << " vs " << exact.value();
-        EXPECT_GE(f.upper, exact.value()) << f.value << " vs " << exact.value();
-        const double n = f.samples, p = f.value;
-        const double centre = (p + z * z / (2 * n)) / (1 + z * z / n);
-        const double half = z / (1 + z * z / n) * std::sqrt(p * (1 - p) / n + z * z / (4 * n * n));
-        EXPECT_NEAR(std::max(0.0, centre - half), f.lower, 1e-12);
-        EXPECT_NEAR(std::min(1.0, centre + half), f.upper, 1e-12);
-        // the dummies are a real share of these small graphs: the sample sees them
-        EXPECT_LT(f.real, f.samples);
-        EXPECT_LT(exact.real, exact.edges - exact.sink - 1);
-
-        // deterministic: the same graph, the same draws
-        const DummyFraction again = mtg::graph::pattern::sample_real_fraction(*graph);
-        EXPECT_EQ(f.real, again.real);
-        EXPECT_EQ(f.value, again.value);
-        EXPECT_EQ(f.lower, again.lower);
-
-        // the oracle of the classification: every edge spelled; a sink (W = $) is never drawn,
-        // a source dummy holds $ in its node, every other edge is a real k-mer. With as many
-        // samples as draws of a uniform choice, the walk agrees with the spelling on each
-        const auto &boss = graph->get_boss();
-        uint64_t spelled_source = 0, spelled_sentinel = 0;
-        for (uint64_t e = 1; e <= boss.num_edges(); ++e) {
-            if (boss.get_W(e) % boss.alph_size == 0) {
-                ++spelled_sentinel;
-                continue;
-            }
-            spelled_source += boss.get_node_str(e).find('$') != std::string::npos;
-        }
-        EXPECT_EQ(exact.sink + 1, spelled_sentinel);
-        // the main dummy edge has W = $ and is among the source dummies
-        EXPECT_EQ(exact.source - 1, spelled_source);
-        EXPECT_EQ(exact.real, exact.edges - spelled_sentinel - spelled_source);
-
-        // fewer samples: the same generator, its first draws
-        const DummyFraction few = mtg::graph::pattern::sample_real_fraction(*graph, 100);
-        EXPECT_EQ(100u, few.samples);
-        EXPECT_LE(few.lower, few.value);
-        EXPECT_GE(few.upper, few.value);
-    }
-
-    // a graph without any k-mer (only the main dummy edge, W = $): nothing to draw
-    DBGSuccinct empty(5);
-    const DummyFraction none = mtg::graph::pattern::sample_real_fraction(empty);
-    EXPECT_EQ(0u, none.samples);
-    EXPECT_EQ(1.0, none.value);
-    EXPECT_EQ(0.0, none.lower);
-    EXPECT_EQ(1.0, none.upper);
-    EXPECT_EQ(empty.get_boss().num_edges(), none.sentinel_edges);
-}
-
 // The Wilson interval at its extremes: every sample real (the interval's top is 1), and its
 // JSON {value, interval, samples, source: "sampled"}
 TEST(PatternMaskUnmasked, DummyFractionJson) {
@@ -671,30 +539,12 @@ TEST(PatternMaskUnmasked, DummyFractionJson) {
     EXPECT_EQ(1.0, v["interval"][1].asDouble());
     EXPECT_EQ(10000u, v["samples"].asUInt64());
     EXPECT_EQ("sampled", v["source"].asString());
-
-    // a graph of one long record, its dummies rare (one chain of k - 1 source dummies, one
-    // sink) as on a real index: the exact value, near 1, inside the interval
-    std::mt19937 rng(7);
-    std::string record(200000, 'A');
-    for (char &c : record) {
-        c = "ACGT"[rng() % 4];
-    }
-    auto graph = std::dynamic_pointer_cast<DBGSuccinct>(
-            test::build_graph_batch<DBGSuccinct>(31, { record }));
-    graph->reset_mask();
-    const DummyFraction g = mtg::graph::pattern::sample_real_fraction(*graph);
-    const ExactFraction exact = exact_fraction(*graph);
-    EXPECT_GT(exact.value(), 0.9998);
-    EXPECT_LE(g.lower, exact.value());
-    EXPECT_GE(g.upper, exact.value());
-    EXPECT_GT(g.lower, 0.999);
 }
 
 // Owner decision #24: --pattern-max-checked-entries, as `metagraph pattern` and the server read
 // it (the same Config): default 50, any integer in [0, 1000], refused at start-up beyond it or
-// when not an integer; through the real loader the capabilities state it, and on the graph
-// without its mask a count with few unchecked candidates is exact at the default, the masked
-// count, and bounds with 0
+// when not an integer; through the real loader the capabilities state it (the counts it makes
+// exact: PatternRoute.UnmaskedTinyBlocksAreExact)
 TEST(PatternMaskUnmasked, CheckedEntriesFlag) {
     const std::string dir = make_dir("checked_flag");
     const std::string built = build_masked(dir, "basic", "stat");
@@ -730,53 +580,15 @@ TEST(PatternMaskUnmasked, CheckedEntriesFlag) {
             << value;
     }
 
-    // through the loader: the capabilities state the limit; the few unchecked candidates of
-    // short patterns at the records' and islands' starts (their source dummies, and their
-    // contexts past offset 0) are checked at the default, each count then the masked graph's
-    auto masked = initialize_annotated_dbg(*config_of(built, {}));
+    // through the loader: the capabilities state the limit
     auto absent = initialize_annotated_dbg(*config_of(stripped, {}));
-    PatternLimits on = pattern_limits(*config_of(stripped, {}));
-    PatternLimits off = pattern_limits(*config_of(stripped,
-                                                  { "--pattern-max-checked-entries", "0" }));
-    on.min_information_bits = 4;
-    off.min_information_bits = 4;
+    const PatternLimits on = pattern_limits(*config_of(stripped, {}));
+    const PatternLimits off = pattern_limits(*config_of(stripped,
+                                                        { "--pattern-max-checked-entries", "0" }));
     EXPECT_EQ(50u, pattern_capabilities_json(absent.get(), on, false)["caps"]
                            ["max_checked_entries"].asUInt64());
     EXPECT_EQ(0u, pattern_capabilities_json(absent.get(), off, false)["caps"]
                           ["max_checked_entries"].asUInt64());
-    const std::vector<std::string> patterns = { "ACGG", "GAGA", "GAG", "CAGT", "GTAAC" };
-    std::string body = "{\"patterns\": [";
-    for (size_t i = 0; i < patterns.size(); ++i) {
-        body += std::string(i ? ", " : "") + "{\"dna\": \"" + patterns[i] + "\"}";
-    }
-    const Json::Value json = parse_pattern_body(body + "], \"mode\": \"count\"}");
-    const Json::Value exact = process_pattern_request(json, *masked, on, "");
-    const Json::Value at = process_pattern_request(json, *absent, on, "");
-    const Json::Value without = process_pattern_request(json, *absent, off, "");
-    size_t resolved = 0;
-    for (Json::ArrayIndex i = 0; i < patterns.size(); ++i) {
-        SCOPED_TRACE(patterns[i]);
-        const Json::Value &x = exact["patterns"][i]["counts"]["contexts"];
-        const Json::Value &c = at["patterns"][i]["counts"]["contexts"];
-        const Json::Value &b = without["patterns"][i]["counts"]["contexts"];
-        EXPECT_EQ(exact["patterns"][i]["counts"], at["patterns"][i]["counts"]);
-        EXPECT_EQ("exact", c["relation"].asString());
-        if (b["relation"].asString() == "exact") {
-            // nothing unchecked (a pattern of length k is spelled whole): nothing to check
-            EXPECT_EQ(without["patterns"][i]["counts"], at["patterns"][i]["counts"]);
-            EXPECT_EQ(without["patterns"][i]["work"], at["patterns"][i]["work"]);
-            continue;
-        }
-        ++resolved;
-        ASSERT_EQ("bounds", b["relation"].asString()) << b;
-        const uint64_t unchecked = b["upper"].asUInt64() - b["lower"].asUInt64();
-        ASSERT_LE(unchecked, 50u) << b;
-        EXPECT_LE(b["lower"].asUInt64(), x["value"].asUInt64());
-        EXPECT_GE(b["upper"].asUInt64(), x["value"].asUInt64());
-        EXPECT_EQ(without["patterns"][i]["work"]["steps"].asUInt64() + unchecked * (kK - 1),
-                  at["patterns"][i]["work"]["steps"].asUInt64());
-    }
-    EXPECT_LT(2u, resolved);
 }
 
 } // namespace

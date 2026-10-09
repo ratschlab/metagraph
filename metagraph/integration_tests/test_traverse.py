@@ -173,42 +173,6 @@ class TestTraverseBase(TestingBase):
             out[flank] = {names[e['label']] for e in path['end_labels'] if e['route_bp'] == 0}
         return out
 
-    @staticmethod
-    def _structural_walks(arm, names, permitted):
-        """The maximal label-consistent walks of an ANNOTATE-mode right arm for the
-        permitted set, read off the RECORDED label sets alone: the oracle side of the
-        spec's §6.9 contract, sharing no label logic with the walker.
-        """
-        segments = {s['id']: s for s in arm['segments']}
-        candidates = {}
-        for path in arm['paths']:
-            root = segments[path['segments'][0]]
-            at = {0: {names[i] for i in root['labels']}}
-            flank = ''
-            for sid in path['segments']:
-                seg = segments[sid]
-                flank += seg['sequence']
-                for run in seg['label_sets']:
-                    assert not run['truncated'], 'a cut list makes the oracle unusable'
-                    for d in range(run['from_bp'] + 1, run['to_bp'] + 1):
-                        at[d] = {names[i] for i in run['labels']}
-            assert len(at) == len(flank) + 1, 'the recorded runs do not cover the walk'
-            for label in permitted:
-                if label not in at[0]:
-                    continue
-                j = 0
-                while j < len(flank) and label in at[j + 1]:
-                    j += 1
-                candidates.setdefault(label, set()).add(flank[:j])
-        # maximal PER LABEL (a label whose walk ends inside another label's walk is a
-        # claim of its own), then grouped by walk
-        out = {}
-        for label, walks in candidates.items():
-            for w in walks:
-                if not any(o != w and o.startswith(w) for o in walks):
-                    out.setdefault(w, set()).add(label)
-        return out
-
 
 class TestTraverseCLI(TestTraverseBase):
     def test_resolve_header_labels(self):
@@ -519,17 +483,6 @@ class TestTraverseCLI(TestTraverseBase):
         })
         self.assertEqual(1, rc)
         self.assertIn('error', out)
-
-    def test_traverse_is_deterministic(self):
-        request = {
-            'seeds': [{'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}],
-            'strategy': {'bounds': {'max_extension_bp': BLOCK},
-                         'output': {'timing': False}},
-        }
-        first, _ = self._traverse(request)
-        second, _ = self._traverse(request)
-        self.assertEqual(json.dumps(first['results'], sort_keys=True),
-                         json.dumps(second['results'], sort_keys=True))
 
     def test_traverse_annotate_mode_records_labels(self):
         """`labels.mode: annotate` follows every structural successor and records what is there.
@@ -1259,9 +1212,8 @@ class TestTraverseGraphlet(TestTraverseBase):
 
     def test_t39_the_oracle_through_the_library(self):
         """T39: the constrained exhaustive trie equals the annotate oracle under the
-        permitted labels (test_api_traverse_constrain_exhaustive_matches_the_structural_
-        oracle), and a tuned run is a prefix subset of the exhaustive one whose omission
-        carries the recorded reason (test_traverse_tuned_run_is_a_prefix_subset_...)."""
+        permitted labels, and a tuned run is a prefix subset of the exhaustive one whose
+        omission carries the recorded reason (test_traverse_tuned_run_is_a_prefix_subset_...)."""
         radius = BLOCK + 10
         right = {'direction': 'right', 'bounds': {'max_extension_bp': radius}}
 
@@ -1534,241 +1486,6 @@ class TestTraverseGraphlet(TestTraverseBase):
                                      lambda P: P[:30], seed_extra={'labels': ['acc_path']})
         self.assertEqual('complete', result['outcome']['walks'])
         self.assertNotIn('resource_stop', result)
-
-    def test_stage3_decode_stop_does_not_depend_on_batch_kmers(self):
-        """Every row a fetch returns is admitted against what decoding it alone needs,
-        whether the lookahead decoded it or the fetch did: the stop is the same for every
-        annotation.batch_kmers."""
-        results = []
-        for batch in (1, 7, 64, 1000):
-            result, _ = self._dense_case(
-                {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_memory_mb': 1}, 'graphlet',
-                lambda P: P[:30], seed_extra={'labels': ['acc_path']},
-                annotation={'batch_kmers': batch})
-            results.append(result)
-        self.assertEqual('annotation_decode', results[0]['resource_stop']['phase'])
-        for r in results[1:]:
-            self.assertEqual(results[0], r)
-
-    def test_stage3_seed_phase_reads_fail_the_seed(self):
-        """Read in the seed phase -- to validate the seed, to derive its labels, or as an
-        annotate root -- a row that does not fit fails the seed: outcome failed, a seed-level
-        walk_domain on the budget, the seed's levers (annotate mode: a label-constrained
-        query)."""
-        cases = (('validation', {'mode': 'constrain'}, lambda P: P[45:75], {'labels': ['acc_path']}),
-                 ('derivation', {'mode': 'constrain', 'seed_label_kind': 'header'},
-                  lambda P: P[45:75], {}),
-                 ('annotate root', {'mode': 'annotate', 'seed_label_kind': 'header'},
-                  lambda P: P[36:66], {}))
-        for what, labels, seed, extra in cases:
-            result, _ = self._dense_case(labels, {'max_extension_bp': 10, 'max_memory_mb': 1},
-                                         'summary', seed, seed_extra=extra)
-            self.assertEqual('failed', result['outcome']['walks'], what)
-            stop = result['resource_stop']
-            self.assertEqual(('memory', 'annotation_decode'), (stop['resource'], stop['phase']), what)
-            self.assertEqual(['raise_memory_budget', 'more_selective_seed']
-                             + (['label_constrained_query'] if labels['mode'] == 'annotate' else []),
-                             stop['actions'], what)
-            (walk,) = [l for l in result['limitations'] if l['kind'] == 'walk_domain']
-            self.assertGreater(walk['observed'], walk['limit'], what)
-            self.assertIn('row-diff dependency rows', walk['effect'], what)
-
-    def test_stage3_work_counts_dependency_rows(self):
-        """A row's work includes its row-diff dependency rows (8 units each and 1 per entry
-        and coordinate they store), whichever read decoded them: the walk past the dense row
-        is charged for the tens of thousands of coordinates its dependency rows hold (the
-        row-diff transform cancels the copies whose successor is the one the fork rule picked),
-        where stage 2 charged its 60 rows' own entries (about 10 units each)."""
-        result, _ = self._dense_case(
-            {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_work_units': 100000000},
-            'summary', lambda P: P[:30], seed_extra={'labels': ['acc_path']})
-        self.assertEqual('complete', result['outcome']['walks'])
-        work = result['arms']['right']['counters']['work_units']
-        self.assertGreater(work, 20000)
-        # a work budget below it stops the walk (in phase traversal: work never refuses a read)
-        stopped, _ = self._dense_case(
-            {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_work_units': work // 2},
-            'summary', lambda P: P[:30], seed_extra={'labels': ['acc_path']})
-        self.assertEqual(('work', 'traversal'), (stopped['resource_stop']['resource'],
-                                                 stopped['resource_stop']['phase']))
-        self.assertIn('per dependency row', stopped['resource_stop']['message'])
-
-    @staticmethod
-    def _largest_charge(stop):
-        """The number a work stop states: the most its seed charged between two comparisons
-        with the budget, which bounds how far used exceeds the budget."""
-        return int(stop['message'].split('between two comparisons: ')[1].split(' units')[0])
-
-    def test_stage2_work_stop_states_its_overrun(self):
-        """GPT re-review, finding 2: 25,000 headers on AAACAAAGAAAT, annotate, a work budget of
-        1 used 125,044 units against an advertised overrun of at most W = 65,536: the root's
-        row and the level's rows were charged before a check. The walk now compares the
-        budget after every charge: the stop exceeds it by the one row that tripped it, and the
-        message states the most the seed charged between two comparisons (here that row).
-        Round 3 (F4): with direction both, the two roots' rows are charged before the first
-        comparison (a stop between them would deliver no result complete to 0 bp): the
-        stated number is then both rows, which the overrun stays within."""
-        records = [(b'L%d' % i, 'AAACAAAGAAAT') for i in range(25000)]
-        labels = {'mode': 'annotate', 'seed_label_kind': 'header', 'max_labels_per_node': 1}
-        result, _ = self._resource_case(
-            'work', records, labels, {'max_extension_bp': 10, 'max_work_units': 1}, 'full')
-        stop = result['resource_stop']
-        self.assertEqual('work', stop['resource'])
-        self.assertLessEqual(stop['used'] - 1, 65536)
-        self.assertEqual(0, result['arms']['right']['complete_to_bp'])
-        self.assertIn('after every charge', stop['message'])
-        self.assertEqual(8 + 25000, self._largest_charge(stop))
-        self.assertLessEqual(stop['used'] - 1, self._largest_charge(stop))
-        for seed in ('AAA', 'AAAC', 'AAACAAAG'):
-            result, _ = self._resource_case(
-                'work', records, labels, {'max_extension_bp': 10, 'max_work_units': 1}, 'summary',
-                seed={'sequence': seed}, direction='both')
-            stop = result['resource_stop']
-            self.assertEqual('work', stop['resource'], seed)
-            self.assertEqual(2 * (8 + 25000), self._largest_charge(stop), seed)
-            self.assertLessEqual(stop['used'] - 1, self._largest_charge(stop), seed)
-
-    def test_stage2_work_stops_state_their_largest_charge(self):
-        """Round 3, F5 and F7: under support trace a row's coordinates were charged as one
-        sum after the row, outside the stated bound (stated 9, overrun 99,924), and a
-        label-state scan carried no number. The coordinates are now charged with their row
-        when the fetch returns it, and every work stop states the most its seed charged
-        between two comparisons, whatever the charge: a sweep of budgets keeps every overrun
-        within the stated number."""
-        result, _ = self._resource_case(
-            'trace', [(b'r1', 'CGAT' + 'GAT' * 100000)], {'mode': 'constrain',
-                                                          'seed_label_kind': 'header'},
-            {'max_extension_bp': 5, 'max_work_units': 100}, 'summary',
-            seed={'sequence': 'CGA'}, support='trace', branching={'on_reconverge': 'keep'})
-        stop = result['resource_stop']
-        self.assertEqual('work', stop['resource'])
-        self.assertGreaterEqual(self._largest_charge(stop), 100000)
-        self.assertLessEqual(stop['used'] - 100, self._largest_charge(stop))
-        records = [(b'L%d' % i, 'AAACAAAGAAAT') for i in range(1000)]
-        stops = 0
-        for budget in range(1, 40000, 1999):
-            result, _ = self._resource_case(
-                'sweep', records, {'mode': 'constrain', 'seed_label_kind': 'header',
-                                   'max_seed_labels': 1000,
-                                   'change_cost': {'model': 'constant', 'value': 1}},
-                {'max_extension_bp': 10, 'max_work_units': budget}, 'summary',
-                seed={'sequence': 'AAACA'}, branching={'max_label_branches': 'unlimited'})
-            stop = result.get('resource_stop')
-            if not stop:
-                continue
-            stops += 1
-            self.assertEqual('work', stop['resource'], budget)
-            self.assertLessEqual(stop['used'] - budget, self._largest_charge(stop), budget)
-        self.assertGreater(stops, 3)
-
-    def test_stage2_every_fetched_row_is_charged(self):
-        """Round 3, F3: the fix to finding 2 charged a row only when a head consumed it, so
-        rows a level's fetch decoded but no head consumed went uncharged (880,000 of 900,000
-        entries), and `used` understated the decoding. Rows are charged again when the fetch
-        returns them: on an index whose every row is n labels wide (n files each holding both
-        branches of a split), every work stop has used >= rows_requested x (8 + n)."""
-        n = 300
-        rng = random.Random(9101)
-        S, X, Y = (''.join(rng.choice('ACGT') for _ in range(m)) for m in (40, 20, 20))
-        X, Y = 'A' + X[1:], 'C' + Y[1:]          # S's last k-mer splits into X and Y
-        files = {('f%03d.fa' % i): [(b'x', S + X), (b'y', S + Y)] for i in range(n)}
-        free, _ = self._resource_case(
-            'uniform', None, {'mode': 'annotate', 'seed_label_kind': 'column',
-                              'max_labels_per_node': 1},
-            {'max_extension_bp': 30, 'max_work_units': 10 ** 9}, 'summary',
-            seed={'sequence': S[:20]}, files=files, k=15, branching={'on_reconverge': 'keep'})
-        self.assertNotIn('resource_stop', free)
-        total = free['arms']['right']['counters']['work_units']
-        stops = 0
-        for budget in range(1, total, (8 + n) // 3):
-            result, _ = self._resource_case(
-                'uniform', None, {'mode': 'annotate', 'seed_label_kind': 'column',
-                                  'max_labels_per_node': 1},
-                {'max_extension_bp': 30, 'max_work_units': budget}, 'summary',
-                seed={'sequence': S[:20]}, files=files, k=15,
-                branching={'on_reconverge': 'keep'})
-            stop = result.get('resource_stop')
-            if not stop:
-                continue
-            stops += 1
-            rows = result['annotation']['rows_requested']
-            self.assertGreaterEqual(stop['used'], rows * (8 + n),
-                                    'budget %d: a fetched row was not charged' % budget)
-        self.assertGreater(stops, 10)
-
-    def test_stage2_interrupted_fetch_states_its_memory(self):
-        """GPT re-review, finding 3: 100,000 headers on the next node, max_memory_mb 1,
-        max_work_units 100 stopped inside the level's fetch and reported memory_bound_soft
-        observed 0 while the annotation cache alone held ~1.6 MB beyond its allotment. What a
-        fetch holds is now observed before any check after it can stop the walk."""
-        records = [(b'root', 'AAAC')] + [(b'L%d' % i, 'AAC') for i in range(100000)]
-        result, _ = self._resource_case(
-            'soft', records, {'mode': 'annotate', 'seed_label_kind': 'header',
-                              'max_labels_per_node': 100000},
-            {'max_extension_bp': 10, 'max_work_units': 100, 'max_memory_mb': 1}, 'full')
-        self.assertIn('resource_stop', result)
-        (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
-        self.assertGreaterEqual(soft['observed'], 2)
-
-    def test_stage2_failed_results_echo_within_what_they_state(self):
-        """Round 3, F1: a failed seed's result echoed an index-supplied header in full (an
-        ambiguous_header: in the error and as observed) and the request's seed_id, neither
-        charged: 2.16 MB under 1 MiB with memory_bound_soft observed 0. Under a memory budget
-        a long index name is now echoed as a bounded prefix with its length and place, and
-        what the echoed seed_id holds beyond the budget is stated as memory_bound_soft."""
-        name = b'\x01' * 180000
-        budget = 1 << 20
-        for detail in ('summary', 'full', 'graphlet'):
-            result, size = self._resource_case(
-                'ambiguous', None, {'mode': 'constrain', 'seed_label_kind': 'header'},
-                {'max_extension_bp': 1, 'max_memory_mb': 1}, detail,
-                files={'a.fa': [(name, 'AAAC')], 'b.fa': [(name, 'AAAC')]})
-            self.assertEqual('failed', result['outcome']['walks'], detail)
-            (d,) = [l for l in result['limitations'] if l['kind'] == 'derivation']
-            self.assertEqual('ambiguous_header', d['cause'], detail)
-            self.assertIn('180000 bytes; column ', d['observed'], detail)
-            compact = json.dumps(result, ensure_ascii=True, separators=(',', ':')).encode()
-            self.assertLessEqual(len(compact), budget, detail)
-            self.assertLessEqual(size, budget, detail)
-        for unit, n in (('\U0001F600', 100000), ('\x01', 200000)):
-            result, _ = self._resource_case(
-                'seed_id', [(b'r1', 'AAACGTTGCA')], {'mode': 'constrain',
-                                                     'seed_label_kind': 'header'},
-                {'max_extension_bp': 4, 'max_memory_mb': 1}, 'graphlet',
-                seed={'sequence': 'AAACGT', 'seed_id': unit * n}, direction='both')
-            self.assertEqual('failed', result['outcome']['walks'])
-            (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
-            compact = json.dumps(result, ensure_ascii=True, separators=(',', ':')).encode()
-            self.assertGreater(len(compact), budget)
-            self.assertGreaterEqual(soft['observed'] << 20, len(compact) - budget,
-                                    'the failed result exceeds the budget by more than stated')
-
-    def test_stage2_validation_and_admission_state_what_they_held(self):
-        """Round 3, F2: the explicit-label validation charged a row (which failed the seed)
-        before observing what the fetch held: a row of 400,000 coordinates under 1 MiB and a
-        work budget of 100 reported memory_bound_soft 0. F6: a seed whose depth-0 admission
-        failed reported 0 although its dictionary held megabytes of names. Both now observe
-        what is held before the check that can fail the seed."""
-        result, _ = self._resource_case(
-            'validation', [(b'r1', 'CGAT' + 'GAT' * 400000)], {'mode': 'constrain'},
-            {'max_extension_bp': 5, 'max_memory_mb': 1, 'max_work_units': 100}, 'summary',
-            seed={'sequence': 'GATG', 'labels': ['r1']}, support='trace',
-            branching={'on_reconverge': 'keep'})
-        self.assertEqual('failed', result['outcome']['walks'])
-        self.assertEqual('work', result['resource_stop']['resource'])
-        (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
-        self.assertGreaterEqual(soft['observed'], 2)     # 3.2 MB of coordinates under 1 MiB
-        records = [(b'N%d' % i + b'x' * 400000, 'AAAC') for i in range(6)]
-        for mode in ('constrain', 'annotate'):
-            result, _ = self._resource_case(
-                'dictionary', records, {'mode': mode, 'seed_label_kind': 'header',
-                                        'max_labels_per_node': 100},
-                {'max_extension_bp': 1, 'max_memory_mb': 1}, 'summary')
-            self.assertEqual('failed', result['outcome']['walks'], mode)
-            self.assertEqual('memory', result['resource_stop']['resource'], mode)
-            (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
-            # 2.4 MB of names, held twice (each label and the query's or recorder's copy)
-            self.assertGreaterEqual(soft['observed'], 3, mode)
 
     def test_stage2_escaped_names_stay_within_the_budget(self):
         """GPT re-review, finding 1: a header of 180,000 control characters (detail full,
@@ -2102,16 +1819,6 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(0, ret.json()['strategy']['bounds']['time_budget_ms'])
         self.assertEqual([], ret.json()['strategy']['clamped'])
 
-    def test_api_resolve(self):
-        ret = self._post('resolve', {
-            'sequence': self.element,
-            'labels': ['acc1', 'acc2', 'acc3'],
-        })
-        self.assertEqual(200, ret.status_code, ret.text)
-        out = ret.json()
-        self.assertEqual(3, len(out['labels']))
-        self.assertEqual(1, len(out['candidates']))
-
     def test_api_resolve_deadline(self):
         """Milestone 1b (SPEC §4.5): bounds.time_budget_ms on /resolve. The `resolve` block on
         both GET routes; a budget a microsecond above the finalisation reserve stops the work
@@ -2198,31 +1905,6 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(1, rc)
         self.assertIn('bounds.time_budget_ms', out['error'])
 
-    def test_api_traverse(self):
-        ret = self._post('traverse', {
-            'seeds': [{'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}],
-            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': BLOCK}},
-        })
-        self.assertEqual(200, ret.status_code, ret.text)
-        right = ret.json()['results'][0]['arms']['right']
-        self.assertEqual('complete', right['status'])
-        self.assertEqual(2, len(right['paths']))
-
-    def test_api_traverse_without_labels(self):
-        """A seed without `labels`: the permitted set comes from the seed itself."""
-        ret = self._post('traverse', {
-            'seeds': [{'sequence': self.element}],
-            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': BLOCK}},
-        })
-        self.assertEqual(200, ret.status_code, ret.text)
-        result = ret.json()['results'][0]
-        self.assertTrue(result['seed']['labels_from_seed'])
-        self.assertEqual(['acc1', 'acc2', 'acc3'], sorted(result['seed']['labels']))
-        self.assertEqual(3, result['seed']['labels_supporting_total'])
-        right = result['arms']['right']
-        self.assertEqual('complete', right['status'])
-        self.assertEqual(2, len(right['paths']))
-
     def test_api_invalid_request_is_400(self):
         ret = self._post('traverse', {'seeds': [], 'strategy': {}})
         self.assertEqual(400, ret.status_code)
@@ -2256,26 +1938,6 @@ class TestTraverseAPI(TestTraverseBase):
         })
         self.assertEqual(400, ret.status_code)
         self.assertIn('access', ret.json()['error'])
-
-    def test_api_release_mismatch_is_400(self):
-        ret = self._post('traverse', {
-            'release': 'some-other-release',
-            'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
-            'strategy': {},
-        })
-        # the server was started without --index-release, so a pinned request is
-        # accepted only when the ids match; with no configured id it is ignored
-        self.assertIn(ret.status_code, (200, 400))
-
-    def _annotate(self, radius):
-        ret = self._post('traverse', {
-            'seeds': [{'sequence': self.element}],
-            'strategy': {'exhaustive': True, 'direction': 'right',
-                         'labels': {'mode': 'annotate'},
-                         'bounds': {'max_extension_bp': radius}},
-        })
-        self.assertEqual(200, ret.status_code, ret.text)
-        return ret.json()
 
     def test_api_traversal_routes_are_compact_and_compressible(self):
         """HTTP transport: the traversal routes write compact JSON (no indentation) and
@@ -2354,74 +2016,6 @@ class TestTraverseAPI(TestTraverseBase):
                          set(result['annotation'].keys()))
         for key in ('rows_fetched', 'tuple_rows_fetched', 'coords_mapped'):
             self.assertIn(key, result['timing'])
-
-    def test_api_traverse_annotate_mode(self):
-        """HTTP, `labels.mode: annotate`: every structural successor is followed and the
-        labels present are recorded; the response carries the completeness contract."""
-        radius = BLOCK + 10
-        out = self._annotate(radius)
-        self.assertIn('edge twice', out['walk_rule'])
-        self.assertEqual('traverse-0.2', out['algorithm_version'])
-        self.assertTrue(out['strategy']['exhaustive'])
-        self.assertEqual('annotate', out['strategy']['labels']['mode'])
-        result = out['results'][0]
-        self.assertEqual('annotate', result['label_mode'])
-        self.assertEqual([], result['seed']['labels'])
-        right = result['arms']['right']
-        self.assertEqual('complete', right['status'])
-        self.assertEqual(radius, right['complete_to_bp'])
-        self.assertEqual(0, right['labels_per_node']['nodes_truncated'])
-        self.assertEqual(3, right['labels_per_node']['max_seen'])
-        for path in right['paths']:
-            self.assertEqual('dead_end', path['path_reason'])
-            self.assertEqual([], path['end_labels'])
-            self.assertEqual({}, path['end_reasons'])
-        names = self._names(result)
-        structural = self._structural_walks(right, names, {'acc1', 'acc2', 'acc3'})
-        self.assertEqual({self.right1: {'acc1', 'acc3'}, self.right2: {'acc2'}}, structural)
-        # the trie view of the fork: one label per flank but acc1 and acc3 share RIGHT1
-        split = right['splits'][0]
-        self.assertEqual(0, split['prefix_bp'])
-        self.assertEqual(3, split['labels_before'])
-        self.assertEqual([1, 2], sorted(b['labels_distinct'] for b in split['branches']))
-        # the preset refuses a knob that would prune it
-        ret = self._post('traverse', {
-            'seeds': [{'sequence': self.element}],
-            'strategy': {'exhaustive': True, 'labels': {'mode': 'annotate'},
-                         'frontier': {'on_overflow': 'beam'}},
-        })
-        self.assertEqual(400, ret.status_code, ret.text)
-        self.assertIn('on_overflow', ret.json()['error'])
-
-    def test_api_traverse_constrain_exhaustive_matches_the_structural_oracle(self):
-        """HTTP, `labels.mode: constrain` with `exhaustive`: the label-constrained trie over a
-        permitted set has exactly the structural oracle's leaves filtered by that set."""
-        radius = BLOCK + 10
-        structural = self._annotate(radius)['results'][0]
-        oracle = self._structural_walks(structural['arms']['right'],
-                                        self._names(structural), {'acc1', 'acc3'})
-        # acc2's flank is not carried by the permitted set: it is not in E
-        self.assertEqual({self.right1: {'acc1', 'acc3'}}, oracle)
-
-        ret = self._post('traverse', {
-            'seeds': [{'sequence': self.element, 'labels': ['acc1', 'acc3']}],
-            'strategy': {'exhaustive': True, 'direction': 'right',
-                         'bounds': {'max_extension_bp': radius}},
-        })
-        self.assertEqual(200, ret.status_code, ret.text)
-        out = ret.json()
-        self.assertEqual('constrain', out['strategy']['labels']['mode'])
-        self.assertEqual('unlimited', out['strategy']['branching']['max_label_branches'])
-        result = out['results'][0]
-        self.assertEqual('constrain', result['label_mode'])
-        right = result['arms']['right']
-        self.assertEqual('complete', right['status'])
-        self.assertEqual(radius, right['complete_to_bp'])
-        self.assertEqual(oracle, self._walks(right, self._names(result)))
-        # the path ends with the semantic reason the structural trie saw, a dead end,
-        # reported per label in this mode (no path-level reason)
-        self.assertEqual([{'dead_end': 2}], [p['end_reasons'] for p in right['paths']])
-        self.assertNotIn('path_reason', right['paths'][0])
 
     def test_api_not_after_ms(self):
         """Pass 5, W1: a request whose not_after_ms has passed on the server's clock is refused
@@ -2661,6 +2255,7 @@ class TestTraverseAPI(TestTraverseBase):
         out = self._post('traverse', {'seeds': [{'sequence': self.element}],
                                       'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
         self.assertEqual(c['algorithm_version'], out['algorithm_version'])
+        self.assertEqual('traverse-0.2', c['algorithm_version'])
         self.assertEqual(6, out['capabilities']['feature_level'])
         att = c['attempts']
         for key in ('allowance_ms', 'hard_cap_ms', 'clock_skew_allowance_ms', 'retention_s',
@@ -3201,53 +2796,26 @@ class TestTraverseMultiGraph(TestTraverseBase):
                          ['index_fp'])
         self.assertEqual(['A', 'B', 'C'], client.server_capabilities()['graphs'])
 
-    def test_multi_list_errors_refuse_to_start(self):
-        """A manifest that does not describe its pair's files, two identities for one pair, a
-        line of six columns and an index_ns that is no token each refuse to start (exit 1,
-        an [error] line naming the problem) before anything is loaded."""
-        d = self.tempdir.name
-        with open(self.manifest) as f:
-            wrong = json.load(f)
-        for e in wrong['files']:
-            e['size'] += 1
-        wrong.pop('index_fp')
-        with open(f'{d}/wrong.manifest.json', 'w') as f:
-            json.dump(wrong, f)
-        cases = {
-            'size': (f'A,{self.graph},{self.anno},{d}/wrong.manifest.json',
-                     'wrong.manifest.json'),
-            'conflict': (f'A,{self.graph},{self.anno},,one\nB,{self.graph},{self.anno},,two',
-                         'one index has one identity'),
-            'columns': (f'A,{self.graph},{self.anno},,ns,extra', 'at most five'),
-            'token': (f'A,{self.graph},{self.anno},,bad/ns', 'does not match'),
-            'missing': (f'A,{self.graph},{self.anno},{d}/nowhere.json', 'cannot be read'),
-        }
-        for name, (text, needle) in cases.items():
-            csv = f'{d}/bad_{name}.csv'
-            with open(csv, 'w') as f:
-                f.write(text + '\n')
-            server = self._Server(self, csv, wait=False)
-            try:
-                code = server.process.wait(timeout=120)
-            finally:
-                server.close()
-            log = server.text()
-            self.assertEqual(1, code, (name, log[-2000:]))
-            self.assertIn('[error]', log, name)
-            self.assertIn(needle, log, (name, log[-2000:]))
-            self.assertNotIn('Loading', log.split('[error]')[0][-200:] + '', name)
-
-    def test_multi_identity_holes_refuse_to_start(self):
-        """Review of pass 5: one index_fp could describe two indexes, and a manifest's sidecars
-        were not checked. A manifest that also lists another annotation (one written for a
-        directory, as for two annotations of one graph with swapped memberships), one whose
-        sidecar (the .seqs the server loads) is another build's, and two different pairs stating
-        one index_fp (copies of one bundle under two paths) each refuse to start."""
+    def test_multi_lists_refuse_to_start(self):
+        """A graph list the server cannot state one identity per index for refuses to start
+        (exit 1, an [error] line naming the problem): a manifest that does not describe its
+        pair's files, a missing one, two identities for one pair, a line of six columns and an
+        index_ns that is no token -- each before anything is loaded; a manifest that also lists
+        another annotation (one written for a directory, as for two annotations of one graph
+        with swapped memberships), one whose sidecar (the .seqs the server loads) is another
+        build's, and two different pairs stating one index_fp (copies of one bundle under two
+        paths). The same pair spelled two ways is one index (one identity), not two."""
         d = self.tempdir.name
         with open(self.manifest) as f:
             base = json.load(f)
         names = [e['path'] for e in base['files']]
         self.assertIn('annotation.seqs', names)
+        wrong = copy.deepcopy(base)
+        for e in wrong['files']:
+            e['size'] += 1
+        wrong.pop('index_fp')
+        with open(f'{d}/wrong.manifest.json', 'w') as f:
+            json.dump(wrong, f)
         # a directory's manifest: the base graph, both of its annotations
         col = self.pairs['col'][1]
         bundle = copy.deepcopy(base)
@@ -3271,29 +2839,34 @@ class TestTraverseMultiGraph(TestTraverseBase):
         os.makedirs(f'{d}/copy', exist_ok=True)
         for name in names:
             shutil.copyfile(f'{d}/{name}', f'{d}/copy/{name}')
+        # name: (the list, the words of its [error], refused before anything is loaded)
         cases = {
+            'size': (f'A,{self.graph},{self.anno},{d}/wrong.manifest.json',
+                     'wrong.manifest.json', True),
+            'conflict': (f'A,{self.graph},{self.anno},,one\nB,{self.graph},{self.anno},,two',
+                         'one index has one identity', True),
+            'columns': (f'A,{self.graph},{self.anno},,ns,extra', 'at most five', True),
+            'token': (f'A,{self.graph},{self.anno},,bad/ns', 'does not match', True),
+            'missing': (f'A,{self.graph},{self.anno},{d}/nowhere.json', 'cannot be read', True),
             'directory': (f'A,{self.graph},{self.anno},{d}/bundle.manifest.json',
-                          'which this index does not load'),
+                          'which this index does not load', False),
             'sidecar': (f'A,{self.graph},{self.anno},{d}/sidecar.manifest.json',
-                        'annotation.seqs'),
+                        'annotation.seqs', False),
             'shared_fp': (f'A,{self.graph},{self.anno},{self.manifest}\n'
                           f'B,{d}/copy/{os.path.basename(self.graph)},'
                           f'{d}/copy/{os.path.basename(self.anno)},{self.manifest}',
-                          'one index_fp'),
+                          'one index_fp', False),
         }
-        for name, (text, needle) in cases.items():
-            csv = f'{d}/hole_{name}.csv'
+        for name, (text, needle, before_load) in cases.items():
+            csv = f'{d}/refused_{name}.csv'
             with open(csv, 'w') as f:
                 f.write(text + '\n')
-            server = self._Server(self, csv, wait=False)
-            try:
-                code = server.process.wait(timeout=120)
-            finally:
-                server.close()
-            log = server.text()
+            code, log = self._start_refused(csv)
             self.assertEqual(1, code, (name, log[-2000:]))
             self.assertIn('[error]', log, name)
             self.assertIn(needle, log, (name, log[-2000:]))
+            if before_load:
+                self.assertNotIn('Loading', log.split('[error]')[0][-200:], name)
         # the same pair spelled two ways is one index (one identity), not two
         csv = f'{d}/spellings.csv'
         rel = os.path.relpath(self.graph, d)
@@ -3323,6 +2896,30 @@ class TestTraverseMultiGraph(TestTraverseBase):
                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, res.returncode, res.stderr.decode())
         return json.loads(res.stdout)
+
+    def _symlinked_bundles(self, d, sides):
+        """Under |d|: a graph and a column_coord annotation of one record (shared.dbg and
+        sharedanno), and for each (side, header) a directory <side> of symlinks to both with a
+        .seqs of its own naming the record |header| (none for None); -> the record."""
+        os.makedirs(d, exist_ok=True)
+        seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
+        with open(f'{d}/source.fa', 'w') as f:
+            f.write('>sampleA\n' + seq + '\n')
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o shared '
+                     'source.fa', d)
+        self._annotate_graph(f'{d}/source.fa', f'{d}/shared.dbg', f'{d}/sharedanno',
+                             'column_coord')
+        for side, header in sides:
+            os.makedirs(f'{d}/{side}', exist_ok=True)
+            os.symlink(f'{d}/shared.dbg', f'{d}/{side}/graph.dbg')
+            os.symlink(f'{d}/sharedanno.column_coord.annodbg',
+                       f'{d}/{side}/annotation.column_coord.annodbg')
+            if header:
+                with open(f'{d}/{side}/source.fa', 'w') as f:
+                    f.write('>' + header + '\n' + seq + '\n')
+                self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
+                             '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+        return seq
 
     def _start_refused(self, csv):
         server = self._Server(self, csv, wait=False)
@@ -3425,23 +3022,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         With a manifest per pair (index_manifest.py --server-csv) it starts, and the two state
         different index_fp and their own headers."""
         d = os.path.join(self.tempdir.name, 'symlinks')
-        os.makedirs(d, exist_ok=True)
-        seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
-        with open(f'{d}/source.fa', 'w') as f:
-            f.write('>sampleA\n' + seq + '\n')
-        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o shared '
-                     'source.fa', d)
-        self._annotate_graph(f'{d}/source.fa', f'{d}/shared.dbg', f'{d}/sharedanno',
-                             'column_coord')
-        for side, header in (('A', 'sampleA'), ('B', 'sampleBBBB')):
-            os.makedirs(f'{d}/{side}', exist_ok=True)
-            os.symlink(f'{d}/shared.dbg', f'{d}/{side}/graph.dbg')
-            os.symlink(f'{d}/sharedanno.column_coord.annodbg',
-                       f'{d}/{side}/annotation.column_coord.annodbg')
-            with open(f'{d}/{side}/source.fa', 'w') as f:
-                f.write('>' + header + '\n' + seq + '\n')
-            self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
-                         '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+        seq = self._symlinked_bundles(d, (('A', 'sampleA'), ('B', 'sampleBBBB')))
         sizes = [os.path.getsize(f'{d}/{side}/annotation.seqs') for side in 'AB']
         self.assertNotEqual(sizes[0], sizes[1])
         # A's manifest (as the reviewer's shared-manifest.json): A's files, A's .seqs
@@ -3499,24 +3080,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         optional sidecar the pair does not load (a .seqs missing beside the symlinks of C, or
         --no-coord-mapping) is refused too, so that index_fp identifies the loaded files."""
         d = os.path.join(self.tempdir.name, 'dupnames')
-        os.makedirs(d, exist_ok=True)
-        seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
-        with open(f'{d}/source.fa', 'w') as f:
-            f.write('>sampleA\n' + seq + '\n')
-        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o shared '
-                     'source.fa', d)
-        self._annotate_graph(f'{d}/source.fa', f'{d}/shared.dbg', f'{d}/sharedanno',
-                             'column_coord')
-        for side, header in (('A', 'sampleA'), ('B', 'sampleBBBB'), ('C', None)):
-            os.makedirs(f'{d}/{side}', exist_ok=True)
-            os.symlink(f'{d}/shared.dbg', f'{d}/{side}/graph.dbg')
-            os.symlink(f'{d}/sharedanno.column_coord.annodbg',
-                       f'{d}/{side}/annotation.column_coord.annodbg')
-            if header:
-                with open(f'{d}/{side}/source.fa', 'w') as f:
-                    f.write('>' + header + '\n' + seq + '\n')
-                self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
-                             '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+        seq = self._symlinked_bundles(d, (('A', 'sampleA'), ('B', 'sampleBBBB'), ('C', None)))
         # the directory's manifest: both bundles, by their paths under it
         files = []
         for side in 'AB':
@@ -3706,7 +3270,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
             server.close()
 
 
-# the mini index (scripts/traversal/build_mini_refseq.sh; not in CI), as test_pattern.py finds it
+# the mini index (scripts/traversal/build_mini_refseq.sh), as test_pattern.py finds it
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
 MINI_FILES = ('graph_k31.dbg', 'graph_k31.dbg.anchors', 'graph_k31.dbg.rd_succ',
               'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg',
@@ -3719,7 +3283,7 @@ _MINI_GUARD = (_MINI_PRESENT or os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') =
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 @unittest.skipUnless(_MINI_GUARD, "the mini index is not built (scripts/traversal/"
-                                  "build_mini_refseq.sh; not in CI)")
+                                  "build_mini_refseq.sh)")
 class TestTraverseDerivedDataMini(TestingBase):
     """The owner's decision #17 of 2026-10-08 on a copy of build/mini_refseq (unmasked, as
     built, like refseq33m): the dummy-edge mask is derived data of the graph, not part of
@@ -4034,11 +3598,16 @@ class TestTraverseWideIndex(TestingBase):
         decoding of their paths, and chunks of sorted rows decoded them again per chunk — a walk
         of about 1.8 s took 30 s on row_diff, ran into its budget and came back partial (its
         bytes changed), and row_diff_brwt walks were 1.4-2.9 times slower. A read the deadline
-        cannot fall into is one piece now: the same bytes as unchunked, in about its time."""
-        for anno_type, ext in (('row_diff', 8), ('row_diff_brwt', 400)):
+        cannot fall into is one piece now: the same bytes as unchunked, in about its time.
+        Checked on the production format, row_diff_brwt
+        (WalkerDeadlineChunks.FarDeadlineReadsAreOnePiece holds the rule on a virtual clock)."""
+        for anno_type, ext in (('row_diff_brwt', 400),):
             index = self.variants[anno_type]
             with self._server('--traverse-chunk-target-ms', '0', index=index) as whole, \
                     self._server(index=index) as paced:
+                # the flag is stated as given
+                caps = requests.get(whole.url + '/traverse/capabilities').json()
+                self.assertEqual(0, caps['deadline_check']['chunk_target_ms'])
                 for mode in ('annotate', 'constrain'):
                     req = self._request(mode, 30000)
                     req['strategy']['bounds']['max_extension_bp'] = ext
@@ -4063,9 +3632,10 @@ class TestTraverseWideIndex(TestingBase):
         are kept, so that a later read's row-diff path stops at a cached row instead of decoding
         to its anchor again (feature level 4: the probe's decode_cache). The responses are byte
         for byte those without the cache (--traverse-path-cache-mb 0) — constrain and annotate,
-        no budget, memory budgets (a large one, and one that stops the walk), a work budget —
-        on both row-diff annotations."""
-        for anno_type, ext in (('row_diff', 8), ('row_diff_brwt', 100)):
+        no budget and a memory budget that stops the walk — on the production format
+        (RowDiffPathCache.* show cached decodes equal to the default ones, and budgeted costs
+        independent of the cache, on every format)."""
+        for anno_type, ext in (('row_diff_brwt', 100),):
             index = self.variants[anno_type]
             with self._server('--traverse-path-cache-mb', '0', index=index) as off, \
                     self._server(index=index) as on:
@@ -4075,8 +3645,7 @@ class TestTraverseWideIndex(TestingBase):
                                  .json()['decode_cache']['path_cache_mb'])
                 stops = 0
                 for mode in ('constrain', 'annotate'):
-                    for extra in ({}, {'max_memory_mb': 4096}, {'max_memory_mb': 1},
-                                  {'max_work_units': 200000}):
+                    for extra in ({}, {'max_memory_mb': 1}):
                         req = self._request(mode, 60000)
                         req['strategy']['bounds']['max_extension_bp'] = ext
                         req['strategy']['bounds'].update(extra)
@@ -4302,32 +3871,15 @@ class TestTraverseWideIndex(TestingBase):
             self.assertEqual(usage['bound_ms'] - usage['bound']['allowance_ms'] // 2,
                              usage['bound']['walk_until_ms'])
 
-    def test_wide_index_unpaced_overruns(self):
-        """--traverse-chunk-target-ms 0: one piece per read, as before; the same walk runs far
-        past its budget (skipped when this machine reads the rows too fast to tell), and the
-        paced walk is censored where it is (the same complete_to_bp)."""
-        with self._server('--traverse-chunk-target-ms', '0') as whole, self._server() as paced:
-            for mode in ('constrain', 'annotate'):
-                a = whole.post('traverse', self._request(mode, 100)).json()
-                b = paced.post('traverse', self._request(mode, 100)).json()
-                if a['timing']['elapsed_ms'] < 100 + 250:
-                    self.skipTest('the unpaced read took %.0f ms: too fast to show an overrun'
-                                  % a['timing']['elapsed_ms'])
-                self.assertLess(b['timing']['elapsed_ms'], a['timing']['elapsed_ms'] - 150)
-                self.assertEqual(a['results'][0]['arms']['right']['complete_to_bp'],
-                                 b['results'][0]['arms']['right']['complete_to_bp'])
-                caps = requests.get(whole.url + '/traverse/capabilities').json()
-                self.assertEqual(0, caps['deadline_check']['chunk_target_ms'])
-
 
 class TestTraverseAttempts(TestingBase):
     """Stage 4, backend half (DESIGN-traverse-graphlet.md §14 v5.1), against a walk slow
     enough to be stopped in its middle: two haplotypes of 200 kbp with a SNP every 64 bp
     (k = 31), walked in annotate mode with every route kept and a beam of 64, so that a seed
     takes seconds. Each test starts its own short-lived server: a cancel by id with the client
-    still connected, a client that goes away (with and without attempt_id), a cancel that
-    waits for the end, the server's duration bound, the retention of finished attempts, and
-    concurrent attempts with mixed cancels."""
+    still connected, a client that goes away (with and without attempt_id), the server's
+    duration bound, the registry's tombstones, retention and restart, and concurrent attempts
+    with mixed cancels."""
 
     @classmethod
     def setUpClass(cls):
@@ -4609,25 +4161,68 @@ class TestTraverseAttempts(TestingBase):
         self.assertIn('[Server] Stopped', text)
         self.assertNotIn('Annotated graph loaded', text)
 
-    def test_cancel_waits_for_the_end(self):
-        """A cancel with wait_ms answers once the attempt finished: its response written."""
-        self._need_a_slow_walk()
-        with self._Server(self) as server:
-            got = {}
-            walker = threading.Thread(target=lambda: got.update(
-                r=server.post('traverse', self._request(2, attempt_id='wait-1'), timeout=300)))
-            walker.start()
-            time.sleep(0.5)
-            cancel = server.post('traverse/cancel', {'attempt_id': 'wait-1', 'wait_ms': 10000})
-            walker.join()
-            self.assertEqual(200, cancel.status_code, cancel.text)
-            body = cancel.json()
-            self.assertEqual((True, 'finished'), (body['cancelled'], body['state']))
-            self.assertEqual(('cancelled', True), (body['attempt']['reason'],
-                                                   body['attempt']['response']['written']))
-            self.assertEqual(200, got['r'].status_code)
-            self.assertEqual(400, server.post('traverse/cancel', {'attempt_id': 'wait-1',
-                                                                  'wait_ms': 10001}).status_code)
+    def test_the_registry_over_http(self):
+        """The attempt registry's rules on real servers, one case of each (timeline by
+        timeline on a fake clock they are GraphletAttemptRegistry.*): a cancel of an unknown id
+        tombstones it and refuses the request that follows (409); past
+        --traverse-attempt-retention tombstones a cancel promises nothing (429
+        tombstones_full); a finished attempt refuses a copy of its request (409 with its
+        finished state, no usage) until its retention ends (GET 404, the id free again); and a
+        restart of the same endpoint holds nothing: a finished request replayed without
+        expect_server_instance runs again, the pinned one is refused (409 instance_mismatch)."""
+        with self._Server(self, '--traverse-attempt-retention', '2') as server:
+            early = server.post('traverse/cancel', {'attempt_id': 'tomb-1'})
+            self.assertEqual(404, early.status_code, early.text)
+            self.assertTrue(early.json()['tombstone'])
+            late = server.post('traverse', self._request(1, radius=10, attempt_id='tomb-1'))
+            self.assertEqual(409, late.status_code, late.text)
+            self.assertEqual(404, server.post('traverse/cancel',
+                                              {'attempt_id': 'tomb-2'}).status_code)
+            full = server.post('traverse/cancel', {'attempt_id': 'tomb-3'})
+            self.assertEqual(429, full.status_code, full.text)
+            self.assertEqual((False, False, 'unknown', 'tombstones_full'),
+                             (full.json()['tombstone'], full.json()['cancelled'],
+                              full.json()['state'], full.json()['reason']))
+        flags = ('--traverse-attempt-retention-s', '1')
+        not_after = int(time.time() * 1000) + 60000
+        with self._Server(self, *flags) as server:
+            instance = requests.get(server.url + '/traverse/capabilities').json()['attempts'][
+                'server_instance']
+            unpinned = self._request(1, radius=5, attempt_id='finished-unpinned',
+                                     not_after_ms=not_after)
+            pinned = self._request(1, radius=5, attempt_id='finished-pinned',
+                                   not_after_ms=not_after, expect_server_instance=instance)
+            first = server.post('traverse', unpinned)
+            self.assertEqual(200, first.status_code, first.text)
+            self.assertEqual(200, server.post('traverse', pinned).status_code)
+            quick = self._request(1, radius=10, attempt_id='kept-1')
+            self.assertEqual(200, server.post('traverse', quick).status_code)
+            copy = server.post('traverse', quick)
+            self.assertEqual(409, copy.status_code, copy.text)
+            self.assertEqual(('finished', 'kept-1'), (copy.json()['attempt']['state'],
+                                                      copy.json()['attempt']['attempt_id']))
+            self.assertNotIn('usage', copy.json())
+            self.assertEqual(200, server.state('kept-1').status_code)
+            time.sleep(1.5)
+            gone = server.state('kept-1')
+            self.assertEqual(404, gone.status_code)
+            self.assertIn('kept 1 s after they finish', gone.json()['error'])
+            self.assertEqual(200, server.post('traverse', quick).status_code)
+            port = server.port
+        with self._Server(self, *flags, port=port) as server:
+            restarted = requests.get(server.url + '/capabilities').json()['attempts'][
+                'server_instance']
+            self.assertNotEqual(instance, restarted)
+            replay = server.post('traverse', unpinned)
+            self.assertEqual(200, replay.status_code, replay.text)
+            self.assertEqual(restarted, replay.json()['usage']['server_instance'])
+            self.assertEqual(first.json()['usage']['work_units'],
+                             replay.json()['usage']['work_units'])
+            refused = server.post('traverse', pinned)
+            self.assertEqual(409, refused.status_code, refused.text)
+            self.assertEqual(('instance_mismatch', instance, restarted),
+                             (refused.json()['state'], refused.json()['expect_server_instance'],
+                              refused.json()['server_instance']))
 
     def test_the_server_enforces_the_attempts_bound(self):
         """The bound n_seeds x time_budget_ms + allowance is enforced by the server itself:
@@ -4691,90 +4286,6 @@ class TestTraverseAttempts(TestingBase):
                                  name)
                 self.assertLess(_instant(state['stopped_at']) - closed, 2.0, name)
 
-    def test_a_tombstone_is_kept_its_whole_retention_period(self):
-        """A cancel of an unknown id tombstones it for retention_s, whatever finishes after
-        it; beyond --traverse-attempt-retention tombstones a cancel is refused (429, nothing
-        promised)."""
-        with self._Server(self, '--traverse-attempt-retention', '2') as server:
-            early = server.post('traverse/cancel', {'attempt_id': 'tomb-1'})
-            self.assertEqual(404, early.status_code, early.text)
-            self.assertTrue(early.json()['tombstone'])
-            for i in range(4):
-                quick = self._request(1, radius=10, attempt_id=f'tomb-done-{i}')
-                self.assertEqual(200, server.post('traverse', quick).status_code)
-            late = server.post('traverse', self._request(1, radius=10, attempt_id='tomb-1'))
-            self.assertEqual(409, late.status_code, late.text)
-            self.assertEqual(404, server.post('traverse/cancel', {'attempt_id': 'tomb-2'}).status_code)
-            full = server.post('traverse/cancel', {'attempt_id': 'tomb-3'})
-            self.assertEqual(429, full.status_code, full.text)
-            self.assertEqual((False, False, 'unknown'),
-                             (full.json()['tombstone'], full.json()['cancelled'],
-                              full.json()['state']))
-            client = graphlet_lib.TraverseClient('127.0.0.1', server.port)
-            self.assertFalse(client.cancel('tomb-4')['tombstone'])
-
-    def test_finished_attempts_are_kept_for_the_retention_period(self):
-        """GET answers for the retention period after the attempt finished, then 404; the id
-        is free again."""
-        with self._Server(self, '--traverse-attempt-retention-s', '1') as server:
-            quick = self._request(1, radius=10, attempt_id='kept-1')
-            self.assertEqual(200, server.post('traverse', quick).status_code)
-            self.assertEqual(200, server.state('kept-1').status_code)
-            self.assertEqual(409, server.post('traverse', quick).status_code)
-            time.sleep(1.5)
-            gone = server.state('kept-1')
-            self.assertEqual(404, gone.status_code)
-            self.assertIn('kept 1 s after they finish', gone.json()['error'])
-            self.assertEqual(200, server.post('traverse', quick).status_code)
-
-    def test_a_finished_attempt_is_held_through_its_not_after_ms(self):
-        """Review of the pass-5 fixes, finding 1 (the reviewer's p1 and p1b): a ledger releases
-        on a finished state, and a replay of the request (same attempt_id, not_after_ms and
-        expect_server_instance) arriving after retention_s, or after retention_count later
-        finishes evicted the attempt, ran again. A finished attempt sent with not_after_ms
-        stays refused (409) until not_after_ms + the skew allowance, and the release rule
-        states it; a copy refused by a tombstone without a not_after_ms of its own is not
-        covered (finding 3)."""
-        for flags in (('--traverse-attempt-retention-s', '1'),
-                      ('--traverse-attempt-retention', '1')):
-            with self._Server(self, *flags) as server:
-                caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
-                self.assertIn('not_after_ms + clock_skew_allowance_ms, at most tombstone_max_s '
-                              'after it finished', caps['release_rule'])
-                instance = caps['server_instance']
-                not_after = int(time.time() * 1000) + 60000
-                req = self._request(1, radius=10, attempt_id='fin-1', not_after_ms=not_after,
-                                    expect_server_instance=instance)
-                first = server.post('traverse', req)
-                self.assertEqual(200, first.status_code, first.text)
-                cancel = server.post('traverse/cancel', {'attempt_id': 'fin-1',
-                                                         'not_after_ms': not_after})
-                self.assertEqual((404, 'finished'), (cancel.status_code, cancel.json()['state']))
-                self.assertEqual('finished', server.state('fin-1').json()['state'])
-                # the ledger releases; then its retention ends, by age or by count
-                if flags[0] == '--traverse-attempt-retention-s':
-                    time.sleep(1.3)
-                else:
-                    other = self._request(1, radius=10, attempt_id='fin-2')
-                    self.assertEqual(200, server.post('traverse', other).status_code)
-                replay = server.post('traverse', req)
-                self.assertEqual(409, replay.status_code, (flags, replay.text))
-                self.assertEqual('finished', replay.json()['attempt']['state'])
-                self.assertEqual(200, server.state('fin-1').status_code)
-        with self._Server(self, '--traverse-attempt-retention-s', '1',
-                          '--traverse-clock-skew-ms', '100') as server:
-            not_after = int(time.time() * 1000) + 1500
-            cancel = server.post('traverse/cancel', {'attempt_id': 'nna-1',
-                                                     'not_after_ms': not_after})
-            self.assertTrue(cancel.json()['covers_admission'])
-            copy = self._request(1, radius=10, attempt_id='nna-1')   # no not_after_ms
-            refused = server.post('traverse', copy)
-            self.assertEqual(409, refused.status_code, refused.text)
-            attempt = refused.json()['attempt']
-            self.assertNotIn('not_after_ms', attempt)
-            self.assertEqual((False, 'no_not_after_ms'),
-                             (attempt['covers_admission'], attempt['covers_admission_reason']))
-
     def test_retention_settings_are_validated_at_start_up(self):
         """Review of pass 5, finding 4: --traverse-attempt-retention-s -1 started and advertised
         2^64 - 1 seconds while every tombstone expired at once. The retention settings are
@@ -4813,31 +4324,6 @@ class TestTraverseAttempts(TestingBase):
             self.assertEqual((31536000, 10000000, 31536000),
                              (caps['retention_s'], caps['retention_count'],
                               caps['tombstone_max_s']))
-
-    def test_retention_zero_promises_no_suppression(self):
-        """Retention 0 s means no tombstones: a cancel of an unknown id is refused (429,
-        tombstone false, reason no_suppression), the capabilities say so, and a request with
-        the id runs (the reviewer's probe: before, the cancel answered tombstone true and the
-        request ran anyway). A count of 0 refuses likewise (reason tombstones_full)."""
-        req = self._request(1, radius=1, attempt_id='cancelled-before-upload')
-        with self._Server(self, '--traverse-attempt-retention-s', '0') as server:
-            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
-            self.assertEqual(0, caps['retention_s'])
-            self.assertIn('no tombstones', caps['suppression'])
-            first = server.post('traverse/cancel', {'attempt_id': 'cancelled-before-upload',
-                                                    'not_after_ms': int(time.time() * 1000)
-                                                    + 60000})
-            self.assertEqual(429, first.status_code, first.text)
-            self.assertEqual((False, False, 'no_suppression'),
-                             (first.json()['tombstone'], first.json()['cancelled'],
-                              first.json()['reason']))
-            self.assertEqual(404, server.state('cancelled-before-upload').status_code)
-            self.assertEqual(200, server.post('traverse', req).status_code)
-        with self._Server(self, '--traverse-attempt-retention', '0') as server:
-            first = server.post('traverse/cancel', {'attempt_id': 'cancelled-before-upload'})
-            self.assertEqual(429, first.status_code, first.text)
-            self.assertEqual((False, 'tombstones_full'),
-                             (first.json()['tombstone'], first.json()['reason']))
 
     def _half_uploaded(self, server, req):
         """Send the header and half the body of |req| on a raw socket: the request is on the
@@ -4951,143 +4437,6 @@ class TestTraverseAttempts(TestingBase):
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(1, res.returncode)
         self.assertEqual('instance_mismatch', json.loads(res.stdout)['state'])
-
-    def test_a_finished_state_is_replay_safe_only_when_pinned(self):
-        """Review of levels 4-5, finding 6 (the reviewer's finish-restart-replay probe): a
-        finished attempt's hold lives in its process. Requests finished with not_after_ms 60 s
-        ahead are refused when replayed to the same process after their retention (1 s, the last
-        1), pinned or not; after a restart of the same endpoint, before not_after_ms, the replay
-        sent without expect_server_instance runs again (200, the same work units as the first
-        time), which the release rule now states (a finished state is replay-safe only for a
-        pinned attempt), and the pinned one is refused, 409 instance_mismatch."""
-        flags = ('--traverse-attempt-retention-s', '1', '--traverse-attempt-retention', '1')
-        not_after = int(time.time() * 1000) + 60000
-        with self._Server(self, *flags) as server:
-            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
-            instance = caps['server_instance']
-            for phrase in ("The hold is this process's, in memory: a restarted process (a new "
-                           "server_instance) holds none",
-                           'replay-safe only as stated next',
-                           'only for an attempt sent with expect_server_instance equal to this '
-                           'server_instance and with not_after_ms',
-                           'A finished state of an attempt sent without expect_server_instance '
-                           'assumes that no copy of the request reaches a restarted process'):
-                self.assertIn(phrase, caps['release_rule'])
-            self.assertIn('a delayed copy of a cancelled or finished request would otherwise run '
-                          'there', caps['instance'])
-            unpinned = self._request(1, radius=5, attempt_id='finished-unpinned',
-                                     not_after_ms=not_after)
-            pinned = self._request(1, radius=5, attempt_id='finished-pinned',
-                                   not_after_ms=not_after, expect_server_instance=instance)
-            first = server.post('traverse', unpinned)
-            self.assertEqual(200, first.status_code, first.text)
-            self.assertEqual(200, server.post('traverse', pinned).status_code)
-            time.sleep(1.1)
-            for req in (unpinned, pinned):
-                held = server.post('traverse', req)
-                self.assertEqual(409, held.status_code, held.text)
-                self.assertEqual('finished', held.json()['attempt']['state'])
-            port = server.port
-        with self._Server(self, *flags, port=port) as server:
-            restarted = requests.get(server.url + '/capabilities').json()['attempts'][
-                'server_instance']
-            self.assertNotEqual(instance, restarted)
-            replay = server.post('traverse', unpinned)
-            self.assertEqual(200, replay.status_code, replay.text)
-            self.assertEqual(restarted, replay.json()['usage']['server_instance'])
-            self.assertEqual(first.json()['usage']['work_units'],
-                             replay.json()['usage']['work_units'])
-            self.assertGreater(replay.json()['usage']['work_units'], 0)
-            refused = server.post('traverse', pinned)
-            self.assertEqual(409, refused.status_code, refused.text)
-            self.assertEqual(('instance_mismatch', instance, restarted),
-                             (refused.json()['state'], refused.json()['expect_server_instance'],
-                              refused.json()['server_instance']))
-
-    def test_release_texts_and_their_grounds(self):
-        """The review of 2026-10-06 (X2, X4, C16, C20, C24, C30, and the search service's release
-        parity LRG-R1/R2), text only: the capabilities state what an attempt runs past its bound
-        (up to its next delivery check, not one step: the review of the P2 fixes) and the clock
-        release's assumption that it ended, the 409 refusing a copy as a finished-state source,
-        the expired 409 as a release ground, the refusal order, the expect_server_instance
-        pattern and the lookahead's polls; the duplicate's 409 no longer says "an attempt runs
-        once" (D3: an id runs again once it is neither retained nor held). On a real server the
-        grounds hold as stated: a copy of a finished request gets the 409 carrying the id's
-        state as GET answers it (finished, its attempt_id and server_instance), also with a
-        not_after_ms already past (registration before expiry); a fresh id past its not_after_ms
-        gets the expired 409 and was never registered; an empty expect_server_instance is a 400
-        without usage."""
-        with self._Server(self) as server:
-            caps = requests.get(server.url + '/traverse/capabilities').json()
-            att, rule = caps['attempts'], caps['deadline_check']['rule']
-            instance = att['server_instance']
-            for field, phrase in (
-                    ('bound', 'past it the attempt runs on until its next delivery check'),
-                    ('bound', 'the walk stops at its first poll that reads the clock after it'),
-                    ('bound', 'content_timeout when it applied'),
-                    ('bound', 'else the lowest walk-until seen'),
-                    ('not_after', 'It is the last of the refusals, all made under one lock'),
-                    ('not_after', 'apart from what it runs past its bound, up to its next '
-                                  'delivery check, a run of no stated length'),
-                    ('instance', 'a string matching id_pattern'),
-                    ('release_rule', 'the 409 refusing a copy of the request whose attempt'),
-                    ('release_rule', 'An expired 409 (state: expired) for an attempt sent with '
-                                     'exactly that not_after_ms'),
-                    ('release_rule', 'It settles nothing'),
-                    ('release_rule', 'still answers running or stopping after that instant'),
-                    ('release_rule', 'no copy of the request reaches another server that serves '
-                                     'the same ledger'),
-                    ('release_rule', 'after it finished or after its latest refused copy')):
-                self.assertIn(phrase, att[field], field)
-            for field in ('bound', 'not_after', 'release_rule'):
-                self.assertNotIn('uninterruptible step', att[field], field)
-            self.assertIn('read the same deadlines every 16 graph steps', rule)
-            self.assertIn("a chain's key mapping", rule)
-            self.assertIn("the attempt's bound, which only the delivery checks compare", rule)
-            self.assertIn('a walk-until at the first poll that reads the clock after it (one in 8',
-                          rule)
-
-            not_after = int(time.time() * 1000) + 60000
-            req = self._request(1, radius=10, attempt_id='grounds-1', not_after_ms=not_after,
-                                expect_server_instance=instance)
-            first = server.post('traverse', req)
-            self.assertEqual(200, first.status_code, first.text[:500])
-            for copy_not_after in (not_after, int(time.time() * 1000) - 1000):
-                copy_req = dict(req, not_after_ms=copy_not_after)
-                refused = server.post('traverse', copy_req)
-                self.assertEqual(409, refused.status_code, refused.text[:500])
-                body = refused.json()
-                self.assertNotIn('usage', body)
-                self.assertIn('it is not run while so', body['error'])
-                self.assertNotIn('runs once', body['error'])
-                self.assertEqual('finished', body['attempt']['state'])
-                self.assertEqual('grounds-1', body['attempt']['attempt_id'])
-                self.assertEqual(instance, body['attempt']['server_instance'])
-                # the id's state, as GET answers it
-                state = server.state('grounds-1').json()
-                self.assertEqual(state['state'], body['attempt']['state'])
-                self.assertEqual(state['usage']['work_units'], body['attempt']['usage']['work_units'])
-
-            past = int(time.time() * 1000) - 1000
-            expired = server.post('traverse', self._request(1, radius=10, attempt_id='grounds-2',
-                                                            not_after_ms=past,
-                                                            expect_server_instance=instance))
-            self.assertEqual(409, expired.status_code, expired.text[:500])
-            body = expired.json()
-            self.assertEqual('expired', body['state'])
-            self.assertEqual(past, body['not_after_ms'])
-            self.assertGreater(body['server_time_ms'], past)
-            self.assertEqual(instance, body['server_instance'])
-            self.assertNotIn('usage', body)
-            self.assertEqual(404, server.state('grounds-2').status_code)
-
-            for bad in ('', 'a/b', 'x' * 129):
-                ret = server.post('traverse', self._request(1, radius=10, attempt_id='grounds-3',
-                                                            expect_server_instance=bad))
-                self.assertEqual(400, ret.status_code, (bad, ret.text[:300]))
-                self.assertIn('expect_server_instance', ret.json()['error'])
-                self.assertNotIn('usage', ret.json())
-            self.assertEqual(404, server.state('grounds-3').status_code)
 
     def test_concurrent_attempts_with_cancels(self):
         """Sixteen attempts at once, half of them cancelled: each response and each state

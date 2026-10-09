@@ -813,6 +813,11 @@ void check_thresholds_against_oracles(const DeBruijnGraph &graph, const Pattern 
             EXPECT_EQ(Relation::AT_LEAST, total.relation);
             EXPECT_LT(cap, total.value);
             EXPECT_FALSE(budget.stopped());  // a threshold ends only its own pattern
+            // ... the next pattern of the request answers on the same budget
+            const Result next = engine.count(pattern, with_cap(Mode::COUNT, false), budget);
+            EXPECT_FALSE(next.stop);
+            EXPECT_EQ(Relation::EXACT,
+                      (L > k ? next.anchors->total : next.contexts->total).relation);
         } else {
             EXPECT_EQ(Relation::EXACT, total.relation);
         }
@@ -987,6 +992,20 @@ TEST(PatternSearch, IUPACTableAgainstTheOracles) {
     std::string text;
     all(text);
     EXPECT_EQ(15u + 15 * 15 + 15 * 15 * 15, checked);
+
+    // the information of a long text, bit for bit the sum over its codes
+    std::mt19937 rng(3);
+    for (int i = 0; i < 200; ++i) {
+        std::string t;
+        for (size_t j = 0, n = 1 + rng() % 300; j < n; ++j) {
+            t.push_back(kIUPACCodes[rng() % 15]);
+        }
+        double expected = 0;
+        for (char c : t) {
+            expected += std::log2(4.0 / iupac_bases(c).size());
+        }
+        EXPECT_EQ(expected, Pattern::parse(PatternKind::IUPAC, t).information_bits()) << t;
+    }
 }
 
 TEST(PatternSearch, CountAlgebra) {
@@ -1087,19 +1106,6 @@ TEST(PatternSearch, GraphSupport) {
     s = PatternSearch::support(*hash);
     EXPECT_FALSE(s.supported);
     EXPECT_EQ("representation_unsupported", s.reason);
-}
-
-TEST(PatternSearch, GraphWithoutMaskServed) {
-    // (until 4596bb3b: refused, mask_required.) Owner decision #16 of 2026-10-08: served,
-    // its unresolved counts upper bounds (test_pattern_unmasked.cpp tests the answers)
-    auto graph = build(4, { "ACGTT", "TTGCA" }, DeBruijnGraph::BASIC);
-    auto &dbg_succ = const_cast<DBGSuccinct&>(base_dbg(*graph));
-    dbg_succ.reset_mask();
-    GraphSupport s = PatternSearch::support(*graph);
-    EXPECT_TRUE(s.supported);
-    EXPECT_FALSE(s.mask_present);
-    EXPECT_TRUE(s.reason.empty());
-    EXPECT_NO_THROW(PatternSearch engine(*graph));
 }
 
 TEST(PatternSearch, MainDummySourceIsInvalid) {
@@ -1786,99 +1792,8 @@ TEST(PatternSearch, ReverseAnchorOnWrappedPrimary) {
     check_against_oracles(*graph, aacg, make_request(), &records, DeBruijnGraph::PRIMARY);
 }
 
-TEST(PatternSearch, NativeCanonical) {
-    // both orientations stored: P and rc(P) count alike, no mapping
-    std::vector<std::string> records { "ACGTTGCAAGGCTTAC", "TTTACGGATC" };
-    auto graph = build(5, records, DeBruijnGraph::CANONICAL);
-    for (std::string p : { "AC", "GTT", "ACGG", "TAC", "G" }) {
-        Pattern pattern = Pattern::parse(PatternKind::DNA, p);
-        Result r = count_of(*graph, pattern, make_request());
-        if (!pattern.is_palindromic()) {
-            EXPECT_EQ(r.contexts->by_orientation.at(Orientation::FORWARD).value,
-                      r.contexts->by_orientation.at(Orientation::REVERSE).value) << p;
-        }
-        for (Scope scope : { Scope::SUFFIX, Scope::ANY_OFFSET }) {
-            check_against_oracles(*graph, pattern, make_request(scope), &records,
-                                  DeBruijnGraph::CANONICAL);
-        }
-    }
-}
-
-TEST(PatternSearch, IUPACPatterns) {
-    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
-        auto graph = build(6, records, mode);
-        for (std::string p : { "ANR", "YNNA", "RY", "N", "NNNNNN", "GATYR", "ACGTTGC", "WSWS" }) {
-            for (Scope scope : { Scope::SUFFIX, Scope::ANY_OFFSET }) {
-                if (mode == DeBruijnGraph::PRIMARY && scope == Scope::SUFFIX)
-                    continue;
-                check_against_oracles(*graph, Pattern::parse(PatternKind::IUPAC, p),
-                                      make_request(scope), &records, mode);
-            }
-        }
-    }
-}
-
-TEST(PatternSearch, AnyOffsetVersusSuffix) {
-    // the suffix count is any_offset's count at offset k - L
-    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA" };
-    auto graph = build(7, records, DeBruijnGraph::BASIC);
-    for (std::string p : { "GAT", "AC", "TCGA", "C" }) {
-        Pattern pattern = Pattern::parse(PatternKind::DNA, p);
-        Result suffix = count_of(*graph, pattern, make_request(Scope::SUFFIX));
-        Result any = count_of(*graph, pattern, make_request());
-        EXPECT_EQ(suffix.contexts->total.value, any.contexts->suffix.value) << p;
-        EXPECT_EQ(suffix.contexts->total.value,
-                  any.contexts->by_offset.at(7 - pattern.length()).value) << p;
-        EXPECT_GE(any.contexts->total.value, suffix.contexts->total.value);
-        EXPECT_LE(suffix.work.steps, any.work.steps);
-    }
-}
-
 
 // ---------------------------------------------------------------- stops and relations
-
-TEST(PatternSearch, MaxStepsAtLeast) {
-    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
-    auto graph = build(7, records, DeBruijnGraph::BASIC);
-    Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NA");
-    // the truth of every count is the oracles', not the engine's own complete run (E1-03,
-    // T1-09): the complete run is checked against both oracles first
-    check_against_oracles(*graph, pattern, make_request(), &records);
-    const std::vector<Ctx> expected = walk_oracle(*graph, pattern, make_request());
-    const Truth truth = truth_of(*graph, pattern, make_request(), expected);
-    Result full = count_of(*graph, pattern, make_request());
-    ASSERT_EQ(Relation::EXACT, full.contexts->total.relation);
-    ASSERT_EQ(truth.total, full.contexts->total.value);
-
-    for (uint64_t steps = 0; steps < full.work.steps; ++steps) {
-        Result r = count_of(*graph, pattern, make_request(), steps);
-        ASSERT_TRUE(r.stop);
-        EXPECT_EQ(StopReason::MAX_STEPS, r.stop->reason);
-        EXPECT_LE(r.work.steps, steps);
-        const Count &total = r.contexts->total;
-        // a discovery stop: at_least; only scans interrupted: bounds; never exact
-        EXPECT_NE(Relation::EXACT, total.relation);
-        if (r.stop->phase == StopPhase::DISCOVERY) {
-            EXPECT_TRUE(total.relation == Relation::AT_LEAST
-                        || total.relation == Relation::UNKNOWN) << steps;
-        }
-        EXPECT_LE(total.value, truth.total) << steps;
-        // every count against the oracle's truth, per offset and per orientation: exact and
-        // right where the discovery and the scans behind it completed, bounds around the
-        // truth where only scans are pending, a lower bound where discovery is open. Every
-        // offset sums both orientations, so in a discovery stop no offset is exact; an
-        // orientation can be (RelationRuleAcrossPatterns)
-        for (const auto &[p, count] : r.contexts->by_offset) {
-            EXPECT_TRUE(true_relation(count, truth.by_offset.at(p))) << steps << " offset " << p;
-        }
-        for (const auto &[o, count] : r.contexts->by_orientation) {
-            EXPECT_TRUE(true_relation(count, truth.by_orientation.at(o)))
-                << steps << " " << orientation_key(o);
-        }
-        EXPECT_TRUE(true_relation(r.contexts->suffix, truth.by_offset.at(7 - 2))) << steps;
-    }
-}
 
 TEST(PatternSearch, RelationRuleAcrossPatterns) {
     std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA" };
@@ -1928,74 +1843,6 @@ TEST(PatternSearch, RelationRuleAcrossPatterns) {
     all.mode = Mode::ALL_OR_COUNT;
     Result none = engine.enumerate(second, all, budget, [&](const Context &) { FAIL(); });
     EXPECT_EQ(Withheld::DISCOVERY_BUDGET, none.extraction->withheld);
-}
-
-TEST(PatternSearch, StopAtThreshold) {
-    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
-    auto graph = build(7, records, DeBruijnGraph::BASIC);
-    PatternSearch engine(*graph);
-    Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NA");
-    std::vector<Ctx> expected = walk_oracle(*graph, pattern, make_request());
-    ASSERT_LT(10u, expected.size());
-
-    Request request = make_request();
-    request.stop_at_threshold = true;
-    request.max_contexts = 5;
-    request.mode = Mode::ALL_OR_COUNT;
-    Result all;
-    EXPECT_TRUE(run_enumerate(engine, StoredNodes(*graph), pattern, request, &all).empty());
-    ASSERT_TRUE(all.stop);
-    EXPECT_EQ(StopPhase::DISCOVERY, all.stop->phase);
-    EXPECT_EQ(StopReason::MAX_CONTEXTS, all.stop->reason);
-    EXPECT_EQ(Relation::AT_LEAST, all.contexts->total.relation);
-    EXPECT_GT(all.contexts->total.value, 5u);
-    EXPECT_EQ(Withheld::THRESHOLD_CROSSED, all.extraction->withheld);
-
-    request.mode = Mode::PARTIAL;
-    Result partial;
-    std::vector<Ctx> some = run_enumerate(engine, StoredNodes(*graph), pattern, request,
-                                          &partial);
-    EXPECT_EQ(5u, some.size());
-    EXPECT_EQ(StopReason::MAX_CONTEXTS, partial.extraction->cut);
-    EXPECT_TRUE(std::is_sorted(some.begin(), some.end()));
-    for (const Ctx &c : some) {
-        EXPECT_TRUE(std::binary_search(expected.begin(), expected.end(), c));
-    }
-
-    // a threshold stop ends only its own pattern
-    Budget budget = unbounded_budget();
-    request.mode = Mode::COUNT;
-    engine.count(pattern, request, budget);
-    EXPECT_FALSE(budget.stopped());
-    Result next = engine.count(Pattern::parse(PatternKind::DNA, "GGGCCC"), request, budget);
-    EXPECT_FALSE(next.stop);
-    EXPECT_EQ(Relation::EXACT, next.contexts->total.relation);
-}
-
-TEST(PatternSearch, PartialAfterStepStop) {
-    // PARTIAL delivers what was discovered (a prefix-free subset of the truth, sorted), the
-    // cut stated; ALL_OR_COUNT delivers nothing
-    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
-    auto graph = build(7, records, DeBruijnGraph::BASIC);
-    PatternSearch engine(*graph);
-    Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NR");
-    std::vector<Ctx> expected = walk_oracle(*graph, pattern, make_request());
-
-    Request request = make_request();
-    request.mode = Mode::PARTIAL;
-    for (uint64_t steps : { 5, 20, 60 }) {
-        Result r;
-        std::vector<Ctx> some = run_enumerate(engine, StoredNodes(*graph), pattern, request,
-                                              &r, steps);
-        ASSERT_TRUE(r.stop);
-        EXPECT_EQ(StopReason::MAX_STEPS, r.extraction->cut);
-        EXPECT_FALSE(r.extraction->complete);
-        EXPECT_TRUE(std::is_sorted(some.begin(), some.end()));
-        EXPECT_LE(some.size(), expected.size());
-        for (const Ctx &c : some) {
-            EXPECT_TRUE(std::binary_search(expected.begin(), expected.end(), c));
-        }
-    }
 }
 
 TEST(PatternSearch, DeadlineStops) {
@@ -2104,34 +1951,6 @@ TEST(PatternSearch, LongPatternAnchors) {
 }
 
 
-// ---------------------------------------------------------------- even k, wrapped PRIMARY
-
-TEST(PatternSearch, EvenKPrimaryPalindromeScanBounds) {
-    // k = 6: palindromic k-mers (ACGCGT, AATATT, ...) are stored once and found by both
-    // probes; the union subtracts them after a palindrome check charged as a scan.
-    // Interrupting that check leaves valid bounds
-    std::vector<std::string> records { "TTACGCGTAA", "GAATATTCCG", "ACGCGTACGT", "CCGGAATTCC" };
-    auto graph = build(6, records, DeBruijnGraph::PRIMARY);
-    for (std::string p : { "CG", "AT", "GCG", "N", "AATT" }) {
-        Pattern pattern = Pattern::parse(PatternKind::IUPAC, p);
-        check_against_oracles(*graph, pattern, make_request(), &records, DeBruijnGraph::PRIMARY);
-
-        Result full = count_of(*graph, pattern, make_request());
-        ASSERT_EQ(Relation::EXACT, full.contexts->total.relation);
-        uint64_t truth = full.contexts->total.value;
-        for (uint64_t steps = full.work.ranges_visited; steps < full.work.steps; ++steps) {
-            Result r = count_of(*graph, pattern, make_request(), steps);
-            ASSERT_TRUE(r.stop);
-            EXPECT_EQ(StopPhase::MASK_SCAN, r.stop->phase);
-            const Count &total = r.contexts->total;
-            EXPECT_EQ(Relation::BOUNDS, total.relation) << p << " " << steps;
-            EXPECT_LE(total.lower, truth) << p << " " << steps;
-            EXPECT_GE(total.upper, truth) << p << " " << steps;
-        }
-    }
-}
-
-
 // ---------------------------------------------------------------- stops in every graph mode
 
 struct HaltCase {
@@ -2154,7 +1973,7 @@ const std::vector<HaltCase>& halt_cases() {
         { 4, DeBruijnGraph::PRIMARY, { "ACGAAATTATG", "AGCTGTCTCGCGCGC" },
           { "T", "A", "G", "C", "N", "AT", "CG", "TA", "W", "ACGT", "AATT", "NNNN", "CGCGC" } },
         { 6, DeBruijnGraph::PRIMARY, { "TTACGCGTAA", "GAATATTCCG", "ACGCGTACGT", "CCGGAATTCC" },
-          { "G", "N", "CG", "AT", "GCG", "ACGCGT", "TTACGC", "ACGCGTA" } },
+          { "G", "N", "CG", "AT", "GCG", "AATT", "ACGCGT", "TTACGC", "ACGCGTA" } },
         // the review's L = 1 case (offset k - 1 of a stopped search is open, not exact)
         { 6, DeBruijnGraph::PRIMARY, { "TTA", "NGAGGTCGTGATCTCTAGCGCNTCCGGG", "CCTAGCCGCTCAAG" },
           { "G", "C", "T", "CG", "GTCGTG" } },

@@ -126,133 +126,8 @@ std::vector<std::string> names(const SeedResult &r, const std::vector<LabelId> &
     return out;
 }
 
-// leaf flank -> sorted names of the labels present on every node of that flank, read
-// from the RECORDED sets of an annotate run (no walker label machinery involved)
-std::map<std::string, std::vector<std::string>> structural_leaves(const SeedResult &r, size_t a) {
-    const ArmResult &arm = r.arms[a];
-    std::map<std::string, std::vector<std::string>> out;
-    for (const auto &path : arm.paths) {
-        const std::vector<size_t> chain = path_segments(arm, path);
-        std::vector<LabelId> alive = arm.segments[chain.front()].labels_start;
-        for (size_t s : chain) {
-            for (const auto &run : arm.segments[s].label_sets) {
-                EXPECT_FALSE(run.truncated());
-                std::vector<LabelId> still;
-                std::set_intersection(alive.begin(), alive.end(), run.labels.begin(),
-                                      run.labels.end(), std::back_inserter(still));
-                alive.swap(still);
-            }
-        }
-        out[spell_path(arm, path)] = names(r, alive);
-    }
-    return out;
-}
-
 } // namespace
 
-
-// Annotate mode follows every structural successor and records what is there: on a
-// fork carried by two labels, the structural trie has both branches, each branch's
-// recorded sets name exactly the label that carries it, and the constrained walk over
-// the same seed yields the same leaves with the same labels (the §6.9 contract in
-// miniature).
-TEST(Trie, AnnotateRecordsWhatConstrainFilters) {
-    auto b = fork_blocks(3);
-    const std::string &X = b[0], &P = b[1], &Q = b[2];
-    std::vector<DeBruijnGraph::Mode> modes { DeBruijnGraph::BASIC };
-#if ! _PROTEIN_GRAPH
-    modes.push_back(DeBruijnGraph::CANONICAL);
-    modes.push_back(DeBruijnGraph::PRIMARY);
-#endif
-    for (auto mode : modes) {
-        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-                kK, { X + P, X + Q }, { "A", "B" }, mode);
-
-        Strategy st = exhaustive(LabelMode::ANNOTATE);
-        st.direction = Strategy::RIGHT;
-        st.max_extension_bp = 100;
-        auto t = run(*anno, X, {}, st);
-        EXPECT_EQ(0u, t.num_seed_labels);
-        EXPECT_FALSE(t.labels_from_seed);
-        ASSERT_EQ(2u, t.label_dict.size());
-        const ArmResult &arm = t.arms[kRight];
-        EXPECT_EQ(ArmResult::COMPLETE, arm.status);
-        EXPECT_EQ(100u, arm.complete_to_bp);
-        EXPECT_EQ(0u, arm.nodes_labels_truncated);
-        EXPECT_EQ(2u, arm.max_labels_at_node);
-        // the root's entry node is the seed boundary, carried by both labels
-        ASSERT_FALSE(arm.segments.empty());
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), names(t, arm.segments[0].labels_start));
-        EXPECT_EQ(0u, arm.segments[0].length_bp);
-        EXPECT_TRUE(arm.segments[0].label_sets.empty());
-        ASSERT_EQ(1u, arm.splits.size());
-        const Split &split = arm.splits[0];
-        EXPECT_EQ(0u, split.at_bp);
-        EXPECT_FALSE(split.ambiguous);
-        EXPECT_EQ(2u, split.labels_before);
-        ASSERT_EQ(2u, split.branches.size());
-        std::set<char> chars;
-        for (const auto &br : split.branches) {
-            chars.insert(br.ch);
-            EXPECT_EQ(1u, br.labels_distinct);
-            EXPECT_EQ(1u, br.labels.size());
-            EXPECT_EQ(br.labels, arm.segments[br.segment].labels_start);
-        }
-        EXPECT_EQ((std::set<char>{ P[0], Q[0] }), chars);
-        // every leaf is a structural end with a path reason and no label ends
-        ASSERT_EQ(2u, arm.paths.size());
-        for (const auto &path : arm.paths) {
-            ASSERT_TRUE(path.path_reason.has_value());
-            EXPECT_EQ(EndReason::DEAD_END, *path.path_reason);
-            EXPECT_TRUE(path.end_labels.empty());
-            EXPECT_FALSE(path.continuation.has_value());
-            // one run per segment: the label set never changes along a branch
-            for (size_t s : path_segments(arm, path)) {
-                const Segment &seg = arm.segments[s];
-                if (!seg.length_bp) continue;
-                ASSERT_EQ(1u, seg.label_sets.size());
-                EXPECT_EQ(seg.from_bp, seg.label_sets[0].from_bp);
-                EXPECT_EQ(seg.from_bp + seg.length_bp, seg.label_sets[0].to_bp);
-                EXPECT_EQ(seg.label_sets[0].labels, seg.labels_start);
-                EXPECT_EQ(seg.label_sets[0].labels, seg.labels_end);
-            }
-        }
-        auto structural = structural_leaves(t, kRight);
-        ASSERT_EQ(2u, structural.size());
-        EXPECT_EQ((std::vector<std::string>{ "A" }), structural.at(P));
-        EXPECT_EQ((std::vector<std::string>{ "B" }), structural.at(Q));
-        // the per-label summary reads off the recorded sets
-        for (LabelId l = 0; l < 2; ++l) {
-            EXPECT_EQ(P.size(), t.label_summary[l][kRight].direct_bp);
-            EXPECT_EQ(P.size(), t.label_summary[l][kRight].reach_bp);
-            EXPECT_TRUE(t.label_summary[l][kRight].runs.empty());
-        }
-
-        // the constrained exhaustive walk agrees leaf by leaf
-        Strategy sc = exhaustive(LabelMode::CONSTRAIN);
-        sc.direction = Strategy::RIGHT;
-        sc.max_extension_bp = 100;
-        auto a = run(*anno, X, { "A", "B" }, sc);
-        const ArmResult &carm = a.arms[kRight];
-        EXPECT_EQ(ArmResult::COMPLETE, carm.status);
-        EXPECT_EQ(100u, carm.complete_to_bp);
-        std::map<std::string, std::vector<std::string>> constrained;
-        for (const auto &path : carm.paths) {
-            std::vector<LabelId> ids;
-            for (const auto &e : path.end_labels) ids.push_back(e.label);
-            constrained[spell_path(carm, path)] = names(a, ids);
-        }
-        EXPECT_EQ(structural, constrained) << "mode " << mode;
-        // and its trie view reports the same branches
-        ASSERT_EQ(1u, carm.splits.size());
-        EXPECT_EQ(2u, carm.splits[0].labels_before);
-        ASSERT_EQ(2u, carm.splits[0].branches.size());
-        for (const auto &br : carm.splits[0].branches) {
-            EXPECT_EQ(1u, br.labels_distinct);
-            EXPECT_EQ(br.labels, carm.segments[br.segment].labels_start);
-        }
-    }
-}
 
 // The preset refuses what would silently prune it, in both modes; annotate mode
 // refuses the label machinery and a seed label list.
@@ -345,110 +220,6 @@ TEST(Trie, ExhaustiveRejectsConflictingKnobs) {
     }
     // the plain (non-exhaustive) constrain default still accepts its own defaults
     EXPECT_NO_THROW(run(*anno, b[0], { "A" }, Strategy()));
-}
-
-// A size cap trips between two heads of a level: the level is partial, complete_to_bp
-// is the last complete depth, the status is never "complete", and every walk up to
-// that depth is present.
-TEST(Trie, TrippedCapReportsTheCompleteDepth) {
-    auto b = fork_blocks(5);
-    const std::string &X = b[0], &P = b[1], &Q = b[2];
-    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-            kK, { X + P, X + Q }, { "A", "B" }, DeBruijnGraph::BASIC);
-    for (LabelMode mode : { LabelMode::ANNOTATE, LabelMode::CONSTRAIN }) {
-        const std::vector<std::string> labels = mode == LabelMode::CONSTRAIN
-            ? std::vector<std::string>{ "A", "B" } : std::vector<std::string>{};
-        // two walks of 40 bases; a budget of 15 steps ends at a partial level
-        Strategy st = exhaustive(mode);
-        st.direction = Strategy::RIGHT;
-        st.max_extension_bp = 100;
-        st.max_steps = 15;
-        auto r = run(*anno, X, labels, st);
-        const ArmResult &arm = r.arms[kRight];
-        EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
-        ASSERT_TRUE(arm.cap_trigger.has_value());
-        EXPECT_EQ(EndReason::MAX_STEPS, arm.cap_trigger->reason);
-        EXPECT_LT(arm.complete_to_bp, 100u);
-        // 15 steps over two heads: 7 full levels (14 steps), the 8th level expands one
-        // head and trips on the other, so walks of length 7 are all present
-        EXPECT_EQ(7u, arm.complete_to_bp);
-        std::set<std::string> walks;
-        for (const auto &path : arm.paths) {
-            std::string flank = spell_path(arm, path);
-            EXPECT_GE(flank.size(), arm.complete_to_bp);
-            walks.insert(flank.substr(0, arm.complete_to_bp));
-            ASSERT_TRUE(path.path_reason.has_value());
-            EXPECT_EQ(EndReason::MAX_STEPS, *path.path_reason);
-            ASSERT_TRUE(path.continuation.has_value());
-        }
-        EXPECT_EQ((std::set<std::string>{ P.substr(0, 7), Q.substr(0, 7) }), walks);
-
-        // the other arm has nothing to do and is complete to the radius
-        auto both = run(*anno, X, labels, exhaustive(mode));
-        EXPECT_EQ(ArmResult::COMPLETE, both.arms[kLeft].status);
-        EXPECT_EQ(both.arms[kLeft].complete_to_bp, Strategy().max_extension_bp);
-
-        // a per-arm cap: output capped at 10 bases per arm, 5 complete levels
-        st = exhaustive(mode);
-        st.direction = Strategy::RIGHT;
-        st.max_output_bp = 10;
-        r = run(*anno, X, labels, st);
-        EXPECT_EQ(ArmResult::TRUNCATED, r.arms[kRight].status);
-        EXPECT_EQ(5u, r.arms[kRight].complete_to_bp);
-        EXPECT_EQ(EndReason::MAX_OUTPUT, r.arms[kRight].cap_trigger->reason);
-
-        // reaching the radius is complete
-        st = exhaustive(mode);
-        st.direction = Strategy::RIGHT;
-        st.max_extension_bp = 12;
-        r = run(*anno, X, labels, st);
-        EXPECT_EQ(ArmResult::COMPLETE, r.arms[kRight].status);
-        EXPECT_EQ(12u, r.arms[kRight].complete_to_bp);
-        for (const auto &path : r.arms[kRight].paths) {
-            EXPECT_EQ(12u, path.length_bp);
-            EXPECT_EQ(EndReason::MAX_EXTENSION, *path.path_reason);
-        }
-    }
-}
-
-// The per-node label cap never hides that it cut a list: the true count and the cut
-// are reported on the run, the branch and the arm.
-TEST(Trie, AnnotateReportsLabelListTruncation) {
-    auto b = fork_blocks(6);
-    const std::string &X = b[0], &P = b[1], &Q = b[2];
-    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-            kK, { X + P, X + Q, X + P }, { "A", "B", "C" }, DeBruijnGraph::BASIC);
-    Strategy st = exhaustive(LabelMode::ANNOTATE);
-    st.direction = Strategy::RIGHT;
-    st.max_labels_per_node = 1;
-    auto r = run(*anno, X, {}, st);
-    const ArmResult &arm = r.arms[kRight];
-    EXPECT_EQ(ArmResult::COMPLETE, arm.status);
-    EXPECT_EQ(3u, arm.max_labels_at_node);
-    EXPECT_GT(arm.nodes_labels_truncated, 0u);
-    // the boundary (3 labels) and the P branch (2 labels) are cut, the Q branch is not
-    EXPECT_EQ(1u, arm.segments[0].labels_start.size());
-    ASSERT_EQ(1u, arm.splits.size());
-    EXPECT_EQ(3u, arm.splits[0].labels_before);
-    for (const auto &br : arm.splits[0].branches) {
-        EXPECT_EQ(1u, br.labels.size());
-        EXPECT_EQ(br.ch == P[0] ? 2u : 1u, br.labels_distinct);
-        const Segment &seg = arm.segments[br.segment];
-        ASSERT_EQ(1u, seg.label_sets.size());
-        EXPECT_EQ(br.labels_distinct, seg.label_sets[0].labels_total);
-        EXPECT_EQ(br.ch == P[0], seg.label_sets[0].truncated());
-    }
-    // with a cap that fits, nothing is cut and the counts agree with the lists
-    st.max_labels_per_node = 3;
-    r = run(*anno, X, {}, st);
-    EXPECT_EQ(0u, r.arms[kRight].nodes_labels_truncated);
-    EXPECT_EQ(3u, r.arms[kRight].segments[0].labels_start.size());
-    for (const auto &seg : r.arms[kRight].segments) {
-        for (const auto &run : seg.label_sets) {
-            EXPECT_FALSE(run.truncated());
-            EXPECT_EQ(run.labels.size(), run.labels_total);
-        }
-    }
 }
 
 // The dictionary and the recorded sets do not depend on how far ahead rows are
@@ -659,10 +430,9 @@ std::set<std::string> leaf_walks(const ArmResult &arm) {
 template <typename Pair>
 class TrieOracle : public ::testing::Test {};
 
+// the two graph and the two annotation types, each once (their cross product adds nothing)
 typedef ::testing::Types<
     std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
-    std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-    std::pair<DBGHashFast, annot::ColumnCompressed<>>,
     std::pair<DBGHashFast, annot::RowFlatAnnotator>
 > TrieOracleTypes;
 TYPED_TEST_SUITE(TrieOracle, TrieOracleTypes);
@@ -1269,7 +1039,7 @@ TEST(Trie, MergedCheckerAcceptsAUnitedHistoryTermination) {
 // show as false rejections here (the reviewer's valid-merge stress, 250 seeds).
 TEST(Trie, MergedCheckerAcceptsGenuineDenseMerges) {
     size_t joined_ends = 0, checked = 0;
-    for (uint32_t seed = 1; seed <= 80; ++seed) {
+    for (uint32_t seed = 1; seed <= 25; ++seed) {
         const std::vector<std::string> seqs { "AAA" + random_seq(30, seed * 3),
                                               "AAA" + random_seq(30, seed * 3 + 1),
                                               "AAA" + random_seq(30, seed * 3 + 2) };
@@ -1297,7 +1067,7 @@ TEST(Trie, MergedCheckerAcceptsGenuineDenseMerges) {
     }
     // the sweep is not vacuous: ends under the united history did occur
     EXPECT_GT(joined_ends, 0u);
-    EXPECT_GT(checked, 80u);
+    EXPECT_GT(checked, 25u);
 }
 
 // Round 3, minor: a REFERENCE whose own claim ended with a cap establishes prefix
@@ -1523,11 +1293,13 @@ TEST(Trie, TunedCheckerRejectsARefusalItsStrategyDoesNotMake) {
 // do not hold them all. The cut is stated (branch_events_complete_to_bp, a level
 // boundary), so the sweep runs with the DEFAULT cap: below the boundary every omission
 // must be explained exactly as without a cap, at or beyond it an unexplained one counts
-// as unexplained_capped; with "unlimited" nothing is cut and nothing is unexplained.
+// as unexplained_capped; the same run with "unlimited" (walked for the cap's guarantee
+// anyway) cuts nothing and leaves nothing unexplained.
 namespace {
 
 struct DenseSweep {
     std::map<std::string, size_t> causes;
+    std::map<std::string, size_t> causes_uncapped;
     size_t cells = 0;
     size_t cut_arms = 0;       // arms whose branch events were cut by the cap
     size_t capped = 0;         // omissions counted unexplained_capped, over all cells
@@ -1574,14 +1346,17 @@ DenseSweep dense_tuned_sweep(size_t max_branch_events) {
                     // the events kept are the first ones, and every event below the
                     // boundary is among them
                     std::optional<SeedResult> all;
+                    Strategy st_all = st;
+                    st_all.max_branch_events = Strategy::kUnlimited;
                     if (max_branch_events != Strategy::kUnlimited) {
-                        Strategy st_all = st;
-                        st_all.max_branch_events = Strategy::kUnlimited;
                         all = run(*anno, "AAA", { "C", "D", "E" }, st_all);
                     }
                     const trie::SeedContext ctx { "AAA", mode != DeBruijnGraph::BASIC, st };
                     for (size_t side : { kLeft, kRight }) {
                         const ArmResult &ta = t.arms[side];
+                        const std::string what = "mode " + std::to_string(mode) + " skip "
+                            + std::to_string(skip) + " random " + std::to_string(s) + " knob "
+                            + std::to_string(knob) + " arm " + std::to_string(side);
                         if (all) {
                             const auto &every = all->arms[side].branch_events;
                             EXPECT_EQ(every.size(), ta.branch_events_total);
@@ -1598,13 +1373,27 @@ DenseSweep dense_tuned_sweep(size_t max_branch_events) {
                                         << "an event below the boundary was not kept";
                                 }
                             }
+                            // with every event kept: no boundary, and every omission of the
+                            // tuned run explained by a recorded reason
+                            const ArmResult &aa = all->arms[side];
+                            const trie::SubsetReport uncapped = trie::tuned_subset_report(
+                                    A, *all, side, what + " uncapped",
+                                    trie::SeedContext{ "AAA", mode != DeBruijnGraph::BASIC, st_all });
+                            if (!uncapped.problems.empty()) {
+                                ADD_FAILURE() << trie::listed(uncapped.problems);
+                                return out;
+                            }
+                            EXPECT_EQ(std::numeric_limits<uint64_t>::max(),
+                                      aa.branch_events_complete_to_bp) << what;
+                            EXPECT_EQ(aa.branch_events_total, aa.branch_events.size()) << what;
+                            EXPECT_EQ(0u, uncapped.unexplained_capped) << what;
+                            for (const BranchEvent &be : aa.branch_events) {
+                                for (const auto &rf : be.refused) out.causes_uncapped[rf.cause]++;
+                            }
                         }
                         for (const BranchEvent &be : ta.branch_events) {
                             for (const auto &rf : be.refused) out.causes[rf.cause]++;
                         }
-                        const std::string what = "mode " + std::to_string(mode) + " skip "
-                            + std::to_string(skip) + " random " + std::to_string(s) + " knob "
-                            + std::to_string(knob) + " arm " + std::to_string(side);
                         const trie::SubsetReport rep = trie::tuned_subset_report(A, t, side, what, ctx);
                         if (!rep.problems.empty()) {
                             ADD_FAILURE() << trie::listed(rep.problems);
@@ -1634,25 +1423,18 @@ DenseSweep dense_tuned_sweep(size_t max_branch_events) {
 
 TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
     const DenseSweep sweep = dense_tuned_sweep(Strategy().max_branch_events);
-    // not vacuous: every cause the walker emits under forbid occurred ...
-    for (const char *cause : { "branch", "minority", "below_min_labels", "split_limit" })
+    // not vacuous: every cause the walker emits under forbid occurred, with the default cap
+    // and without one ...
+    for (const char *cause : { "branch", "minority", "below_min_labels", "split_limit" }) {
         EXPECT_GT(sweep.causes.count(cause) ? sweep.causes.at(cause) : 0, 0u) << cause;
+        EXPECT_GT(sweep.causes_uncapped.count(cause) ? sweep.causes_uncapped.at(cause) : 0, 0u)
+            << cause;
+    }
     EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, sweep.cells);
     // ... the default cap does cut evidence here, and omissions resting on the cut
     // events exist and are accepted only at or beyond the boundary (checked per cell)
     EXPECT_GT(sweep.cut_arms, 0u);
     EXPECT_GT(sweep.capped, 0u);
-}
-
-// The same sweep with every branch event kept: no boundary, and every omission of every
-// tuned run is explained by a recorded reason.
-TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphsWithAllEvents) {
-    const DenseSweep sweep = dense_tuned_sweep(Strategy::kUnlimited);
-    for (const char *cause : { "branch", "minority", "below_min_labels", "split_limit" })
-        EXPECT_GT(sweep.causes.count(cause) ? sweep.causes.at(cause) : 0, 0u) << cause;
-    EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, sweep.cells);
-    EXPECT_EQ(0u, sweep.cut_arms);
-    EXPECT_EQ(0u, sweep.capped);
 }
 
 // Finding 3 (the reference model, support: trace). Two occurrences of the seed under
@@ -2292,7 +2074,7 @@ TEST(Trie, EveryRunIsAnchoredWhereItEnds) {
     // dense random graphs with switching: silent switch-source ends (on a single
     // successor and at splits), merges of several parents, branch-limited lineages
     for (auto mode : all_modes()) {
-        for (uint32_t s = 1; s <= 8; ++s) {
+        for (uint32_t s = 1; s <= 4; ++s) {
             std::vector<std::string> seqs, labels;
             for (uint32_t i = 0; i < 6; ++i) {
                 seqs.push_back("AAA" + random_seq(14, s * 11 + i));

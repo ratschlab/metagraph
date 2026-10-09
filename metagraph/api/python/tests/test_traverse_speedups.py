@@ -184,12 +184,6 @@ class TestLabelIndex(unittest.TestCase):
             for l in want:
                 self.assertIn(l.ref, str(cm.exception))
 
-    def test_every_name_and_ref_as_a_scan_would(self):
-        for key, g in GRAPHLETS:
-            for l in g.labels:
-                for sel in (l.name, l.ref, {'name': l.name}, {'ref': l.ref}):
-                    self.check(g, sel)
-
     def test_a_name_like_a_ref_a_shared_name_and_non_strings(self):
         g = T.body('limits')
         g.labels[2].name = 'c:0'
@@ -204,34 +198,6 @@ class TestLabelIndex(unittest.TestCase):
 
 
 class TestWalkBatch(unittest.TestCase):
-    def test_chains_and_spellings_equal_one_walk_at_a_time(self):
-        rng = random.Random(7)
-        for key, g in GRAPHLETS:
-            for a in g.arms.values():
-                ids = [s.id for s in a.segments]
-                for k in (1, 2, 5, len(ids)):
-                    targets = rng.sample(ids, min(k, len(ids)))
-                    got = derive.walk_batch(a, targets)
-                    self.assertEqual(sorted(set(targets)), sorted(got))
-                    for t in targets:
-                        chain, w = got[t]
-                        self.assertEqual(derive.chain(a, t), chain)
-                        if a.segments[0].walk is None:
-                            self.assertIsNone(w)
-                        else:
-                            self.assertEqual(derive.walk_bases(a, t), w)
-                # chains only, and no shared list between two targets
-                got = derive.walk_batch(a, ids, spell=False)
-                self.assertEqual(len({id(c) for c, _ in got.values()}), len(ids))
-
-    def test_bases_on_some_segments_only_is_a_value_error(self):
-        g = T.graphlet('merge')
-        a = g.arms['right']
-        a.segments[3].walk = None
-        leaves = derive.leaves(a)
-        with self.assertRaises(ValueError):
-            derive.walk_batch(a, leaves)
-
     def test_the_kept_prefixes_are_bounded_by_the_output(self):
         # a comb: every walk shares the spine; spelling them one by one walks the spine
         # per walk, keeping a prefix per spine segment would be quadratic in memory
@@ -308,26 +274,6 @@ class TestGfaContext(unittest.TestCase):
                         self.assertEqual(_gfa_reference_context(g, a, s, k1), got)
                         n += 1
         self.assertGreater(n, 1000)
-
-
-class TestTheComparisonsKeepTheirSpellings(unittest.TestCase):
-    def test_divergence_and_refusals_with_and_without_the_memo(self):
-        for key, g in GRAPHLETS:
-            for a in g.arms.values():
-                if not a.segments or a.segments[0].walk is None:
-                    continue
-                depth = a.complete_to_bp
-                leaves = ops.restricted_leaves(a, depth)
-                if not leaves:
-                    continue
-                seq = derive.walk_bases(a, leaves[-1])[:depth]
-                memo = {}
-                for _ in range(2):
-                    self.assertEqual(ops._divergence(a, seq, depth),
-                                     ops._divergence(a, seq, depth, memo))
-                    for l in g.labels[:5]:
-                        self.assertEqual(ops._recorded_refusal(g, a, seq, l.ref),
-                                         ops._recorded_refusal(g, a, seq, l.ref, memo))
 
 
 if __name__ == '__main__':

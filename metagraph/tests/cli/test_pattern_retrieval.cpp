@@ -985,43 +985,13 @@ const uint64_t kStatement = 384 + kK;
 // a label name of the dictionary: 192 + 2 x its length ("c1")
 const uint64_t kName = 192 + 2 * 2;
 
-// Review finding (unsigned wrap): an unbudgeted read's label names are held whether or not
-// they fit; once they took the account past its maximum, `max - held` wrapped and every later
-// charge succeeded, so the account bounded nothing (in the review's probe the next pattern
-// listed 35 contexts with labels at 48,647 bytes against a maximum of 626). Now nothing fits
-// while it is past the maximum, and the reads stop, stated.
-TEST(PatternRetrieval, UnbudgetedNamesPastTheMaximumStopTheReads) {
-    Index idx = build<annot::ColumnCompressed<>>(kK, kRecords, true);
-    // GACGACT: one context, its row carries c1 and c4 (two names, 2 x 196 bytes). The account
-    // holds its descriptor and leaves 391 bytes: enough to reserve one statement (391) for the
-    // read, not for the two names the read returns, which take it 1 byte past its maximum.
-    RetrievalHooks hooks;
-    hooks.max_memory_bytes = kDescriptor + kStatement;
-    ASSERT_LT(hooks.max_memory_bytes - kDescriptor, 2 * kName);
-    Json::Value out = run(idx, body("{\"dna\": \"GACGACT\"}, {\"dna\": \"AC\"}",
-                                    "\"allow_unbudgeted_annotation\": true"), hooks);
-    const Json::Value &first = out["patterns"][0];
-    EXPECT_EQ("label_discovery", first["stop"]["phase"].asString()) << first;
-    EXPECT_EQ("max_memory", first["stop"]["reason"].asString());
-    EXPECT_EQ("annotation_budget", first["withheld"]["reason"].asString());
-    EXPECT_EQ(0u, first["results"].size());
-    // past the maximum by the forced names, no more
-    EXPECT_EQ(kDescriptor + 2 * kName, first["work"]["memory_bytes"].asUInt64());
-    // the next pattern: the names stay with the dictionary, its first descriptor does not fit
-    // what is left, and it is said
-    const Json::Value &next = out["patterns"][1];
-    EXPECT_FALSE(next["retrieval_complete"].asBool());
-    EXPECT_EQ("output_budget", next["withheld"]["reason"].asString()) << next;
-    EXPECT_EQ("output", next["stop"]["phase"].asString());
-    EXPECT_EQ("max_memory", next["stop"]["reason"].asString());
-    EXPECT_EQ(0u, next["work"]["annotation_rows"].asUInt64());
-    EXPECT_EQ(first["work"]["memory_bytes"], next["work"]["memory_bytes"]);
-}
-
 // The memory account bounds the request (§5.3): over a sweep of maxima, both modes, a
 // budgeted backend (with every read admitted, or every read refused) and an unbudgeted one, no
 // entry's peak passes the maximum (the unbudgeted reads: by the names of one read at most,
-// bounded here by the whole dictionary's), and every incomplete entry says why.
+// bounded here by the whole dictionary's), and every incomplete entry says why. The maximum
+// of one descriptor and one statement is swept too: GACGACT's one read then returns two names
+// that take the account past it, after which nothing may fit (an unsigned `max - held` wrapped
+// there, and every later charge succeeded).
 TEST(PatternRetrieval, MemoryAccountBoundsEveryMaximum) {
     Index budgeted = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     Index column = build<annot::ColumnCompressed<>>(kK, kRecords, true);
@@ -1036,12 +1006,31 @@ TEST(PatternRetrieval, MemoryAccountBoundsEveryMaximum) {
                                        "\"allow_unbudgeted_annotation\": true, \"mode\": \""
                                        + std::string(mode) + "\"");
             uint64_t complete = 0, stated = 0;
-            for (uint64_t max = 500; max < 40000; max += max < 2500 ? 1 : 97) {
+            std::vector<uint64_t> maxima { kDescriptor + kStatement };
+            for (uint64_t max = 500; max < 40000; max += max < 2500 ? 7 : 97) {
+                maxima.push_back(max);
+            }
+            for (uint64_t max : maxima) {
                 RetrievalHooks hooks;
                 hooks.max_memory_bytes = max;
                 if (backend == REFUSING)
                     hooks.deny_decode = [](uint64_t) { return true; };
                 Json::Value out = run(idx, b, hooks);
+                if (backend == UNBUDGETED && max == kDescriptor + kStatement
+                        && std::string(mode) == "all_or_count") {
+                    // GACGACT's row carries two names: the read is admitted on one
+                    // statement's reservation, its names take the account past the maximum
+                    // by them and no more, and the reads stop there; the next pattern's
+                    // first descriptor does not fit what is left
+                    const Json::Value &first = out["patterns"][0];
+                    EXPECT_EQ("label_discovery", first["stop"]["phase"].asString()) << first;
+                    EXPECT_EQ("max_memory", first["stop"]["reason"].asString());
+                    EXPECT_EQ("annotation_budget", first["withheld"]["reason"].asString());
+                    EXPECT_EQ(kDescriptor + 2 * kName, first["work"]["memory_bytes"].asUInt64());
+                    const Json::Value &next = out["patterns"][1];
+                    EXPECT_EQ("output_budget", next["withheld"]["reason"].asString()) << next;
+                    EXPECT_EQ(0u, next["work"]["annotation_rows"].asUInt64());
+                }
                 uint64_t peak = 0;
                 for (const Json::Value &e : out["patterns"]) {
                     // the account's peak is the request's: non-decreasing over its patterns

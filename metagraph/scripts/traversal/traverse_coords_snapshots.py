@@ -1,7 +1,7 @@
-"""The record-coordinate snapshots of the library's tests (not a test module itself): real
-server responses on mini_refseq with strategy.output.coordinates (feature level 6, DESIGN
-§18 and §26), committed under data/traverse/coords/ so that test_traverse_coordinates.py
-and the golden file golden/coordinates.json.gz run with no server.
+"""The record-coordinate snapshots of the library's tests: real server responses on
+mini_refseq with strategy.output.coordinates (feature level 6, DESIGN §18 and §26), committed
+under api/python/tests/data/traverse/coords/ so that test_traverse_coordinates.py and the
+golden file golden/coordinates.json.gz run with no server.
 
 Each cell is <name>.request.json.gz (the request, detail left out), <name>.graphlet.json.gz
 and <name>.full.json.gz (the same request in detail graphlet and full), gzipped with mtime 0
@@ -11,12 +11,13 @@ a run marked lower_bound (a switch into a live label), the column and mixed kind
 arms and one, the null reasons "support kmer" and "partial derivation" (D3), a D3 result
 without coordinates, and a memory stop offering drop_coordinates.
 
-    python3 traverse_coords_snapshots.py --binary BUILD/metagraph [--out DIR] [--index DIR]
+    python3 scripts/traversal/traverse_coords_snapshots.py --binary BUILD/metagraph [--out DIR]
+                                                           [--index DIR]
 
 The index is build/mini_refseq (scripts/traversal/build_mini_refseq.sh); the server runs
 with --traverse-chunk-target-ms 0, so the D3 cells (a time budget of 1e-6 ms) stop after the
 first k-mer deterministically. Rebuilding changes the snapshots only where the server's
-output changed: then record the golden file again (traverse_golden.py --out
+output changed: then record the golden file again (api/python/tests/traverse_golden.py --out
 data/traverse/golden/coordinates.json.gz data/traverse/coords) and say why.
 """
 
@@ -33,8 +34,8 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
-OUT = os.path.join(HERE, 'data', 'traverse', 'coords')
+REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
+OUT = os.path.join(REPO, 'api', 'python', 'tests', 'data', 'traverse', 'coords')
 
 # seeds of mini_refseq: a 150 bp window of NZ_CP030345.1 that the index holds six times
 # (a repeat, so lists can be cut), blaNDM-1 (813 bp), and a 400 bp seed whose derivation

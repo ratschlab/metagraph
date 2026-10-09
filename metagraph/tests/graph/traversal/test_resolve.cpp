@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -512,19 +513,20 @@ void expect_same_profile(const SupportProfile &expected, const SupportProfile &g
 }
 
 // Every stop |opts| can come to, one per poll of the work (the deadline passing at the n-th
-// read, n = 1, 2, ... until the work completes before it), each checked against what the
-// decision B7 promises: exactly the resolve of the query's first stop->resolved_kmers k-mers,
-// resolved_kmers being a k-mer in the graph whose labels were not read, never decreasing in n.
-// Without a stop the profile is the unbudgeted one. Returns the stops seen: (phase, k-mers
-// resolved)
+// read, n = 1, 2, ... until the work completes before it; past |dense| polls every tenth part
+// of them, since each check re-runs the whole resolve and a prefix's), each checked against
+// what the decision B7 promises: exactly the resolve of the query's first
+// stop->resolved_kmers k-mers, resolved_kmers being a k-mer in the graph whose labels were not
+// read, never decreasing in n. Without a stop the profile is the unbudgeted one. Returns the
+// stops seen: (phase, k-mers resolved)
 std::vector<std::pair<ResolveStop::Phase, uint64_t>>
 check_every_stop(LabelOracle &oracle, const std::string &q, const ResolveOptions &opts,
-                 const std::string &what) {
+                 const std::string &what, size_t dense = std::numeric_limits<size_t>::max()) {
     const SupportProfile full = resolve_support(oracle, q, opts);
     EXPECT_FALSE(full.stop) << what;
     std::vector<std::pair<ResolveStop::Phase, uint64_t>> stops;
     uint64_t last = 0;
-    for (size_t n = 1; ; ++n) {
+    for (size_t n = 1; ; n += n < dense ? 1 : std::max<size_t>(1, n / 10)) {
         size_t polls = 0;
         ResolveOptions timed = opts;
         timed.time_up = [&polls, n]() { return ++polls >= n; };
@@ -596,6 +598,10 @@ TYPED_TEST(ResolveCoordTest, DeadlineStopIsTheResolveOfAPrefix) {
     }
     auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
     LabelOracle oracle(*anno);
+    // every stop on the column annotation; on the row-diff one (whose reads cost the most)
+    // the first 20 and then every tenth part
+    const size_t dense = std::is_same_v<Annotation, annot::RowDiffColumnAnnotator>
+            ? 20 : std::numeric_limits<size_t>::max();
     size_t stops = 0;
     for (Support support : { Support::KMER, Support::TRACE }) {
         for (size_t max_labels : { size_t(0), size_t(1000), size_t(10) }) {
@@ -610,7 +616,7 @@ TYPED_TEST(ResolveCoordTest, DeadlineStopIsTheResolveOfAPrefix) {
             opts.batch_rows = 3;
             const std::string what = std::string(support == Support::TRACE ? "trace" : "kmer")
                     + (max_labels ? ", discover " + std::to_string(max_labels) : ", explicit");
-            const auto seen = check_every_stop(oracle, q, opts, what);
+            const auto seen = check_every_stop(oracle, q, opts, what, dense);
             // rows read three at a time: a stop between most of them
             EXPECT_GT(count_phase(seen, ResolveStop::ROWS), 30u) << what;
             stops += seen.size();

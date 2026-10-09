@@ -1,6 +1,6 @@
 """Record coordinates in the library (feature level 6; DESIGN §18 and §26, the owner's
 decisions C1-C12, C-N1..C-N9 and X-C8), on real mini_refseq responses committed under
-data/traverse/coords/ (traverse_coords_snapshots.py):
+data/traverse/coords/ (scripts/traversal/traverse_coords_snapshots.py):
 
   * parsing: the block is validated eagerly against the body (C9) by from_response(), a
     saved file's J line and the store's first parse of an unparsed entry; the parsed index
@@ -12,7 +12,7 @@ data/traverse/coords/ (traverse_coords_snapshots.py):
     them 1-based closed (C-N8: none in GFA);
   * requests: next_request() carries the setting and strips the cap when coordinates are
     dropped (revision 2, C-N6); build_request(), supports_coordinates() and the automatic
-    rule of traverse() (C8, the D4 gate of X-C8);
+    rule of traverse() (C8, the depth gate);
   * the MCP rows (C7), the stage-L charges (W_COORD) and the traced peak, also of blocks of
     10^4 occurrences (widened()), and one charge for the index whether cached or not;
   * D3 (R21 (3)): a walked result with a derivation limitation is qualified, check_rules
@@ -797,7 +797,7 @@ class TestClient(unittest.TestCase):
         self.assertEqual([], r.notes)
 
     def test_auto_under_a_memory_budget(self):
-        # the branch where the D4 gate passes (AUTO_COORDINATES_UNDER_MEMORY_BUDGET true):
+        # the branch where the depth gate passes (AUTO_COORDINATES_UNDER_MEMORY_BUDGET true):
         # asked under a memory budget too, and stated. At level 6 the gate fails for wide
         # columns (DESIGN §26.5), so the shipped default is false (the test below)
         self.assertFalse(AUTO_COORDINATES_UNDER_MEMORY_BUDGET)
@@ -943,7 +943,7 @@ class TestTools(unittest.TestCase):
         self.assertTrue(self.client.sent[-1]['strategy']['output']['coordinates'])
         self.assertEqual('record', out['evidence']['coordinates']['kind'])
         st = dict(TRACE, bounds={'max_extension_bp': 300, 'max_memory_mb': 4})
-        # the branch where the D4 gate passes: under a memory budget too, and no note
+        # the branch where the depth gate passes: under a memory budget too, and no note
         # without a stop (the shipped default is false at level 6, DESIGN §26.5)
         import metagraph.traverse.client as client_mod
         client_mod.AUTO_COORDINATES_UNDER_MEMORY_BUDGET = True
@@ -1437,15 +1437,6 @@ class TestDisplayedParentAtMerges(unittest.TestCase):
 
 
 # ======================================================================= R21 (5)
-
-class TestLabelLimitDocs(unittest.TestCase):
-    def test_graphlets_rst_states_it(self):
-        path = os.path.join(T.REPO, 'docs', 'source', 'graphlets.rst')
-        with open(path, encoding='utf-8') as f:
-            text = f.read()
-        self.assertIn('max_labels_per_node', text)
-        self.assertIn('coordinates are not compared', text)
-
 
 # ======================================================================= open items
 

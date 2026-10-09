@@ -22,8 +22,8 @@
 #
 # usage: make_column_coord_fixtures.sh [lockstep|divcol|both] [BUILD_DIR] [METAGRAPH_BIN]
 #   BUILD_DIR      default: <repo>/metagraph/build (writes BUILD_DIR/coord_lockstep and
-#                  BUILD_DIR/coord_divcol, where MiniRefSeqWide.DISABLED_CoordinatesDepthByRegime
-#                  looks for them when run from BUILD_DIR)
+#                  BUILD_DIR/coord_divcol, where the benchmark
+#                  BM_TraversalCoordinatesDepthByRegime looks for them when run from BUILD_DIR)
 #   METAGRAPH_BIN  default: <repo>/metagraph/build/metagraph
 # env:
 #   NCOLS_LOCKSTEP (200), NCOLS_DIVCOL (100), RECORDS (16), LENGTH (3000), CORE (600),

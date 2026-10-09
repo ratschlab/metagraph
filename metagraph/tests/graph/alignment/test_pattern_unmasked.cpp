@@ -1179,15 +1179,15 @@ TEST(PatternUnmasked, LongPatternsAnchorsAndPaths) {
 
 // ---------------------------------------------------------------- random cases
 
-TEST(PatternUnmasked, RandomPatternsAgainstOracles) {
-    // fixed seeds: graphs of every mode and both builders, k 3 to 12, short records (many
-    // sources, so many source dummies), patterns from the records' starts (where the dummies
-    // match), IUPAC with leading N runs, short and long, every strand choice and scope
-    size_t cases = 0;
-    size_t with_dummies = 0;
-    size_t nonempty = 0;
+// The random cases of the two tests below, each test with seeds of its own: graphs of every
+// mode and both builders, k 3 to 12, short records (many sources, so many source dummies),
+// patterns from the records' starts (where the dummies match), IUPAC with leading N runs,
+// short and long, every strand choice and scope. |visit|(twin, records, mode, text, kind,
+// request) for each of 60 graphs x 6 patterns
+template <class Visit>
+void for_random_unmasked_cases(uint32_t seeds, Visit visit) {
     for (uint32_t seed = 1; seed <= 60; ++seed) {
-        std::mt19937 rng(9000 + seed);
+        std::mt19937 rng(seeds + seed);
         const size_t k = 3 + rng() % 10;
         const auto mode = static_cast<DeBruijnGraph::Mode>(rng() % 3);
         const bool batch = rng() % 2;
@@ -1220,16 +1220,27 @@ TEST(PatternUnmasked, RandomPatternsAgainstOracles) {
             if (text.size() <= k && mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0)
                 scope = Scope::SUFFIX;
             const auto strands = static_cast<Strands>(rng() % 3);
-            SCOPED_TRACE("seed " + std::to_string(seed) + " batch " + std::to_string(batch));
-            const Request request = make_request(scope, strands);
-            const size_t found = check_unmasked(twin, records, mode, text, kind, request);
-            ++cases;
-            nonempty += found > 0;
-            const Result r = count_of(*twin.unmasked, Pattern::parse(kind, text), request);
-            const Count &total = r.contexts ? r.contexts->total : r.anchors->total;
-            with_dummies += upper_of(total) > found;
+            SCOPED_TRACE("seed " + std::to_string(seed) + " batch " + std::to_string(batch)
+                         + " mode " + std::to_string(mode));
+            visit(twin, records, mode, text, kind, make_request(scope, strands));
         }
     }
+}
+
+TEST(PatternUnmasked, RandomPatternsAgainstOracles) {
+    size_t cases = 0;
+    size_t with_dummies = 0;
+    size_t nonempty = 0;
+    for_random_unmasked_cases(9000, [&](const Twin &twin, const std::vector<std::string> &records,
+                                        DeBruijnGraph::Mode mode, const std::string &text,
+                                        PatternKind kind, const Request &request) {
+        const size_t found = check_unmasked(twin, records, mode, text, kind, request);
+        ++cases;
+        nonempty += found > 0;
+        const Result r = count_of(*twin.unmasked, Pattern::parse(kind, text), request);
+        const Count &total = r.contexts ? r.contexts->total : r.anchors->total;
+        with_dummies += upper_of(total) > found;
+    });
     EXPECT_EQ(360u, cases);
     // not vacuous: many patterns hit, and many counts hold source dummies
     EXPECT_LT(200u, nonempty);
@@ -1738,47 +1749,12 @@ TEST(PatternUnmasked, TinyBlocksCheckedExact) {
 }
 
 TEST(PatternUnmasked, TinyBlocksAgainstTheMaskedTwin) {
-    // the random cases of RandomPatternsAgainstOracles' kind (other seeds): graphs of every
-    // mode and both builders, k 3 to 12, short records (many source dummies), patterns from the
-    // records' starts, IUPAC with leading N runs, short and long, every strand and scope
     TinyStats stats;
-    for (uint32_t seed = 1; seed <= 60; ++seed) {
-        std::mt19937 rng(7100 + seed);
-        const size_t k = 3 + rng() % 10;
-        const auto mode = static_cast<DeBruijnGraph::Mode>(rng() % 3);
-        const bool batch = rng() % 2;
-        std::vector<std::string> records(1 + rng() % 6);
-        for (std::string &record : records) {
-            for (size_t i = 0, n = k + rng() % 12; i < n; ++i) {
-                record.push_back("ACGT"[rng() % 4]);
-            }
-        }
-        const Twin twin = build_twin(k, records, mode, batch);
-        for (int t = 0; t < 6; ++t) {
-            const std::string &record = records[rng() % records.size()];
-            const size_t L = 1 + rng() % std::min(record.size(), k + 3);
-            const size_t start = rng() % 3 ? 0 : rng() % (record.size() - L + 1);
-            std::string text = record.substr(start, L);
-            PatternKind kind = PatternKind::DNA;
-            if (rng() % 2) {
-                kind = PatternKind::IUPAC;
-                for (char &c : text) {
-                    if (rng() % 4 == 0)
-                        c = "RYSWKMBDHVN"[rng() % 11];
-                }
-                for (size_t i = 0, n = rng() % 3; i < n && i < text.size(); ++i) {
-                    text[i] = 'N';
-                }
-            }
-            Scope scope = Scope::ANY_OFFSET;
-            if (text.size() <= k && mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0)
-                scope = Scope::SUFFIX;
-            const auto strands = static_cast<Strands>(rng() % 3);
-            SCOPED_TRACE("seed " + std::to_string(seed) + " batch " + std::to_string(batch)
-                         + " mode " + std::to_string(mode));
-            check_tiny(twin, text, kind, make_request(scope, strands), &stats);
-        }
-    }
+    for_random_unmasked_cases(7100, [&](const Twin &twin, const std::vector<std::string> &,
+                                        DeBruijnGraph::Mode, const std::string &text,
+                                        PatternKind kind, const Request &request) {
+        check_tiny(twin, text, kind, request, &stats);
+    });
     std::cerr << "tiny blocks: " << stats.cases << " cases, " << stats.checked
               << " checked, " << stats.with_dummies << " with source dummies, "
               << stats.only_dummies << " of only dummies, " << stats.long_checked
@@ -1918,6 +1894,13 @@ TEST(PatternUnmasked, RealFractionOnSmallGraphs) {
             if (samples == kRealFractionSamples) {
                 ++graphs;
                 inside += f.lower <= exact.value && exact.value <= f.upper;
+                // the interval is Wilson's (z = 1.959964)
+                const double n = double(samples), p = f.value, z = 1.959963984540054;
+                const double centre = (p + z * z / (2 * n)) / (1 + z * z / n);
+                const double half = z / (1 + z * z / n)
+                                  * std::sqrt(p * (1 - p) / n + z * z / (4 * n * n));
+                EXPECT_NEAR(std::max(0.0, centre - half), f.lower, 1e-12);
+                EXPECT_NEAR(std::min(1.0, centre + half), f.upper, 1e-12);
             }
         }
         // the default is 10,000
@@ -1947,24 +1930,16 @@ TEST(PatternUnmasked, RealFractionWilsonInterval) {
     EXPECT_EQ(1, f.upper);
 }
 
-// build/mini_refseq's graph, when present beside the source tree
-std::string mini_refseq_graph() {
-    std::string here = __FILE__;
-    const std::string marker = "/tests/graph/alignment/";
-    const size_t at = here.rfind(marker);
-    if (at == std::string::npos)
-        return "";
-    const std::string path = here.substr(0, at) + "/build/mini_refseq/graph_k31.dbg";
-    return std::ifstream(path).good() ? path : "";
-}
-
-TEST(PatternUnmasked, RealFractionOnMiniRefseq) {
-    // build/mini_refseq (k = 31, no .edgemask): 8,335,760 entries, 375 source and 12 sink
-    // dummies by `stats --count-dummy`. The sample's 95% interval holds the exact f
-    // (deterministic: the seed is the graph's number of edges), and its cost is measured
-    const std::string path = mini_refseq_graph();
-    if (path.empty())
-        GTEST_SKIP() << "build/mini_refseq/graph_k31.dbg not found";
+// The mini index (scripts/traversal/build_mini_refseq.sh), as the MiniRefSeq tests find it:
+// mini_refseq/ in the working directory (build/)
+TEST(PatternUnmasked, RealFractionOnMiniRefSeq) {
+    // the mini graph (k = 31, no .edgemask): 8,335,760 entries, 375 source and 12 sink dummies
+    // by `stats --count-dummy`. The sample's 95% interval holds the exact f (deterministic: the
+    // seed is the graph's number of edges), and its cost is measured
+    const std::string path = "mini_refseq/graph_k31.dbg";
+    if (!std::ifstream(path).good())
+        GTEST_SKIP() << "mini_refseq index not found in the working directory (build it with "
+                        "scripts/traversal/build_mini_refseq.sh)";
     DBGSuccinct graph(2);
     ASSERT_TRUE(graph.load(path));
     graph.reset_mask();
@@ -2038,11 +2013,6 @@ void measure_real_fraction(size_t records, size_t length) {
 
 TEST(PatternUnmasked, RealFractionCost) {
     measure_real_fraction(40, 25'000);
-}
-
-// by hand (--gtest_also_run_disabled_tests): about 30 million k-mers
-TEST(PatternUnmasked, DISABLED_RealFractionCostOnALargeGraph) {
-    measure_real_fraction(300, 100'000);
 }
 
 #endif // _DNA_GRAPH || _DNA5_GRAPH

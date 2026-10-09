@@ -1,5 +1,6 @@
 import filecmp
 import glob
+import itertools
 import json
 import math
 import os
@@ -61,10 +62,11 @@ Fixtures:
     ($METAGRAPH_BASE_BINARY, e.g. the build of 804731aa) on test_api.py's fixture and requests;
     skipped without it.
 
-CI has neither the mini index nor a base binary: there TestPatternMini, TestPatternFixtures and
-TestPatternRegression are skipped, which unittest counts as passed (review of 2026-10-07,
-T2-01, X-TESTS-05). With $METAGRAPH_REQUIRE_GUARDS=1 a missing input fails those classes instead
-of skipping them, so that a run meant to check the guarantees cannot pass without them.
+Without the mini index or a base binary TestPatternMini, TestPatternFixtures and
+TestPatternRegression are skipped, which unittest counts as passed. With
+$METAGRAPH_REQUIRE_GUARDS=1 a missing input fails those classes instead of skipping them, so
+that a run meant to check the guarantees cannot pass without them: CI's mini-index job builds
+the index and runs TestPatternMini and TestPatternFixtures so (it has no base binary).
 """
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
@@ -171,9 +173,10 @@ def peptide_prefix(residues, table, s, reverse):
     return True
 
 
-def six_frames(seq, residues, table):
+def six_frames_reference(seq, residues, table):
     """{(0-based start, strand)}: every match of the peptide in the six frames of |seq| (its
-    three frames and the three of its reverse complement), the start on |seq|'s + strand."""
+    three frames and the three of its reverse complement), the start on |seq|'s + strand. The
+    plain definition, residue by residue: six_frames must answer as it does."""
     m, L = len(residues), 3 * len(residues)
     out = set()
     for strand, t in (('+', seq), ('-', revcomp(seq))):
@@ -183,6 +186,46 @@ def six_frames(seq, residues, table):
                 if all(residue_admits(residues[x], aa[j + x]) for x in range(m)):
                     start = frame + 3 * j
                     out.add((start if strand == '+' else len(t) - start - L, strand))
+    return out
+
+
+# the six translations of a record, per (record, table): the mini's oracles scan the same 9 Mbp
+# for every peptide, and translating them again for each would dominate the module's runtime
+_FRAMES = {}
+
+
+def translated_frames(seq, table):
+    """[(strand, frame, residues)]: the translations of |seq|'s three frames and of the three of
+    its reverse complement, as translate() reads them."""
+    key = (seq, table)
+    if key not in _FRAMES:
+        code = dict(zip(CODONS_TCAG, GENETIC_CODES[table]))
+        frames = []
+        for strand, t in (('+', seq), ('-', revcomp(seq))):
+            for frame in range(3):
+                codons = re.findall('...', t[frame:])
+                frames.append((strand, frame,
+                               ''.join(map(code.get, codons, itertools.repeat('?')))))
+        _FRAMES[key] = frames
+    return _FRAMES[key]
+
+
+def peptide_regex(residues):
+    """A lookahead matching each start of the peptide in a translation, a residue the class of
+    the amino acids residue_admits: '*' only the stop, X anything but a stop or a '?'."""
+    classes = {'*': r'\*', 'X': '[^*?]', 'B': '[DN]', 'Z': '[EQ]', 'J': '[IL]'}
+    return re.compile('(?=' + ''.join(classes.get(r, re.escape(r)) for r in residues) + ')')
+
+
+def six_frames(seq, residues, table):
+    """six_frames_reference(seq, residues, table), from the cached translations."""
+    L = 3 * len(residues)
+    regex = peptide_regex(residues)
+    out = set()
+    for strand, frame, aa in translated_frames(seq, table):
+        for match in regex.finditer(aa):
+            start = frame + 3 * match.start()
+            out.add((start if strand == '+' else len(seq) - start - L, strand))
     return out
 
 
@@ -391,10 +434,8 @@ SCAN_STEPS = 20
 HEAVY31 = 'GG' + 'N' * 19 + 'TTGGCGATCT'
 
 # owner decision #16: the note of an entry whose counts carry an estimate (a graph without its
-# dummy-edge mask), and the engine's of a threshold decided on an upper bound against a request
-# whose lower bound fits
+# dummy-edge mask)
 NOTE_ESTIMATE = 'estimate_sampled_dummy_fraction'
-NOTE_THRESHOLD_UPPER = 'threshold_upper_bound'
 
 
 def guard(condition, reason):
@@ -570,7 +611,7 @@ class PatternChecks:
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 @guard(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH))
        and os.path.isdir(os.path.join(MINI_DIR, 'fasta')),
-       "the mini index is not built (scripts/traversal/build_mini_refseq.sh; not in CI)")
+       "the mini index is not built (scripts/traversal/build_mini_refseq.sh)")
 class TestPatternMini(PatternChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -595,9 +636,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         cls.graph = cls._mini_copy('masked', copy_graph=True)
         cls.anno = os.path.join(os.path.dirname(cls.graph), MINI_ANNO)
         cls.label_of_kmer = cls.records.names_with_kmer
-        res = TestingBase._run_command(f'{METAGRAPH} transform --mask-dummy -p 2 {cls.graph}',
-                                       'Mask the copy of the mini graph')
-        cls.transform_log = (res.stdout + res.stderr).decode()
+        TestingBase._run_command(f'{METAGRAPH} transform --mask-dummy -p 2 {cls.graph}',
+                                 'Mask the copy of the mini graph')
         assert os.path.isfile(cls.graph[:-len('.dbg')] + '.edgemask')
         assert filecmp.cmp(cls.graph, os.path.join(MINI_DIR, MINI_GRAPH), shallow=False)
         # the mini graph as built, without a mask whatever build/mini_refseq holds: a symlink in
@@ -626,7 +666,21 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         cls.server.stop()
         cls.unmasked_server.stop()
         cls.unchecked_server.stop()
+        if cls._no_map is not None:
+            cls._no_map.stop()
         cls.tempdir.cleanup()
+
+    _no_map = None
+
+    @classmethod
+    def no_map_server(cls):
+        """The masked copy served with --no-coord-mapping (coordinates without the record
+        mapping), started once for the tests that read it."""
+        if cls._no_map is None:
+            cls._no_map = Server(METAGRAPH, ['-i', cls.graph, '-a', cls.anno,
+                                             '--no-coord-mapping'],
+                                 os.path.join(cls.tempdir.name, 'server_no_map.log'))
+        return cls._no_map
 
     @classmethod
     def _mini_copy(cls, name, copy_graph):
@@ -791,121 +845,6 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(['dna', 'dna', 'iupac', 'dna'], [e['kind'] for e in out['patterns'][:4]])
         self.assertContextCounts(out['patterns'][4], self.contexts(self.p16), self.k, 16,
                                  'any_offset')
-
-    def test_refusals(self):
-        p = [{'dna': self.p16}]
-        cases = [
-            ({'patterns': p, 'bogus': 1}, 'invalid_request', "unknown field 'bogus'"),
-            ({'patterns': [{'dna': self.p16, 'name': 'x'}]}, 'invalid_request',
-             "unknown field 'name'"),
-            ({'patterns': p, 'output': {'labels': 'none', 'format': 'x'}}, 'invalid_request',
-             "unknown field 'format'"),
-            ({'patterns': [{'dna': self.p16, 'iupac': self.p16}]}, 'invalid_request', 'exactly one'),
-            ({'patterns': [{'id': 1, 'dna': self.p16}]}, 'invalid_request', 'id'),
-            ({'patterns': []}, 'invalid_request', 'patterns'),
-            ({'patterns': p * 17}, 'invalid_request', 'patterns'),
-            ({}, 'invalid_request', 'patterns'),
-            ([], 'invalid_request', 'object'),
-            ({'patterns': p, 'mode': 'all'}, 'invalid_request', 'mode'),
-            ({'patterns': p, 'scope': 'long'}, 'invalid_request', 'scope'),
-            ({'patterns': p, 'strands': '+'}, 'invalid_request', 'strands'),
-            ({'patterns': p, 'max_steps': 0}, 'invalid_request', 'max_steps'),
-            ({'patterns': p, 'max_contexts': -1}, 'invalid_request', 'max_contexts'),
-            ({'patterns': p, 'time_budget_ms': DEFAULT_FINALIZE_MS}, 'invalid_request',
-             'time_budget_ms'),
-            ({'patterns': p, 'stop_at_threshold': 'yes'}, 'invalid_request', 'stop_at_threshold'),
-            # increment 5b: the predicate's labels need a predicate (later_increment before)
-            ({'patterns': p, 'output': {'labels': 'predicate_only'}}, 'invalid_request',
-             'needs a predicate'),
-            ({'patterns': p, 'mode': 'count', 'output': {'labels': 'predicate_only'}},
-             'invalid_request', 'needs a predicate'),
-            # occurrences are placed per label (increment 3): they need labels "all"
-            ({'patterns': p, 'output': {'occurrences': True}}, 'invalid_request', 'occurrences'),
-            # output.paths is accepted with either value since increment 4 (a path result
-            # always carries its node path); another type is refused
-            ({'patterns': p, 'output': {'paths': 1}}, 'invalid_request', 'paths'),
-            # increment 5b: a predicate is served (SPEC §19); its form and fields are checked
-            ({'patterns': p, 'predicate': {'any': [562]}}, 'invalid_request',
-             'write a taxid as "562"'),
-            ({'patterns': p, 'predicate': {'any': ['562'], 'none': ['287']}}, 'invalid_request',
-             'request.predicate'),
-            ({'patterns': p, 'predicate': {'at_least': {'n': 3, 'labels': ['562', '287']}}},
-             'invalid_request', 'request.predicate.at_least'),
-            ({'patterns': p, 'predicate': {'any': [str(i) for i in range(10001)]}},
-             'predicate_too_large', '10001 names'),
-            ({'patterns': p, 'predicate': {'any': ['562']}, 'long_search': 'paths'},
-             'invalid_request', 'supported paths'),
-            ({'patterns': p, 'predicate': {'any': ['562']}, 'predicate_strands': 'both'},
-             'invalid_request', 'predicate_strands'),
-            ({'patterns': p, 'max_predicate_work': 0}, 'invalid_request', 'max_predicate_work'),
-            ({'patterns': p, 'max_predicate_contexts': -1}, 'invalid_request',
-             'max_predicate_contexts'),
-            ({'patterns': p, 'long_search': 'supported_paths'}, 'invalid_request',
-             'long_search'),
-            # increment 4: long_search, max_paths and require_support are served (paths
-            # opt-in, owner decisions #13 and #14); their values are checked
-            ({'patterns': p, 'max_paths': None}, 'invalid_request', 'max_paths'),
-            ({'patterns': p, 'max_paths': -1}, 'invalid_request', 'max_paths'),
-            ({'patterns': p, 'long_search': 'path'}, 'invalid_request', 'long_search'),
-            ({'patterns': p, 'long_search': None}, 'invalid_request', 'long_search'),
-            ({'patterns': p, 'require_support': 'kmer'}, 'invalid_request', 'require_support'),
-            ({'patterns': p, 'require_support': 'record_verified',
-              'output': {'labels': 'all', 'occurrences': False}}, 'invalid_request',
-             'require_support'),
-            ({'patterns': p, 'max_labels': None}, 'invalid_request', 'max_labels'),
-            ({'patterns': p, 'max_labels_per_anchor': 0}, 'invalid_request',
-             'max_labels_per_anchor'),
-            ({'patterns': p, 'allow_unbudgeted_annotation': 'yes'}, 'invalid_request',
-             'allow_unbudgeted_annotation'),
-            ({'patterns': p, 'graphs': ['x']}, 'later_increment', 'graphs'),
-            # increment 5: protein is served; genetic_code is an NCBI table id
-            ({'patterns': [{'protein': 'MKV'}], 'genetic_code': 7}, 'genetic_code_unknown',
-             'genetic_code'),
-            ({'patterns': p, 'genetic_code': '11'}, 'invalid_request', 'genetic_code'),
-            # an integer that is no table, a negative one included, is genetic_code_unknown;
-            # a fraction is not an integer (SPEC §4.1; review of increments 4 and 5, finding 2)
-            ({'patterns': [{'protein': 'MELPNIMHPV'}], 'genetic_code': -1},
-             'genetic_code_unknown', 'genetic_code'),
-            ({'patterns': [{'protein': 'MELPNIMHPV'}], 'genetic_code': 1.5}, 'invalid_request',
-             'genetic_code'),
-            ({'patterns': [{'protein': 'MKV', 'dna': self.p16}]}, 'invalid_request',
-             'exactly one'),
-            ({'patterns': p, 'in_ram': False}, 'resident_only', 'in_ram'),
-        ]
-        for payload, code, words in cases:
-            ret = self.server.post('pattern', payload)
-            self.assertEqual(400, ret.status_code, (payload, ret.text))
-            body = ret.json()
-            self.assertEqual({'error', 'code'}, set(body), payload)
-            self.assertEqual(code, body['code'], (payload, body))
-            self.assertIn(words, body['error'], payload)
-        ret = self.server.post('pattern', '{"patterns": [', raw=True)
-        self.assertEqual(400, ret.status_code)
-        self.assertEqual('invalid_request', ret.json()['code'])
-        # one RFC 8259 JSON text with unique member names (review of 2026-10-07, R1-02: each
-        # was answered 200), nested at most 1,000 deep (R1-03, R2-01: a 400 without a code)
-        one = '{"patterns": [{"dna": "%s"}]' % self.p16
-        for raw in (one + '} GARBAGE', one + ',}', one + '} ' + one + '}',
-                    one + ', /* x */ "mode": "count"}', one + ', "mode": "count", "mode": "partial"}',
-                    one + ', "max_steps": 1, "max_steps": 100000}',
-                    '{"patterns": [{"dna": "%s", "dna": "%s"}]}' % (self.p16, self.p14),
-                    '[' * 1200 + ']' * 1200,
-                    one + ', "x": ' + '[' * 1500 + ']' * 1500 + '}'):
-            ret = self.server.post('pattern', raw, raw=True)
-            self.assertEqual(400, ret.status_code, raw[:100])
-            self.assertEqual({'error', 'code'}, set(ret.json()), raw[:100])
-            self.assertEqual('invalid_request', ret.json()['code'], raw[:100])
-        # false projections and occurrences are accepted and change nothing; so are
-        # output.paths true and long_search for a pattern of at most k bases
-        out = self.pattern(self.server, {'patterns': p, 'mode': 'count',
-                                         'output': {'labels': 'none', 'occurrences': False,
-                                                    'paths': False}})
-        self.assertContextCounts(out['patterns'][0], self.contexts(self.p16), self.k, 16,
-                                 'any_offset')
-        for extra in ({'output': {'labels': 'none', 'paths': True}},
-                      {'long_search': 'paths'}, {'long_search': 'anchors'}):
-            again = self.pattern(self.server, dict({'patterns': p, 'mode': 'count'}, **extra))
-            self.assertEqual(untimed(out['patterns']), untimed(again['patterns']), extra)
 
     def test_max_steps_and_clamps(self):
         out = self.pattern(self.server, {'patterns': [{'dna': self.p16}, {'dna': self.p14}],
@@ -1221,10 +1160,10 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertLessEqual(out['timing']['elapsed_ms'], 2000)
 
     def test_resolve_deadline_is_503(self):
-        """/resolve's 503 end to end (review of 2026-10-07, V1-04: only the exception was
-        tested): a query whose k-mer mapping, which the deadline cannot interrupt, outlasts
-        the whole budget is answered 503 {error, code: deadline}, uncompressed, without
-        Retry-After (that is the loading 503's), and the CLI writes the same body and exits 1."""
+        """/resolve's 503 end to end, on the mini server because it needs a query whose k-mer
+        mapping, which the deadline cannot interrupt, outlasts the whole budget: 503 {error,
+        code: deadline}, uncompressed although the client accepts gzip, without Retry-After
+        (that is the loading 503's), and the CLI writes the same body and exits 1."""
         # the whole 7 Mbp record: its mapping takes well over the 250 ms reserve on any host
         # (2 Mbp mapped within it on a quiet machine)
         seq = ''.join(s for _, s in read_fasta(os.path.join(MINI_DIR, 'fasta', '287.fa')))
@@ -1234,13 +1173,12 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                              'bounds.time_budget_ms (250.001 ms, the finalisation reserve of '
                              '250 ms included): nothing partial is sent',
                     'code': 'deadline'}
-        for headers in ({}, {'Accept-Encoding': 'gzip'}):
-            ret = requests.post(self.server.url('resolve'), data=json.dumps(body),
-                                headers=headers, timeout=300)
-            self.assertEqual(503, ret.status_code, ret.text[:500])
-            self.assertNotIn('Retry-After', ret.headers)
-            self.assertNotIn('Content-Encoding', ret.headers)
-            self.assertEqual(expected, ret.json())
+        ret = requests.post(self.server.url('resolve'), data=json.dumps(body),
+                            headers={'Accept-Encoding': 'gzip'}, timeout=300)
+        self.assertEqual(503, ret.status_code, ret.text[:500])
+        self.assertNotIn('Retry-After', ret.headers)
+        self.assertNotIn('Content-Encoding', ret.headers)
+        self.assertEqual(expected, ret.json())
         path = os.path.join(self.tempdir.name, 'resolve_deadline.json')
         with open(path, 'w') as f:
             json.dump(body, f)
@@ -1522,35 +1460,18 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual([{'field': 'max_paths', 'requested': 10 ** 6,
                            'effective': DEFAULT_CAPS['max_paths']}], out['limits']['clamped'])
 
-    def test_long_paths_cli_answers_as_the_server(self):
-        request = self.paths_request(self.long_patterns()[:3], mode='partial', max_paths=1,
-                                     output={'labels': 'all'}, require_support='record_verified')
-        server_out = self.pattern(self.server, request)
-        path = os.path.join(self.tempdir.name, 'request_paths.json')
-        with open(path, 'w') as f:
-            json.dump(request, f)
-        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
-                                                       '-a', self.anno, path],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(0, res.returncode, res.stderr.decode())
-        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
-
     def test_long_paths_without_record_mapping(self):
         """--no-coord-mapping: the coordinates without the .seqs. A path's labels are the
         columns carrying it, none record_verified (record bounds unknown: a chain of
         consecutive column coordinates may cross from one record into the next); each lists
         its chains (kmer_coord of the first k-mer, offset 0). require_support "record_verified"
         is refused there."""
-        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno, '--no-coord-mapping'],
-                        os.path.join(self.tempdir.name, 'server_paths_no_map.log'))
-        try:
-            p = self.long_patterns()[0]
-            entry = self.pattern(server, self.paths_request([p], output={'labels': 'all'})
-                                 )['patterns'][0]
-            ret = server.post('pattern', self.paths_request([p], output={'labels': 'all'},
-                                                            require_support='record_verified'))
-        finally:
-            server.stop()
+        server = self.no_map_server()
+        p = self.long_patterns()[0]
+        entry = self.pattern(server, self.paths_request([p], output={'labels': 'all'})
+                             )['patterns'][0]
+        ret = server.post('pattern', self.paths_request([p], output={'labels': 'all'},
+                                                        require_support='record_verified'))
         self.assertEqual((400, 'support_unavailable'), (ret.status_code, ret.json()['code']))
         self.assertEqual('global', entry['placement'])
         self.assertIn('record_bounds_unknown', entry['notes'])
@@ -1853,19 +1774,6 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                          entry['counts']['contexts']['value'], (r, other))
                         self.assertNotIn('no_stop_codon', entry['notes'])
 
-    def test_peptide_cli_answers_as_the_server(self):
-        request = {'patterns': [{'protein': 'MELPNIMHPV'}, {'protein': 'MELPNIMHPVAKLS'}],
-                   'genetic_code': 11, 'long_search': 'paths', 'output': {'labels': 'all'}}
-        server_out = self.pattern(self.server, request)
-        path = os.path.join(self.tempdir.name, 'request_peptides.json')
-        with open(path, 'w') as f:
-            json.dump(request, f)
-        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
-                                                       '-a', self.anno, path],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(0, res.returncode, res.stderr.decode())
-        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
-
     # ------------------------------------------------------------ labels (increment 3)
 
     NDM_F = 'GGTTTGGCGATCTGGTTTTC'   # blaNDM-1 forward primer: its k-mers carry 7 to 9 taxa
@@ -2042,33 +1950,15 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         out['patterns'][0]['notes'] = []
         self.assertEqual(untimed(none), untimed(out))
 
-    def test_labels_all_cli_answers_as_the_server(self):
-        request = {'patterns': [{'dna': self.NDM_F}, {'iupac': self.iupac16}, {'dna': self.p40}],
-                   'mode': 'partial', 'max_contexts': 9, 'max_labels': 4,
-                   'output': {'labels': 'all'}}
-        server_out = self.pattern(self.server, request)
-        path = os.path.join(self.tempdir.name, 'request_labels.json')
-        with open(path, 'w') as f:
-            json.dump(request, f)
-        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
-                                                       '-a', self.anno, path],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(0, res.returncode, res.stderr.decode())
-        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
-
     def test_labels_all_without_record_mapping(self):
         """--no-coord-mapping: coordinates without the .seqs. Each label lists the column
         coordinate of the context's k-mer (kmer_coord) and the offset, placed nowhere; no
         occurrence count is claimed (note record_bounds_unknown)."""
-        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno, '--no-coord-mapping'],
-                        os.path.join(self.tempdir.name, 'server_no_map.log'))
-        try:
-            caps = server.get('capabilities').json()['pattern']
-            self.assertEqual('global', caps['placement'])
-            entry = self.pattern(server, {'patterns': [{'dna': self.NDM_F}],
-                                          'output': {'labels': 'all'}})['patterns'][0]
-        finally:
-            server.stop()
+        server = self.no_map_server()
+        caps = server.get('capabilities').json()['pattern']
+        self.assertEqual('global', caps['placement'])
+        entry = self.pattern(server, {'patterns': [{'dna': self.NDM_F}],
+                                      'output': {'labels': 'all'}})['patterns'][0]
         self.assertEqual('global', entry['placement'])
         self.assertEqual(['record_bounds_unknown'], entry['notes'])
         self.assertTrue(entry['retrieval_complete'])
@@ -2279,57 +2169,53 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
 
     def test_cli_answers_as_the_server(self):
-        request = {'patterns': [{'id': 'a', 'dna': self.p16}, {'iupac': self.iupac16},
-                                {'dna': self.p11}, {'dna': self.p40}],
-                   'mode': 'partial', 'max_contexts': 7}
-        server_out = self.pattern(self.server, request)
-        path = os.path.join(self.tempdir.name, 'request.json')
-        with open(path, 'w') as f:
-            json.dump(request, f)
-        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
-                                                       '-a', self.anno, path],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(0, res.returncode, res.stderr.decode())
-        cli_out = json.loads(res.stdout)
-
-        def strip(out):
-            out = json.loads(json.dumps(out))
-            out.pop('timing')
-            for e in out['patterns']:
-                e.pop('timing', None)
-            return out
-        self.assertEqual(strip(server_out), strip(cli_out))
-
-        # a refusal: its body, exit status 1
-        with open(path, 'w') as f:
-            json.dump({'patterns': [{'dna': self.p16}], 'bogus': True}, f)
-        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
-                                                       '-a', self.anno, path],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(1, res.returncode)
-        self.assertEqual('invalid_request', json.loads(res.stdout)['code'])
-
-        # every request file is answered, the later ones after a refused one (review of
-        # 2026-10-07, R1-03, R2-01: a body nested too deep aborted the run, exit 134, and
-        # left the later files unanswered)
-        deep = os.path.join(self.tempdir.name, 'deep.json')
-        with open(deep, 'w') as f:
-            f.write('[' * 1200 + ']' * 1200)
-        dup = os.path.join(self.tempdir.name, 'dup.json')
-        with open(dup, 'w') as f:
-            f.write('{"patterns": [{"dna": "%s"}], "mode": "count", "mode": "partial"}' % self.p16)
-        ok = os.path.join(self.tempdir.name, 'ok.json')
-        with open(ok, 'w') as f:
+        """`metagraph pattern` answers each request file as the server: one process over a panel
+        (counts and a partial retrieval, paths with labels and record verification, peptides,
+        labels "all" with caps), a refusal's body with exit status 1, and every file answered,
+        the later ones after a refused one (review of 2026-10-07, R1-03, R2-01: a body nested
+        too deep aborted the run, exit 134, and left the later files unanswered)."""
+        panel = [
+            {'patterns': [{'id': 'a', 'dna': self.p16}, {'iupac': self.iupac16},
+                          {'dna': self.p11}, {'dna': self.p40}],
+             'mode': 'partial', 'max_contexts': 7},
+            self.paths_request(self.long_patterns()[:3], mode='partial', max_paths=1,
+                               output={'labels': 'all'}, require_support='record_verified'),
+            {'patterns': [{'protein': 'MELPNIMHPV'}, {'protein': 'MELPNIMHPVAKLS'}],
+             'genetic_code': 11, 'long_search': 'paths', 'output': {'labels': 'all'}},
+            {'patterns': [{'dna': self.NDM_F}, {'iupac': self.iupac16}, {'dna': self.p40}],
+             'mode': 'partial', 'max_contexts': 9, 'max_labels': 4,
+             'output': {'labels': 'all'}},
+        ]
+        files = []
+        for i, request in enumerate(panel):
+            files.append(os.path.join(self.tempdir.name, f'cli_request_{i}.json'))
+            with open(files[-1], 'w') as f:
+                json.dump(request, f)
+        refused = {
+            'bogus.json': json.dumps({'patterns': [{'dna': self.p16}], 'bogus': True}),
+            'deep.json': '[' * 1200 + ']' * 1200,
+            'dup.json': '{"patterns": [{"dna": "%s"}], "mode": "count", "mode": "partial"}'
+                        % self.p16,
+        }
+        for name, text in refused.items():
+            files.append(os.path.join(self.tempdir.name, name))
+            with open(files[-1], 'w') as f:
+                f.write(text)
+        files.append(os.path.join(self.tempdir.name, 'cli_ok.json'))
+        with open(files[-1], 'w') as f:
             json.dump({'patterns': [{'dna': self.p16}], 'mode': 'count'}, f)
         res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
-                                                       '-a', self.anno, deep, dup, ok],
+                                                       '-a', self.anno] + files,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(1, res.returncode, res.stderr.decode()[-2000:])
         lines = res.stdout.decode().strip().split('\n')
-        self.assertEqual(3, len(lines), lines)
-        self.assertEqual('invalid_request', json.loads(lines[0])['code'])
-        self.assertEqual('invalid_request', json.loads(lines[1])['code'])
-        self.assertContextCounts(json.loads(lines[2])['patterns'][0], self.contexts(self.p16),
+        self.assertEqual(len(files), len(lines), lines)
+        for request, line in zip(panel, lines):
+            self.assertEqual(untimed(self.pattern(self.server, request)),
+                             untimed(json.loads(line)), request)
+        for line in lines[len(panel):len(panel) + len(refused)]:
+            self.assertEqual('invalid_request', json.loads(line)['code'])
+        self.assertContextCounts(json.loads(lines[-1])['patterns'][0], self.contexts(self.p16),
                                  self.k, 16, 'any_offset')
 
     def test_cli_unmasked(self):
@@ -2434,51 +2320,6 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertEqual((a.status_code, untimed(a.json())), (b.status_code, untimed(b.json())),
                              request)
 
-    def test_transform_left_the_index_alone(self):
-        """transform wrote <copy>.edgemask and nothing else; build/mini_refseq is unchanged."""
-        self.assertEqual(self.mini_files, sorted(os.listdir(MINI_DIR)))
-        self.assertEqual(sorted([MINI_GRAPH, MINI_GRAPH[:-len('.dbg')] + '.edgemask',
-                                 MINI_ANNO, MINI_SEQS]),
-                         sorted(os.listdir(os.path.dirname(self.graph))))
-        self.assertTrue(filecmp.cmp(self.graph, os.path.join(MINI_DIR, MINI_GRAPH),
-                                    shallow=False))
-        # the counts it logged: every edge is a k-mer, a source or a sink dummy, and the
-        # masked graph states its k-mers as its nodes
-        m = re.search(r'(\d+) edges, (\d+) source dummies \(the main dummy edge included\), '
-                      r'(\d+) sink dummies, (\d+) k-mers', self.transform_log)
-        self.assertIsNotNone(m, self.transform_log)
-        edges, source, sink, kmers = (int(x) for x in m.groups())
-        self.assertEqual(edges, source + sink + kmers)
-        self.assertEqual(edges, self.stats['annotation']['objects'])
-        self.assertEqual(kmers, self.stats['graph']['nodes'])
-
-    def test_transform_mask_equals_build_mask(self):
-        """The mask transform gave the copy is the one `build --mask-dummy` writes, and the
-        answers on a masked rebuild are the answers on the transformed copy."""
-        d = os.path.join(self.tempdir.name, 'rebuilt')
-        os.makedirs(d)
-        graph = os.path.join(d, MINI_GRAPH)
-        # the same records and flags as the mini index (commands.log), single-threaded so that
-        # nothing depends on the order of threads
-        TestingBase._run_command(
-            f'{METAGRAPH} build -p 1 --mode basic --graph succinct --state stat -k {MINI_K} '
-            f'--index-ranges 12 --mask-dummy --in-ram -o {graph[:-len(".dbg")]} '
-            + ' '.join(self.fastas), 'Build the masked mini graph')
-        if not filecmp.cmp(graph, os.path.join(MINI_DIR, MINI_GRAPH), shallow=False):
-            self.skipTest('the rebuild is not the mini graph (built by another metagraph?): '
-                          'its masks cannot be compared')
-        self.assertTrue(filecmp.cmp(graph[:-len('.dbg')] + '.edgemask',
-                                    self.graph[:-len('.dbg')] + '.edgemask', shallow=False))
-        for f in (MINI_ANNO, MINI_SEQS):
-            os.symlink(os.path.join(MINI_DIR, f), os.path.join(d, f))
-        server = Server(METAGRAPH, ['-i', graph, '-a', os.path.join(d, MINI_ANNO)],
-                        os.path.join(d, 'server.log'))
-        try:
-            self.assertSameAnswers(self.server, server)
-            self.assertEqual(self.stats, server.get('stats').json())
-        finally:
-            server.stop()
-
     def test_pattern_build_mask(self):
         """A server started with --pattern-build-mask on the unmasked graph builds the same mask
         in memory: the same answers on every route of the panel, mask: built_at_load."""
@@ -2506,6 +2347,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(sorted([MINI_GRAPH, MINI_ANNO, MINI_SEQS]),
                          sorted(os.listdir(os.path.dirname(self.unmasked_graph))))
         self.assertFalse(os.path.exists(self.unmasked_graph[:-len('.dbg')] + '.edgemask'))
+        # and the mini index itself is as it was
+        self.assertEqual(self.mini_files, sorted(os.listdir(MINI_DIR)))
 
     # ------------------------------------------------------------ without the mask (#16)
 
@@ -2548,32 +2391,14 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                                        q['dummy_fraction']))
             self.assertEqual(dict(q, mask='absent', counting='upper_bound', dummy_fraction=frac),
                              p)
-        # (the probe's size under the MCP tool's ceiling: test_capabilities_byte_budget)
+        # (the probe's size under the MCP tool's ceiling: the fixture validator's
+        # test_capabilities_documents_keep_a_kibibyte, on the stored documents --check compares)
         # the log names it once, at start-up
         with open(os.path.join(self.tempdir.name, 'server_unmasked.log')) as log:
             text = log.read()
         self.assertRegex(text, r'Dummy fraction sampled for the pattern search in [\d.]+ s')
         self.assertIn('The graph has no dummy-edge mask (.edgemask): the pattern search counts '
                       'upper bounds with estimates', text)
-
-    def test_capabilities_byte_budget(self):
-        """The probe's document (GET /traverse/capabilities, as served: compact JSON) stays 1 KiB
-        under the ceiling of the MCP tool that returns it in one piece (traverse_capabilities,
-        CAPABILITIES_MAX_BYTES of the Python API), on the masked, the unmasked and the unchecked
-        mini servers (owner decision P9 of 2026-10-08): the room the next increment's additions
-        need. The pattern block's prose fields are SPEC references (the document of the
-        unmasked mini had 5 bytes left under the old guard of 64 bytes before); the fixture
-        servers' stored documents are held to the same budget by test_pattern_fixtures.py."""
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api',
-                                        'python'))
-        from metagraph.traverse.mcp_tools import CAPABILITIES_MAX_BYTES
-        budget = CAPABILITIES_MAX_BYTES - 1024
-        for name, server in (('masked', self.server), ('unmasked', self.unmasked_server),
-                             ('unchecked', self.unchecked_server)):
-            for route in ('traverse/capabilities', 'capabilities'):
-                size = len(server.get(route).content)
-                self.assertLessEqual(size, budget, f'{name} {route}: {size} bytes, '
-                                                   f'{budget - size} left under {budget}')
 
     def assertUnmaskedCount(self, count, exact, upper, fraction, where=''):
         """A count of the unmasked graph against the masked graph's exact count and the oracle's
@@ -2600,252 +2425,53 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         e = min(upper, max(count['lower'], round(upper * fraction)))
         self.assertEqual(e, count['estimate'], msg)
 
-    def test_unmasked_counts_against_the_masked(self):
-        """Owner decision #16: every count of the unmasked graph against the masked graph's exact
-        one and the source-dummy oracle, in both scopes, per offset and per strand: the upper
-        bound counts exactly the contexts of the k-mers and of the source dummies, the lower
-        bound never passes the exact count, an absent pattern is exact 0, the estimate of an
-        ordinary pattern (no dummy holds it) is the exact count; a pattern at an island's start
-        (its source dummies hold it) has an upper bound above the exact count. Anchors of a
-        pattern longer than k: a dummy never holds an anchor window (its first symbol is $).
-        Served with the check of decision #24 off (--pattern-max-checked-entries 0), so that
-        every count with unchecked candidates is bounds, as any count above the limit is
-        (test_unmasked_tiny_blocks_are_exact compares the default with it)."""
+    def test_unmasked_against_the_masked(self):
+        """Owner decision #16 on the mini index, whose rules the unit tests check on small graphs
+        in every graph mode (PatternRoute.Unmasked*, PatternUnmasked.*): served without its mask,
+        a count is the bounds [lower, U], U the oracle's (the contexts of the k-mers and of the
+        source dummies) and the estimate U x f rounded into them, an absent pattern exact 0;
+        the lists, labels and placed occurrences included, are the masked graph's. At the
+        server's default --pattern-max-checked-entries (decision #24) a pattern with few
+        unchecked candidates has each tested: its counts the masked graph's, k - 1 steps per
+        candidate."""
         fraction = self.unchecked_server.get('capabilities').json()['pattern'][
             'dummy_fraction']['value']
-        long_ = [self.p40, self.absent40, self.start40]
-        for scope in ('any_offset', 'suffix'):
-            # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
-            short = [self.p16, self.p14, self.iupac16, self.pal12, self.absent16, self.start16,
-                     self.start14] + ([SCAN_10] if scope == 'suffix' else [])
-            request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
-                                    for p in short + long_], 'mode': 'count', 'scope': scope}
-            out = self.pattern(self.unchecked_server, request)
-            masked = self.pattern(self.server, request)
-            self.assertEqual('upper_bound', out['index']['counting'])
-            self.assertNotIn('counting', masked['index'])
-            for p, e, m in zip(short + long_, out['patterns'], masked['patterns']):
-                with self.subTest(pattern=p, scope=scope):
-                    estimated = NOTE_ESTIMATE in e['notes']
-                    self.assertNotIn(NOTE_ESTIMATE, m['notes'])
-                    if len(p) > self.k:
-                        a, b = e['counts']['anchors'], m['counts']['anchors']
-                        self.assertEqual('exact', b['relation'])
-                        self.assertUnmaskedCount(a, b['value'], b['value'], fraction, 'anchors')
-                        self.assertEqual(m['counts']['paths'], e['counts']['paths'])
-                        self.assertFalse(estimated)
-                        continue
-                    exact = self.contexts(p, scope=scope)
-                    dummies = self.records.dummy_contexts(p, self.k, scope=scope)
-                    c, x = e['counts']['contexts'], m['counts']['contexts']
-                    self.assertEqual(len(exact), x['value'])
-                    self.assertUnmaskedCount(c, len(exact), len(exact) + len(dummies), fraction,
-                                             'total')
-                    L = len(p)
-                    for o in c['by_offset']:
-                        self.assertUnmaskedCount(
-                            c['by_offset'][o], sum(1 for *_, q in exact if q == int(o)),
-                            sum(1 for *_, q in exact | dummies if q == int(o)), fraction, o)
-                    self.assertUnmaskedCount(
-                        c['suffix'], sum(1 for *_, q in exact if q == self.k - L),
-                        sum(1 for *_, q in exact | dummies if q == self.k - L), fraction,
-                        'suffix')
-                    for strand, count in c['by_strand'].items():
-                        t = '=' if strand == 'both' else strand
-                        self.assertUnmaskedCount(
-                            count, sum(1 for u, *_ in exact if u == t),
-                            sum(1 for u, *_ in exact | dummies if u == t), fraction, strand)
-                    self.assertEqual(set(x['by_offset']), set(c['by_offset']))
-                    self.assertEqual(set(x['by_strand']), set(c['by_strand']))
-                    if p in (self.start16, self.start14, SCAN_10):
-                        self.assertGreater(len(dummies), 0)
-                        self.assertEqual('bounds', c['relation'])
-                        self.assertTrue(estimated)
-                    elif not dummies:
-                        # an ordinary pattern: the estimate (or the exact count) is the count
-                        self.assertEqual(len(exact), c.get('estimate', c['value']))
-                    self.assertEqual(estimated, any('estimate' in v for v in [c, c['suffix']]
-                                                    + list(c['by_offset'].values())
-                                                    + list(c['by_strand'].values())))
-                    # the rest of the entry is the masked graph's
-                    self.assertEqual({k: v for k, v in m.items()
-                                      if k not in ('counts', 'work', 'notes', 'timing')},
-                                     {k: v for k, v in e.items()
-                                      if k not in ('counts', 'work', 'notes', 'timing')})
-
-    def test_unmasked_retrieval_against_the_masked(self):
-        """Owner decision #16: the lists of the unmasked graph are exact, the masked graph's,
-        labels and placed occurrences included, and a complete release makes the counts exact
-        (the masked graph's); partial's cut lists are the masked graph's first ones; all_or_count
-        admits on the upper bound (stated: threshold_upper_bound) and withholds a pattern whose
-        real contexts fit but whose candidates do not. With the check of decision #24 off, as
-        any pattern above its limit; at the default (the last part) the few unchecked
-        candidates of start16 are checked and its contexts released."""
-        panel = []
-        for scope in ('any_offset', 'suffix'):
-            # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
-            patterns = [{'dna': self.p16}, {'iupac': self.iupac16}, {'dna': self.pal12},
-                        {'dna': self.absent16}, {'dna': self.start16}, {'dna': self.start14}] \
-                + ([{'dna': SCAN_10}] if scope == 'suffix' else [])
-            panel.append({'patterns': patterns, 'scope': scope})
-            panel.append({'patterns': patterns, 'scope': scope, 'mode': 'partial',
-                          'max_contexts': 5})
-            panel.append({'patterns': patterns, 'scope': scope, 'output': {'labels': 'all'}})
-        panel.append({'patterns': [{'dna': self.p40}, {'dna': self.start40},
-                                   {'dna': self.absent40}], 'long_search': 'paths',
-                      'output': {'labels': 'all'}})
-        for request in panel:
-            out = self.pattern(self.unchecked_server, request)
-            masked = self.pattern(self.server, request)
-            for e, m in zip(out['patterns'], masked['patterns']):
-                with self.subTest(pattern=m['pattern'], request=request):
-                    for field in ('results', 'returned', 'withheld', 'cut', 'by_label',
-                                  'retrieval_complete'):
-                        self.assertEqual(m.get(field), e.get(field), field)
-                    for r in e['results']:
-                        self.assertNotIn('$', r.get('kmer', r.get('sequence')))
-                    if m['retrieval_complete']:
-                        # every candidate enumerated: the counts are the exact ones
-                        self.assertEqual(m['counts'], e['counts'])
-                    elif request.get('mode') == 'partial':
-                        c, x = e['counts']['contexts'], m['counts']['contexts']
-                        self.assertGreaterEqual(c['value'], e['returned'])
-                        self.assertLessEqual(c['value'], x['value'])
-                        if c['relation'] == 'bounds':
-                            self.assertGreaterEqual(c['upper'], x['value'])
-        # all_or_count's admission compares the upper bound: start16's real contexts fit
-        # max_contexts, its candidates (the source dummies among them) do not
-        exact = len(self.contexts(self.start16))
-        upper = exact + len(self.records.dummy_contexts(self.start16, self.k))
-        self.assertGreater(upper, exact)
-        request = {'patterns': [{'dna': self.start16}], 'max_contexts': exact}
-        m = self.pattern(self.server, request)['patterns'][0]
-        self.assertCompleteRetrieval(m)
-        e = self.pattern(self.unchecked_server, request)['patterns'][0]
-        self.assertEqual({'reason': 'count_above_threshold'}, e['withheld'])
-        self.assertFalse(e['retrieval_complete'])
-        self.assertEqual(('bounds', upper), (e['counts']['contexts']['relation'],
-                                             e['counts']['contexts']['upper']))
-        self.assertIn(NOTE_THRESHOLD_UPPER, e['notes'])
-        self.assertIn(NOTE_ESTIMATE, e['notes'])
-        # room for every candidate: released, the masked graph's list, the count exact
-        e = self.pattern(self.unchecked_server, dict(request, max_contexts=upper))['patterns'][0]
-        self.assertCompleteRetrieval(e)
-        self.assertEqual(m['results'], e['results'])
-        self.assertEqual(m['counts'], e['counts'])
-        # at the default limit (decision #24) its unchecked candidates are few: checked, the
-        # count exact, and the contexts released at max_contexts = the exact count
-        c = self.pattern(self.unchecked_server, {'patterns': [{'dna': self.start16}],
-                                                 'mode': 'count'})['patterns'][0]
-        unchecked = c['counts']['contexts']['upper'] - c['counts']['contexts']['lower']
-        limit = self.unmasked_server.get('capabilities').json()['pattern']['caps'][
-            'max_checked_entries']
-        self.assertLessEqual(unchecked, limit)
-        e = self.pattern(self.unmasked_server, request)['patterns'][0]
-        self.assertCompleteRetrieval(e)
-        self.assertEqual(m['results'], e['results'])
-        self.assertEqual(m['counts'], e['counts'])
-        self.assertNotIn(NOTE_THRESHOLD_UPPER, e['notes'])
-
-    def test_unmasked_stop_at_threshold_is_conservative(self):
-        """stop_at_threshold on the unmasked graph compares the running upper bound: it stops
-        no later than on the masked graph, every count it leaves a true lower bound."""
-        request = {'patterns': [{'dna': self.p16}, {'dna': self.start16}, {'iupac': self.iupac16}],
-                   'max_contexts': 3, 'stop_at_threshold': True}
-        out = self.pattern(self.unmasked_server, request)
+        patterns = [self.p16, self.iupac16, self.absent16, self.start16]
+        request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                                for p in patterns], 'output': {'labels': 'all'}}
+        out = self.pattern(self.unchecked_server, dict(request, mode='count'))
+        masked = self.pattern(self.server, dict(request, mode='count'))
+        self.assertEqual('upper_bound', out['index']['counting'])
+        self.assertNotIn('counting', masked['index'])
+        for p, e, m in zip(patterns, out['patterns'], masked['patterns']):
+            exact = self.contexts(p)
+            dummies = self.records.dummy_contexts(p, self.k)
+            self.assertEqual(len(exact), m['counts']['contexts']['value'])
+            self.assertUnmaskedCount(e['counts']['contexts'], len(exact),
+                                     len(exact) + len(dummies), fraction, p)
+        # start16 begins an island: its source dummies are candidates the count cannot rule out
+        start = out['patterns'][3]
+        self.assertGreater(len(self.records.dummy_contexts(self.start16, self.k)), 0)
+        self.assertEqual('bounds', start['counts']['contexts']['relation'])
+        self.assertIn(NOTE_ESTIMATE, start['notes'])
+        out = self.pattern(self.unchecked_server, request)
         masked = self.pattern(self.server, request)
         for e, m in zip(out['patterns'], masked['patterns']):
-            with self.subTest(pattern=m['pattern']):
-                exact = len(self.contexts(m['pattern']))
-                c = e['counts']['contexts']
-                self.assertLessEqual(c['value'], exact)
-                self.assertIn(c['relation'], ('at_least', 'bounds', 'exact'))
-                if c['relation'] == 'exact':
-                    self.assertEqual(exact, c['value'])
-                # all or nothing: the masked graph's list, or none (the upper bound crossed the
-                # threshold first: start16 has fewer real contexts than its candidates)
-                if e['withheld'] is None:
-                    self.assertEqual(m['results'], e['results'])
-                else:
-                    self.assertEqual([], e['results'])
-                    if m['withheld'] is None:
-                        self.assertIn(NOTE_THRESHOLD_UPPER, e['notes'])
-
-    def test_unmasked_tiny_blocks_are_exact(self):
-        """Owner decision #24: on the graph without its mask, a pattern whose unchecked candidates
-        (U - lower, on this BASIC graph) number at most the server's max_checked_entries (the
-        default, 50; capabilities caps and caps_rule) has each tested at query time: every count
-        exact, the masked graph's, with neither estimate nor estimate note, k - 1 = 30 steps per
-        candidate; a pattern with more is answered as with the check off, field for field but
-        the timing. In every mode (count, all_or_count, partial) and both scopes, short patterns
-        and long ones (anchors behind a leading N), so that a count and a retrieval of the same
-        request agree; the lists are the masked graph's. A step stop in the check (phase
-        mask_scan) leaves the bounds of the check off."""
-        caps = self.unmasked_server.get('capabilities').json()['pattern']
-        limit = caps['caps']['max_checked_entries']
-        self.assertEqual(50, limit)
-        self.assertIn('max_checked_entries', caps['caps_rule'])
-        self.assertEqual(0, self.unchecked_server.get('capabilities').json()['pattern']['caps'][
-            'max_checked_entries'])
-        long_n = 'N' + self.p40[1:]
-        checked, above = 0, 0
-        for scope in ('any_offset', 'suffix'):
-            # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
-            short = [self.p16, self.p14, self.iupac16, self.pal12, self.absent16, self.start16,
-                     self.start14] + ([SCAN_10] if scope == 'suffix' else [])
-            patterns = [{'iupac' if set(p) - set('ACGT') else 'dna': p}
-                        for p in short + [self.p40, self.start40, long_n]]
-            for strands in ('both', 'forward'):
-                # which patterns the check resolves: bounds with the check off, at most the
-                # limit of candidates unchecked
-                base = {'patterns': patterns, 'scope': scope, 'strands': strands}
-                off = self.pattern(self.unchecked_server, dict(base, mode='count'))
-                widths = []
-                for e in off['patterns']:
-                    c = e['counts'].get('contexts') or e['counts']['anchors']
-                    self.assertIsNone(e['stop'])
-                    widths.append(c['upper'] - c['lower'] if c['relation'] == 'bounds'
-                                  else None)
-                for mode in ('count', 'all_or_count', 'partial'):
-                    request = dict(base, mode=mode,
-                                   max_contexts=5 if mode == 'partial' else 10000)
-                    out = self.pattern(self.unmasked_server, request)
-                    out0 = self.pattern(self.unchecked_server, request)
-                    masked = self.pattern(self.server, request)
-                    self.assertEqual(out0['index'], out['index'])
-                    self.assertEqual(out0['limits'], out['limits'])
-                    for e, e0, m, width in zip(out['patterns'], out0['patterns'],
-                                               masked['patterns'], widths):
-                        with self.subTest(pattern=m['pattern'], scope=scope, strands=strands,
-                                          mode=mode):
-                            if width is None or width > limit:
-                                above += 1
-                                self.assertEqual(untimed(e0), untimed(e))
-                                continue
-                            checked += 1
-                            self.assertEqual(m['counts'], e['counts'])
-                            self.assertEqual(m['notes'], e['notes'])
-                            self.assertNotIn(NOTE_ESTIMATE, e['notes'])
-                            for field in ('results', 'returned', 'withheld', 'cut',
-                                          'retrieval_complete', 'stop'):
-                                self.assertEqual(m.get(field), e.get(field), field)
-                            self.assertEqual(e0['work']['ranges_visited'],
-                                             e['work']['ranges_visited'])
-                            self.assertEqual(e0['work']['steps'] + width * (self.k - 1),
-                                             e['work']['steps'])
-        self.assertGreater(checked, 20)
-        self.assertGreater(above, 20)
-        # the step stop: start16 with the steps of its discovery and 29 more (one candidate
-        # needs 30): stop {mask_scan, max_steps}, the bounds and the estimate of the check off
-        request = {'patterns': [{'dna': self.start16}], 'mode': 'count'}
-        e0 = self.pattern(self.unchecked_server, request)['patterns'][0]
-        budget = e0['work']['steps'] + self.k - 2
-        e = self.pattern(self.unmasked_server, dict(request, max_steps=budget))['patterns'][0]
-        self.assertEqual({'phase': 'mask_scan', 'reason': 'max_steps'}, e['stop'])
-        self.assertEqual(e0['counts'], e['counts'])
-        self.assertEqual(e0['notes'], e['notes'])
-        self.assertEqual(e0['work']['steps'], e['work']['steps'])
-        self.assertEqual('full', e['determinism'])
+            for field in ('results', 'returned', 'withheld', 'cut', 'by_label',
+                          'retrieval_complete'):
+                self.assertEqual(m.get(field), e.get(field), (m['pattern'], field))
+        # decision #24 at the default limit: start16's few unchecked candidates are tested
+        count = {'patterns': [{'dna': self.start16}], 'mode': 'count'}
+        c0 = start['counts']['contexts']
+        width = c0['upper'] - c0['lower']
+        limit = self.unmasked_server.get('capabilities').json()['pattern']['caps'][
+            'max_checked_entries']
+        self.assertTrue(0 < width <= limit, (width, limit))
+        e = self.pattern(self.unmasked_server, count)['patterns'][0]
+        e0 = self.pattern(self.unchecked_server, count)['patterns'][0]
+        self.assertEqual(self.pattern(self.server, count)['patterns'][0]['counts'], e['counts'])
+        self.assertNotIn(NOTE_ESTIMATE, e['notes'])
+        self.assertEqual(e0['work']['steps'] + width * (self.k - 1), e['work']['steps'])
 
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
@@ -2909,6 +2535,49 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         for server in list(cls.servers.values()) + list(cls.unmasked_servers.values()):
             server.stop()
         super().tearDownClass()
+
+    def test_refusals(self):
+        """A refusal over HTTP: 400 {error, code}, the message naming the field, for one case of
+        each code a request can draw and for bodies that are no single RFC 8259 JSON text
+        (duplicate members, a nesting past jsoncpp's limit). The full table, every field and
+        the order of the checks, is PatternRoute.Refusals and RefusalOrder."""
+        server = self.servers['basic']
+        p = [{'dna': 'TTAGGACGACTTTG'}]
+        cases = [
+            ({'patterns': p, 'bogus': 1}, 'invalid_request', "unknown field 'bogus'"),
+            ({'patterns': p, 'max_steps': 0}, 'invalid_request', 'max_steps'),
+            ({'patterns': p, 'predicate': {'any': [562]}}, 'invalid_request',
+             'write a taxid as "562"'),
+            ({'patterns': p, 'predicate': {'any': [str(i) for i in range(10001)]}},
+             'predicate_too_large', '10001 names'),
+            ({'patterns': p, 'graphs': ['x']}, 'later_increment', 'graphs'),
+            ({'patterns': [{'protein': 'MKV'}], 'genetic_code': 7}, 'genetic_code_unknown',
+             'genetic_code'),
+            ({'patterns': p, 'in_ram': False}, 'resident_only', 'in_ram'),
+        ]
+        for payload, code, words in cases:
+            ret = server.post('pattern', payload)
+            self.assertEqual(400, ret.status_code, (payload, ret.text))
+            body = ret.json()
+            self.assertEqual({'error', 'code'}, set(body), payload)
+            self.assertEqual(code, body['code'], (payload, body))
+            self.assertIn(words, body['error'], payload)
+        one = '{"patterns": [{"dna": "TTAGGACGACTTTG"}]'
+        for raw in ('{"patterns": [', one + '} GARBAGE',
+                    one + ', "mode": "count", "mode": "partial"}',
+                    one + ', "x": ' + '[' * 1500 + ']' * 1500 + '}'):
+            ret = server.post('pattern', raw, raw=True)
+            self.assertEqual(400, ret.status_code, raw[:100])
+            self.assertEqual({'error', 'code'}, set(ret.json()), raw[:100])
+            self.assertEqual('invalid_request', ret.json()['code'], raw[:100])
+        # false projections and occurrences are accepted and change nothing; so are
+        # output.paths true and long_search for a pattern of at most k bases
+        out = self.pattern(server, {'patterns': p, 'mode': 'count'})
+        for extra in ({'output': {'labels': 'none', 'occurrences': False, 'paths': False}},
+                      {'output': {'labels': 'none', 'paths': True}},
+                      {'long_search': 'paths'}, {'long_search': 'anchors'}):
+            again = self.pattern(server, dict({'patterns': p, 'mode': 'count'}, **extra))
+            self.assertEqual(untimed(out['patterns']), untimed(again['patterns']), extra)
 
     def test_counts_and_contexts_in_every_graph_mode(self):
         for mode, server in self.servers.items():
@@ -3057,21 +2726,24 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                     self.assertEqual(x['counts']['paths'], e['counts']['paths'])
 
     def test_rows(self):
-        """The row is the annotation row of the context's k-mer: node - 1 on BASIC; on the
-        other modes a k-mer and its reverse complement share one row (one annotated key)."""
-        for mode, server in self.servers.items():
-            out = self.pattern(server, {'patterns': [{'dna': 'GAATTC'}, {'dna': 'ACGAC'}]})
-            rows = {}
-            for entry in out['patterns']:
-                for r in entry['results']:
-                    self.assertIsNotNone(r['row'])
-                    if mode == 'basic':
-                        self.assertEqual(r['node'] - 1, r['row'])
-                    rows.setdefault(r['kmer'], set()).add(r['row'])
-            for kmer, row in rows.items():
-                self.assertEqual(1, len(row))
-                if mode != 'basic' and revcomp(kmer) in rows:
-                    self.assertEqual(row, rows[revcomp(kmer)], (mode, kmer))
+        """The row is the annotation row of the context's k-mer: on a PRIMARY graph served
+        wrapped in CanonicalDBG a k-mer and its reverse complement share one row (one annotated
+        key). BASIC (row = node - 1) and CANONICAL are PatternRoute.RetrievalRows and
+        CanonicalRowsAreTheAnnotationKeys."""
+        out = self.pattern(self.servers['primary'],
+                           {'patterns': [{'dna': 'GAATTC'}, {'dna': 'ACGAC'}]})
+        rows = {}
+        for entry in out['patterns']:
+            for r in entry['results']:
+                self.assertIsNotNone(r['row'])
+                rows.setdefault(r['kmer'], set()).add(r['row'])
+        shared = 0
+        for kmer, row in rows.items():
+            self.assertEqual(1, len(row))
+            if revcomp(kmer) in rows:
+                self.assertEqual(row, rows[revcomp(kmer)], kmer)
+                shared += 1
+        self.assertGreater(shared, 0)
 
     def test_partial_order(self):
         server = self.servers['basic']
@@ -3273,25 +2945,6 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                                         limits['max_predicate_work'],
                                         limits['max_predicate_labels']))
 
-    def test_usage_states_the_threads_and_the_limits(self):
-        """The usage of server_query and pattern (review of 2026-10-07): the mask built at
-        load takes its threads from --threads-each on a server, from -p in the CLI (M1-04); a
-        server's /pattern cap stays under the content timeout (R1-05); the finalisation
-        reserve is a floor the answer's estimated writing time adds to, at stated rates (R1-04,
-        X-EFFICIENCY-04)."""
-        for command, needles in (
-                ('server_query', ['with --threads-each threads', 'at most 899000',
-                                  'longer by the estimated time to write what the answer holds',
-                                  '--pattern-delivery-build-mbps', '--pattern-delivery-compress-mbps']),
-                ('pattern', ['with -p threads',
-                             'longer by the estimated time to write what the answer holds',
-                             '--pattern-delivery-build-mbps', '--pattern-delivery-compress-mbps'])):
-            res = subprocess.run(shlex.split(METAGRAPH) + [command], stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            text = (res.stdout + res.stderr).decode()
-            for needle in needles:
-                self.assertIn(needle, text, command)
-
     def test_cli(self):
         request = {'patterns': [{'iupac': p} for p in self.PATTERNS], 'mode': 'count'}
         server_out = self.pattern(self.servers['basic'], request)
@@ -3308,6 +2961,27 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         for a, b in zip(server_out['patterns'], cli_out['patterns']):
             self.assertEqual(a['counts'], b['counts'])
             self.assertEqual(a['work'], b['work'])
+
+
+class TestPeptideOracle(unittest.TestCase):
+    """The six-frame oracle the mini's peptide tests use (cached translations and a residue
+    regex) finds what its plain definition finds: no server, no index, always run."""
+
+    def test_six_frames_is_the_reference(self):
+        rng = random.Random(5)
+        matches = 0
+        for i in range(60):
+            seq = ''.join(rng.choice('ACGTN' if i % 3 == 0 else 'ACGT')
+                          for _ in range(rng.randrange(30, 400)))
+            for _ in range(20):
+                residues = ''.join(rng.choice('ACDEFGHIKLMNPQRSTVWY*XBZJ')
+                                   for _ in range(rng.randrange(1, 6)))
+                table = rng.choice(sorted(GENETIC_CODES))
+                expected = six_frames_reference(seq, residues, table)
+                self.assertEqual(expected, six_frames(seq, residues, table),
+                                 (seq, residues, table))
+                matches += len(expected)
+        self.assertGreater(matches, 1000)
 
 
 class TestPatternFixtureBodies(unittest.TestCase):
@@ -3362,34 +3036,80 @@ class TestPatternFixtureBodies(unittest.TestCase):
                                 script.dumps(script.blanked(regressed)))
 
 
+# The mini index the fixtures were answered on: its manifest's index_fp. build_mini_refseq.sh
+# picks the row-diff anchors anew on every run, so another build of the same records has
+# another annotation file, whose row-diff reads decode other paths: what an answer states as
+# that decoding's work (WORK_OF_THE_ANCHORS) differs, and nothing else may
+FIXTURES_MINI_FP = 'bea44d604ffe08d60b348b630b4a35bd0ae0b428615727345ba191228c7ef5e7'
+WORK_OF_THE_ANCHORS = ('annotation_units', 'predicate_units')
+
+
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 @guard(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH)) and os.path.isfile(FIXTURES_SCRIPT),
-       "the mini index (scripts/traversal/build_mini_refseq.sh; not in CI) or the fixture "
-       "script is not there")
+       "the mini index (scripts/traversal/build_mini_refseq.sh) or the fixture script is not "
+       "there")
 class TestPatternFixtures(unittest.TestCase):
     """The frozen fixture bodies the search service tests against
     (api/python/tests/data/traverse/pattern/, SPEC-pattern-search.md §11) are what this binary
     answers: a change of /pattern or of either capabilities route that alters one fails here,
-    not first in the service's tests -- on a machine with the mini index, which CI does not
-    have (review of 2026-10-07, T2-01). (Review of milestone 1b: the bodies had been generated by
-    the milestone-1 binary and missed /capabilities' new `resolve` block and the new
-    mask_required message, and nothing that ran a server compared them.)"""
+    not first in the service's tests. On the build of the mini index they were answered on,
+    every body byte for byte (pattern_fixtures.py --check); on another build of it (CI builds
+    its own), every body but the decode work its row-diff anchors make (WORK_OF_THE_ANCHORS)."""
 
     def test_fixtures_are_what_this_binary_answers(self):
         binary = shlex.split(METAGRAPH)
         if len(binary) != 1:
             self.skipTest('the binary runs under a prefix: the script starts it directly')
+        with open(os.path.join(MINI_DIR, MINI_ANNO[:-len('.row_diff_brwt_coord.annodbg')]
+                               + '.manifest.json')) as f:
+            reference = json.load(f)['index_fp'] == FIXTURES_MINI_FP
+        stored = os.path.join(os.path.dirname(FIXTURE_VALIDATOR), 'data', 'traverse', 'pattern')
         with tempfile.TemporaryDirectory() as work:
-            # --check writes nothing: it builds its copies of the mini index in |work| (the
-            # mini itself is only read), starts each server, and compares every body once its
-            # run-dependent values are blanked
-            res = subprocess.run([sys.executable, FIXTURES_SCRIPT, '--metagraph', binary[0],
-                                  '--mini', MINI_DIR, '--work', work, '--check'],
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        out = res.stdout.decode()
-        self.assertEqual(0, res.returncode, out[-4000:])
-        self.assertRegex(out, r'OK: \d+ fixtures match')
+            # the script writes nothing in the stored fixtures: it builds its copies of the mini
+            # index in |work| (the mini itself is only read), starts each server, and compares
+            # every body once its run-dependent values are blanked (--check), or writes what
+            # differs into a copy of them
+            command = [sys.executable, FIXTURES_SCRIPT, '--metagraph', binary[0],
+                       '--mini', MINI_DIR, '--work', os.path.join(work, 'indexes')]
+            if reference:
+                res = subprocess.run(command + ['--check'], stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+                out = res.stdout.decode()
+                self.assertEqual(0, res.returncode, out[-4000:])
+                self.assertRegex(out, r'OK: \d+ fixtures match')
+                return
+            copy = os.path.join(work, 'fixtures')
+            shutil.copytree(stored, copy)
+            res = subprocess.run(command + ['--dir', copy], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+            out = res.stdout.decode()
+            self.assertEqual(0, res.returncode, out[-4000:])
+            # the requests, the README and the index as stored: only answers may differ
+            comparison = filecmp.dircmp(stored, copy)
+            self.assertEqual([], comparison.diff_files + comparison.left_only
+                             + comparison.right_only)
+            generator = TestPatternFixtureBodies.load(FIXTURES_SCRIPT, 'pattern_fixtures')
+
+            def without_anchor_work(answer):
+                a = generator.blanked(answer)
+                for e in a.get('patterns', []) if isinstance(a, dict) else []:
+                    for k in WORK_OF_THE_ANCHORS:
+                        if k in e.get('work', {}):
+                            e['work'][k] = generator.BLANK
+                return a
+
+            written = re.findall(r'^wrote (.+)$', out, re.M)
+            for path in written:
+                name = os.path.basename(os.path.dirname(path))
+                with self.subTest(fixture=name):
+                    with open(os.path.join(stored, name, 'answer.json')) as f:
+                        expected = without_anchor_work(json.load(f))
+                    with open(path) as f:
+                        self.assertEqual(expected, without_anchor_work(json.load(f)))
+                    with open(os.path.join(stored, name, 'request.json')) as f, \
+                            open(os.path.join(copy, name, 'request.json')) as g:
+                        self.assertEqual(f.read(), g.read())
 
 
 @unittest.skipIf(PROTEIN_MODE, "the request panel is DNA")

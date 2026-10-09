@@ -805,9 +805,20 @@ TEST(PatternRoute, CompactJsonBytes) {
 
 // T3-07 (review of 2026-10-07): the 503 states a fractional budget as given (a cast floored
 // 1000.5 to 1000)
+// PatternDelivery::check: nothing to miss before the request was parsed, nothing before the
+// deadline; at it, the 503 stating the budget
 TEST(PatternRoute, DeadlineMessageStatesTheBudget) {
     PatternDelivery delivery;
+    EXPECT_NO_THROW(delivery.check());
     const Clock::time_point start = Clock::now();
+    delivery.set_deadline(pattern::Deadline(start, 1000, 250, [start]() {
+        return start + std::chrono::milliseconds(999);
+    }));
+    EXPECT_NO_THROW(delivery.check());
+    delivery.set_deadline(pattern::Deadline(start, 1000, 250, [start]() {
+        return start + std::chrono::milliseconds(1000);
+    }));
+    EXPECT_THROW(delivery.check(), PatternRefusal);
     delivery.set_deadline(pattern::Deadline(start, 1000.5, 250, [start]() {
         return start + std::chrono::milliseconds(2000);
     }));
@@ -874,21 +885,6 @@ TEST(PatternRoute, AnAbortedRequestIsNotAnswered) {
     // the caller left after the work: its writing stops at the next check
     gone = true;
     EXPECT_THROW(live.check(), pattern::Aborted);
-}
-
-TEST(PatternRoute, DeliveryCheck) {
-    PatternDelivery delivery;
-    // before the request was parsed there is no deadline to miss
-    EXPECT_NO_THROW(delivery.check());
-    const Clock::time_point start = Clock::now();
-    delivery.set_deadline(pattern::Deadline(start, 1000, 250, [start]() {
-        return start + std::chrono::milliseconds(999);
-    }));
-    EXPECT_NO_THROW(delivery.check());
-    delivery.set_deadline(pattern::Deadline(start, 1000, 250, [start]() {
-        return start + std::chrono::milliseconds(1000);
-    }));
-    EXPECT_THROW(delivery.check(), PatternRefusal);
 }
 
 // SPEC §5: the body not JSON (3), then the graph (4), then the body not an object (5)
@@ -993,6 +989,9 @@ TEST(PatternRoute, AlphabetRefusal) {
     }
 }
 
+// The block as this graph, its annotation and the configured limits make it (the whole block of
+// a served index, value for value, is integration test_capabilities and the capabilities
+// fixtures the validator reads)
 TEST(PatternRoute, Capabilities) {
     auto g = tiny();
     Json::Value caps = pattern_capabilities_json(g.get(), limits(), false);
@@ -1001,30 +1000,8 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("file", caps["mask"].asString());
     EXPECT_EQ("basic", caps["graph_mode"].asString());
     EXPECT_EQ(kK, caps["k"].asUInt64());
-    EXPECT_EQ("none", caps["default_projection"].asString());
-    // increment 3: the projection "all" is served; increment 5b: "predicate_only" (with a
-    // predicate), the default still "none" (owner decision P2)
-    ASSERT_EQ(3u, caps["projections"].size());
-    EXPECT_EQ("none", caps["projections"][0].asString());
-    EXPECT_EQ("all", caps["projections"][1].asString());
-    EXPECT_EQ("predicate_only", caps["projections"][2].asString());
-    ASSERT_TRUE(caps["projections_later_increment"].isArray());
-    EXPECT_EQ(0u, caps["projections_later_increment"].size());
-    // increment 5b (SPEC §19.12): the three caps, the operators, the strands and the access a
-    // column annotation (unbudgeted, direct access) gives a selection
-    EXPECT_EQ(100000u, caps["caps"]["max_predicate_contexts"].asUInt64());
-    EXPECT_EQ(100000000u, caps["caps"]["max_predicate_work"].asUInt64());
-    EXPECT_EQ(10000u, caps["caps"]["max_predicate_labels"].asUInt64());
+    // the access a column annotation (unbudgeted, direct access) gives a selection
     EXPECT_EQ(3u, caps["predicate"].size());
-    std::vector<std::string> operators;
-    for (const Json::Value &op : caps["predicate"]["operators"]) {
-        operators.push_back(op.asString());
-    }
-    EXPECT_EQ(std::vector<std::string>({ "any", "all", "none", "at_least", "and", "or", "not" }),
-              operators);
-    ASSERT_EQ(2u, caps["predicate"]["strands"].size());
-    EXPECT_EQ("either", caps["predicate"]["strands"][0].asString());
-    EXPECT_EQ("context", caps["predicate"]["strands"][1].asString());
     EXPECT_EQ("columns", caps["predicate"]["access"].asString());
     {
         PatternLimits p = limits();
@@ -1036,21 +1013,8 @@ TEST(PatternRoute, Capabilities) {
         EXPECT_EQ(12u, c["max_predicate_work"].asUInt64());
         EXPECT_EQ(13u, c["max_predicate_labels"].asUInt64());
     }
-    EXPECT_TRUE(caps["default_occurrences"].asBool());
+    // the limits as configured (these tests' limits(): min_information_bits 4)
     EXPECT_EQ(4.0, caps["caps"]["min_information_bits"].asDouble());
-    EXPECT_EQ(64u, caps["caps"]["max_labels_per_anchor"].asUInt64());
-    EXPECT_EQ(100000000u, caps["caps"]["max_annotation_work"].asUInt64());
-    EXPECT_EQ(256u, caps["caps"]["max_memory_mb"].asUInt64());
-    EXPECT_EQ(1000u, caps["caps"]["max_labels"].asUInt64());
-    EXPECT_EQ(16u, caps["caps"]["max_occurrences_per_label"].asUInt64());
-    // increment 4: paths opt-in (owner decision #13); without the option a long pattern keeps
-    // its anchor-only answer, which long_patterns describes
-    EXPECT_EQ(1000u, caps["caps"]["max_paths"].asUInt64());
-    EXPECT_EQ("anchors_counted", caps["long_patterns"].asString());
-    ASSERT_EQ(2u, caps["long_search"].size());
-    EXPECT_EQ("anchors", caps["long_search"][0].asString());
-    EXPECT_EQ("paths", caps["long_search"][1].asString());
-    EXPECT_EQ("anchors", caps["default_long_search"].asString());
     PatternLimits other = limits();
     other.max_paths = 7;
     other.delivery_build_mbps = 2.5;
@@ -1058,9 +1022,6 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ(7u, pattern_capabilities_json(g.get(), other, false)["caps"]["max_paths"].asUInt64());
     // owner decision P9: the prose fields are references to the SPEC, the rates of the time
     // kept back for the answer numbers (MB/s, the server's flags as configured)
-    EXPECT_EQ(10.0, caps["delivery_mbps"]["build"].asDouble());
-    EXPECT_EQ(50.0, caps["delivery_mbps"]["compress"].asDouble());
-    EXPECT_EQ(2u, caps["delivery_mbps"].size());
     EXPECT_EQ(2.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["build"]
                            .asDouble());
     EXPECT_EQ(12.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["compress"]
@@ -1083,12 +1044,8 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("label_intersection", caps["support"].asString());
     // a column annotation: no budget-aware decode
     EXPECT_EQ("unbudgeted", caps["annotation"].asString());
-    // increment 5 (owner decision #15): the kind protein, its residues, the genetic codes
-    // (every NCBI translation table) and the default, the standard code
-    ASSERT_EQ(3u, caps["kinds"].size());
-    EXPECT_EQ("protein", caps["kinds"][2].asString());
-    EXPECT_TRUE(caps["kinds_later_increment"].isArray());
-    EXPECT_EQ(0u, caps["kinds_later_increment"].size());
+    // increment 5 (owner decision #15): the residues, the genetic codes (every NCBI
+    // translation table) and the default, the standard code
     std::string residues;
     for (const Json::Value &r : caps["protein_residues"]) {
         ASSERT_EQ(1u, r.asString().size());

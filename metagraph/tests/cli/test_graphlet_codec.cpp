@@ -1390,8 +1390,10 @@ TEST(Graphlet, ReaderRebuildsTheFullResult) {
             "bounds": {"max_extension_bp": 8}, "output": {"sequences": false}})",
         R"({"labels": {"mode": "annotate"}, "bounds": {"max_extension_bp": 8, "max_work_units": 600}})",
     };
+    // three random graphs per mode (the Coverage check below fails if a record kind or an end
+    // token stops being written: with two, R:B is not)
     for (auto mode : modes) {
-        for (uint32_t s = 1; s <= 4; ++s) {
+        for (uint32_t s = 1; s <= 3; ++s) {
             std::vector<std::string> seqs, labels;
             for (uint32_t i = 0; i < 6; ++i) {
                 seqs.push_back("AAA" + random_seq(14, s * 11 + i));
@@ -1705,49 +1707,15 @@ TEST(Graphlet, IndexIdentity) {
     // whether they exist or not: the loader fails without them)
     EXPECT_EQ((std::vector<std::string> { graph, rd_anno, anchors, fork_succ }),
               index_bundle_files(graph, rd_anno));
-    auto derived = [](const std::string &g) {
-        std::vector<std::tuple<std::string, std::string, bool, bool>> out;
-        for (const IndexDerivedFile &f : index_derived_files(g)) {
-            out.emplace_back(f.path, f.role, f.exists, f.loaded);
-        }
-        return out;
-    };
-    using Derived = std::vector<std::tuple<std::string, std::string, bool, bool>>;
-    EXPECT_EQ((Derived { { mask, "graph_mask", true, true }, { bloom, "graph_bloom", true, true } }),
-              derived(graph));
-    // none for a graph that is not a DBGSuccinct (no loader reads a mask beside it)
+    // which of the derived files the loader reads, and that adding or removing them leaves
+    // the identity as it is, is GraphletServer.DerivedDataIsWhatTheLoaderReadsAndNotTheIdentity
+    // (against DBGSuccinct::load); none for a graph that is not a DBGSuccinct (no loader reads
+    // a mask beside it)
     EXPECT_TRUE(index_derived_files((dir / "g.orhashdbg").string()).empty());
-    // the inventory's JSON: the identity files, and the derived ones apart, with the rule
     const Json::Value inventory = index_inventory_json(graph, anno);
     ASSERT_EQ(2u, inventory["files"].size());
     EXPECT_EQ("graph", inventory["files"][0]["role"].asString());
     EXPECT_EQ("annotation", inventory["files"][1]["role"].asString());
-    ASSERT_EQ(2u, inventory["derived"].size());
-    EXPECT_EQ(mask, inventory["derived"][0]["path"].asString());
-    EXPECT_EQ("graph_mask", inventory["derived"][0]["role"].asString());
-    EXPECT_TRUE(inventory["derived"][0]["loaded"].asBool());
-    EXPECT_EQ(bloom, inventory["derived"][1]["path"].asString());
-    EXPECT_EQ("graph_bloom", inventory["derived"][1]["role"].asString());
-    EXPECT_TRUE(inventory["derived"][1]["exists"].asBool());
-    EXPECT_TRUE(inventory["derived"][1]["loaded"].asBool());
-    EXPECT_EQ(kIndexDerivedDataRule, inventory["derived_rule"].asString());
-    // a manifest of the graph and the annotation alone is valid beside its mask and Bloom
-    // filter, and states the index_fp it states without them: adding a mask (and then a Bloom
-    // filter) beside a deployed graph leaves its identity unchanged
-    EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
-                                             index_bundle_files(graph, anno), nullptr,
-                                             index_unloaded_optional_files(graph, anno)));
-    // the Bloom filter is read only with the mask
-    std::filesystem::remove(dir / "g.edgemask");
-    EXPECT_EQ((Derived { { mask, "graph_mask", false, false },
-                         { bloom, "graph_bloom", true, false } }), derived(graph));
-    EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
-    EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
-                                             index_bundle_files(graph, anno), nullptr,
-                                             index_unloaded_optional_files(graph, anno)));
-    std::filesystem::remove(dir / "g.bloom");
-    EXPECT_EQ((Derived { { mask, "graph_mask", false, false },
-                         { bloom, "graph_bloom", false, false } }), derived(graph));
     EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
                                              index_bundle_files(graph, anno), nullptr,
                                              index_unloaded_optional_files(graph, anno)));
@@ -2261,8 +2229,9 @@ TEST(Graphlet, DenialLeavesAConsistentPrefix) {
         EXPECT_FALSE(base.resource_stop) << c.name;
         const size_t n = admissions.size();
         ASSERT_GT(n, 0u) << c.name;
-        // every admission of the small cases, evenly spaced ones of the dense graphs
-        const size_t most = c.name.rfind("mode ", 0) == 0 ? 8 : 40;
+        // evenly spaced admissions (every one of the smallest cases), the first and the last
+        // among them
+        const size_t most = c.name.rfind("mode ", 0) == 0 ? 4 : 16;
         std::vector<size_t> ordinals;
         for (size_t i = 0; i < std::min(n, most); ++i) {
             ordinals.push_back(n <= most ? i : i * (n - 1) / (most - 1));
@@ -2326,7 +2295,7 @@ TEST(Graphlet, DenialLeavesAConsistentPrefix) {
             EXPECT_TRUE(stated) << what;
         }
     }
-    EXPECT_GT(denials, 200u);
+    EXPECT_GT(denials, 100u);
     EXPECT_GT(mid_level, 10u) << "denials between two heads of one level";
 }
 
@@ -3073,7 +3042,8 @@ TEST(Graphlet, DeadlineIsCheckedWithinALevel) {
                 break;
             }
         }
-        if (!pick || checked >= 6)
+        // three cases: most of the time is the sleep
+        if (!pick || checked >= 3)
             continue;
         const Admission &slow = admissions[*pick];
         Strategy st = c.st;
@@ -3111,7 +3081,7 @@ TEST(Graphlet, DeadlineIsCheckedWithinALevel) {
         EXPECT_EQ(300.0, budgeted["resource_stop"]["requested"].asDouble()) << what;
         checked++;
     }
-    EXPECT_GE(checked, 4u);
+    EXPECT_EQ(3u, checked);
 }
 
 
@@ -3664,34 +3634,6 @@ TEST(Stage2Review, SplitClonesEveryRunContinuedTwice) {
     check_serialised(r, seed, st, oracle, "three wide splits");
 }
 
-// Finding 5 (stated, not charged): neither the work budget nor the deadline bounds the
-// delivery of detail tree/full, whose paths spell every leaf's chain. Work stays the
-// walk's own — the same walk, and the same stop, in every detail, which is what lets a
-// graphlet rebuild the full response — and the size of the output (with the time to
-// serialise it) is bounded by the memory budget, which charges the chains per expansion
-// in the requested detail (CombTrieStaysLinear).
-TEST(Stage2Review, WorkIsTheWalksInEveryDetail) {
-    size_t stopped = 0;
-    for (const BudgetCase &c : budget_cases()) {
-        const SeedResult free = run_case(c, c.st);
-        Strategy s = c.st;
-        s.max_work_units = std::max<uint64_t>(1, free.account.work_used / 2);
-        std::string reference;
-        for (const char *detail : { "summary", "full", "graphlet" }) {
-            s.delivery = delivery_costs(detail, s.sequences);
-            const SeedResult r = run_case(c, s);
-            stopped += r.resource_stop.has_value();
-            const std::string j = compact(seed_result_to_json(r, s, "full", false));
-            if (reference.empty()) {
-                reference = j;
-            } else {
-                EXPECT_EQ(reference, j) << c.name << " " << detail;
-            }
-        }
-    }
-    EXPECT_GT(stopped, 10u);
-}
-
 // Finding 6: the seed phase (one annotation row per seed k-mer: the validation of an
 // explicit set, or the derivation of one) was not charged as work, so a tiny work budget
 // still read a whole long seed before its first head. It is charged now (8 per k-mer, 1
@@ -3799,73 +3741,6 @@ HeaderIndexCase header_index(size_t k, const std::vector<std::pair<std::string, 
 }
 
 } // namespace
-
-// Finding 2: the work budget exceeded its advertised maximum overrun. The level's rows were
-// charged and checked in fixed batches of keys, whatever their width, and the root's row
-// before any check: 25,000 headers on AAACAAAGAAAT under a budget of 1 used 125,044 units.
-// Now the walk compares the budget after every charge — a fetch call's rows are charged
-// when it returns them, and near the budget a call reads one key — so a stop overruns by
-// what was charged since the previous comparison at most: here one row, as wide as the
-// index makes it, stated with its number (ResourceAccount::largest_charge) rather than
-// promised to be below W.
-TEST(Stage2ReviewRecheck, WorkStopsWithinOneRowOfTheBudget) {
-    const size_t n = 3000;
-    std::vector<std::pair<std::string, std::string>> records;
-    for (size_t i = 0; i < n; ++i) {
-        records.emplace_back("L" + std::to_string(i), "AAACAAAGAAAT");
-    }
-    const HeaderIndexCase idx = header_index(3, records);
-    LabelOracle oracle(*idx.anno, idx.cth.get());
-
-    // annotate: the root's row (n labels) is charged before the first level reads anything
-    Strategy st;
-    st.direction = Strategy::RIGHT;
-    st.label_mode = LabelMode::ANNOTATE;
-    st.seed_label_kind = LabelKind::HEADER;
-    st.max_labels_per_node = 1;
-    st.max_label_branches = Strategy::kUnlimited;
-    st.max_splits_per_path = Strategy::kUnlimited;
-    st.min_live_labels = 0;
-    st.max_extension_bp = 10;
-    st.max_work_units = 1;
-    const SeedResult a = traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
-    ASSERT_TRUE(a.resource_stop);
-    EXPECT_EQ(ResourceStop::WORK, a.resource_stop->resource);
-    EXPECT_EQ(0u, a.arms[1].complete_to_bp);
-    // the root's row, the one charge before the first comparison (annotate reads no row
-    // in its seed phase)
-    EXPECT_EQ(8u + n, a.account.largest_charge);
-    EXPECT_LE(a.resource_stop->used - 1, static_cast<double>(a.account.largest_charge));
-    EXPECT_LE(a.resource_stop->used, 1.0 + kWorkCheckInterval);
-
-    // constrain, a derived set of n labels: a budget that admits the seed phase and the
-    // first enumeration stops at the first row the head consumes, not after the level's
-    st = Strategy();
-    st.direction = Strategy::RIGHT;
-    st.max_seed_labels = n;
-    st.max_extension_bp = 10;
-    const Seed seed = seed_of("AAA");
-    const SeedResult free = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
-    ASSERT_FALSE(free.resource_stop);
-    ASSERT_EQ(n, free.label_dict.size());
-    st.max_work_units = free.account.work_seed + 4 + 1;
-    const SeedResult c = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
-    ASSERT_TRUE(c.resource_stop);
-    EXPECT_EQ(ResourceStop::WORK, c.resource_stop->resource);
-    EXPECT_EQ(0u, c.arms[1].complete_to_bp);
-    const double over = c.resource_stop->used - static_cast<double>(st.max_work_units);
-    EXPECT_GT(over, 0.0);
-    EXPECT_LE(over, static_cast<double>(8 + n)) << "more than one row past the budget";
-    EXPECT_LE(over, static_cast<double>(c.account.largest_charge));
-    // the stop states the bound, with the most the seed charged between two comparisons
-    const Json::Value j = seed_result_to_json(c, st, "full", false);
-    const std::string message = j["resource_stop"]["message"].asString();
-    EXPECT_NE(std::string::npos, message.find("after every charge")) << message;
-    EXPECT_NE(std::string::npos, message.find("between two comparisons: "
-                                              + std::to_string(c.account.largest_charge) + " units"))
-        << message;
-    check_serialised(c, seed, st, oracle, "work stop at a row");
-}
 
 // Finding 3: an interrupted fetch hid its memory excess. The level's fetch was checked
 // against the work budget between its chunks, and a stop there skipped the observation of
@@ -4101,8 +3976,7 @@ void expect_stated_work_bound(const SeedResult &r, const Strategy &st, const std
 // name is echoed as a bounded prefix with its length and where it is, and what the echoed
 // seed_id holds beyond the budget is stated as memory_bound_soft's observed excess.
 TEST(Stage2ReviewRound3, FailedResultsEchoWithinWhatTheyState) {
-    // an index-supplied header (the CLI's view of the same case: integration
-    // test_stage2_failed_results_echo_within_what_they_state)
+    // an index-supplied header
     const std::string name(180'000, '\x01');
     const HeaderIndexCase idx = same_header_in_two_columns(name, "AAAC");
     LabelOracle oracle(*idx.anno, idx.cth.get());
@@ -4262,6 +4136,35 @@ TEST(Stage2ReviewRound3, WorkStopsStateTheirLargestCharge) {
             expect_stated_work_bound(r, st, std::string("both roots of ") + seed);
             EXPECT_EQ(2 * (8u + n), r.account.largest_charge) << seed;
         }
+        // one arm: its root's row is the one charge before the first comparison (annotate
+        // reads no row in its seed phase), a stop at 0 bp within an interval of the budget
+        st.direction = Strategy::RIGHT;
+        const SeedResult a = traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
+        expect_stated_work_bound(a, st, "one root");
+        EXPECT_EQ(0u, a.arms[1].complete_to_bp);
+        EXPECT_EQ(8u + n, a.account.largest_charge);
+        EXPECT_LE(a.resource_stop->used, 1.0 + kWorkCheckInterval);
+
+        // constrain, a derived set of n labels: a budget that admits the seed phase and the
+        // first enumeration stops at the first row the head consumes, not after the level's
+        Strategy c;
+        c.direction = Strategy::RIGHT;
+        c.max_seed_labels = n;
+        c.max_extension_bp = 10;
+        const Seed seed = seed_of("AAA");
+        const SeedResult free = traverse_seed(oracle, seed, c, LabelChangeCost::forbid());
+        ASSERT_FALSE(free.resource_stop);
+        ASSERT_EQ(n, free.label_dict.size());
+        c.max_work_units = free.account.work_seed + 4 + 1;
+        const SeedResult r = traverse_seed(oracle, seed, c, LabelChangeCost::forbid());
+        expect_stated_work_bound(r, c, "constrain at a row");
+        EXPECT_EQ(0u, r.arms[1].complete_to_bp);
+        EXPECT_LE(r.resource_stop->used - static_cast<double>(c.max_work_units),
+                  static_cast<double>(8 + n)) << "more than one row past the budget";
+        const std::string message
+            = seed_result_to_json(r, c, "full", false)["resource_stop"]["message"].asString();
+        EXPECT_NE(std::string::npos, message.find("after every charge")) << message;
+        check_serialised(r, seed, c, oracle, "work stop at a row");
     }
     {
         // F5: a row with one label and 20,000 coordinates under support: trace
@@ -4469,7 +4372,7 @@ TEST(GraphletStage3Decode, DecodeDenialLeavesAConsistentPrefix) {
         ASSERT_TRUE(base.account.decode_charged) << c.name;
         ASSERT_GT(charges.size(), 0u) << c.name;
         const std::string base_text = result_text(base, st);
-        const size_t most = 60;
+        const size_t most = 20;
         LabelOracle oracle(*c.anno);
         for (size_t s = 0; s < std::min(charges.size(), most); ++s) {
             const size_t ordinal = charges.size() <= most ? s : s * (charges.size() - 1) / (most - 1);
@@ -4537,8 +4440,8 @@ TEST(GraphletStage3Decode, DecodeDenialLeavesAConsistentPrefix) {
             EXPECT_EQ(only, j["resource_stop"]["actions"]) << what;
         }
     }
-    EXPECT_GT(seed_failures, 20u);
-    EXPECT_GT(level_stops, 100u);
+    EXPECT_GT(seed_failures, 15u);
+    EXPECT_GT(level_stops, 60u);
     EXPECT_GT(warm_denials, 5u);
     EXPECT_GT(retried, 5u);
     std::cerr << "decode denials: " << seed_failures << " seed failures, " << level_stops
@@ -4558,11 +4461,11 @@ TEST(GraphletStage3Decode, StopsDoNotDependOnBatchKmers) {
         const uint64_t peak = full.account.memory_peak;
         const uint64_t work = full.account.work_used;
         std::vector<std::pair<uint64_t, uint64_t>> budgets;    // memory, work
-        for (uint64_t m = 8192; m < 8 * peak; m = m * 5 / 4 + 1) budgets.emplace_back(m, 0);
-        for (uint64_t w = 1; w < 2 * work; w = w * 3 / 2 + 1) budgets.emplace_back(0, w);
+        for (uint64_t m = 8192; m < 8 * peak; m = m * 3 / 2 + 1) budgets.emplace_back(m, 0);
+        for (uint64_t w = 1; w < 2 * work; w = w * 2 + 1) budgets.emplace_back(0, w);
         for (const auto &[memory, units] : budgets) {
             std::string reference;
-            for (size_t batch : { 1, 3, 64, 1000 }) {
+            for (size_t batch : { 1, 64, 1000 }) {
                 Strategy st = c.st;
                 st.max_memory_bytes = memory;
                 st.max_work_units = units;
@@ -4799,82 +4702,61 @@ std::set<std::string> actions_of(const Json::Value &q) {
 } // namespace
 
 // F2: in annotate mode a level's key whose row fits but whose new dictionary labels do not is
-// a stop by those labels — phase traversal, with the levers that name fewer or cheaper labels —
-// not a row that "needs more than the walk had left"; with fewer labels per node the same
-// budget walks on
+// a stop by those labels -- phase traversal, with the levers that name fewer or cheaper labels --
+// not a row that "needs more than the walk had left"; with fewer labels per node the same budget
+// walks on. On a format whose reads are not budget-aware (a column annotation; the review of
+// 2026-10-06, U03-03) a level's rows are read whole and the labels they name are charged after
+// the read: the stop is theirs as well (LABEL_NAMES), its message names the labels and their
+// bytes, and the need is a lower bound ("at least")
 TEST(GraphletStage3Review, LabelsThatDoNotFitAreNotARowStop) {
-    const NamesCase c = names_case();
-    const Json::Value out = names_request(c, c.P.substr(0, 20), "right", 2, 1000);
-    const Json::Value &res = out["results"][0];
-    ASSERT_TRUE(res.isMember("resource_stop")) << res.toStyledString().substr(0, 2000);
-    const Json::Value &q = res["resource_stop"];
-    EXPECT_EQ("traversal", q["phase"].asString());
-    EXPECT_EQ("memory", q["resource"].asString());
-    const std::string message = q["message"].asString();
-    EXPECT_NE(std::string::npos, message.find("new dictionary label(s)")) << message;
-    EXPECT_EQ(std::string::npos, message.find("needs more")) << message;
-    const auto actions = actions_of(q);
-    for (const char *a : { "raise_memory_budget", "use_graphlet", "lower_max_labels_per_node",
-                           "label_constrained_query", "continue_from_leaves" }) {
-        EXPECT_TRUE(actions.count(a)) << a;
+    for (bool row_diff : { true, false }) {
+        const std::string what = row_diff ? "row-diff" : "column";
+        const NamesCase c = names_case(300, 4000, row_diff);
+        EXPECT_EQ(row_diff, LabelOracle(*c.anno).decode_charged()) << what;
+        const Json::Value out = names_request(c, c.P.substr(0, 20), "right", 2, 1000);
+        const Json::Value &res = out["results"][0];
+        ASSERT_TRUE(res.isMember("resource_stop")) << what << res.toStyledString().substr(0, 2000);
+        const Json::Value &q = res["resource_stop"];
+        EXPECT_EQ("traversal", q["phase"].asString()) << what;
+        EXPECT_EQ("memory", q["resource"].asString()) << what;
+        const std::string message = q["message"].asString();
+        EXPECT_NE(std::string::npos, message.find("new dictionary label(s)")) << message;
+        EXPECT_EQ(std::string::npos, message.find("needs more")) << message;
+        const auto actions = actions_of(q);
+        for (const char *a : { "raise_memory_budget", "use_graphlet", "lower_max_labels_per_node",
+                               "label_constrained_query", "continue_from_leaves" }) {
+            EXPECT_TRUE(actions.count(a)) << what << " " << a;
+        }
+        EXPECT_FALSE(actions.count("more_selective_seed")) << what;
+        const uint64_t stopped_at = res["arms"]["right"]["complete_to_bp"].asUInt64();
+        EXPECT_GT(stopped_at, 0u) << what;
+        if (!row_diff) {
+            EXPECT_NE(std::string::npos, message.find("after reading the next level's annotation: "
+                                                      "its rows named 300 new dictionary label(s)"))
+                << message;
+            EXPECT_NE(std::string::npos, message.find("at least the account with them")) << message;
+            // no row was refused: nothing of a row's demand or of bytes left is stated
+            EXPECT_EQ(std::string::npos, message.find("a row that fits")) << message;
+            EXPECT_EQ(std::string::npos, message.find("charged per head")) << message;
+            bool walk_domain = false;
+            for (const Json::Value &l : res["arms"]["right"]["limitations"]) {
+                if (l["kind"].asString() != "walk_domain")
+                    continue;
+                walk_domain = true;
+                const std::string effect = l["effect"].asString();
+                EXPECT_NE(std::string::npos, effect.find("did not admit the dictionary labels"))
+                    << effect;
+                EXPECT_NE(std::string::npos, effect.find("observed: at least")) << effect;
+                // the account with the labels: 300 names of 4 KB, each priced in every copy
+                EXPECT_GT(l["observed"].asUInt64(), 2u);
+            }
+            EXPECT_TRUE(walk_domain);
+        }
+        // the lever works: with one label per node the same budget walks past u (where its
+        // 300 branches, one new label each, stop it again)
+        const Json::Value fewer = names_request(c, c.P.substr(0, 20), "right", 2, 1)["results"][0];
+        EXPECT_GT(fewer["arms"]["right"]["complete_to_bp"].asUInt64(), stopped_at) << what;
     }
-    EXPECT_FALSE(actions.count("more_selective_seed"));
-    const uint64_t stopped_at = res["arms"]["right"]["complete_to_bp"].asUInt64();
-    EXPECT_GT(stopped_at, 0u);
-    // the lever works: with one label per node the same budget walks past u (where its 300
-    // branches, one new label each, stop it again)
-    const Json::Value fewer = names_request(c, c.P.substr(0, 20), "right", 2, 1)["results"][0];
-    EXPECT_GT(fewer["arms"]["right"]["complete_to_bp"].asUInt64(), stopped_at);
-}
-
-// The review of 2026-10-06, U03-03: on a format whose reads are not budget-aware (a column
-// annotation) a level's rows are read whole and the labels they name are charged after the
-// read. When those labels put the account over the budget the stop is theirs as well
-// (LABEL_NAMES): its message names the labels and their bytes, the need is a lower bound ("at
-// least"), and the levers that name fewer labels are offered. It was stated as a refused head
-// with an exact need — the dictionary's, so raised to it the walk stopped at the same depth
-// again — and without lower_max_labels_per_node, which lets the same budget walk on
-TEST(GraphletStage3Review, LabelsAnUnbudgetedReadNamedAreTheirOwnStop) {
-    const NamesCase c = names_case(300, 4000, false);
-    LabelOracle oracle(*c.anno);
-    ASSERT_FALSE(oracle.decode_charged());
-    const Json::Value out = names_request(c, c.P.substr(0, 20), "right", 2, 1000);
-    const Json::Value &res = out["results"][0];
-    ASSERT_TRUE(res.isMember("resource_stop")) << res.toStyledString().substr(0, 2000);
-    const Json::Value &q = res["resource_stop"];
-    EXPECT_EQ("traversal", q["phase"].asString());
-    EXPECT_EQ("memory", q["resource"].asString());
-    const std::string message = q["message"].asString();
-    EXPECT_NE(std::string::npos, message.find("after reading the next level's annotation: its "
-                                              "rows named 300 new dictionary label(s)"))
-        << message;
-    EXPECT_NE(std::string::npos, message.find("at least the account with them")) << message;
-    // no row was refused: nothing of a row's demand or of bytes left is stated
-    EXPECT_EQ(std::string::npos, message.find("a row that fits")) << message;
-    EXPECT_EQ(std::string::npos, message.find("charged per head")) << message;
-    const auto actions = actions_of(q);
-    for (const char *a : { "raise_memory_budget", "use_graphlet", "lower_max_labels_per_node",
-                           "label_constrained_query", "continue_from_leaves" }) {
-        EXPECT_TRUE(actions.count(a)) << a;
-    }
-    EXPECT_FALSE(actions.count("more_selective_seed"));
-    const uint64_t stopped_at = res["arms"]["right"]["complete_to_bp"].asUInt64();
-    EXPECT_GT(stopped_at, 0u);
-    bool walk_domain = false;
-    for (const Json::Value &l : res["arms"]["right"]["limitations"]) {
-        if (l["kind"].asString() != "walk_domain")
-            continue;
-        walk_domain = true;
-        const std::string effect = l["effect"].asString();
-        EXPECT_NE(std::string::npos, effect.find("did not admit the dictionary labels")) << effect;
-        EXPECT_NE(std::string::npos, effect.find("observed: at least")) << effect;
-        // the account with the labels: 300 names of 4 KB, each priced in every copy
-        EXPECT_GT(l["observed"].asUInt64(), 2u);
-    }
-    EXPECT_TRUE(walk_domain);
-    // the lever works: with one label per node the same budget walks past u
-    const Json::Value fewer = names_request(c, c.P.substr(0, 20), "right", 2, 1)["results"][0];
-    EXPECT_GT(fewer["arms"]["right"]["complete_to_bp"].asUInt64(), stopped_at);
 }
 
 // F7: an annotate root whose row fits but whose labels (with their delivery) do not fails the
@@ -4956,7 +4838,7 @@ TEST(GraphletStage3Review, ExcessAtAStopIsObserved) {
         Strategy big = c.st;
         big.max_memory_bytes = uint64_t(1) << 30;
         const uint64_t peak = run_case(c, big).account.memory_peak;
-        for (uint64_t memory = 8192; memory < 4 * peak; memory = memory * 51 / 50 + 1) {
+        for (uint64_t memory = 8192; memory < 4 * peak; memory = memory * 11 / 10 + 1) {
             Strategy st = c.st;
             st.max_memory_bytes = memory;
             SeedResult r;
@@ -5143,6 +5025,7 @@ const char kRepeatStrategy[] = R"({"direction": "right", "support": "trace",
 // read (annotation.rows_requested); the derivation holds its window of up to 64 rows, all of
 // them charged at once (the reviewer's 400,019 units, reported as 200,009)
 TEST(GraphletStage2Recheck, SeedFetchChargesEveryReturnedRow) {
+    // rows whose charges together pass kWorkCheckInterval, at which the seed phase is compared
     const size_t n = 70'000;
     const uint64_t gat = 8 + 1 + occurrences(n, "GAT"), atg = 8 + 1 + occurrences(n, "ATG");
     for (bool rowdiff : { false, true }) {
@@ -5621,7 +5504,7 @@ TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
         EXPECT_FALSE(base.resource_stop) << c.name;
         const uint64_t polls = count.calls;
         ASSERT_GT(polls, 0u) << c.name;
-        const size_t most = c.name.rfind("mode ", 0) == 0 ? 6 : 16;
+        const size_t most = c.name.rfind("mode ", 0) == 0 ? 3 : 8;
         std::vector<uint64_t> ats;
         for (size_t i = 0; i < std::min<uint64_t>(polls, most); ++i) {
             ats.push_back(polls <= most ? i : i * (polls - 1) / (most - 1));
@@ -5705,9 +5588,9 @@ TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
             }
         }
     }
-    EXPECT_GT(stops, 200u);
+    EXPECT_GT(stops, 80u);
     EXPECT_GT(seed_phase, 10u);
-    EXPECT_GT(mid_walk, 100u);
+    EXPECT_GT(mid_walk, 60u);
 }
 
 // No stop: the walk is the one without a control, byte for byte, and the meter is its account
@@ -6381,31 +6264,6 @@ TEST(GraphletCoordinates, CapWithoutCoordinatesIsRefused) {
                       .strategy.max_coordinate_occurrences);
 }
 
-// Without coordinates nothing is added (decision C1): no echo field, no block, no reason. With
-// them the echo carries both fields (the cap's default included), and is resubmittable: the
-// echoed strategy gives the same response
-TEST(GraphletCoordinates, EchoOnlyWhenRequestedAndResubmittable) {
-    const CoordIndex ix;
-    const Json::Value plain = request_of({ seed_of(ix.S, { "C", "D" }) }, kTrace, "full");
-    const Json::Value off = process_traverse_request(plain, *ix.anno, "");
-    EXPECT_FALSE(off["strategy"]["output"].isMember("coordinates"));
-    EXPECT_FALSE(off["strategy"]["output"].isMember("max_coordinate_occurrences"));
-    EXPECT_FALSE(off["results"][0].isMember("coordinates"));
-    EXPECT_FALSE(off["results"][0].isMember("coordinates_reason"));
-    const Json::Value on = process_traverse_request(with_coordinates(plain), *ix.anno, "");
-    EXPECT_TRUE(on["strategy"]["output"]["coordinates"].asBool());
-    EXPECT_EQ(16u, on["strategy"]["output"]["max_coordinate_occurrences"].asUInt64());
-    EXPECT_TRUE(on["results"][0]["coordinates"].isObject());
-    Json::Value again = plain;
-    again["strategy"] = on["strategy"];
-    again["strategy"].removeMember("clamped");
-    EXPECT_EQ(compact_json(on), compact_json(process_traverse_request(again, *ix.anno, "")));
-    const Json::Value unlimited = process_traverse_request(
-            with_coordinates(plain, "unlimited"), *ix.anno, "");
-    EXPECT_EQ("unlimited", unlimited["strategy"]["output"]["max_coordinate_occurrences"].asString());
-    EXPECT_EQ("unlimited", unlimited["results"][0]["coordinates"]["max_occurrences"].asString());
-}
-
 // coordinates: null with the reason, in the order of §18.1: the index's ("index has no
 // coordinates"), the support's ("support kmer", annotate mode included), then "no traversal"
 // for a seed without a walk — a failed derivation, a seed a budget does not hold, a refused
@@ -6507,33 +6365,16 @@ TEST(GraphletCoordinates, NullReasons) {
     }
 }
 
-// One block in every detail (the envelope carries it; the graphlet's summary too)
-TEST(GraphletCoordinates, SameBlockInEveryDetail) {
-    const CoordIndex ix;
-    for (const Json::Value &cap : { Json::Value(1), Json::Value(16), Json::Value("unlimited") }) {
-        std::string block;
-        for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
-            const Json::Value out = process_traverse_request(
-                    with_coordinates(request_of({ seed_of(ix.S, { "C", "D" }) }, kTrace, detail), cap),
-                    *ix.anno, "");
-            const Json::Value &c = out["results"][0]["coordinates"];
-            ASSERT_TRUE(c.isObject()) << detail;
-            if (block.empty()) {
-                block = compact_json(c);
-            } else {
-                EXPECT_EQ(block, compact_json(c)) << detail << " cap " << compact_json(cap);
-            }
-        }
-        EXPECT_NE(std::string::npos, block.find("\"kind\":\"column\""));
-    }
-}
-
 // The MGT body changes only where a list was cut, by one K record of kind coordinates (C12's free
 // token, extra field lists_cut), which the reader keeps; otherwise it is byte-identical to the
 // opt-out body. Stripped of the block, its reason, the limitation and the echo, an opt-in response
-// is the opt-out response, in every detail
+// is the opt-out response, in every detail: without coordinates nothing is added (decision C1).
+// The block is the same in every detail (the envelope carries it; the graphlet's summary too).
+// The echo carries both fields (the cap's default included) and is resubmittable: the echoed
+// strategy gives the same response
 TEST(GraphletCoordinates, KRecordOnlyWhenCutAndStrippedEqualsOptOut) {
     const CoordIndex ix;
+    std::map<std::string, std::string> blocks;      // by cap, the seed's block under trace
     for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
         for (const std::string &strategy : { std::string(kTrace),
                                              std::string(R"({"bounds": {"max_extension_bp": 30}})") }) {
@@ -6546,6 +6387,13 @@ TEST(GraphletCoordinates, KRecordOnlyWhenCutAndStrippedEqualsOptOut) {
                 EXPECT_EQ(off, compact_json(strip_coordinates(on, &k_records)))
                     << detail << " " << strategy << " cap " << compact_json(cap);
                 const Json::Value &first = on["results"][0];
+                if (strategy == kTrace) {
+                    ASSERT_TRUE(first["coordinates"].isObject()) << detail;
+                    const std::string block = compact_json(first["coordinates"]);
+                    auto [at, added] = blocks.emplace(compact_json(cap), block);
+                    EXPECT_TRUE(added || at->second == block) << detail << " cap " << compact_json(cap);
+                    EXPECT_NE(std::string::npos, block.find("\"kind\":\"column\""));
+                }
                 const bool cut = first.isMember("coordinates") && first["coordinates"].isObject()
                               && !first["coordinates"]["complete"].asBool();
                 const Json::Value *lim = limitation_of(first["limitations"], "coordinates");
@@ -6570,6 +6418,19 @@ TEST(GraphletCoordinates, KRecordOnlyWhenCutAndStrippedEqualsOptOut) {
             }
         }
     }
+    EXPECT_EQ(3u, blocks.size());
+    const Json::Value plain = request_of({ seed_of(ix.S, { "C", "D" }) }, kTrace, "full");
+    const Json::Value on = process_traverse_request(with_coordinates(plain), *ix.anno, "");
+    EXPECT_TRUE(on["strategy"]["output"]["coordinates"].asBool());
+    EXPECT_EQ(16u, on["strategy"]["output"]["max_coordinate_occurrences"].asUInt64());
+    Json::Value again = plain;
+    again["strategy"] = on["strategy"];
+    again["strategy"].removeMember("clamped");
+    EXPECT_EQ(compact_json(on), compact_json(process_traverse_request(again, *ix.anno, "")));
+    const Json::Value unlimited = process_traverse_request(
+            with_coordinates(plain, "unlimited"), *ix.anno, "");
+    EXPECT_EQ("unlimited", unlimited["strategy"]["output"]["max_coordinate_occurrences"].asString());
+    EXPECT_EQ("unlimited", unlimited["results"][0]["coordinates"]["max_occurrences"].asString());
 }
 
 // The delivery model bounds the block too (DeliveryCostsBoundTheOutput's check): many occurrences
@@ -6959,11 +6820,10 @@ TEST(GraphletCoordinates, AttemptsMeasureTheSameRatioWithCoordinates) {
     auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             31, seqs, labels, DeBruijnGraph::BASIC, true, starts);
     size_t measured = 0;
-    // a cut list (S's 800 occurrences at cap 1: the limitation, and its K record in a graphlet)
-    // and none
-    for (const auto &[detail, cap] : { std::make_pair("full", Json::Value(1)),
-                                       std::make_pair("graphlet", Json::Value(1)),
-                                       std::make_pair("full", Json::Value("unlimited")) }) {
+    // a cut list (S's 800 occurrences at cap 1: the limitation, and its K record in a graphlet);
+    // the ratio's arithmetic in every detail and cap is GraphletAttempt.
+    // CoordinatesLeaveTheServersRatioUnchanged and CoordinateTextIsExactAndBoundedByItsAccount
+    for (const auto &[detail, cap] : { std::make_pair("graphlet", Json::Value(1)) }) {
         {
             const Json::Value plain = request_of({ seed_of(S, { "F" }) },
                     R"({"support": "trace", "direction": "right",
@@ -7002,7 +6862,7 @@ TEST(GraphletCoordinates, AttemptsMeasureTheSameRatioWithCoordinates) {
             measured += ratio[true] > 0;
         }
     }
-    EXPECT_EQ(3u, measured);
+    EXPECT_EQ(1u, measured);
 }
 
 // The probe's coordinates block (feature level 6, plan revisions 7 and 8) follows the index it

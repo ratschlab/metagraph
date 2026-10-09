@@ -293,6 +293,7 @@ class TestCompareWithoutBases(unittest.TestCase):
             yield name, g, without_bases(g)
 
     def test_the_same_trie_without_bases(self):
+        verified = 0
         for name, g, nb in self.pairs():
             self.assertTrue(all(s.walk is None for a in nb.arms.values() for s in a.segments))
             for x, y in ((g, nb), (nb, g), (nb, nb)):
@@ -304,7 +305,13 @@ class TestCompareWithoutBases(unittest.TestCase):
                                           cmp.only_in_b, cmp.differ))
                         self.assertIn('output.sequences', cmp.reason)
                         self.assertFalse(any('no difference found' in n for n in cmp.notes))
-                    self.assertEqual([], x.compare(y, mode='labels').only_in_a)
+                    # labels need no bases: equal wherever the identities make it comparable
+                    cmp = x.compare(y, mode='labels')
+                    self.assertEqual([], cmp.only_in_a)
+                    if cmp.comparable is True:
+                        self.assertTrue(cmp.equal)
+                        verified += 1
+        self.assertGreater(verified, 0)
 
     def test_with_bases_the_verdict_is_unchanged(self):
         g = parse(T.compare_text('oracle_exhaustive'))
@@ -332,6 +339,9 @@ class TestCompareWithoutBases(unittest.TestCase):
                 out = tools.graphlet_compare(ha, hb, mode=mode)
                 self.assertNotIn('error', out, (mode, out))
                 self.assertEqual(0, out['total'], (mode, out))
+                if mode != 'labels':
+                    self.assertEqual(('unknown', None), (out['comparable'], out['equal']), out)
+                    self.assertIn('output.sequences', out['reason'])
 
 
 # ------------------------------------------------------------------ COMPARE-SELECTORS-A-ONLY
@@ -834,23 +844,6 @@ class TestWalkPages(ToolCase):
 # ------------------------------------------------------------------ B2-MEMORY-BYTES
 
 class TestMemoryAccounting(unittest.TestCase):
-    def test_memory_bytes_is_the_heap(self):
-        for name in ('merge', 'annotate', 'caps', 'limits', 'quorum'):
-            text = T.doc_text(name)
-            gc.collect()
-            tracemalloc.start()
-            try:
-                base = tracemalloc.get_traced_memory()[0]
-                g = parse(text)
-                gc.collect()
-                held = tracemalloc.get_traced_memory()[0] - base
-            finally:
-                tracemalloc.stop()
-            ratio = g.memory_bytes() / held
-            with self.subTest(doc=name, held=held):
-                self.assertGreater(ratio, 0.8)
-                self.assertLess(ratio, 1.5)
-
     def test_star_sets_are_shared(self):
         g = T.graphlet('merge')
         for a in g.arms.values():

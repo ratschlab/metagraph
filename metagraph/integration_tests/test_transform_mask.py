@@ -71,43 +71,32 @@ class TestTransformMaskDummy(TestingBase):
         self.assertTrue(filecmp.cmp(built[:-4] + '.edgemask', stripped[:-4] + '.edgemask',
                                     shallow=False))
 
-    def test_every_mode_and_state(self):
-        for mode in ('basic', 'canonical', 'primary'):
-            for state in ('stat', 'fast', 'small'):
-                with self.subTest(mode=mode, state=state):
-                    built, stripped = self.built_and_stripped(f'{mode}_{state}', mode, state)
-                    code, log = run(['transform', '--mask-dummy', '-p', '2', stripped])
-                    self.assertEqual(0, code, log)
-                    self.assertSameMask(built, stripped)
-                    # the graph file is untouched and nothing else was written
-                    self.assertTrue(filecmp.cmp(built, stripped, shallow=False))
-                    self.assertEqual({'built.dbg', 'built.edgemask', 'stripped.dbg',
-                                      'stripped.edgemask'},
-                                     set(os.listdir(os.path.dirname(stripped))) - {
-                                         'built.dbg.fasta.gz'})
-                    # the counts it logs are those of stats --count-dummy
-                    source, sink, real = dummy_counts(built)
-                    m = re.search(r'Dummy edges marked in [\d.]+ s with \d+ threads: (\d+) edges, '
-                                  r'(\d+) source dummies \(the main dummy edge included\), (\d+) '
-                                  r'sink dummies, (\d+) k-mers', log)
-                    self.assertIsNotNone(m, log)
-                    self.assertEqual((source + sink + real, source, sink, real),
-                                     tuple(int(x) for x in m.groups()))
-                    self.assertGreater(source, 1)
-                    self.assertGreater(sink, 0)
-                    # the graph states the same k-mers as the built one
-                    self.assertEqual(self._get_stats(built)['nodes (k)'],
-                                     self._get_stats(stripped)['nodes (k)'])
-                    self.assertEqual(str(real), self._get_stats(stripped)['nodes (k)'])
-
-    def test_with_mmap_and_output_naming_the_graph(self):
-        built, stripped = self.built_and_stripped('mmap')
-        code, log = run(['transform', '--mask-dummy', '--mmap', '-o', stripped[:-4], stripped])
+    def test_transform_writes_the_mask_of_build(self):
+        """On one graph (every mode and state, byte for byte, is PatternMask.
+        TransformWritesTheMaskOfBuild): the mask transform writes is the build's, the graph
+        file is untouched and nothing else is written, and the counts it logs are those of
+        stats --count-dummy. A mask already there is not replaced without --force, which
+        rebuilds it without reading it (a broken mask makes the graph unloadable) and leaves
+        no temporary file."""
+        built, stripped = self.built_and_stripped('basic_stat')
+        code, log = run(['transform', '--mask-dummy', '-p', '2', stripped])
         self.assertEqual(0, code, log)
         self.assertSameMask(built, stripped)
+        self.assertTrue(filecmp.cmp(built, stripped, shallow=False))
+        self.assertEqual({'built.dbg', 'built.edgemask', 'stripped.dbg', 'stripped.edgemask'},
+                         set(os.listdir(os.path.dirname(stripped))) - {'built.dbg.fasta.gz'})
+        source, sink, real = dummy_counts(built)
+        m = re.search(r'Dummy edges marked in [\d.]+ s with \d+ threads: (\d+) edges, '
+                      r'(\d+) source dummies \(the main dummy edge included\), (\d+) '
+                      r'sink dummies, (\d+) k-mers', log)
+        self.assertIsNotNone(m, log)
+        self.assertEqual((source + sink + real, source, sink, real),
+                         tuple(int(x) for x in m.groups()))
+        self.assertGreater(source, 1)
+        self.assertGreater(sink, 0)
+        # the masked graph states its k-mers as its nodes
+        self.assertEqual(str(real), self._get_stats(stripped)['nodes (k)'])
 
-    def test_existing_mask_and_force(self):
-        built, stripped = self.built_and_stripped('force')
         mask = stripped[:-4] + '.edgemask'
         with open(mask, 'w') as f:
             f.write('not a mask')
@@ -116,12 +105,17 @@ class TestTransformMaskDummy(TestingBase):
         self.assertIn('pass --force to build it again and replace it', log)
         with open(mask) as f:
             self.assertEqual('not a mask', f.read())
-        # a broken mask makes the graph unloadable; --force rebuilds it without reading it
         code, log = run(['transform', '--mask-dummy', '--force', stripped])
         self.assertEqual(0, code, log)
         self.assertIn('Replaced', log)
         self.assertSameMask(built, stripped)
         self.assertEqual([], [f for f in os.listdir(os.path.dirname(stripped)) if '.tmp' in f])
+
+    def test_with_mmap_and_output_naming_the_graph(self):
+        built, stripped = self.built_and_stripped('mmap')
+        code, log = run(['transform', '--mask-dummy', '--mmap', '-o', stripped[:-4], stripped])
+        self.assertEqual(0, code, log)
+        self.assertSameMask(built, stripped)
 
     def test_bloom_filter_beside_the_graph(self):
         """DBGSuccinct::load reads a .bloom only together with a mask: stated when it applies."""

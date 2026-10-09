@@ -615,49 +615,4 @@ TEST(LabelOracleCoordRuns, SameAsMapSingleCoord) {
     }
 }
 
-// A measurement (--gtest_also_run_disabled_tests), on a column of 2,000 sequences of 100,000
-// to 300,000 k-mers: map_single_coord per coordinate, the sequence ranges used always, and
-// the run mapper, for the three patterns
-TEST(LabelOracleCoordRuns, DISABLED_Benchmark) {
-    std::mt19937_64 rng(1);
-    const CoordColumn col = coord_column(2000, 100'000, 200'000, 1);
-    for (int kind : { 0, 1, 2 }) {
-        const std::vector<uint64_t> coords = coord_pattern(col, kind, rng);
-        const int reps = 2000;
-        uint64_t sums[3] = { 0, 0, 0 };
-        double ns[3];
-        for (int method = 0; method < 3; ++method) {
-            const auto t0 = std::chrono::steady_clock::now();
-            for (int rep = 0; rep < reps; ++rep) {
-                if (method == 0) {
-                    for (uint64_t c : coords) {
-                        const auto [seq, local] = col.cth->map_single_coord(0, c);
-                        sums[0] += seq + local;
-                    }
-                } else if (method == 1) {
-                    annot::CoordToHeader::SequenceRange range { 0, 1, 0 };
-                    for (uint64_t c : coords) {
-                        if (c < range.first || c > range.last)
-                            range = col.cth->sequence_range(0, c);
-                        sums[1] += range.seq_id + (c - range.first);
-                    }
-                } else {
-                    LabelOracle::CoordRuns runs(*col.cth, 0, coords.size());
-                    for (uint64_t c : coords) {
-                        const auto [seq, local] = runs.map(c);
-                        sums[2] += seq + local;
-                    }
-                }
-            }
-            ns[method] = std::chrono::duration<double, std::nano>(
-                    std::chrono::steady_clock::now() - t0).count() / (double(coords.size()) * reps);
-        }
-        EXPECT_EQ(sums[0], sums[1]);
-        EXPECT_EQ(sums[0], sums[2]);
-        std::cerr << "pattern " << kind << " (" << coords.size() << " coordinates): map_single_coord "
-                  << ns[0] << " ns, sequence ranges " << ns[1] << " ns, run mapper " << ns[2]
-                  << " ns a coordinate" << std::endl;
-    }
-}
-
 } // namespace
