@@ -332,6 +332,80 @@ bool Pattern::is_palindromic() const {
     return true;
 }
 
+namespace {
+
+// log2(2^a + 2^b), -infinity standing for an empty term
+double log2_add(double a, double b) {
+    if (a < b)
+        std::swap(a, b);
+    if (b == -std::numeric_limits<double>::infinity())
+        return a;
+    return a + std::log2(1 + std::exp2(b - a));
+}
+
+} // namespace
+
+double Pattern::mismatch_information_bits(size_t begin, size_t end,
+                                          uint8_t max_mismatches) const {
+    assert(begin <= end && end <= positions_.size());
+    if (!max_mismatches)
+        return information_bits(begin, end);
+    if (kind_ == PatternKind::PROTEIN) {
+        throw std::invalid_argument("pattern: the substitution ball of a peptide is not "
+                                    "defined yet");
+    }
+
+    // f[u] = log2 of the strings over the positions so far with exactly u substitutions
+    constexpr double kEmpty = -std::numeric_limits<double>::infinity();
+    std::vector<double> f(max_mismatches + 1, kEmpty);
+    f[0] = 0;
+    for (size_t i = begin; i < end; ++i) {
+        const uint32_t s = set_size(positions_[i]);
+        const double same = std::log2(static_cast<double>(s));
+        const double other = s < 4 ? std::log2(static_cast<double>(4 - s)) : kEmpty;
+        for (size_t u = f.size(); u-- > 0; ) {
+            const double kept = f[u] == kEmpty ? kEmpty : f[u] + same;
+            const double added = !u || f[u - 1] == kEmpty || other == kEmpty
+                ? kEmpty
+                : f[u - 1] + other;
+            f[u] = log2_add(kept, added);
+        }
+    }
+    double ball = kEmpty;
+    for (double level : f) {
+        ball = log2_add(ball, level);
+    }
+    return 2.0 * static_cast<double>(end - begin) - ball;
+}
+
+std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
+                                        std::string_view instance) {
+    if (pattern.kind() == PatternKind::PROTEIN)
+        throw std::invalid_argument("pattern: residue substitutions are not defined yet");
+    const size_t L = pattern.length();
+    if (instance.size() != L) {
+        throw std::invalid_argument("pattern: an instance of " + std::to_string(instance.size())
+                                    + " bases for a pattern of " + std::to_string(L));
+    }
+    const bool reverse = orientation == Orientation::REVERSE;
+    std::vector<Substitution> result;
+    for (size_t i = 0; i < L; ++i) {
+        const char spelled = instance[reverse ? L - 1 - i : i];
+        BaseSet base = iupac_set(spelled);
+        if (set_size(base) != 1) {
+            throw std::invalid_argument(std::string("pattern: the instance holds '") + spelled
+                                        + "', not a base of A, C, G, T");
+        }
+        if (reverse)
+            base = complement_set(base);
+        if (!(pattern.positions()[i] & base)) {
+            result.push_back(Substitution { static_cast<uint32_t>(i), pattern.text()[i],
+                                            iupac_letter(base) });
+        }
+    }
+    return result;
+}
+
 
 // ---------------------------------------------------------------- deadline and budget
 
@@ -486,6 +560,31 @@ bool may_be_palindromic(const std::vector<BaseSet> &q, size_t p, size_t k) {
 }
 
 /**
+ * The same test for an instance of |level| substitutions: a k-mer x equal to its reverse
+ * complement holding |q| at |p| needs a substitution in every mirrored pair of pattern
+ * positions whose sets admit no complementary bases (one of the two bases of x there lies
+ * outside its set), and the pairs are disjoint, so x is possible only where at most |level|
+ * pairs conflict. A necessary condition, as the one above (which is this one at level 0): the
+ * palindrome scans stay a superset.
+ */
+bool may_be_palindromic(const std::vector<BaseSet> &q, size_t p, size_t k, uint32_t level) {
+    if (!level)
+        return may_be_palindromic(q, p, k);
+    if (k % 2)
+        return false;
+
+    uint32_t conflicts = 0;
+    for (size_t i = 0; i < q.size(); ++i) {
+        size_t mirror = k - 1 - (p + i);
+        // each pair once, from its first position
+        if (mirror > p + i && mirror < p + q.size()
+                && !(q[i] & complement_set(q[mirror - p])))
+            ++conflicts;
+    }
+    return conflicts <= level;
+}
+
+/**
  * A range whose edges are contexts of one base search at one offset: a flank range (c == 0:
  * every valid edge leaving its nodes) or a W-rule leaf (the valid edges with W in
  * {c, c + alph_size}). Kept for the deferred scans and for enumerate()'s release.
@@ -527,6 +626,9 @@ struct Item {
     // candidates found real (any range: the scan spells each)
     uint64_t hits = 0;
     uint64_t palindromes = 0;
+    // Request::max_mismatches > 0: the substitutions its contexts' instances hold (the level of
+    // the pass that found the range); 0 otherwise
+    uint8_t level = 0;
 
     bool flank() const { return !c; }
 
@@ -595,7 +697,10 @@ struct Span {
     // the contexts the release is sure to find in the range (Item::lower() when it was
     // counted, capped to 32 bits, still a lower bound): what PARTIAL's retention bound sums
     uint32_t guaranteed;
-    uint16_t offset;
+    // the contexts' offset (k < 16,384) and the level of the pass that found the range (two
+    // bits: levels 0 .. kMaxMismatches)
+    uint16_t offset : 14;
+    uint16_t level : 2;
     // the W-rule symbol; 0 for a flank range
     TAlphabet c;
     // Item::unchecked: the release tests each candidate for a source dummy
@@ -604,6 +709,7 @@ struct Span {
     bool flank() const { return !c; }
 };
 static_assert(sizeof(Span) == 24, "a retained range stays 24 bytes");
+static_assert(kMaxMismatches < 4, "a Span keeps its level in two bits");
 
 /**
  * A graph without the dummy-edge mask: an unchecked range kept for the check after discovery,
@@ -616,7 +722,10 @@ struct CheckRange {
     edge_index last;
     uint32_t offset;
     TAlphabet c;
+    // Item::level
+    uint8_t level = 0;
 };
+static_assert(sizeof(CheckRange) == 24, "a kept unchecked range stays 24 bytes");
 
 /**
  * What is known of one count: started or not, its offset discovered completely or not,
@@ -754,6 +863,24 @@ struct BaseSearch {
     std::vector<Estimate> contexts;
     std::vector<Estimate> palindromes;
 
+    // Request::max_mismatches m > 0 (the level passes): the levels counted (m + 1; 1 without
+    // mismatches), so that exact, unchecked, contexts and palindromes hold one entry per
+    // (offset, level) (slot()); the passes entered so far (the last one is the one a halt
+    // interrupted); and per core position the BOSS codes of the bases that substitute it
+    // (outside its set, in A, C, G, T order; none at N) and |left|, the core positions at or
+    // after it that can hold a substitution (left[core_length()] = 0)
+    uint8_t levels = 1;
+    uint8_t entered = 0;
+    std::vector<std::vector<TAlphabet>> substitutes;
+    std::vector<uint32_t> left;
+    // the pending ranges scanned by the passes so far (the later ones are the pass running's)
+    size_t scanned = 0;
+
+    // the offsets counted
+    size_t offsets() const { return exact.size() / levels; }
+    // the entry of offset |p| at level |t|, level-major: level 0's is the offset itself
+    size_t slot(uint32_t p, uint32_t t) const { return p + t * offsets(); }
+
     uint32_t max_offset(size_t k) const { return static_cast<uint32_t>(k - q.size()); }
     // the positions the DFS matches
     size_t core_length() const { return q.size() - lead; }
@@ -769,17 +896,23 @@ struct BaseSearch {
 
         const bool discovered = !halted;
         for (uint32_t p = 0; p < exact.size(); ++p) {
-            contexts[p] = { true, discovered, discovered && !unchecked[p], exact[p],
+            // with levels: the entries of a pass not entered stay unknown, those of the passes
+            // before the one a halt interrupted are complete
+            const uint32_t t = p / static_cast<uint32_t>(offsets());
+            if (t >= std::max<uint32_t>(entered, 1))
+                continue;
+            const bool found = discovered || t + 1u < entered;
+            contexts[p] = { true, found, found && !unchecked[p], exact[p],
                             exact[p] + unchecked[p] };
-            palindromes[p] = { true, discovered, discovered, 0, 0 };
+            palindromes[p] = { true, found, found, 0, 0 };
         }
         for (const Item &item : pending) {
-            Estimate &e = contexts[item.offset];
+            Estimate &e = contexts[slot(item.offset, item.level)];
             e.lower += item.lower();
             e.upper += item.upper();
             e.exact &= item.count_exact();
             if (item.count_palindromes) {
-                Estimate &pal = palindromes[item.offset];
+                Estimate &pal = palindromes[slot(item.offset, item.level)];
                 pal.lower += item.palindromes;
                 pal.upper += item.palindromes_upper();
                 pal.exact &= item.scan_done;
@@ -803,19 +936,22 @@ struct OrientationPlan {
     bool palindromes_mirrored = false;
 };
 
-// one context in the release, ordered by (node, offset, orientation): §5.5
+// one context in the release, ordered by (node, offset, orientation): §5.5; with mismatches
+// by (level, node, offset, orientation), the closest instances first (every level is 0
+// without them)
 struct Key {
     node_index node = 0;
     uint32_t offset = 0;
     Orientation orientation = Orientation::FORWARD;
+    uint8_t level = 0;
 
     bool operator<(const Key &other) const {
-        return std::tie(node, offset, orientation)
-                < std::tie(other.node, other.offset, other.orientation);
+        return std::tie(level, node, offset, orientation)
+                < std::tie(other.level, other.node, other.offset, other.orientation);
     }
     bool operator==(const Key &other) const {
-        return std::tie(node, offset, orientation)
-                == std::tie(other.node, other.offset, other.orientation);
+        return std::tie(level, node, offset, orientation)
+                == std::tie(other.level, other.node, other.offset, other.orientation);
     }
 };
 
@@ -894,7 +1030,13 @@ class PatternRun {
         // nothing to release: nothing to keep
         if (prune_ && !cap_)
             retain_ = false;
+        // bounded mismatches: the level passes' state of every base search
+        if (request.max_mismatches)
+            prepare_levels();
     }
+
+    // the levels counted: Request::max_mismatches + 1
+    uint8_t levels() const { return levels_; }
 
     const std::vector<Orientation>& searched() const { return searched_; }
     const std::vector<OrientationPlan>& plans() const { return plans_; }
@@ -946,6 +1088,8 @@ class PatternRun {
         if (budget_.stopped() || !budget_.check_time()) {
             // a request-wide stop before this pattern: nothing runs, every count UNKNOWN
             record_stop(StopPhase::DISCOVERY, *budget_.stopped());
+        } else if (levels_ > 1) {
+            run_levels();
         } else {
             std::vector<size_t> order(searches_.size());
             std::vector<double> cost(searches_.size());
@@ -972,25 +1116,33 @@ class PatternRun {
         for (BaseSearch &search : searches_) {
             search.tally();
         }
+        // the pass a stop of the search's work came in (a stop before the pattern: pass 0)
+        if (levels_ > 1 && stop_)
+            stop_->mismatch_level = pass_;
     }
 
-    // the contexts (or anchors) of one orientation at one offset of the served graph
-    Count count(const OrientationPlan &o, uint32_t p, Unit unit) const {
-        const Estimate &a = searches_[o.direct].contexts[p];
+    // the contexts (or anchors) of one orientation at one offset of the served graph; with
+    // mismatches those at |level| (0 without them)
+    Count count(const OrientationPlan &o, uint32_t p, Unit unit, uint8_t level = 0) const {
+        const BaseSearch &direct = searches_[o.direct];
+        const Estimate &a = direct.contexts[direct.slot(p, level)];
         if (!o.mapped)
             return to_count(a, unit);
 
         // wrapped PRIMARY: U = A + B - P, with B the reverse-complement search at the mirrored
         // offset and P the palindromic stored k-mers both find (§4.1: the probes are united
-        // by wrapper node id before anything counts them)
+        // by wrapper node id before anything counts them). With mismatches per level: a
+        // stored k-mer holds rc(Q) at the mirrored offset with as many substitutions as its
+        // reverse complement holds Q at p
         uint32_t mirror = max_offset() - p;
-        const Estimate &b = searches_[*o.mapped].contexts[mirror];
+        const BaseSearch &mapped = searches_[*o.mapped];
+        const Estimate &b = mapped.contexts[mapped.slot(mirror, level)];
         Estimate pal = Estimate::zero();
         if (o.palindromes) {
             uint32_t q = o.palindromes_mirrored ? mirror : p;
             const BaseSearch &source = searches_[*o.palindromes];
-            if (may_be_palindromic(source.q, q, k_))
-                pal = source.palindromes[q];
+            if (may_be_palindromic(source.q, q, k_, level))
+                pal = source.palindromes[source.slot(q, level)];
         }
 
         if (!a.started && !b.started)
@@ -1185,6 +1337,21 @@ class PatternRun {
     // PARTIAL: the next compaction when more ranges than this are retained
     uint64_t next_compaction_ = kMinCompaction;
     static constexpr uint64_t kMinCompaction = 4096;
+    // PARTIAL with mismatches: the level of the retention bound, prune_bound_ the node at it (a
+    // range of a lower level is kept, one of a higher level dropped); kNoLevel while no bound
+    // is known
+    static constexpr uint8_t kNoLevel = std::numeric_limits<uint8_t>::max();
+    uint8_t prune_level_ = kNoLevel;
+
+    // Request::max_mismatches m > 0: the levels (m + 1; 1 without mismatches) and the level of
+    // the pass running, which every range counted carries (0 without mismatches)
+    uint8_t levels_ = 1;
+    uint8_t pass_ = 0;
+    // a graph without the mask: the unchecked candidates of the passes already checked (the
+    // check after each pass tests that pass's)
+    uint64_t entries_tested_ = 0;
+    // the flank's symbols: every symbol of the graph's alphabet but $ (NonSentinelSymbols)
+    std::vector<TAlphabet> flank_symbols_;
 
     std::vector<TAlphabet> codes_;
     // the BOSS codes of every BaseSet's bases, in A, C, G, T order (a peptide window's
@@ -1417,27 +1584,35 @@ class PatternRun {
         search.halted = true;
     }
 
-    // whether the release may read a range of |search| at |offset| through a cursor whose
-    // contexts start at its own first node (the direct read, or the palindromes of a mapped
-    // one), rather than only shifted by the wrapper's offset
-    bool read_at_own_node(const BaseSearch &search, uint32_t offset) const {
-        return search.read_directly || may_be_palindromic(search.q, offset, k_);
+    // whether the release may read a range of |search| at |offset| (and |level|) through a
+    // cursor whose contexts start at its own first node (the direct read, or the palindromes
+    // of a mapped one), rather than only shifted by the wrapper's offset
+    bool read_at_own_node(const BaseSearch &search, uint32_t offset, uint32_t level = 0) const {
+        return search.read_directly || may_be_palindromic(search.q, offset, k_, level);
+    }
+
+    // PARTIAL: a range of |level| whose contexts start at node |lowest| lies beyond the
+    // retention bound (prune_level_, prune_bound_): it holds none of the first cap_ contexts
+    // in answer order. Without mismatches the bound's level is 0 once it is known
+    bool beyond_bound(uint32_t level, node_index lowest) const {
+        return level > prune_level_ || (level == prune_level_ && lowest > prune_bound_);
     }
 
     void add_item(BaseSearch &search, const Item &item) {
         if (retain_) {
             const uint64_t lower = item.lower();
-            const node_index lowest = read_at_own_node(search, item.offset)
+            const node_index lowest = read_at_own_node(search, item.offset, item.level)
                 ? item.first
                 : item.first + wrapper_offset_;
             // PARTIAL: a range wholly above the bound holds none of the first cap_ contexts
-            if (!prune_ || lowest <= prune_bound_) {
-                assert(item.offset <= std::numeric_limits<uint16_t>::max());
+            if (!prune_ || !beyond_bound(item.level, lowest)) {
+                // Span keeps the offset in 14 bits
+                assert(item.offset < (1u << 14));
                 search.release.push_back(Span {
                     item.first, item.last,
                     static_cast<uint32_t>(std::min<uint64_t>(
                             lower, std::numeric_limits<uint32_t>::max())),
-                    static_cast<uint16_t>(item.offset), item.c, item.unchecked
+                    static_cast<uint16_t>(item.offset), item.level, item.c, item.unchecked
                 });
                 retained_peak_ = std::max(retained_peak_, ++retained_);
                 if (prune_ && retained_ > next_compaction_)
@@ -1447,10 +1622,10 @@ class PatternRun {
         if (item.pending()) {
             search.pending.push_back(item);
         } else if (item.unchecked) {
-            search.unchecked[item.offset] += item.candidates;
+            search.unchecked[search.slot(item.offset, item.level)] += item.candidates;
             keep_for_check(search, item);
         } else {
-            search.exact[item.offset] += item.candidates;
+            search.exact[search.slot(item.offset, item.level)] += item.candidates;
         }
         search.running_lower += item.lower();
         // a range whose scan is pending (the palindromes of an even-k wrapped PRIMARY graph)
@@ -1474,7 +1649,8 @@ class PatternRun {
             return;
         unchecked_entries_ += item.candidates;
         if (unchecked_entries_ <= check_limit_) {
-            search.checks.push_back(CheckRange { item.first, item.last, item.offset, item.c });
+            search.checks.push_back(CheckRange { item.first, item.last, item.offset, item.c,
+                                                 item.level });
             return;
         }
         checkable_ = false;
@@ -1493,22 +1669,30 @@ class PatternRun {
      * arrive, so the bound holds for every later range too (add_item drops those at once).
      */
     void compact_release() {
+        // with mismatches the answer order is (level, node, ...): the bound is a (level, node)
+        // bound, the cursors taken in that order (every level is 0 without mismatches)
         struct Bound {
             node_index high;
             uint64_t sure;
+            uint32_t level;
         };
         std::vector<Bound> bounds;
         bounds.reserve(retained_ + retained_ / 2);
         for_each_use([&](const OrientationPlan &, const Span &span, Use use) {
-            bounds.push_back(Bound { use_high(span, use), use_sure(span, use) });
+            bounds.push_back(Bound { use_high(span, use), use_sure(span, use), span.level });
         });
-        std::sort(bounds.begin(), bounds.end(),
-                  [](const Bound &a, const Bound &b) { return a.high < b.high; });
+        std::sort(bounds.begin(), bounds.end(), [](const Bound &a, const Bound &b) {
+            return std::tie(a.level, a.high) < std::tie(b.level, b.high);
+        });
         uint64_t sure = 0;
         for (const Bound &bound : bounds) {
             sure += bound.sure;
             if (sure >= cap_) {
-                prune_bound_ = std::min(prune_bound_, bound.high);
+                if (std::tie(bound.level, bound.high)
+                        < std::make_tuple(uint32_t(prune_level_), prune_bound_)) {
+                    prune_level_ = static_cast<uint8_t>(bound.level);
+                    prune_bound_ = bound.high;
+                }
                 break;
             }
         }
@@ -1518,10 +1702,10 @@ class PatternRun {
             BaseSearch &search = searches_[s];
             auto end = std::remove_if(search.release.begin(), search.release.end(),
                                       [&](const Span &span) {
-                const node_index lowest = read_at_own_node(search, span.offset)
+                const node_index lowest = read_at_own_node(search, span.offset, span.level)
                     ? span.first
                     : span.first + wrapper_offset_;
-                return lowest > prune_bound_;
+                return beyond_bound(span.level, lowest);
             });
             search.release.erase(end, search.release.end());
             if (search.release.capacity() > 2 * search.release.size() + kMinCompaction)
@@ -1575,7 +1759,7 @@ class PatternRun {
                 continue;
             const BaseSearch &mapped = searches_[*o.mapped];
             for (const Span &span : mapped.release) {
-                if (may_be_palindromic(mapped.q, span.offset, k_)) {
+                if (may_be_palindromic(mapped.q, span.offset, k_, span.level)) {
                     f(o, span, Use::MAPPED_SKIPPING);
                     f(o, span, Use::PALINDROMES);
                 } else {
@@ -1593,6 +1777,8 @@ class PatternRun {
         item.first = first;
         item.last = last;
         item.offset = static_cast<uint32_t>(k_ - 1 - depth - search.lead);
+        // with mismatches: a flank range is created in the pass of its level only
+        item.level = pass_;
         if (masked_) {
             item.candidates = dbg_succ_.count_valid_edges_in_range(first, last);
         } else {
@@ -1603,7 +1789,8 @@ class PatternRun {
         }
         if (!item.candidates)
             return;
-        if (search.count_palindromes && may_be_palindromic(search.q, item.offset, k_)) {
+        if (search.count_palindromes
+                && may_be_palindromic(search.q, item.offset, k_, item.level)) {
             item.scan = Item::Scan::CANDIDATES;
             item.count_palindromes = true;
         }
@@ -1622,11 +1809,14 @@ class PatternRun {
             item.last = last;
             item.offset = search.max_offset(k_);
             item.c = c;
+            // with mismatches: the pass tries only the symbols that make its level
+            item.level = pass_;
             item.candidates = dbg_succ_.count_edges_with_symbol(first, last, c);
             if (!item.candidates)
                 return;
             item.unchecked = depth < boss_.get_k();
-            if (search.count_palindromes && may_be_palindromic(search.q, item.offset, k_)) {
+            if (search.count_palindromes
+                    && may_be_palindromic(search.q, item.offset, k_, item.level)) {
                 item.scan = Item::Scan::CANDIDATES;
                 item.count_palindromes = true;
             }
@@ -1642,10 +1832,12 @@ class PatternRun {
         item.last = last;
         item.offset = search.max_offset(k_);
         item.c = c;
+        item.level = pass_;
         item.candidates = edges.candidates;
         item.invalid_ns = edges.invalid_non_sentinel;
         item.invalid = edges.invalid;
-        if (search.count_palindromes && may_be_palindromic(search.q, item.offset, k_)) {
+        if (search.count_palindromes
+                && may_be_palindromic(search.q, item.offset, k_, item.level)) {
             item.scan = Item::Scan::CANDIDATES;
             item.count_palindromes = true;
         } else if (item.invalid_ns) {
@@ -1824,6 +2016,272 @@ class PatternRun {
         // the empty suffix: every edge, the ranges of whole node groups from the first
         Range all { 1, boss_.num_edges(), 0 };
         expand(search, all, nullptr);
+    }
+
+    // ---------------------------------------------------------------- level passes
+
+    /**
+     * One range of a level pass: as Range (the nodes ending with a spelled prefix of the
+     * window's core, and its length), with the substitutions that prefix holds. A stack of its
+     * own, since suffix_to_prefix's ranges have no room for the level (the aligner's file is
+     * not edited, §11).
+     */
+    struct LevelRange {
+        edge_index first;
+        edge_index last;
+        uint32_t depth;
+        uint8_t used;
+    };
+
+    // the bases a range may append at one position: |same| keep its level, |next| add a
+    // substitution; null: not tried
+    struct LevelSteps {
+        const std::vector<TAlphabet> *same = nullptr;
+        const std::vector<TAlphabet> *next = nullptr;
+    };
+
+    // the levels' state of every base search (BaseSearch::levels): counts per (offset, level),
+    // the substituting bases and the substitutable positions left per core position
+    void prepare_levels() {
+        assert(request_.max_mismatches <= kMaxMismatches);
+        assert(pattern_.kind() != PatternKind::PROTEIN && !long_);
+        levels_ = static_cast<uint8_t>(request_.max_mismatches + 1);
+        align::NonSentinelSymbols()(boss_, Range(),
+                                    [&](TAlphabet s) { flank_symbols_.push_back(s); });
+        for (BaseSearch &search : searches_) {
+            search.levels = levels_;
+            const size_t offsets = search.max_offset(k_) + 1;
+            search.exact.assign(offsets * levels_, 0);
+            search.unchecked.assign(offsets * levels_, 0);
+            const size_t core = search.core_length();
+            search.substitutes.assign(core, {});
+            search.left.assign(core + 1, 0);
+            for (size_t x = core; x-- > 0; ) {
+                const BaseSet set = search.q[search.lead + x];
+                search.substitutes[x] = codes_of_set_[kAllBases & ~set];
+                search.left[x] = search.left[x + 1] + (set != kAllBases);
+            }
+        }
+    }
+
+    /**
+     * The level passes of Request::max_mismatches (PatternSearch, "Bounded mismatches"):
+     * pass t runs the discovery of level t of every base search, cheapest first by that
+     * pass's estimate (pass 0 by the estimate and in the order of the search without
+     * mismatches), then that level's deferred scans and its check of few unchecked candidates,
+     * so that a stop in pass t leaves every level below t complete. The clock is read at the
+     * start of every pass after the first (the first is the pattern's own reading).
+     */
+    void run_levels() {
+        work_.steps_by_mismatches.assign(levels_, 0);
+        for (uint8_t t = 0; t < levels_; ++t) {
+            pass_ = t;
+            if (t && !budget_.check_time()) {
+                record_stop(StopPhase::DISCOVERY, *budget_.stopped());
+                return;
+            }
+            const uint64_t before = budget_.steps_used();
+            std::vector<size_t> order(searches_.size());
+            std::vector<double> cost(searches_.size());
+            for (size_t i = 0; i < searches_.size(); ++i) {
+                order[i] = i;
+                cost[i] = t ? estimated_cost(searches_[i], t) : estimated_cost(searches_[i]);
+            }
+            std::stable_sort(order.begin(), order.end(),
+                             [&](size_t a, size_t b) { return cost[a] < cost[b]; });
+            for (size_t i : order) {
+                discover_level(searches_[i], t);
+                if (stop_)
+                    break;
+            }
+            if (!stop_)
+                scan_level(order);
+            if (!stop_)
+                check_unchecked(order);
+            work_.steps_by_mismatches[t] = budget_.steps_used() - before;
+            if (stop_)
+                return;
+        }
+    }
+
+    /**
+     * The ranges pass |t| of a base search can create over its core: per depth the strings of
+     * the core's prefix within t substitutions (the ball's product DP), of which at most the
+     * graph's share (edges / 4^d) can be non-empty. A planning estimate that orders the
+     * searches of a pass (as estimated_cost, which it equals at t = 0).
+     */
+    double estimated_cost(const BaseSearch &search, uint8_t t) const {
+        const double edges = static_cast<double>(boss_.num_edges());
+        std::vector<double> f(t + 1, 0);
+        f[0] = 1;
+        double strings = 1;
+        double cost = 0;
+        for (size_t x = 0; x < search.codes.size(); ++x) {
+            const double same = static_cast<double>(search.codes[x].size());
+            const double other = static_cast<double>(search.substitutes[x].size());
+            for (size_t u = f.size(); u-- > 0; ) {
+                f[u] = f[u] * same + (u ? f[u - 1] * other : 0);
+            }
+            strings *= 4;
+            double ball = 0;
+            for (double level : f) {
+                ball += level;
+            }
+            cost += ball * std::min(1.0, edges / strings);
+        }
+        return cost;
+    }
+
+    // pass |t| of |search|: every instance of its window with exactly t substitutions, counted
+    // at level t. Nothing is tried when the core cannot hold t substitutions
+    void discover_level(BaseSearch &search, uint8_t t) {
+        if (!t)
+            search.started = true;
+        search.entered = t + 1;
+        if (t > search.left[0])
+            return;
+        // the empty suffix: every edge, the ranges of whole node groups from the first
+        expand_level(search, LevelRange { 1, boss_.num_edges(), 0, 0 }, t, nullptr);
+    }
+
+    /**
+     * The bases a range of core depth x tries at core position x in pass |t|: a child must
+     * still be able to reach exactly t substitutions over the positions after x
+     * (left[x + 1]). range.used <= t always, so neither difference wraps.
+     */
+    static LevelSteps steps_at(const BaseSearch &search, const LevelRange &range, uint8_t t) {
+        const size_t x = range.depth;
+        const uint32_t after = search.left[x + 1];
+        LevelSteps steps;
+        if (uint32_t(t - range.used) <= after)
+            steps.same = &search.codes[x];
+        if (range.used < t && uint32_t(t - range.used - 1) <= after)
+            steps.next = &search.substitutes[x];
+        return steps;
+    }
+
+    /**
+     * expand() with the level (the same structure, so that pass 0 charges the steps of the
+     * search without mismatches in the same order): a flank range (d >= L) is counted, every
+     * one at level t (its core is spelled, its level made); a leaf tries the W rule with the
+     * bases of its last position that make its level exactly t, then (any_offset) continues
+     * the flank with those bases; a range before the leaf creates its children by steps_at();
+     * a flank range below max_depth its children by every non-sentinel symbol (a flank symbol
+     * is not a pattern position: the level stays). After a halt the ranges still created are
+     * counted (they were charged) but not expanded.
+     */
+    void expand_level(BaseSearch &search, const LevelRange &range, uint8_t t,
+                      std::vector<LevelRange> *stack) {
+        const size_t d = range.depth;
+        const size_t L = search.core_length();
+        const size_t max_depth = search.max_depth(k_);
+        const Range as_range { range.first, range.last, d };
+
+        if (d >= L) {
+            count_flank(search, as_range);
+            if (threshold_crossed())
+                halt(search);
+        }
+        if (search.halted)
+            return;
+
+        if (d + 1 == L) {
+            // left[L] = 0: at most one of the two is tried
+            const LevelSteps steps = steps_at(search, range, t);
+            const std::vector<TAlphabet> *last = steps.same ? steps.same : steps.next;
+            if (!last)
+                return;
+            for (TAlphabet c : *last) {
+                if (!charge_range()) {
+                    halt(search);
+                    return;
+                }
+                count_w_rule(search, as_range, c);
+                if (threshold_crossed()) {
+                    halt(search);
+                    return;
+                }
+            }
+            if (search.any_offset && d < max_depth)
+                children_level(search, range, steps, stack);
+
+        } else if (d + 1 < L) {
+            children_level(search, range, steps_at(search, range, t), stack);
+
+        } else if (d < max_depth) {
+            children_level(search, range, LevelSteps { &flank_symbols_, nullptr }, stack);
+        }
+    }
+
+    /**
+     * children() with the level: one step per base tried, charged before its tighten_range. A
+     * child at depth 1 starts a DFS of its own (dfs_level), a child at depth k - 1 is expanded
+     * at once, the others are pushed onto the DFS of |range| (|stack|). The matching child is
+     * explored first: pushed after the substituting ones (so popped first), or tried before
+     * them, so that the DFS follows the exact prefix and places the substitutions from the
+     * deepest position back.
+     */
+    void children_level(BaseSearch &search, const LevelRange &range, const LevelSteps &steps,
+                        std::vector<LevelRange> *stack) {
+        const size_t d = range.depth;
+        const size_t K1 = boss_.get_k();
+        const bool push = d && d + 1 < K1;
+        const std::pair<const std::vector<TAlphabet>*, uint8_t> groups[2] = {
+            push ? std::make_pair(steps.next, uint8_t(range.used + 1))
+                 : std::make_pair(steps.same, range.used),
+            push ? std::make_pair(steps.same, range.used)
+                 : std::make_pair(steps.next, uint8_t(range.used + 1)),
+        };
+        for (const auto &[symbols, level] : groups) {
+            if (!symbols)
+                continue;
+            for (TAlphabet s : *symbols) {
+                if (!charge_range()) {
+                    halt(search);
+                    return;
+                }
+                LevelRange child { range.first, range.last, range.depth + 1, level };
+                if (boss_.tighten_range(&child.first, &child.last, s)) {
+                    if (push) {
+                        assert(stack);
+                        stack->push_back(child);
+                        continue;
+                    }
+                    if (child.depth == K1) {
+                        expand_level(search, child, pass_, nullptr);
+                    } else {
+                        dfs_level(search, child);
+                    }
+                }
+                if (search.halted)
+                    return;
+            }
+        }
+    }
+
+    // suffix_to_prefix's loop over a stack of LevelRange, from a range at depth 1 <= d < k - 1:
+    // the last range pushed is expanded first; after a halt the ranges left are still popped
+    // (expand_level counts the flank ones, which were charged)
+    void dfs_level(BaseSearch &search, const LevelRange &start) {
+        assert(start.depth >= 1 && start.depth < boss_.get_k());
+        std::vector<LevelRange> stack { start };
+        while (stack.size()) {
+            const LevelRange range = stack.back();
+            stack.pop_back();
+            expand_level(search, range, pass_, &stack);
+        }
+    }
+
+    // the deferred scans of the pass running: the ranges discovered in it (those of the earlier
+    // passes are scanned), in the order of the base searches
+    void scan_level(const std::vector<size_t> &order) {
+        for (size_t i : order) {
+            BaseSearch &search = searches_[i];
+            for (; search.scanned < search.pending.size(); ++search.scanned) {
+                if (!scan(search.pending[search.scanned]))
+                    return;
+            }
+        }
     }
 
     // ---------------------------------------------------------------- extension
@@ -2228,7 +2686,10 @@ class PatternRun {
      * discovery left it, BOUNDS.
      */
     void check_unchecked(const std::vector<size_t> &order) {
-        if (!checkable_ || !unchecked_entries_)
+        // with mismatches it runs after every pass on the ranges that pass kept (the earlier
+        // passes' were checked and applied), while the pattern's unchecked candidates over all
+        // passes are within the limit
+        if (!checkable_ || unchecked_entries_ == entries_tested_)
             return;
 
         std::vector<std::vector<uint64_t>> real(searches_.size());
@@ -2247,17 +2708,20 @@ class PatternRun {
                     if (!charge_check())
                         return;
                     ++tested;
-                    real[i][range.offset] += !boss_.node_has_sentinel(e);
+                    real[i][search.slot(range.offset, range.level)]
+                            += !boss_.node_has_sentinel(e);
                 }
             }
         }
         // every unchecked candidate counted is among those tested (a broken invariant is never
         // published as an exact count)
-        if (tested != unchecked_entries_) {
+        if (tested != unchecked_entries_ - entries_tested_) {
             throw std::logic_error("pattern: " + std::to_string(tested)
                                    + " candidates checked of "
-                                   + std::to_string(unchecked_entries_) + " unchecked");
+                                   + std::to_string(unchecked_entries_ - entries_tested_)
+                                   + " unchecked");
         }
+        entries_tested_ = unchecked_entries_;
         for (size_t i = 0; i < searches_.size(); ++i) {
             BaseSearch &search = searches_[i];
             for (size_t p = 0; p < search.unchecked.size(); ++p) {
@@ -2309,9 +2773,11 @@ class PatternRun {
             // no mask: a source dummy is never released
             if (item.unchecked && boss_.node_has_sentinel(e))
                 continue;
+            // (a mapped context has the level its stored k-mer has for the reverse complement)
+            const uint8_t level = static_cast<uint8_t>(item.level);
             switch (cursor.use) {
                 case Use::DIRECT:
-                    cursor.key = Key { e, item.offset, cursor.orientation };
+                    cursor.key = Key { e, item.offset, cursor.orientation, level };
                     return true;
                 case Use::MAPPED_SKIPPING:
                     // a palindromic stored k-mer is its own reverse complement in the wrapper
@@ -2322,12 +2788,13 @@ class PatternRun {
                     [[fallthrough]];
                 case Use::MAPPED:
                     cursor.key = Key { e + wrapper_offset_, max_offset() - item.offset,
-                                       cursor.orientation };
+                                       cursor.orientation, level };
                     return true;
                 case Use::PALINDROMES:
                     if (!is_palindrome(e))
                         continue;
-                    cursor.key = Key { e, max_offset() - item.offset, cursor.orientation };
+                    cursor.key = Key { e, max_offset() - item.offset, cursor.orientation,
+                                       level };
                     return true;
             }
         }
@@ -2363,8 +2830,12 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
     }
 
     // a cursor's contexts are at nodes >= this bound: cursors join the merge only when the
-    // merge reaches their bound, so that a small limit examines few ranges
-    auto bound = [&](const Cursor &c) { return use_low(*c.item, c.use); };
+    // merge reaches their bound, so that a small limit examines few ranges. With mismatches
+    // the bound is (level, node), the merge's order (every level is 0 without them)
+    typedef std::pair<uint32_t, node_index> Bound;
+    auto bound = [&](const Cursor &c) {
+        return Bound(c.item->level, use_low(*c.item, c.use));
+    };
     std::stable_sort(cursors.begin(), cursors.end(), [&](const Cursor &a, const Cursor &b) {
         return bound(a) < bound(b);
     });
@@ -2386,8 +2857,9 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
         if (heap.empty() && joined == cursors.size())
             break;
 
-        node_index next_bound = heap.empty() ? bound(cursors[joined])
-                                             : cursors[heap.top()].key.node;
+        Bound next_bound = heap.empty() ? bound(cursors[joined])
+                                        : Bound(cursors[heap.top()].key.level,
+                                                cursors[heap.top()].key.node);
         bool any_joined = false;
         while (joined < cursors.size() && bound(cursors[joined]) <= next_bound) {
             if (advance(cursors[joined], &stopped))
@@ -2410,7 +2882,8 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
                 record_stop(phase, StopReason::TIME);
                 return false;
             }
-            emit(Context { key.orientation, key.offset, key.node, base_of(key.node), {}, {} });
+            emit(Context { key.orientation, key.offset, key.node, base_of(key.node), {}, {},
+                           key.level });
             ++released;
             last = key;
         }
@@ -2785,6 +3258,24 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         result.min_anchor_information_bits = floor_bits;
     }
 
+    // bounded mismatches (SPEC §21): served for DNA and IUPAC patterns of L <= k; the floor
+    // gates the bits left after max_mismatches substitutions, with no exemption
+    const uint8_t max_mismatches = request.max_mismatches;
+    if (max_mismatches) {
+        if (max_mismatches > kMaxMismatches) {
+            throw std::invalid_argument("pattern: max_mismatches "
+                                        + std::to_string(max_mismatches) + " above "
+                                        + std::to_string(kMaxMismatches));
+        }
+        if (pattern.kind() == PatternKind::PROTEIN)
+            throw std::invalid_argument("pattern: mismatches in a peptide are not served yet");
+        if (is_long) {
+            throw std::invalid_argument("pattern: mismatches in a pattern longer than k are "
+                                        "not served yet");
+        }
+        result.mismatch_information_bits = pattern.mismatch_information_bits(max_mismatches);
+    }
+
     auto finish = [&]() {
         result.elapsed_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - start).count();
@@ -2807,6 +3298,30 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     // reach the '*', and its paths (none) are the extension's
     if (!pattern.has_instances() && !is_long) {
         answer_no_instance(pattern, request, callback != nullptr, &result);
+        return finish();
+    }
+    // with mismatches the floor gates the ball's bits: a ball is not one range, so no scope is
+    // exempt (SPEC §21.5); a pattern refused states the largest smaller max_mismatches the
+    // floor admits (0 under the rule below)
+    if (max_mismatches && *result.mismatch_information_bits < request.min_information_bits) {
+        for (uint8_t m = max_mismatches; m-- > 0; ) {
+            const bool admitted = m
+                ? pattern.mismatch_information_bits(m) >= request.min_information_bits
+                : (result.scope == Scope::SUFFIX && pattern.is_exact())
+                        || result.information_bits >= request.min_information_bits;
+            if (admitted) {
+                result.max_mismatches_within_floor = m;
+                break;
+            }
+        }
+        result.refusal = Refusal {
+            "information_below_floor",
+            "pattern: " + format_bits(*result.mismatch_information_bits)
+                + " information bits within " + std::to_string(max_mismatches)
+                + (max_mismatches == 1 ? " substitution" : " substitutions")
+                + ", below the floor of " + format_bits(request.min_information_bits)
+                + " for scope " + to_string(result.scope)
+        };
         return finish();
     }
     // the information floor gates discovery, except for an exact pattern in suffix scope:
@@ -2844,27 +3359,32 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.searched = engine.searched();
 
     // the count of every (orientation, offset) of the served graph, in plan order: what the
-    // totals sum (§3)
+    // totals sum (§3); with mismatches one per (orientation, offset, level)
     const Unit unit = is_long ? Unit::ANCHORS : Unit::GRAPH_CONTEXTS;
     struct Cell {
         Orientation orientation;
         uint32_t offset;
         Count count;
+        uint8_t level = 0;
     };
     std::vector<Cell> cells;
     for (const OrientationPlan &o : engine.plans()) {
         for (uint32_t p : engine.offsets()) {
-            cells.push_back(Cell { o.orientation, p, engine.count(o, p, unit) });
+            for (uint8_t t = 0; t < engine.levels(); ++t) {
+                cells.push_back(Cell { o.orientation, p, engine.count(o, p, unit, t), t });
+            }
         }
     }
 
-    // counts by orientation and offset, summed with the weakest relation (§3)
+    // counts by orientation and offset (and by level), summed with the weakest relation (§3)
     std::map<uint32_t, Count> by_offset;
     std::map<Orientation, Count> by_orientation;
+    std::map<uint8_t, Count> by_level;
     std::optional<Count> total;
     auto aggregate = [&]() {
         by_offset.clear();
         by_orientation.clear();
+        by_level.clear();
         total.reset();
         // one plan's cells are consecutive, one plan per orientation
         for (size_t i = 0; i < cells.size(); ) {
@@ -2872,6 +3392,9 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             std::optional<Count> orientation_total;
             for (; i < cells.size() && cells[i].orientation == o; ++i) {
                 const Count &c = cells[i].count;
+                auto [level, fresh] = by_level.emplace(cells[i].level, c);
+                if (!fresh)
+                    level->second += c;
                 auto [it, inserted] = by_offset.emplace(cells[i].offset, c);
                 if (!inserted)
                     it->second += c;
@@ -2899,9 +3422,9 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
      * count's lower bound to it (raise_lower). Real contexts only (the release drops the source
      * dummies), so a number outside a count's bounds is a broken invariant, never published.
      */
-    typedef std::map<std::pair<Orientation, uint32_t>, uint64_t> Released;
+    typedef std::map<std::tuple<Orientation, uint32_t, uint8_t>, uint64_t> Released;
     auto released_at = [](const Released &released, const Cell &cell) -> uint64_t {
-        auto it = released.find({ cell.orientation, cell.offset });
+        auto it = released.find({ cell.orientation, cell.offset, cell.level });
         return it == released.end() ? 0 : it->second;
     };
     auto broken = [](const Cell &cell, uint64_t n) {
@@ -2993,7 +3516,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                     } else {
                         Released counted;
                         for (const Context &c : listed) {
-                            ++counted[{ c.orientation, c.offset }];
+                            ++counted[{ c.orientation, c.offset, c.mismatches }];
                         }
                         exactify(counted);
                         if (listed.empty()) {
@@ -3143,7 +3666,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                         // counts are what was released
                         Released released;
                         for (const Context &c : buffer) {
-                            ++released[{ c.orientation, c.offset }];
+                            ++released[{ c.orientation, c.offset, c.mismatches }];
                         }
                         exactify(released);
                     }
@@ -3181,7 +3704,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                     (*callback)(c);
                     ++extraction.returned;
                     if (!masked)
-                        ++released[{ c.orientation, c.offset }];
+                        ++released[{ c.orientation, c.offset, c.mismatches }];
                 }, true, StopPhase::EXTRACTION, &exhausted);
                 bool now_exact = exact;
                 if (!masked && !exact) {
@@ -3235,6 +3758,14 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         contexts.suffix = by_offset.at(static_cast<uint32_t>(k - L));
         contexts.by_offset = std::move(by_offset);
         contexts.by_orientation = std::move(by_orientation);
+        // (the counts as the release left them, as the others)
+        if (max_mismatches) {
+            for (const auto &[level, count] : by_level) {
+                assert(level == contexts.by_mismatches.size());
+                contexts.by_mismatches.push_back(count);
+            }
+            assert(contexts.by_mismatches.size() == max_mismatches + 1u);
+        }
         result.contexts = std::move(contexts);
     }
 

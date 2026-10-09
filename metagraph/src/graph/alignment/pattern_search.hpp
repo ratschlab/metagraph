@@ -50,6 +50,11 @@
  *    (Count), the route adding the estimate U x f with f from sample_real_fraction(); the lists
  *    stay exact. A pattern with few unchecked candidates is checked entry by entry and counted
  *    exactly (Request::max_checked_entries; the route passes --pattern-max-checked-entries).
+ *  - bounded mismatches (not served yet: no route sets Request::max_mismatches; SPEC §21 is
+ *    the contract to come): the engine answers DNA and IUPAC patterns of L <= k with
+ *    ContextCounts::by_mismatches, Work::steps_by_mismatches, Stop::mismatch_level,
+ *    Context::mismatches (substitutions() gives the positions), Result::
+ *    mismatch_information_bits and, on a floor refusal, Result::max_mismatches_within_floor.
  *
  * For every type here nothing is weakened silently: every count carries its unit and its
  * relation, and a count is never promoted by assumption.
@@ -406,6 +411,22 @@ class Pattern final : public Model {
     double information_bits() const { return information_bits(0, length()); }
 
     /**
+     * The information left when up to |max_mismatches| substitutions are allowed (SPEC §21.5,
+     * mismatch_information_bits): 2 (end - begin) - log2 |B|, B the strings over the positions
+     * [begin, end) within |max_mismatches| substitutions, a position of set size s admitting s
+     * matching and 4 - s substituting bases (an N none). |B| = sum over u <= max_mismatches of
+     * f[u], f the product DP f'[u] = f[u] s + f[u - 1] (4 - s) over the positions, kept in log
+     * space (the ball of a long pattern overflows every integer type): O((end - begin) m), no
+     * clock, as information_bits. With 0 it is information_bits(begin, end) itself. DNA and
+     * IUPAC only: a peptide's ball (residue substitutions) is not defined yet, and asking for
+     * it with max_mismatches > 0 throws std::invalid_argument.
+     */
+    double mismatch_information_bits(size_t begin, size_t end, uint8_t max_mismatches) const;
+    double mismatch_information_bits(uint8_t max_mismatches) const {
+        return mismatch_information_bits(0, length(), max_mismatches);
+    }
+
+    /**
      * False iff the pattern has no instance at all: a peptide holding a '*' read in a genetic
      * code without an unconditional stop codon (tables 27, 28, 31). Every DNA and IUPAC pattern
      * has instances.
@@ -498,6 +519,12 @@ enum class Strands { BOTH, FORWARD, REVERSE };
 // the extension's support tracker and path sink, declared with the results below
 class SupportTracker;
 class PathSink;
+
+/**
+ * The most substitutions a request may allow (the owner's cap, SPEC §21.1). The levels
+ * 0 .. kMaxMismatches fit the two bits a retained range keeps for its level.
+ */
+constexpr uint8_t kMaxMismatches = 3;
 
 /**
  * The per-pattern semantics of a request. The route fills it from the request JSON with the
@@ -631,6 +658,21 @@ struct Request {
      */
     SupportTracker *support = nullptr;
     PathSink *sink = nullptr;
+    /**
+     * The most substitutions an instance may hold, 0 .. kMaxMismatches (SPEC §21). 0 (the
+     * default) is the search without substitutions: none of the code of the level passes
+     * runs, and every answer is the one of a request without this field. A substitution is a
+     * pattern position whose base in the instance lies outside the position's set (DNA,
+     * IUPAC; an N position never holds one). The search runs level by level: pass t finds
+     * the instances with exactly t substitutions (every base search, then that level's scans
+     * and check), so that a stop in pass t leaves every level below t complete
+     * (ContextCounts::by_mismatches, Stop::mismatch_level). The information floor gates
+     * Pattern::mismatch_information_bits, with no exemption (min_information_bits). Not a
+     * JSON field yet (the route does not set it). Served for DNA and IUPAC patterns of
+     * L <= k; above kMaxMismatches, for a peptide or for L > k count() and enumerate() throw
+     * std::invalid_argument.
+     */
+    uint8_t max_mismatches = 0;
 };
 
 // the server's default of Request::max_checked_entries (--pattern-max-checked-entries: a block
@@ -706,6 +748,11 @@ enum class StopPhase { DISCOVERY, MASK_SCAN, EXTRACTION, EXTENSION };
 struct Stop {
     StopPhase phase;
     StopReason reason;
+    // Request::max_mismatches > 0 and a stop of the search's own work (DISCOVERY or MASK_SCAN,
+    // a request-wide stop before the pattern included): the level of the pass it came in, whose
+    // work it interrupted or, at the clock reading that starts the pass, prevented. The levels
+    // below it are complete, the levels above it UNKNOWN. Unset otherwise (an EXTRACTION stop)
+    std::optional<uint8_t> mismatch_level = std::nullopt;
 };
 
 /**
@@ -915,6 +962,17 @@ struct ContextCounts {
     std::map<uint32_t, Count> by_offset;
     // one entry per orientation searched
     std::map<Orientation, Count> by_orientation;
+    /**
+     * Request::max_mismatches m > 0: per level t = 0 .. m, the contexts whose instance holds
+     * exactly t substitutions against the oriented pattern of their orientation, zero counts
+     * included; |total| is their sum under Count's algebra (as is every by_offset and
+     * by_orientation count over its levels). A level whose pass completed is EXACT (on a graph
+     * without the mask EXACT or BOUNDS); a stop in pass t leaves the levels below t as they
+     * completed, level t AT_LEAST (discovery) or BOUNDS (its scans or its check) or UNKNOWN
+     * (the stop came at the clock reading that starts it), the levels above UNKNOWN. Empty
+     * without mismatches.
+     */
+    std::vector<Count> by_mismatches;
 };
 
 /**
@@ -1033,6 +1091,9 @@ struct Work {
     // diagnostic, not a JSON field of contract version 1: the most range descriptors held at
     // once for the release (24 bytes each; see PatternSearch::enumerate, "Memory")
     uint64_t spans_retained_peak = 0;
+    // Request::max_mismatches m > 0: per level t = 0 .. m the steps its pass charged (its
+    // discovery, scans and check; 0 for a pass not run), summing to |steps|; empty otherwise
+    std::vector<uint64_t> steps_by_mismatches;
 };
 
 // A per-pattern refusal decided by the engine (JSON: the slot's error {code, message});
@@ -1134,7 +1195,39 @@ struct Context {
     std::vector<DeBruijnGraph::node_index> path = {};
     // a path only: the L bases it spells (its first k are the anchor's k-mer)
     std::string sequence = {};
+    // Request::max_mismatches > 0: the substitutions its instance holds against the oriented
+    // pattern of its orientation (its level); 0 without mismatches. The positions are
+    // substitutions(), computed from the instance
+    uint8_t mismatches = 0;
 };
+
+/**
+ * One substitution of an instance (SPEC §21.8, schema substitution), in the coordinates of
+ * the submitted pattern P.
+ */
+struct Substitution {
+    // 0-based position in P
+    uint32_t position;
+    // P's code there (a base or an IUPAC code, upper case)
+    char expected;
+    // the instance's base at that position read in P's orientation: for a REVERSE context the
+    // complement of the instance's base at L - 1 - position
+    char found;
+};
+
+/**
+ * The substitutions of |instance|, the L bases a context of |orientation| spells at its offset
+ * (kmer.substr(offset, L)), against the submitted DNA or IUPAC pattern |pattern| (P, as parsed,
+ * never its reverse complement), ascending by position. FORWARD and PALINDROMIC: the instance
+ * instantiates P, position i is instance[i]; REVERSE: it instantiates rc(P), position i of P is
+ * the complement of instance[L - 1 - i]. A position holds a substitution when that base is
+ * outside P's set there (an N position never does). Their number is the context's level
+ * (Context::mismatches). O(L). Throws std::invalid_argument for a peptide, for an instance of
+ * another length, and for a base other than A, C, G, T (no context spells one at a pattern
+ * position).
+ */
+std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
+                                        std::string_view instance);
 
 
 // ---------------------------------------------------------------- the search state
@@ -1322,6 +1415,14 @@ struct Result {
     // L > k: the bits of each searched orientation's anchor window (an addition to the JSON
     // of contract version 1 when the route publishes it)
     std::map<Orientation, double> anchor_window_bits;
+    // Request::max_mismatches > 0 (an answered or an engine-refused pattern): the bits the
+    // information floor gated, Pattern::mismatch_information_bits(max_mismatches) (SPEC
+    // §21.5); unset without mismatches
+    std::optional<double> mismatch_information_bits;
+    // an information_below_floor refusal with Request::max_mismatches > 0: the largest
+    // m' < max_mismatches whose search the floor admits (m' = 0 under the rule without
+    // mismatches, its exemption included), unset when none does (JSON null)
+    std::optional<uint8_t> max_mismatches_within_floor;
 
     // exactly one of the two is set on an answered pattern: contexts when L <= k, anchors
     // when L > k
@@ -1437,6 +1538,24 @@ struct Result {
  * orientation), then the DFS in symbol order A < C < G < T at every position, i.e. the
  * paths of one anchor by their spelled sequence. Deterministic on the same index.
  *
+ * Bounded mismatches (Request::max_mismatches m > 0; SPEC §21): the Hamming ball of the
+ * pattern is searched level by level on the same range DFS. Pass t (t = 0 .. m, each base
+ * search in the order of its estimated cost for that pass) keeps per range the substitutions
+ * its spelled prefix holds; at core position x a range tries the position's bases (its level
+ * kept) and the other bases of A, C, G, T (its level plus one), each only where the positions
+ * left that can hold a substitution can still bring it to exactly t, so that every string of
+ * the ball is spelled by one range and counted in the pass of its level. Pass 0 charges the
+ * same steps in the same order as the search without mismatches. Within a pass the matching
+ * child is explored first (the substitutions placed from the deepest position back); the W
+ * rule, the flank of any_offset (expanded for the ranges of level t only), the deferred scans
+ * and, without the mask, the check of few unchecked candidates (a pattern-wide allowance of
+ * Request::max_checked_entries) run per pass. Counts are kept per (offset, level); on an
+ * even-k wrapped PRIMARY graph a palindromic stored k-mer is possible at level t only where at
+ * most t mirrored pattern pairs admit no complementary bases. The answer order is
+ * (mismatches, node, offset, orientation): the closest instances first, so that PARTIAL keeps
+ * and releases the first max_contexts of the closest levels (its retention bound a (level,
+ * node) bound); ALL_OR_COUNT compares the total over the levels.
+ *
  * Stateless between calls; one instance may serve concurrent requests, each with its own
  * Budget.
  */
@@ -1481,7 +1600,9 @@ class PatternSearch {
      * finds no path); both carry the note kNoteNoStopCodon. Never throws for a parsed
      * pattern, except
      * std::logic_error on a broken internal invariant (never expected: an answer that
-     * cannot be stated correctly is not stated at all).
+     * cannot be stated correctly is not stated at all), and std::invalid_argument for a
+     * Request::max_mismatches the engine does not serve (above kMaxMismatches, a peptide, a
+     * pattern longer than k), before anything is charged.
      * L > k with request.extend_paths: the anchors are retained (§5.2: kept through the
      * extension's admission, dropped once their count exceeds max_anchors) and, when
      * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is
@@ -1499,7 +1620,9 @@ class PatternSearch {
      * or PARTIAL; COUNT throws std::invalid_argument), calling |callback| once per released
      * context, in answer order: node ascending, then offset ascending, then orientation
      * (FORWARD, REVERSE, PALINDROMIC) (§5.5, "BOSS edge order, then by offset"; the
-     * orientation separates the two contexts an IUPAC pattern can have at one offset).
+     * orientation separates the two contexts an IUPAC pattern can have at one offset). With
+     * Request::max_mismatches > 0 the level comes first (Context::mismatches ascending), and
+     * max_contexts and every threshold read the total over the levels.
      *  ALL_OR_COUNT  releases every context iff discovery completed with an EXACT total
      *                <= max_contexts; otherwise none (Extraction::withheld). The release is
      *                buffered (a released set that differs from the EXACT count throws
