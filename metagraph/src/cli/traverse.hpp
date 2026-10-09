@@ -324,40 +324,21 @@ std::string graphlet_text(const graph::traversal::SeedResult &result,
                           size_t *lines = nullptr);
 
 /**
- * The MGT v1 token codec (DESIGN-traverse-graphlet.md §2.1-§2.2, the golden vectors of
+ * The MGT v1 token encoders (DESIGN-traverse-graphlet.md §2.1-§2.2, the golden vectors of
  * api/python/tests/data/traverse/codec_vectors.tsv). Every value has exactly one valid
- * spelling; the decoders reject every other one (FormatError), so that two readers never
- * disagree on which documents are valid. Exposed for the golden-vector test.
+ * spelling, which these write; a reader rejects every other one, so that two readers never
+ * disagree on which documents are valid (the conformance tests' reader:
+ * tests/cli/mgt_reader_for_tests.hpp). Exposed for the golden-vector test.
  */
 namespace mgt {
 
-class FormatError : public std::invalid_argument {
-  public:
-    using std::invalid_argument::invalid_argument;
-};
-
 // x >= 0 (or -0) or +inf: the shortest round-trip digits, expanded positionally
 std::string encode_float(double x);
-double decode_float(std::string_view token);
-// strictly ascending ids; every maximal run of >= 2 written a-b; "." = empty
-std::string encode_ranges(const std::vector<uint64_t> &ids);
-// |bound|: every id must be below it, checked BEFORE a run is expanded, so that a few
-// bytes of a corrupt or hostile token ("0-3000000000") cannot allocate in proportion to
-// the range (a reader passes the number of L records)
-std::vector<uint64_t> decode_ranges(std::string_view token,
-                                    std::optional<uint64_t> bound = std::nullopt);
-// against |base| (null: none, explicit only); the shorter of explicit and delta, a tie
-// explicit
-std::string encode_setexpr(const std::vector<uint64_t> &ids, const std::vector<uint64_t> *base);
-std::vector<uint64_t> decode_setexpr(std::string_view token, const std::vector<uint64_t> *base,
-                                     std::optional<uint64_t> bound = std::nullopt);
 // the free-text last field: % LF CR as %25 %0A %0D, nothing else
 std::string pct_escape(std::string_view raw);
-std::string pct_unescape(std::string_view token);
 // "<prefix_len> <suffix>" of an L record after |previous| (byte prefix cut back to a
-// code-point boundary, suffix pct-escaped); decoding returns the full name
+// code-point boundary, suffix pct-escaped)
 std::string front_code(std::string_view previous, std::string_view name);
-std::string front_decode(std::string_view previous, std::string_view token);
 // strings in MGT (and in the JSON beside it) are UTF-8 (§2.1): well-formed UTF-8 (no
 // overlong forms, no surrogates, at most U+10FFFF). A label name that is not is never
 // replaced: the seed is refused (spec §6.1 step 4, cause unrepresentable_label_name)
@@ -372,7 +353,6 @@ struct KValue {
     std::string string;
 };
 std::string encode_kvalue(const KValue &value);
-KValue decode_kvalue(std::string_view token);
 
 } // namespace mgt
 

@@ -662,9 +662,6 @@ class Deadline {
     Deadline(Clock::time_point start, double time_budget_ms, double finalize_reserve_ms,
              std::function<Clock::time_point()> clock = &Clock::now);
 
-    // no deadline (tests that do not test time)
-    static Deadline unbounded();
-
     bool work_expired() const;
     bool respond_expired() const;
     double elapsed_ms() const;
@@ -675,7 +672,6 @@ class Deadline {
     Clock::time_point start_;
     double time_budget_ms_;
     double finalize_reserve_ms_;
-    bool unbounded_ = false;
     std::function<Clock::time_point()> clock_;
 };
 
@@ -862,12 +858,10 @@ struct RealFraction {
     // real / samples; 1 when the graph has no edge with W != $ (nothing can be counted)
     double value = 1;
     // Wilson's score interval at 95% (z = 1.959963984540054) around |value|, clamped to
-    // [0, 1] (and holding |value| despite rounding); [0, 1] without samples; lower == upper ==
-    // value for exact_real_fraction
+    // [0, 1] (and holding |value| despite rounding); [0, 1] without samples
     double lower = 0;
     double upper = 1;
-    // the entries drawn (W != $; every non-sink entry for exact_real_fraction) and the real
-    // k-mers among them
+    // the entries drawn (W != $) and the real k-mers among them
     uint64_t samples = 0;
     uint64_t real = 0;
     // the edges with W = $ (plain or marked: the sink dummies and the main dummy edge 1),
@@ -876,8 +870,6 @@ struct RealFraction {
     uint64_t edges = 0;
     // the seed of the draws: the graph's number of edges
     uint64_t seed = 0;
-    // false: sampled (sample_real_fraction); true: every entry tested (exact_real_fraction)
-    bool exact = false;
 };
 
 // the entries drawn for f: 10,000
@@ -897,14 +889,6 @@ constexpr uint64_t kRealFractionSamples = 10'000;
  */
 RealFraction sample_real_fraction(const DBGSuccinct &graph,
                                   uint64_t samples = kRealFractionSamples);
-
-/**
- * f over every entry with W != $: RealFraction::exact, lower == upper == value, the source
- * dummies found by BOSS's own traversal of the dummy tree (BOSS::mark_source_dummy_edges, as
- * `stats --count-dummy`), not by the test sample_real_fraction draws with. O(edges) bits; for
- * tests and offline checks, never on a request's path.
- */
-RealFraction exact_real_fraction(const DBGSuccinct &graph);
 
 
 // ---------------------------------------------------------------- results

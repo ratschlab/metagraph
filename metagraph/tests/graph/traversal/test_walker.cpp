@@ -16,6 +16,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 #include "graph/traversal/walker.hpp"
+#include "tests/graph/traversal/walker_paths_for_tests.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"

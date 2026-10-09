@@ -35,9 +35,6 @@ int base_index(char base);
 // the index of a codon of three bases (case-insensitive); -1 when a character is not A, C, G, T
 int codon_index(std::string_view codon);
 
-// the three bases of a codon index, upper case
-std::string codon_string(int index);
-
 // { rc(c) : c in |set| }: each codon reversed and complemented
 CodonSet reverse_complement_codons(CodonSet set);
 

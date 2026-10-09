@@ -967,7 +967,7 @@ Json::Value dummy_fraction_json(const DummyFraction &f) {
     interval.append(f.upper);
     v["interval"] = std::move(interval);
     v["samples"] = uint_json(f.samples);
-    v["source"] = f.exact ? "counted" : "sampled";
+    v["source"] = "sampled";
     return v;
 }
 

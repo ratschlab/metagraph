@@ -41,6 +41,7 @@
 
 #include "../../test_helpers.hpp"
 #include "../all/test_dbg_helpers.hpp"
+#include "pattern_test_support.hpp"
 
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -56,6 +57,7 @@ using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::graph::pattern;
 using mtg::test::build_graph;
+using mtg::test::unbounded_deadline;
 
 typedef DeBruijnGraph::node_index node_index;
 typedef SupportTracker::Verdict Verdict;
@@ -702,7 +704,7 @@ Request path_request(Strands strands = Strands::BOTH) {
 }
 
 Budget unbounded_budget() {
-    return Budget(kManySteps, Deadline::unbounded());
+    return Budget(kManySteps, unbounded_deadline());
 }
 
 struct PathCtx {

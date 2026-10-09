@@ -342,18 +342,12 @@ Deadline::Deadline(Clock::time_point start, double time_budget_ms, double finali
         finalize_reserve_ms_(finalize_reserve_ms),
         clock_(clock ? std::move(clock) : std::function<Clock::time_point()>(&Clock::now)) {}
 
-Deadline Deadline::unbounded() {
-    Deadline deadline(Clock::now(), std::numeric_limits<double>::infinity(), 0);
-    deadline.unbounded_ = true;
-    return deadline;
-}
-
 bool Deadline::work_expired() const {
-    return !unbounded_ && elapsed_ms() >= time_budget_ms_ - finalize_reserve_ms_;
+    return elapsed_ms() >= time_budget_ms_ - finalize_reserve_ms_;
 }
 
 bool Deadline::respond_expired() const {
-    return !unbounded_ && elapsed_ms() >= time_budget_ms_;
+    return elapsed_ms() >= time_budget_ms_;
 }
 
 double Deadline::elapsed_ms() const {
@@ -2655,34 +2649,6 @@ RealFraction sample_real_fraction(const DBGSuccinct &graph, uint64_t samples) {
         f.real += !boss.node_has_sentinel(edge);
     }
     set_wilson_interval(&f);
-    return f;
-}
-
-RealFraction exact_real_fraction(const DBGSuccinct &graph) {
-    const BOSS &boss = graph.get_boss();
-    RealFraction f;
-    f.edges = boss.num_edges();
-    f.sentinel_edges = sentinel_edges(boss);
-    f.seed = f.edges;
-    f.exact = true;
-    f.samples = f.edges - f.sentinel_edges;
-    // the source dummies by BOSS's own traversal of the dummy tree (`stats --count-dummy`),
-    // not by the walk sample_real_fraction tests with: those with W != $ are the dummies
-    // among the entries
-    sdsl::bit_vector source_dummies(boss.get_W().size(), false);
-    boss.mark_source_dummy_edges(&source_dummies, 1);
-    uint64_t dummies = 0;
-    for (uint64_t e = 1; e < source_dummies.size(); ++e) {
-        // (W modulo alph_size is 0 for $, plain or marked: BOSS::kSentinelCode)
-        if (source_dummies[e] && boss.get_W(e) % boss.alph_size)
-            ++dummies;
-    }
-    assert(dummies <= f.samples);
-    f.real = f.samples - dummies;
-    if (f.samples) {
-        f.value = static_cast<double>(f.real) / static_cast<double>(f.samples);
-        f.lower = f.upper = f.value;
-    }
     return f;
 }
 

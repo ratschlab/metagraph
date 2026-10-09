@@ -42,6 +42,7 @@
 
 #include "../../test_helpers.hpp"
 #include "../all/test_dbg_helpers.hpp"
+#include "pattern_test_support.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/genetic_code.hpp"
@@ -61,6 +62,8 @@ using namespace mtg::graph;
 using namespace mtg::graph::pattern;
 using mtg::test::build_graph;
 using mtg::test::build_graph_batch;
+using mtg::test::exact_real_fraction;
+using mtg::test::unbounded_deadline;
 
 typedef DeBruijnGraph::node_index node_index;
 typedef boss::BOSS BOSS;
@@ -263,14 +266,14 @@ std::ostream& operator<<(std::ostream &out, const Ctx &c) {
 
 Result count_of(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
                 uint64_t max_steps = kManySteps) {
-    Budget budget(max_steps, Deadline::unbounded());
+    Budget budget(max_steps, unbounded_deadline());
     return PatternSearch(graph).count(pattern, request, budget);
 }
 
 std::vector<Ctx> enumerate_of(const DeBruijnGraph &graph, const Pattern &pattern,
                               const Request &request, Result *result,
                               uint64_t max_steps = kManySteps) {
-    Budget budget(max_steps, Deadline::unbounded());
+    Budget budget(max_steps, unbounded_deadline());
     std::vector<Ctx> contexts;
     *result = PatternSearch(graph).enumerate(pattern, request, budget, [&](const Context &c) {
         contexts.push_back(Ctx { c.node, c.offset, c.orientation, c.base_node });
@@ -679,7 +682,7 @@ size_t check_unmasked(const Twin &twin, const std::vector<std::string> &records,
             paths[2];
         Result results[2];
         for (int m = 0; m < 2; ++m) {
-            Budget budget(kManySteps, Deadline::unbounded());
+            Budget budget(kManySteps, unbounded_deadline());
             results[m] = PatternSearch(m ? masked : unmasked)
                 .enumerate(pattern, extend, budget, [&](const Context &c) {
                     paths[m].emplace_back(c.node, c.orientation, c.sequence, c.path);
@@ -1147,7 +1150,7 @@ TEST(PatternUnmasked, LongPatternsAnchorsAndPaths) {
             request.mode = Mode::ALL_OR_COUNT;
             std::vector<std::pair<std::string, std::vector<node_index>>> paths[2];
             for (int m = 0; m < 2; ++m) {
-                Budget budget(kManySteps, Deadline::unbounded());
+                Budget budget(kManySteps, unbounded_deadline());
                 PatternSearch(m ? *twin.masked : *twin.unmasked)
                     .enumerate(p, request, budget, [&](const Context &c) {
                         paths[m].emplace_back(c.sequence, c.path);
@@ -1253,7 +1256,7 @@ TEST(PatternUnmasked, PeptidesWithoutTheMask) {
                     std::vector<std::tuple<node_index, uint32_t, Orientation, std::string>>
                         listed[2];
                     for (int m = 0; m < 2; ++m) {
-                        Budget budget(kManySteps, Deadline::unbounded());
+                        Budget budget(kManySteps, unbounded_deadline());
                         results[m] = PatternSearch(m ? *twin.masked : *twin.unmasked)
                             .enumerate(p, request, budget, [&](const Context &c) {
                                 listed[m].emplace_back(c.node, c.offset, c.orientation,
@@ -1615,7 +1618,7 @@ void check_tiny(const Twin &twin, const std::string &text, PatternKind kind,
         std::vector<std::pair<std::string, std::vector<node_index>>> paths[2];
         Result results[2];
         for (int m = 0; m < 2; ++m) {
-            Budget budget(kManySteps, Deadline::unbounded());
+            Budget budget(kManySteps, unbounded_deadline());
             results[m] = PatternSearch(m ? masked : unmasked)
                 .enumerate(pattern, extend, budget, [&](const Context &c) {
                     paths[m].emplace_back(c.sequence, c.path);
@@ -1887,7 +1890,6 @@ TEST(PatternUnmasked, RealFractionOnSmallGraphs) {
 
         const auto [real, entries] = spelled_fraction(dbg_succ);
         const RealFraction exact = exact_real_fraction(dbg_succ);
-        EXPECT_TRUE(exact.exact);
         EXPECT_EQ(entries, exact.samples);
         EXPECT_EQ(real, exact.real);
         EXPECT_EQ(dbg_succ.max_index() - entries, exact.sentinel_edges);
@@ -1899,7 +1901,6 @@ TEST(PatternUnmasked, RealFractionOnSmallGraphs) {
             const RealFraction f = sample_real_fraction(dbg_succ, samples);
             const RealFraction again = sample_real_fraction(dbg_succ, samples);
             const RealFraction oracle = oracle_draws(dbg_succ, samples);
-            EXPECT_FALSE(f.exact);
             EXPECT_EQ(samples, f.samples);
             EXPECT_EQ(oracle.real, f.real) << samples;
             EXPECT_EQ(oracle.sentinel_edges, f.sentinel_edges);

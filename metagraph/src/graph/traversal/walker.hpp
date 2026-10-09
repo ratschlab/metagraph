@@ -1261,13 +1261,6 @@ SeedResult traverse_seed(LabelOracle &oracle,
 std::vector<double> switch_reach(const LabelChangeCost &cost, size_t n, size_t sources,
                                  double budget);
 
-// Reconstruct the flank of |path| in natural orientation from the segments.
-std::string spell_path(const ArmResult &arm, const PathResult &path);
-
-// The segments of |path|, root -> leaf, through first parents at joins: the chain that
-// PathResult does not store. O(path depth in segments) per call.
-std::vector<size_t> path_segments(const ArmResult &arm, const PathResult &path);
-
 // Visit the segments of |path| leaf -> root (first parents) without allocating; |f|
 // returns false to stop early (a continuation needs only the last n bases).
 template <class F>

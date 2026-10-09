@@ -48,6 +48,7 @@
 
 #include "../../test_helpers.hpp"
 #include "../all/test_dbg_helpers.hpp"
+#include "pattern_test_support.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -71,6 +72,7 @@ using namespace mtg::graph;
 using namespace mtg::graph::pattern;
 using mtg::test::build_graph;
 using mtg::test::build_graph_batch;
+using mtg::test::unbounded_deadline;
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -225,7 +227,7 @@ Request make_request(Scope scope = Scope::ANY_OFFSET, Strands strands = Strands:
 }
 
 Budget unbounded_budget(uint64_t max_steps = kManySteps) {
-    return Budget(max_steps, Deadline::unbounded());
+    return Budget(max_steps, unbounded_deadline());
 }
 
 struct Ctx {
@@ -1018,7 +1020,7 @@ TEST(PatternSearch, CountAlgebra) {
 }
 
 TEST(PatternSearch, BudgetAndDeadline) {
-    Budget budget(10, Deadline::unbounded());
+    Budget budget(10, unbounded_deadline());
     EXPECT_TRUE(budget.charge(4));
     EXPECT_TRUE(budget.charge(6));
     EXPECT_FALSE(budget.charge(1));

@@ -15,6 +15,7 @@
 #include "gtest/gtest.h"
 
 #include "../annotation/test_annotated_dbg_helpers.hpp"
+#include "../graph/alignment/pattern_test_support.hpp"
 #include "../test_helpers.hpp"
 
 #include "annotation/coord_to_header.hpp"
@@ -1325,7 +1326,7 @@ TEST(PatternSelection, AllUnknownNeedsNoRead) {
     // that did not run
     {
         const gp::GraphSupport support = gp::PatternSearch::support(idx.anno->get_graph());
-        gp::Budget budget(1'000'000, gp::Deadline::unbounded());
+        gp::Budget budget(1'000'000, mtg::test::unbounded_deadline());
         PatternRetrieval retrieval(*idx.anno, support.mode, RetrievalLimits(), budget);
         retrieval.bind(predicate::Predicate::parse(parse_pattern_body("{\"any\": [\"zz\"]}"),
                                                    10'000),

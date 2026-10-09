@@ -27,6 +27,7 @@
 
 #include "../../test_helpers.hpp"
 #include "../all/test_dbg_helpers.hpp"
+#include "pattern_test_support.hpp"
 
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/alignment/pattern_search.hpp"
@@ -45,6 +46,7 @@ using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::graph::pattern;
 using mtg::test::build_graph;
+using mtg::test::unbounded_deadline;
 
 typedef DeBruijnGraph::node_index node_index;
 typedef Deadline::Clock Clock;
@@ -213,7 +215,7 @@ Request request_of(Mode mode, uint64_t max_contexts, Scope scope = Scope::ANY_OF
 }
 
 Budget budget_of(uint64_t max_steps = kSteps) {
-    return Budget(max_steps, Deadline::unbounded());
+    return Budget(max_steps, unbounded_deadline());
 }
 
 Pattern iupac(const std::string &text) {

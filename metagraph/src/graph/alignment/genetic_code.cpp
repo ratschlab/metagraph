@@ -32,11 +32,6 @@ int codon_index(std::string_view codon) {
     return index;
 }
 
-std::string codon_string(int index) {
-    static constexpr char kBases[] = "ACGT";
-    return { kBases[(index >> 4) & 3], kBases[(index >> 2) & 3], kBases[index & 3] };
-}
-
 CodonSet reverse_complement_codons(CodonSet set) {
     CodonSet result = 0;
     for (int c = 0; c < 64; ++c) {

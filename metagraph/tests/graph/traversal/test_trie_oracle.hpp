@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "graph/traversal/walker.hpp"
+#include "tests/graph/traversal/walker_paths_for_tests.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 

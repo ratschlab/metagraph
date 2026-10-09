@@ -36,6 +36,7 @@
 
 #include "../../test_helpers.hpp"
 #include "../all/test_dbg_helpers.hpp"
+#include "pattern_test_support.hpp"
 
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/alignment/genetic_code.hpp"
@@ -54,6 +55,8 @@ using namespace mtg::graph;
 using namespace mtg::graph::pattern;
 using mtg::test::build_graph;
 using mtg::test::build_graph_batch;
+using mtg::test::codon_string;
+using mtg::test::unbounded_deadline;
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -513,7 +516,7 @@ Pattern peptide_pattern(const std::string &peptide, int table) {
 
 Result count_of(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
                 uint64_t max_steps = kManySteps) {
-    Budget budget(max_steps, Deadline::unbounded());
+    Budget budget(max_steps, unbounded_deadline());
     return PatternSearch(graph).count(pattern, request, budget);
 }
 
@@ -641,7 +644,7 @@ PathOracle walk_paths(const DeBruijnGraph &graph, const std::string &peptide,
 
 std::vector<Ctx> run_contexts(const PatternSearch &engine, const StoredNodes &stored,
                               const Pattern &pattern, const Request &request, Result *result) {
-    Budget budget(kManySteps, Deadline::unbounded());
+    Budget budget(kManySteps, unbounded_deadline());
     std::vector<Ctx> contexts;
     *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
         EXPECT_EQ(stored.of(c.node), c.base_node) << c.node;
@@ -653,7 +656,7 @@ std::vector<Ctx> run_contexts(const PatternSearch &engine, const StoredNodes &st
 
 std::vector<PathCtx> run_paths(const PatternSearch &engine, const StoredNodes &stored,
                                const Pattern &pattern, const Request &request, Result *result) {
-    Budget budget(kManySteps, Deadline::unbounded());
+    Budget budget(kManySteps, unbounded_deadline());
     std::vector<PathCtx> paths;
     *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
         EXPECT_EQ(0u, c.offset);
@@ -692,7 +695,7 @@ size_t check_peptide(const DeBruijnGraph &graph, const std::vector<std::string> 
     const std::vector<Orientation> orientations
         = oracle_orientations(peptide, code, request.strands);
 
-    Budget budget(kManySteps, Deadline::unbounded());
+    Budget budget(kManySteps, unbounded_deadline());
     Result counted = engine.count(pattern, request, budget);
     EXPECT_FALSE(counted.refusal);
     if (counted.refusal)
@@ -1472,7 +1475,7 @@ TEST(PatternPeptide, AutomatonStateAcrossTheKBoundary) {
     EXPECT_EQ(2u, r.anchors->paths.value);
     std::vector<std::string> sequences;
     {
-        Budget budget(kManySteps, Deadline::unbounded());
+        Budget budget(kManySteps, unbounded_deadline());
         Request all = forward;
         PatternSearch(*graph).enumerate(peptide_pattern("MLW", 1), all, budget,
                                         [&](const Context &c) {
@@ -1747,7 +1750,7 @@ TEST(PatternPeptide, NoStopCodonAnswered) {
                 EXPECT_EQ(Relation::EXACT, r.contexts->suffix.relation);
                 // enumerate(): nothing, and that is complete
                 request.mode = Mode::PARTIAL;
-                Budget budget(kManySteps, Deadline::unbounded());
+                Budget budget(kManySteps, unbounded_deadline());
                 size_t called = 0;
                 const Result e = PatternSearch(*graph).enumerate(
                         p, request, budget, [&](const Context &) { ++called; });

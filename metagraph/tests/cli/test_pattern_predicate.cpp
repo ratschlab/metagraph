@@ -15,6 +15,7 @@
 #include "gtest/gtest.h"
 
 #include "../annotation/test_annotated_dbg_helpers.hpp"
+#include "../graph/alignment/pattern_test_support.hpp"
 
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -51,7 +52,7 @@ std::string compact(const Json::Value &value) {
     return Json::writeString(builder, value);
 }
 
-Budget unbounded() { return Budget(UINT64_MAX, Deadline::unbounded()); }
+Budget unbounded() { return Budget(UINT64_MAX, mtg::test::unbounded_deadline()); }
 
 // the columns of a test index: |known| in order, column i the i-th
 ColumnLookup columns(const std::vector<std::string> &known) {

@@ -180,7 +180,7 @@ A field marked `|*` has a *rule*. The C++ writer computes the rule's value from 
 
 ## 2.4 Orientation (the one rule, answering REVIEW-REQUEST §5.1.7)
 
-`walk` in `H`: every `G` stores its bases in walking order on **both** arms, so outward index `i ∈ [from_bp, from_bp+length_bp)` is `bases[i − from_bp]`, and every position field (`from_bp`, `to_bp`, `at_bp`, `route_bp`, `complete_to_bp`) indexes bases directly. Natural orientation: right flank = concat root→leaf; left flank = `reverse(concat root→leaf)` = concat leaf→root of per-segment reversals = `spell_path` (walker.cpp:3220-3232). Whole molecule, natural: `natural(left) + seed + natural(right)`. Seed coordinate of outward `i`: `|seed| + i` (right), `−(i+1)` (left). The serializer reverses `Segment::sequence` of the left arm back to walking order (finalize reversed it at walker.cpp:2877-2878).
+`walk` in `H`: every `G` stores its bases in walking order on **both** arms, so outward index `i ∈ [from_bp, from_bp+length_bp)` is `bases[i − from_bp]`, and every position field (`from_bp`, `to_bp`, `at_bp`, `route_bp`, `complete_to_bp`) indexes bases directly. Natural orientation: right flank = concat root→leaf; left flank = `reverse(concat root→leaf)` = concat leaf→root of per-segment reversals = `spell_path` (tests/graph/traversal/walker_paths_for_tests.hpp). Whole molecule, natural: `natural(left) + seed + natural(right)`. Seed coordinate of outward `i`: `|seed| + i` (right), `−(i+1)` (left). The serializer reverses `Segment::sequence` of the left arm back to walking order (finalize reversed it at walker.cpp:2877-2878).
 
 ## 2.5 Stored vs derived
 
@@ -1586,7 +1586,7 @@ in place of `16`); the accounts are the same, since each run holds one chain and
 
 - **Where it was chosen**: `Walker::merge_level` made the first head to arrive at the node the merged segment's
   first parent (`parents[0]`); everything displayed follows first parents — a path's `segments` chain
-  (`walk_path_leaf_first`), its spelled bases (`spell_path`) and continuation (`make_continuation`, the graphlet's
+  (`walk_path_leaf_first`), its spelled bases (`spell_path` of the tests) and continuation (`make_continuation`, the graphlet's
   `C`), the end labels' `route_bp` (a label taken from a later parent is routed from the merge) and the
   reconverge event's order. The graphlet writer, the JSON writer and the library read `parents[0]`; no other place
   chooses a displayed parent.

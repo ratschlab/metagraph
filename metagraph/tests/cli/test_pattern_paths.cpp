@@ -17,6 +17,7 @@
 #include "gtest/gtest.h"
 
 #include "../annotation/test_annotated_dbg_helpers.hpp"
+#include "../graph/alignment/pattern_test_support.hpp"
 
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -1889,7 +1890,7 @@ TEST(PatternPaths, TheRetrievalCounters) {
         return p;
     };
     RetrievalLimits limits;
-    pattern::Budget budget(1'000'000, pattern::Deadline::unbounded());
+    pattern::Budget budget(1'000'000, mtg::test::unbounded_deadline());
     RetrievalHooks hooks;
     hooks.coord_to_header = idx.cth.get();
     PatternRetrieval retrieval(*idx.anno, pattern::GraphMode::BASIC, limits, budget, &hooks);
@@ -1927,7 +1928,7 @@ TEST(PatternPaths, TheRetrievalCounters) {
 
     // a work budget that one row passes: the others not read, not counted
     limits.max_annotation_work = 1;
-    pattern::Budget small(1'000'000, pattern::Deadline::unbounded());
+    pattern::Budget small(1'000'000, mtg::test::unbounded_deadline());
     PatternRetrieval one(*idx.anno, pattern::GraphMode::BASIC, limits, small, &hooks);
     const std::string s = "C" + std::string(25, 'A') + "C";
     const std::vector<RetrievalPath> paths = { path_of(s) };

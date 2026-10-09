@@ -18,6 +18,8 @@
 #include <json/json.h>
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "tests/cli/mgt_reader_for_tests.hpp"
+#include "tests/graph/traversal/walker_paths_for_tests.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
