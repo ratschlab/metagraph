@@ -20,6 +20,21 @@ using Clock = Attempt::Clock;
 
 namespace {
 
+// The rules of the capabilities' attempts block, stated by reference to the SPEC section that
+// holds each (the documents a service returns in one piece have a ceiling of 32 KiB; the
+// numbers a ledger computes with are the block's fields). ASCII only
+constexpr char kBoundRule[] = "SPEC-labeled-traversal-core.md section 6.8, the attempt's bound";
+constexpr char kDeliveryReserveRule[]
+        = "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve";
+constexpr char kCalibrationRule[]
+        = "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve: calibration";
+constexpr char kNotAfterRule[] = "SPEC-labeled-traversal-core.md section 5, not_after_ms";
+constexpr char kInstanceRule[]
+        = "SPEC-labeled-traversal-core.md section 5, expect_server_instance";
+constexpr char kSuppressionRule[]
+        = "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone";
+constexpr char kReleaseRule[] = "SPEC-labeled-traversal-core.md section 10.3, the release rule";
+
 // whole milliseconds, rounded up (a duration a ledger leases by is never understated); null
 // when there is no bound (an infinite time budget without the HTTP server's cap: the CLI)
 Json::Value ceil_ms_json(double ms) {
@@ -1068,36 +1083,10 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["content_timeout_s"] = uint_json(settings_.content_timeout_s);
     att["client_check_ms"] = uint_json(settings_.client_check_ms);
     att["clock_skew_allowance_ms"] = uint_json(settings_.clock_skew_ms);
-    // What the bound is and how it is enforced: the cap, the walk-until stated, and what runs
-    // past it, which every release text names. The bound is compared only in check_delivery: the
-    // walk's polls compare the walk-until, and only those that read the clock (one in
-    // poll_stride, every forced one). So past the bound the attempt runs on until its next
-    // delivery check, not one step: the rest of the piece the bound fell into, the walk up to
-    // its next clock-reading poll, the stopped seed's finalisation and its result's building up
-    // to the first check (a 6.94 Mbp seed: GET answered running 2,720 ms past the instant)
-    att["bound"] = fmt::format(
-        "min(seeds x the effective bounds.time_budget_ms + allowance_ms, hard_cap_ms) ms on the "
-        "attempt's clock, which starts when the server read the request's header (time queued "
-        "before that, all server threads busy, is not in it); hard_cap_ms = content_timeout_s x "
-        "1000 - 1000, the cap whatever the seeds' budgets (usage.bound.capped_by: "
-        "content_timeout when it applied); seeds stop being walked at bound - max(allowance_ms "
-        "/ 2, the delivery reserve), which moves as the walk goes (the walk-until; the walk "
-        "stops at its first poll that reads the clock after it, usage.stopped_at, such a poll "
-        "being one in {} of a walk's polls, every poll before a paced read's chunk or in the "
-        "lookahead, and the poll before each seed; usage.bound.walk_until_ms states the "
-        "walk-until in force when it stopped the walk, else the lowest walk-until seen: the "
-        "lowest that such a poll compared with, not a lower one in force only between two such "
-        "polls), and a response "
-        "not written by the bound is not written (503 with usage). The bound itself is compared "
-        "only at the delivery checks (every 4096 objects of a seed's result or of the MGT text, "
-        "every 64 KiB of text, between compression blocks and before the transport): past it "
-        "the attempt runs on until its next delivery check (then the 503) or its handler's "
-        "return — the rest of the piece it was in when the bound passed and, when its walk had "
-        "not stopped by then, the walk up to its next poll that reads the clock, the stopped "
-        "seed's finalisation and the building of its result up to the first delivery check "
-        "(deadline_check names these pieces) —, a run of no stated length "
-        "(deadline_check.max_uninterruptible_ms: null; observed_max_uninterruptible_ms leaves "
-        "some of these pieces out)", settings_.poll_stride);
+    // what the bound is and how it is enforced (the cap, the walk-until stated, what runs past
+    // it up to the next delivery check): the SPEC's rule, the numbers in the fields above and
+    // in deadline_check (poll_stride)
+    att["bound"] = kBoundRule;
     // the time kept back from the walk to build and compress what was walked
     Json::Value reserve;
     reserve["compress_mbps"] = settings_.delivery_compress_mbps;
@@ -1124,200 +1113,20 @@ Json::Value AttemptRegistry::capabilities_json() const {
     reserve["rate_window"] = uint_json(kRateWindow);
     reserve["margin"] = kReserveMargin;
     reserve["stop_ms"] = ceil_ms_json(settings_.delivery_stop_ms);
-    // where the configured starting estimates come from (feature level 4)
-    reserve["calibration"] = "starting estimates, replaced by this server's measurements: "
-        "account_per_text_byte just below the smallest ratios measured on real responses (JSON "
-        "details 33.5 to 1,344, graphlet 58.4 and more). They stay conservative, so a server's "
-        "first large attempt of a detail can still be cut early until it has measured that "
-        "detail on its own responses: on a warm SRA server the first tree and full attempts of "
-        "a 16S beam (40 s bound) were cut at 3-5 s, the tree text measuring 115-129 account "
-        "units a byte against the 30 assumed; the JSON details share one starting ratio: one "
-        "locus is too narrow a measurement to start a detail's reserve from; "
-        "stop_ms = chunk_target_ms + 950 (950 ms for the heads between two readings of the clock "
-        "and the stopped seed's finalisation: 352 ms measured on a quiet SRA server, 1,001 ms on "
-        "a loaded one, 1,699 ms once; a longer one measured replaces it), the rest of a "
-        "finalisation that grows with the result "
-        "being covered by the margin while it runs faster than 4 x build_mbps; compress_mbps "
-        "and build_mbps conservative (measured 460-670 and 13.6-51 MB/s on SRA at level 1)";
+    // where the configured starting estimates come from: the SPEC's table of the measurements
+    reserve["calibration"] = kCalibrationRule;
     reserve["measured_stop_ms"] = m.stop_ms > 0 ? ceil_ms_json(m.stop_ms) : Json::Value();
-    reserve["rule"] = "reserve_ms = margin x ((T + E) / (compress x 1000) + E / (build x 1000)) "
-        "+ stop, rates in MB/s: T the exact bytes of the text of the seeds finished so far (each "
-        "seed's result is written as text once built), E the text the seed being walked is "
-        "estimated to write: ceil((A - C) / the account per text byte of the requested detail) "
-        "+ ceil(C / coordinate_account_per_text_byte), A its modelled account and C the part of "
-        "it that is its record coordinates (output.coordinates: the block with its entries and "
-        "occurrences, or the null form; 0 without them), both updated at every level's end — "
-        "every byte of coordinate text costs at least coordinate_account_per_text_byte account "
-        "bytes, whatever its digits —, stop the time from the walk-until to the "
-        "walk's end (the walk stops at its first poll that reads the clock after the "
-        "walk-until, then finalises the stopped seed): stop_ms, or the longest this server measured over its last rate_window "
-        "attempts that walked past their walk-until (measured_stop_ms) when longer. Each of "
-        "compress, build and the account per text byte is the configured value (compress_mbps, "
-        "build_mbps, account_per_text_byte) until this server has measured its own on responses "
-        "and seeds of at least measured_text_bytes: then the slowest rate, and the smallest "
-        "ratio for the detail, of its last rate_window measurements (the measured_* fields, as "
-        "of this document), and the attempt's own seeds' where those are more conservative; a "
-        "ratio is measured as (A - C) / (the seed's text - the text its record coordinates "
-        "wrote, counted exactly from digits and punctuation) on a rest of at least "
-        "measured_text_bytes, so that a request with coordinates measures what the same walk "
-        "without them would. A response is still not delivered (503) when it is built or "
-        "compressed more slowly than the rates used allow for with the margin, a seed writes "
-        "more text than its estimate, or the walk ends later after its walk-until than stop";
+    // the reserve's formula and when a response is still not delivered: the SPEC's rule, its
+    // numbers the fields of this block
+    reserve["rule"] = kDeliveryReserveRule;
     att["delivery_reserve"] = std::move(reserve);
-    // The refusal order is part of the contract: an expired 409
-    // is a release ground (release_rule) only because the id's registration is checked first
-    att["not_after"] = "not_after_ms (Unix epoch ms, an integer in [0, 2^53 - 1], with or "
-        "without attempt_id): a request whose not_after_ms is earlier than this server's clock "
-        "when its handler starts is refused, 409 {error, state: \"expired\", not_after_ms, "
-        "server_time_ms, the ids given, server_instance}, and never runs (no usage, nothing "
-        "registered: a later GET /traverse/attempt answers 404); the check is strict, no "
-        "allowance added. It is the last of the refusals, all made under one lock: a request "
-        "naming another expect_server_instance is refused first (409 instance_mismatch), then "
-        "one whose attempt_id is running, retained, held or tombstoned here, whatever its "
-        "not_after_ms (the duplicate's 409 {error, attempt}; a held or tombstoned id's refusal "
-        "extends that hold, as suppression and release_rule state), so an expired 409 means "
-        "that no attempt with that id existed on this server_instance when it was judged, and "
-        "none can start here later while this server's clock does not step back below "
-        "not_after_ms. A ledger treats an attempt it has no answer for as one that cannot start "
-        "subsequently once its own clock passes not_after_ms + clock_skew_allowance_ms (an "
-        "unanswered request may already be running: bound_ms covers its walk and its "
-        "delivery), and as past its bound once its clock passes that + bound_ms — apart from "
-        "what it runs past its bound, up to its next delivery check, a run of no stated length "
-        "(bound, release_rule)";
-    // the field's format and its 400s: the value is
-    // checked as an id is, so that "" can never un-pin a request
-    att["instance"] = "expect_server_instance (with attempt_id; a string matching id_pattern, "
-        "as every server_instance does): a request naming another server_instance than this "
-        "process's is refused before anything runs, checked first (ahead of a duplicate id and "
-        "of not_after_ms), 409 {error, state: \"instance_mismatch\", expect_server_instance, "
-        "server_instance, the ids given, not_after_ms if given}: tombstones and the holds of "
-        "finished attempts live in memory, so a restarted process (a new server_instance) has "
-        "none, and a delayed copy of a cancelled or finished request would otherwise run there. "
-        "A value that is not such a string (null, empty, longer than 128 characters, a "
-        "character outside the pattern) and the field without attempt_id are a 400 naming the "
-        "field, without usage: nothing runs and nothing is registered (the CLI prints that "
-        "error, exit status 1); a server below feature level 5 refuses the unknown field (400)";
-    if (settings_.retention_s) {
-        att["suppression"] = fmt::format(
-            "POST /traverse/cancel of an id no attempt of this process holds tombstones it (404, "
-            "tombstone: true): a request with the id arriving while the tombstone is live is "
-            "refused (409, its attempt object carrying the tombstone) and never runs. The "
-            "tombstone is held at least retention_s ({} s) from the cancel and, when the cancel "
-            "names the request's not_after_ms, until this server's clock reads later than "
-            "not_after_ms + clock_skew_allowance_ms, at most tombstone_max_s ({} s) from the "
-            "cancel. A repeated "
-            "cancel, and a refused copy of the request (with its own not_after_ms), never shorten "
-            "it: each extends it to at least retention_s from then and to its own not_after_ms + "
-            "clock_skew_allowance_ms within the cap. It is held while either clock says it is "
-            "live: the steady clock for the duration computed when it was set or extended, and "
-            "the wall clock while it reads at most suppressed_until_ms (inclusive). Every "
-            "tombstone answer (the cancel's 404, a repeated cancel's 404, GET /traverse/attempt's "
-            "404 and the refused request's 409) states suppressed_until_ms (that last instant, "
-            "Unix epoch ms on this server's clock), not_after_ms (the one it was judged against: "
-            "for the refused request's 409 its own, absent when it has none; for a cancel its "
-            "own, else, as for GET, the largest named for the id; absent when none was), "
-            "covers_admission (true iff a not_after_ms was judged against and "
-            "suppressed_until_ms >= not_after_ms + clock_skew_allowance_ms: no copy of that "
-            "request can start on this server_instance, since while the tombstone is live it is "
-            "refused and once it is gone this server's clock has read later than "
-            "suppressed_until_ms, so its not_after_ms has passed on the clock the strict check "
-            "reads) and, when false, covers_admission_reason (no_not_after_ms | "
-            "beyond_tombstone_max). What a clock step can do: a backward step of this server's "
-            "wall clock by more than clock_skew_allowance_ms after the tombstone expired can make "
-            "a copy's not_after_ms lie in the future again, so it could be admitted (the same "
-            "assumption the ledger's skew allowance makes); a forward step does not shorten the "
-            "hold. A cancel of an unknown id is tombstoned only while fewer than retention_count "
-            "({}) tombstones and finished attempts held past their retention (release_rule) are "
-            "held; beyond that it is refused (429, tombstone: false, reason: tombstones_full) and "
-            "promises nothing",
-            settings_.retention_s, tombstone_cap_ms() / 1000, settings_.retention_count);
-    } else {
-        att["suppression"] = "retention_s is 0: this server keeps no tombstones. A cancel of an "
-            "id no attempt of this process holds is refused (429, tombstone: false, reason: "
-            "no_suppression) and promises nothing; a request with the id arriving later runs";
-    }
-    // What a finished state promises against a replay of the request: the id's hold beyond
-    // retention, or, with nothing kept, nothing. The hold is this process's, in memory, so a
-    // restart ends it: only an attempt pinned to the instance (expect_server_instance) is refused
-    // by the restarted process, and the finished state is replay-safe only for such an attempt —
-    // required as for a tombstone, and what an unpinned one assumes stated (an unpinned request
-    // replayed after a restart of the same endpoint runs again, however far ahead its
-    // not_after_ms)
-    const std::string finished_hold = settings_.retention_s
-        ? "A finished attempt's id stays refused (409) while it is retained (retention_s, "
-          "retention_count) and, for an attempt sent with not_after_ms, until this server's "
-          "clock reads later than not_after_ms + clock_skew_allowance_ms, at most "
-          "tombstone_max_s after it finished or after its latest refused copy: a copy of the "
-          "request refused with its own not_after_ms extends the hold to that + "
-          "clock_skew_allowance_ms, at most tombstone_max_s from the copy's arrival (held among "
-          "the tombstones, on both clocks, and never dropped early, so beyond retention_count if "
-          "need be: their number is at most the finishes and refused copies within "
-          "tombstone_max_s). The hold is this process's, in memory: a restarted process (a "
-          "new server_instance) holds none, and a copy of the request reaching it runs there "
-          "unless it was sent with expect_server_instance (then it is refused, 409 "
-          "instance_mismatch). So a finished state is replay-safe — no copy of the request runs "
-          "after it, on this process or a restarted one — only for an attempt sent with "
-          "expect_server_instance equal to this server_instance and with not_after_ms, when "
-          "not_after_ms + clock_skew_allowance_ms lies within tombstone_max_s of the finish: a "
-          "ledger that releases on a finished state before its own clock passes not_after_ms + "
-          "clock_skew_allowance_ms + bound_ms pins the instance, as for a tombstone. A finished "
-          "state of an attempt sent without expect_server_instance assumes that no copy of the "
-          "request reaches a restarted process (or another server at the same address) while it "
-          "could still be admitted there; one sent without not_after_ms, or with one further "
-          "out, assumes that no copy of the request arrives after the attempt left retention. "
-        : "retention_s is 0: finished attempts are not kept, so a finished state assumes that "
-          "no copy of the request arrives after it (a copy sent with expect_server_instance is "
-          "still refused by a restarted process). ";
-    // The grounds a ledger may release on, and what each assumes: the clock release takes the
-    // attempt as stopped at its bound, which it is apart from its run up to its next delivery
-    // check, of no stated length (bound), and an answer of running or stopping past that
-    // instant shows that run; for the search service's release parity, the 409 refusing a
-    // copy carries the id's state as GET answers it, so its finished state is a finished
-    // state, and an expired 409 is a ground because the id's registration is checked before
-    // the expiry. Texts only: they state what the server does
-    const std::string expired_ground = "An expired 409 (state: expired) for an attempt sent "
-        "with exactly that not_after_ms — from the server_instance it named in "
-        "expect_server_instance, when it named one — releases it: this server checks the id's "
-        "registration (running, retained, held, tombstoned) before the expiry, under one lock "
-        "(not_after), so no copy of the request was running or registered on that "
-        "server_instance when it was judged, and none can start there later. It settles "
-        "nothing: an earlier copy may have run, finished and left retention, and its usage is "
-        "then unknown. It assumes that this server's clock does not step back below "
-        "not_after_ms (the 409's server_time_ms - not_after_ms is the step it survives) and, "
-        "for an attempt sent without expect_server_instance, that no copy of the request "
-        "reaches another server at the same address while it could still be admitted there. ";
-    const std::string clock_ground = "The clock release takes the attempt as stopped once the "
-        "ledger's clock passes not_after_ms + clock_skew_allowance_ms + bound_ms: it is then "
-        "past its bound apart from what it runs past it until its next delivery check — the "
-        "rest of the piece the bound fell into and, when its walk had not stopped, the walk up "
-        "to its next poll that reads the clock, the stopped seed's finalisation and the "
-        "building up to that check (bound) —, a run of no stated length "
-        "(deadline_check.max_uninterruptible_ms is null, and observed_max_uninterruptible_ms "
-        "is an observation, not a margin). A GET /traverse/attempt that still answers running "
-        "or stopping after that instant shows that run still going: a ledger that must not "
-        "let two attempts overlap keeps polling while it answers so, or adds a margin of its "
-        "own. ";
-    att["release_rule"] = "A ledger may release an attempt's capacity before it finished only on "
-        "a 404 with tombstone: true and covers_admission: true from the same server_instance, "
-        "for an attempt it sent with exactly that not_after_ms and with expect_server_instance "
-        "equal to that server_instance (a copy reaching a restarted process or another server is "
-        "then refused, instance_mismatch). An attempt sent without not_after_ms, or without "
-        "expect_server_instance, is never released early on a tombstone. Otherwise it releases "
-        "only on a finished state (GET /traverse/attempt, a cancel's 404 or 200 with state "
-        "finished, the 409 refusing a copy of the request whose attempt — the id's state, as "
-        "GET answers it, with its attempt_id and server_instance — says state finished, or the "
-        "response; replay-safe only as stated next), on an expired 409 (below), or once its "
-        "own clock passes not_after_ms + clock_skew_allowance_ms + bound_ms (the clock release, "
-        "below). " + finished_hold + expired_ground + clock_ground
-        + "A 429, a cancel's 200 with state stopping, a 409 whose attempt says running or "
-        "stopping or is a tombstone, and a 409 instance_mismatch release nothing. Assumed: the "
-        "ledger's clock is within clock_skew_allowance_ms of this server's, this server's clock "
-        "does not step back by more than that, nothing between the ledger and the server "
-        "rewrites a request's attempt_id, not_after_ms or expect_server_instance, no copy of "
-        "the request reaches another server that serves the same ledger (a server knows only "
-        "its own tombstones and holds; expect_server_instance refuses such a copy only where it "
-        "names that server's instance), and, for the clock release, that the attempt's run "
-        "past its bound has ended by then";
+    // not_after_ms and expect_server_instance (their checks, their 409s and the order of the
+    // refusals), the tombstone of a cancel and what it suppresses (retention_s 0: none), and
+    // when a ledger may release an attempt's capacity: the SPEC's rules, by reference
+    att["not_after"] = kNotAfterRule;
+    att["instance"] = kInstanceRule;
+    att["suppression"] = kSuppressionRule;
+    att["release_rule"] = kReleaseRule;
     return att;
 }
 

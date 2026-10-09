@@ -294,6 +294,9 @@ SCHEMA = {
     'selection': ['pass', 'support', 'access'],
     'capabilities_predicate': ['operators', 'strands', 'access'],
     'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
+    # the block of GET /traverse/capabilities (SPEC §23): the gate fields and the route of the
+    # full block
+    'pattern_gate': None,
     # output.labels "all" (SPEC §14)
     'anchor_truncated': ['kmer', 'row', 'cap', 'total'],
     'occurrence': ['seq_id', 'record', 'strand', 'nt_coords', 'nt_length'],
@@ -305,6 +308,38 @@ SCHEMA = {
     'labels_cut': ['reason', 'returned'],
     'occurrences_cut': ['reason', 'labels'],
 }
+# The fields of the full block that GET /traverse/capabilities keeps for a client that reads it
+# alone (SPEC §23, the gate block): every key the search service gates on or parses, and
+# counting -- its interface inventory of 2026-10-08, §3.10: the version, available and
+# unavailable_reason gate the host (capabilities.py:637-645, 752-781); modes, projections,
+# kinds, protein_residues, genetic_codes and strands gate request values (validate.py:667,
+# 676-684, 338-343, 147-175, 520-531, 688); scopes, scopes_by_graph_mode, graph_mode and k gate
+# scopes and lengths (capabilities.py:694, 728-736, 809-814); long_patterns and long_search the
+# long patterns (capabilities.py:738-750); finalize_reserve_ms is the budget floor
+# (validate.py:561-575); support, placement and annotation gate record_verified and labels
+# (validate.py:485-515, 685-687); default_long_search, default_genetic_code,
+# default_occurrences, default_time_budget_ms and mask are parsed (capabilities.py:670-714).
+# The server's list is pattern.cpp's kPatternGateKeys and kPatternGateCaps
+GATE_KEYS = ['pattern_contract_version', 'available', 'unavailable_reason',
+             'modes', 'projections', 'kinds', 'protein_residues', 'genetic_codes', 'strands',
+             'scopes', 'scopes_by_graph_mode', 'graph_mode', 'k',
+             'long_patterns', 'long_search', 'default_long_search',
+             'finalize_reserve_ms', 'default_time_budget_ms', 'default_genetic_code',
+             'default_occurrences',
+             'support', 'placement', 'annotation', 'mask', 'counting',
+             'caps']
+# the caps of the gate block: the ceilings and the chunk size (max_patterns) the service gates
+# on (validate.py:423-460, 701-717), and the two it parses (min_information_bits, max_anchors)
+GATE_CAPS = ['max_patterns', 'max_contexts', 'max_anchors', 'max_paths', 'max_steps',
+             'time_budget_ms', 'min_information_bits', 'max_memory_mb', 'max_labels_per_anchor']
+SCHEMA['pattern_gate'] = GATE_KEYS + ['details']
+# the route of the full block, which the /traverse block names (SPEC §23)
+DETAILS = 'GET /pattern/capabilities'
+# what caps_rule refers to: the section that classifies every cap (SPEC §4.5)
+CAPS_RULE = 'SPEC-pattern-search.md section 4.5'
+# the full block's graph fields, null while the index loads (SPEC §10.2)
+GRAPH_FIELDS = ('graph_mode', 'k', 'alphabet', 'strand_stated', 'mask', 'counting',
+                'dummy_fraction', 'scopes', 'placement', 'support', 'annotation')
 ENTRY_DESCRIPTION = ['id', 'kind', 'pattern', 'length', 'information_bits',
                      'anchor_information_bits', 'min_anchor_information_bits']
 ENTRY_ANSWERED = ENTRY_DESCRIPTION + ['mode', 'scope', 'strands', 'palindromic', 'counts',
@@ -2180,9 +2215,8 @@ class Checker:
         # same version)
         self.ok(b['default_projection'] == 'none', path + '.default_projection',
                 'version 1: an omitted output.labels is "none"')
-        # the rule names every cap
-        for cap in b['caps']:
-            self.ok(cap in b['caps_rule'], path + '.caps_rule', f'{cap} not in the rule')
+        # the caps are classified in SPEC §4.5 (test_caps_rule_section_classifies_every_cap)
+        self.ok(b['caps_rule'] == CAPS_RULE, path + '.caps_rule', f'a reference to {CAPS_RULE}')
         self.ok(not set(b['projections']) & set(b['projections_later_increment']),
                 path + '.projections_later_increment')
         self.ok(not set(b['kinds']) & set(b['kinds_later_increment']),
@@ -2293,11 +2327,26 @@ class TestPatternFixtures(unittest.TestCase):
         cls.bodies = {name: (load(name, 'request.json'), load(name, 'answer.json'))
                       for name in cls.fixtures}
 
+    def full_block(self, name):
+        """The full pattern block of GET fixture |name| (SPEC §23): the document of
+        /pattern/capabilities, the `pattern` member of /capabilities, that of
+        /traverse/capabilities without `details`; None for a refusal."""
+        f = self.fixtures[name]
+        doc = self.bodies[name][1]
+        if f['status'] != 200:
+            return None
+        if f['path'].split('?')[0] == '/pattern/capabilities':
+            return doc
+        return {k: v for k, v in doc['pattern'].items() if k != 'details'}
+
     def capabilities_of(self, server):
-        """The pattern block of the server a fixture ran on (its GET /capabilities fixture)."""
+        """The full pattern block of the server a fixture ran on (its first GET fixture
+        answered by the loaded server)."""
         for name, f in self.fixtures.items():
-            if f['server'] == server and f['method'] == 'GET':
-                return self.bodies[name][1]['pattern']
+            if f['server'] == server and f['method'] == 'GET' and not f['hand_made']:
+                b = self.full_block(name)
+                if b is not None:
+                    return b
         return None
 
     def check_stored(self, name, mutate=None):
@@ -2397,25 +2446,178 @@ class TestPatternFixtures(unittest.TestCase):
         check.ok(f['status'] in (400, 503), 'status')
 
     def capabilities_document(self, check, f, doc):
+        """A GET of the three capabilities routes (SPEC §10.1, §23): the full block on
+        /capabilities and /pattern/capabilities (there the document itself), the block with
+        `details` on /traverse/capabilities; /pattern/capabilities with ?graph= on a
+        single-graph server a 400 {error}."""
         multi = f['server'] == 'multi'
-        check.block(doc['pattern'], 'pattern', multi)
-        if f['path'] == '/capabilities':
+        route = f['path'].split('?')[0]
+        if f['status'] != 200:
+            check.ok(route == '/pattern/capabilities' and f['status'] == 400 and not multi
+                     and re.search(r'[?&]graph(_path)?=', f['path']), 'status',
+                     'only ?graph= on a single-graph server is refused')
+            check.keys(doc, ['error'], 'answer')
+            check.ok(isinstance(doc['error'], str) and 'single graph' in doc['error'],
+                     'answer.error')
+            return
+        if route == '/pattern/capabilities':
+            check.block(doc, 'pattern', multi)
+            return
+        b = doc['pattern']
+        if route == '/traverse/capabilities':
+            check.ok(b.get('details') == DETAILS, 'pattern.details', DETAILS)
+            check.ok(set(GATE_KEYS) & set(SCHEMA['capabilities_multi' if multi else
+                                                  'capabilities'])
+                     <= set(b), 'pattern', 'every gate field of the block')
+            b = {k: v for k, v in b.items() if k != 'details'}
+        else:
+            check.ok(route == '/capabilities', 'path')
+            check.ok('details' not in b, 'pattern.details', 'only on /traverse/capabilities')
+        check.block(b, 'pattern', multi)
+        if route == '/capabilities':
             check.ok(doc['mode'] == ('multi' if multi else 'single'), 'mode')
             listed = not multi
             check.ok(('pattern' in doc['features']) is listed, 'features')
             check.ok(doc['routes'].get('pattern') == ('POST /pattern' if listed else None),
                      'routes.pattern')
-        else:
-            check.ok(f['path'].startswith('/traverse/capabilities'), 'path')
+            check.ok(doc['routes'].get('pattern_capabilities') == (DETAILS if listed else None),
+                     'routes.pattern_capabilities')
 
     def test_the_block_is_the_same_on_both_routes(self):
+        """SPEC §23: on every fixture server the full block is the same on /capabilities and
+        /pattern/capabilities, and the block of /traverse/capabilities is the full block with
+        `details` (phase 1), every gate field with the full block's value."""
         by_server = {}
         for name, f in self.fixtures.items():
+            if f['method'] == 'GET' and f['status'] == 200 and not f['hand_made']:
+                by_server.setdefault(f['server'], []).append(name)
+        routes = set()
+        for server, names in by_server.items():
+            full = self.full_block(names[0])
+            for name in names:
+                with self.subTest(fixture=name):
+                    self.assertEqual(full, self.full_block(name))
+                    route = self.fixtures[name]['path'].split('?')[0]
+                    routes.add(route)
+                    if route != '/traverse/capabilities':
+                        continue
+                    b = self.bodies[name][1]['pattern']
+                    self.assertEqual(dict(full, details=DETAILS), b)
+                    for key in GATE_KEYS:
+                        if key in full:
+                            self.assertEqual(full[key], b[key], key)
+                    for cap in GATE_CAPS if 'caps' in full else ():
+                        self.assertEqual(full['caps'][cap], b['caps'][cap], cap)
+        self.assertEqual({'/capabilities', '/traverse/capabilities', '/pattern/capabilities'},
+                         routes)
+
+    def test_gate_keys_are_the_servers(self):
+        """GATE_KEYS and GATE_CAPS are the server's lists (pattern.cpp kPatternGateKeys,
+        kPatternGateCaps, read from the source), each a field of the full block (SPEC §10.2)."""
+        self.assertLessEqual(set(GATE_KEYS), set(SCHEMA['capabilities']))
+        self.assertLessEqual(set(GATE_CAPS), set(CAPS))
+        self.assertEqual(len(GATE_KEYS) + len(GATE_CAPS), len(set(GATE_KEYS) | set(GATE_CAPS)))
+        if not os.path.isfile(PATTERN_CPP):
+            self.skipTest('the server sources are not in this checkout')
+        with open(PATTERN_CPP, encoding='utf-8') as f:
+            source = f.read()
+        for name, expected in (('kPatternGateKeys', GATE_KEYS), ('kPatternGateCaps', GATE_CAPS)):
+            m = re.search(r'const char \*const ' + name + r'\[\] = \{(.*?)\};', source, re.S)
+            self.assertTrue(m, name)
+            self.assertEqual(expected, re.findall(r'"([a-z_]+)"', m.group(1)), name)
+        self.assertIn('"' + DETAILS + '"', source)
+
+    def test_caps_rule_section_classifies_every_cap(self):
+        """caps_rule refers to SPEC §4.5, and §4.5 classifies every cap of every fixture
+        server's block: each named once, as a request field's maximum or as the server's
+        policy."""
+        if not os.path.isfile(SPEC):
+            self.skipTest('docs/SPEC-pattern-search.md is not in this checkout')
+        with open(SPEC, encoding='utf-8') as f:
+            text = f.read()
+        m = re.search(r'^### 4\.5 .*?$(.*?)^## 5\. ', text, re.M | re.S)
+        self.assertTrue(m, 'SPEC §4.5')
+        section = m.group(1)
+        m = re.search(r'\*\*Every cap of the capabilities\' `caps`, classified\*\*.*?\n\n'
+                      r'(.*?)\n\n', section, re.S)
+        self.assertTrue(m, 'the classification in §4.5')
+        kinds = re.findall(r'^- \*\*(.*?)\*\*(.*?)(?=^- |\Z)', m.group(1), re.M | re.S)
+        self.assertEqual(['the maximum of a request field', "the server's policy"],
+                         [k for k, _ in kinds])
+        named = [re.findall(r'`([a-z_]+)`', body) for _, body in kinds]
+        caps = set()
+        for name, f in self.fixtures.items():
+            b = self.full_block(name) if f['method'] == 'GET' else None
+            if b and 'caps' in b:
+                self.assertEqual(CAPS_RULE, b['caps_rule'], name)
+                caps |= set(b['caps'])
+        self.assertEqual(set(CAPS), caps)
+        for cap in caps:
+            # in exactly one of the two lists (the request field's name is the cap's)
+            self.assertEqual(1, sum(cap in n for n in named), cap)
+        policy = {'max_patterns', 'min_information_bits', 'max_checked_entries',
+                  'max_predicate_labels'}
+        self.assertEqual(policy, set(named[1]) & caps)
+        # a request field's maximum is a field of the request
+        self.assertLessEqual(caps - policy, set(SCHEMA['request']))
+
+    def test_capabilities_routes_refuse_what_v1_never_answers(self):
+        """SPEC §23: the stored capabilities documents pass, and each rule refuses a document
+        that breaks it -- the /traverse block without `details`, naming another route, or
+        missing a gate field; `details` in the full block; /capabilities without the route of
+        the full block; caps_rule not the reference to §4.5; a 400 of ?graph= with a code or on
+        a route that answers it; and the full block while the index loads with a graph field
+        set."""
+        def run(name, mutate=None):
+            f = self.fixtures[name]
+            doc = copy.deepcopy(self.bodies[name][1])
+            if mutate:
+                mutate(doc)
+            self.capabilities_document(Checker(Raising(), name), f, doc)
+
+        def pop(*path):
+            def m(doc):
+                for key in path[:-1]:
+                    doc = doc[key]
+                doc.pop(path[-1])
+            return m
+
+        def put(value, *path):
+            def m(doc):
+                for key in path[:-1]:
+                    doc = doc[key]
+                doc[path[-1]] = value
+            return m
+
+        for name, f in self.fixtures.items():
             if f['method'] == 'GET':
-                by_server.setdefault(f['server'], []).append(self.bodies[name][1]['pattern'])
-        for server, blocks in by_server.items():
-            for b in blocks[1:]:
-                self.assertEqual(blocks[0], b, server)
+                run(name)
+        cases = [
+            ('traverse_capabilities', pop('pattern', 'details'), 'details'),
+            ('traverse_capabilities', put('GET /capabilities', 'pattern', 'details'), 'details'),
+            ('traverse_capabilities_multi_graph', pop('pattern', 'details'), 'details'),
+            ('traverse_capabilities', pop('pattern', 'counting'), 'gate field'),
+            ('traverse_capabilities_mask_absent', pop('pattern', 'long_search'), 'gate field'),
+            ('pattern_capabilities', put(DETAILS, 'details'), 'fields'),
+            ('capabilities', put(DETAILS, 'pattern', 'details'), 'details'),
+            ('capabilities', pop('routes', 'pattern_capabilities'), 'pattern_capabilities'),
+            ('capabilities_multi_graph', put(DETAILS, 'routes', 'pattern_capabilities'),
+             'pattern_capabilities'),
+            ('pattern_capabilities', put('SPEC-pattern-search.md section 7.4', 'caps_rule'),
+             'section 4.5'),
+            ('pattern_capabilities_graph_param', put('invalid_request', 'code'), 'fields'),
+            ('pattern_capabilities_loading', put('basic', 'graph_mode'), 'loads'),
+            ('pattern_capabilities_loading', put(31, 'k'), 'loads'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+        # a 400 where the route answers: on the multi-graph server
+        f = dict(self.fixtures['pattern_capabilities_graph_param'], server='multi')
+        with self.assertRaisesRegex(AssertionError, 'only \\?graph='):
+            self.capabilities_document(Checker(Raising(), 'multi'), f,
+                                       self.bodies['pattern_capabilities_graph_param'][1])
 
     def test_requests_and_answers_agree(self):
         """What a fixture's request asks is what its answer states."""
@@ -2588,10 +2790,11 @@ class TestPatternFixtures(unittest.TestCase):
         built_at_load and absent, DESIGN §4)."""
         seen = {'unavailable': {}, 'counting': {}, 'mask': {}}
         for name, f in self.fixtures.items():
-            if f['method'] != 'GET':
+            if f['method'] != 'GET' or f['status'] != 200 or f['hand_made']:
                 continue
-            route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
-            b = self.bodies[name][1]['pattern']
+            route = 'probe' if f['path'].startswith('/traverse/') \
+                else 'pattern' if f['path'].startswith('/pattern/') else 'capabilities'
+            b = self.full_block(name)
             if b['available'] is False:
                 seen['unavailable'].setdefault(b['unavailable_reason'], set()).add(route)
             if b.get('counting') is not None:
@@ -2610,7 +2813,7 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(set(MASKS), set(seen['mask']))
         for kind, values in seen.items():
             for value, routes in values.items():
-                self.assertEqual({'probe', 'capabilities'}, routes, (kind, value))
+                self.assertLessEqual({'probe', 'capabilities'}, routes, (kind, value))
 
     def test_the_codes_are_the_sources(self):
         """REFUSALS and UNAVAILABLE are the codes the server's sources write (a code missing
@@ -2817,7 +3020,9 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertRefusesMutations(cases)
 
     def test_hand_made_bodies_are_the_codes(self):
-        """The two hand-made 503 bodies are written by the code as stored here."""
+        """The hand-made bodies are written by the code as stored here: the two 503s, and the
+        full block while the index loads (the loaded masked server's block with what
+        pattern_capabilities_json sets to null without the graph)."""
         if not (os.path.isfile(PATTERN_CPP) and os.path.isfile(SERVER_UTILS_CPP)):
             self.skipTest('the server sources are not in this checkout')
         with open(PATTERN_CPP, encoding='utf-8') as f:
@@ -2825,7 +3030,24 @@ class TestPatternFixtures(unittest.TestCase):
         with open(SERVER_UTILS_CPP, encoding='utf-8') as f:
             server_utils = f.read()
         hand_made = {n for n, f in self.fixtures.items() if f['hand_made']}
-        self.assertEqual({'deadline_503', 'initializing_503'}, hand_made)
+        self.assertEqual({'deadline_503', 'initializing_503', 'pattern_capabilities_loading'},
+                         hand_made)
+
+        # the graph fields the code sets to null without the graph, read from its source
+        m = re.search(r'const char \*graph_fields\[\] = \{(.*?)\};', pattern_cpp, re.S)
+        self.assertTrue(m, 'pattern_capabilities_json graph_fields')
+        self.assertEqual(list(GRAPH_FIELDS), re.findall(r'"([a-z_]+)"', m.group(1)))
+        loading = self.bodies['pattern_capabilities_loading'][1]
+        loaded = self.bodies['pattern_capabilities'][1]
+        self.assertTrue(loaded['available'])
+        self.assertEqual(set(loaded), set(loading))
+        for key, value in loading.items():
+            if key in GRAPH_FIELDS + ('available', 'unavailable_reason'):
+                self.assertIsNone(value, key)
+            elif key == 'predicate':
+                self.assertEqual(dict(loaded['predicate'], access=None), value)
+            else:
+                self.assertEqual(loaded[key], value, key)
 
         _, deadline = self.bodies['deadline_503']
         self.assertEqual('deadline', deadline['code'])

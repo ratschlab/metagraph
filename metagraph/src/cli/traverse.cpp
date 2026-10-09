@@ -44,6 +44,15 @@ using namespace mtg::graph::traversal;
 
 namespace {
 
+// The rules of the capabilities' coordinates and resolve blocks, stated by reference to the
+// SPEC section that holds each (the documents a service returns in one piece have a ceiling of
+// 32 KiB; the numbers a client computes with are fields beside them). ASCII only
+constexpr char kCoordinatesRule[]
+        = "SPEC-labeled-traversal-core.md section 7.1, record coordinates";
+constexpr char kCoordinatesOutputBound[]
+        = "SPEC-labeled-traversal-core.md section 7.1, record coordinates: what bounds the block";
+constexpr char kResolveTimeBudgetRule[] = "SPEC-labeled-traversal-core.md section 4.5";
+
 // ---------------------------------------------------------------- the attempt's delivery check
 
 // The check of the server's attempt while the results are built (traverse_attempts.hpp): its
@@ -2273,42 +2282,10 @@ Json::Value coordinates_capabilities_json(const LabelOracle &oracle) {
     c["kinds"] = std::move(kinds);
     c["limitation"] = "coordinates";
     c["action"] = "drop_coordinates";
-    // The true bound of the block: --traverse-max-memory-mb is 0 by default,
-    // so neither it nor the cap bounds the block's size on its own. The text names the probe's
-    // own max_memory_mb / max_work_units rather than a value: this function sees no server
-    // configuration, and a server maximum, when set, is the budget of every request without one
-    c["output_bound"] = "an occurrence is a coordinate chain the walk read (every coordinate "
-        "charged 1 work unit with its row), so a seed's listed occurrences are at most the "
-        "coordinates it read, and at most min(chains, max_coordinate_occurrences) per run and "
-        "seed label; under a memory budget (bounds.max_memory_mb, or this server's "
-        "max_memory_mb, which a request without one runs under when it is not 0) every entry "
-        "and occurrence is charged when its run is created (at the count it starts with, in the "
-        "requested detail), so the block is within the budget; under a work budget "
-        "(bounds.max_work_units, or this server's max_work_units) the coordinates read are "
-        "within it; with neither (both maxima 0, their default) and \"unlimited\", nothing else "
-        "bounds the block: set a budget, keep the cap, or drop the coordinates";
-    c["rule"] = "with output.coordinates true each seed result carries a coordinates block "
-        "under support trace, otherwise coordinates null with coordinates_reason (index has no "
-        "coordinates | support kmer | no traversal | partial derivation); per seed label its "
-        "occurrences of the seed, per requested arm one entry per run with the occurrences of "
-        "the run's own bases [from_bp, to_bp): 0-based, half-open, forward strand; an occurrence "
-        "is a chain of the label's coordinates live at the run's last node, c its k-mer "
-        "coordinate there and L = to_bp - from_bp: [c + k - L, c + k) on the right arm, "
-        "[c, c + L) on the left (L = 0: empty, at the seed boundary). Header labels (kind "
-        "record) number positions within their record; column labels (kind column) in the "
-        "column's k-mer index space, record i's k-mer j being offset_i + j with offset_{i+1} = "
-        "offset_i + len_i - k + 1, so a column label's interval in a record's last k - 1 bases "
-        "shares its numbers with the next record's first k - 1 positions: such an interval is "
-        "attributed to one record only with the record lengths, which are not stated, and "
-        "column intervals of different records can overlap (trace_record_boundaries: a "
-        "column's trace can cross records); mixed: each label's kind says which. Each list "
-        "keeps its first max_coordinate_occurrences by start and states occurrences_total when "
-        "cut (the coordinates limitation, in no outcome class, and complete false); "
-        "chains_ended counts the chains that stopped on the run's lineage before its last node; "
-        "lower_bound marks a run a switch entered into a label whose own lineage was live there, "
-        "its chains that start at the switch node left out (complete false, runs_lower_bound). "
-        "Assumed, not detectable from the index: one strand per record (no --fwd-and-reverse "
-        "build) and unique headers";
+    // what bounds the block's size (no server limit does on its own: --traverse-max-memory-mb
+    // is 0 by default) and the coordinates' rule, both the SPEC's
+    c["output_bound"] = kCoordinatesOutputBound;
+    c["rule"] = kCoordinatesRule;
     return c;
 }
 
@@ -5319,40 +5296,9 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     t["check_kmers"] = uint_json(kResolveCheckKmers);
     t["check_labels"] = uint_json(kResolveCheckLabels);
     t["stop_phases"] = strings_json({ "rows", "support" });
-    t["rule"] = "opt-in: a request without bounds.time_budget_ms runs without a deadline, "
-        "whatever max_time_ms; with it, a number of ms above finalize_reserve_ms (else "
-        "400), lowered to max_time_ms when that is not 0 (stated in limits.clamped), the "
-        "deadline starting when the request's body is parsed. The work stops at the budget "
-        "less finalize_reserve_ms: the deadline is read between two batches of annotation rows "
-        "(a discovery's pass and the explicit labels' priming: the first of 64 rows, then up to "
-        "4,096 rows or about 64 MiB of rows) and, on a direct-access annotation, before every "
-        "check_kmers k-mers of the explicit labels' hits, which are then fetched in pieces of "
-        "that many k-mers (on the row paths each priming batch's k-mers take their hits from "
-        "the primed rows before the deadline is read). A stop answers 200 "
-        "with stop {phase (rows | support), reason time, resolved_kmers, query_kmers, "
-        "resolved_bp, query_bp, remainder_from_bp, message}: the answer is then exactly the "
-        "resolve of the sequence's first resolved_kmers k-mers (its num_kmers, graph_runs, "
-        "labels, labels_truncated, candidates and selection are those of that prefix; a run "
-        "ending at resolved_kmers may continue past it), resolved_kmers being the first k-mer "
-        "in the graph whose labels were not read (the k-mers before it absent from the graph "
-        "are resolved); an explicit selection whose interval ends past the prefix, or that "
-        "names a label a discovery did not meet in the prefix, is not made (selection: null), "
-        "while what holds whatever the stop is refused (400) as without one: an interval "
-        "empty, out of range or not fully in the graph, and with explicit labels a seed label "
-        "that is not one of them; without a stop, stop "
-        "is null, and limits {time_budget_ms, finalize_reserve_ms, clamped} is stated either "
-        "way. The answer is built within the reserve: the loops over its labels after the work "
-        "and its JSON read the whole budget every check_labels labels or objects, its text "
-        "every 64 KiB and its compression every block; past the budget the answer is 503 "
-        "{error, code: deadline}, never a partial one. Not polled: the parse of the request, "
-        "the mapping of the query's k-mers (one call, linear in the query, which max_query_bp "
-        "bounds), the resolution of explicit labels and their query's setup (linear in their "
-        "bytes; no server limit caps their number), one row batch's decode and accumulation, "
-        "a discovery's pass setup (linear in the k-mers), one piece of hits (on a "
-        "direct-access annotation check_kmers x labels cell reads) and its accumulation, the "
-        "ranking of a discovery's labels and the sort of the candidates (n log n), the seed "
-        "selection, and the transport: a stop comes up to one such piece after the work "
-        "deadline, and an overrun of the reserve by them answers 503";
+    // the rule (opt-in, the clamp, where the deadline is read, the stop and the prefix it
+    // answers, the reserve and its 503, what is not polled) is the SPEC's
+    t["rule"] = kResolveTimeBudgetRule;
     Json::Value r;
     r["time_budget"] = std::move(t);
     return r;

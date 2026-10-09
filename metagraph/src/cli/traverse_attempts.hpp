@@ -513,8 +513,8 @@ class AttemptRegistry {
     // the wall clock not_after_ms is compared with (Unix epoch ms)
     uint64_t now_ms() const;
     // the `attempts` block of both capabilities routes: the fields, routes, retention, the
-    // bound's parts with their number types (integers, ms) and rules, and the clock skew a
-    // ledger adds to not_after_ms
+    // bound's parts with their number types (integers, ms), the clock skew a ledger adds to
+    // not_after_ms, and the rules as references to the SPEC sections that state them
     Json::Value capabilities_json() const;
     // POST /traverse/cancel {attempt_id, wait_ms, not_after_ms}: (HTTP status, body). An
     // unknown id is tombstoned (404, tombstone: true) for at least retention_s and, when the

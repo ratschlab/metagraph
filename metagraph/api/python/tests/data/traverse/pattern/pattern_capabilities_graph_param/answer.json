@@ -1,0 +1,3 @@
+{
+ "error": "Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path' parameter"
+}

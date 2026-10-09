@@ -1,0 +1,164 @@
+{
+ "alphabet": null,
+ "annotation": null,
+ "available": null,
+ "caps": {
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_checked_entries": 50,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_predicate_contexts": 100000,
+  "max_predicate_labels": 10000,
+  "max_predicate_work": 100000000,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "time_budget_ms": 600000
+ },
+ "caps_rule": "SPEC-pattern-search.md section 4.5",
+ "counting": null,
+ "default_genetic_code": 1,
+ "default_long_search": "anchors",
+ "default_mode": "all_or_count",
+ "default_occurrences": true,
+ "default_projection": "none",
+ "default_scope": "any_offset",
+ "default_strands": "both",
+ "default_time_budget_ms": 60000,
+ "delivery_mbps": {
+  "build": 10,
+  "compress": 50
+ },
+ "dummy_fraction": null,
+ "finalize_reserve_ms": 250,
+ "genetic_codes": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  16,
+  21,
+  22,
+  23,
+  24,
+  25,
+  26,
+  27,
+  28,
+  29,
+  30,
+  31,
+  32,
+  33
+ ],
+ "graph_cleaned": "unknown",
+ "graph_mode": null,
+ "k": null,
+ "kinds": [
+  "dna",
+  "iupac",
+  "protein"
+ ],
+ "kinds_later_increment": [],
+ "long_patterns": "anchors_counted",
+ "long_search": [
+  "anchors",
+  "paths"
+ ],
+ "mask": null,
+ "modes": [
+  "count",
+  "all_or_count",
+  "partial"
+ ],
+ "pattern_contract_version": 1,
+ "placement": null,
+ "predicate": {
+  "access": null,
+  "operators": [
+   "any",
+   "all",
+   "none",
+   "at_least",
+   "and",
+   "or",
+   "not"
+  ],
+  "strands": [
+   "either",
+   "context"
+  ]
+ },
+ "projections": [
+  "none",
+  "all",
+  "predicate_only"
+ ],
+ "projections_later_increment": [],
+ "protein_residues": [
+  "A",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "K",
+  "L",
+  "M",
+  "N",
+  "P",
+  "Q",
+  "R",
+  "S",
+  "T",
+  "V",
+  "W",
+  "Y",
+  "X",
+  "B",
+  "Z",
+  "J",
+  "*"
+ ],
+ "protein_rule": "SPEC-pattern-search.md section 12.2",
+ "records_shorter_than_k": "not_indexed",
+ "resident_only": true,
+ "scopes": null,
+ "scopes_by_graph_mode": {
+  "basic": [
+   "suffix",
+   "any_offset"
+  ],
+  "canonical": [
+   "suffix",
+   "any_offset"
+  ],
+  "primary": [
+   "any_offset"
+  ]
+ },
+ "strand_stated": null,
+ "strands": [
+  "both",
+  "forward",
+  "reverse"
+ ],
+ "support": null,
+ "unavailable_reason": null
+}

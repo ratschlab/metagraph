@@ -458,7 +458,7 @@ TEST(GraphletAttemptRegistry, NotAfterMsRefusesAtStart) {
 }
 
 // The attempts block of both capabilities routes: integers where usage.bound states integers,
-// the hard cap, the clock skew a ledger adds, the not_after rule
+// the hard cap, the clock skew a ledger adds
 TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
     AttemptSettings s;
     s.clock_skew_ms = 2500;
@@ -481,10 +481,6 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
         fields.append(f);
     }
     EXPECT_EQ(fields, att["fields"]);
-    EXPECT_NE(std::string::npos, att["not_after"].asString().find("clock_skew_allowance_ms"));
-    // an unanswered request may already be running
-    EXPECT_NE(std::string::npos, att["not_after"].asString().find("cannot start subsequently"));
-    EXPECT_EQ(std::string::npos, att["not_after"].asString().find("never started"));
     EXPECT_EQ(registry.server_instance(), att["server_instance"].asString());
     // the tombstone's cap as applied, the cancel's fields, and the normative release rule
     EXPECT_EQ(Json::uintValue, att["tombstone_max_s"].type());
@@ -494,36 +490,54 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
         cancel_fields.append(f);
     }
     EXPECT_EQ(cancel_fields, att["cancel_fields"]);
-    for (const char *phrase : { "covers_admission: true", "same server_instance",
-                                "exactly that not_after_ms", "expect_server_instance",
-                                "never released early",
-                                "not_after_ms + clock_skew_allowance_ms + bound_ms",
-                                // what a finished state promises, and what it
-                                // assumes
-                                "A finished attempt's id stays refused (409)",
-                                "never dropped early",
-                                "assumes that no copy of the request arrives after the attempt "
-                                "left retention" }) {
-        EXPECT_NE(std::string::npos, att["release_rule"].asString().find(phrase)) << phrase;
-    }
-    // the hold is live through suppressed_until_ms inclusive, and a refused copy is judged by
-    // its own not_after_ms alone
-    for (const char *phrase : { "suppressed_until_ms",
-                                "the wall clock while it reads at most suppressed_until_ms "
-                                "(inclusive)",
-                                "for the refused request's 409 its own, absent when it has none",
-                                "finished attempts held past their retention" }) {
-        EXPECT_NE(std::string::npos, att["suppression"].asString().find(phrase)) << phrase;
-    }
-    EXPECT_NE(std::string::npos, att["instance"].asString().find("instance_mismatch"));
     // a retention below the cap's setting: the cap is never below it
     s.retention_s = 100'000;
     s.tombstone_max_s = 10;
     EXPECT_EQ(100'000u, AttemptRegistry(s).capabilities_json()["tombstone_max_s"].asUInt64());
-    // retention 0: no tombstones, said so
+    // retention 0: no tombstones, stated by the number (the rule of both cases is the SPEC's)
     s.retention_s = 0;
-    EXPECT_NE(std::string::npos, AttemptRegistry(s).capabilities_json()["suppression"].asString()
-                                         .find("no_suppression"));
+    EXPECT_EQ(0u, AttemptRegistry(s).capabilities_json()["retention_s"].asUInt64());
+}
+
+// The rules of the attempts block are references to the sections of
+// SPEC-labeled-traversal-core.md that state them, the same whatever the settings (retention_s
+// 0 included: its case is in the section, the number in retention_s), in printable ASCII; the
+// rules' substance is checked in the SPEC (api/python/tests/test_traverse_capabilities_references.py)
+TEST(GraphletAttemptRegistry, CapabilitiesRulesAreSpecReferences) {
+    const std::vector<std::pair<std::vector<std::string>, std::string>> rules = {
+        { { "bound" }, "section 6.8, the attempt's bound" },
+        { { "not_after" }, "section 5, not_after_ms" },
+        { { "instance" }, "section 5, expect_server_instance" },
+        { { "suppression" }, "section 10.3, POST /traverse/cancel: the tombstone" },
+        { { "release_rule" }, "section 10.3, the release rule" },
+        { { "delivery_reserve", "rule" }, "section 6.8, the delivery reserve" },
+        { { "delivery_reserve", "calibration" },
+          "section 6.8, the delivery reserve: calibration" },
+    };
+    FakeClock clock;
+    for (uint64_t retention_s : { uint64_t(60), uint64_t(0) }) {
+        AttemptSettings settings = settings_with(&clock, retention_s);
+        settings.poll_stride = 3;
+        const AttemptRegistry registry(settings);
+        const Json::Value caps = registry.capabilities_json();
+        if (retention_s) {
+            // the attempt routes' errors state the hold of a finished attempt
+            EXPECT_NE(std::string::npos, registry.retention_text().find(
+                    "after it finished or after its latest refused copy"));
+        }
+        for (const auto &[path, section] : rules) {
+            Json::Value v = caps;
+            for (const std::string &key : path) {
+                v = v[key];
+            }
+            const std::string text = v.asString();
+            EXPECT_EQ("SPEC-labeled-traversal-core.md " + section, text)
+                << path.back() << ", retention_s " << retention_s;
+            EXPECT_TRUE(std::all_of(text.begin(), text.end(),
+                                    [](char c) { return c >= 0x20 && c < 0x7f; }))
+                << path.back();
+        }
+    }
 }
 
 // The seeds stop being walked at bound - max(allowance / 2, reserve), the reserve 1.25 times
@@ -651,8 +665,8 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_EQ(5, r["build_mbps"].asDouble());
     EXPECT_EQ(20, r["account_per_text_byte"]["json"].asDouble());
     EXPECT_EQ(40, r["account_per_text_byte"]["graphlet"].asDouble());
-    EXPECT_NE(std::string::npos, r["calibration"].asString().find("starting estimates"));
-    // the calibrated starting estimates
+    // the calibrated starting estimates (the measurements they come from: the SPEC's table,
+    // which calibration refers to)
     const AttemptSettings defaults;
     EXPECT_EQ(30, defaults.account_per_text_byte_json);
     EXPECT_EQ(50, defaults.account_per_text_byte_graphlet);
@@ -664,8 +678,6 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_TRUE(r["measured_build_mbps"].isNull());
     EXPECT_TRUE(r["measured_compress_mbps"].isNull());
     EXPECT_TRUE(r["measured_account_per_text_byte"]["full"].isNull());
-    EXPECT_NE(std::string::npos, registry.capabilities_json()["bound"].asString()
-                                         .find("the delivery reserve"));
 
     // the server's measurements replace the configured values: the slowest rate and the
     // smallest ratio of the last 16, the longest stop latency
@@ -773,14 +785,6 @@ TEST(GraphletAttempt, WalkUntilStatedIsTheLowestAClockReadingPollSaw) {
                   a->usage_json("completed")["bound"]["walk_until_ms"].asUInt64())
             << "poll_stride " << stride;
     }
-    // the texts state the clock-reading polls, not "every poll"
-    FakeClock clock;
-    AttemptRegistry registry(settings_with(&clock));
-    const std::string bound = registry.capabilities_json()["bound"].asString();
-    EXPECT_NE(std::string::npos, bound.find("its first poll that reads the clock after it"))
-        << bound;
-    EXPECT_NE(std::string::npos, bound.find("not a lower one in force only between two such "
-                                            "polls")) << bound;
 }
 
 // The delivery reserve's coordinate share: the walked seed's record coordinates (their part of
@@ -829,7 +833,6 @@ TEST(GraphletAttempt, ReserveCountsCoordinateText) {
     ASSERT_TRUE(r["coordinate_account_per_text_byte"].isUInt64());
     EXPECT_EQ(12u, r["coordinate_account_per_text_byte"].asUInt64());
     EXPECT_EQ(kCoordinateAccountPerTextByte, r["coordinate_account_per_text_byte"].asUInt64());
-    EXPECT_NE(std::string::npos, r["rule"].asString().find("ceil(C / coordinate_account_per_text_byte)"));
 }
 
 // An attempt with record coordinates feeds the server's measured ratio with the sample the same
@@ -1390,8 +1393,6 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         ASSERT_FALSE(registry.start(original));
         registry.finish(original, "completed", 200, 1);
         EXPECT_FALSE(registry.start(sent(registry, "z", not_after)));
-        EXPECT_NE(std::string::npos, registry.capabilities_json()["release_rule"].asString()
-                                             .find("retention_s is 0"));
     }
 }
 
@@ -1440,139 +1441,6 @@ TEST(GraphletAttemptRegistry, AFinishedStateIsReplaySafeOnlyWhenPinned) {
     EXPECT_TRUE(refused->instance_mismatch);
     EXPECT_EQ("instance_mismatch", refused->body["state"].asString());
     EXPECT_EQ(404, restarted.state("finished-pinned").first);
-    // what the contract states: the hold is the process's, a finished state is replay-safe only
-    // when pinned, and what an unpinned one assumes
-    const Json::Value caps = restarted.capabilities_json();
-    const std::string rule = caps["release_rule"].asString();
-    for (const char *phrase : { "The hold is this process's, in memory: a restarted process (a "
-                                "new server_instance) holds none",
-                                "replay-safe only as stated next",
-                                "So a finished state is replay-safe",
-                                "only for an attempt sent with expect_server_instance equal to "
-                                "this server_instance and with not_after_ms",
-                                "pins the instance, as for a tombstone",
-                                "A finished state of an attempt sent without "
-                                "expect_server_instance assumes that no copy of the request "
-                                "reaches a restarted process",
-                                // what a finished state promises
-                                "A finished attempt's id stays refused (409)",
-                                "assumes that no copy of the request arrives after the attempt "
-                                "left retention" }) {
-        EXPECT_NE(std::string::npos, rule.find(phrase)) << phrase;
-    }
-    EXPECT_NE(std::string::npos, caps["instance"].asString().find(
-            "a delayed copy of a cancelled or finished request would otherwise run there"));
-    AttemptRegistry none(settings_with(&clock, 0));
-    EXPECT_NE(std::string::npos, none.capabilities_json()["release_rule"].asString().find(
-            "a copy sent with expect_server_instance is still refused by a restarted process"));
-}
-
-// The release texts, text only: the clock release takes the attempt as stopped at its bound,
-// which it is apart from what it runs past it until its next delivery check, of no stated
-// length (not "one uninterruptible step", since only the delivery checks compare the bound),
-// and an answer of running or stopping past that instant shows that run; the 409 refusing a
-// copy carries the id's state as GET answers it, so its finished state is a finished state; an
-// expired 409 releases, because the id's registration is checked before the expiry (the order
-// the not_after text states), and settles nothing; refused copies extend a finished attempt's
-// hold; expect_server_instance has the ids' pattern and a 400; the bound names its cap and the
-// walk-until it states. With retention and without
-TEST(GraphletAttemptRegistry, ReleaseTextsStateTheOverrunAndTheGrounds) {
-    FakeClock clock;
-    for (uint64_t retention_s : { uint64_t(60), uint64_t(0) }) {
-        AttemptRegistry registry(settings_with(&clock, retention_s));
-        const Json::Value caps = registry.capabilities_json();
-        const std::string what = "retention_s " + std::to_string(retention_s);
-        auto has = [&](const char *field, const char *phrase) {
-            EXPECT_NE(std::string::npos, caps[field].asString().find(phrase))
-                << what << ", " << field << ": " << phrase;
-        };
-        for (const char *phrase : { "the cap whatever the seeds' budgets (usage.bound.capped_by: "
-                                    "content_timeout when it applied)",
-                                    "the walk stops at its first poll that reads the clock "
-                                    "after it",
-                                    "else the lowest walk-until seen: the lowest that such a "
-                                    "poll compared with",
-                                    "not a lower one in force only between two such polls",
-                                    "The bound itself is compared only at the delivery checks",
-                                    "past it the attempt runs on until its next delivery check "
-                                    "(then the 503) or its handler's return",
-                                    "when its walk had not stopped by then, the walk up to its "
-                                    "next poll that reads the clock, the stopped seed's "
-                                    "finalisation and the building of its result up to the "
-                                    "first delivery check",
-                                    "a run of no stated length" }) {
-            has("bound", phrase);
-        }
-        // the overrun is not one step
-        for (const char *field : { "bound", "not_after", "release_rule" }) {
-            EXPECT_EQ(std::string::npos, caps[field].asString().find("uninterruptible step"))
-                << what << ", " << field;
-            EXPECT_EQ(std::string::npos, caps[field].asString().find("first poll after"))
-                << what << ", " << field;
-        }
-        EXPECT_EQ(std::string::npos, caps["delivery_reserve"]["rule"].asString()
-                                             .find("first poll after")) << what;
-        for (const char *phrase : { "It is the last of the refusals, all made under one lock",
-                                    "a request naming another expect_server_instance is refused "
-                                    "first (409 instance_mismatch)",
-                                    "whatever its not_after_ms (the duplicate's 409",
-                                    "so an expired 409 means that no attempt with that id existed "
-                                    "on this server_instance when it was judged",
-                                    "cannot start subsequently",
-                                    "as past its bound once its clock passes that + bound_ms — "
-                                    "apart from what it runs past its bound, up to its next "
-                                    "delivery check, a run of no stated length" }) {
-            has("not_after", phrase);
-        }
-        EXPECT_EQ(std::string::npos, caps["not_after"].asString().find("as stopped once")) << what;
-        for (const char *phrase : { "a string matching id_pattern",
-                                    "checked first (ahead of a duplicate id and of not_after_ms)",
-                                    "and the field without attempt_id are a 400 naming the field, "
-                                    "without usage" }) {
-            has("instance", phrase);
-        }
-        for (const char *phrase : { "the 409 refusing a copy of the request whose attempt — the "
-                                    "id's state, as GET answers it, with its attempt_id and "
-                                    "server_instance — says state finished",
-                                    "on an expired 409 (below)",
-                                    "An expired 409 (state: expired) for an attempt sent with "
-                                    "exactly that not_after_ms",
-                                    "checks the id's registration (running, retained, held, "
-                                    "tombstoned) before the expiry, under one lock",
-                                    "It settles nothing",
-                                    "the 409's server_time_ms - not_after_ms is the step it "
-                                    "survives",
-                                    "The clock release takes the attempt as stopped",
-                                    "past its bound apart from what it runs past it until its "
-                                    "next delivery check",
-                                    "a run of no stated length",
-                                    "still answers running or stopping after that instant shows "
-                                    "that run still going",
-                                    "a 409 whose attempt says running or stopping or is a "
-                                    "tombstone, and a 409 instance_mismatch release nothing",
-                                    "no copy of the request reaches another server that serves "
-                                    "the same ledger",
-                                    "for the clock release, that the attempt's run past its "
-                                    "bound has ended by then",
-                                    // kept
-                                    "replay-safe only as stated next",
-                                    "not_after_ms + clock_skew_allowance_ms + bound_ms" }) {
-            has("release_rule", phrase);
-        }
-        if (retention_s) {
-            for (const char *phrase : { "at most tombstone_max_s after it finished or after its "
-                                        "latest refused copy",
-                                        "their number is at most the finishes and refused copies "
-                                        "within tombstone_max_s" }) {
-                has("release_rule", phrase);
-            }
-            EXPECT_EQ(std::string::npos, caps["release_rule"].asString().find(
-                    "tombstone_max_s bounds how many are held")) << what;
-            EXPECT_NE(std::string::npos,
-                      registry.retention_text().find("after it finished or after its latest "
-                                                     "refused copy")) << what;
-        }
-    }
 }
 
 // With clock_skew_ms 0 a cancel's covers_admission (suppressed_until_ms == not_after_ms) must

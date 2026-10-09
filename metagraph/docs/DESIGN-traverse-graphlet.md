@@ -1256,7 +1256,8 @@ delivered, and state the limiting resource and the useful next action — the st
 # 15. Attempts, cancellation and the release rule
 
 The ledger lives in the search service (§14). The backend provides what a ledger needs; SPEC §5, §7.0, §7.3 and
-§10.3 are normative, and `GET /traverse/capabilities` states the rules (`attempts`).
+§10.3 are normative, and `GET /traverse/capabilities` names them (`attempts`: each rule a reference to the SPEC
+section that states it).
 
 ## 15.1 Attempt ids and usage
 
@@ -1347,7 +1348,7 @@ no stated bound, and that an answer of `running` or `stopping` past the instant 
 
 ## 15.5 The release rule
 
-Normative, stated in the capabilities (`attempts.release_rule`) and in SPEC §5 and §10.3; the library applies it in
+Normative, stated in SPEC §5 and §10.3 (the capabilities' `attempts.release_rule` refers there); the library applies it in
 `attempts.release_verdict`, which lists the assumptions of each release (e.g. `sent_without_expect_server_instance`).
 A ledger may release an attempt's capacity:
 

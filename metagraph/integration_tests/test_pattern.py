@@ -896,6 +896,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         caps = self.server.get('capabilities').json()
         self.assertIn('pattern', caps['features'])
         self.assertEqual('POST /pattern', caps['routes']['pattern'])
+        self.assertEqual('GET /pattern/capabilities', caps['routes']['pattern_capabilities'])
         p = caps['pattern']
         expected = {
             'pattern_contract_version': 1, 'available': True, 'unavailable_reason': None,
@@ -929,13 +930,27 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         }
         self.assertEqual(expected, {x: p[x] for x in expected})
         self.assertEqual(['any_offset'], p['scopes_by_graph_mode']['primary'])
-        for rule, sections in (('caps_rule', 'sections 4.5, 7.4, 7.6, 12.1, 19'),
-                               ('protein_rule', 'section 12.2')):
-            self.assertTrue(p[rule].endswith('SPEC-pattern-search.md ' + sections), rule)
-        self.assertTrue(all(cap in p['caps_rule'] for cap in p['caps']))
-        # the same block on the probe a service reads (§7.3)
+        # references to the sections that state the rules (§4.5 classifies every cap)
+        self.assertEqual('SPEC-pattern-search.md section 4.5', p['caps_rule'])
+        self.assertEqual('SPEC-pattern-search.md section 12.2', p['protein_rule'])
+        # the same block on the probe a service reads, with the route of the full block, and
+        # the full block on its own route (SPEC §23), compressed when asked for
         probe = self.server.get('traverse/capabilities').json()
-        self.assertEqual(p, probe['pattern'])
+        self.assertEqual(dict(p, details='GET /pattern/capabilities'), probe['pattern'])
+        ret = requests.get(url=self.server.url('pattern/capabilities'),
+                           headers={'Accept-Encoding': 'gzip'}, timeout=60)
+        self.assertEqual((200, 'gzip'), (ret.status_code, ret.headers.get('Content-Encoding')))
+        self.assertEqual(p, ret.json())
+        # a parameter that would select a graph is refused on a single-graph server; any other
+        # is ignored
+        for query in ('?graph=G1', '?graph_path=x', '?other=1&graph=G1'):
+            ret = self.server.get('pattern/capabilities' + query)
+            self.assertEqual(400, ret.status_code, query)
+            self.assertEqual({'error': "Bad request: this server hosts a single graph; remove "
+                                       "the 'graph' / 'graph_path' parameter"}, ret.json())
+        self.assertEqual(p, self.server.get('pattern/capabilities?other=1').json())
+        # no other method
+        self.assertEqual(404, self.server.post('pattern/capabilities', {}).status_code)
         if self.anno.endswith(MINI_ANNO):
             # coordinates and record mapping, a budgeted row-diff annotation
             self.assertEqual(('record', 'record_verified', 'budgeted'),
@@ -2846,11 +2861,17 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             caps = server.get('capabilities').json()
             self.assertNotIn('pattern', caps['features'])
             self.assertNotIn('pattern', caps['routes'])
+            self.assertNotIn('pattern_capabilities', caps['routes'])
             multi_block = {'pattern_contract_version': 1, 'available': False,
                            'unavailable_reason': 'multi_graph_later_increment'}
             self.assertEqual(multi_block, caps['pattern'])
             probe = server.get('traverse/capabilities?graph=G1').json()
-            self.assertEqual(multi_block, probe['pattern'])
+            self.assertEqual(dict(multi_block, details='GET /pattern/capabilities'),
+                             probe['pattern'])
+            # the route of the full block answers the same block, whatever the query
+            for query in ('', '?graph=G1', '?graph_path=x'):
+                ret = server.get('pattern/capabilities' + query)
+                self.assertEqual((200, multi_block), (ret.status_code, ret.json()), query)
         finally:
             server.stop()
 
@@ -3192,9 +3213,15 @@ class TestPatternRegression(TestingBase):
 
         def without_reworded(caps):
             # prose whose wording this build changed, the rule it states unchanged: compared as
-            # present, not by its text
+            # present, not by its text (the rules are references to the SPEC's sections,
+            # SPEC-labeled-traversal-core.md §10.3)
             for path in (('attempts', 'delivery_reserve', 'calibration'),
-                         ('deadline_check', 'rule'), ('decode_cache', 'rule')):
+                         ('attempts', 'delivery_reserve', 'rule'), ('attempts', 'bound'),
+                         ('attempts', 'not_after'), ('attempts', 'instance'),
+                         ('attempts', 'suppression'), ('attempts', 'release_rule'),
+                         ('deadline_check', 'rule'), ('decode_cache', 'rule'),
+                         ('work_bound',), ('coordinates', 'rule'),
+                         ('coordinates', 'output_bound')):
                 block = caps
                 for key in path[:-1]:
                     block = block.get(key, {})
@@ -3202,11 +3229,17 @@ class TestPatternRegression(TestingBase):
                     self.assertIsInstance(block[path[-1]], str, path)
                     block[path[-1]] = None
             return caps
+        def without_poll_stride(caps):
+            # the number of the deadline_check rule, a field beside its reference
+            self.assertEqual(8, caps['deadline_check'].pop('poll_stride'))
+            return caps
         a = without_reworded(without_instance(self.base.get('capabilities').json()))
         b = without_reworded(without_instance(self.new.get('capabilities').json()))
+        b = without_poll_stride(b)
         self.assertIn('pattern', b)
         self.assertEqual(a['features'] + ['pattern'], b['features'])
-        self.assertEqual(dict(a['routes'], pattern='POST /pattern'), b['routes'])
+        self.assertEqual(dict(a['routes'], pattern='POST /pattern',
+                              pattern_capabilities='GET /pattern/capabilities'), b['routes'])
         for key in a:
             if key not in ('features', 'routes'):
                 self.assertEqual(a[key], b[key], key)
@@ -3219,9 +3252,11 @@ class TestPatternRegression(TestingBase):
         # the probe gains the same two blocks and nothing else
         a = without_reworded(without_instance(self.base.get('traverse/capabilities').json()))
         b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
+        b = without_poll_stride(b)
         new_caps = self.new.get('capabilities').json()
-        for block in ('pattern', 'resolve'):
-            self.assertEqual(new_caps[block], b.pop(block), block)
+        self.assertEqual(dict(new_caps['pattern'], details='GET /pattern/capabilities'),
+                         b.pop('pattern'))
+        self.assertEqual(new_caps['resolve'], b.pop('resolve'))
         self.assertEqual(a, b)
 
 

@@ -1712,19 +1712,19 @@ class TestTraverseAPI(TestTraverseBase):
         # set: a deployment that configures nothing must not be the unlimited one.
         for cap in ('max_time_ms', 'max_seeds', 'max_seed_bp', 'max_seed_labels'):
             self.assertGreater(caps[cap], 0, cap)
-        # the request budgets, and how far a work stop can exceed one: stated with what
-        # bounds it (a fetch call's rows are decoded whole; each stop states the most its
-        # seed charged between two comparisons), not as the fixed interval W
+        # the request budgets, and how far a work stop can exceed one: the rule is the SPEC's
+        # section (SPEC §10.3, the rules are references), W a number beside it
         self.assertEqual(['max_memory_mb', 'max_work_units'], caps['budgets'])
         self.assertEqual(65536, caps['work_check_interval'])
-        self.assertIn('indivisible charge', caps['work_bound'])
-        self.assertIn('between two comparisons', caps['work_bound'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 6.8, work units',
+                         caps['work_bound'])
         self.assertEqual('soft', caps['memory_bound'])
         # feature level 4: the server's maxima of the budgets (off unless configured) and the
         # row-diff path cache of the reads (128 MiB by default)
         self.assertEqual((0, 0), (caps['max_memory_mb'], caps['max_work_units']))
         self.assertEqual(128, caps['decode_cache']['path_cache_mb'])
-        self.assertIn('do not depend on it', caps['decode_cache']['rule'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 8.4, the row-diff path cache',
+                         caps['decode_cache']['rule'])
         # feature level 6: record coordinates, on this index (coordinates and a CoordToHeader)
         # with every kind; stated here only, not in the per-request capabilities
         co = caps['coordinates']
@@ -1736,22 +1736,21 @@ class TestTraverseAPI(TestTraverseBase):
                           co['max_occurrences_default'], co['kinds'], co['limitation'],
                           co['action']))
         self.assertEqual(caps['supports_trace'], co['supported'])
-        # the true bound of the block, and the column record-end numbering
-        # (a server maximum is the budget of a request without one: the text names the probe's
-        # max_memory_mb, never a value it could contradict)
-        self.assertIn("this server's max_memory_mb", co['output_bound'])
-        self.assertIn('both maxima 0, their default', co['output_bound'])
-        self.assertIn("a record's last k - 1 bases shares its numbers with the next record's "
-                      "first k - 1 positions", co['rule'])
-        self.assertIn('[c + k - L, c + k)', co['rule'])
+        # the block's bound and the coordinates' rule: references to the SPEC's section
+        self.assertEqual('SPEC-labeled-traversal-core.md section 7.1, record coordinates: what '
+                         'bounds the block', co['output_bound'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 7.1, record coordinates',
+                         co['rule'])
         out = self._post('traverse', {'seeds': [{'sequence': self.element}],
                                       'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
         self.assertNotIn('coordinates', out['capabilities'])
         self.assertEqual(caps['feature_level'], out['capabilities']['feature_level'])
-        # max_uninterruptible_ms stays null: no bound is promised
+        # max_uninterruptible_ms stays null: no bound is promised; the attempt's polls read the
+        # clock one in poll_stride; the rule is the SPEC's section
         self.assertIsNone(caps['deadline_check']['max_uninterruptible_ms'])
-        self.assertIn('it stays null', caps['deadline_check']['rule'])
-        self.assertNotIn('before stage 3c', caps['deadline_check']['rule'])
+        self.assertEqual(8, caps['deadline_check']['poll_stride'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 6.8, chunked deadlines',
+                         caps['deadline_check']['rule'])
 
     def test_api_enforces_server_caps(self):
         caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
@@ -1834,7 +1833,7 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(probe['max_time_ms'], t['max_time_ms'])
         self.assertEqual(250, t['finalize_reserve_ms'])
         self.assertEqual(['rows', 'support'], t['stop_phases'])
-        self.assertIn('Not polled', t['rule'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 4.5', t['rule'])
         reserve = t['finalize_reserve_ms']
         n = BLOCK - K + 1
         for request in ({'sequence': self.element, 'discover': {'max_labels': 10, 'kind': 'header'}},
@@ -2027,7 +2026,8 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertIn('not_after_ms', att['fields'])
         self.assertIs(type(att['clock_skew_allowance_ms']), int)
         self.assertEqual(2000, att['clock_skew_allowance_ms'])
-        self.assertIn('clock_skew_allowance_ms', att['not_after'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 5, not_after_ms',
+                         att['not_after'])
         base = {'seeds': [{'sequence': self.element}],
                 'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
                              'output': {'timing': False}}}
@@ -2239,6 +2239,7 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual({'align': 'POST /align', 'attempt': 'GET /traverse/attempt/{attempt_id}',
                           'cancel': 'POST /traverse/cancel', 'capabilities': 'GET /capabilities',
                           'column_labels': 'GET /column_labels', 'pattern': 'POST /pattern',
+                          'pattern_capabilities': 'GET /pattern/capabilities',
                           'resolve': 'POST /resolve', 'search': 'POST /search',
                           'stats': 'GET /stats', 'traverse': 'POST /traverse',
                           'traverse_capabilities': 'GET /traverse/capabilities'}, c['routes'])
@@ -2271,7 +2272,8 @@ class TestTraverseAPI(TestTraverseBase):
         # fixed bound a ledger can reproduce (an integer)
         self.assertIs(type(reserve['coordinate_account_per_text_byte']), int)
         self.assertEqual(12, reserve['coordinate_account_per_text_byte'])
-        self.assertIn('ceil(C / coordinate_account_per_text_byte)', reserve['rule'])
+        self.assertEqual('SPEC-labeled-traversal-core.md section 6.8, the delivery reserve',
+                         reserve['rule'])
         # the reserve's margin and the walk's stop time, calibrated (feature level 4):
         # + 950 ms, ratios 30 / 50
         self.assertEqual(1.25, reserve['margin'])
@@ -2287,7 +2289,7 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertTrue(reserve[key] is None or reserve[key] > 0, key)
         dc = c['deadline_check']
         self.assertIsNone(dc['max_uninterruptible_ms'])
-        for key in ('chunk_target_ms', 'observed_max_uninterruptible_ms'):
+        for key in ('chunk_target_ms', 'observed_max_uninterruptible_ms', 'poll_stride'):
             self.assertIs(type(dc[key]), int, key)
         self.assertEqual(50, dc['chunk_target_ms'])
         # the library reads both documents

@@ -47,6 +47,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <json/json.h>
 
@@ -269,8 +270,9 @@ Json::Value process_pattern_request(const Json::Value &json,
                                     PatternDelivery *delivery = nullptr);
 
 /**
- * The `pattern` block of GET /capabilities (§7.3): the contract version, whether this server
- * can answer /pattern (available: true | false | null while the single index loads, with the
+ * The full `pattern` block, of GET /pattern/capabilities and GET /capabilities (SPEC §10.2,
+ * §23; GET /traverse/capabilities carries pattern_traverse_block of it): the contract
+ * version, whether this server can answer /pattern (available: true | false | null while the single index loads, with the
  * reason when false), the modes, projections, kinds, scopes and strands, the caps and the
  * finalisation reserve with the delivery rates (delivery_mbps; caps_rule and protein_rule are
  * references to the SPEC), and what the graph is (mode, k, alphabet, mask, counting: exact with
@@ -283,6 +285,21 @@ Json::Value process_pattern_request(const Json::Value &json,
  */
 Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);
+
+/**
+ * The keys of the pattern block that GET /traverse/capabilities keeps with the full block's
+ * values for a client that reads that document alone (SPEC-pattern-search.md §23, the gate
+ * block): every key such a client gates on or parses, and counting; a cap as "caps.NAME". The
+ * other keys are the full block's (GET /pattern/capabilities, GET /capabilities).
+ */
+std::vector<std::string> pattern_gate_keys();
+
+/**
+ * The pattern block of GET /traverse/capabilities from |full| (pattern_capabilities_json):
+ * |full| with `details`, the route of the full block ("GET /pattern/capabilities"). Every key
+ * of |full| is kept until the search service reads that route (SPEC §23).
+ */
+Json::Value pattern_traverse_block(Json::Value full);
 
 /**
  * One request of `metagraph pattern` (the text of a request file, |name| in the log) as the

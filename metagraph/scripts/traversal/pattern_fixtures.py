@@ -41,10 +41,12 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
   hash       a hash graph (build --graph hash) of one mini record (1296536.fa) with a column
              annotation: a graph the engine does not recognise (representation_unsupported)
 
-Two fixtures are HAND-MADE (index.json "hand_made": true): the 503 bodies a server cannot be
+Three fixtures are HAND-MADE (index.json "hand_made": true): the bodies a server cannot be
 made to produce on demand (an answer that overran its finalisation reserve; a request during
-the index load). Their text is the code's (src/cli/pattern.cpp PatternDelivery::check,
-server_utils.cpp process_request) and the unit test checks it against the source. Two refusal
+the index load, 503 on POST /pattern and 200 on GET /pattern/capabilities). Their text is the
+code's (src/cli/pattern.cpp PatternDelivery::check and pattern_capabilities_json,
+server_utils.cpp process_request) and the unit test checks it against the source; the loading
+block is made from the masked server's GET /pattern/capabilities. Two refusal
 codes have no fixture at all: primary_unwrapped (server_query and the CLI always wrap a PRIMARY
 graph in CanonicalDBG) and alphabet_unsupported (a graph of another alphabet does not load in
 this build).
@@ -420,7 +422,39 @@ def features(listed):
     def run(doc):
         check(('pattern' in doc['features']) is listed, doc['features'])
         check(('pattern' in doc['routes']) is listed, doc['routes'])
+        check(('pattern_capabilities' in doc['routes']) is listed, doc['routes'])
     return run
+
+
+def full_block(available, reason=None, mask=None, counting=None):
+    """GET /pattern/capabilities: the document is the full block itself (SPEC §23)."""
+    def run(doc):
+        check('details' not in doc, doc)
+        caps_block(available, reason, mask, counting)({'pattern': doc})
+    return run
+
+
+def details(doc):
+    """The block of GET /traverse/capabilities names the route of the full block."""
+    check(doc['pattern']['details'] == 'GET /pattern/capabilities', doc['pattern'])
+
+
+def loading_block(full):
+    """The full block of a single-graph server while its index loads, from the block of the
+    loaded server: what pattern_capabilities_json writes without the graph -- available,
+    unavailable_reason and the graph fields null, the predicate's access unknown; the
+    contract, the lists and the caps as configured (SPEC §23)."""
+    b = copy.deepcopy(full)
+    for f in ('available', 'unavailable_reason') + LOADING_NULL:
+        b[f] = None
+    b['predicate']['access'] = None
+    return b
+
+
+# the graph fields of the full block, null while the index loads (pattern.cpp
+# pattern_capabilities_json's graph_fields)
+LOADING_NULL = ('graph_mode', 'k', 'alphabet', 'strand_stated', 'mask', 'counting',
+                'dummy_fraction', 'scopes', 'placement', 'support', 'annotation')
 
 
 # ----------------------------------------------------------------------- the fixtures
@@ -429,7 +463,7 @@ class Fixture:
     """One request to one server, the HTTP status it must get, and what its answer shows."""
 
     def __init__(self, name, server, method, path, body, status, shows, expect=None,
-                 hand_made=None, headers=None):
+                 hand_made=None, headers=None, needs=()):
         self.name = name
         self.server = server
         self.method = method
@@ -438,18 +472,21 @@ class Fixture:
         self.status = status
         self.shows = shows
         self.expect = expect
-        # the stored answer of a hand-made fixture (no server produces it on demand)
+        # the stored answer of a hand-made fixture (no server produces it on demand), or a
+        # function of the bodies generated ({name: (request, answer)}) that makes it
         self.hand_made = hand_made
         # response headers a client acts on (Retry-After of the 503 during the load)
         self.headers = headers or {}
+        # the fixtures a hand-made body is made from
+        self.needs = tuple(needs)
 
 
 def post(name, server, body, status, shows, expect=None, **kw):
     return Fixture(name, server, 'POST', '/pattern', body, status, shows, expect, **kw)
 
 
-def get(name, server, path, shows, expect=None):
-    return Fixture(name, server, 'GET', path, None, 200, shows, expect)
+def get(name, server, path, shows, expect=None, status=200, **kw):
+    return Fixture(name, server, 'GET', path, None, status, shows, expect, **kw)
 
 
 def p(text, kind='dna', ident=None):
@@ -469,8 +506,23 @@ FIXTURES = [
         expect_all(features(True), caps_block(True, mask='file', counting='exact'))),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
-        'the same `pattern` block',
-        caps_block(True, mask='file', counting='exact')),
+        'the same `pattern` block with `details`, the route of the full block (SPEC §23)',
+        expect_all(caps_block(True, mask='file', counting='exact'), details)),
+    get('pattern_capabilities', 'masked', '/pattern/capabilities',
+        'GET /pattern/capabilities on the same server: the full block, the document itself '
+        '(SPEC §23)',
+        full_block(True, mask='file', counting='exact')),
+    get('pattern_capabilities_loading', 'masked', '/pattern/capabilities',
+        'HAND-MADE: GET /pattern/capabilities while the index loads (SPEC §23): 200, available '
+        'null and the graph fields null, the contract, lists and caps as configured (the '
+        'masked server\'s block as pattern_capabilities_json writes it without the graph)',
+        hand_made=lambda bodies: loading_block(bodies['pattern_capabilities'][1]),
+        needs=('pattern_capabilities',)),
+    get('pattern_capabilities_graph_param', 'masked', '/pattern/capabilities?graph=' + INDEX_NAME,
+        'GET /pattern/capabilities?graph= on a single-graph server: 400, as on '
+        '/traverse/capabilities (this server hosts a single graph)',
+        lambda doc: check(set(doc) == {'error'} and 'single graph' in doc['error'], doc),
+        status=400),
     get('capabilities_mask_absent', 'unmasked', '/capabilities',
         'the mini index as built, without its .edgemask (owner decision #16): the feature and '
         'route listed, the block available, mask absent, counting upper_bound with the '
@@ -479,7 +531,10 @@ FIXTURES = [
         expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'))),
     get('traverse_capabilities_mask_absent', 'unmasked', '/traverse/capabilities',
         'the same unmasked server on the probe route',
-        caps_block(True, mask='absent', counting='upper_bound')),
+        expect_all(caps_block(True, mask='absent', counting='upper_bound'), details)),
+    get('pattern_capabilities_unmasked', 'unmasked', '/pattern/capabilities',
+        'the same unmasked server on the route of the full block',
+        full_block(True, mask='absent', counting='upper_bound')),
     get('capabilities_built_at_load', 'built_at_load', '/capabilities',
         'the mini index as built, served with --pattern-build-mask: the block available, mask '
         'built_at_load (the mask built in memory at start-up), counting exact, otherwise as '
@@ -487,19 +542,25 @@ FIXTURES = [
         expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'))),
     get('traverse_capabilities_built_at_load', 'built_at_load', '/traverse/capabilities',
         'the same server on the probe route',
-        caps_block(True, mask='built_at_load', counting='exact')),
+        expect_all(caps_block(True, mask='built_at_load', counting='exact'), details)),
+    get('pattern_capabilities_built_at_load', 'built_at_load', '/pattern/capabilities',
+        'the same server on the route of the full block',
+        full_block(True, mask='built_at_load', counting='exact')),
     get('capabilities_multi_graph', 'multi', '/capabilities',
         'a multi-graph server: no `pattern` feature or route; the block says '
         'multi_graph_later_increment and nothing else',
         expect_all(features(False), caps_block(False, 'multi_graph_later_increment'))),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
-        'the multi-graph server probed for one graph: the same reduced block',
-        caps_block(False, 'multi_graph_later_increment')),
+        'the multi-graph server probed for one graph: the same reduced block, with `details`',
+        expect_all(caps_block(False, 'multi_graph_later_increment'), details)),
+    get('pattern_capabilities_multi_graph', 'multi', '/pattern/capabilities',
+        'the multi-graph server on the route of the full block: 200, the same reduced block',
+        full_block(False, 'multi_graph_later_increment')),
     get('traverse_capabilities_primary', 'primary', '/traverse/capabilities',
         'a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], '
         'strand_stated false, placement none_canonical, annotation unbudgeted (column)',
-        caps_block(True, mask='file')),
+        expect_all(caps_block(True, mask='file'), details)),
     get('capabilities_representation_unsupported', 'hash', '/capabilities',
         'a graph the engine does not recognise (a hash graph): the feature and route listed, '
         'the block available false, unavailable_reason representation_unsupported, graph_mode '
@@ -507,7 +568,7 @@ FIXTURES = [
         expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k)),
     get('traverse_capabilities_representation_unsupported', 'hash', '/traverse/capabilities',
         'the same hash-graph server on the probe route',
-        expect_all(caps_block(False, 'representation_unsupported'), only_k)),
+        expect_all(caps_block(False, 'representation_unsupported'), only_k, details)),
 
     # ---------------------------------------------------------------- count
     post('count', 'masked',
@@ -1703,7 +1764,7 @@ def readme(fixtures):
         'the first `determinism: time_limited` pattern of an answer (and, when the clock cut its',
         'release, its `returned` and `results`; the later ones, stopped by the same budget, are',
         'compared as they are).',
-        'Paths under the generator\'s work directory read `{work}/...`. Two fixtures are',
+        'Paths under the generator\'s work directory read `{work}/...`. Three fixtures are',
         'HAND-MADE (no server produces them on demand); their text is the code\'s. No fixture',
         'holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph),',
         '`alphabet_unsupported` (a graph of another alphabet does not load in this build),',
@@ -1741,16 +1802,21 @@ def index_json(fixtures):
 def generate(args, fixtures):
     """{name: (request, answer)} as the servers answer now."""
     out = {}
-    for f in fixtures:
-        if f.hand_made is not None:
-            out[f.name] = (f.body, f.hand_made)
     by_server = {}
     for f in fixtures:
         if f.hand_made is None:
             by_server.setdefault(f.server, []).append(f)
-    if not by_server:
-        return out
+    if by_server:
+        out.update(answered(args, by_server))
+    for f in fixtures:
+        if f.hand_made is not None:
+            out[f.name] = (f.body, f.hand_made(out) if callable(f.hand_made) else f.hand_made)
+    return out
 
+
+def answered(args, by_server):
+    """{name: (request, answer)} of the fixtures |by_server| as their servers answer now."""
+    out = {}
     work = args.work or tempfile.mkdtemp(prefix='pattern_fixtures.')
     os.makedirs(work, exist_ok=True)
     work = os.path.realpath(work)
@@ -1798,7 +1864,10 @@ def main():
 
     names = [f.name for f in FIXTURES]
     assert len(set(names)) == len(names), 'fixture names must be unique'
-    fixtures = [f for f in FIXTURES if not args.only or f.name in args.only]
+    # a hand-made body made from another fixture's needs that one generated too
+    wanted = set(args.only or names)
+    wanted |= {n for f in FIXTURES if f.name in wanted for n in f.needs}
+    fixtures = [f for f in FIXTURES if f.name in wanted]
     unknown = set(args.only or []) - set(names)
     if unknown:
         parser.error(f'unknown fixtures: {sorted(unknown)}')

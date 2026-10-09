@@ -1025,13 +1025,10 @@ TEST(PatternRoute, Capabilities) {
         // written as it is (a byte outside printable ASCII would be escaped as \uXXXX)
         EXPECT_TRUE(std::all_of(text.begin(), text.end(),
                                 [](char c) { return c >= 0x20 && c < 0x7f; })) << rule;
-        // a reference, not the rule: a sentence
-        EXPECT_GE(512u, text.size()) << rule;
     }
-    // the rule names every cap: which bound a request field, which are the server's policy
-    for (const std::string &cap : caps["caps"].getMemberNames()) {
-        EXPECT_NE(std::string::npos, caps["caps_rule"].asString().find(cap)) << cap;
-    }
+    // §4.5 classifies every cap (a request field's maximum or the server's policy; the
+    // validator checks the SPEC's list against the caps of every fixture server)
+    EXPECT_EQ("SPEC-pattern-search.md section 4.5", caps["caps_rule"].asString());
     EXPECT_EQ("none", caps["placement"].asString());
     // no coordinates: a path's labels can only be the intersection of its k-mers'
     EXPECT_EQ("label_intersection", caps["support"].asString());
@@ -1092,6 +1089,48 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ(3u, caps.size());
     EXPECT_FALSE(caps["available"].asBool());
     EXPECT_EQ("multi_graph_later_increment", caps["unavailable_reason"].asString());
+}
+
+// The block of GET /traverse/capabilities (SPEC §23): the full block with `details`, the route of
+// the full block, in the three forms of the full block (served, loading, multi-graph); every
+// gate key a key of the full block a served graph states, with its value
+TEST(PatternRoute, TraverseBlockIsTheFullBlockWithDetails) {
+    auto g = tiny();
+    // the gate keys as the SPEC's §23 table lists them (top level, then the caps)
+    const std::vector<std::string> spec_gate = {
+        "pattern_contract_version", "available", "unavailable_reason", "modes", "projections",
+        "kinds", "protein_residues", "genetic_codes", "strands", "scopes",
+        "scopes_by_graph_mode", "graph_mode", "k", "long_patterns", "long_search",
+        "default_long_search", "finalize_reserve_ms", "default_time_budget_ms",
+        "default_genetic_code", "default_occurrences", "support", "placement", "annotation",
+        "mask", "counting", "caps",
+        "caps.max_patterns", "caps.max_contexts", "caps.max_anchors", "caps.max_paths",
+        "caps.max_steps", "caps.time_budget_ms", "caps.min_information_bits",
+        "caps.max_memory_mb", "caps.max_labels_per_anchor",
+    };
+    EXPECT_EQ(spec_gate, pattern_gate_keys());
+    const Json::Value forms[] = {
+        pattern_capabilities_json(g.get(), limits(), false),
+        pattern_capabilities_json(nullptr, limits(), false),
+        pattern_capabilities_json(g.get(), limits(), true),
+    };
+    for (const Json::Value &full : forms) {
+        ASSERT_FALSE(full.isMember("details"));
+        const Json::Value block = pattern_traverse_block(full);
+        EXPECT_EQ("GET /pattern/capabilities", block["details"].asString());
+        Json::Value rest = block;
+        rest.removeMember("details");
+        EXPECT_EQ(full, rest);
+    }
+    // a served graph's full block states every gate key; the multi-graph block the first three
+    const Json::Value &served = forms[0];
+    for (const std::string &key : pattern_gate_keys()) {
+        const bool cap = key.rfind("caps.", 0) == 0;
+        EXPECT_TRUE(cap ? served["caps"].isMember(key.substr(5)) : served.isMember(key)) << key;
+    }
+    EXPECT_EQ((std::vector<std::string> { "available", "pattern_contract_version",
+                                          "unavailable_reason" }),
+              forms[2].getMemberNames());
 }
 
 
@@ -1528,12 +1567,11 @@ TEST(PatternRoute, UnmaskedTinyBlocksAreExact) {
         auto masked = tiny(mode);
         auto g = unmasked(*masked, "tiny_" + name);
 
-        // the capabilities: the limit in force, named by the rule; a masked graph's alike
+        // the capabilities: the limit in force (classified in the SPEC section caps_rule names);
+        // a masked graph's alike
         for (const AnnotatedDBG *graph : { g.get(), masked.get() }) {
             const Json::Value caps = pattern_capabilities_json(graph, limits(), false);
             EXPECT_EQ(50u, caps["caps"]["max_checked_entries"].asUInt64());
-            EXPECT_NE(std::string::npos,
-                      caps["caps_rule"].asString().find("max_checked_entries"));
             EXPECT_EQ(0u, pattern_capabilities_json(graph, off, false)["caps"]
                                   ["max_checked_entries"].asUInt64());
         }

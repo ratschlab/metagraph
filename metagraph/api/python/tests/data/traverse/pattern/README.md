@@ -14,7 +14,7 @@ Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms
 the first `determinism: time_limited` pattern of an answer (and, when the clock cut its
 release, its `returned` and `results`; the later ones, stopped by the same budget, are
 compared as they are).
-Paths under the generator's work directory read `{work}/...`. Two fixtures are
+Paths under the generator's work directory read `{work}/...`. Three fixtures are
 HAND-MADE (no server produces them on demand); their text is the code's. No fixture
 holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph),
 `alphabet_unsupported` (a graph of another alphabet does not load in this build),
@@ -28,13 +28,19 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 `unmasked_unchecked` has the check off.
 
 - `capabilities` (GET /capabilities, 200, masked): GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record)
-- `traverse_capabilities` (GET /traverse/capabilities, 200, masked): GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block
+- `traverse_capabilities` (GET /traverse/capabilities, 200, masked): GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block with `details`, the route of the full block (SPEC §23)
+- `pattern_capabilities` (GET /pattern/capabilities, 200, masked): GET /pattern/capabilities on the same server: the full block, the document itself (SPEC §23)
+- `pattern_capabilities_loading` (GET /pattern/capabilities, 200, masked): HAND-MADE: GET /pattern/capabilities while the index loads (SPEC §23): 200, available null and the graph fields null, the contract, lists and caps as configured (the masked server's block as pattern_capabilities_json writes it without the graph)
+- `pattern_capabilities_graph_param` (GET /pattern/capabilities, 400, masked): GET /pattern/capabilities?graph= on a single-graph server: 400, as on /traverse/capabilities (this server hosts a single graph)
 - `capabilities_mask_absent` (GET /capabilities, 200, unmasked): the mini index as built, without its .edgemask (owner decision #16): the feature and route listed, the block available, mask absent, counting upper_bound with the dummy_fraction sampled at load (value, 95% interval, samples, source sampled); it said available false, mask_required before
 - `traverse_capabilities_mask_absent` (GET /traverse/capabilities, 200, unmasked): the same unmasked server on the probe route
+- `pattern_capabilities_unmasked` (GET /pattern/capabilities, 200, unmasked): the same unmasked server on the route of the full block
 - `capabilities_built_at_load` (GET /capabilities, 200, built_at_load): the mini index as built, served with --pattern-build-mask: the block available, mask built_at_load (the mask built in memory at start-up), counting exact, otherwise as with the file
 - `traverse_capabilities_built_at_load` (GET /traverse/capabilities, 200, built_at_load): the same server on the probe route
+- `pattern_capabilities_built_at_load` (GET /pattern/capabilities, 200, built_at_load): the same server on the route of the full block
 - `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: no `pattern` feature or route; the block says multi_graph_later_increment and nothing else
-- `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one graph: the same reduced block
+- `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one graph: the same reduced block, with `details`
+- `pattern_capabilities_multi_graph` (GET /pattern/capabilities, 200, multi): the multi-graph server on the route of the full block: 200, the same reduced block
 - `traverse_capabilities_primary` (GET /traverse/capabilities, 200, primary): a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], strand_stated false, placement none_canonical, annotation unbudgeted (column)
 - `capabilities_representation_unsupported` (GET /capabilities, 200, hash): a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set
 - `traverse_capabilities_representation_unsupported` (GET /traverse/capabilities, 200, hash): the same hash-graph server on the probe route

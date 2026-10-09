@@ -282,6 +282,19 @@ They are served now, §4.1–§4.3.)
 | `--pattern-max-predicate-labels` | 10,000 | — (increment 5b: the names of a predicate's lists, a name in two lists counted twice; the server's policy, `caps.max_predicate_labels`) | 400 `predicate_too_large`; the flag is refused at start-up above 1,000,000 |
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
 
+**Every cap of the capabilities' `caps`, classified** (the capabilities' `caps_rule` refers here):
+
+- **the maximum of a request field** — a larger value is lowered to the cap and listed in `limits.clamped`, an
+  omitted one is the cap: `max_contexts`, `max_anchors`, `max_paths`, `max_steps`, `time_budget_ms` (an omitted
+  one is `default_time_budget_ms` instead), `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`,
+  `max_labels`, `max_occurrences_per_label`, `max_predicate_contexts`, `max_predicate_work`;
+- **the server's policy** — no request field lowers it: `max_patterns` (a longer `patterns` list is refused,
+  400), `min_information_bits` (the floor, §7.8), `max_checked_entries` (§7.4) and `max_predicate_labels` (400
+  `predicate_too_large`, §19.3).
+
+The rules they bound are §7.4 (the check of few unchecked candidates), §7.6 (the time kept back for the answer),
+§12.1 (the two admissions of `long_search: "paths"`) and §19 (a predicate's admissions and budgets).
+
 The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`; the two
 delivery rates in `delivery_mbps`, since the owner's decision P9, §18, in `caps_rule`'s prose before), and every
 answer echoes the effective ones (`limits`, §8.3), except
@@ -1125,16 +1138,22 @@ It costs no step.
 
 ### 10.1 Where the block is
 
+- **`GET /pattern/capabilities`** (§23): the full block of §10.2, the document itself (not wrapped in an object).
 - **`GET /capabilities`**: on a single-graph server, `"pattern"` in `features`, `routes.pattern =
-  "POST /pattern"`, and the `pattern` block. The feature and the route are listed whether or not this graph can
-  be searched (as `align` is); `pattern.available` says whether it can. A client gates on both.
-- **`GET /traverse/capabilities`** (the document the service's probe reads): the same `pattern` block, so one
-  cached probe serves both (design §7.3).
-- While the single index loads, `/capabilities` answers with `ready: false` and the block's graph fields `null`
-  (`available: null`); `/traverse/capabilities` answers 503.
-- On a multi-graph server: no `pattern` feature or route; the block on `/capabilities` and on
-  `/traverse/capabilities?graph=NAME` is `{pattern_contract_version: 1, available: false,
-  unavailable_reason: "multi_graph_later_increment"}` and nothing else.
+  "POST /pattern"`, `routes.pattern_capabilities = "GET /pattern/capabilities"`, and the full block as its
+  `pattern` member. The feature and the routes are listed whether or not this graph can be searched (as `align`
+  is); `pattern.available` says whether it can. A client gates on both.
+- **`GET /traverse/capabilities`** (the document the service's probe reads): its `pattern` member is the gate
+  block (§23): every field a client gates on, with the full block's value, and `details: "GET
+  /pattern/capabilities"`, where the full block is. In this build it is the full block with `details` (§23,
+  phase 1), so one cached probe still serves both (design §7.3).
+- While the single index loads, `/pattern/capabilities` answers 200 with the block's graph fields `null`
+  (`available: null`), `/capabilities` with `ready: false` and the same block; `/traverse/capabilities` answers
+  503.
+- On a multi-graph server: no `pattern` feature or route; the block on `/pattern/capabilities` (whatever its
+  query), on `/capabilities` and on `/traverse/capabilities?graph=NAME` (there with `details`) is
+  `{pattern_contract_version: 1, available: false, unavailable_reason: "multi_graph_later_increment"}` and
+  nothing else.
 
 ### 10.2 The block, field by field
 
@@ -1170,7 +1189,7 @@ It costs no step.
 | `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not); increment 5b: `max_predicate_contexts`, `max_predicate_work` and `max_predicate_labels` (no request field: the names a predicate may list, §19.3) |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
-| `caps_rule` | string | | which caps are request fields' maxima (each named: lowered and listed in `limits.clamped` above it) and which are the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`, `max_predicate_labels`), and a reference to the sections stating the rules (`SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1, 19`: the caps and defaults, the check of few unchecked candidates, the time kept back for the answer, the two admissions of `long_search: "paths"`, a predicate's admissions and budgets). Since the owner's decision P9 (§18) a reference: it stated those rules in prose before, the delivery rates among them (now `delivery_mbps`). Printable ASCII; every cap of `caps` is named in it; for people, not parsed |
+| `caps_rule` | string | `"SPEC-pattern-search.md section 4.5"` | a reference to §4.5, where every cap of `caps` is classified: a request field's maximum (lowered and listed in `limits.clamped` above it) or the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`, `max_predicate_labels`), with the sections of the rules they bound. Printable ASCII; for people, not parsed |
 | `delivery_mbps` | object (`delivery_mbps` below) | | the owner's decision P9 (§18): the rates in force of the time kept back for the answer (§7.6) |
 | `predicate` | object (`capabilities_predicate` below) | | increment 5b (§19.12): the operators of a predicate served, the `predicate_strands` values and the access this index gives a selection |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
@@ -1233,6 +1252,10 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
 
 ### 10.3 How a client gates
 
+- Where the block of `GET /traverse/capabilities` names `details`, the full block is at that route (`GET
+  /pattern/capabilities`, §23): the gate fields there have the same values, and every other field (the
+  predicate's, the delivery rates, the defaults a request may leave out, and every later addition) is read from
+  the full block, by presence. A block without `details` (a build before §23) is the full block.
 - Pattern search is offered on a host only when both hold: the block states a `pattern_contract_version` the
   client implements (§1), and `available: true`. No block, or a missing, malformed or unsupported version
   (lower or higher): no pattern search on this host (`pattern_unsupported` on the service).
@@ -1339,6 +1362,11 @@ build). The first and the third are exercised by the unit tests of `tests/cli/te
 (the third by `PatternRetrieval.AWorkStopThenATimeStopOfTheOutput`, on a virtual clock: a work stop in discovery
 kept as the first stop, then the output's time stop).
 How a client merges answers is in `PROMPT-search-service-pattern.md` §3.1 item 2, not in a fixture.
+
+The route of the full block (§23) has its own: `pattern_capabilities` (the masked server), `_unmasked`,
+`_built_at_load` and `_multi_graph` (each equal to its server's `/capabilities` block), `_graph_param` (the 400 of
+`?graph=` on a single-graph server) and `pattern_capabilities_loading`, a third hand-made body: the masked server's
+block as the code writes it while the index loads (200, the graph fields `null`), which no server gives on demand.
 
 The owner's decisions of 2026-10-08 (§18) replace `mask_required` (the 400 of the unmasked server) by the
 unmasked server's answers: `unmasked_count` (mode `count`: blaNDM-1's forward primer `bounds` [2, 24] with
@@ -3009,3 +3037,107 @@ virtual clock, the memory account from the smallest, the descriptors' admission,
 CANONICAL and PRIMARY builds, unbudgeted access, a graph without its mask; `PatternRoute.Refusals`, `RefusalOrder`
 and `Capabilities`; the integration's `test_predicate_against_the_fasta` (the mini's FASTA scanned per k-mer and
 its reverse complement).
+
+## 23. `GET /pattern/capabilities`, and the gate block of `GET /traverse/capabilities`
+
+The capabilities documents a service's MCP tool returns in one piece have a ceiling of 32 KiB
+(`api/python/metagraph/traverse/mcp_tools.py`, `CAPABILITIES_MAX_BYTES`), and every fixture server's document keeps
+1 KiB under it (§11). The pattern block has its own route, so that its later additions (the predicate's, the
+mismatches', the segments') never grow the document the service's probe reads; the probe's document carries the
+fields a client gates on.
+
+### 23.1 The routes
+
+- **`GET /pattern/capabilities`**: the full block (§10.2, with every later addition), the document itself; compact
+  JSON, `Accept-Encoding` honoured (gzip preferred, deflate accepted), as the traversal routes.
+  - On a single-graph server: **200 always**, also while the index loads — then `available: null`, the graph
+    fields `null` and `predicate.access: null`, the contract, the lists and the caps as configured (fixture
+    `pattern_capabilities_loading`): a client learns the contract version and the caps before the index is ready
+    and re-probes for availability, never reading `null` as `false`. A query parameter `graph` or `graph_path` is
+    a 400 `{"error": "Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path'
+    parameter"}`, as on `/traverse/capabilities`; any other parameter is ignored.
+  - On a multi-graph server (pattern search is not served there): 200 with the `capabilities_multi` block
+    (§10.2), whatever the query.
+- **`GET /capabilities`** keeps the full block as its `pattern` member, and its `routes` gain
+  `"pattern_capabilities": "GET /pattern/capabilities"` on a single-graph server (beside `routes.pattern`).
+- **`GET /traverse/capabilities`**: its `pattern` member is the **gate block**, `pattern_traverse_block` of the full
+  block: every field of the table below with the full block's value, and `details: "GET /pattern/capabilities"`,
+  where the full block is. 503 while the single index loads, as before.
+
+### 23.2 The gate block, in two phases
+
+- **Phase 1 (this build):** the `/traverse` block is the full block with `details`: nothing a client reads there
+  changes.
+- **Phase 2** (once the search service reads the full block from `GET /pattern/capabilities`, it is deployed, and
+  the owner says so): the `/traverse` block is reduced to the fields below. A client that still reads the
+  `/traverse` block alone keeps every field it gates on or parses, with its value; the others are absent there,
+  and a client reading by presence (§1) offers nothing that needs them (the predicate, the mismatches, the
+  segments' details).
+- Fields added by later increments go to the full block only; a new value of a gate list (`long_search`'s, say)
+  is in both.
+
+<!-- schema: pattern_gate -->
+| field | type | meaning |
+|---|---|---|
+| `pattern_contract_version` | integer | §10.2 |
+| `available` | boolean \| null | §10.2 |
+| `unavailable_reason` | string \| null | §10.2 |
+| `modes` | list | §10.2 |
+| `projections` | list | §10.2 |
+| `kinds` | list | §10.2 |
+| `protein_residues` | list | §10.2 |
+| `genetic_codes` | list | §10.2 |
+| `strands` | list | §10.2 |
+| `scopes` | list \| null | §10.2 |
+| `scopes_by_graph_mode` | object | §10.2 |
+| `graph_mode` | string \| null | §10.2 |
+| `k` | integer \| null | §10.2 |
+| `long_patterns` | string | §10.2 |
+| `long_search` | list | §10.2, with every value served |
+| `default_long_search` | string | §10.2 |
+| `finalize_reserve_ms` | number | §10.2 |
+| `default_time_budget_ms` | number | §10.2 |
+| `default_genetic_code` | integer | §10.2 |
+| `default_occurrences` | boolean | §10.2 |
+| `support` | string \| null | §10.2 |
+| `placement` | string \| null | §10.2 |
+| `annotation` | string \| null | §10.2 |
+| `mask` | string \| null | §10.2 |
+| `counting` | string \| null | §10.2 |
+| `caps` | object | `max_patterns`, `max_contexts`, `max_anchors`, `max_paths`, `max_steps`, `time_budget_ms`, `min_information_bits`, `max_memory_mb`, `max_labels_per_anchor` (§10.2; the other caps are the full block's) |
+| `details` | string | `"GET /pattern/capabilities"`: where the full block is |
+
+These are the fields the search service gates on or parses (its interface inventory of 2026-10-08, §3.10), and
+`counting`; the server's list is `pattern.cpp`'s `kPatternGateKeys` and `kPatternGateCaps` (`pattern_gate_keys()`),
+which `test_pattern_fixtures.py` compares with this table. The full block's fields not in it: `default_mode`,
+`default_projection`, `projections_later_increment`, `kinds_later_increment`, `protein_rule`, `default_scope`,
+`default_strands`, `graph_cleaned`, `records_shorter_than_k`, `resident_only`, `caps_rule`, `delivery_mbps`,
+`predicate`, `alphabet`, `strand_stated`, `dummy_fraction`, the caps `max_annotation_work`, `max_labels`,
+`max_occurrences_per_label`, `max_checked_entries`, `max_predicate_contexts`, `max_predicate_work` and
+`max_predicate_labels`, and every later addition.
+
+### 23.3 For a client
+
+- Read `GET /traverse/capabilities` as before; where its block names `details`, read the full block from that
+  route with the same cache and lifetime as the probe, and use it as the block (§10.3). A 404 there (a proxy that
+  does not pass the route; a build that names `details` always serves it): fall back to the `/traverse` block.
+- Without `details` (a build before this one) the `/traverse` block is the full block.
+- Moving a field between the routes changes no field's name, type or meaning (§1); the contract version stays 1.
+
+### 23.4 What changed (contract version 1)
+
+- **Additions**: the route `GET /pattern/capabilities`; `details` in the `/traverse` block; `routes.pattern_capabilities`
+  on `GET /capabilities`.
+- **`caps_rule`** is the reference `"SPEC-pattern-search.md section 4.5"`, where every cap is classified (§4.5);
+  it named the caps and the sections in prose before. For people, not parsed.
+- **`GET /traverse/capabilities` and `GET /capabilities`**: the traversal contract's rules are references to the
+  sections of `SPEC-labeled-traversal-core.md` that state them, and `deadline_check.poll_stride` is a number field
+  (that SPEC's §10.3, "The rules are references"). Sizes on the mini index (the fixture servers, compact JSON as
+  served): `/traverse/capabilities` 3,536 (multi-graph) and 5,249–5,417 bytes (before: about 31,300),
+  `/capabilities` 2,722–4,733, `/pattern/capabilities` 99–2,036; the largest, `/traverse/capabilities` of the
+  unmasked server, 26,327 bytes under the budget of 31,744 (26,180 by the validator's measure, which counts a
+  float as 24 characters).
+- Requests to `POST /pattern`, `/traverse` and `/resolve` are answered as before: no answer carries these texts.
+- Fixtures (§11): `pattern_capabilities`, `pattern_capabilities_unmasked`, `pattern_capabilities_built_at_load`,
+  `pattern_capabilities_multi_graph`, `pattern_capabilities_graph_param` (400) and the hand-made
+  `pattern_capabilities_loading`; the capabilities bodies of every fixture server regenerated.

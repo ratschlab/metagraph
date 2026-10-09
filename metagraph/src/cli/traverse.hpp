@@ -245,8 +245,9 @@ Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
 // The `coordinates` block of GET /traverse/capabilities (feature level 6; not in the
 // per-request capabilities, which change only in their feature_level): whether this index
 // reports record coordinates (supports_trace), the knobs and the cap's default, the block
-// kinds it can report, the limitation and the action, what bounds the block's size, and the
-// rule — positions, the interval rule, the column record-end numbering, the assumptions
+// kinds it can report, the limitation and the action, and what bounds the block's size and the
+// rule (positions, the interval rule, the column record-end numbering, the assumptions) as
+// references to the SPEC section that states them
 Json::Value coordinates_capabilities_json(const graph::traversal::LabelOracle &oracle);
 // |identity| null: no name, no manifest, meta_fp computed here
 Json::Value capabilities_to_json(const graph::traversal::LabelOracle &oracle,
@@ -453,7 +454,8 @@ class ResolveDelivery {
 
 // The `resolve` block of both capabilities routes (GET /capabilities, GET
 // /traverse/capabilities): bounds.time_budget_ms accepted, its cap and the reserve, and the
-// rule — where the deadline is read, what a stop answers, what is not polled
+// rule (where the deadline is read, what a stop answers, what is not polled) as a reference to
+// the SPEC section that states it
 Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
 
 // |client_gone|: polled between the phases of the request (the discovery read, the support

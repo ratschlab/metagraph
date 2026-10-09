@@ -30,7 +30,34 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block"
+   "shows": "GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block with `details`, the route of the full block (SPEC §23)"
+  },
+  "pattern_capabilities": {
+   "server": "masked",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /pattern/capabilities on the same server: the full block, the document itself (SPEC §23)"
+  },
+  "pattern_capabilities_loading": {
+   "server": "masked",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": true,
+   "headers": {},
+   "shows": "HAND-MADE: GET /pattern/capabilities while the index loads (SPEC §23): 200, available null and the graph fields null, the contract, lists and caps as configured (the masked server's block as pattern_capabilities_json writes it without the graph)"
+  },
+  "pattern_capabilities_graph_param": {
+   "server": "masked",
+   "method": "GET",
+   "path": "/pattern/capabilities?graph=mini_refseq",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /pattern/capabilities?graph= on a single-graph server: 400, as on /traverse/capabilities (this server hosts a single graph)"
   },
   "capabilities_mask_absent": {
    "server": "unmasked",
@@ -50,6 +77,15 @@
    "headers": {},
    "shows": "the same unmasked server on the probe route"
   },
+  "pattern_capabilities_unmasked": {
+   "server": "unmasked",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same unmasked server on the route of the full block"
+  },
   "capabilities_built_at_load": {
    "server": "built_at_load",
    "method": "GET",
@@ -68,6 +104,15 @@
    "headers": {},
    "shows": "the same server on the probe route"
   },
+  "pattern_capabilities_built_at_load": {
+   "server": "built_at_load",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same server on the route of the full block"
+  },
   "capabilities_multi_graph": {
    "server": "multi",
    "method": "GET",
@@ -84,7 +129,16 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the multi-graph server probed for one graph: the same reduced block"
+   "shows": "the multi-graph server probed for one graph: the same reduced block, with `details`"
+  },
+  "pattern_capabilities_multi_graph": {
+   "server": "multi",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the multi-graph server on the route of the full block: 200, the same reduced block"
   },
   "traverse_capabilities_primary": {
    "server": "primary",

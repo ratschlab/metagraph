@@ -53,6 +53,17 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 // bound of a /traverse attempt (traverse_attempts.hpp), less a second for the response
 constexpr long kContentTimeoutS = static_cast<long>(kServerContentTimeoutS);
 
+// The rules of GET /traverse/capabilities (and GET /capabilities' deadline_check), stated by
+// reference to the SPEC section that holds each: the documents a service returns in one piece
+// have a ceiling of 32 KiB, and the numbers a client computes with are fields beside them
+// (chunk_target_ms, poll_stride, work_check_interval, path_cache_mb). ASCII only: the writers
+// escape any other byte as \uXXXX
+constexpr char kDeadlineCheckRule[]
+        = "SPEC-labeled-traversal-core.md section 6.8, chunked deadlines";
+constexpr char kWorkBoundRule[] = "SPEC-labeled-traversal-core.md section 6.8, work units";
+constexpr char kDecodeCacheRule[]
+        = "SPEC-labeled-traversal-core.md section 8.4, the row-diff path cache";
+
 
 Json::Value process_search_request(const Json::Value &json,
                                    const graph::AnnotatedDBG &anno_graph,
@@ -1302,8 +1313,9 @@ int run_server(Config *config) {
     auto encodings_json = []() { return strings_json({ "gzip", "deflate" }); };
 
     // How a deadline reaches the walk (both capabilities routes): the time-sized chunks of
-    // the annotation reads it may fall into, what stays uninterruptible, and the longest single
-    // piece seen
+    // the annotation reads it may fall into, what stays uninterruptible, the longest single
+    // piece seen, and how often an attempt's poll reads the clock; the rule is the SPEC's
+    // (kDeadlineCheckRule)
     auto deadline_check_json = [&]() {
         Json::Value d;
         d["chunk_target_ms"] = static_cast<Json::UInt64>(config->traverse_chunk_target_ms);
@@ -1313,65 +1325,11 @@ int run_server(Config *config) {
         d["max_uninterruptible_ms"] = Json::Value();
         d["observed_max_uninterruptible_ms"]
             = static_cast<Json::UInt64>(attempts.observed_max_uninterruptible_ms());
-        const graph::traversal::DecodePacer pacer;
-        d["rule"] = fmt::format(
-            "under a deadline — the seed's bounds.time_budget_ms (at depth > 0 and in a "
-            "derivation) and, with attempt_id, the attempt's walk-until — every /traverse "
-            "annotation read (a level's fetch, the lookahead, a seed's validation, a "
-            "derivation's window) that the deadline may fall into is decoded in chunks, the "
-            "deadline checked before each: a read is one piece when, at the slowest per-row "
-            "time the request has seen, it would take less than 1/{} of the time left (rows "
-            "more than {} times slower than any seen before can make such a read overrun); "
-            "else its first chunk is at most {} rows, each next one at most 4 times the "
-            "previous and sized at the rate the previous measured to take chunk_target_ms (or "
-            "the time left), taken in the walk's order (the rows of one path share their "
-            "row-diff decoding), and the rest is one piece once predicted at that rate to take "
-            "less than 1/{} of the time left. A read far from its deadline is thus one piece, "
-            "and a cancel or a gone client is seen after it. A seed's validation is "
-            "stopped by the attempt only, never by its own time budget. One chunk, at least "
-            "one row, is uninterruptible, and no time bound on one piece is stated "
-            "(max_uninterruptible_ms: null, and it stays null: checkpoints inside reads bound "
-            "the index operations of a piece, not its wall time, which page faults and "
-            "scheduling leave open); observed_max_uninterruptible_ms is the longest "
-            "single piece of this process (below), a whole read far from its deadline included, "
-            "an observation, not a bound. A chunked read returns exactly what one read would (the "
-            "same rows, caches and counters) unless the deadline stops it, and a stopped read "
-            "censors the walk at the read (an unchunked read would run to its end, past the "
-            "deadline, before the walk's next check). The lookahead's chains (graph steps along "
-            "unbranched runs, up to min(annotation.batch_kmers, the radius left) per head of a "
-            "level) read the same deadlines every {} graph steps and before each chain's key "
-            "mapping, and a stop ends the lookahead there. The text of each seed's result and of "
-            "the response is written under the attempt's delivery check every 64 KiB, a larger "
-            "piece copied in pieces up to the next check; the preparation of one token (one "
-            "JSON value, e.g. a graphlet string of many MB, is escaped whole before it is "
-            "copied) is not interrupted, and the longest time between two such checks is part "
-            "of observed_max_uninterruptible_ms. Not chunked: /resolve, the mapping of a "
-            "seed's k-mers, the seed phase's own processing (resolving and checking the named "
-            "labels, linear in their bytes, which no server limit caps), a head's processing "
-            "(checked every work_check_interval units), a chain's key mapping (one call, at most "
-            "annotation.batch_kmers nodes), a read's preparation before its first chunk (its "
-            "cache lookups and the ordering of its keys in the walk's order, n log n in them: a "
-            "lookahead read has up to a level's heads x batch_kmers keys), the lookahead's "
-            "clearing once it outgrows its bound (linear in its entries), a seed's finalisation "
-            "and summary, the building of a "
-            "seed's JSON tree between the attempt's delivery checks (every 4096 objects), and "
-            "the transport; chunk_target_ms 0: one piece per read. "
-            "observed_max_uninterruptible_ms counts the reads and chunks, the head pieces (the "
-            "walk between two readings of the clock for a stop, its reads excluded: a lookahead's "
-            "chains between their polls included) and the delivery gaps; it leaves out the "
-            "mapping of a seed's k-mers, the seed phase's own processing, a derivation's steps "
-            "and a seed's finalisation (each seed's timing.deadline.longest_piece names its "
-            "longest piece of any kind). A cancel is therefore seen up to one piece late; a "
-            "walk-until at the first poll that reads the clock after it (one in {} of a walk's "
-            "polls — the one before a head —, every poll before a paced read's chunk or in the "
-            "lookahead, and the poll before each seed), so up to {} heads later; and the "
-            "attempt's bound, which only the delivery checks compare, is passed by the "
-            "processing up to the next of them: the rest of the piece it fell into and, when the "
-            "walk had not stopped, the walk up to that poll, the stopped seed's finalisation and "
-            "the building up to the next delivery check (attempts.bound)",
-            pacer.far_factor, pacer.far_factor, pacer.first_rows, pacer.rest_factor,
-            graph::traversal::kLookaheadPollSteps, attempts.settings().poll_stride,
-            attempts.settings().poll_stride > 0 ? attempts.settings().poll_stride - 1 : 0);
+        // one in poll_stride of a walk's polls (the one before a head) reads the clock for an
+        // attempt's walk-until and bound, so a walk-until is seen up to poll_stride - 1 heads
+        // late (the rule's number, stated as a number)
+        d["poll_stride"] = static_cast<Json::UInt64>(attempts.settings().poll_stride);
+        d["rule"] = kDeadlineCheckRule;
         return d;
     };
 
@@ -1416,52 +1374,24 @@ int run_server(Config *config) {
         caps["max_work_units"] = static_cast<Json::UInt64>(config->traverse_max_work_units);
         caps["work_check_interval"]
             = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
-        // Work is deterministic LOGICAL work, not measured decode effort: the physical
-        // decode counters are in each response's timing
-        caps["work_bound"] = "bounds.max_work_units counts deterministic logical work, not "
-            "measured decode effort: 4 per successor enumeration; per annotation row a fetch "
-            "returns 8 per key and 1 per entry and coordinate, and on a budget-aware "
-            "(row-diff) annotation 8 per row-diff dependency row and 1 per entry it stores, "
-            "whatever the decode shared or cached; 1 per pair evaluation, refusal-scan "
-            "entry, edge-reuse probe and step. The walk compares the budget after every "
-            "charge, so a stop exceeds it by at most what was charged since the previous "
-            "comparison, one indivisible charge (a fetch call's rows, sized from the budget "
-            "left down to one key; a label-state scan; or the roots' rows with the end of the "
-            "seed phase), and the stop states the most its seed charged between two "
-            "comparisons; the seed phase is compared every work_check_interval units and "
-            "fails at a comparison finding it at least that much over budget; the deadline "
-            "is read before every head and at least every work_check_interval units; the "
-            "physical decode counters are in timing";
+        // what bounds.max_work_units counts and how far a work stop can exceed it: the rule is
+        // the SPEC's (work is deterministic logical work, not measured decode effort; the
+        // physical decode counters are in each response's timing)
+        caps["work_bound"] = kWorkBoundRule;
         caps["memory_bound"] = "soft";
         // the row-diff path cache of the reads (feature level 4)
         Json::Value decode_cache;
         decode_cache["path_cache_mb"] = static_cast<Json::UInt64>(config->traverse_path_cache_mb);
-        decode_cache["rule"] = "on a row-diff annotation rows a /traverse request's reads "
-            "reconstruct are kept in a cache of at most path_cache_mb MiB, so that a later read's "
-            "row-diff path stops at a cached row instead of decoding to its anchor again (in two "
-            "generations: the older is dropped when the current one fills half the bound): the "
-            "rows asked for, the 8 rows after each on its path, every row whose distance to its "
-            "anchor is a multiple of 16 (anchors included) and every row whose copy holds less "
-            "than 4096 bytes — not every row of every path, which would copy each wide row of a "
-            "long path and make first reads slower than without the cache (tuple rows are kept "
-            "flat: columns, ends, coordinates). What a "
-            "read returns, the work units charged (each row with its whole row-diff path) and "
-            "the memory admissions (each row by the demand of its whole path) do not depend on "
-            "it; the decode time and the physical counters in timing do. Without a memory budget "
-            "the cache is the request's, kept from seed to seed; under bounds.max_memory_mb it is "
-            "each seed's, off during the seed phase and an annotate root's read, then within what "
-            "the label cache leaves of its allotment (min(budget / 4, 64 MiB), held by the "
-            "account), and the lookahead's reads are admitted as without it (each also charges "
-            "what the cache spared it). 0: off";
+        decode_cache["rule"] = kDecodeCacheRule;
         caps["decode_cache"] = std::move(decode_cache);
         put_contract(&caps);
         // record coordinates (feature level 6): only here, the per-request capabilities
         // change only in their feature_level
         caps["coordinates"] = coordinates_capabilities_json(oracle);
-        // the pattern search (DESIGN-pattern-search.md §7.3): the same block as on
-        // /capabilities, here because this is the document a service's probe reads
-        caps["pattern"] = pattern_capabilities_json(&index, pattern_limits(*config),
-                                                    !config->fnames.empty());
+        // the pattern search (SPEC-pattern-search.md §23): here because this is the document a
+        // service's probe reads; the full block with `details`, the route of the full block
+        caps["pattern"] = pattern_traverse_block(pattern_capabilities_json(
+                &index, pattern_limits(*config), !config->fnames.empty()));
         return caps;
     };
 
@@ -1513,6 +1443,29 @@ int run_server(Config *config) {
         }, /* compact */ true, &traversal_io);
     };
 
+    // The full pattern block (SPEC-pattern-search.md §23): answered while the single index
+    // loads (available null, the graph fields null), so that a client learns the contract and
+    // the caps before the index is ready; a multi-graph server answers that it is not served
+    // there. The parameters that would select a graph are refused on a single-graph server, as
+    // on /traverse/capabilities; any other is ignored
+    server.resource["^/pattern/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                                           shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            const bool multi = !config->fnames.empty();
+            if (!multi) {
+                for (const auto &[key, value] : request->parse_query_string()) {
+                    if (key == "graph" || key == "graph_path") {
+                        throw InvalidRequest("Bad request: this server hosts a single graph; "
+                                             "remove the 'graph' / 'graph_path' parameter");
+                    }
+                }
+            }
+            const bool ready = !multi && anno_graph.wait_for(0s) == std::future_status::ready;
+            return pattern_capabilities_json(ready ? anno_graph.get().get() : nullptr,
+                                             pattern_limits(*config), multi);
+        }, /* compact */ true, &traversal_io);
+    };
+
     // The server-wide capabilities (DESIGN-traverse-graphlet.md §17.1): the
     // routes and features this server offers, its mode and graphs, the attempts and how
     // deadlines are checked — answered while the single index loads (ready: false), so that a
@@ -1548,8 +1501,10 @@ int run_server(Config *config) {
             }
             if (!multi) {
                 // listed like align: a multi-graph server answers /pattern with 400; whether
-                // this graph can be searched is pattern.available (a client gates on both)
+                // this graph can be searched is pattern.available (a client gates on both).
+                // The full pattern block's own route beside it (SPEC-pattern-search.md §23)
                 routes["pattern"] = "POST /pattern";
+                routes["pattern_capabilities"] = "GET /pattern/capabilities";
                 features.append("pattern");
             }
             c["features"] = std::move(features);

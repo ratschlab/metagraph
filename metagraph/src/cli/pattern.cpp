@@ -63,15 +63,39 @@ constexpr const char kSupportVerified[] = "record_verified";
 // Pattern::parse reads them; listed in the capabilities
 constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
 
-// The two prose fields of the capabilities, references to the SPEC (pattern_capabilities_json);
-// the first names every cap
-constexpr const char kCapsRule[] = "max_contexts, max_anchors, max_paths, max_steps, "
-    "time_budget_ms, max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
-    "max_occurrences_per_label, max_predicate_contexts, max_predicate_work: maxima of request "
-    "fields (lowered, in limits.clamped); max_patterns, min_information_bits, "
-    "max_checked_entries, max_predicate_labels: server policy. "
-    "SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1, 19";
+// The two prose fields of the capabilities, references to the SPEC (pattern_capabilities_json):
+// §4.5 classifies every cap (a request field's maximum or the server's policy), §12.2 states
+// how a peptide is read
+constexpr const char kCapsRule[] = "SPEC-pattern-search.md section 4.5";
 constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 12.2";
+
+// The route of the full pattern block, which the block of GET /traverse/capabilities names in
+// `details` (SPEC §23)
+constexpr const char kPatternDetails[] = "GET /pattern/capabilities";
+
+// The keys of the pattern block a client of GET /traverse/capabilities alone gates on or parses
+// (SPEC §23, the gate block; what the search service reads, its interface inventory of
+// 2026-10-08 §3.10): the contract version and availability, the values a request is checked
+// against (modes, projections, kinds, residues, genetic codes, strands, scopes, k, the long
+// patterns' search), the budget floor and the defaults its parser reads, what the annotation
+// gives (support, placement, annotation), the mask and counting. Each keeps the full block's
+// value on that route, whatever else the route leaves to GET /pattern/capabilities
+const char *const kPatternGateKeys[] = {
+    "pattern_contract_version", "available", "unavailable_reason",
+    "modes", "projections", "kinds", "protein_residues", "genetic_codes", "strands",
+    "scopes", "scopes_by_graph_mode", "graph_mode", "k",
+    "long_patterns", "long_search", "default_long_search",
+    "finalize_reserve_ms", "default_time_budget_ms", "default_genetic_code",
+    "default_occurrences",
+    "support", "placement", "annotation", "mask", "counting",
+    "caps",
+};
+// the caps of the gate block: the ceilings a request is checked against and the chunk size
+// (max_patterns), and the two its parser reads (min_information_bits, max_anchors)
+const char *const kPatternGateCaps[] = {
+    "max_patterns", "max_contexts", "max_anchors", "max_paths", "max_steps", "time_budget_ms",
+    "min_information_bits", "max_memory_mb", "max_labels_per_anchor",
+};
 
 // The note of an entry answered on a graph without its dummy-edge mask (counting "upper_bound")
 // where a count carries an estimate: each such count is the bounds [lower, upper], upper the
@@ -1926,9 +1950,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     delivery["build"] = number_json(limits.delivery_build_mbps);
     delivery["compress"] = number_json(limits.delivery_compress_mbps);
     p["delivery_mbps"] = std::move(delivery);
-    // which caps are request fields' maxima and which are the server's policy (max_patterns,
-    // min_information_bits, max_checked_entries), every cap named; the rules themselves are the
-    // SPEC's (as protein_rule)
+    // which caps are request fields' maxima and which are the server's policy: a reference to
+    // the SPEC's section that classifies every cap (as protein_rule)
     p["caps_rule"] = kCapsRule;
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
@@ -1996,6 +2019,21 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
                      e.what());
     }
     return p;
+}
+
+std::vector<std::string> pattern_gate_keys() {
+    std::vector<std::string> keys(std::begin(kPatternGateKeys), std::end(kPatternGateKeys));
+    for (const char *cap : kPatternGateCaps) {
+        keys.push_back(std::string("caps.") + cap);
+    }
+    return keys;
+}
+
+Json::Value pattern_traverse_block(Json::Value full) {
+    // every key of the full block is kept until the search service reads the full block from
+    // GET /pattern/capabilities (SPEC §23); the gate keys keep their values after that too
+    full["details"] = kPatternDetails;
+    return full;
 }
 
 bool write_pattern_answer(const std::string &content,

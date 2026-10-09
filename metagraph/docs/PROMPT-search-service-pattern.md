@@ -70,6 +70,16 @@ scopes per graph mode, the caps and floors, `placement` and `support` the index 
 changed meaning; within version 1 read fields by presence and pass unknown values of the extensible
 enumerations through, SPEC §1). A host without the block has no route.
 
+**The full block's own route (SPEC §23).** A MetaGraph server also answers `GET /pattern/capabilities` (on its
+own host: not your `GET /pattern/capabilities/{db}`) with the full block, and the block of
+`GET /traverse/capabilities` names it, `details: "GET /pattern/capabilities"`. In this build the `/traverse` block
+is still the full block with `details`; once your probe reads the full route (§3.1 item 12), the `/traverse`
+block keeps only the fields you gate on or parse (SPEC §23's table, `counting` among them) and later additions
+(the predicate's details, the mismatches', the segments') appear on the full route only. The traversal contract's
+rules in both capabilities documents are references to the sections of `SPEC-labeled-traversal-core.md` that state
+them (its §10.3, "The rules are references"): `work_bound`, which your admin view shows, reads
+`"SPEC-labeled-traversal-core.md section 6.8, work units"`; `deadline_check.poll_stride` is the one new number.
+
 **Increments 4 and 5 (in the build since 2026-10-08; SPEC §12.1, §12.2, §17).** Two additions to contract
 version 1, both opt-in, each gated on the capabilities block, never on a milestone number:
 - **Paths of a pattern longer than k**: offer them only where `long_search` lists `"paths"`; the job then sends
@@ -280,6 +290,13 @@ capabilities block are what to build on.
     policy as sequences.
 11. Row ids are opaque and valid per (host, index release, graph); the later backend request "labels for given
     rows" takes them back. The job returns them as given.
+12. **(required before the `/traverse` block is reduced)** When the `pattern` block of `GET /traverse/capabilities`
+    has `details`, the probe fetches `GET {base}/pattern/capabilities` with the same cache and lifetime and uses
+    that document as the block (your `GET /pattern/capabilities/{db}` then shows it); without `details` (a build
+    before SPEC §23) it uses the `/traverse` block as today. A 404 on the new route (a proxy that does not pass
+    it): fall back to the `/traverse` block and log it. The route answers 200 while the index loads (`available:
+    null`): re-probe, never cache it as unavailable. The MetaGraph side reduces the `/traverse` block only after
+    this change is deployed on staging and has read the route there.
 
 ### 3.2 Time budget (decided 2026-10-07)
 

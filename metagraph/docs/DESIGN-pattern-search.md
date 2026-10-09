@@ -973,10 +973,11 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 an MCP tool returns whole keeps 1 KiB under its 32 KiB ceiling), the modes, the projections (`none`,
 `all`, `predicate_only`, with `none` available everywhere) and scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
 `mask: file | built_at_load | absent` with `counting: exact | upper_bound` and the sampled `dummy_fraction` (§4.4), `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
-resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The same `pattern`
-block is carried by `GET /traverse/capabilities` (`server.cpp:1340-1370`), the document the search service's
-probe reads, which today has `attempts`, `coordinates` and `deadline_check` and no feature list: one cached probe
-then serves both. A client gates on the block (a contract version it implements, and `available: true`; SPEC
+resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The full block also
+has a route of its own, `GET /pattern/capabilities` (the owner's decision of 2026-10-09, SPEC §23), and
+`GET /traverse/capabilities`, the document the search service's probe reads, carries the block with `details`
+naming that route: in two phases, first the full block, later only the fields a client gates on, so that the
+probe's document stays small while the block grows (SPEC §23.2). A client gates on the block (a contract version it implements, and `available: true`; SPEC
 §1, §10.3: since the outside review of 2026-10-07 a higher version is refused, not read by presence), reads
 fields by presence within it, and offers the label projections exactly when the block's `projections` list has
 them (§9).

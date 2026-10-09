@@ -521,9 +521,10 @@ def _finished(why, sent, state, attempts, skew, instance=None):
 # The server compares the bound only at its delivery checks, it is not interrupted at it:
 # past the bound an attempt runs the rest of the piece it was in, the walk up to its next
 # poll that reads the clock (one in poll_stride), the stopped seed's finalisation and the
-# building of its result up to the first delivery check -- the server's bound and
-# release_rule texts (traverse_attempts.cpp) state it in these words, and that run has no
-# stated length, so a clock release assumes it has ended
+# building of its result up to the first delivery check -- the attempt's bound and the
+# release rule (SPEC-labeled-traversal-core.md §6.8, §10.3, which the capabilities' bound and
+# release_rule refer to) state it so, and that run has no stated length, so a clock release
+# assumes it has ended
 _CLOCK_ASSUMED = ("the attempt's run past its bound has ended: past it the attempt runs on "
                   "until its next delivery check (then the 503) or its handler's return -- "
                   'the rest of the piece it was in when the bound passed and, when its walk '

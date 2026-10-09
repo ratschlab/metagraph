@@ -6902,13 +6902,12 @@ TEST(GraphletCoordinates, CapabilitiesBlockFollowsTheIndex) {
         EXPECT_EQ(16u, block["max_occurrences_default"].asUInt64());
         EXPECT_EQ("coordinates", block["limitation"].asString());
         EXPECT_EQ("drop_coordinates", block["action"].asString());
-        // the column record-end numbering and the true bound, which names the probe's maxima
-        // rather than a value it could contradict
-        EXPECT_NE(std::string::npos, block["rule"].asString().find(
-                "a column label's interval in a record's last k - 1 bases shares its numbers with "
-                "the next record's first k - 1 positions")) << c.name;
-        EXPECT_NE(std::string::npos, block["output_bound"].asString().find(
-                "this server's max_memory_mb")) << c.name;
+        // the rule and the block's bound: references to the SPEC section that states them (the
+        // section's substance: api/python/tests/test_traverse_capabilities_references.py)
+        EXPECT_EQ("SPEC-labeled-traversal-core.md section 7.1, record coordinates",
+                  block["rule"].asString()) << c.name;
+        EXPECT_EQ("SPEC-labeled-traversal-core.md section 7.1, record coordinates: what bounds "
+                  "the block", block["output_bound"].asString()) << c.name;
     }
 }
 
@@ -7320,10 +7319,8 @@ TEST(ResolveDeadline, CapabilitiesBlock) {
     EXPECT_EQ(4096u, t["check_kmers"].asUInt64());
     EXPECT_EQ(4096u, t["check_labels"].asUInt64());
     EXPECT_EQ("[\"rows\",\"support\"]", compact(t["stop_phases"]));
-    for (const char *needle : { "opt-in", "exactly the resolve", "503", "Not polled",
-                                "the mapping of the query's k-mers", "the seed selection" }) {
-        EXPECT_NE(std::string::npos, t["rule"].asString().find(needle)) << needle;
-    }
+    // the rule: a reference to the SPEC section that states it
+    EXPECT_EQ("SPEC-labeled-traversal-core.md section 4.5", t["rule"].asString());
     EXPECT_EQ(0u, resolve_capabilities_json({ 0, kResolveFinalizeMs })["time_budget"]
                           ["max_time_ms"].asUInt64());
 }
