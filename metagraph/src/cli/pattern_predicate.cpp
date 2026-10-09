@@ -1,6 +1,5 @@
 #include "pattern_predicate.hpp"
 
-#include <set>
 #include <stdexcept>
 #include <string_view>
 
@@ -8,6 +7,7 @@
 
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/traversal/label_oracle.hpp"
+#include "json_helpers.hpp"
 #include "pattern.hpp"
 
 
@@ -35,45 +35,9 @@ constexpr uint64_t kStride = 4096;
 
 constexpr const char kOperators[] = "any, all, none, at_least, and, or, not";
 
-PatternRefusal invalid(const std::string &message) {
-    return PatternRefusal(400, "invalid_request", message);
-}
+constexpr InvalidPatternRequest invalid{};
 
-/**
- * Strict access to one JSON object of the request, as /traverse's: every field read is
- * remembered, and finish() refuses the first one nothing read ("unknown field"), after the
- * known ones were checked — the guarantee rule: a field the server does not know is never
- * ignored. (A copy of the route's reader in pattern.cpp.)
- */
-class Fields {
-  public:
-    Fields(const Json::Value &value, std::string path) : v_(value), path_(std::move(path)) {
-        if (!v_.isObject())
-            throw invalid(path_ + ": expected an object");
-    }
-
-    bool has(const std::string &key) {
-        seen_.insert(key);
-        return v_.isMember(key);
-    }
-    const Json::Value& raw(const std::string &key) {
-        seen_.insert(key);
-        return v_[key];
-    }
-    std::string path(const std::string &key) const { return path_ + "." + key; }
-
-    void finish() const {
-        for (const std::string &name : v_.getMemberNames()) {
-            if (!seen_.count(name))
-                throw invalid(path_ + ": unknown field '" + name + "'");
-        }
-    }
-
-  private:
-    const Json::Value &v_;
-    std::string path_;
-    std::set<std::string> seen_;
-};
+using Fields = StrictObject<InvalidPatternRequest>;
 
 bool is_leaf(Op op) { return op <= Op::AT_LEAST; }
 

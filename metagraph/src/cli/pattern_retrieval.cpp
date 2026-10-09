@@ -32,6 +32,8 @@ using graph::traversal::LabelId;
 using graph::traversal::KeyCost;
 using graph::traversal::FetchRefusal;
 using graph::traversal::ReadPacing;
+using graph::traversal::kKeyUnits;
+using graph::traversal::hits_units;
 using graph::traversal::Column;
 using graph::traversal::Coord;
 using annot::matrix::DecodeBudget;
@@ -286,6 +288,154 @@ struct PathLabel {
 constexpr uint64_t kPathLabelsBytes = 32;
 constexpr uint64_t kPathLabelBytes = 8;
 
+// an item's occurrences inserted into the unions, undone when its output is refused
+using Inserted = std::vector<std::pair<LabelId, std::set<Occurrence>::iterator>>;
+
+// The label fields of a pattern's answer before anything is read: the counts unknown, no
+// statement and no cut, and the notes on the annotation's access and placement
+LabelsAnswer begin_labels(const char *placement, bool budgeted, bool place, bool records) {
+    LabelsAnswer a;
+    a.fields["placement"] = placement;
+    a.fields["annotation"] = budgeted ? "budgeted" : "unbudgeted";
+    a.fields["rows_refused"] = Json::Value(Json::arrayValue);
+    a.fields["anchors_truncated"] = Json::Value(Json::arrayValue);
+    a.fields["labels_cut"] = Json::Value();
+    a.fields["occurrences_cut"] = Json::Value();
+    a.fields["by_label"] = Json::Value();
+    a.labels_count = count_json(Relation::UNKNOWN, 0, Unit::LABELS);
+    a.occurrences_count = count_json(Relation::UNKNOWN, 0, Unit::PLACED_OCCURRENCES);
+    if (!budgeted)
+        a.notes.push_back("annotation_unbudgeted");
+    if (place && !records)
+        a.notes.push_back("record_bounds_unknown");
+    return a;
+}
+
+/**
+ * The label order of §5.5 over the labels the items carry (|counts|: per label, the contexts
+ * or the paths): items desc, column asc; and the labels the results list: all of them, or
+ * partial's first max_labels (the cut stated in |labels_cut|). rank[id] is the label's place
+ * among the listed ones, uint64_t's maximum when it is not listed.
+ */
+struct LabelOrder {
+    std::vector<LabelId> order;
+    std::vector<uint64_t> rank;
+    size_t listed = 0;
+};
+
+LabelOrder order_labels(const std::vector<uint64_t> &counts, const std::vector<LabelRef> &dict,
+                        bool partial, uint64_t max_labels, Json::Value *labels_cut) {
+    LabelOrder o;
+    for (LabelId id = 0; id < dict.size(); ++id) {
+        if (counts[id])
+            o.order.push_back(id);
+    }
+    std::sort(o.order.begin(), o.order.end(), [&](LabelId x, LabelId y) {
+        if (counts[x] != counts[y])
+            return counts[x] > counts[y];
+        return dict[x].name < dict[y].name;
+    });
+    o.rank.assign(dict.size(), std::numeric_limits<uint64_t>::max());
+    o.listed = o.order.size();
+    if (partial && o.listed > max_labels) {
+        o.listed = max_labels;
+        Json::Value cut = reason_json("max_labels");
+        cut["returned"] = uint_json(o.listed);
+        *labels_cut = std::move(cut);
+    }
+    for (size_t r = 0; r < o.listed; ++r) {
+        o.rank[o.order[r]] = r;
+    }
+    return o;
+}
+
+// The text of each label's name in the answer (string_text_bytes), computed once per label
+class NameText {
+  public:
+    explicit NameText(const std::vector<LabelRef> &dict) : dict_(dict), bytes_(dict.size(), 0) {}
+
+    uint64_t operator()(LabelId id) {
+        if (!bytes_[id])
+            bytes_[id] = string_text_bytes(dict_[id].name);
+        return bytes_[id];
+    }
+
+  private:
+    const std::vector<LabelRef> &dict_;
+    std::vector<uint64_t> bytes_;
+};
+
+// by_label in the account: an entry with its copy of the name per listed label
+uint64_t summary_bytes(const LabelOrder &labels, const std::vector<LabelRef> &dict) {
+    uint64_t bytes = 0;
+    for (size_t r = 0; r < labels.listed; ++r) {
+        bytes += by_label_bytes(dict[labels.order[r]].name);
+    }
+    return bytes;
+}
+
+// by_label's text: per listed label |entry_text| (an entry without its names), the label's
+// name and the graph's
+uint64_t summary_text(const LabelOrder &labels, NameText &names, const Json::Value &graph_name,
+                      uint64_t entry_text) {
+    const uint64_t graph_text = compact_json_bytes(graph_name);
+    uint64_t text = 0;
+    for (size_t r = 0; r < labels.listed; ++r) {
+        text += entry_text + names(labels.order[r]) + graph_text;
+    }
+    return text;
+}
+
+// a refused item's occurrences out of the unions again, it and every later item cut
+void undo_output(std::vector<std::set<Occurrence>> *unions, const Inserted &inserted,
+                 std::vector<bool> *output_cut, size_t i) {
+    for (const auto &[id, it] : inserted) {
+        (*unions)[id].erase(it);
+    }
+    for (size_t j = i; j < output_cut->size(); ++j) {
+        (*output_cut)[j] = true;
+    }
+}
+
+// One label object of a result (§7.2): its column, its |support| and, with placement, its
+// occurrences (their count with record placement, and their list; null when not placed)
+Json::Value label_json(const ContextLabel &cl, const LabelRef &label, const char *support,
+                       const char *strand, size_t length, const LabelOracle &oracle,
+                       bool place, bool records) {
+    Json::Value l;
+    l["column"] = label.name;
+    l["support"] = support;
+    if (!place)
+        return l;
+    if (!cl.placed) {
+        if (records)
+            l["occurrences"] = count_json(Relation::UNKNOWN, 0, Unit::PLACED_OCCURRENCES);
+        l["occurrence_list"] = Json::Value();
+        return l;
+    }
+    if (records)
+        l["occurrences"] = count_json(Relation::EXACT, cl.total, Unit::PLACED_OCCURRENCES);
+    const size_t k = oracle.get_k();
+    Json::Value occ(Json::arrayValue);
+    for (const Occurrence &o : cl.occurrences) {
+        Json::Value e;
+        if (records) {
+            e["seq_id"] = uint_json(o.a);
+            e["record"] = oracle.header_name(label.column, o.a);
+            e["strand"] = strand;
+            e["nt_coords"] = std::to_string(o.b) + "-" + std::to_string(o.b + length - 1);
+            e["nt_length"] = uint_json(oracle.num_kmers_in_sequence(label.column, o.a) + k - 1);
+        } else {
+            e["kmer_coord"] = uint_json(o.a);
+            e["offset"] = uint_json(o.b);
+            e["strand"] = strand;
+        }
+        occ.append(std::move(e));
+    }
+    l["occurrence_list"] = std::move(occ);
+    return l;
+}
+
 } // namespace
 
 
@@ -360,6 +510,98 @@ AnnotationDescription describe_annotation(const LabelOracle &oracle, GraphMode m
 }
 
 
+void PatternRetrieval::Impl::finish_work(LabelsAnswer &a, uint64_t rows_read,
+                                         uint64_t pattern_units, double discovery_ms,
+                                         double placement_ms) {
+    a.work["annotation_rows"] = uint_json(rows_read);
+    a.work["annotation_units"] = uint_json(pattern_units);
+    a.work["memory_bytes"] = uint_json(account.peak());
+    a.timing["label_discovery_ms"] = discovery_ms;
+    a.timing["placement_ms"] = placement_ms;
+    if (volume) {
+        volume->add(compact_json_bytes(a.fields["rows_refused"])
+                    + compact_json_bytes(a.fields["anchors_truncated"]));
+    }
+    counters += a.counters;
+}
+
+bool PatternRetrieval::Impl::skip_reads(LabelsAnswer &a, const Extraction &x, size_t keep,
+                                        uint64_t released, uint64_t descriptors, bool partial) {
+    if (x.withheld) {
+        // nothing was released: nothing is read (§5.2: no annotation work on a pattern whose
+        // count was not admitted)
+        account.release(descriptors);
+        finish_work(a, 0, 0, 0, 0);
+        return true;
+    }
+    if (keep < released) {
+        set_stop("output", "max_memory");
+        if (!partial) {
+            account.release(descriptors);
+            a.withheld = "output_budget";
+            a.stop = stop;
+            finish_work(a, 0, 0, 0, 0);
+            return true;
+        }
+        a.cut = "max_memory";
+    }
+    return false;
+}
+
+bool PatternRetrieval::Impl::state_rows(LabelsAnswer &a, const std::vector<RowState> &rows,
+                                        const std::vector<RetrievalContext> &named,
+                                        bool *truncated) {
+    bool complete = true;
+    for (const RowState &row : rows) {
+        a.counters.rows_distinct += row.status == RowStatus::COMPLETE
+                                    || row.status == RowStatus::TRUNCATED;
+        if (row.status == RowStatus::TRUNCATED) {
+            *truncated = true;
+            Json::Value t;
+            t["kmer"] = named[row.first].kmer;
+            t["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(row.key));
+            t["cap"] = uint_json(limits.max_labels_per_anchor);
+            t["total"] = uint_json(row.labels.total);
+            a.fields["anchors_truncated"].append(std::move(t));
+        }
+        complete &= row.status == RowStatus::COMPLETE;
+    }
+    return complete;
+}
+
+bool PatternRetrieval::Impl::commit_output(size_t i, uint64_t bytes, uint64_t text, bool late,
+                                           bool refused, PendingText *pending) {
+    const bool held = !late && !refused && account.charge(bytes);
+    if (held) {
+        if (output_hook)
+            output_hook(i);
+        pending->add(text);
+        late = !budget.check_time();
+        if (late) {
+            pending->drop(text);
+            account.release(bytes);
+        }
+    }
+    if (held && !late)
+        return true;
+    set_stop("output", late ? "time" : "max_memory");
+    time_stop |= late;
+    return false;
+}
+
+void PatternRetrieval::Impl::withhold_all(LabelsAnswer &a, bool rows_refused,
+                                          bool output_stopped, bool truncated, uint64_t held,
+                                          PendingText *pending) {
+    a.withheld = time_stop ? "deadline"
+               : rows_refused || read_stop ? "annotation_budget"
+               : output_stopped || stop ? "output_budget"
+               : truncated ? "anchor_labels_truncated"
+                           : "annotation_budget";
+    account.release(held);
+    pending->drop_all();
+}
+
+
 // Both steps read one row at a time: the time and the work are checked before every row, and
 // every row whose read began is charged its units (also when it is refused or interrupted), so
 // that a read passes the work budget by its one row at most — a batch sized by the rows read
@@ -426,7 +668,7 @@ void PatternRetrieval::Impl::discover(std::vector<RowState> &rows,
                 assert(stated);
                 (void)stated;
             }
-            charge_work(8 + row.labels.total + costs[0].dependency_units, pattern_units);
+            charge_work(kKeyUnits + row.labels.total + costs[0].dependency_units, pattern_units);
         } else {
             const size_t named = recorder->labels().size();
             std::vector<LabelRecorder::NodeLabels> out = recorder->fetch({ row.key }, &pace);
@@ -448,7 +690,7 @@ void PatternRetrieval::Impl::discover(std::vector<RowState> &rows,
                 names += label_name_bytes(recorder->labels()[id].name);
             }
             account.force(names);
-            charge_work(8 + out[0].total, pattern_units);
+            charge_work(kKeyUnits + out[0].total, pattern_units);
             if (!account.charge(list)) {
                 set_stop("label_discovery", "max_memory");
                 break;
@@ -487,14 +729,6 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
     // retrieve_given's rows name
     LabelQuery query(oracle, dict ? *dict : recorder->labels(), true);
     query.set_max_cache_bytes(0);
-    // the units of a row's hits: 8, 1 per label and 1 per coordinate, and its dependency rows'
-    auto hits_units = [](const LabelQuery::NodeHits &hits, const KeyCost &cost) {
-        uint64_t u = 8 + hits.size() + cost.dependency_units;
-        for (const auto &hit : hits) {
-            u += hit.coords.size();
-        }
-        return u;
-    };
     for (size_t t : todo) {
         RowState &row = rows[t];
         if (!may_read("placement"))
@@ -546,13 +780,13 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
             costs.resize(1);
             const uint64_t bytes = LabelQuery::held_bytes(out[0]);
             if (!account.charge(bytes)) {
-                charge_work(hits_units(out[0], costs[0]), pattern_units);
+                charge_work(hits_units(out[0]) + costs[0].dependency_units, pattern_units);
                 set_stop("placement", "max_memory");
                 break;
             }
             *held_hits += bytes;
         }
-        charge_work(hits_units(out[0], costs[0]), pattern_units);
+        charge_work(hits_units(out[0]) + costs[0].dependency_units, pattern_units);
         row.hits = std::move(out[0]);
         row.placed = true;
         ++*rows_read;
@@ -612,7 +846,6 @@ bool PatternRetrieval::admit_path(size_t length) {
 }
 
 uint64_t PatternRetrieval::memory_peak() const { return impl_->account.peak(); }
-uint64_t PatternRetrieval::memory_held() const { return impl_->account.held(); }
 const RetrievalCounters& PatternRetrieval::counters() const { return impl_->counters; }
 
 LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &contexts,
@@ -638,60 +871,14 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
     const size_t k = m.oracle.get_k();
     const bool partial = mode == Mode::PARTIAL;
 
-    LabelsAnswer a;
-    a.fields["placement"] = placement();
-    a.fields["annotation"] = description_.budgeted ? "budgeted" : "unbudgeted";
-    a.fields["rows_refused"] = Json::Value(Json::arrayValue);
-    a.fields["anchors_truncated"] = Json::Value(Json::arrayValue);
-    a.fields["labels_cut"] = Json::Value();
-    a.fields["occurrences_cut"] = Json::Value();
-    a.fields["by_label"] = Json::Value();
-    a.labels_count = count_json(Relation::UNKNOWN, 0, Unit::LABELS);
-    a.occurrences_count = count_json(Relation::UNKNOWN, 0, Unit::PLACED_OCCURRENCES);
-    if (!description_.budgeted)
-        a.notes.push_back("annotation_unbudgeted");
-    if (m.place && !m.records)
-        a.notes.push_back("record_bounds_unknown");
-
+    LabelsAnswer a = begin_labels(placement(), description_.budgeted, m.place, m.records);
     uint64_t rows_read = 0, pattern_units = 0;
     double discovery_ms = 0, placement_ms = 0;
-    auto finish_work = [&]() {
-        a.work["annotation_rows"] = uint_json(rows_read);
-        a.work["annotation_units"] = uint_json(pattern_units);
-        a.work["memory_bytes"] = uint_json(m.account.peak());
-        a.timing["label_discovery_ms"] = discovery_ms;
-        a.timing["placement_ms"] = placement_ms;
-        // the statements stay in the answer, whatever else does (AnswerVolume)
-        if (m.volume) {
-            m.volume->add(compact_json_bytes(a.fields["rows_refused"])
-                          + compact_json_bytes(a.fields["anchors_truncated"]));
-        }
-        m.counters += a.counters;
-    };
 
-    if (x.withheld) {
-        // nothing was released: nothing is read (§5.2: no annotation work on a pattern
-        // whose count was not admitted)
-        m.account.release(descriptors);
-        finish_work();
-        return a;
-    }
-
-    // the descriptors of the released contexts were charged as the engine released them,
-    // before their result objects were built (admit_context, §5.3 items 3 and 5): the first
-    // that did not fit ended the list, and no result object was built after it
+    // the contexts' descriptors were charged by admit_context (§5.3 items 3 and 5)
     const size_t keep = contexts.size();
-    if (keep < released) {
-        m.set_stop("output", "max_memory");
-        if (!partial) {
-            m.account.release(descriptors);
-            a.withheld = "output_budget";
-            a.stop = m.stop;
-            finish_work();
-            return a;
-        }
-        a.cut = "max_memory";
-    }
+    if (m.skip_reads(a, x, keep, released, descriptors, partial))
+        return a;
 
     // the rows: the contexts' distinct keys, in answer order of their first context
     std::vector<RowState> rows;
@@ -756,21 +943,7 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
     discovery_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     bool truncated = false;
-    bool rows_complete = true;
-    for (const RowState &row : rows) {
-        a.counters.rows_distinct += row.status == RowStatus::COMPLETE
-                                    || row.status == RowStatus::TRUNCATED;
-        if (row.status == RowStatus::TRUNCATED) {
-            truncated = true;
-            Json::Value t;
-            t["kmer"] = contexts[row.first].kmer;
-            t["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(row.key));
-            t["cap"] = uint_json(m.limits.max_labels_per_anchor);
-            t["total"] = uint_json(row.labels.total);
-            a.fields["anchors_truncated"].append(std::move(t));
-        }
-        rows_complete &= row.status == RowStatus::COMPLETE;
-    }
+    const bool rows_complete = m.state_rows(a, rows, contexts, &truncated);
 
     // all_or_count publishes nothing once a row is cut, refused or not read: no placement
     // (partial: on the rows read, unless a stop ended the reads)
@@ -795,71 +968,31 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
                 label_suffix[id]++;
         }
     }
-    std::vector<LabelId> order;
-    for (LabelId id = 0; id < dict.size(); ++id) {
-        if (label_contexts[id])
-            order.push_back(id);
-    }
-    std::sort(order.begin(), order.end(), [&](LabelId x, LabelId y) {
-        if (label_contexts[x] != label_contexts[y])
-            return label_contexts[x] > label_contexts[y];
-        return dict[x].name < dict[y].name;
-    });
+    const LabelOrder labels = order_labels(label_contexts, dict, partial, m.limits.max_labels,
+                                           &a.fields["labels_cut"]);
+    const std::vector<LabelId> &order = labels.order;
+    const std::vector<uint64_t> &rank = labels.rank;
+    const size_t kept_labels = labels.listed;
     const uint64_t num_labels = order.size();
-    std::vector<uint64_t> rank(dict.size(), std::numeric_limits<uint64_t>::max());
-    size_t kept_labels = order.size();
-    if (partial && kept_labels > m.limits.max_labels) {
-        kept_labels = m.limits.max_labels;
-        Json::Value cut = reason_json("max_labels");
-        cut["returned"] = uint_json(kept_labels);
-        a.fields["labels_cut"] = std::move(cut);
-    }
-    for (size_t r = 0; r < kept_labels; ++r) {
-        rank[order[r]] = r;
-    }
 
     // the text the labels built for the answer will write (AnswerVolume), from above and before
     // they are built: every result's label fields and by_label first, then each context's
     // labels as the loop below takes them; the work time is read with them counted before each
     // context's labels are built
-    uint64_t pending = 0;
-    auto pend = [&](uint64_t bytes) {
-        pending += bytes;
-        if (m.volume)
-            m.volume->add_pending(bytes);
-    };
-    auto unpend = [&](uint64_t bytes) {
-        pending -= std::min(bytes, pending);
-        if (m.volume)
-            m.volume->drop_pending(bytes);
-    };
-    std::vector<uint64_t> name_text(dict.size(), 0);
-    auto label_text = [&](LabelId id) {
-        if (!name_text[id])
-            name_text[id] = string_text_bytes(dict[id].name);
-        return name_text[id];
-    };
-    uint64_t summary_text = 0;
-    {
-        const uint64_t graph_text = compact_json_bytes(graph_name);
-        for (size_t r = 0; r < kept_labels; ++r) {
-            summary_text += kByLabelText + label_text(order[r]) + graph_text;
-        }
-        pend(keep * kResultLabelsText + summary_text);
-    }
+    PendingText pending(m.volume);
+    NameText label_text(dict);
+    const uint64_t by_label_text = summary_text(labels, label_text, graph_name, kByLabelText);
+    pending.add(keep * kResultLabelsText + by_label_text);
 
     // by_label (its entries with their copies of the names) is charged before any context's
     // labels: the answer holds it whatever is cut after it. When it does not fit, no label of
     // the pattern is built: stop {output, max_memory} (unless an earlier stop is stated),
     // all_or_count withholds (output_budget), partial returns the contexts read with
     // labels_status output_budget and by_label null
-    uint64_t summary = 0;
-    for (size_t r = 0; r < kept_labels; ++r) {
-        summary += by_label_bytes(dict[order[r]].name);
-    }
+    const uint64_t summary = summary_bytes(labels, dict);
     const bool summary_held = m.account.charge(summary);
     if (!summary_held)
-        unpend(summary_text);
+        pending.drop(by_label_text);
 
     // the contexts' label lists with their occurrences; each label's deduplicated union (§5.4:
     // (column, seq_id, start, strand); the label is the column). Every occurrence is counted in
@@ -889,7 +1022,7 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
             m.occurrences_hook(i);
         std::vector<ContextLabel> list;
         uint64_t bytes = 0, new_dedup = 0, text = 0;
-        std::vector<std::pair<LabelId, std::set<Occurrence>::iterator>> inserted;
+        Inserted inserted;
         bool late = false, refused = false;
         for (LabelId id : row.labels.labels) {
             // a label partial's max_labels cut is not listed, but its occurrences are
@@ -1002,31 +1135,9 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
             if (listed)
                 list.push_back(std::move(cl));
         }
-        // the memory first (where it stops does not depend on the machine), then the time:
-        // the work time, read with this context's labels counted in the answer's volume
-        const bool held = !late && !refused && m.account.charge(bytes + new_dedup);
-        if (held) {
-            if (m.output_hook)
-                m.output_hook(i);
-            pend(text);
-            late = !m.budget.check_time();
-            if (late) {
-                unpend(text);
-                m.account.release(bytes + new_dedup);
-            }
-        }
-        if (!held || late) {
-            for (const auto &[id, it] : inserted) {
-                unions[id].erase(it);
-            }
+        if (!m.commit_output(i, bytes + new_dedup, text, late, refused, &pending)) {
+            undo_output(&unions, inserted, &output_cut, i);
             output_stopped = true;
-            for (size_t j = i; j < keep; ++j) {
-                output_cut[j] = true;
-            }
-            // a time stop of the output is recorded in the budget too (Budget::check_time):
-            // the later patterns answer as after any time stop
-            m.set_stop("output", late ? "time" : "max_memory");
-            m.time_stop |= late;
             break;
         }
         output += bytes;
@@ -1047,7 +1158,7 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
                        &a.fields["occurrences_cut"], [&](uint64_t bytes, uint64_t text) {
             m.account.release(bytes);
             output -= std::min(output, bytes);
-            unpend(text);
+            pending.drop(text);
         });
     }
 
@@ -1087,19 +1198,10 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
     a.time_limited = m.time_stop;
 
     if (!partial && !a.complete) {
-        // all_or_count: all or nothing (§5.2), the reason named; what explains it
-        // (rows_refused, anchors_truncated) stays
-        // the reads' own budgets (a refused row, the work, an unbudgeted read the account
-        // could not hold) before the answer's memory, before a truncated anchor
-        a.withheld = m.time_stop ? "deadline"
-                   : !refused.empty() || m.read_stop ? "annotation_budget"
-                   : output_stopped || m.stop ? "output_budget"
-                   : truncated ? "anchor_labels_truncated"
-                               : "annotation_budget";
-        m.account.release(output + descriptors + (summary_held ? summary : 0));
-        // no label of this pattern is built for the answer
-        unpend(pending);
-        finish_work();
+        // all_or_count: all or nothing (§5.2); no label of this pattern is built
+        m.withhold_all(a, !refused.empty(), output_stopped, truncated,
+                       output + descriptors + (summary_held ? summary : 0), &pending);
+        m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
         return a;
     }
 
@@ -1148,51 +1250,17 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
             continue;
         }
         Json::Value labels(Json::arrayValue);
+        const char *strand = strand_of(c.orientation);
         for (const ContextLabel &cl : lists[i]) {
-            Json::Value l;
-            const Column column = dict[cl.label].column;
-            l["column"] = dict[cl.label].name;
-            l["support"] = "kmer";
-            if (m.place) {
-                if (!cl.placed) {
-                    if (m.records)
-                        l["occurrences"] = count_json(Relation::UNKNOWN, 0,
-                                                      Unit::PLACED_OCCURRENCES);
-                    l["occurrence_list"] = Json::Value();
-                } else {
-                    if (m.records)
-                        l["occurrences"] = count_json(Relation::EXACT, cl.total,
-                                                      Unit::PLACED_OCCURRENCES);
-                    Json::Value occ(Json::arrayValue);
-                    for (const Occurrence &o : cl.occurrences) {
-                        Json::Value e;
-                        if (m.records) {
-                            e["seq_id"] = uint_json(o.a);
-                            e["record"] = m.oracle.header_name(column, o.a);
-                            e["strand"] = strand_of(c.orientation);
-                            e["nt_coords"] = std::to_string(o.b) + "-"
-                                                + std::to_string(o.b + length - 1);
-                            e["nt_length"] = uint_json(
-                                    m.oracle.num_kmers_in_sequence(column, o.a) + k - 1);
-                        } else {
-                            e["kmer_coord"] = uint_json(o.a);
-                            e["offset"] = uint_json(o.b);
-                            e["strand"] = strand_of(c.orientation);
-                        }
-                        occ.append(std::move(e));
-                    }
-                    l["occurrence_list"] = std::move(occ);
-                }
-            }
-            labels.append(std::move(l));
+            labels.append(label_json(cl, dict[cl.label], "kmer", strand, length, m.oracle,
+                                     m.place, m.records));
         }
         f["labels"] = std::move(labels);
         a.result_fields.push_back(std::move(f));
     }
     // the labels are built: from now on they are written only
-    if (m.volume)
-        m.volume->settle(pending);
-    finish_work();
+    pending.settle();
+    m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
     return a;
 }
 
@@ -1235,64 +1303,21 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         return v;
     };
 
-    LabelsAnswer a;
-    a.fields["placement"] = placement();
-    a.fields["annotation"] = description_.budgeted ? "budgeted" : "unbudgeted";
-    a.fields["rows_refused"] = Json::Value(Json::arrayValue);
-    a.fields["anchors_truncated"] = Json::Value(Json::arrayValue);
-    a.fields["labels_cut"] = Json::Value();
-    a.fields["occurrences_cut"] = Json::Value();
-    a.fields["by_label"] = Json::Value();
+    LabelsAnswer a = begin_labels(placement(), description_.budgeted, m.place, m.records);
     if (require_verified)
         a.fields["labels_excluded_unverified"] = count_json(Relation::UNKNOWN, 0, Unit::LABELS);
-    a.labels_count = count_json(Relation::UNKNOWN, 0, Unit::LABELS);
     a.labels_count["by_support"] = support_split(Relation::UNKNOWN, 0, Relation::UNKNOWN, 0);
-    a.occurrences_count = count_json(Relation::UNKNOWN, 0, Unit::PLACED_OCCURRENCES);
-    if (!description_.budgeted)
-        a.notes.push_back("annotation_unbudgeted");
-    if (m.place && !m.records)
-        a.notes.push_back("record_bounds_unknown");
     // no coordinates read (placement none, none_canonical, not_requested): every label of a
     // path is supported by the intersection of its k-mers' labels only (DESIGN §4.3)
     if (!m.place)
         a.notes.push_back("label_intersection_only");
-
     uint64_t rows_read = 0, pattern_units = 0;
     double discovery_ms = 0, placement_ms = 0;
-    auto finish_work = [&]() {
-        a.work["annotation_rows"] = uint_json(rows_read);
-        a.work["annotation_units"] = uint_json(pattern_units);
-        a.work["memory_bytes"] = uint_json(m.account.peak());
-        a.timing["label_discovery_ms"] = discovery_ms;
-        a.timing["placement_ms"] = placement_ms;
-        if (m.volume) {
-            m.volume->add(compact_json_bytes(a.fields["rows_refused"])
-                          + compact_json_bytes(a.fields["anchors_truncated"]));
-        }
-        m.counters += a.counters;
-    };
 
-    if (x.withheld) {
-        // nothing was released: nothing is read (§5.2)
-        m.account.release(descriptors);
-        finish_work();
-        return a;
-    }
-
-    // the descriptors of the released paths were charged as the engine released them, before
-    // their result objects were built (admit_path): the first that did not fit ended the list
+    // the paths' descriptors were charged by admit_path
     const size_t keep = paths.size();
-    if (keep < released) {
-        m.set_stop("output", "max_memory");
-        if (!partial) {
-            m.account.release(descriptors);
-            a.withheld = "output_budget";
-            a.stop = m.stop;
-            finish_work();
-            return a;
-        }
-        a.cut = "max_memory";
-    }
+    if (m.skip_reads(a, x, keep, released, descriptors, partial))
+        return a;
 
     // the rows: the distinct keys of the paths' k-mers, in answer order of their first
     // appearance, each named by its k-mer in the statements (rows_refused, anchors_truncated)
@@ -1341,24 +1366,13 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
             std::chrono::steady_clock::now() - t0).count();
 
     bool truncated = false;
-    bool rows_complete = true;
+    const bool rows_complete = m.state_rows(a, rows, namer, &truncated);
+    // the paths intersect the rows' label lists: sorted once per row (LabelRecorder gives them
+    // in ascending ids), not copied and sorted for every path through the row
     for (RowState &row : rows) {
         const bool read = row.status == RowStatus::COMPLETE || row.status == RowStatus::TRUNCATED;
-        a.counters.rows_distinct += read;
-        // the paths intersect the rows' label lists: sorted once per row (LabelRecorder gives
-        // them in ascending ids), not copied and sorted for every path through the row
         if (read && !std::is_sorted(row.labels.labels.begin(), row.labels.labels.end()))
             std::sort(row.labels.labels.begin(), row.labels.labels.end());
-        if (row.status == RowStatus::TRUNCATED) {
-            truncated = true;
-            Json::Value t;
-            t["kmer"] = namer[row.first].kmer;
-            t["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(row.key));
-            t["cap"] = uint_json(m.limits.max_labels_per_anchor);
-            t["total"] = uint_json(row.labels.total);
-            a.fields["anchors_truncated"].append(std::move(t));
-        }
-        rows_complete &= row.status == RowStatus::COMPLETE;
     }
 
     // ---- each path's labels: those on EVERY one of its k-mers (the intersection of its
@@ -1645,68 +1659,31 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
                 label_paths[pl.label]++;
         }
     }
-    std::vector<LabelId> order;
+    const LabelOrder labels = order_labels(label_paths, dict, partial, m.limits.max_labels,
+                                           &a.fields["labels_cut"]);
+    const std::vector<LabelId> &order = labels.order;
+    const std::vector<uint64_t> &rank = labels.rank;
+    const size_t kept_labels = labels.listed;
+    const uint64_t num_labels = order.size();
     uint64_t excluded_labels = 0;
     for (LabelId id = 0; id < dict.size(); ++id) {
-        if (label_paths[id])
-            order.push_back(id);
         if (require_verified && label_carries[id] && !label_verified[id])
             excluded_labels++;
-    }
-    std::sort(order.begin(), order.end(), [&](LabelId x, LabelId y) {
-        if (label_paths[x] != label_paths[y])
-            return label_paths[x] > label_paths[y];
-        return dict[x].name < dict[y].name;
-    });
-    const uint64_t num_labels = order.size();
-    std::vector<uint64_t> rank(dict.size(), std::numeric_limits<uint64_t>::max());
-    size_t kept_labels = order.size();
-    if (partial && kept_labels > m.limits.max_labels) {
-        kept_labels = m.limits.max_labels;
-        Json::Value cut = reason_json("max_labels");
-        cut["returned"] = uint_json(kept_labels);
-        a.fields["labels_cut"] = std::move(cut);
-    }
-    for (size_t r = 0; r < kept_labels; ++r) {
-        rank[order[r]] = r;
     }
 
     // the text the labels built for the answer will write (AnswerVolume), from above and
     // before they are built
-    uint64_t pending = 0;
-    auto pend = [&](uint64_t bytes) {
-        pending += bytes;
-        if (m.volume)
-            m.volume->add_pending(bytes);
-    };
-    auto unpend = [&](uint64_t bytes) {
-        pending -= std::min(bytes, pending);
-        if (m.volume)
-            m.volume->drop_pending(bytes);
-    };
-    std::vector<uint64_t> name_text(dict.size(), 0);
-    auto label_text = [&](LabelId id) {
-        if (!name_text[id])
-            name_text[id] = string_text_bytes(dict[id].name);
-        return name_text[id];
-    };
-    uint64_t summary_text = 0;
-    {
-        const uint64_t graph_text = compact_json_bytes(graph_name);
-        for (size_t r = 0; r < kept_labels; ++r) {
-            summary_text += kPathByLabelText + label_text(order[r]) + graph_text;
-        }
-        pend(keep * kPathResultLabelsText + summary_text);
-    }
+    PendingText pending(m.volume);
+    NameText label_text(dict);
+    const uint64_t by_label_text = summary_text(labels, label_text, graph_name,
+                                                kPathByLabelText);
+    pending.add(keep * kPathResultLabelsText + by_label_text);
 
     // by_label before any path's labels (as for contexts)
-    uint64_t summary = 0;
-    for (size_t r = 0; r < kept_labels; ++r) {
-        summary += by_label_bytes(dict[order[r]].name);
-    }
+    const uint64_t summary = summary_bytes(labels, dict);
     const bool summary_held = m.account.charge(summary);
     if (!summary_held)
-        unpend(summary_text);
+        pending.drop(by_label_text);
 
     // the paths' label lists with their occurrences; each label's deduplicated union (§5.4),
     // and, as for contexts, each listed label's list with its first max_occurrences_per_label
@@ -1738,7 +1715,7 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         }
         std::vector<ContextLabel> list;
         uint64_t bytes = 0, new_dedup = 0, text = 0;
-        std::vector<std::pair<LabelId, std::set<Occurrence>::iterator>> inserted;
+        Inserted inserted;
         late = false;
         bool refused = false;
         size_t f = 0;
@@ -1813,28 +1790,9 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         // the runs kept for this path are no longer needed
         m.account.release(kept_bytes[i]);
         kept_bytes[i] = 0;
-        // the memory first, then the time (as for contexts)
-        const bool held = !late && !refused && m.account.charge(bytes + new_dedup);
-        if (held) {
-            if (m.output_hook)
-                m.output_hook(i);
-            pend(text);
-            late = !m.budget.check_time();
-            if (late) {
-                unpend(text);
-                m.account.release(bytes + new_dedup);
-            }
-        }
-        if (!held || late) {
-            for (const auto &[id, it] : inserted) {
-                unions[id].erase(it);
-            }
+        if (!m.commit_output(i, bytes + new_dedup, text, late, refused, &pending)) {
+            undo_output(&unions, inserted, &output_cut, i);
             output_stopped = true;
-            for (size_t j = i; j < keep; ++j) {
-                output_cut[j] = true;
-            }
-            m.set_stop("output", late ? "time" : "max_memory");
-            m.time_stop |= late;
             break;
         }
         output += bytes;
@@ -1855,7 +1813,7 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
                        &a.fields["occurrences_cut"], [&](uint64_t bytes, uint64_t text) {
             m.account.release(bytes);
             output -= std::min(output, bytes);
-            unpend(text);
+            pending.drop(text);
         });
     }
 
@@ -1887,15 +1845,10 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     a.time_limited = m.time_stop;
 
     if (!partial && !a.complete) {
-        // all_or_count: all or nothing (§5.2), the reason named, as for contexts
-        a.withheld = m.time_stop ? "deadline"
-                   : !refused.empty() || m.read_stop ? "annotation_budget"
-                   : output_stopped || m.stop ? "output_budget"
-                   : truncated ? "anchor_labels_truncated"
-                               : "annotation_budget";
-        m.account.release(output + descriptors + (summary_held ? summary : 0));
-        unpend(pending);
-        finish_work();
+        // all_or_count: all or nothing (§5.2), as for contexts
+        m.withhold_all(a, !refused.empty(), output_stopped, truncated,
+                       output + descriptors + (summary_held ? summary : 0), &pending);
+        m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
         return a;
     }
 
@@ -1981,44 +1934,12 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         }
         Json::Value labels(Json::arrayValue);
         bool any_verified = false, any_unverified = false;
+        const char *strand = strand_of(p.orientation);
         for (const ContextLabel &cl : lists[i]) {
-            Json::Value l;
-            const Column column = dict[cl.label].column;
-            l["column"] = dict[cl.label].name;
-            l["support"] = cl.verified ? "record_verified" : "label_intersection";
             (cl.verified ? any_verified : any_unverified) = true;
-            if (m.place) {
-                if (!cl.placed) {
-                    if (m.records)
-                        l["occurrences"] = count_json(Relation::UNKNOWN, 0,
-                                                      Unit::PLACED_OCCURRENCES);
-                    l["occurrence_list"] = Json::Value();
-                } else {
-                    if (m.records)
-                        l["occurrences"] = count_json(Relation::EXACT, cl.total,
-                                                      Unit::PLACED_OCCURRENCES);
-                    Json::Value occ(Json::arrayValue);
-                    for (const Occurrence &o : cl.occurrences) {
-                        Json::Value e;
-                        if (m.records) {
-                            e["seq_id"] = uint_json(o.a);
-                            e["record"] = m.oracle.header_name(column, o.a);
-                            e["strand"] = strand_of(p.orientation);
-                            e["nt_coords"] = std::to_string(o.b) + "-"
-                                                + std::to_string(o.b + length - 1);
-                            e["nt_length"] = uint_json(
-                                    m.oracle.num_kmers_in_sequence(column, o.a) + k - 1);
-                        } else {
-                            e["kmer_coord"] = uint_json(o.a);
-                            e["offset"] = uint_json(o.b);
-                            e["strand"] = strand_of(p.orientation);
-                        }
-                        occ.append(std::move(e));
-                    }
-                    l["occurrence_list"] = std::move(occ);
-                }
-            }
-            labels.append(std::move(l));
+            labels.append(label_json(cl, dict[cl.label],
+                                     cl.verified ? "record_verified" : "label_intersection",
+                                     strand, length, m.oracle, m.place, m.records));
         }
         // the path's support: its listed labels' (null when it lists none)
         f["support"] = !any_verified && !any_unverified ? Json::Value()
@@ -2027,9 +1948,8 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         f["labels"] = std::move(labels);
         a.result_fields.push_back(std::move(f));
     }
-    if (m.volume)
-        m.volume->settle(pending);
-    finish_work();
+    pending.settle();
+    m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
     return a;
 }
 

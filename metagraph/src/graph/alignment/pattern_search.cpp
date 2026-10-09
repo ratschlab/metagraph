@@ -2791,7 +2791,6 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
 
     Result result;
     result.scope = is_long ? Scope::LONG : request.scope;
-    result.graph_mode = support_.mode;
     result.palindromic = pattern.is_palindromic();
     result.information_bits = pattern.information_bits();
     // the bits the information floor reads: for a long pattern the least over the searched

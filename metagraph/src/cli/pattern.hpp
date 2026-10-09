@@ -86,6 +86,14 @@ class PatternRefusal : public std::runtime_error {
     std::string code_;
 };
 
+// The refusal of a request that cannot be read (400 invalid_request), as the strict readers of
+// the request's parsers throw it (StrictObject<InvalidPatternRequest>)
+struct InvalidPatternRequest {
+    PatternRefusal operator()(const std::string &message) const {
+        return PatternRefusal(400, "invalid_request", message);
+    }
+};
+
 /**
  * The server's caps of a /pattern request (the --pattern-* flags; the CLI applies the same
  * ones, so that both answer alike). Each is a request field's maximum: a larger request value

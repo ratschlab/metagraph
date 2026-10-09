@@ -40,6 +40,7 @@ using graph::traversal::LabelRef;
 using graph::traversal::LabelId;
 using graph::traversal::KeyCost;
 using graph::traversal::ReadPacing;
+using graph::traversal::kKeyUnits;
 using annot::matrix::DecodeBudget;
 
 const char* to_string(SelectionPass pass) {
@@ -673,8 +674,8 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
                 size_t refused_at = 0;
                 if (!query.fetch(&row.key, 1, decode, &out, &costs, &refused_at, &pace)) {
                     if (pace.interrupted) {
-                        // the units its decode reached, at least 8
-                        charge(std::max<uint64_t>(8, pace.units));
+                        // the units its decode reached, at least a key's
+                        charge(std::max<uint64_t>(kKeyUnits, pace.units));
                         m.budget.check_time();
                         set_stop("selection", "time");
                         break;
@@ -701,19 +702,20 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
                 row.bytes = decode.held();
                 row.hits = std::move(out[0]);
                 // the decoded row's whole size: every entry, not only the predicate's
-                charge(8 + static_cast<uint64_t>(costs[0].entries) + costs[0].dependency_units);
+                charge(kKeyUnits + static_cast<uint64_t>(costs[0].entries)
+                       + costs[0].dependency_units);
             } else {
                 std::vector<LabelQuery::NodeHits> out = query.fetch({ row.key }, &pace);
                 if (pace.interrupted) {
-                    charge(std::max<uint64_t>(8, pace.units));
+                    charge(std::max<uint64_t>(kKeyUnits, pace.units));
                     m.budget.check_time();
                     set_stop("selection", "time");
                     break;
                 }
                 // read without a budget: what it returned is held, charged after the fact
-                // (the row's size is not known: 8 and its hits)
+                // (the row's size is not known: a key's units and its hits)
                 const uint64_t bytes = LabelQuery::held_bytes(out[0]);
-                charge(8 + out[0].size());
+                charge(kKeyUnits + out[0].size());
                 if (!m.account.charge(bytes)) {
                     set_stop("selection", "max_memory");
                     break;

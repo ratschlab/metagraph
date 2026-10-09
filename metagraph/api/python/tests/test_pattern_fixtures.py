@@ -2603,7 +2603,7 @@ class TestPatternFixtures(unittest.TestCase):
         cli = os.path.dirname(PATTERN_CPP)
         sources = {}
         for name in sorted(os.listdir(cli)):
-            if name.endswith('.cpp'):
+            if name.endswith(('.cpp', '.hpp')):
                 with open(os.path.join(cli, name), encoding='utf-8') as f:
                     sources[name] = f.read()
         literal = set()

@@ -23,6 +23,7 @@
 
 #include <json/json.h>
 
+#include "json_helpers.hpp"
 #include "pattern_retrieval.hpp"
 #include "pattern_predicate.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
@@ -116,18 +117,7 @@ inline uint64_t string_text_bytes(std::string_view s) {
     return string_text_bytes(s.data(), s.data() + s.size());
 }
 
-inline uint64_t decimal_digits(uint64_t x) {
-    uint64_t digits = 1;
-    while (x >= 10) {
-        x /= 10;
-        ++digits;
-    }
-    return digits;
-}
-
 constexpr uint64_t kNoKey = graph::traversal::npos;
-
-inline Json::Value uint_json(uint64_t x) { return Json::Value(static_cast<Json::UInt64>(x)); }
 
 inline Json::Value count_json(graph::pattern::Relation relation, uint64_t value,
                               graph::pattern::Unit unit) {
@@ -136,12 +126,6 @@ inline Json::Value count_json(graph::pattern::Relation relation, uint64_t value,
     v["relation"] = graph::pattern::to_string(relation);
     v["unit"] = graph::pattern::to_string(unit);
     return v;
-}
-
-inline Json::Value reason_json(const std::string &reason) {
-    Json::Value r;
-    r["reason"] = reason;
-    return r;
 }
 
 inline const char* strand_of(graph::pattern::Orientation o) {
@@ -252,6 +236,38 @@ inline uint64_t selection_strands_bytes(uint64_t labels) { return 32 + 24 * labe
 struct KeptRow {
     graph::traversal::LabelQuery::NodeHits hits;
     uint64_t bytes = 0;
+};
+
+/**
+ * The text of the labels about to be built for one pattern's answer (AnswerVolume's pending
+ * part, from above): added before they are built, so that the work time is read with them
+ * counted, dropped for what is not built, settled once built.
+ */
+class PendingText {
+  public:
+    explicit PendingText(AnswerVolume *volume) : volume_(volume) {}
+
+    void add(uint64_t bytes) {
+        pending_ += bytes;
+        if (volume_)
+            volume_->add_pending(bytes);
+    }
+    void drop(uint64_t bytes) {
+        pending_ -= std::min(bytes, pending_);
+        if (volume_)
+            volume_->drop_pending(bytes);
+    }
+    // none of it is built
+    void drop_all() { drop(pending_); }
+    // all of it was built: from now on it is written only
+    void settle() const {
+        if (volume_)
+            volume_->settle(pending_);
+    }
+
+  private:
+    AnswerVolume *volume_;
+    uint64_t pending_ = 0;
 };
 
 } // namespace retrieval
@@ -380,11 +396,11 @@ struct PatternRetrieval::Impl {
     }
 
     // What a refused read is charged: the units of what it decoded (FetchRefusal::units: the
-    // row was read, and refused for its demand or its names), or 8 when its read itself did not
-    // fit (its units are not known): a refused row is work like a row read, so that refusals
-    // cannot go on past the work budget
+    // row was read, and refused for its demand or its names), or a key's units when its read
+    // itself did not fit (its units are not known): a refused row is work like a row read, so
+    // that refusals cannot go on past the work budget
     static uint64_t refused_units(const graph::traversal::FetchRefusal &r) {
-        return r.units ? r.units : 8;
+        return r.units ? r.units : graph::traversal::kKeyUnits;
     }
 
     Json::Value refusal_json(const retrieval::RowState &row,
@@ -400,7 +416,7 @@ struct PatternRetrieval::Impl {
         using graph::traversal::FetchRefusal;
         Json::Value v;
         v["kmer"] = kmer;
-        v["row"] = retrieval::uint_json(graph::AnnotatedDBG::graph_to_anno_index(key));
+        v["row"] = uint_json(graph::AnnotatedDBG::graph_to_anno_index(key));
         v["phase"] = phase;
         v["reason"] = "max_memory";
         uint64_t need = 0;
@@ -408,8 +424,8 @@ struct PatternRetrieval::Impl {
             need = r->cause == FetchRefusal::DECODE ? r->need
                  : r->cause == FetchRefusal::NAMES ? r->demand + r->names_bytes : r->demand;
         }
-        v["needed_bytes"] = r ? Json::Value(retrieval::uint_json(need)) : Json::Value();
-        v["available_bytes"] = retrieval::uint_json(r ? r->left : account.left());
+        v["needed_bytes"] = r ? Json::Value(uint_json(need)) : Json::Value();
+        v["available_bytes"] = uint_json(r ? r->left : account.left());
         return v;
     }
 
@@ -459,6 +475,40 @@ struct PatternRetrieval::Impl {
 
     // frees what the pass of the last pattern still held (its descriptors, its kept rows)
     void end_selection();
+
+    // ---- the steps retrieve_rows() and retrieve_paths() share (pattern_retrieval.cpp)
+
+    // the pattern's annotation work into |a|, on every return: its rows and units, the
+    // account's peak, the steps' times, the statements' text (they stay in the answer whatever
+    // else does: AnswerVolume), and the pattern's counters into the request's
+    void finish_work(LabelsAnswer &a, uint64_t rows_read, uint64_t pattern_units,
+                     double discovery_ms, double placement_ms);
+    // Before the reads, over the |keep| of the |released| items the route built (their
+    // descriptors charged as the engine released them, before their result objects were
+    // built: the first that did not fit ended the list). True when nothing is read: the engine
+    // withheld the release, or all_or_count's list was cut (withheld output_budget, stop
+    // {output, max_memory}); |a| is then the answer, finished. Partial's cut is stated in |a|.
+    bool skip_reads(LabelsAnswer &a, const graph::pattern::Extraction &x, size_t keep,
+                    uint64_t released, uint64_t descriptors, bool partial);
+    // Every row's statement after the reads: the rows read (counters.rows_distinct) and each
+    // truncated row's anchors_truncated entry (|named|[row.first] names it by its k-mer).
+    // Returns whether every row was read completely; |truncated|: whether one was truncated
+    bool state_rows(LabelsAnswer &a, const std::vector<retrieval::RowState> &rows,
+                    const std::vector<RetrievalContext> &named, bool *truncated);
+    // The output of item |i|'s labels (a context's or a path's): their |bytes| charged first
+    // (where the output stops does not depend on the machine), then the work time read with
+    // their |text| counted in the answer's volume. False when the item was |late| or |refused|
+    // already, or the account or the time refuses it now: stop {output, time | max_memory}
+    // (a time stop is recorded in the budget too: the later patterns answer as after any time
+    // stop), nothing of it charged or pending
+    bool commit_output(size_t i, uint64_t bytes, uint64_t text, bool late, bool refused,
+                       retrieval::PendingText *pending);
+    // all_or_count without every label of every item: withheld, the reason named (the reads'
+    // own budgets — a refused row, the work, an unbudgeted read the account could not hold —
+    // before the answer's memory, before a truncated anchor), what was |held| for the output
+    // released, nothing pending; what explains it (rows_refused, anchors_truncated) stays
+    void withhold_all(LabelsAnswer &a, bool rows_refused, bool output_stopped, bool truncated,
+                      uint64_t held, retrieval::PendingText *pending);
 };
 
 /**

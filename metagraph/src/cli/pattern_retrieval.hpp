@@ -102,7 +102,6 @@ struct Binding;
  */
 class AnswerVolume {
   public:
-    AnswerVolume() = default;
     AnswerVolume(double build_mbps, double compress_mbps, double text_scale = 1)
           : build_mbps_(build_mbps), compress_mbps_(compress_mbps), scale_(text_scale) {}
 
@@ -438,7 +437,6 @@ class PatternRetrieval {
     // the placement this request's answers give: the index's, or "not_requested" when the
     // request set output.occurrences false
     const char* placement() const;
-    const RetrievalLimits& limits() const { return limits_; }
 
     /**
      * Before the engine releases one pattern's contexts (mode ALL_OR_COUNT or PARTIAL): opens
@@ -497,9 +495,8 @@ class PatternRetrieval {
                                 const graph::pattern::Extraction &extraction,
                                 const Json::Value &graph_name, bool require_verified);
 
-    // the memory account's peak so far (bytes of the model) and what it holds now
+    // the memory account's peak so far (bytes of the model)
     uint64_t memory_peak() const;
-    uint64_t memory_held() const;
     // the request's counters so far (the sum of its patterns')
     const RetrievalCounters& counters() const;
 

@@ -4,11 +4,9 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <mutex>
-#include <set>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -19,6 +17,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "config/config.hpp"
+#include "json_helpers.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "pattern_predicate.hpp"
 #include "traverse.hpp"
@@ -115,75 +114,13 @@ const char *const kPredicateOperators[] = {
 // its default): a deeper one is refused invalid_request
 constexpr int kMaxBodyNesting = 1000;
 
-// a number of milliseconds in a message: 250.5, not std::to_string's 250.500000 nor a cast's
-// 250 (as /resolve's ms_text)
-std::string ms_text(double x) {
-    std::ostringstream out;
-    out << std::setprecision(15) << x;
-    return out.str();
-}
+constexpr InvalidPatternRequest invalid{};
 
-PatternRefusal invalid(const std::string &message) {
-    return PatternRefusal(400, "invalid_request", message);
-}
+using Fields = StrictObject<InvalidPatternRequest>;
 
 PatternRefusal later(const std::string &message) {
     return PatternRefusal(400, "later_increment", message);
 }
-
-Json::Value uint_json(uint64_t x) { return Json::Value(static_cast<Json::UInt64>(x)); }
-
-// a number of milliseconds or bits as JSON: an integer when it is one (the flags are integers
-// and a client compares them as written), else the double
-Json::Value number_json(double x) {
-    if (x >= 0 && x == std::floor(x) && x <= 9007199254740991.0)
-        return uint_json(static_cast<uint64_t>(x));
-    return Json::Value(x);
-}
-
-Json::Value strings_json(std::initializer_list<const char*> values) {
-    Json::Value a(Json::arrayValue);
-    for (const char *v : values) {
-        a.append(v);
-    }
-    return a;
-}
-
-/**
- * Strict access to one JSON object of the request, as /traverse's: every field read is
- * remembered, and finish() refuses the first one nothing read ("unknown field"), after the
- * known ones were checked — the guarantee rule: a field the server does not know is never
- * ignored.
- */
-class Fields {
-  public:
-    Fields(const Json::Value &value, std::string path) : v_(value), path_(std::move(path)) {
-        if (!v_.isObject())
-            throw invalid(path_ + ": expected an object");
-    }
-
-    bool has(const std::string &key) {
-        seen_.insert(key);
-        return v_.isMember(key);
-    }
-    const Json::Value& raw(const std::string &key) {
-        seen_.insert(key);
-        return v_[key];
-    }
-    std::string path(const std::string &key) const { return path_ + "." + key; }
-
-    void finish() const {
-        for (const std::string &name : v_.getMemberNames()) {
-            if (!seen_.count(name))
-                throw invalid(path_ + ": unknown field '" + name + "'");
-        }
-    }
-
-  private:
-    const Json::Value &v_;
-    std::string path_;
-    std::set<std::string> seen_;
-};
 
 // One pattern of the request: parsed, or refused in its slot (bad_alphabet)
 struct PatternSpec {
@@ -232,15 +169,6 @@ struct ParsedRequest {
     SelectionLimits selection;
 };
 
-void note_clamped(Json::Value *clamped, const char *field, Json::Value requested,
-                  Json::Value effective) {
-    Json::Value c;
-    c["field"] = field;
-    c["requested"] = std::move(requested);
-    c["effective"] = std::move(effective);
-    clamped->append(std::move(c));
-}
-
 // A cap of the request (max_contexts, max_anchors, max_steps): the server's cap when omitted,
 // else the request's integer >= |min|, lowered to the cap and listed when above it
 uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
@@ -258,15 +186,6 @@ uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
         return cap;
     }
     return x;
-}
-
-std::string string_field(Fields &f, const char *key, const std::string &def) {
-    if (!f.has(key))
-        return def;
-    const Json::Value &v = f.raw(key);
-    if (!v.isString())
-        throw invalid(f.path(key) + ": expected a string");
-    return v.asString();
 }
 
 /**
@@ -315,11 +234,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         const std::string path = "request.patterns[" + std::to_string(i) + "]";
         Fields p(patterns[i], path);
         PatternSpec spec;
-        if (p.has("id")) {
-            if (!p.raw("id").isString())
-                throw invalid(p.path("id") + ": expected a string");
-            spec.id = p.raw("id").asString();
-        }
+        if (p.has("id"))
+            spec.id = p.str("id", "");
         // the kinds (§4.2): dna, iupac and protein (a peptide)
         const bool dna = p.has("dna");
         const bool iupac = p.has("iupac");
@@ -329,17 +245,15 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             throw invalid(path + (protein ? ": expected exactly one of 'dna', 'iupac', 'protein'"
                                           : ": expected exactly one of 'dna', 'iupac'"));
         }
-        const char *key = dna ? "dna" : iupac ? "iupac" : "protein";
-        if (!p.raw(key).isString())
-            throw invalid(p.path(key) + ": expected a string");
+        const std::string text = p.str(dna ? "dna" : iupac ? "iupac" : "protein", "");
         p.finish();
         spec.kind = dna ? PatternKind::DNA : iupac ? PatternKind::IUPAC : PatternKind::PROTEIN;
         if (protein) {
             // parsed with the request's genetic code, once that is read (below)
-            spec.protein = p.raw(key).asString();
+            spec.protein = text;
         } else {
             try {
-                spec.pattern = Pattern::parse(spec.kind, p.raw(key).asString());
+                spec.pattern = Pattern::parse(spec.kind, text);
             } catch (const PatternError &e) {
                 // the pattern's own error (§7.2): the other patterns are still answered
                 spec.error = std::make_pair(e.code(), std::string(e.what()));
@@ -348,7 +262,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         req.patterns.push_back(std::move(spec));
     }
 
-    const std::string mode = string_field(f, "mode", to_string(Mode::ALL_OR_COUNT));
+    const std::string mode = f.str("mode", to_string(Mode::ALL_OR_COUNT));
     if (auto m = parse_mode(mode)) {
         req.request.mode = *m;
     } else {
@@ -358,10 +272,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     if (f.has("output")) {
         Fields o(f.raw("output"), f.path("output"));
         if (o.has("labels")) {
-            const Json::Value &v = o.raw("labels");
-            if (!v.isString())
-                throw invalid(o.path("labels") + ": expected a string");
-            const std::string labels = v.asString();
+            const std::string labels = o.str("labels", "");
             if (labels != "none" && labels != "all" && labels != kLabelsPredicateOnly)
                 throw invalid(o.path("labels") + ": expected one of none|all|predicate_only");
             req.labels_all = labels == "all";
@@ -372,45 +283,38 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             req.projection_named |= req.labels_all || req.labels_predicate_only;
         }
         if (o.has("occurrences")) {
-            if (!o.raw("occurrences").isBool())
-                throw invalid(o.path("occurrences") + ": expected a boolean");
+            const bool occurrences = o.boolean("occurrences", false);
             // placed occurrences are the labels' (§4.3): without labels there is nothing
             // to place (the predicate's labels, with "predicate_only", are placed alike)
-            if (o.raw("occurrences").asBool() && !req.labels_all && !req.labels_predicate_only) {
+            if (occurrences && !req.labels_all && !req.labels_predicate_only) {
                 throw invalid(o.path("occurrences") + ": true needs output.labels \"all\""
                               + std::string(json.isMember("predicate")
                                                 ? " or \"predicate_only\"" : "")
                               + " (occurrences are placed per label)");
             }
-            req.retrieval.occurrences = o.raw("occurrences").asBool();
+            req.retrieval.occurrences = occurrences;
         }
-        if (o.has("paths")) {
-            // accepted with either value and changes nothing, since a path result always
-            // carries its node path (nodes, rows), as a context its node and row
-            if (!o.raw("paths").isBool())
-                throw invalid(o.path("paths") + ": expected a boolean");
-        }
+        // accepted with either value and changes nothing, since a path result always carries
+        // its node path (nodes, rows), as a context its node and row
+        o.boolean("paths", false);
         o.finish();
     }
 
-    const std::string scope = string_field(f, "scope", to_string(Scope::ANY_OFFSET));
+    const std::string scope = f.str("scope", to_string(Scope::ANY_OFFSET));
     if (auto s = parse_scope(scope)) {
         req.request.scope = *s;
     } else {
         throw invalid(f.path("scope") + ": expected one of suffix|any_offset (a pattern longer "
                       "than k is searched as 'long' whatever is named)");
     }
-    const std::string strands = string_field(f, "strands", to_string(Strands::BOTH));
+    const std::string strands = f.str("strands", to_string(Strands::BOTH));
     if (auto s = parse_strands(strands)) {
         req.request.strands = *s;
     } else {
         throw invalid(f.path("strands") + ": expected one of both|forward|reverse");
     }
-    if (f.has("stop_at_threshold")) {
-        if (!f.raw("stop_at_threshold").isBool())
-            throw invalid(f.path("stop_at_threshold") + ": expected a boolean");
-        req.request.stop_at_threshold = f.raw("stop_at_threshold").asBool();
-    }
+    req.request.stop_at_threshold = f.boolean("stop_at_threshold",
+                                              req.request.stop_at_threshold);
 
     req.request.max_contexts = capped_integer(f, "max_contexts", limits.max_contexts, 0,
                                               &req.clamped);
@@ -465,15 +369,11 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     r.max_occurrences_per_label = capped_integer(f, "max_occurrences_per_label",
                                                  limits.max_occurrences_per_label, 0,
                                                  &req.clamped);
-    if (f.has("allow_unbudgeted_annotation")) {
-        if (!f.raw("allow_unbudgeted_annotation").isBool())
-            throw invalid(f.path("allow_unbudgeted_annotation") + ": expected a boolean");
-        r.allow_unbudgeted = f.raw("allow_unbudgeted_annotation").asBool();
-    }
+    r.allow_unbudgeted = f.boolean("allow_unbudgeted_annotation", r.allow_unbudgeted);
     r.chunk_target_ms = limits.chunk_target_ms;
 
     // the paths of a pattern longer than k, opt-in
-    const std::string long_search = string_field(f, "long_search", kLongSearchAnchors);
+    const std::string long_search = f.str("long_search", kLongSearchAnchors);
     if (long_search != kLongSearchAnchors && long_search != kLongSearchPaths)
         throw invalid(f.path("long_search") + ": expected one of anchors|paths");
     req.long_paths = long_search == kLongSearchPaths;
@@ -484,7 +384,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     // reads no labels, it is stated as not read (annotation_not_read)
     req.annotation_named |= f.has("require_support");
     req.projection_named |= f.has("require_support");
-    const std::string support = string_field(f, "require_support", kSupportIntersection);
+    const std::string support = f.str("require_support", kSupportIntersection);
     if (support != kSupportIntersection && support != kSupportVerified) {
         throw invalid(f.path("require_support") + ": expected one of label_intersection|"
                       "record_verified");
@@ -542,7 +442,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     req.selection.max_predicate_work = capped_integer(f, "max_predicate_work",
                                                       limits.max_predicate_work, 1,
                                                       &req.clamped);
-    const std::string predicate_strands = string_field(f, "predicate_strands",
+    const std::string predicate_strands = f.str("predicate_strands",
                                                        kPredicateStrandsEither);
     if (predicate_strands != kPredicateStrandsEither
             && predicate_strands != kPredicateStrandsContext) {
@@ -655,12 +555,6 @@ Json::Value stop_json(const std::optional<Stop> &stop) {
     s["phase"] = to_string(stop->phase);
     s["reason"] = to_string(stop->reason);
     return s;
-}
-
-Json::Value reason_json(const char *reason) {
-    Json::Value r;
-    r["reason"] = reason;
-    return r;
 }
 
 Json::Value error_json(const std::string &code, const std::string &message) {
@@ -1864,10 +1758,8 @@ Json::Value process_pattern_request(
     }
 
     Json::Value index;
-    index["index_ns"] = identity && !identity->name.empty() ? Json::Value(identity->name)
-                                                            : Json::Value();
-    index["index_fp"] = identity && !identity->fp.empty() ? Json::Value(identity->fp)
-                                                          : Json::Value();
+    index["index_ns"] = identity ? string_or_null(identity->name) : Json::Value();
+    index["index_fp"] = identity ? string_or_null(identity->fp) : Json::Value();
     index["release"] = release;
     index["k"] = uint_json(k);
     index["graph_mode"] = to_string(support.mode);

@@ -772,7 +772,6 @@ class Budget {
 
     std::optional<StopReason> stopped() const { return stopped_; }
     uint64_t steps_used() const { return steps_used_; }
-    uint64_t max_steps() const { return max_steps_; }
     const Deadline& deadline() const { return deadline_; }
 
   private:
@@ -1322,7 +1321,6 @@ struct Result {
 
     // SUFFIX | ANY_OFFSET as requested, LONG when L > k
     Scope scope = Scope::ANY_OFFSET;
-    GraphMode graph_mode = GraphMode::BASIC;
     bool palindromic = false;
     // the orientations searched, in plan order (FORWARD before REVERSE). The base searches
     // behind them run in the order of their estimated cost, the cheaper first (the plan's
@@ -1466,8 +1464,6 @@ class PatternSearch {
     // Throws std::invalid_argument naming support(graph).reason when it is not supported.
     // |graph| must outlive this object.
     explicit PatternSearch(const DeBruijnGraph &graph);
-
-    const GraphSupport& graph_support() const { return support_; }
 
     /**
      * The stored k-mer carrying the annotation row of |node| of the graph given to
