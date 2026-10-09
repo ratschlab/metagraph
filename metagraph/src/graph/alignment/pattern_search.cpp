@@ -594,6 +594,9 @@ struct Item {
     edge_index last = 0;
     uint32_t offset = 0;
     TAlphabet c = 0;
+    // Request::max_mismatches > 0: the substitutions its contexts' instances hold (the level of
+    // the pass that found the range); 0 otherwise
+    uint8_t level = 0;
     // W rule: the candidate edges (plain + marked, R); flank: the valid edges (exact)
     uint64_t candidates = 0;
     // W rule: invalid edges whose W is not the sentinel (J): the most candidates can lose
@@ -626,9 +629,6 @@ struct Item {
     // candidates found real (any range: the scan spells each)
     uint64_t hits = 0;
     uint64_t palindromes = 0;
-    // Request::max_mismatches > 0: the substitutions its contexts' instances hold (the level of
-    // the pass that found the range); 0 otherwise
-    uint8_t level = 0;
 
     bool flank() const { return !c; }
 
@@ -686,6 +686,7 @@ struct Item {
         return count_palindromes ? palindromes + (candidates - examined) : 0;
     }
 };
+static_assert(sizeof(Item) == 88, "a range whose scan is deferred stays 88 bytes");
 
 /**
  * A range kept for enumerate()'s release: only what the release reads (24 bytes; the scan
@@ -936,22 +937,19 @@ struct OrientationPlan {
     bool palindromes_mirrored = false;
 };
 
-// one context in the release, ordered by (node, offset, orientation): §5.5; with mismatches
-// by (level, node, offset, orientation), the closest instances first (every level is 0
-// without them)
+// one context in the release, ordered by (node, offset, orientation): §5.5
 struct Key {
     node_index node = 0;
     uint32_t offset = 0;
     Orientation orientation = Orientation::FORWARD;
-    uint8_t level = 0;
 
     bool operator<(const Key &other) const {
-        return std::tie(level, node, offset, orientation)
-                < std::tie(other.level, other.node, other.offset, other.orientation);
+        return std::tie(node, offset, orientation)
+                < std::tie(other.node, other.offset, other.orientation);
     }
     bool operator==(const Key &other) const {
-        return std::tie(level, node, offset, orientation)
-                == std::tie(other.level, other.node, other.offset, other.orientation);
+        return std::tie(node, offset, orientation)
+                == std::tie(other.node, other.offset, other.orientation);
     }
 };
 
@@ -2743,6 +2741,7 @@ class PatternRun {
         edge_index next;
         Key key;
     };
+    static_assert(sizeof(Cursor) == 40, "the release's index stays 40 bytes per range");
 
     // one examined edge of the release; the clock every kClockStride of them
     bool tick() {
@@ -2773,11 +2772,9 @@ class PatternRun {
             // no mask: a source dummy is never released
             if (item.unchecked && boss_.node_has_sentinel(e))
                 continue;
-            // (a mapped context has the level its stored k-mer has for the reverse complement)
-            const uint8_t level = static_cast<uint8_t>(item.level);
             switch (cursor.use) {
                 case Use::DIRECT:
-                    cursor.key = Key { e, item.offset, cursor.orientation, level };
+                    cursor.key = Key { e, item.offset, cursor.orientation };
                     return true;
                 case Use::MAPPED_SKIPPING:
                     // a palindromic stored k-mer is its own reverse complement in the wrapper
@@ -2788,13 +2785,12 @@ class PatternRun {
                     [[fallthrough]];
                 case Use::MAPPED:
                     cursor.key = Key { e + wrapper_offset_, max_offset() - item.offset,
-                                       cursor.orientation, level };
+                                       cursor.orientation };
                     return true;
                 case Use::PALINDROMES:
                     if (!is_palindrome(e))
                         continue;
-                    cursor.key = Key { e, max_offset() - item.offset, cursor.orientation,
-                                       level };
+                    cursor.key = Key { e, max_offset() - item.offset, cursor.orientation };
                     return true;
             }
         }
@@ -2844,7 +2840,13 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
         return false;
     }
 
-    auto later = [&](size_t a, size_t b) { return cursors[b].key < cursors[a].key; };
+    // with mismatches the merge orders by (level, key): a cursor's contexts are all of its
+    // range's level (a context's level is its instance's, so a duplicate shares it too)
+    auto later = [&](size_t a, size_t b) {
+        const uint32_t level_a = cursors[a].item->level;
+        const uint32_t level_b = cursors[b].item->level;
+        return level_b < level_a || (level_b == level_a && cursors[b].key < cursors[a].key);
+    };
     std::priority_queue<size_t, std::vector<size_t>, decltype(later)> heap(later);
 
     size_t joined = 0;
@@ -2858,7 +2860,7 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
             break;
 
         Bound next_bound = heap.empty() ? bound(cursors[joined])
-                                        : Bound(cursors[heap.top()].key.level,
+                                        : Bound(cursors[heap.top()].item->level,
                                                 cursors[heap.top()].key.node);
         bool any_joined = false;
         while (joined < cursors.size() && bound(cursors[joined]) <= next_bound) {
@@ -2883,7 +2885,7 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
                 return false;
             }
             emit(Context { key.orientation, key.offset, key.node, base_of(key.node), {}, {},
-                           key.level });
+                           static_cast<uint8_t>(cursors[top].item->level) });
             ++released;
             last = key;
         }

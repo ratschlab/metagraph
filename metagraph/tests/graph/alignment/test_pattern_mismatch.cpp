@@ -439,6 +439,46 @@ TEST(PatternMismatch, RandomCasesAgainstOracles) {
 }
 
 
+TEST(PatternMismatch, RandomCasesAtK31) {
+    // the served k: records of a few hundred bases, patterns of 10 to 31 positions (a 31-mer
+    // is the NOTE's k-mer neighbourhood: one offset), every mode, m 1 to 3
+    size_t contexts = 0;
+    size_t substituted = 0;
+    for (uint32_t seed = 6000; seed < 6030; ++seed) {
+        std::mt19937 rng(seed);
+        const auto mode = std::vector<DeBruijnGraph::Mode> {
+            DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }[seed % 3];
+        std::vector<std::string> records = random_records(rng, 3, 150, 300);
+        // variants of a stretch of the first record, so that the neighbourhood is not empty
+        const std::string stretch = records[0].substr(20, 60);
+        for (int v = 0; v < 4; ++v) {
+            std::string variant = stretch;
+            for (int s = 0; s <= v % 4; ++s) {
+                variant[rng() % variant.size()] = "ACGT"[rng() % 4];
+            }
+            records.push_back(variant);
+        }
+        auto graph = build(31, records, mode);
+        const size_t L = 10 + rng() % 22;
+        std::string text = records[0].substr(25 + rng() % 20, L);
+        if (rng() % 2)
+            text[rng() % L] = "RYSWKMBDHVN"[rng() % 11];
+        const Request request = make_request(
+                mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0 ? Scope::SUFFIX
+                                                                 : Scope::ANY_OFFSET,
+                Strands::BOTH, 1 + rng() % 3);
+        SCOPED_TRACE(text + " " + mode_name(mode) + " m "
+                     + std::to_string(request.max_mismatches));
+        contexts += check_against_oracles(*graph, text, request, &records, mode);
+        for (const MCtx &c : hamming_walk(*graph, text, request.scope, request.strands,
+                                          request.max_mismatches)) {
+            substituted += c.level > 0;
+        }
+    }
+    EXPECT_LT(100u, contexts);
+    EXPECT_LT(20u, substituted);
+}
+
 // ---------------------------------------------------------------- pass 0 and the search
 // without mismatches
 
@@ -856,6 +896,57 @@ TEST(PatternMismatch, UnmaskedTwinsPerLevel) {
 }
 
 
+TEST(PatternMismatch, UnmaskedReleasesPerLevel) {
+    // without the mask, every mode (wrapped PRIMARY at odd and even k included): each level a
+    // true relation of the masked count; a release that enumerated every candidate makes each
+    // level EXACT (ALL_OR_COUNT, and PARTIAL with a cap above the total); a PARTIAL cut short
+    // releases the masked list's prefix and raises each level's lower bound to what it
+    // released there
+    size_t cases = 0;
+    for (uint32_t seed = 7000; seed < 7060; ++seed) {
+        Case c = random_case(seed);
+        auto unmasked = unmasked_copy(c);
+        SCOPED_TRACE(describe(c));
+        const std::vector<MCtx> expected = hamming_walk(*c.graph, c.text, c.request.scope,
+                                                        c.request.strands,
+                                                        c.request.max_mismatches);
+        const Truth truth = truth_of(expected, c.request.max_mismatches, c.text.size(), c.k,
+                                     c.request, c.text);
+        const Result counted = count_of(*unmasked, c.text, c.request);
+        ASSERT_FALSE(counted.stop);
+        for (uint8_t t = 0; t <= c.request.max_mismatches; ++t) {
+            EXPECT_TRUE(true_relation(counted.contexts->by_mismatches.at(t), truth.by_level[t]));
+        }
+        Result all;
+        EXPECT_EQ(expected, released_by(*unmasked, c.text, c.request, &all));
+        Request partial = c.request;
+        partial.mode = Mode::PARTIAL;
+        for (uint64_t cap : { uint64_t(expected.size() / 2), uint64_t(expected.size() + 1) }) {
+            partial.max_contexts = cap;
+            Result r;
+            const std::vector<MCtx> got = released_by(*unmasked, c.text, partial, &r);
+            EXPECT_EQ(std::vector<MCtx>(expected.begin(),
+                                        expected.begin() + std::min<size_t>(cap, expected.size())),
+                      got);
+            std::vector<uint64_t> released(c.request.max_mismatches + 1, 0);
+            for (const MCtx &x : got) {
+                ++released[x.level];
+            }
+            for (uint8_t t = 0; t <= c.request.max_mismatches; ++t) {
+                const Count &level = r.contexts->by_mismatches.at(t);
+                EXPECT_TRUE(true_relation(level, truth.by_level[t])) << int(t) << " " << cap;
+                if (cap > expected.size()) {
+                    EXPECT_EQ(Relation::EXACT, level.relation) << int(t);
+                } else {
+                    EXPECT_LE(released[t], level.value) << int(t);
+                }
+            }
+        }
+        ++cases;
+    }
+    EXPECT_EQ(60u, cases);
+}
+
 // ---------------------------------------------------------------- order and retention
 
 TEST(PatternMismatch, PartialKeepsTheClosestLevels) {
@@ -920,6 +1011,44 @@ TEST(PatternMismatch, CheaperOrientationFirstInEveryPass) {
     EXPECT_LT(0u, reverse_only);
 }
 
+
+TEST(PatternMismatch, MatchingBaseFirst) {
+    // within a pass the DFS follows the exact prefix and places the substitution from the
+    // deepest position back: a pass 1 stopped step by step finds the graph's single mutants of
+    // P in the order of their substituted position from the last to the first (7, 4, 1, 0),
+    // the first position's last of all (the matching base at depth 0 is tried first too)
+    std::mt19937 rng(29);
+    std::string p;
+    for (int i = 0; i < 8; ++i) {
+        p.push_back("ACGT"[rng() % 4]);
+    }
+    std::vector<std::string> records;
+    for (size_t position : { 0, 1, 4, 7 }) {
+        std::string variant = p;
+        // another base
+        variant[position] = "ACGT"[(std::string("ACGT").find(p[position]) + 1 + rng() % 3) % 4];
+        records.push_back(random_records(rng, 1, 6, 6)[0] + variant
+                          + random_records(rng, 1, 6, 6)[0]);
+    }
+    auto graph = build(12, records, DeBruijnGraph::BASIC);
+    Request request = make_request(Scope::SUFFIX, Strands::FORWARD, 1);
+    check_against_oracles(*graph, p, request, &records, DeBruijnGraph::BASIC);
+    const Result full = count_of(*graph, p, request);
+    ASSERT_EQ(4u, full.contexts->by_mismatches.at(1).value);
+    request.mode = Mode::PARTIAL;
+    std::vector<uint32_t> order;
+    for (uint64_t s = full.work.steps_by_mismatches.at(0); s <= full.work.steps; ++s) {
+        Result r;
+        for (const MCtx &c : released_by(*graph, p, request, &r, s)) {
+            if (c.level != 1)
+                continue;
+            ASSERT_EQ(1u, c.positions.size());
+            if (std::find(order.begin(), order.end(), c.positions[0]) == order.end())
+                order.push_back(c.positions[0]);
+        }
+    }
+    EXPECT_EQ((std::vector<uint32_t> { 7, 4, 1, 0 }), order);
+}
 
 // ---------------------------------------------------------------- named cases
 
