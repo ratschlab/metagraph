@@ -158,7 +158,7 @@ constexpr size_t kDeliveryCheckBytes = size_t(1) << 16;
  *     name,graph_path,annotation_path[,manifest_path[,index_ns]]
  * split on every comma; the first three columns are required, the last two optional — the
  * per-graph identity of
- * DESIGN-traverse-graphlet.md §21: the manifest of the pair's bundle, checked at start-up as
+ * DESIGN-traverse-graphlet.md §16.1: the manifest of the pair's bundle, checked at start-up as
  * --index-manifest is, and the name the pair's responses state. An empty optional column means
  * none (index_fp, index_ns null). Paths are as the server opens them (relative to its working
  * directory).

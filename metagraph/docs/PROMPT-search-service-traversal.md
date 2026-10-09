@@ -26,7 +26,7 @@ All of this is on branch `gr/labeled-traversal` of `ratschlab/metagraph`, head `
 `~/git/services/metagraph/metagraph/docs/`:
 - `SPEC-labeled-traversal-core.md`: §5 request, §7 response and guarantees, §7.5 the graphlet format, §10.3 server.
 - `DESIGN-traverse-graphlet.md`: the architecture; §3 summary and §3.1 index identity; §5 and §6 the library and
-  its tool surface; §14 and §19 the resource contract.
+  its tool surface; §14 the resource contract and §15 the attempts and their release rule.
 - `source/graphlets.rst`: the library guide, with runnable examples.
 
 **Backend routes** on the same `server_query` processes that serve `/search`:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # make_wide_coord_fixture.sh -- the wide record-coordinates fixture of measurement M2
-# (DESIGN-traverse-graphlet.md §26): the same
+# (DESIGN-traverse-graphlet.md §18.8): the same
 # few-kb sequence in many records under ONE column, so that every run of a trace walk carries
 # thousands of coordinate chains (column labels), and the same records as header labels
 # through a CoordToHeader (many labels with one chain each). mini_refseq has at most 6 chains

@@ -665,7 +665,7 @@ int run_server(Config *config) {
             indexes[e.name].emplace_back(e.graph_path, e.annotation_path);
             num_indexes++;
         }
-        // The per-graph identity (DESIGN-traverse-graphlet.md §21): every listed manifest is
+        // The per-graph identity (DESIGN-traverse-graphlet.md §16.1): every listed manifest is
         // checked against the files its pair loads — sizes and the digest of its list, no
         // re-hashing, as --index-manifest — before hours of loading, and a mismatch, or two
         // lines stating different identities for one pair, refuses to start
@@ -1513,7 +1513,7 @@ int run_server(Config *config) {
         }, /* compact */ true, &traversal_io);
     };
 
-    // The server-wide capabilities (DESIGN-traverse-graphlet.md §21): the
+    // The server-wide capabilities (DESIGN-traverse-graphlet.md §17.1): the
     // routes and features this server offers, its mode and graphs, the attempts and how
     // deadlines are checked — answered while the single index loads (ready: false), so that a
     // service can learn the server's instance and contract before it routes anything to it

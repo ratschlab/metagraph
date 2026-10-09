@@ -1,7 +1,7 @@
 // Measurements of the labeled traversal and of the pattern search, kept out of the unit tests:
 // they print numbers and check no contract the unit tests do not. The depth at a memory stop
 // with and without record coordinates and what completing takes (M1), the coordinate share of a
-// wide fixture's delivery reserve (M2) -- the tables of DESIGN-traverse-graphlet.md §26.5 --,
+// wide fixture's delivery reserve (M2) -- the tables of DESIGN-traverse-graphlet.md §18.8 --,
 // the speed of the coordinate mappers, and the dummy-fraction sampler on a large graph. Each
 // runs once and prints its table to stderr; a consistency check that fails ends it with an
 // error.
@@ -507,7 +507,7 @@ void print_gate(const std::map<std::string, GateRow> &rows,
 // (taxid columns of a few genomes each), so the column cells are also walked under the
 // refseq33m projection (gate_cell's |project|: every list at the cap of 16, as refseq33m's
 // taxid columns give). Budgets are bytes, exact, through the C++ API (the request's knob is
-// whole MiB). The tables are in DESIGN §26.5
+// whole MiB). The tables are in DESIGN §18.8
 void coordinates_depth_at_the_stop(benchmark::State &state, const Mini &mini) {
     const std::string repeat = "CAAAGTTAGCGATGAGGCAGCCTTTTGTCTTATTCAAAGGCCTTACATTTCAAAAACTCTGCTTACC"
                                "AGGCGCATTTCGCCCAGGGGATCACCATAATAAAATGCTGAGGCCTGGCCTTTGCGTAGTGCACGCAT"
@@ -617,7 +617,7 @@ void coordinates_depth_at_the_stop(benchmark::State &state, const Mini &mini) {
 // sequence: column labels one run of 5,000 chains an arm, header labels 5,000 runs of one chain
 // each). Column labels, branch limits 0 and 2 (header labels at 0), details full and graphlet,
 // to 3,000 bp. Run from the build directory after building
-// the fixtures there; the tables are in DESIGN §26.5
+// the fixtures there; the tables are in DESIGN §18.8
 void coordinates_depth_by_regime(benchmark::State &state) {
     struct Fixture {
         std::string dir, annotation, fasta;

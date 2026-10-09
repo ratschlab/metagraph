@@ -14,7 +14,7 @@ Layout under spool_dir:
                               valid across a restart for as long as their handles do
 
 A body is validated (parsed in full) before it is stored: a truncated MGT document is
-never stored or returned as a graphlet. Local limits (DESIGN §21): with parse limits
+never stored or returned as a graphlet. Local limits (DESIGN §5.4): with parse limits
 (parse_limits, or an explicit parse budget) a parse that stops keeps the body -- stored
 after the checks that need no parse (graphlet_bytes, graphlet_lines, the H record and the
 Z line count) as an entry marked parsed: false, which no local answer is derived from until

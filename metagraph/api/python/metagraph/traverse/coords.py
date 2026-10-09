@@ -1,4 +1,4 @@
-"""Record coordinates (DESIGN §18 and §26).
+"""Record coordinates (DESIGN §18).
 
 A request with `strategy.output.coordinates: true` gets, per seed result in every detail
 level, either a `coordinates` block -- where each run's own bases lie in the indexed

@@ -37,7 +37,7 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     local_limits (the default) the local tools (graphlet_compare, graphlet_export, the
     route listings) run with no work or allocation budget, and their time and peak memory
     follow the graphlet's size -- a service must set local_limits=ToolLimits(...) (local
-    limits, DESIGN §21): then every local tool runs under a budget of its class (view, heavy,
+    limits, DESIGN §5.4): then every local tool runs under a budget of its class (view, heavy,
     parse), which the agent may raise up to the class ceiling with budget={work_units,
     memory_mb, deadline_s}; every result carries `local` {complete, usage, limits,
     work_model, memory_bound "model", clamped?, parsed?, stop?}; a stop is the error
@@ -126,7 +126,7 @@ DEFAULT_MAX_BYTES = 2048
 SEQUENCE_MAX_BYTES = 16 * 1024
 # traverse_capabilities' default ceiling: the server's capabilities in one piece. It grows
 # with what the server offers: 15.9 KB compact at feature level 5, 19.4 KB at level 6 (the
-# coordinates block and the reserve's coordinate rule, DESIGN §26.3) on mini_refseq -- past
+# coordinates block and the reserve's coordinate rule, DESIGN §18.7) on mini_refseq -- past
 # 16 KB, where an agent's first discovery call would fail by default (result_too_large);
 # 32 KB leaves room for what later feature levels add
 CAPABILITIES_MAX_BYTES = 32 * 1024
@@ -172,7 +172,7 @@ def _size(obj):
 
 # ------------------------------------------------------------------ local limits
 
-# the budget class of each budgeted tool (DESIGN §21.8); the others are not budgeted
+# the budget class of each budgeted tool (DESIGN §5.4); the others are not budgeted
 TOOL_CLASS = {
     'graphlet_summary': 'view', 'graphlet_walks': 'view', 'graphlet_walk': 'view',
     'graphlet_support': 'view', 'graphlet_labels': 'view', 'graphlet_splits': 'view',
@@ -253,7 +253,7 @@ _LOCAL_EVIDENCE = {'work': 'local_work', 'memory': 'local_memory',
 
 def _mark_interrupted(out, stop):
     """An interrupted answer's evidence names the scope local, so that it never reads as
-    complete on its own (§21.6)."""
+    complete on its own (DESIGN §5.4)."""
     ev = out.get('evidence')
     blocks = [ev] if isinstance(ev, dict) and 'limitations' in ev else \
         [v for v in (ev or {}).values() if isinstance(v, dict) and 'limitations' in v] \
@@ -290,7 +290,7 @@ def _local_block(call, compact=0):
     return out
 
 
-# what a page reserves for the local block's compact form (§21.6): measured on the largest
+# what a page reserves for the local block's compact form (DESIGN §5.4): measured on the largest
 # compact block (a memory stop with its numbers and four levers), with room to spare
 _LOCAL_RESERVE = 420
 
@@ -484,7 +484,7 @@ def _fit_error(out, limit):
 def _fit_stop_error(out, limit):
     """local_budget_exceeded over the ceiling: the message is cut first, then the local
     block's detail, the stop's levers and how far it got; its code, resource, operation
-    and phase are kept as long as anything fits (§21.5)."""
+    and phase are kept as long as anything fits (DESIGN §5.4)."""
     stop = dict(out.get('stop') or {})
     local = out.get('local')
     keep = ('resource', 'op', 'phase', 'unit', 'limit', 'used', 'needed_at_least')
@@ -718,7 +718,7 @@ class GraphletTools:
         parse limits when it has them (None here), else the tools' parse class RAISED,
         field by field, by the agent's budget argument up to the parse class's ceiling --
         never lowered by it, and never the call's budget itself (the parse is reported as
-        local.parsed, not charged to the operation, §21.7). An agent told to raise its
+        local.parsed, not charged to the operation, DESIGN §5.4). An agent told to raise its
         budget for a stopped parse can then do so with the call's budget argument: under
         the parse defaults alone, raise_local_budget could never help."""
         L = self.local_limits
@@ -2254,7 +2254,7 @@ class GraphletTools:
 
     def _export_body(self, handle, path, what, call):
         """graphlet_export(format=mgt) under local limits: the entry's standalone text
-        copied from its stored body without a parse (the escape hatch of §21.9)."""
+        copied from its stored body without a parse (the escape hatch of DESIGN §5.4)."""
         if what is not None:
             raise ToolError('bad_argument', 'what= applies to format json only')
         e = self.store.get(_handle(handle))

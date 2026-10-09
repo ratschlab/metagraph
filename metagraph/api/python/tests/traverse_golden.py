@@ -3,7 +3,7 @@ itself): every public operation, with a fixed set of arguments, reduced to a sta
 per (graphlet, operation), and the MCP tools over a store of the same graphlets.
 
 The speed-ups and the local-limits charge points must leave every unbudgeted output byte
-for byte the same (DESIGN §21): test_traverse_speedups.py compares the digests of the
+for byte the same (DESIGN §5.4): test_traverse_speedups.py compares the digests of the
 committed real and review3 fixtures with data/traverse/golden/committed.json.gz, the
 reference digests, and test_traverse_stage_l.py takes the same digests with an unlimited
 LocalBudget (local limits must not change an answer either). The command line records

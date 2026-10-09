@@ -166,7 +166,7 @@ class TestCapabilitiesFitTheDefaultCeiling(unittest.TestCase):
         return GraphletTools(GraphletStore(root), {'mini': Big()})
 
     def test_the_servers_description_is_returned_whole(self):
-        # 19,355 B: the level-6 probe on mini_refseq (the coordinates block, DESIGN §26.3),
+        # 19,355 B: the level-6 probe on mini_refseq (the coordinates block, DESIGN §18.7),
         # past 16 KB
         for size in (2400, 12000, 19355, 30000):
             caps = _capabilities(size)

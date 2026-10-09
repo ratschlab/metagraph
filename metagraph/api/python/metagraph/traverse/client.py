@@ -29,7 +29,7 @@ attempt_id, so a request with that id is refused (409) while that server retains
 (retention_s, retention_count; below level 5 nothing holds it longer) and runs again after
 that.
 
-Feature level 6 (DESIGN §18, §26): record coordinates. traverse() asks for them
+Feature level 6 (DESIGN §18): record coordinates. traverse() asks for them
 (strategy.output.coordinates) by itself for a support: trace strategy that does not set
 them, where GET /traverse/capabilities states the coordinates block for the index with
 supported true (supports_coordinates()) -- never on an index that cannot report them,
@@ -89,7 +89,7 @@ COORDINATES_LEVEL = 6
 # coordinates automatically only if the median depth at the budget's stop with them stays
 # within 10% of the depth without -- each run's coordinate entry and occurrences are
 # charged when the run is created, so a budgeted walk with them stops shallower. Measured
-# at level 6 (DESIGN §26.5): on mini_refseq's 56 trace cells the median depth is 0.959-0.971
+# at level 6 (DESIGN §18.8): on mini_refseq's 56 trace cells the median depth is 0.959-0.971
 # of the depth without (a 3-4% drop), but the gate FAILS where it matters most: column labels
 # with 16 or more chains per run (refseq33m's taxid columns) and seeds with many header
 # labels need 2-4x the memory and can fail at depth 0 at a budget that completes without
@@ -102,7 +102,7 @@ _MEMORY_BUDGET_NOTE = (
     '(bounds.max_memory_mb), under which their account makes the walk stop shallower; '
     'pass coordinates=True to ask for them (output.coordinates), or drop the memory budget')
 # where coordinates requested automatically under a memory budget share a memory stop
-# (DESIGN §26.5: the single-lineage switch cells are the outliers; at 50% of their peak two
+# (DESIGN §18.8: the single-lineage switch cells are the outliers; at 50% of their peak two
 # of them fail at depth 0 with coordinates and not without)
 _DROP_COORDINATES_NOTE = (
     'record coordinates were requested automatically under a memory budget '
@@ -176,7 +176,7 @@ def drop_coordinates_note(results, statement):
     """The note for coordinates the automatic rule asked for under a memory budget
     (|statement|: auto_coordinates()'s) where seed results of |results| (the response's
     raw `results`, graphlet or failed) stopped on memory with drop_coordinates offered,
-    else None: it says how to walk further without them (DESIGN §26.5)."""
+    else None: it says how to walk further without them (DESIGN §18.8)."""
     if not statement or not statement.get('requested') or not statement.get('memory_budget'):
         return None
     n = 0

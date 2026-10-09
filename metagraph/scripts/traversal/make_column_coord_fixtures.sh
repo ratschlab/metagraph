@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # make_column_coord_fixtures.sh -- the column-label fixtures of the depth gate (a column-kind
-# fixture with at least 16 chains per run; DESIGN-traverse-graphlet.md §26.5). mini_refseq's
+# fixture with at least 16 chains per run; DESIGN-traverse-graphlet.md §18.8). mini_refseq's
 # taxid columns never reach that regime (at most 12 chains in a run on the recorded seeds),
 # while refseq33m's taxid columns hold many genomes, so a run there carries a full list at the
 # cap of 16 routinely. These fixtures give every column 16 records of its sequence, so that

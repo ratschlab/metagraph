@@ -1,5 +1,5 @@
 """The record-coordinate snapshots of the library's tests: real server responses on
-mini_refseq with strategy.output.coordinates (feature level 6, DESIGN §18 and §26), committed
+mini_refseq with strategy.output.coordinates (feature level 6, DESIGN §18), committed
 under api/python/tests/data/traverse/coords/ so that test_traverse_coordinates.py and the
 golden file golden/coordinates.json.gz run with no server.
 

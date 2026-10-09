@@ -357,7 +357,7 @@ class TestNextRequestShape(unittest.TestCase):
                             want['labels']['extra'] = got
                         if req.branch_budget is not None:
                             # the branch allowance reduced by the largest terminal branch
-                            # count (DESIGN §19.3): its derivation is checked in
+                            # count (DESIGN §5.3): its derivation is checked in
                             # branch_budget, its value is what the request carries
                             want.setdefault('branching', {})['max_label_branches'] = \
                                 req.branch_budget['effective']

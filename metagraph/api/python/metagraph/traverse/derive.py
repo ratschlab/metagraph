@@ -834,7 +834,7 @@ def evidence(arm, run):
 
 def arm_sizes(arm):
     """The structural sizes of an arm that the derivations' prices are made of (local
-    limits, DESIGN §21.3): facts of the model, cached once computed. Callers charge the pass
+    limits, DESIGN §5.4): facts of the model, cached once computed. Callers charge the pass
     at its price first (sizes_price)."""
     got = arm.cache.get('sizes')
     if got is None:

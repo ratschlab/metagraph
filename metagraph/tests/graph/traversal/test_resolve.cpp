@@ -572,7 +572,7 @@ size_t count_phase(const std::vector<std::pair<ResolveStop::Phase, uint64_t>> &s
                          [phase](const auto &s) { return s.first == phase; });
 }
 
-// The prefix rule (DESIGN-traverse-graphlet.md §21): a resolve its deadline stops is exactly
+// The prefix rule (DESIGN-traverse-graphlet.md §13): a resolve its deadline stops is exactly
 // the resolve of a query prefix, wherever the stop falls among the row batches — a discovery
 // with and without truncation and explicit labels (primed from rows or tuple rows), presence
 // and trace, on a query with a stretch absent from the graph and a repeat (rows kept for a

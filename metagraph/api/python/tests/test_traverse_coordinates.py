@@ -1,4 +1,4 @@
-"""Record coordinates in the library (feature level 6; DESIGN §18 and §26), on real
+"""Record coordinates in the library (feature level 6; DESIGN §18), on real
 mini_refseq responses committed under data/traverse/coords/
 (scripts/traversal/traverse_coords_snapshots.py):
 
@@ -95,7 +95,7 @@ def stripped(name):
 def widened(name, n, labels=None):
     """The snapshot's response with |n| occurrences in every list of |labels| (None: all
     seed labels) and the cap "unlimited": a block of 10^4 occurrences and more, as the
-    wide fixture of DESIGN §26 gives, consistent with the body -- each seed-entered run
+    wide fixture of DESIGN §18.8 gives, consistent with the body -- each seed-entered run
     continues every seed occurrence of its label, a switch-entered run has its own starts --
     so from_response() accepts it. The lists of the other labels stay."""
     j = resp(name)
@@ -798,7 +798,7 @@ class TestClient(unittest.TestCase):
     def test_auto_under_a_memory_budget(self):
         # the branch where the depth gate passes (AUTO_COORDINATES_UNDER_MEMORY_BUDGET true):
         # asked under a memory budget too, and stated. At level 6 the gate fails for wide
-        # columns (DESIGN §26.5), so the shipped default is false (the test below)
+        # columns (DESIGN §18.8), so the shipped default is false (the test below)
         self.assertFalse(AUTO_COORDINATES_UNDER_MEMORY_BUDGET)
         import metagraph.traverse.client as client_mod
         client_mod.AUTO_COORDINATES_UNDER_MEMORY_BUDGET = True
@@ -943,7 +943,7 @@ class TestTools(unittest.TestCase):
         self.assertEqual('record', out['evidence']['coordinates']['kind'])
         st = dict(TRACE, bounds={'max_extension_bp': 300, 'max_memory_mb': 4})
         # the branch where the depth gate passes: under a memory budget too, and no note
-        # without a stop (the shipped default is false at level 6, DESIGN §26.5)
+        # without a stop (the shipped default is false at level 6, DESIGN §18.8)
         import metagraph.traverse.client as client_mod
         client_mod.AUTO_COORDINATES_UNDER_MEMORY_BUDGET = True
         self.addCleanup(setattr, client_mod, 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET', False)

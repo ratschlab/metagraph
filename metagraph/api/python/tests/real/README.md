@@ -146,7 +146,7 @@ oracle run needs no server. Without servers and cache, everything skips.
   is written independently of the library.
 - `invariants`: full-JSON invariants (label_end events, switch provenance, `end_labels`).
 - `summary`: the per-seed JSON summary agrees with the body and with the full result,
-  including the conservative outcome rule of v5.2.
+  including the conservative outcome rule (DESIGN §14).
 - `identity`: H identity equals the server's capabilities. mini_refseq is verifiable;
   SRA and UHGG are not.
 - `seed`: S equals the request; the derived labels are the catalog's full carriers.

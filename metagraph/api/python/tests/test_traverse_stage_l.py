@@ -1,4 +1,4 @@
-"""Local limits (DESIGN §21): work and allocation budgets for the library's local
+"""Local limits (DESIGN §5.4): work and allocation budgets for the library's local
 operations, the store's parses and the MCP tools. The tests, by the property each covers:
 
   T-L1/L20  off by default: no budget, no change -- and an unlimited budget changes no

@@ -60,7 +60,7 @@ struct ResolveOptions {
     // between two row batches, every kResolveCheckKmers k-mers of the explicit labels' support
     // pass —, after |stop|: true ends the work there, and the profile is then exactly the
     // resolve of the query's first SupportProfile::stop->resolved_kmers k-mers
-    // (DESIGN-traverse-graphlet.md §21): a prefix, never a sample of the whole query. Under it
+    // (DESIGN-traverse-graphlet.md §13): a prefix, never a sample of the whole query. Under it
     // the explicit labels' hits are fetched kResolveCheckKmers k-mers at a time (one fetch of
     // the whole query, the unbudgeted path, is a piece no clock read can end). Not a request
     // field.

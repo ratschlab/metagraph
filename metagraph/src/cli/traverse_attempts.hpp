@@ -178,7 +178,7 @@ constexpr double kReserveMargin = 1.25;
 // (GraphletCoordinates.CoordinateAccountBoundsItsText). The
 // reserve estimates the coordinate share's text with it, not with the measured ratio of the
 // rest of the output (115-129 for a tree, against 20-73 for an occurrence: the measured
-// ratio would understate a coordinate-heavy seed's text up to 4 times, DESIGN §26 M2)
+// ratio would understate a coordinate-heavy seed's text up to 4 times, DESIGN §18.8, M2)
 constexpr uint64_t kCoordinateAccountPerTextByte = 12;
 
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller

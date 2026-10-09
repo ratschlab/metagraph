@@ -1427,7 +1427,7 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertEqual(0, res.returncode, res.stderr.decode())
         return json.loads(res.stdout.decode('utf-8'))['results'][0], len(res.stdout)
 
-    # ---- the budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.1)
+    # ---- the budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.3)
 
     @staticmethod
     def _dense_files():
@@ -3868,7 +3868,7 @@ class TestTraverseWideIndex(TestingBase):
 
 
 class TestTraverseAttempts(TestingBase):
-    """An attempt stopped from outside the walk (DESIGN-traverse-graphlet.md §14), against a
+    """An attempt stopped from outside the walk (DESIGN-traverse-graphlet.md §15), against a
     walk slow enough to be stopped in its middle: two haplotypes of 200 kbp with a SNP every
     64 bp (k = 31), walked in annotate mode with every route kept and a beam of 64, so that a
     seed takes seconds. Each test starts its own short-lived server: a cancel by id with the

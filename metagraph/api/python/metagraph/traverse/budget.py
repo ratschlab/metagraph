@@ -1,10 +1,10 @@
-"""Local limits: work and allocation budgets for the library's local operations (DESIGN §21).
+"""Local limits: work and allocation budgets for the library's local operations (DESIGN §5.4).
 
 Off by default: an operation called without a budget -- no `budget=` argument and no
 ambient budget (local_budget()) -- charges nothing, its output does not depend on this
 module, and nothing below is consulted beyond one `is None` test per charge point.
 
-With a budget, a local call either completes or stops and says so (§21.1):
+With a budget, a local call either completes or stops and says so (DESIGN §5.4):
 
   * WORK is counted in local work units (lwu): a deterministic, weighted count of the
     model elements an operation's algorithm visits and of the rows and text it produces

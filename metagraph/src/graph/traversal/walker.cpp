@@ -4469,7 +4469,7 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
         // of its parents' labels, so after nested merges the walk displayed upstream of it
         // can be carried by fewer — a known limit, pinned by
         // MiniRefSeq.AnnotateMergeRanksParentsByTheirOwnSegment so that the library checks
-        // the same rule, DESIGN §26.6); ties in arrival order. Which labels reach the merged
+        // the same rule, DESIGN §11); ties in arrival order. Which labels reach the merged
         // head with which loss and branches does not depend on the order (each label's least
         // (loss, branches) is kept); on a tie of both, the first parent's lineage continues.
         // One exception keeps the arrival order: tree and full detail (the JSON spells every

@@ -1735,7 +1735,7 @@ TEST_F(MiniRefSeq, CoordinateShareIsExact) {
 }
 
 // The majority-parent rule in annotate mode compares the parents by their OWN segment (the
-// fewest labels present at a node of it, true counts; DESIGN §26.6), not by the walks they
+// fewest labels present at a node of it, true counts; DESIGN §11), not by the walks they
 // display. A parent that is itself a merged segment holds the union of its parents' labels, so
 // after nested merges the rule can display a walk carried by fewer labels upstream. Pinned here
 // as the rule stands, so that the library's check of it (derive.carried_labels) follows a known
