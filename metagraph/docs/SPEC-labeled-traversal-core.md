@@ -947,9 +947,14 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     only free tokens take new values (`Q` scope `attempt`, resources `cancelled` and `attempt_deadline`, phase
     `not_started`, action `retry_attempt`; the `K` knob `attempt_id`); the amounts are integers, so no float is
     priced wider.
-  - **The client is gone** (every `/traverse`, with or without `attempt_id`; `/resolve` between its phases —
-    before and after the discovery read and the support fetch, every 4,096 k-mers of an explicit-label
-    support pass (*review of 2026-10-06, X-EFFICIENCY-04*), and before the selection): the client closed or
+  - **The client is gone** (every `/traverse`, with or without `attempt_id`; `/resolve`, which **a client
+    that goes away stops within one row batch**: it is checked at its phase boundaries, between the row
+    batches of the discovery and of the explicit labels' priming — 64 rows, then up to 4,096 rows or about
+    64 MiB of rows (§4.2) — and every 4,096 k-mers of an explicit-label support pass (*review of 2026-10-06,
+    X-EFFICIENCY-04*), with or without `bounds.time_budget_ms`, each check a peek at the socket; the one
+    exception is the direct cell path — at most 16 explicit column labels on an annotation with single-cell
+    reads, none of the row-diff family — without `bounds.time_budget_ms`, whose read of the query's cells is
+    one piece): the client closed or
     reset its connection, or half-closed it (a client that half-closes after its request is treated as gone, as
     nginx does by default). Found by a non-blocking peek at the request's socket that consumes nothing (at most
     every 100 ms); where bytes past the request wait on the socket (a pipelined request, a trailing CRLF), which
