@@ -1920,7 +1920,11 @@ struct Result {
  * most t mirrored pattern pairs admit no complementary bases. The answer order is
  * (mismatches, node, offset, orientation): the closest instances first, so that PARTIAL keeps
  * and releases the first max_contexts of the closest levels (its retention bound a (level,
- * node) bound); ALL_OR_COUNT compares the total over the levels.
+ * node) bound); ALL_OR_COUNT compares the total over the levels. stop_at_threshold compares
+ * the running total during discovery and again at the end of each pass but the last, once its
+ * scans and check have completed the pass's counts: when the levels 0 .. t alone exceed the
+ * threshold, no later pass starts (stop {DISCOVERY, MAX_CONTEXTS or MAX_ANCHORS} with
+ * mismatch_level t, level t complete).
  * A peptide's level is counted per residue on its codon automaton: a range carries the bases
  * it spelled in the current codon, and at each position tries the bases that continue one of
  * the residue's own codons (its level kept), then the bases that continue only a substitute

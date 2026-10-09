@@ -1309,9 +1309,12 @@ class PatternRun {
         // nothing to release: nothing to keep
         if (prune_ && !cap_)
             retain_ = false;
-        // bounded mismatches: the level passes' state of every base search
-        if (request.max_mismatches)
+        // bounded mismatches: the level passes' state of every base search, and an entry of
+        // steps per level from the start (a stop before the pattern answers m + 1 zeros)
+        if (request.max_mismatches) {
             prepare_levels();
+            work_.steps_by_mismatches.assign(levels_, 0);
+        }
     }
 
     // the levels counted: Request::max_mismatches + 1
@@ -2392,7 +2395,7 @@ class PatternRun {
      * start of every pass after the first (the first is the pattern's own reading).
      */
     void run_levels() {
-        work_.steps_by_mismatches.assign(levels_, 0);
+        assert(work_.steps_by_mismatches.size() == levels_);
         for (uint8_t t = 0; t < levels_; ++t) {
             pass_ = t;
             if (t && !budget_.check_time()) {
@@ -2420,6 +2423,32 @@ class PatternRun {
             work_.steps_by_mismatches[t] = budget_.steps_used() - before;
             if (stop_)
                 return;
+            // discovery compared the pass's counts before its scans and check completed them:
+            // compared again before the next pass, so that stop_at_threshold stops once the
+            // levels 0 .. t alone exceed the threshold (level t then complete). After the last
+            // pass nothing is left to save and the counts are the answer
+            if (t + 1 < levels_) {
+                refresh_running_lower();
+                if (threshold_crossed())
+                    return;
+            }
+        }
+    }
+
+    // every base search's running lower bound recomputed from its counts as they stand: the
+    // exact contexts (the check's included) and the pending ranges' lower bounds, which the
+    // scans raised after discovery counted them
+    void refresh_running_lower() {
+        for (BaseSearch &search : searches_) {
+            uint64_t lower = 0;
+            for (uint64_t exact : search.exact) {
+                lower += exact;
+            }
+            for (const Item &item : search.pending) {
+                lower += item.lower();
+            }
+            assert(lower >= search.running_lower);
+            search.running_lower = lower;
         }
     }
 

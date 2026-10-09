@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -661,9 +662,11 @@ Truth truth_of(const Case &c, const DeBruijnGraph &masked) {
 /**
  * The relations a stop leaves (SPEC §21.6): the levels below the stop's level as they
  * completed (|exact_below|: EXACT, on a masked graph; else a true relation), the stop's level
- * AT_LEAST (discovery), BOUNDS (its scans or check) or UNKNOWN (the clock reading that starts
- * its pass), the levels above UNKNOWN; every count a true relation; the steps per pass summing
- * to the steps. Returns the stop's level.
+ * AT_LEAST (discovery), BOUNDS (its scans or check), UNKNOWN (the clock reading that starts
+ * its pass) or, for a threshold crossed by the levels' counts once the pass's scans and check
+ * are done, as it completed (the stop before the next pass); the levels above UNKNOWN; every
+ * count a true relation; one entry of steps per level, summing to the steps. Returns the
+ * stop's level.
  */
 uint8_t check_stopped(const Result &r, const Truth &truth, bool exact_below = true) {
     EXPECT_TRUE(r.stop);
@@ -690,11 +693,18 @@ uint8_t check_stopped(const Result &r, const Truth &truth, bool exact_below = tr
                 case Relation::UNKNOWN:
                     // the clock at the pass's start (or a stop before the pattern)
                     EXPECT_EQ(StopPhase::DISCOVERY, r.stop->phase);
-                    EXPECT_EQ(0u, r.work.steps_by_mismatches.empty()
-                                    ? 0 : r.work.steps_by_mismatches.at(u));
+                    EXPECT_EQ(0u, r.work.steps_by_mismatches.at(u));
                     break;
                 case Relation::EXACT:
-                    ADD_FAILURE() << "the interrupted level " << int(u) << " is exact";
+                    // the threshold compared at the end of the pass: nothing of the next one
+                    EXPECT_TRUE(r.stop->reason == StopReason::MAX_CONTEXTS
+                                    || r.stop->reason == StopReason::MAX_ANCHORS)
+                        << "the interrupted level " << int(u) << " is exact";
+                    EXPECT_EQ(StopPhase::DISCOVERY, r.stop->phase);
+                    EXPECT_GT(levels.size(), u + 1u) << "a stop after the last pass";
+                    if (u + 1u < r.work.steps_by_mismatches.size()) {
+                        EXPECT_EQ(0u, r.work.steps_by_mismatches[u + 1]);
+                    }
                     break;
             }
         } else {
@@ -703,6 +713,7 @@ uint8_t check_stopped(const Result &r, const Truth &truth, bool exact_below = tr
     }
     EXPECT_NE(Relation::EXACT, r.contexts->total.relation);
     EXPECT_TRUE(true_relation(r.contexts->total, truth.total));
+    EXPECT_EQ(levels.size(), r.work.steps_by_mismatches.size());
     for (const auto &[p, n] : truth.by_offset) {
         EXPECT_TRUE(true_relation(r.contexts->by_offset.at(p), n)) << "offset " << p;
     }
@@ -871,8 +882,11 @@ TEST(PatternMismatch, StoppedAtEveryClockReading) {
 TEST(PatternMismatch, ThresholdStopsLeaveTheCloserLevelsComplete) {
     // stop_at_threshold compares the running total over the levels: a stop in the pass of
     // level t means the contexts of levels <= t exceed max_contexts, and the levels below t
-    // are complete; ALL_OR_COUNT then withholds THRESHOLD_CROSSED
+    // are complete; ALL_OR_COUNT then withholds THRESHOLD_CROSSED. The comparison is repeated
+    // at the end of each pass but the last, on the counts its scans and check completed: once
+    // the levels 0 .. t alone exceed max_contexts, no later pass starts
     size_t stopped = 0;
+    size_t after_its_pass = 0;
     std::set<uint8_t> levels;
     for (uint32_t seed = 4000; seed < 4040; ++seed) {
         Case c = random_case(seed);
@@ -885,6 +899,24 @@ TEST(PatternMismatch, ThresholdStopsLeaveTheCloserLevelsComplete) {
             request.stop_at_threshold = true;
             request.max_contexts = cap;
             const Result r = count_of(*c.graph, c.text, request);
+            // the first level up to which the closer levels alone exceed the cap, before the
+            // last: the stop comes in its pass at the latest
+            std::optional<uint8_t> first_above;
+            uint64_t closer = 0;
+            for (uint8_t u = 0; u + 1u < truth.by_level.size(); ++u) {
+                closer += truth.by_level[u];
+                if (closer > cap) {
+                    first_above = u;
+                    break;
+                }
+            }
+            if (first_above) {
+                EXPECT_TRUE(r.stop) << "cap " << cap;
+                if (r.stop) {
+                    EXPECT_GE(*first_above, r.stop->mismatch_level.value_or(kMaxMismatches + 1))
+                        << "cap " << cap;
+                }
+            }
             if (!r.stop) {
                 EXPECT_EQ(Relation::EXACT, r.contexts->total.relation);
                 EXPECT_EQ(truth.total, r.contexts->total.value);
@@ -894,6 +926,7 @@ TEST(PatternMismatch, ThresholdStopsLeaveTheCloserLevelsComplete) {
             EXPECT_EQ(StopReason::MAX_CONTEXTS, r.stop->reason);
             const uint8_t t = check_stopped(r, truth);
             levels.insert(t);
+            after_its_pass += r.contexts->by_mismatches.at(t).relation == Relation::EXACT;
             uint64_t up_to = 0;
             for (uint8_t u = 0; u <= t; ++u) {
                 up_to += truth.by_level[u];
@@ -906,6 +939,7 @@ TEST(PatternMismatch, ThresholdStopsLeaveTheCloserLevelsComplete) {
     }
     EXPECT_LT(100u, stopped);
     EXPECT_LE(3u, levels.size());
+    EXPECT_LT(0u, after_its_pass);
 }
 
 
@@ -1458,6 +1492,35 @@ TEST(PatternMismatch, RequestsNotServedYet) {
     EXPECT_TRUE(r.work.steps_by_mismatches.empty());
     EXPECT_FALSE(r.mismatch_information_bits);
     EXPECT_FALSE(r.max_mismatches_within_floor);
+}
+
+TEST(PatternMismatch, StopBeforeThePatternStatesEveryLevel) {
+    // a request-wide stop before the pattern (an earlier pattern spent the budget): nothing is
+    // searched or charged, every level UNKNOWN, and the work still has an entry per level
+    auto graph = build(5, { "ACGTACGTTGCAAGGCTTACG" }, DeBruijnGraph::BASIC);
+    const PatternSearch engine(*graph);
+    Budget budget = budget_of(1);
+    Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, 0);
+    engine.count(parse("ACG"), request, budget);
+    ASSERT_TRUE(budget.stopped());
+    const uint64_t spent = budget.steps_used();
+    request.max_mismatches = 2;
+    for (const std::string &text : { std::string("CGT"), std::string("ACGTACG") }) {
+        SCOPED_TRACE(text);
+        const Result r = engine.count(parse(text), request, budget);
+        ASSERT_TRUE(r.stop);
+        EXPECT_EQ(StopPhase::DISCOVERY, r.stop->phase);
+        EXPECT_EQ(0, r.stop->mismatch_level.value_or(kMaxMismatches + 1));
+        const std::vector<Count> &by_level = r.contexts ? r.contexts->by_mismatches
+                                                        : r.anchors->by_mismatches;
+        ASSERT_EQ(3u, by_level.size());
+        for (const Count &level : by_level) {
+            EXPECT_EQ(Relation::UNKNOWN, level.relation);
+        }
+        EXPECT_EQ(std::vector<uint64_t>(3, 0), r.work.steps_by_mismatches);
+        EXPECT_EQ(0u, r.work.steps);
+    }
+    EXPECT_EQ(spent, budget.steps_used());
 }
 
 TEST(PatternMismatch, SubstitutionsInTheSubmittedPatternsCoordinates) {
