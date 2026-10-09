@@ -1209,9 +1209,6 @@ struct WalkerHooks {
     // as if it had not fit — reported like a refusal of |deny|, as an injected memory stop, in
     // phase annotation_decode (a lookahead read gives up silently, as on a real refusal)
     std::function<bool(const DecodeCharge&)> deny_decode;
-    // after every level of an arm (its merges and beam done): the arm, the level's depth
-    // and the accounted memory total — what a budget must admit to complete that level
-    std::function<void(Arm, uint64_t, uint64_t)> level;
     // a derived seed's state is recounted in full at every observation and compared with the
     // running total the derivation keeps (std::logic_error on a difference): what a debug
     // build asserts, so that a Release build's tests check that the running total is the

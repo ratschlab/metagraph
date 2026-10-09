@@ -61,6 +61,10 @@ struct AttemptIds {
     std::string expect_server_instance;
 };
 
+// The names of AttemptIds' request fields, in the order the capabilities list them
+constexpr const char *kAttemptFields[] = { "attempt_id", "budget_id", "locus_id",
+                                           "not_after_ms", "expect_server_instance" };
+
 // The largest not_after_ms accepted: 2^53 - 1, the largest integer every JSON reader keeps
 // exactly (a ledger in JavaScript or Python writes and reads it unchanged)
 constexpr uint64_t kMaxNotAfterMs = (uint64_t(1) << 53) - 1;

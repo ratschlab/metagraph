@@ -44,11 +44,6 @@ struct LabelRef {
     Column column = 0;
     uint64_t seq_id = 0;  // only meaningful for HEADER
     std::string name;     // column name or FASTA header
-
-    bool same_target(const LabelRef &other) const {
-        return kind == other.kind && column == other.column
-            && (kind == LabelKind::COLUMN || seq_id == other.seq_id);
-    }
 };
 
 // Evidence required for a label to support a k-mer on a path.

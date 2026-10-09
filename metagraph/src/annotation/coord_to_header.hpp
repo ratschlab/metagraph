@@ -51,11 +51,8 @@ class CoordToHeader {
     CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                   std::vector<std::vector<uint64_t>> &&num_kmers);
     ~CoordToHeader();
-    // a copy or a moved-to object starts without a header index of its own (find_header)
+    // a copy starts without a header index of its own (find_header); not assignable
     CoordToHeader(const CoordToHeader &other);
-    CoordToHeader(CoordToHeader &&other);
-    CoordToHeader& operator=(const CoordToHeader &other);
-    CoordToHeader& operator=(CoordToHeader &&other);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;

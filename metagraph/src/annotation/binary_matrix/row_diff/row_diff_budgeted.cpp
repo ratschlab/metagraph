@@ -23,28 +23,6 @@ using RowTuples = MultiIntMatrix::RowTuples;
 using Tuple = MultiIntMatrix::Tuple;
 using node_index = graph::DeBruijnGraph::node_index;
 
-// What a full copy of a row holds (a shared row kept for a later path, a row taken from
-// one): copy construction allocates each buffer at its exact size from an empty one
-uint64_t copy_bytes(const SetBitPositions &row) {
-    return small_vector_bytes(row.size(), sizeof(Column));
-}
-uint64_t copy_bytes(const RowTuples &row) {
-    uint64_t bytes = buffer_bytes(row.size(), sizeof(row[0]));
-    for (const auto &entry : row) {
-        bytes += small_vector_bytes(entry.second.size(), sizeof(uint64_t));
-    }
-    return bytes;
-}
-
-uint64_t entries_of(const SetBitPositions &row) { return row.size(); }
-uint64_t entries_of(const RowTuples &row) {
-    uint64_t n = row.size();
-    for (const auto &entry : row) {
-        n += entry.second.size();
-    }
-    return n;
-}
-
 // The reconstruction step of RowDiff::add_diff, with its allocation known in advance:
 // the symmetric difference into a buffer reserved for |row| + |diff| (none for an empty
 // diff, which changes nothing). xor_bound() is what it allocates, the new row's bytes.
@@ -435,7 +413,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             if (!budget.charge(bytes))
                 return refuse();
             entry->row.load(&slot[v]);
-            assert(bytes == copy_bytes(slot[v]));
+            assert(bytes == row_copy_bytes(slot[v]));
             visit.slot_bytes = bytes;
             cache->hits++;
             continue;
@@ -445,7 +423,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         if (!fetcher.fetch(visit.row, &slot[v], &visit.stored, budget))
             return refuse();
         visit.slot_bytes = visit.stored;
-        visit.entries = entries_of(slot[v]);
+        visit.entries = row_entries(slot[v]);
         visit.scratch = fetcher.scratch_entries(slot[v]);
     }
 
@@ -455,7 +433,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     // is freed once its last path has used it, a row a later path ends at is kept whole
     auto take = [&](Visit &visit, RowT &from, RowT *row, uint64_t *row_bytes) {
         if (--visit.times) {
-            const uint64_t bytes = copy_bytes(from);
+            const uint64_t bytes = row_copy_bytes(from);
             if (!budget.charge(bytes))
                 return false;
             *row = from;
@@ -538,7 +516,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             visit.slot_bytes = 0;
             RowT().swap(slot[y]);
             if (--visit.times) {
-                const uint64_t bytes = copy_bytes(result);
+                const uint64_t bytes = row_copy_bytes(result);
                 if (!budget.charge(bytes))
                     return refuse();
                 slot[y] = result;

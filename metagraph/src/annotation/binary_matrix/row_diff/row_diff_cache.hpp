@@ -50,6 +50,16 @@ inline uint64_t row_copy_bytes(const MultiIntMatrix::RowTuples &row) {
     return bytes;
 }
 
+// The entries of a row: its columns, and for a tuple row their coordinates too
+inline uint64_t row_entries(const BinaryMatrix::SetBitPositions &row) { return row.size(); }
+inline uint64_t row_entries(const MultiIntMatrix::RowTuples &row) {
+    uint64_t entries = row.size();
+    for (const auto &entry : row) {
+        entries += entry.second.size();
+    }
+    return entries;
+}
+
 /**
  * How the cache stores a row. A binary row as it is (one buffer). A tuple row flattened into
  * three buffers — its columns, the end of each column's coordinates, and the coordinates —

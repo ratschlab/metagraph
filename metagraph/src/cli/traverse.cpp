@@ -19,6 +19,7 @@
 #include <tuple>
 
 #include "cli/config/config.hpp"
+#include "cli/json_helpers.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse_attempts.hpp"
@@ -72,86 +73,21 @@ class DeliveryScope {
 
 // ---------------------------------------------------------------- strict JSON access
 
-class Strict {
-  public:
-    Strict(const Json::Value &v, std::string path) : v_(v), path_(std::move(path)) {
-        if (!v_.isObject())
-            throw InvalidRequest(path_ + ": expected an object");
-    }
-    ~Strict() noexcept(false) {
-        if (std::uncaught_exceptions())
-            return;
-        for (const auto &name : v_.getMemberNames()) {
-            if (!seen_.count(name))
-                throw InvalidRequest(path_ + ": unknown field '" + name + "'");
-        }
-    }
-    bool has(const std::string &k) {
-        seen_.insert(k);
-        return v_.isMember(k);
-    }
-    const Json::Value& raw(const std::string &k) { seen_.insert(k); return v_[k]; }
-    std::string child_path(const std::string &k) const { return path_ + "." + k; }
-
-    std::string str(const std::string &k, const std::string &def) {
-        if (!has(k)) return def;
-        if (!v_[k].isString()) throw InvalidRequest(child_path(k) + ": expected a string");
-        return v_[k].asString();
-    }
-    bool boolean(const std::string &k, bool def) {
-        if (!has(k)) return def;
-        if (!v_[k].isBool()) throw InvalidRequest(child_path(k) + ": expected a boolean");
-        return v_[k].asBool();
-    }
-    uint64_t uint(const std::string &k, uint64_t def, uint64_t min = 0,
-                  uint64_t max = std::numeric_limits<uint64_t>::max()) {
-        if (!has(k)) return def;
-        if (!v_[k].isIntegral() || (v_[k].isInt64() && v_[k].asInt64() < 0))
-            throw InvalidRequest(child_path(k) + ": expected a non-negative integer");
-        uint64_t x = v_[k].asUInt64();
-        if (x < min || x > max)
-            throw InvalidRequest(child_path(k) + ": out of range [" + std::to_string(min) + ", "
-                                 + std::to_string(max) + "]");
-        return x;
-    }
-    double number(const std::string &k, double def, double min = 0,
-                  double max = std::numeric_limits<double>::infinity()) {
-        if (!has(k)) return def;
-        if (!v_[k].isNumeric()) throw InvalidRequest(child_path(k) + ": expected a number");
-        double x = v_[k].asDouble();
-        if (!(x >= min && x <= max))
-            throw InvalidRequest(child_path(k) + ": out of range");
-        return x;
-    }
-    std::vector<std::string> strings(const std::string &k) {
-        std::vector<std::string> out;
-        if (!has(k)) return out;
-        if (!v_[k].isArray()) throw InvalidRequest(child_path(k) + ": expected an array of strings");
-        for (const auto &x : v_[k]) {
-            if (!x.isString()) throw InvalidRequest(child_path(k) + ": expected an array of strings");
-            out.push_back(x.asString());
-        }
-        return out;
-    }
-    template <class E>
-    E enumeration(const std::string &k, E def, const std::vector<std::pair<std::string, E>> &values) {
-        if (!has(k)) return def;
-        std::string s = str(k, "");
-        std::string allowed;
-        for (const auto &[name, val] : values) {
-            if (name == s) return val;
-            allowed += (allowed.empty() ? "" : "|") + name;
-        }
-        throw InvalidRequest(child_path(k) + ": expected one of " + allowed);
-    }
-
-  private:
-    const Json::Value &v_;
-    std::string path_;
-    std::set<std::string> seen_;
+struct RefuseRequest {
+    InvalidRequest operator()(const std::string &message) const { return InvalidRequest(message); }
 };
 
-Json::Value uint_json(uint64_t x) { return Json::Value(static_cast<Json::UInt64>(x)); }
+// A request object read strictly (StrictObject): an unknown field is refused when it goes out
+// of scope, unless an exception is already on its way
+class Strict : public StrictObject<RefuseRequest> {
+  public:
+    using StrictObject::StrictObject;
+    ~Strict() noexcept(false) {
+        if (!std::uncaught_exceptions())
+            finish();
+    }
+    std::string child_path(const std::string &k) const { return path(k); }
+};
 
 Json::Value labels_json(const std::vector<LabelId> &labels) {
     Json::Value arr(Json::arrayValue);
@@ -276,17 +212,16 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     TraverseRequest req;
     Strict s(json, "request");
     req.release = s.str("release", "");
-    // Routing fields: consumed by the server before parsing (resolve_traverse_index).
-    // They must still be declared here, or the unknown-field check would reject every
+    // Routing fields: consumed by the server before parsing (resolve_traverse_index). They
+    // are still checked and declared here, or the unknown-field check would reject every
     // multi-graph request.
-    req.graph = s.str("graph", "");
-    req.graph_path = s.str("graph_path", "");
+    s.str("graph", "");
+    s.str("graph_path", "");
     // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
     // the same rule); declared here so that strict parsing accepts them
     const AttemptIds ids = attempt_ids(json);
-    for (const char *field : { "attempt_id", "budget_id", "locus_id", "not_after_ms",
-                               "expect_server_instance" }) {
+    for (const char *field : kAttemptFields) {
         s.has(field);
     }
     req.attempt_id = ids.attempt_id;
@@ -526,8 +461,8 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     ResolveRequest req;
     Strict s(json, "request");
     // see parse_traverse_request: routing fields are handled by the server
-    req.graph = s.str("graph", "");
-    req.graph_path = s.str("graph_path", "");
+    s.str("graph", "");
+    s.str("graph_path", "");
     req.sequence = s.str("sequence", "");
     if (req.sequence.empty()) throw InvalidRequest("request.sequence is required");
     req.options.labels = s.strings("labels");
@@ -1832,14 +1767,6 @@ static Json::Value coordinates_json(const SeedResult &r, const Strategy &st, Jso
     return block;
 }
 
-static uint64_t decimal_digits(uint64_t x) {
-    uint64_t n = 1;
-    for (; x >= 10; x /= 10) {
-        n++;
-    }
-    return n;
-}
-
 // compact_json_size with |check| (the attempt's delivery check) called every 4096 values, so
 // that counting a large block is under the attempt's bound like writing it; |values| counts them
 static uint64_t compact_size(const Json::Value &v, const std::function<void()> &check,
@@ -1853,20 +1780,15 @@ static uint64_t compact_size(const Json::Value &v, const std::function<void()> &
             return v.asBool() ? 4 : 5;
         case Json::uintValue:
             return decimal_digits(v.asUInt64());
-        case Json::intValue: {
-            const int64_t x = v.asInt64();
-            // |x| without overflow at INT64_MIN
-            return x < 0 ? 1 + decimal_digits(static_cast<uint64_t>(-(x + 1)) + 1)
-                         : decimal_digits(static_cast<uint64_t>(x));
-        }
         case Json::stringValue: {
             const char *begin = nullptr, *end = nullptr;
             v.getString(&begin, &end);
             return 2 + json_escaped_size(std::string_view(begin, end - begin));
         }
+        case Json::intValue:
         case Json::realValue:
-            // the writer's own digits (17 significant, its special values): short, and rare in
-            // what this counts
+            // the writer's own text (a sign and digits; 17 significant digits or its special
+            // values): rare in what this counts
             return json_text(v, true).size();
         case Json::arrayValue: {
             uint64_t n = 2 + (v.size() ? v.size() - 1 : 0);
@@ -2407,25 +2329,19 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     c["has_coordinates"] = oracle.has_coordinates();
     c["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
     c["supports_trace"] = oracle.has_coordinates() && oracle.regime() == Regime::BASIC;
-    Json::Value models(Json::arrayValue);
-    models.append("forbid"); models.append("constant"); models.append("table");
-    c["cost_models_available"] = std::move(models);
-    Json::Value modes(Json::arrayValue);
-    modes.append("constrain"); modes.append("annotate");
-    c["label_modes"] = std::move(modes);
+    c["cost_models_available"] = strings_json({ "forbid", "constant", "table" });
+    c["label_modes"] = strings_json({ "constrain", "annotate" });
     c["direct_access"] = oracle.supports_direct();
     c["release"] = release;
     // the retrieval format (spec §7.5): `detail: graphlet` embeds MGT text of this version
     c["graphlet_format"] = kGraphletFormatVersion;
-    Json::Value details(Json::arrayValue);
-    for (const char *d : { "summary", "tree", "full", "graphlet" }) details.append(d);
-    c["detail_levels"] = std::move(details);
+    c["detail_levels"] = strings_json({ "summary", "tree", "full", "graphlet" });
     // which index this is (DESIGN-traverse-graphlet.md §3.1): labels are joined across
     // retrievals only on an equal index_fp; null fp = no manifest, joins unverifiable;
     // index_meta_fp is a negative check only
     const IndexIdentity id = identity_or_default(identity, oracle);
-    c["index_ns"] = id.name.empty() ? Json::Value() : Json::Value(id.name);
-    c["index_fp"] = id.fp.empty() ? Json::Value() : Json::Value(id.fp);
+    c["index_ns"] = string_or_null(id.name);
+    c["index_fp"] = string_or_null(id.fp);
     c["index_meta_fp"] = id.meta_fp;
     return c;
 }
@@ -3238,11 +3154,8 @@ static IndexIdentity identity_or_default(const IndexIdentity *given, const Label
 }
 
 IndexIdentity index_identity(const Config &config, const graph::AnnotatedDBG &anno_graph) {
+    // --index-name is checked by the flag parser
     IndexIdentity id;
-    if (!config.index_name.empty() && !valid_index_name(config.index_name)) {
-        throw std::runtime_error("--index-name '" + config.index_name + "': expected "
-                                 "[A-Za-z0-9._-]+");
-    }
     id.name = config.index_name;
     if (!config.index_manifest.empty()) {
         if (config.infbase_annotators.size() != 1)
@@ -4764,6 +4677,31 @@ static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t obser
     return std::max(observed, held > st.max_memory_bytes ? held - st.max_memory_bytes : 0);
 }
 
+// The head of a result without a walk (a failed, refused or never started seed): its seed
+// (seed_id, length_bp, labels_from_seed) and |error|
+static Json::Value failed_seed_head(const Seed &seed, bool labels_from_seed, std::string error) {
+    Json::Value rj;
+    Json::Value &sj = rj["seed"];
+    sj["seed_id"] = seed.seed_id;
+    sj["length_bp"] = uint_json(seed.sequence.size());
+    sj["labels_from_seed"] = labels_from_seed;
+    rj["error"] = std::move(error);
+    return rj;
+}
+
+// What such a result states under a memory budget (§7.0): memory_bound_soft, with what the seed
+// was seen to hold beyond the budget (|observed|) and the result's echo of seed_id
+static void append_failed_memory(Json::Value *lims, const Strategy &st, const Seed &seed,
+                                 uint64_t observed, bool decode_charged) {
+    if (!st.max_memory_bytes)
+        return;
+    ResourceAccount account;
+    account.memory_limit = st.max_memory_bytes;
+    account.soft_overshoot = failed_soft(st, seed, observed);
+    account.decode_charged = decode_charged;
+    lims->append(memory_bound_soft(st, account));
+}
+
 // A failed, refused or never started seed of a request that asked for coordinates states that
 // it has none, and why: |reason| is computed once per request — the index's or the support's
 // when either rules them out whatever the seed, otherwise "no traversal" (§18.1). Null: not
@@ -4851,14 +4789,10 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
             effect = e.what();
             break;
     }
-    Json::Value rj;
-    Json::Value sj;
-    sj["seed_id"] = seed.seed_id;
-    sj["length_bp"] = uint_json(seed.sequence.size());
-    // a derivation is made only for such a seed: true, by the rule every failed writer states
-    sj["labels_from_seed"] = labels_derived_from_seed(seed, st.label_mode);
-    rj["seed"] = std::move(sj);
-    rj["error"] = e.what();
+    // a derivation is made only for such a seed: labels_from_seed true, by the rule every failed
+    // writer states
+    Json::Value rj = failed_seed_head(seed, labels_derived_from_seed(seed, st.label_mode),
+                                      e.what());
     Json::Value lims(Json::arrayValue);
     Json::Value d = limitation("derivation", knob, limit, observed, effect);
     d["cause"] = to_string(e.cause());
@@ -4875,16 +4809,10 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
         server_limit("labels.max_seed_labels", &s);
         lims.append(std::move(s));
     }
-    if (st.max_memory_bytes) {
-        // every response under a memory budget states it (§7.0), a failed derivation's
-        // too: it decoded whole annotation rows that no admission charged, and observed is
-        // what it was seen to hold beyond the budget
-        ResourceAccount account;
-        account.memory_limit = st.max_memory_bytes;
-        account.soft_overshoot = failed_soft(st, seed, e.soft_overshoot());
-        account.decode_charged = decode_charged;
-        lims.append(memory_bound_soft(st, account));
-    }
+    // every response under a memory budget states it (§7.0), a failed derivation's too: it
+    // decoded whole annotation rows that no admission charged, and observed is what it was seen
+    // to hold beyond the budget
+    append_failed_memory(&lims, st, seed, e.soft_overshoot(), decode_charged);
     rj["limitations"] = std::move(lims);
     // no walk was made, so nothing was cut on the other axes — except the carriers a cap
     // cut before the trace check (seed_labels), whose evidence is then missing
@@ -4969,16 +4897,11 @@ static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResu
         + " not valid UTF-8: no output can carry such a name verbatim, and a replaced one could "
           "name another label of the index, so the seed is refused and nothing of it is "
           "delivered: " + lever + ", or rename the label in the index";
-    Json::Value rj;
-    Json::Value sj;
-    sj["seed_id"] = seed.seed_id;
-    sj["length_bp"] = uint_json(seed.sequence.size());
-    sj["labels_from_seed"] = r.labels_from_seed;
-    rj["seed"] = std::move(sj);
-    rj["error"] = "The seed's labels include " + count + " that " + (bad > 1 ? "are" : "is")
-                + " not valid UTF-8 (the first: " + where + "): refused, since no output "
-                  "carries such a name verbatim and a replaced name could resolve to another "
-                  "label";
+    Json::Value rj = failed_seed_head(seed, r.labels_from_seed,
+        "The seed's labels include " + count + " that " + (bad > 1 ? "are" : "is")
+        + " not valid UTF-8 (the first: " + where + "): refused, since no output "
+          "carries such a name verbatim and a replaced name could resolve to another "
+          "label");
     Json::Value lims(Json::arrayValue);
     Json::Value d = limitation("derivation", knob, std::move(limit),
                                uint_json(static_cast<uint64_t>(bad)), effect);
@@ -5014,13 +4937,7 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
     // not offered (state_budget_clamp states the rest)
     const Json::Value *clamp = q.injected ? nullptr : budget_clamp(clamped, q.resource);
     const bool at_max = clamp != nullptr;
-    Json::Value rj;
-    Json::Value sj;
-    sj["seed_id"] = seed.seed_id;
-    sj["length_bp"] = uint_json(seed.sequence.size());
-    sj["labels_from_seed"] = e.labels_from_seed();
-    rj["seed"] = std::move(sj);
-    rj["error"] = e.what();
+    Json::Value rj = failed_seed_head(seed, e.labels_from_seed(), e.what());
     Json::Value lims(Json::arrayValue);
     if (q.resource == ResourceStop::MEMORY && is_decode_stop(q)) {
         // A seed-phase or root read did not fit. Observed: what admitting the refused row needed
@@ -5147,31 +5064,20 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     q.demand = q.used;
     const uint64_t limit = static_cast<uint64_t>(q.limit);
     const uint64_t used = static_cast<uint64_t>(q.used);
-    Json::Value rj;
-    Json::Value sj;
-    sj["seed_id"] = seed.seed_id;
-    sj["length_bp"] = uint_json(seed.sequence.size());
-    // as a walked or budget-failed seed of the same request states it: false in annotate mode
-    // (seed.labels.empty() would say true for every annotate seed)
-    sj["labels_from_seed"] = labels_derived_from_seed(seed, st.label_mode);
-    rj["seed"] = std::move(sj);
-    rj["error"] = std::string("not started: ") + external_cause(q) + " before this seed began, "
-                + std::to_string(used) + " ms after the request was received; no budget of the "
-                  "request ran out: a new attempt can traverse it";
+    // labels_from_seed as a walked or budget-failed seed of the same request states it: false
+    // in annotate mode (seed.labels.empty() would say true for every annotate seed)
+    Json::Value rj = failed_seed_head(seed, labels_derived_from_seed(seed, st.label_mode),
+        std::string("not started: ") + external_cause(q) + " before this seed began, "
+        + std::to_string(used) + " ms after the request was received; no budget of the "
+          "request ran out: a new attempt can traverse it");
     Json::Value lims(Json::arrayValue);
     lims.append(limitation("walk_domain", "attempt_id", uint_json(limit), uint_json(used),
                            std::string(external_cause(q)) + " before this seed's walk began, so "
                            "no traversal was made (limit: the attempt's bound, observed: its "
                            "elapsed time, ms); no budget of the request ran out: a new attempt "
                            "can traverse the seed"));
-    if (st.max_memory_bytes) {
-        // every response under a memory budget states it (§7.0): this result echoes seed_id
-        ResourceAccount account;
-        account.memory_limit = st.max_memory_bytes;
-        account.soft_overshoot = failed_soft(st, seed, 0);
-        account.decode_charged = decode_charged;
-        lims.append(memory_bound_soft(st, account));
-    }
+    // every response under a memory budget states it (§7.0): this result echoes seed_id
+    append_failed_memory(&lims, st, seed, 0, decode_charged);
     rj["limitations"] = std::move(lims);
     rj["outcome"] = outcome_of(rj, true);
     Json::Value j;
@@ -5182,9 +5088,7 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     j["effective"] = uint_json(limit);
     j["used"] = uint_json(used);
     j["remaining"] = uint_json(limit > used ? limit - used : 0);
-    Json::Value actions(Json::arrayValue);
-    actions.append("retry_attempt");
-    j["actions"] = std::move(actions);
+    j["actions"] = strings_json({ "retry_attempt" });
     j["message"] = std::string(external_cause(q)) + " before this seed's walk began, "
                  + std::to_string(used) + " ms after the request was received (the bound: "
                  + std::to_string(limit) + " ms): the seed is failed, nothing of it was read; no "
@@ -5245,11 +5149,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     // double it printed 10000.0, which a client reads as a float where the field is an
     // integer), a time budget as the number it was parsed as
     auto clamp = [&](const char *field, Json::Value requested, Json::Value effective) {
-        Json::Value c;
-        c["field"] = field;
-        c["requested"] = std::move(requested);
-        c["effective"] = std::move(effective);
-        clamped.append(c);
+        note_clamped(&clamped, field, std::move(requested), std::move(effective));
     };
     const bool derives = std::any_of(req.seeds.begin(), req.seeds.end(),
                                      [](const Seed &s) { return s.labels.empty(); });
@@ -5647,21 +5547,6 @@ Json::Value process_traverse_request(const Json::Value &json,
     return out;
 }
 
-// a number of milliseconds as JSON: an integer when it is one (the flags are integers and a
-// client compares them as written), else the double (as /pattern's limits)
-static Json::Value ms_json(double x) {
-    if (x >= 0 && x == std::floor(x) && x <= 9007199254740991.0)
-        return uint_json(static_cast<uint64_t>(x));
-    return Json::Value(x);
-}
-
-// the same number in a message: 250.001, not std::to_string's 250.001000
-static std::string ms_text(double x) {
-    std::ostringstream out;
-    out << std::setprecision(15) << x;
-    return out.str();
-}
-
 Json::Value resolve_deadline_body(const ResolveDeadline &e) {
     Json::Value b;
     b["error"] = e.what();
@@ -5676,15 +5561,12 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     // no deadline without the field, whatever the cap: such a request has no time limit
     t["default"] = Json::Value();
     // the cap (--traverse-max-time-ms, as /traverse's); 0: none
-    t["max_time_ms"] = ms_json(limits.max_time_ms);
-    t["finalize_reserve_ms"] = ms_json(limits.finalize_ms);
+    t["max_time_ms"] = number_json(limits.max_time_ms);
+    t["finalize_reserve_ms"] = number_json(limits.finalize_ms);
     t["finalize_reserve_configurable"] = false;
     t["check_kmers"] = uint_json(kResolveCheckKmers);
     t["check_labels"] = uint_json(kResolveCheckLabels);
-    Json::Value phases(Json::arrayValue);
-    phases.append("rows");
-    phases.append("support");
-    t["stop_phases"] = std::move(phases);
+    t["stop_phases"] = strings_json({ "rows", "support" });
     t["rule"] = "opt-in: a request without bounds.time_budget_ms runs without a deadline, as "
         "before, whatever max_time_ms; with it, a number of ms above finalize_reserve_ms (else "
         "400), lowered to max_time_ms when that is not 0 (stated in limits.clamped), the "
@@ -5850,11 +5732,8 @@ Json::Value process_resolve_request(
         }
         if (time.max_time_ms > 0 && budget > time.max_time_ms) {
             // lowered to the server's cap and stated, as /traverse states its clamps
-            Json::Value c;
-            c["field"] = "bounds.time_budget_ms";
-            c["requested"] = req.time_budget_given;
-            c["effective"] = ms_json(time.max_time_ms);
-            clamped.append(std::move(c));
+            note_clamped(&clamped, "bounds.time_budget_ms", req.time_budget_given,
+                         number_json(time.max_time_ms));
             budget = time.max_time_ms;
         }
         // (the parse admits the field only where the peek above saw it)
@@ -5914,8 +5793,8 @@ Json::Value process_resolve_request(
     if (deadline) {
         // the budget the work ran under, stated whether or not it stopped the work
         Json::Value l;
-        l["time_budget_ms"] = ms_json(deadline->time_budget_ms());
-        l["finalize_reserve_ms"] = ms_json(deadline->finalize_reserve_ms());
+        l["time_budget_ms"] = number_json(deadline->time_budget_ms());
+        l["finalize_reserve_ms"] = number_json(deadline->finalize_reserve_ms());
         l["clamped"] = std::move(clamped);
         out["limits"] = std::move(l);
         out["stop"] = profile.stop

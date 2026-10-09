@@ -45,8 +45,6 @@ struct CostSpec {
 
 struct TraverseRequest {
     std::string release;
-    std::string graph;        // multi-graph mode: index name (resolved by the server)
-    std::string graph_path;   // optional disambiguation when a name spans several shards
     // A ledger-managed attempt (DESIGN-traverse-graphlet.md §14.1: the frozen wire contract's
     // request fields; traverse_attempts.hpp): its id, unique per server process while it runs
     // or is retained, and the budget and locus it is charged to, echoed in `usage` only
@@ -211,8 +209,6 @@ std::string sha256_hex(std::string_view data);
 IndexIdentity index_identity(const Config &config, const graph::AnnotatedDBG &anno_graph);
 
 struct ResolveRequest {
-    std::string graph;
-    std::string graph_path;
     std::string sequence;
     graph::traversal::ResolveOptions options;
     bool select = false;

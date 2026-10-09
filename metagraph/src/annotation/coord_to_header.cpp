@@ -24,36 +24,9 @@ CoordToHeader::CoordToHeader() {}
 CoordToHeader::~CoordToHeader() {}
 
 // The index is never shared or carried over: its keys view the headers of the object that
-// built it, so a copy or a moved-to object builds its own on first use
+// built it, so a copy builds its own on first use
 CoordToHeader::CoordToHeader(const CoordToHeader &other)
       : headers_(other.headers_), coord_offsets_(other.coord_offsets_) {}
-
-CoordToHeader::CoordToHeader(CoordToHeader &&other)
-      : headers_(std::move(other.headers_)), coord_offsets_(std::move(other.coord_offsets_)) {
-    std::lock_guard<std::mutex> lock(other.header_index_mutex_);
-    other.header_index_.reset();
-}
-
-CoordToHeader& CoordToHeader::operator=(const CoordToHeader &other) {
-    if (this != &other) {
-        std::lock_guard<std::mutex> lock(header_index_mutex_);
-        header_index_.reset();
-        headers_ = other.headers_;
-        coord_offsets_ = other.coord_offsets_;
-    }
-    return *this;
-}
-
-CoordToHeader& CoordToHeader::operator=(CoordToHeader &&other) {
-    if (this != &other) {
-        std::scoped_lock lock(header_index_mutex_, other.header_index_mutex_);
-        header_index_.reset();
-        other.header_index_.reset();
-        headers_ = std::move(other.headers_);
-        coord_offsets_ = std::move(other.coord_offsets_);
-    }
-    return *this;
-}
 
 size_t CoordToHeader::build_header_index() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);

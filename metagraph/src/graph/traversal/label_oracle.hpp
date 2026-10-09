@@ -452,6 +452,23 @@ inline uint32_t saturate_units(uint64_t units) {
     return static_cast<uint32_t>(std::min<uint64_t>(units, std::numeric_limits<uint32_t>::max()));
 }
 
+// The work of a fetched row (DESIGN-traverse-graphlet.md §14, "rows decoded"): kKeyUnits per
+// key, plus 1 per entry and per coordinate it holds
+constexpr uint64_t kKeyUnits = 8;
+
+// the work of a key's row-diff dependency rows, charged as fetched rows are
+inline uint64_t dependency_units(const annot::matrix::RowCost &cost) {
+    return kKeyUnits * cost.dependency_rows + cost.dependency_entries;
+}
+
+// what the result vectors of a budget-aware fetch of |n| keys are charged: the rows' hits or
+// label lists (|Result|) and their costs
+template <class Result>
+uint64_t fetch_result_bytes(size_t n) {
+    return annot::matrix::buffer_bytes(n, sizeof(Result))
+            + annot::matrix::buffer_bytes(n, sizeof(KeyCost));
+}
+
 // The longest run of keys one budget-aware read decodes together: a run that does not fit
 // is retried in halves, so this bounds the wasted decoding near the budget
 constexpr size_t kMaxDecodeRun = 512;
@@ -493,7 +510,25 @@ struct FetchRefusal {
     // read or build did not fit (DECODE) adds nothing: its units
     // are not known. INTERRUPTED: ReadPacing::units.
     uint64_t units = 0;
+
+    static FetchRefusal at(Cause cause, size_t position, uint64_t left, uint64_t held,
+                           uint64_t demand = 0, uint64_t need = 0) {
+        FetchRefusal r;
+        r.cause = cause;
+        r.position = position;
+        r.left = left;
+        r.held = held;
+        r.demand = demand;
+        r.need = need;
+        return r;
+    }
 };
+
+// What a read refused by |budget| was seen to need beyond the |before| bytes held before it:
+// what it held when its charge did not fit, and that charge (FetchRefusal::need)
+inline uint64_t need_beyond(const annot::matrix::DecodeBudget &budget, uint64_t before) {
+    return budget.refused_need() > before ? budget.refused_need() - before : 0;
+}
 
 /**
  * The (column, seq_id) keys of header labels, hashed for one flat table: a map per column
@@ -539,7 +574,6 @@ class LabelQuery {
                size_t max_cache_size = 1'000'000);
 
     const std::vector<LabelRef>& labels() const { return labels_; }
-    bool with_coords() const { return with_coords_; }
     // which accessor is used: "direct", "rows" or "tuples"
     const char* access_path() const;
 
@@ -704,6 +738,15 @@ class LabelQuery {
                         const KeyCost *costs, Eviction eviction = Eviction::EVICT);
 };
 
+// the work of a fetched row's hits: kKeyUnits, and 1 per hit and per coordinate
+inline uint64_t hits_units(const LabelQuery::NodeHits &hits) {
+    uint64_t units = kKeyUnits + hits.size();
+    for (const LabelQuery::Hit &hit : hits) {
+        units += hit.coords.size();
+    }
+    return units;
+}
+
 
 /**
  * The labels PRESENT at annotation keys, with no permitted set: `labels.mode: annotate`
@@ -739,8 +782,6 @@ class LabelRecorder {
                   size_t max_cache_size = 1'000'000,
                   size_t max_cache_keys = 64'000'000);
 
-    LabelKind kind() const { return kind_; }
-    size_t max_labels_per_node() const { return cap_; }
     // the labels named so far (LabelId == index)
     const std::vector<LabelRef>& labels() const { return dict_; }
     // "rows" or "tuples"
@@ -785,7 +826,6 @@ class LabelRecorder {
     // cost (by |name_bytes|; the caller's account charges them with the dictionary) and what
     // naming them provisionally was charged (freed with the call)
     const FetchRefusal& refusal() const { return refusal_; }
-    uint64_t refused_held() const { return refusal_.held; }
     uint64_t last_names_bytes() const { return last_names_bytes_; }
     uint64_t last_naming_bytes() const { return last_naming_bytes_; }
     uint64_t last_call_bytes() const { return last_call_bytes_; }

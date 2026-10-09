@@ -36,6 +36,7 @@
 #include "pattern.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "server_utils.hpp"
+#include "cli/json_helpers.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -922,6 +923,12 @@ int run_server(Config *config) {
         });
     };
 
+    // Whether the client of |request| is gone or the server stops (a shutdown is treated as a
+    // client gone, class Shutdown)
+    auto gone_of = [&shutdown](const shared_ptr<HttpServer::Request> &request) {
+        return [r = request.get(), &shutdown]() { return shutdown.stopping() || client_gone(*r); };
+    };
+
     // Count, and extract without reading annotation, the graph contexts of short motifs and
     // IUPAC patterns (DESIGN-pattern-search.md; pattern.hpp). Single-graph servers only: the
     // multi-graph fan-out with its barriers is not served (§8). Every refusal is {"error",
@@ -929,16 +936,24 @@ int run_server(Config *config) {
     // reserve), past which it is 503 "deadline", never a partial answer.
     server.resource["^/pattern$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> request) {
-        auto as_http = [](const PatternRefusal &e) { return HttpError(e.status(), e.body()); };
+        // what the route throws, in the server's terms: a refusal as its HTTP answer, an
+        // abandoned request as a client gone
+        auto translated = [](const auto &f) {
+            try {
+                return f();
+            } catch (const PatternRefusal &e) {
+                throw HttpError(e.status(), e.body());
+            } catch (const graph::pattern::Aborted &e) {
+                throw ClientGone(e.what());
+            }
+        };
         // the request's deadline, set once its body is parsed; the writing and the
         // compression of the answer are checked against it
         PatternDelivery delivery;
         // a client that is gone, or a shutdown, is not answered: the work ends at its next
         // clock reading, the writing at its next check, and nothing is written (as /resolve's and
         // /traverse's)
-        auto gone = [&request, &shutdown]() {
-            return shutdown.stopping() || client_gone(*request);
-        };
+        auto gone = gone_of(request);
         delivery.set_abort(gone);
         ResponseControl control;
         // nor with an error: a refusal, a 400 of a malformed body, a 503 (the index loading,
@@ -946,19 +961,11 @@ int run_server(Config *config) {
         // half-close counts — or during a shutdown (SPEC §3).
         // Asked apart from the deadline: a 503 at the deadline reaches a client still there
         control.gone = gone;
-        control.check = [&]() {
-            try {
-                delivery.check();
-            } catch (const PatternRefusal &e) {
-                throw as_http(e);
-            } catch (const graph::pattern::Aborted &e) {
-                throw ClientGone(e.what());
-            }
-        };
+        control.check = [&]() { translated([&]() { delivery.check(); }); };
         // the time to compress is inside the reserve: the traversal routes' faster level
         control.compression_level = config->traverse_compression_level;
         process_request(response, request, num_requests++, [&](const std::string &content) {
-            try {
+            return translated([&]() {
                 if (config->fnames.size()) {
                     throw PatternRefusal(400, "later_increment",
                                          "pattern: multi-graph servers in a later increment");
@@ -969,11 +976,7 @@ int run_server(Config *config) {
                 const IndexIdentity identity = identity_of(index);
                 return process_pattern_request(parse_pattern_body(content), index, *config,
                                                &identity, &delivery);
-            } catch (const PatternRefusal &e) {
-                throw as_http(e);
-            } catch (const graph::pattern::Aborted &e) {
-                throw ClientGone(e.what());
-            }
+            });
         }, /* compact */ true, &control);
     };
 
@@ -1048,13 +1051,9 @@ int run_server(Config *config) {
             const IndexIdentity identity = identity_of(index);
             // a client that is gone is not answered: abandoned between the request's phases
             try {
-                // a shutdown is treated as a client gone (class Shutdown)
-                auto gone = [&request, &shutdown]() {
-                    return shutdown.stopping() || client_gone(*request);
-                };
                 return process_resolve_request(json, index, config->index_release,
-                                               config->resolve_max_query_bp, &identity, gone,
-                                               resolve_time, &delivery);
+                                               config->resolve_max_query_bp, &identity,
+                                               gone_of(request), resolve_time, &delivery);
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             } catch (const ResolveDeadline &e) {
@@ -1173,13 +1172,7 @@ int run_server(Config *config) {
                 // (its ledger may already have released it), also without usage. Once its
                 // retention and hold are over the id runs again
                 if (auto refused = attempts.start(attempt)) {
-                    if (refused->instance_mismatch) {
-                        logger->info("[Server] Attempt {} (request {}): not started, {}",
-                                     attempt->ids().attempt_id, request_id,
-                                     refused->body["error"].asString());
-                        throw HttpError(409, std::move(refused->body));
-                    }
-                    if (refused->expired) {
+                    if (refused->instance_mismatch || refused->expired) {
                         logger->info("[Server] Attempt {} (request {}): not started, {}",
                                      attempt->ids().attempt_id, request_id,
                                      refused->body["error"].asString());
@@ -1305,12 +1298,7 @@ int run_server(Config *config) {
 
     // The content encodings of the traversal routes (compact JSON, Accept-Encoding honoured:
     // gzip preferred, deflate accepted)
-    auto encodings_json = []() {
-        Json::Value encodings(Json::arrayValue);
-        encodings.append("gzip");
-        encodings.append("deflate");
-        return encodings;
-    };
+    auto encodings_json = []() { return strings_json({ "gzip", "deflate" }); };
 
     // How a deadline reaches the walk (both capabilities routes): the time-sized chunks of
     // the annotation reads it may fall into, what stays uninterruptible, and the longest single
@@ -1386,6 +1374,23 @@ int run_server(Config *config) {
         return d;
     };
 
+    // The keys both capabilities routes state alike: which walk a response gives (every
+    // /traverse response names it too); the ledger-managed attempts (requests with
+    // attempt_id): how they are named, cancelled, queried, kept and bounded
+    // (traverse_attempts.hpp); the transport: the traversal routes write compact JSON and
+    // honour Accept-Encoding (gzip preferred, deflate accepted), at this zlib level; how a
+    // deadline reaches the walk; and /resolve's deadline (bounds.time_budget_ms; index-free, so
+    // stated while the single index loads too). The deadline is not a feature_level bump, which
+    // every /resolve and /traverse response states: a client gates on the block's presence
+    auto put_contract = [&](Json::Value *c) {
+        (*c)["algorithm_version"] = kTraverseAlgorithmVersion;
+        (*c)["attempts"] = attempts.capabilities_json();
+        (*c)["content_encodings"] = encodings_json();
+        (*c)["compression_level"] = config->traverse_compression_level;
+        (*c)["deadline_check"] = deadline_check_json();
+        (*c)["resolve"] = resolve_capabilities_json(resolve_time);
+    };
+
     // What one index of this deployment supports, so a client can pick a strategy before
     // asking: GET /traverse/capabilities (per graph in multi-graph mode)
     auto probe_json = [&](const AnnotatedDBG &index, const IndexIdentity &identity) {
@@ -1403,10 +1408,7 @@ int run_server(Config *config) {
         // stated with what bounds it, not as a fixed maximum: a fetch call's rows are
         // decoded and charged whole, and each stop states the most its seed charged
         // between two comparisons (no fixed kind of charge bounds them all)
-        Json::Value budgets(Json::arrayValue);
-        budgets.append("max_memory_mb");
-        budgets.append("max_work_units");
-        caps["budgets"] = budgets;
+        caps["budgets"] = strings_json({ "max_memory_mb", "max_work_units" });
         // the server's maxima of those budgets (feature level 4; 0: off): a larger
         // budget is lowered to it and an omitted one set to it, echoed in strategy.clamped
         caps["max_memory_mb"] = static_cast<Json::UInt64>(config->traverse_max_memory_mb);
@@ -1451,16 +1453,7 @@ int run_server(Config *config) {
             "account), and the lookahead's reads are admitted as without it (each also charges "
             "what the cache spared it). 0: off";
         caps["decode_cache"] = std::move(decode_cache);
-        // which walk a response gives (every /traverse response names it too)
-        caps["algorithm_version"] = kTraverseAlgorithmVersion;
-        // the ledger-managed attempts (requests with attempt_id): how they are named,
-        // cancelled, queried, kept and bounded (traverse_attempts.hpp)
-        caps["attempts"] = attempts.capabilities_json();
-        // transport: the traversal routes write compact JSON and honour Accept-Encoding
-        // (gzip preferred, deflate accepted), at this zlib level
-        caps["content_encodings"] = encodings_json();
-        caps["compression_level"] = config->traverse_compression_level;
-        caps["deadline_check"] = deadline_check_json();
+        put_contract(&caps);
         // record coordinates (feature level 6): only here, the per-request capabilities
         // change only in their feature_level
         caps["coordinates"] = coordinates_capabilities_json(oracle);
@@ -1468,10 +1461,6 @@ int run_server(Config *config) {
         // /capabilities, here because this is the document a service's probe reads
         caps["pattern"] = pattern_capabilities_json(&index, pattern_limits(*config),
                                                     !config->fnames.empty());
-        // /resolve's deadline (bounds.time_budget_ms): the same block as on
-        // /capabilities. Not a feature_level bump, which every /resolve and /traverse response
-        // states: a client gates on this block's presence
-        caps["resolve"] = resolve_capabilities_json(resolve_time);
         return caps;
     };
 
@@ -1532,11 +1521,7 @@ int run_server(Config *config) {
         process_request(response, request, num_requests++, [&](const std::string&) {
             const bool multi = !config->fnames.empty();
             Json::Value c;
-            c["algorithm_version"] = kTraverseAlgorithmVersion;
-            c["attempts"] = attempts.capabilities_json();
-            c["compression_level"] = config->traverse_compression_level;
-            c["content_encodings"] = encodings_json();
-            c["deadline_check"] = deadline_check_json();
+            put_contract(&c);
             c["feature_level"] = kTraverseFeatureLevel;
             Json::Value features(Json::arrayValue);
             Json::Value routes;
@@ -1589,9 +1574,6 @@ int run_server(Config *config) {
             c["pattern"] = pattern_capabilities_json(
                     !multi && c["ready"].asBool() ? anno_graph.get().get() : nullptr,
                     pattern_limits(*config), multi);
-            // /resolve's deadline (bounds.time_budget_ms): index-free, so stated while the
-            // single index loads too
-            c["resolve"] = resolve_capabilities_json(resolve_time);
             c["release"] = config->index_release;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;

@@ -222,6 +222,22 @@ std::string hex64(uint64_t x);
 // query output of `with_signature`.
 std::string encode_runs(const std::vector<KmerInterval> &runs, uint64_t num_kmers);
 
+// The maximal runs of the positions i in [0, n) where |present|(i) holds, ascending
+template <class Present>
+std::vector<KmerInterval> runs_of(uint64_t n, const Present &present) {
+    std::vector<KmerInterval> runs;
+    for (uint64_t i = 0; i < n; ++i) {
+        if (!present(i))
+            continue;
+        if (runs.empty() || runs.back().end != i) {
+            runs.push_back({ i, i + 1 });
+        } else {
+            runs.back().end = i + 1;
+        }
+    }
+    return runs;
+}
+
 } // namespace traversal
 } // namespace graph
 } // namespace mtg

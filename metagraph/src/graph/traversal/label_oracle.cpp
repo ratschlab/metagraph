@@ -29,6 +29,7 @@ using annot::matrix::DecodeBudget;
 using annot::matrix::DecodeStatus;
 using annot::matrix::RowCost;
 using annot::matrix::buffer_bytes;
+using annot::matrix::row_entries;
 using annot::matrix::small_vector_bytes;
 
 // What a budget-aware cache entry is taken to hold besides its value's own buffers: its share
@@ -38,17 +39,22 @@ using annot::matrix::small_vector_bytes;
 // values' buffers as decode_budget.hpp models them).
 constexpr uint64_t kCacheEntryBytes = 256;
 constexpr uint64_t kCostEntryBytes = 128;
-// the work of a key's dependency rows: as a fetched row's (8 per row, 1 per entry)
-static uint64_t dependency_units(const RowCost &cost) {
-    return 8 * cost.dependency_rows + cost.dependency_entries;
+
+// what is left before |pacing|'s deadline (infinity: none)
+static double ms_left_of(const ReadPacing &pacing) {
+    return pacing.ms_left ? pacing.ms_left() : std::numeric_limits<double>::infinity();
 }
-// the entries of a decoded tuple row (KeyCost::entries): its columns and their coordinates
-static uint64_t row_entries(const MultiIntMatrix::RowTuples &row) {
-    uint64_t entries = row.size();
-    for (const auto &entry : row) {
-        entries += entry.second.size();
+
+// the end of the run of consecutive misses (keys neither npos nor in |cache|) from |pos|, at
+// most |limit| long
+template <class Cache>
+static size_t miss_run_end(const node_index *keys, size_t pos, size_t n, size_t limit,
+                           const Cache &cache) {
+    size_t end = pos;
+    while (end < n && end - pos < limit && keys[end] != npos && !cache.count(keys[end])) {
+        ++end;
     }
-    return entries;
+    return end;
 }
 
 
@@ -724,9 +730,6 @@ static bool paced_fetch(DecodePacer &pacer, const std::vector<node_index> &keys,
     if (keys.empty())
         return true;
     const bool paced = pacing && pacer.target_ms > 0;
-    auto ms_left = [&]() {
-        return pacing->ms_left ? pacing->ms_left() : std::numeric_limits<double>::infinity();
-    };
     auto stopped = [&](const node_index *decoded, size_t n) {
         if (!pacing->stop || !pacing->stop())
             return false;
@@ -741,7 +744,7 @@ static bool paced_fetch(DecodePacer &pacer, const std::vector<node_index> &keys,
     if (paced) {
         if (stopped(nullptr, 0))
             return false;
-        n = pacer.next(keys.size(), ms_left(), 0, 0);
+        n = pacer.next(keys.size(), ms_left_of(*pacing), 0, 0);
     }
     if (n == keys.size()) {
         const uint64_t coords = pacer.coords_now();
@@ -758,7 +761,7 @@ static bool paced_fetch(DecodePacer &pacer, const std::vector<node_index> &keys,
         if (begin) {
             if (stopped(ordered.data(), begin))
                 return false;
-            n = pacer.next(ordered.size() - begin, ms_left(), previous, previous_ms);
+            n = pacer.next(ordered.size() - begin, ms_left_of(*pacing), previous, previous_ms);
         }
         chunk.assign(ordered.begin() + begin, ordered.begin() + begin + n);
         std::sort(chunk.begin(), chunk.end());
@@ -778,15 +781,8 @@ bool LabelQuery::fetch_uncached_paced(const std::vector<node_index> &keys,
                                       const std::vector<node_index> &order, ReadPacing *pacing) {
     return paced_fetch(oracle_.pacer(), keys, order, pacing,
         [this](const node_index *k, size_t n) { fetch_uncached(k, n); },
-        [this](node_index key) {
-            // the keys decoded so far (in the cache now) are work done: the caller's
-            const NodeHits &h = cache_.at(key);
-            uint64_t units = 8 + h.size();
-            for (const Hit &hit : h) {
-                units += hit.coords.size();
-            }
-            return units;
-        });
+        // the keys decoded so far (in the cache now) are work done: the caller's
+        [this](node_index key) { return hits_units(cache_.at(key)); });
 }
 
 std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index> &keys,
@@ -1024,9 +1020,18 @@ bool LabelQuery::hits_budgeted(const MultiIntMatrix::RowTuples &row, DecodeBudge
     return true;
 }
 
-DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudget &budget,
-                                    std::vector<NodeHits> *out, size_t at,
-                                    std::vector<KeyCost> *costs, size_t *built) {
+// The budget-aware read of a run of |n| keys (LabelQuery::decode_run, LabelRecorder::decode_run):
+// their rows decoded within |budget| (tuple rows on |tuple_path|), then each row built in key
+// order by |build|(i, row, &peak) and freed — a build that does not fit (false) drops the rest
+// of the run, REFUSED — and the costs of each key built written to |costs|[i]: its dependency
+// units, its row's entries and its demand, decoding it alone, |one| (its share of the run's
+// vectors), what building it held beside the raw row (peak) and |extra|(i). |*built|: the
+// keys built; a decode that did not fit builds none, with |budget| as on entry.
+template <class Build, class Extra>
+static DecodeStatus decode_keys(const LabelOracle &oracle, const node_index *keys, size_t n,
+                                DecodeBudget &budget, bool tuple_path, uint64_t one,
+                                const Build &build, const Extra &extra, KeyCost *costs,
+                                size_t *built) {
     *built = 0;
     const uint64_t rows_bytes = buffer_bytes(n, sizeof(Row));
     if (!budget.charge(rows_bytes))
@@ -1040,12 +1045,9 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
     std::vector<uint64_t> held;
     std::vector<BinaryMatrix::SetBitPositions> plain;
     std::vector<MultiIntMatrix::RowTuples> tuples;
-    const bool tuple_path = path_ == Path::TUPLES;
-    // whole rows only: a budgeted caller asks for Access::ROWS, not AUTO (see the constructor)
-    assert(path_ != Path::DIRECT);
     const DecodeStatus status = tuple_path
-        ? oracle_.get_row_tuples(rows, budget, &tuples, &row_costs, &held)
-        : oracle_.get_rows(rows, budget, &plain, &row_costs, &held);
+        ? oracle.get_row_tuples(rows, budget, &tuples, &row_costs, &held)
+        : oracle.get_rows(rows, budget, &plain, &row_costs, &held);
     if (status != DecodeStatus::OK) {
         budget.release(rows_bytes);
         return status;
@@ -1053,14 +1055,10 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
     const uint64_t containers = tuple_path
         ? annot::matrix::IRowDiff::output_bytes<MultiIntMatrix::RowTuples>(n)
         : annot::matrix::IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(n);
-    // each row's hits replace its raw row; a key's demand: decoding it alone, the row
-    // vector of one key, and what building its hits holds beside its raw row
-    const uint64_t one = buffer_bytes(1, sizeof(Row));
     DecodeStatus result = DecodeStatus::OK;
     for (size_t i = 0; i < n; ++i) {
         uint64_t peak = 0;
-        const bool ok = tuple_path ? hits_budgeted(tuples[i], budget, &(*out)[at + i], &peak)
-                                   : hits_budgeted(plain[i], budget, &(*out)[at + i], &peak);
+        const bool ok = tuple_path ? build(i, tuples[i], &peak) : build(i, plain[i], &peak);
         if (!ok) {
             // the rest of the run is dropped (the caller retries it in a smaller run)
             for (size_t j = i; j < n; ++j) {
@@ -1069,10 +1067,10 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
             result = DecodeStatus::REFUSED;
             break;
         }
-        KeyCost &cost = (*costs)[at + i];
+        KeyCost &cost = costs[i];
         cost.dependency_units = saturate_units(dependency_units(row_costs[i]));
-        cost.entries = saturate_units(tuple_path ? row_entries(tuples[i]) : plain[i].size());
-        cost.demand = row_costs[i].demand + one + peak;
+        cost.entries = saturate_units(tuple_path ? row_entries(tuples[i]) : row_entries(plain[i]));
+        cost.demand = row_costs[i].demand + one + peak + extra(i);
         budget.release(held[i]);
         if (tuple_path) {
             MultiIntMatrix::RowTuples().swap(tuples[i]);
@@ -1083,6 +1081,21 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
     }
     budget.release(containers + rows_bytes);
     return result;
+}
+
+DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudget &budget,
+                                    std::vector<NodeHits> *out, size_t at,
+                                    std::vector<KeyCost> *costs, size_t *built) {
+    // whole rows only: a budgeted caller asks for Access::ROWS, not AUTO (see the constructor)
+    assert(path_ != Path::DIRECT);
+    // each row's hits replace its raw row; a key's demand: decoding it alone, the row
+    // vector of one key, and what building its hits holds beside its raw row
+    return decode_keys(oracle_, keys, n, budget, path_ == Path::TUPLES,
+        buffer_bytes(1, sizeof(Row)),
+        [&](size_t i, const auto &row, uint64_t *peak) {
+            return hits_budgeted(row, budget, &(*out)[at + i], peak);
+        },
+        [](size_t) { return uint64_t(0); }, costs->data() + at, built);
 }
 
 bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits *hits,
@@ -1162,23 +1175,13 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         for (size_t i = 0; i < end; ++i) {
             if (keys[i] == npos || cache_.count(keys[i]))
                 continue;
-            const NodeHits &h = (*out)[base + i];
-            units += 8 + h.size() + (*costs)[base + i].dependency_units;
-            for (const Hit &hit : h) {
-                units += hit.coords.size();
-            }
+            units += hits_units((*out)[base + i]) + (*costs)[base + i].dependency_units;
         }
         return units;
     };
     auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand, uint64_t need,
                       size_t decoded_end) {
-        refusal_ = FetchRefusal();
-        refusal_.cause = cause;
-        refusal_.position = pos;
-        refusal_.left = left();
-        refusal_.held = committed;
-        refusal_.demand = demand;
-        refusal_.need = need;
+        refusal_ = FetchRefusal::at(cause, pos, left(), committed, demand, need);
         refusal_.units = decoded_units(decoded_end);
         out->resize(base);
         costs->resize(base);
@@ -1186,12 +1189,8 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         *refused_at = pos;
         return false;
     };
-    // the least a refused read alone was seen to need: what it held when its charge did not
-    // fit, and that charge
-    auto seen_need = [&]() {
-        const uint64_t before = at_entry + committed;
-        return budget.refused_need() > before ? budget.refused_need() - before : 0;
-    };
+    // the least a refused read alone was seen to need
+    auto seen_need = [&]() { return need_beyond(budget, at_entry + committed); };
     // A paced fetch's deadline before a run: restored as a refusal (nothing appended, the
     // budget as on entry), with the work of the keys its runs decoded (those the cache, which
     // does not change during the call, does not hold) for the caller to charge
@@ -1238,15 +1237,10 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         if (paced) {
             if (pacing->stop && pacing->stop())
                 return interrupt(pos);
-            limit = std::min(limit, pacer.next(n - pos, pacing->ms_left
-                                                            ? pacing->ms_left()
-                                                            : std::numeric_limits<double>::infinity(),
-                                               previous, previous_ms));
+            limit = std::min(limit, pacer.next(n - pos, ms_left_of(*pacing), previous,
+                                               previous_ms));
         }
-        size_t end = pos;
-        while (end < n && end - pos < limit && keys[end] != npos && !cache_.count(keys[end])) {
-            ++end;
-        }
+        const size_t end = miss_run_end(keys, pos, n, limit, cache_);
         const size_t len = end - pos;
         out->resize(base + end);
         costs->resize(base + end);
@@ -1288,60 +1282,60 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
     return true;
 }
 
-void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
-                      ReadPacing *pacing) {
-    if (costs_.size() != cache_.size())
-        clear_cache();
-    // A cache of capacity zero keeps nothing, so there is nothing to warm; the runs below
-    // are at most that capacity long and would never advance
-    if (!max_cache_size_)
+// The budget-aware lookahead (LabelQuery::warm, LabelRecorder::warm): the misses among |keys|
+// (|cached|(key): a key the cache holds), charged like the rest of the lookahead's read,
+// decoded in runs of at most kMaxDecodeRun and |max_cache_size| keys and cached run by run.
+// A run's buffers, charged |run_bytes|(len), are those of make_run(len): its decode(keys, n,
+// at) decodes a piece of the run into them at |at| (false: it did not fit), and its keep(keys,
+// len, first) caches the run (false: the cache cannot keep it, which ends the warming).
+// A cache of capacity zero keeps nothing, so there is nothing to warm; the runs would be at
+// most that capacity long and would never advance.
+// The runs and their pieces are taken in the order of the keys' first appearance in |keys| —
+// the walk's order, where the nodes of one path are adjacent and share the decoding of their
+// row-diff paths — and each piece is decoded sorted, as paced_fetch takes the unbudgeted reads
+// (runs cut from the globally sorted keys would hold rows of as many paths as rows: 32 paths,
+// 2,048 rows, runs of 8 make 161,679 decoder charges against 28,736). Only what is cached
+// depends on it: a key is admitted and charged by its own costs when the walk reads it (fetch).
+// The warming ends at the first run the cache cannot keep beside the runs this warm cached (or
+// cannot keep at all), before it is decoded where the count tells, after where only its bytes
+// do: the runs are in the walk's order, so the runs kept are the nearest. Decoding every run,
+// one that did not fit evicting the cache wholesale (this warm's own earlier runs included) or
+// dropped when it alone exceeded the bound, a warm larger than the cache would keep only the
+// last one or two runs, the farthest, and the level would decode the near rows again (+31-39%
+// tuple rows at batch_kmers 2048-8192 under 16 MiB, the same result). Nothing a fetch returns,
+// admits or charges depends on the cache, so only physical work and time change
+template <class Cached, class CacheSize, class RunBytes, class MakeRun>
+static void warm_runs(DecodePacer &pacer, const std::vector<node_index> &keys,
+                      DecodeBudget &budget, ReadPacing *pacing, size_t max_cache_size,
+                      const Cached &cached, const CacheSize &cache_size,
+                      const RunBytes &run_bytes, const MakeRun &make_run) {
+    if (!max_cache_size)
         return;
-    // the misses, charged like the rest of the lookahead's read
     const uint64_t at_entry = budget.held();
     if (!budget.charge(buffer_bytes(keys.size(), sizeof(node_index))))
         return;
     std::vector<node_index> missing;
     missing.reserve(keys.size());
     for (node_index key : keys) {
-        if (key != npos && !cache_.count(key))
+        if (key != npos && !cached(key))
             missing.push_back(key);
     }
     std::sort(missing.begin(), missing.end());
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
-    // The runs and their pieces are taken in the order of the keys' first appearance in |keys|
-    // — the walk's order, where the nodes of one path are adjacent and share the decoding of
-    // their row-diff paths — and each piece is decoded sorted, as paced_fetch takes the
-    // unbudgeted reads (runs cut from the globally sorted keys would hold rows of as many
-    // paths as rows: 32 paths, 2,048 rows, runs of 8 make 161,679 decoder charges against
-    // 28,736). Only what is cached depends on it: a key is admitted and charged by its own
-    // costs when the walk reads it (fetch)
     missing = in_first_order(missing, keys);
-    DecodePacer &pacer = oracle_.pacer();
     const bool paced = pacing && pacer.target_ms > 0;
     size_t previous = 0;
     double previous_ms = 0;
-    const size_t run = std::min(kMaxDecodeRun, max_cache_size_);
-    // The warming ends at the first run the cache cannot keep beside the runs this warm cached
-    // (or cannot keep at all), before it is decoded where the count tells, after where only
-    // its bytes do: the runs are in the walk's order, so the runs kept are the nearest.
-    // Decoding every run, one that did not fit evicting the cache wholesale (this warm's own
-    // earlier runs included) or dropped when it alone exceeded the bound, a warm larger than
-    // the cache would keep only the last one or two runs, the farthest, and the level would
-    // decode the near rows again (+31-39% tuple rows at batch_kmers 2048-8192 under 16 MiB,
-    // the same result). Nothing a fetch returns, admits or charges depends on the cache, so
-    // only physical work and time change
+    const size_t run = std::min(kMaxDecodeRun, max_cache_size);
     size_t warmed = 0;          // runs this warm cached
     for (size_t begin = 0; begin < missing.size(); begin += run) {
         const size_t len = std::min(run, missing.size() - begin);
-        if (warmed && cache_.size() + len > max_cache_size_)
+        if (warmed && cache_size() + len > max_cache_size)
             break;
         const uint64_t at_run = budget.held();
-        const uint64_t containers = buffer_bytes(len, sizeof(NodeHits))
-                                  + buffer_bytes(len, sizeof(KeyCost));
-        if (!budget.charge(containers))
+        if (!budget.charge(run_bytes(len)))
             break;
-        std::vector<NodeHits> hits(len);
-        std::vector<KeyCost> costs(len);
+        auto buffers = make_run(len);
         // the run decoded in paced pieces, cached as one run (the cache's decisions are the
         // run's); a deadline before a piece drops the run and ends the warming
         bool ok = true;
@@ -1353,16 +1347,12 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
                     budget.restore(at_entry);
                     return;
                 }
-                piece = pacer.next(piece, pacing->ms_left ? pacing->ms_left()
-                                                          : std::numeric_limits<double>::infinity(),
-                                   previous, previous_ms);
+                piece = pacer.next(piece, ms_left_of(*pacing), previous, previous_ms);
             }
-            size_t built = 0;
             std::sort(missing.begin() + begin + at, missing.begin() + begin + at + piece);
             const uint64_t coords = pacer.coords_now();
             PacerTimer timer(pacer);
-            ok = decode_run(missing.data() + begin + at, piece, budget, &hits, at, &costs,
-                            &built) == DecodeStatus::OK;
+            ok = buffers.decode(missing.data() + begin + at, piece, at);
             previous_ms = timer.elapsed_ms();
             pacer.record(piece, previous_ms, piece_kind(paced, at, at + piece, len),
                          pacer.coords_now() - coords);
@@ -1371,14 +1361,42 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
         }
         if (!ok)
             break;      // the lookahead gives up within what is left: nothing depends on it
-        if (!cache_budgeted(missing.data() + begin, len, hits.data(), costs.data(),
-                            warmed ? Eviction::KEEP : Eviction::EVICT_IF_KEPT)) {
+        if (!buffers.keep(missing.data() + begin, len, !warmed))
             break;
-        }
         ++warmed;
         budget.restore(at_run);
     }
     budget.restore(at_entry);
+}
+
+void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
+                      ReadPacing *pacing) {
+    if (costs_.size() != cache_.size())
+        clear_cache();
+    struct Run {
+        LabelQuery &query;
+        DecodeBudget &budget;
+        std::vector<NodeHits> hits;
+        std::vector<KeyCost> costs;
+
+        bool decode(const node_index *keys, size_t n, size_t at) {
+            size_t built = 0;
+            return query.decode_run(keys, n, budget, &hits, at, &costs, &built)
+                    == DecodeStatus::OK;
+        }
+        bool keep(const node_index *keys, size_t len, bool first) {
+            return query.cache_budgeted(keys, len, hits.data(), costs.data(),
+                                        first ? Eviction::EVICT_IF_KEPT : Eviction::KEEP);
+        }
+    };
+    warm_runs(oracle_.pacer(), keys, budget, pacing, max_cache_size_,
+              [this](node_index key) { return cache_.count(key) > 0; },
+              [this]() { return cache_.size(); },
+              [](size_t len) { return fetch_result_bytes<NodeHits>(len); },
+              [&](size_t len) {
+                  return Run { *this, budget, std::vector<NodeHits>(len),
+                               std::vector<KeyCost>(len) };
+              });
 }
 
 
@@ -1524,7 +1542,7 @@ bool LabelRecorder::fetch_uncached_paced(const std::vector<node_index> &keys,
     return paced_fetch(oracle_.pacer(), keys, order, pacing,
         [this](const node_index *k, size_t n) { fetch_uncached(k, n); },
         // a recorded row is its whole width: the true count, not the capped list
-        [this](node_index key) { return 8 + static_cast<uint64_t>(cache_.at(key).total); });
+        [this](node_index key) { return kKeyUnits + static_cast<uint64_t>(cache_.at(key).total); });
 }
 
 std::vector<LabelRecorder::NodeLabels>
@@ -1773,62 +1791,18 @@ DecodeStatus LabelRecorder::decode_run(const node_index *keys, size_t n, DecodeB
                                        std::vector<RawRow> *rows_out,
                                        std::vector<uint64_t> *rows_held,
                                        std::vector<KeyCost> *costs, size_t *built, size_t at) {
-    *built = 0;
-    const uint64_t rows_bytes = buffer_bytes(n, sizeof(Row));
-    if (!budget.charge(rows_bytes))
-        return DecodeStatus::REFUSED;
-    std::vector<Row> rows(n);
-    for (size_t i = 0; i < n; ++i) {
-        assert(keys[i] != npos);
-        rows[i] = AnnotatedDBG::graph_to_anno_index(keys[i]);
-    }
-    std::vector<RowCost> row_costs;
-    std::vector<uint64_t> held;
-    std::vector<BinaryMatrix::SetBitPositions> plain;
-    std::vector<MultiIntMatrix::RowTuples> tuples;
-    const bool tuple_path = kind_ == LabelKind::HEADER;
-    const DecodeStatus status = tuple_path
-        ? oracle_.get_row_tuples(rows, budget, &tuples, &row_costs, &held)
-        : oracle_.get_rows(rows, budget, &plain, &row_costs, &held);
-    if (status != DecodeStatus::OK) {
-        budget.release(rows_bytes);
-        return status;
-    }
-    const uint64_t containers = tuple_path
-        ? annot::matrix::IRowDiff::output_bytes<MultiIntMatrix::RowTuples>(n)
-        : annot::matrix::IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(n);
-    // the row vector and the run's vectors of one key (fetch())
-    const uint64_t one = buffer_bytes(1, sizeof(Row)) + run_bytes_of(1, sizeof(RawRow));
-    DecodeStatus result = DecodeStatus::OK;
-    for (size_t i = 0; i < n; ++i) {
-        uint64_t peak = 0;
-        const bool ok = tuple_path ? raw_budgeted(tuples[i], budget, &(*rows_out)[at + i], &peak)
-                                   : raw_budgeted(plain[i], budget, &(*rows_out)[at + i], &peak);
-        if (!ok) {
-            for (size_t j = i; j < n; ++j) {
-                budget.release(held[j]);
-            }
-            result = DecodeStatus::REFUSED;
-            break;
-        }
-        // a key's demand: decoding it alone, the row vector of one key, building its raw
-        // row, and the label list it is returned as
-        KeyCost &cost = (*costs)[at + i];
-        cost.dependency_units = saturate_units(dependency_units(row_costs[i]));
-        cost.entries = saturate_units(tuple_path ? row_entries(tuples[i]) : plain[i].size());
-        cost.demand = row_costs[i].demand + one + peak
-                        + buffer_bytes((*rows_out)[at + i].kept.size(), sizeof(LabelId));
-        (*rows_held)[at + i] = raw_bytes((*rows_out)[at + i]);
-        budget.release(held[i]);
-        if (tuple_path) {
-            MultiIntMatrix::RowTuples().swap(tuples[i]);
-        } else {
-            BinaryMatrix::SetBitPositions().swap(plain[i]);
-        }
-        ++*built;
-    }
-    budget.release(containers + rows_bytes);
-    return result;
+    // a key's demand: decoding it alone, the row vector and the run's vectors of one key
+    // (fetch()), building its raw row, and the label list it is returned as
+    return decode_keys(oracle_, keys, n, budget, kind_ == LabelKind::HEADER,
+        buffer_bytes(1, sizeof(Row)) + run_bytes_of(1, sizeof(RawRow)),
+        [&](size_t i, const auto &row, uint64_t *peak) {
+            if (!raw_budgeted(row, budget, &(*rows_out)[at + i], peak))
+                return false;
+            (*rows_held)[at + i] = raw_bytes((*rows_out)[at + i]);
+            return true;
+        },
+        [&](size_t i) { return buffer_bytes((*rows_out)[at + i].kept.size(), sizeof(LabelId)); },
+        costs->data() + at, built);
 }
 
 void LabelRecorder::cache_raw(node_index key, RawRow &&raw, const KeyCost &cost) {
@@ -1900,20 +1874,14 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         uint64_t units = 0;
         for (size_t i = 0; i < out->size() - base; ++i) {
             if (keys[i] != npos && !cache_.count(keys[i]))
-                units += 8 + (*out)[base + i].total + (*costs)[base + i].dependency_units;
+                units += kKeyUnits + (*out)[base + i].total + (*costs)[base + i].dependency_units;
         }
         return units;
     };
     // |run_units|: those of the keys of the current run built but not admitted
     auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand, uint64_t need,
                       uint64_t labels, uint64_t names, uint64_t run_units) {
-        refusal_ = FetchRefusal();
-        refusal_.cause = cause;
-        refusal_.position = pos;
-        refusal_.left = left();
-        refusal_.held = committed;
-        refusal_.demand = demand;
-        refusal_.need = need;
+        refusal_ = FetchRefusal::at(cause, pos, left(), committed, demand, need);
         refusal_.labels = labels;
         refusal_.names_bytes = names;
         refusal_.units = decoded_units() + run_units;
@@ -1923,10 +1891,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         *refused_at = pos;
         return false;
     };
-    auto seen_need = [&]() {
-        const uint64_t before = at_entry + committed;
-        return budget.refused_need() > before ? budget.refused_need() - before : 0;
-    };
+    auto seen_need = [&]() { return need_beyond(budget, at_entry + committed); };
     // a key read (cached or decoded now) is admitted against its demand and its names, and a
     // refusal says which of them did not fit
     // (|run_units|(): those of the keys of its run built from it on, asked on a refusal only)
@@ -1990,15 +1955,10 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         if (paced) {
             if (pacing->stop && pacing->stop())
                 return interrupt(pos);
-            limit = std::min(limit, pacer.next(n - pos, pacing->ms_left
-                                                            ? pacing->ms_left()
-                                                            : std::numeric_limits<double>::infinity(),
-                                               previous, previous_ms));
+            limit = std::min(limit, pacer.next(n - pos, ms_left_of(*pacing), previous,
+                                               previous_ms));
         }
-        size_t end = pos;
-        while (end < n && end - pos < limit && keys[end] != npos && !cache_.count(keys[end])) {
-            ++end;
-        }
+        const size_t end = miss_run_end(keys, pos, n, limit, cache_);
         const size_t len = end - pos;
         const uint64_t work = run_bytes_of(len, sizeof(RawRow));
         if (!budget.charge(work)) {
@@ -2029,7 +1989,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         auto unlisted_units = [&]() {
             uint64_t units = 0;
             for (size_t j = listed; j < built; ++j) {
-                units += 8 + raws[j].total + run_costs[j].dependency_units;
+                units += kKeyUnits + raws[j].total + run_costs[j].dependency_units;
             }
             return units;
         };
@@ -2141,92 +2101,51 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
                          ReadPacing *pacing) {
     if (costs_.size() != cache_.size())
         clear_cache();
-    // as LabelQuery's: a cache of capacity zero keeps nothing, and its runs would not advance
-    if (!max_cache_size_)
-        return;
-    // the misses, charged like the rest of the lookahead's read
-    const uint64_t at_entry = budget.held();
-    if (!budget.charge(buffer_bytes(keys.size(), sizeof(node_index))))
-        return;
-    std::vector<node_index> missing;
-    missing.reserve(keys.size());
-    for (node_index key : keys) {
-        if (key != npos && !cache_.count(key))
-            missing.push_back(key);
-    }
-    std::sort(missing.begin(), missing.end());
-    missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
-    // runs and pieces in the walk's order, each piece decoded sorted (LabelQuery::warm)
-    missing = in_first_order(missing, keys);
-    DecodePacer &pacer = oracle_.pacer();
-    const bool paced = pacing && pacer.target_ms > 0;
-    size_t previous = 0;
-    double previous_ms = 0;
-    const size_t run = std::min(kMaxDecodeRun, max_cache_size_);
-    // as LabelQuery::warm: the warming ends at the first run the cache cannot keep beside this
-    // warm's runs or at all, so that it never evicts its own runs
-    size_t warmed = 0;          // runs this warm cached
-    for (size_t begin = 0; begin < missing.size(); begin += run) {
-        const size_t len = std::min(run, missing.size() - begin);
-        if (warmed && cache_.size() + len > max_cache_size_)
-            break;
-        const uint64_t at_run = budget.held();
-        if (!budget.charge(run_bytes_of(len, sizeof(RawRow))))
-            break;
-        std::vector<RawRow> raws(len);
-        std::vector<uint64_t> raws_held(len);
-        std::vector<KeyCost> run_costs(len);
-        // as LabelQuery::warm: the run decoded in paced pieces and cached as one run
-        bool ok = true;
-        for (size_t at = 0; ok && at < len; ) {
-            size_t piece = len - at;
-            if (paced) {
-                if (pacing->stop && pacing->stop()) {
-                    pacing->interrupted = true;
-                    budget.restore(at_entry);
-                    return;
-                }
-                piece = pacer.next(piece, pacing->ms_left ? pacing->ms_left()
-                                                          : std::numeric_limits<double>::infinity(),
-                                   previous, previous_ms);
-            }
+    struct Run {
+        LabelRecorder &recorder;
+        DecodeBudget &budget;
+        std::vector<RawRow> raws;
+        std::vector<uint64_t> raws_held;
+        std::vector<KeyCost> run_costs;
+
+        bool decode(const node_index *keys, size_t n, size_t at) {
             size_t built = 0;
-            std::sort(missing.begin() + begin + at, missing.begin() + begin + at + piece);
-            const uint64_t coords = pacer.coords_now();
-            PacerTimer timer(pacer);
-            ok = decode_run(missing.data() + begin + at, piece, budget, &raws, &raws_held,
-                            &run_costs, &built, at) == DecodeStatus::OK;
-            previous_ms = timer.elapsed_ms();
-            pacer.record(piece, previous_ms, piece_kind(paced, at, at + piece, len),
-                         pacer.coords_now() - coords);
-            previous = piece;
-            at += piece;
+            return recorder.decode_run(keys, n, budget, &raws, &raws_held, &run_costs, &built,
+                                       at) == DecodeStatus::OK;
         }
-        if (!ok)
-            break;      // the lookahead gives up within what is left: nothing depends on it
-        uint64_t bytes = 0, kept = 0;
-        for (const RawRow &raw : raws) {
-            bytes += kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw);
-            kept += std::max<size_t>(1, raw.kept.size());
+        bool keep(const node_index *keys, size_t len, bool first) {
+            LabelRecorder &r = recorder;
+            uint64_t bytes = 0, kept = 0;
+            for (const RawRow &raw : raws) {
+                bytes += kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw);
+                kept += std::max<size_t>(1, raw.kept.size());
+            }
+            // evicted wholesale only for the warm's first run and only to keep it (what was
+            // cached before the warm); a later run that does not fit beside, or a run that
+            // does not fit alone, ends the warming
+            const bool kept_alone = bytes <= r.max_cache_bytes_ && len <= r.max_cache_size_
+                                  && kept <= r.max_cache_keys_;
+            if (r.cache_bytes_ + bytes > r.max_cache_bytes_
+                    || r.cache_.size() + len > r.max_cache_size_
+                    || r.cached_keys_ + kept > r.max_cache_keys_) {
+                if (!first || !kept_alone)
+                    return false;
+                r.clear_cache();
+            }
+            for (size_t i = 0; i < len; ++i) {
+                r.cache_raw(keys[i], std::move(raws[i]), run_costs[i]);
+            }
+            return true;
         }
-        // evicted wholesale only for the warm's first run and only to keep it (what was
-        // cached before the warm); a later run that does not fit beside, or a run that does
-        // not fit alone, ends the warming
-        const bool kept_alone = bytes <= max_cache_bytes_ && len <= max_cache_size_
-                              && kept <= max_cache_keys_;
-        if (cache_bytes_ + bytes > max_cache_bytes_ || cache_.size() + len > max_cache_size_
-                || cached_keys_ + kept > max_cache_keys_) {
-            if (warmed || !kept_alone)
-                break;
-            clear_cache();
-        }
-        for (size_t i = 0; i < len; ++i) {
-            cache_raw(missing[begin + i], std::move(raws[i]), run_costs[i]);
-        }
-        ++warmed;
-        budget.restore(at_run);
-    }
-    budget.restore(at_entry);
+    };
+    warm_runs(oracle_.pacer(), keys, budget, pacing, max_cache_size_,
+              [this](node_index key) { return cache_.count(key) > 0; },
+              [this]() { return cache_.size(); },
+              [](size_t len) { return run_bytes_of(len, sizeof(RawRow)); },
+              [&](size_t len) {
+                  return Run { *this, budget, std::vector<RawRow>(len),
+                               std::vector<uint64_t>(len), std::vector<KeyCost>(len) };
+              });
 }
 
 } // namespace traversal

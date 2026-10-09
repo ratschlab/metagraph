@@ -86,17 +86,7 @@ std::string encode_runs(const std::vector<KmerInterval> &runs, uint64_t num_kmer
 }
 
 static std::vector<KmerInterval> runs_of(const std::vector<bool> &mask) {
-    std::vector<KmerInterval> runs;
-    for (uint64_t i = 0; i < mask.size(); ++i) {
-        if (!mask[i])
-            continue;
-        if (runs.empty() || runs.back().end != i) {
-            runs.push_back({ i, i + 1 });
-        } else {
-            runs.back().end = i + 1;
-        }
-    }
-    return runs;
+    return runs_of(mask.size(), [&](uint64_t i) { return mask[i]; });
 }
 
 

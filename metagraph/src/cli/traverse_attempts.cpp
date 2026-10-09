@@ -8,6 +8,7 @@
 
 #include <spdlog/fmt/fmt.h>
 
+#include "json_helpers.hpp"
 #include "traverse.hpp"
 
 
@@ -19,14 +20,55 @@ using Clock = Attempt::Clock;
 
 namespace {
 
-Json::Value uint_value(uint64_t x) { return Json::Value(static_cast<Json::UInt64>(x)); }
-
 // whole milliseconds, rounded up (a duration a ledger leases by is never understated); null
 // when there is no bound (an infinite time budget without the HTTP server's cap: the CLI)
-Json::Value ms_json(double ms) {
+Json::Value ceil_ms_json(double ms) {
     if (!std::isfinite(ms))
         return Json::Value();
-    return uint_value(static_cast<uint64_t>(std::ceil(std::max(0.0, ms))));
+    return uint_json(static_cast<uint64_t>(std::ceil(std::max(0.0, ms))));
+}
+
+// Writes the ids of |ids| into |j|: attempt_id (always with |always_attempt_id|, else when
+// given), budget_id and locus_id when given, and not_after_ms when given
+void put_attempt_ids(Json::Value *j, const AttemptIds &ids, bool always_attempt_id) {
+    if (always_attempt_id || !ids.attempt_id.empty())
+        (*j)["attempt_id"] = ids.attempt_id;
+    if (!ids.budget_id.empty())
+        (*j)["budget_id"] = ids.budget_id;
+    if (!ids.locus_id.empty())
+        (*j)["locus_id"] = ids.locus_id;
+    if (ids.not_after_ms)
+        (*j)["not_after_ms"] = uint_json(*ids.not_after_ms);
+}
+
+// Appends |x| to |window|, which keeps the last kRateWindow values
+void push_window(std::deque<double> *window, double x) {
+    window->push_back(x);
+    if (window->size() > kRateWindow)
+        window->pop_front();
+}
+
+// the smaller of two measurements where both were made (> 0), else the one that was made
+double prefer_measured(double a, double b) {
+    return a > 0 && b > 0 ? std::min(a, b) : std::max(a, b);
+}
+
+// |unknown| (AttemptRegistry::unknown_json of |id|) as the answer for an id a cancel
+// tombstoned before any request with it arrived
+Json::Value tombstoned_json(Json::Value unknown, const std::string &id) {
+    unknown["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request "
+                       "with it arrived; a request with it will be refused (409)";
+    unknown["tombstone"] = true;
+    return unknown;
+}
+
+// |unknown| as the 429 of a cancel that could not tombstone the id: |error|, and |reason|
+Json::Value not_tombstoned_json(Json::Value unknown, std::string error, const char *reason) {
+    unknown["error"] = std::move(error);
+    unknown["cancelled"] = false;
+    unknown["tombstone"] = false;
+    unknown["reason"] = reason;
+    return unknown;
 }
 
 const char* stop_name(ExternalStop s) {
@@ -89,14 +131,8 @@ Json::Value expired_json(const AttemptIds &ids, uint64_t now_ms,
                              iso_of_ms(now_ms));
     // told apart from the other 409 (a duplicate id, which carries `attempt`) by its state
     j["state"] = "expired";
-    j["not_after_ms"] = uint_value(*ids.not_after_ms);
-    j["server_time_ms"] = uint_value(now_ms);
-    if (!ids.attempt_id.empty())
-        j["attempt_id"] = ids.attempt_id;
-    if (!ids.budget_id.empty())
-        j["budget_id"] = ids.budget_id;
-    if (!ids.locus_id.empty())
-        j["locus_id"] = ids.locus_id;
+    j["server_time_ms"] = uint_json(now_ms);
+    put_attempt_ids(&j, ids, false);
     j["server_instance"] = server_instance;
     return j;
 }
@@ -126,14 +162,7 @@ Json::Value instance_mismatch_json(const AttemptIds &ids, const std::string &ins
     j["state"] = "instance_mismatch";
     j["expect_server_instance"] = ids.expect_server_instance;
     j["server_instance"] = instance;
-    if (!ids.attempt_id.empty())
-        j["attempt_id"] = ids.attempt_id;
-    if (!ids.budget_id.empty())
-        j["budget_id"] = ids.budget_id;
-    if (!ids.locus_id.empty())
-        j["locus_id"] = ids.locus_id;
-    if (ids.not_after_ms)
-        j["not_after_ms"] = uint_value(*ids.not_after_ms);
+    put_attempt_ids(&j, ids, false);
     return j;
 }
 
@@ -203,15 +232,8 @@ double Attempt::ms_since_received(Clock::time_point t) const {
 double Attempt::elapsed_ms() const { return ms_since_received(now()); }
 
 std::string Attempt::iso(Clock::time_point t) const {
-    const auto wall = received_wall_ + std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                                               t - received_);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(wall.time_since_epoch()).count();
-    const std::time_t seconds = static_cast<std::time_t>(ms / 1000);
-    std::tm tm {};
-    gmtime_r(&seconds, &tm);
-    char buf[32];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm);
-    return fmt::format("{}.{:03d}Z", buf, static_cast<int>(ms % 1000));
+    return iso_utc(received_wall_ + std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                                            t - received_));
 }
 
 void Attempt::set_bound(size_t seeds, double time_budget_ms, uint64_t memory_budget) {
@@ -242,10 +264,8 @@ double Attempt::ms_left() const {
 double Attempt::ratio_locked() const {
     // the measured ratios replace the configured one, the smaller (more text per account) of
     // this server's and this attempt's own
-    if (server_ratio_ > 0 && own_ratio_ > 0)
-        return std::min(server_ratio_, own_ratio_);
     if (server_ratio_ > 0 || own_ratio_ > 0)
-        return std::max(server_ratio_, own_ratio_);
+        return prefer_measured(server_ratio_, own_ratio_);
     return configured_ratio_;
 }
 
@@ -253,11 +273,8 @@ double Attempt::reserve_ms() const {
     // the measured rates replace the configured ones: this server's (the slowest of its recent
     // responses) and, for building, this attempt's own seeds, the slower of the two
     double build_mbps = settings_.delivery_build_mbps;
-    if (server_.build_mbps > 0 || measured_build_mbps_ > 0) {
-        build_mbps = server_.build_mbps > 0 && measured_build_mbps_ > 0
-            ? std::min(server_.build_mbps, measured_build_mbps_)
-            : std::max(server_.build_mbps, measured_build_mbps_);
-    }
+    if (server_.build_mbps > 0 || measured_build_mbps_ > 0)
+        build_mbps = prefer_measured(server_.build_mbps, measured_build_mbps_);
     const double compress_mbps = server_.compress_mbps > 0 ? server_.compress_mbps
                                                            : settings_.delivery_compress_mbps;
     // the walked seed's text, estimated from its account: its record coordinates' share at
@@ -551,9 +568,9 @@ void Attempt::seed_delivered(size_t index, const std::string &outcome, double el
 
 Json::Value Attempt::bound_json() const {
     Json::Value b;
-    b["seeds"] = uint_value(bound_seeds_);
+    b["seeds"] = uint_json(bound_seeds_);
     b["time_budget_ms"] = bound_set_ ? Json::Value(bound_time_budget_ms_) : Json::Value();
-    b["allowance_ms"] = ms_json(settings_.allowance_ms);
+    b["allowance_ms"] = ceil_ms_json(settings_.allowance_ms);
     // When the walk-until stopped the walk, the walk-until in force then: where the seeds
     // stopped being walked (the walk stopped at its first poll that read the clock after it,
     // usage.stopped_at). Otherwise the lowest walk-until the walk's clock-reading polls checked
@@ -562,7 +579,7 @@ Json::Value Attempt::bound_json() const {
     // walk: the lowest computed would read 14905 ms for walks stopped near 16000, and 20174 ms
     // (from the last seed's text, written after its walk) for a walk its own 30 s budget ended
     const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
-    b["walk_until_ms"] = ms_json(tripped_walk_until_ms_ ? *tripped_walk_until_ms_
+    b["walk_until_ms"] = ceil_ms_json(tripped_walk_until_ms_ ? *tripped_walk_until_ms_
                                : std::isfinite(checked) ? checked : walk_until_ms_);
     b["capped_by"] = capped_ ? Json::Value("content_timeout") : Json::Value();
     b["enforced"] = enforced();
@@ -571,32 +588,27 @@ Json::Value Attempt::bound_json() const {
 
 Json::Value Attempt::seeds_json() const {
     Json::Value seeds;
-    seeds["requested"] = uint_value(seeds_requested_);
-    seeds["started"] = uint_value(seeds_started_);
+    seeds["requested"] = uint_json(seeds_requested_);
+    seeds["started"] = uint_json(seeds_started_);
     // a seed whose walk ended (complete, partial, failed), delivered or not
-    seeds["finished"] = uint_value(seeds_walked_);
+    seeds["finished"] = uint_json(seeds_walked_);
     // a seed whose walk the client's departure cut: neither finished nor delivered
-    seeds["abandoned"] = uint_value(seeds_abandoned_);
+    seeds["abandoned"] = uint_json(seeds_abandoned_);
     return seeds;
 }
 
 Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const {
     std::lock_guard<std::mutex> lock(mutex_);
     Json::Value u;
-    u["attempt_id"] = ids_.attempt_id;
-    if (!ids_.budget_id.empty())
-        u["budget_id"] = ids_.budget_id;
-    if (!ids_.locus_id.empty())
-        u["locus_id"] = ids_.locus_id;
+    // not_after_ms echoed only when the request gave it, so that every other usage keeps its
+    // keys
+    put_attempt_ids(&u, ids_, true);
     u["server_instance"] = server_instance_;
-    // echoed only when the request gave it, so that every other usage keeps its keys
-    if (ids_.not_after_ms)
-        u["not_after_ms"] = uint_value(*ids_.not_after_ms);
     u["reason"] = reason;
     u["received_at"] = iso(received_);
     u["stopped_at"] = stopped_at_ ? Json::Value(iso(*stopped_at_)) : Json::Value();
-    u["elapsed_ms"] = ms_json(ms_since_received(finished_at_ ? *finished_at_ : now()));
-    u["bound_ms"] = ms_json(bound_ms_);
+    u["elapsed_ms"] = ceil_ms_json(ms_since_received(finished_at_ ? *finished_at_ : now()));
+    u["bound_ms"] = ceil_ms_json(bound_ms_);
     u["bound"] = bound_json();
     u["seeds"] = seeds_json();
     // The request: work adds up; memory is held at once by the seed being walked and the
@@ -624,31 +636,31 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
         if (!per_seed)
             continue;
         Json::Value e;
-        e["index"] = uint_value(i);
+        e["index"] = uint_json(i);
         e["outcome"] = s.outcome;
         e["stopped_by"] = s.stopped_by.empty() ? Json::Value() : Json::Value(s.stopped_by);
-        e["work_units"] = uint_value(m.work_units);
-        e["work_seed"] = uint_value(m.work_seed);
-        e["peak_admitted_bytes"] = uint_value(m.memory_peak);
-        e["final_bytes"] = uint_value(m.memory_final);
-        e["soft_excess_bytes"] = memory_budget_ ? uint_value(m.soft_excess) : Json::Value();
-        e["refused_bytes"] = s.refused_bytes ? uint_value(*s.refused_bytes) : Json::Value();
-        e["elapsed_ms"] = ms_json(s.elapsed_ms);
+        e["work_units"] = uint_json(m.work_units);
+        e["work_seed"] = uint_json(m.work_seed);
+        e["peak_admitted_bytes"] = uint_json(m.memory_peak);
+        e["final_bytes"] = uint_json(m.memory_final);
+        e["soft_excess_bytes"] = memory_budget_ ? uint_json(m.soft_excess) : Json::Value();
+        e["refused_bytes"] = s.refused_bytes ? uint_json(*s.refused_bytes) : Json::Value();
+        e["elapsed_ms"] = ceil_ms_json(s.elapsed_ms);
         list.append(std::move(e));
     }
-    u["work_units"] = uint_value(work);
+    u["work_units"] = uint_json(work);
     // the longest read or head piece of the request's walks: how late a stop could be seen
     // in them (an observation of this attempt, not a bound; see deadline_check)
-    u["observed_max_uninterruptible_ms"] = ms_json(max_uninterruptible_ms_);
+    u["observed_max_uninterruptible_ms"] = ceil_ms_json(max_uninterruptible_ms_);
     Json::Value memory;
-    memory["peak_admitted_bytes"] = uint_value(peak);
+    memory["peak_admitted_bytes"] = uint_json(peak);
     // the soft part is observed only under a memory budget, and per seed (each seed's excess
     // over its own budget): the request states the largest
-    memory["soft_excess_bytes"] = memory_budget_ ? uint_value(soft) : Json::Value();
+    memory["soft_excess_bytes"] = memory_budget_ ? uint_json(soft) : Json::Value();
     // Without a memory budget the account leaves out the label caches, the lookahead and a
     // level's decoded rows, so nothing bounds what was held (a walk whose account states
     // 0.79 MB can raise the RSS by 111 MB): null, never a number that reads as a bound
-    memory["held_bound_bytes"] = memory_budget_ ? uint_value(bound) : Json::Value();
+    memory["held_bound_bytes"] = memory_budget_ ? uint_json(bound) : Json::Value();
     u["memory"] = std::move(memory);
     if (per_seed)
         u["per_seed"] = std::move(list);
@@ -658,14 +670,8 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
 Json::Value Attempt::state_json() const {
     std::lock_guard<std::mutex> lock(mutex_);
     Json::Value j;
-    j["attempt_id"] = ids_.attempt_id;
-    if (!ids_.budget_id.empty())
-        j["budget_id"] = ids_.budget_id;
-    if (!ids_.locus_id.empty())
-        j["locus_id"] = ids_.locus_id;
+    put_attempt_ids(&j, ids_, true);
     j["server_instance"] = server_instance_;
-    if (ids_.not_after_ms)
-        j["not_after_ms"] = uint_value(*ids_.not_after_ms);
     if (tombstone_) {
         // a cancel that came first: no request with this id ran here, and none will
         j["state"] = "unknown";
@@ -690,13 +696,13 @@ Json::Value Attempt::state_json() const {
         ? Json::Value(iso(received_ + std::chrono::duration_cast<Clock::duration>(
                                           std::chrono::duration<double, std::milli>(bound_ms_))))
         : Json::Value();
-    j["bound_ms"] = ms_json(bound_ms_);
-    j["elapsed_ms"] = ms_json(ms_since_received(finished_at_ ? *finished_at_ : now()));
+    j["bound_ms"] = ceil_ms_json(bound_ms_);
+    j["elapsed_ms"] = ceil_ms_json(ms_since_received(finished_at_ ? *finished_at_ : now()));
     j["seeds"] = seeds_json();
     Json::Value response;
     response["written"] = finished_at_ ? Json::Value(status_ != 0) : Json::Value();
     response["status"] = status_ ? Json::Value(status_) : Json::Value();
-    response["bytes"] = bytes_ ? uint_value(*bytes_) : Json::Value();
+    response["bytes"] = bytes_ ? uint_json(*bytes_) : Json::Value();
     j["response"] = std::move(response);
     j["usage"] = finished_at_ ? final_usage_ : Json::Value();
     return j;
@@ -735,7 +741,7 @@ void Attempt::finish(const std::string &reason, int status, std::optional<size_t
         status_ = status;
         bytes_ = bytes;
         if (!usage.isNull()) {
-            usage["elapsed_ms"] = ms_json(ms_since_received(*finished_at_));
+            usage["elapsed_ms"] = ceil_ms_json(ms_since_received(*finished_at_));
             usage["stopped_at"] = iso(*stopped_at_);
         }
         final_usage_ = std::move(usage);
@@ -830,37 +836,28 @@ void AttemptRegistry::note_build_rate(double mbps) {
     if (!(mbps > 0) || !std::isfinite(mbps))
         return;
     std::lock_guard<std::mutex> lock(rates_mutex_);
-    build_rates_.push_back(mbps);
-    if (build_rates_.size() > kRateWindow)
-        build_rates_.pop_front();
+    push_window(&build_rates_, mbps);
 }
 
 void AttemptRegistry::note_compress_rate(double mbps) {
     if (!(mbps > 0) || !std::isfinite(mbps))
         return;
     std::lock_guard<std::mutex> lock(rates_mutex_);
-    compress_rates_.push_back(mbps);
-    if (compress_rates_.size() > kRateWindow)
-        compress_rates_.pop_front();
+    push_window(&compress_rates_, mbps);
 }
 
 void AttemptRegistry::note_account_per_text_byte(const std::string &detail, double ratio) {
     if (!(ratio > 0) || !std::isfinite(ratio) || detail.empty())
         return;
     std::lock_guard<std::mutex> lock(rates_mutex_);
-    std::deque<double> &ratios = ratios_[detail];
-    ratios.push_back(ratio);
-    if (ratios.size() > kRateWindow)
-        ratios.pop_front();
+    push_window(&ratios_[detail], ratio);
 }
 
 void AttemptRegistry::note_stop_latency(double ms) {
     if (!(ms > 0) || !std::isfinite(ms))
         return;
     std::lock_guard<std::mutex> lock(rates_mutex_);
-    stop_latencies_.push_back(ms);
-    if (stop_latencies_.size() > kRateWindow)
-        stop_latencies_.pop_front();
+    push_window(&stop_latencies_, ms);
 }
 
 DeliveryMeasurements AttemptRegistry::measured() const {
@@ -977,9 +974,9 @@ void AttemptRegistry::add_suppression_locked(Json::Value *j, const Attempt &tomb
     // this server's clock reads at most it — the steady hold lasts as long from when it was
     // set, so a forward step of the clock does not end it earlier — and once it is gone the
     // clock has read later
-    (*j)["suppressed_until_ms"] = uint_value(tomb.tomb_wall_until_ms_);
+    (*j)["suppressed_until_ms"] = uint_json(tomb.tomb_wall_until_ms_);
     if (against)
-        (*j)["not_after_ms"] = uint_value(*against);
+        (*j)["not_after_ms"] = uint_json(*against);
     const bool covers = against
                      && tomb.tomb_wall_until_ms_ >= *against + settings_.clock_skew_ms;
     (*j)["covers_admission"] = covers;
@@ -1048,8 +1045,7 @@ AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
 Json::Value AttemptRegistry::capabilities_json() const {
     Json::Value att;
     Json::Value fields(Json::arrayValue);
-    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms",
-                           "expect_server_instance" }) {
+    for (const char *f : kAttemptFields) {
         fields.append(f);
     }
     att["fields"] = std::move(fields);
@@ -1062,16 +1058,16 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["cancel_fields"] = std::move(cancel_fields);
     att["state"] = "GET /traverse/attempt/{attempt_id}";
     att["server_instance"] = instance_;
-    att["retention_s"] = uint_value(settings_.retention_s);
-    att["retention_count"] = uint_value(settings_.retention_count);
+    att["retention_s"] = uint_json(settings_.retention_s);
+    att["retention_count"] = uint_json(settings_.retention_count);
     // the cap of a tombstone's hold, as applied: max(tombstone_max_s, retention_s)
-    att["tombstone_max_s"] = uint_value(tombstone_cap_ms() / 1000);
+    att["tombstone_max_s"] = uint_json(tombstone_cap_ms() / 1000);
     // integers (ms), as usage.bound states them: a ledger compares them with its own
-    att["allowance_ms"] = ms_json(settings_.allowance_ms);
-    att["hard_cap_ms"] = ms_json(settings_.hard_cap_ms);
-    att["content_timeout_s"] = uint_value(settings_.content_timeout_s);
-    att["client_check_ms"] = uint_value(settings_.client_check_ms);
-    att["clock_skew_allowance_ms"] = uint_value(settings_.clock_skew_ms);
+    att["allowance_ms"] = ceil_ms_json(settings_.allowance_ms);
+    att["hard_cap_ms"] = ceil_ms_json(settings_.hard_cap_ms);
+    att["content_timeout_s"] = uint_json(settings_.content_timeout_s);
+    att["client_check_ms"] = uint_json(settings_.client_check_ms);
+    att["clock_skew_allowance_ms"] = uint_json(settings_.clock_skew_ms);
     // What the bound is and how it is enforced: the cap, the walk-until stated, and what runs
     // past it, which every release text names. The bound is compared only in check_delivery: the
     // walk's polls compare the walk-until, and only those that read the clock (one in
@@ -1112,8 +1108,8 @@ Json::Value AttemptRegistry::capabilities_json() const {
     reserve["account_per_text_byte"] = std::move(per);
     // the fixed bound the record coordinates' share is estimated with (feature level 6): a
     // number, so that a ledger can reproduce the reserve
-    reserve["coordinate_account_per_text_byte"] = uint_value(kCoordinateAccountPerTextByte);
-    reserve["measured_text_bytes"] = uint_value(kMeasuredTextBytes);
+    reserve["coordinate_account_per_text_byte"] = uint_json(kCoordinateAccountPerTextByte);
+    reserve["measured_text_bytes"] = uint_json(kMeasuredTextBytes);
     const DeliveryMeasurements m = measured();
     reserve["measured_build_mbps"] = m.build_mbps > 0 ? Json::Value(m.build_mbps) : Json::Value();
     reserve["measured_compress_mbps"] = m.compress_mbps > 0 ? Json::Value(m.compress_mbps)
@@ -1125,9 +1121,9 @@ Json::Value AttemptRegistry::capabilities_json() const {
                                                              : Json::Value();
     }
     reserve["measured_account_per_text_byte"] = std::move(ratios);
-    reserve["rate_window"] = uint_value(kRateWindow);
+    reserve["rate_window"] = uint_json(kRateWindow);
     reserve["margin"] = kReserveMargin;
-    reserve["stop_ms"] = ms_json(settings_.delivery_stop_ms);
+    reserve["stop_ms"] = ceil_ms_json(settings_.delivery_stop_ms);
     // where the configured starting estimates come from (feature level 4)
     reserve["calibration"] = "starting estimates, replaced by this server's measurements: "
         "account_per_text_byte just below the smallest ratios measured on real responses (JSON "
@@ -1145,7 +1141,7 @@ Json::Value AttemptRegistry::capabilities_json() const {
         "replaces it), the rest of a finalisation that grows with the result "
         "being covered by the margin while it runs faster than 4 x build_mbps; compress_mbps "
         "and build_mbps conservative (measured 460-670 and 13.6-51 MB/s on SRA at level 1)";
-    reserve["measured_stop_ms"] = m.stop_ms > 0 ? ms_json(m.stop_ms) : Json::Value();
+    reserve["measured_stop_ms"] = m.stop_ms > 0 ? ceil_ms_json(m.stop_ms) : Json::Value();
     reserve["rule"] = "reserve_ms = margin x ((T + E) / (compress x 1000) + E / (build x 1000)) "
         "+ stop, rates in MB/s: T the exact bytes of the text of the seeds finished so far (each "
         "seed's result is written as text once built), E the text the seed being walked is "
@@ -1338,28 +1334,20 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
             if (!settings_.retention_s) {
                 // Retention 0: this server suppresses nothing, and says so (a tombstone held
                 // 0 s would expire at once); a retry gives the same answer
-                Json::Value j = unknown_json(id);
-                j["error"] = "unknown attempt_id '" + id + "', and it was NOT tombstoned: this "
-                             "server keeps no tombstones (--traverse-attempt-retention-s 0), so a "
-                             "request with it that arrives later may still run here";
-                j["cancelled"] = false;
-                j["tombstone"] = false;
-                j["reason"] = "no_suppression";
-                return { 429, j };
+                return { 429, not_tombstoned_json(unknown_json(id),
+                    "unknown attempt_id '" + id + "', and it was NOT tombstoned: this server "
+                    "keeps no tombstones (--traverse-attempt-retention-s 0), so a request with it "
+                    "that arrives later may still run here", "no_suppression") };
             }
             if (tomb_expiry_.size() >= settings_.retention_count) {
                 // No tombstone can be kept for its whole hold without evicting another one
                 // early, which would break that one's promise: nothing is promised for this
                 // id, said so, and the cancel can be retried
-                Json::Value j = unknown_json(id);
-                j["error"] = "unknown attempt_id '" + id + "', and it was NOT tombstoned: "
-                             + std::to_string(tomb_expiry_.size()) + " cancels of unknown ids "
-                             "are held already (" + retention_text() + "), so a request with it "
-                             "that arrives later may still run here; retry the cancel later";
-                j["cancelled"] = false;
-                j["tombstone"] = false;
-                j["reason"] = "tombstones_full";
-                return { 429, j };
+                return { 429, not_tombstoned_json(unknown_json(id),
+                    "unknown attempt_id '" + id + "', and it was NOT tombstoned: "
+                    + std::to_string(tomb_expiry_.size()) + " cancels of unknown ids are held "
+                    "already (" + retention_text() + "), so a request with it that arrives later "
+                    "may still run here; retry the cancel later", "tombstones_full") };
             }
             // A cancel can overtake its request (still queued, or on the wire, its body half
             // uploaded): the id is tombstoned, so a request that arrives later is refused
@@ -1382,14 +1370,8 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
             // repeated: never shortened, extended to this cancel's not_after_ms, and at least
             // retention_s from now
             hold_locked(*attempt, not_after_ms);
-            Json::Value j;
-            j["attempt_id"] = id;
-            j["server_instance"] = instance_;
-            j["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request "
-                         "with it arrived; a request with it will be refused (409)";
-            j["state"] = "unknown";
+            Json::Value j = tombstoned_json(unknown_json(id), id);
             j["cancelled"] = false;
-            j["tombstone"] = true;
             add_suppression_locked(&j, *attempt, not_after_ms, true);
             return { 404, j };
         }
@@ -1423,10 +1405,7 @@ std::pair<int, Json::Value> AttemptRegistry::state(const std::string &id) {
         attempt = it->second;
         if (attempt->tombstone()) {
             // read only: the hold is not extended by looking at it
-            Json::Value j = unknown_json(id);
-            j["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request "
-                         "with it arrived; a request with it will be refused (409)";
-            j["tombstone"] = true;
+            Json::Value j = tombstoned_json(unknown_json(id), id);
             add_suppression_locked(&j, *attempt, std::nullopt, true);
             return { 404, j };
         }

@@ -1311,7 +1311,7 @@ byte-identical to `7aaee760`.
   - `seed_phase_ms` runs from the seed's start to that end (before: the validation or derivation alone), and
     `seed_fetch_ms` counts the reads in it (an annotate root's read now among them);
   - the duplicate checks are hash sets in the request's order — the seed labels' by name (a resolved label
-    carries the name it was given), the extra labels' by target (`LabelRef::same_target`: the column, and for a
+    carries the name it was given), the extra labels' by target (the same kind and column, and for a
     header its sequence) — refusing what the scans refused, the first duplicate in order and after resolving the
     names before it (tested, including an unknown name before a later duplicate).
   On the reviewer's request from the CLI: seed phase 13.9 ms against 139.1, elapsed 14.2 against 143.5, longest
