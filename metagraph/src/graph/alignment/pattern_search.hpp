@@ -45,6 +45,11 @@
  *    SupportTracker and a PathSink through Request::support and Request::sink, and to read
  *    AnchorCounts::walks, supported, branches_pruned and pruned_before_completion. Without them
  *    the extension is the plain one of long_search "paths".
+ *  - `segments` (not served yet: the engine API only, the graph level; no route sets it): a
+ *    pattern longer than k anchored on several k-windows (Request::segments, SegmentPlan), each
+ *    anchor extended left (incoming edges, Model::bases_left) and right until no continuation
+ *    fits, every root anchor's extent handed to a SegmentSink (GraphSegmentStore groups them
+ *    into the segments of each orientation). See PatternSearch::count, "Segments".
  *  - graphs without the dummy-edge mask: served, see "Graphs without the dummy-edge mask" at
  *    PatternSearch. Their counts that the engine could not resolve are BOUNDS [lower, U]
  *    (Count), the route adding the estimate U x f with f from sample_real_fraction(); the lists
@@ -59,11 +64,13 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -538,6 +545,47 @@ enum class Strands { BOTH, FORWARD, REVERSE };
 // the extension's support tracker and path sink, declared with the results below
 class SupportTracker;
 class PathSink;
+// the segment search's receiver, declared with the results below
+class SegmentSink;
+
+/**
+ * Which windows the segment search anchors on, in each orientation alike (offsets in its own
+ * oriented pattern Q, ascending; W' the effective window, L the length):
+ *  STEPS  0, step, 2 step, ... while <= L - W', and L - W' when it is not one of them
+ *  ENDS   0 and L - W' (one window when they coincide): the prefix and the suffix
+ *  FIRST  0 only: the extents of the anchors of Q[0, k)
+ * A choice by rarity (each orientation anchored on its least ambiguous window, the selective
+ * anchor) is a further value: the driver discovers a window and extends it in separate steps
+ * (SegmentRun::discover_window, extend_window), so that such a choice discovers the candidate
+ * windows first and extends the chosen one.
+ */
+enum class WindowChoice : uint8_t { STEPS, ENDS, FIRST };
+
+/**
+ * The segment search of a pattern longer than k (Request::segments, read by count() only): the
+ * oriented pattern Q is covered by windows of W' = min(window, L) bases, each anchored on its
+ * first k bases; every anchor of an admitted window is extended left and right until no
+ * continuation fits, and each root anchor's extent [from, to) goes to Request::segment_sink when
+ * it holds its window whole (see PatternSearch::count, "Segments"). Not JSON fields yet: the
+ * route is to set them for long_search "segments".
+ */
+struct SegmentPlan {
+    bool enabled = false;
+    // W, in bases: the window a reported segment must hold whole; 0 is k, below k is refused
+    // (std::invalid_argument); above L the window is L
+    uint32_t window = 0;
+    // S, in bases, >= 1: the distance between consecutive window starts (STEPS only)
+    uint32_t step = 15;
+    WindowChoice choice = WindowChoice::STEPS;
+    // the most windows per orientation (server policy): a pattern with more is refused in its
+    // slot with "too_many_windows", the message naming the step that fits
+    uint32_t max_windows = 1000;
+};
+
+// the window starts of one orientation (see WindowChoice) for a pattern of |length| bases and
+// the effective window |window| (1 <= window <= length); |step| >= 1 for STEPS
+std::vector<uint32_t> segment_window_offsets(uint32_t length, uint32_t window, uint32_t step,
+                                             WindowChoice choice);
 
 /**
  * The per-pattern semantics of a request. The route fills it from the request JSON with the
@@ -671,6 +719,16 @@ struct Request {
      */
     SupportTracker *support = nullptr;
     PathSink *sink = nullptr;
+    /**
+     * L > k: the segment search instead of the anchors (and of extend_paths, which it
+     * ignores), count() only (enumerate() refuses it: std::invalid_argument). |segment_sink|
+     * receives the extents and holds the search's memory (SegmentSink); it must be set when
+     * segments.enabled and outlive the call. The graph level only: a request with
+     * |support| or |sink| set is refused (std::invalid_argument). A pattern of at most k bases
+     * is answered as without them.
+     */
+    SegmentPlan segments;
+    SegmentSink *segment_sink = nullptr;
 };
 
 // the server's default of Request::max_checked_entries (--pattern-max-checked-entries: a block
@@ -1073,6 +1131,33 @@ struct Work {
     // diagnostic, not a JSON field of contract version 1: the most range descriptors held at
     // once for the release (24 bytes each; see PatternSearch::enumerate, "Memory")
     uint64_t spans_retained_peak = 0;
+    /**
+     * The segment search (Request::segments; 0 otherwise). Its right arm counts as the
+     * extension above (extension_edges one step per outgoing edge, extension_anchors the roots
+     * whose right arm began, extension_branches its branchings); beside it:
+     *  segment_windows                   the windows whose discovery began (all orientations)
+     *  segment_anchors_extended          the root anchors extended (both arms)
+     *  segment_anchors_owned             the anchors an earlier window's right arm had reached
+     *                                    at their own window start: not extended
+     *  segment_occurrences_below_window  root extents that held no admitted window whole (not
+     *                                    handed to the sink)
+     *  segment_states_memoised           the distinct (k-mer, offset) states the arms expanded
+     *                                    and memoised beside the roots, both arms
+     *  left_edges                        the incoming edges the left arm examined, one step each
+     *  left_backward_steps               the BOSS bwd steps their first bases (and the roots'
+     *                                    own) cost, one step each: 2 for the incoming edge a
+     *                                    node's bwd names, k - 2 for any other (a wrapped
+     *                                    PRIMARY graph: k - 2 for every edge)
+     *  left_horizon_cuts                 allowed incoming k-mers not entered for the horizon
+     */
+    uint64_t segment_windows = 0;
+    uint64_t segment_anchors_extended = 0;
+    uint64_t segment_anchors_owned = 0;
+    uint64_t segment_occurrences_below_window = 0;
+    uint64_t segment_states_memoised = 0;
+    uint64_t left_edges = 0;
+    uint64_t left_backward_steps = 0;
+    uint64_t left_horizon_cuts = 0;
 };
 
 // A per-pattern refusal decided by the engine (JSON: the slot's error {code, message});
@@ -1305,6 +1390,170 @@ class PathSink {
     virtual const char* stop_reason() const = 0;
 };
 
+
+// ---------------------------------------------------------------- segments
+
+/**
+ * What became of one window of the segment search (JSON, once wired: a segment_window's state):
+ *  NOT_REACHED   a stop came before it
+ *  BELOW_FLOOR   its anchored k bases are below the information floor: not discovered
+ *  NOT_ADMITTED  more anchors than max_anchors (its discovery stopped at max_anchors + 1:
+ *                AT_LEAST; or EXACT above; without the mask an upper bound above): not extended
+ *  EXTENDED      admitted and every anchor processed (also with 0 anchors)
+ *  STOPPED       a stop came during its discovery, listing or extension
+ */
+enum class WindowState : uint8_t { NOT_REACHED, BELOW_FLOOR, NOT_ADMITTED, EXTENDED, STOPPED };
+
+// one window of one orientation
+struct WindowCount {
+    // its start in the oriented pattern Q (the route states P's coordinates)
+    uint32_t offset = 0;
+    // the information bits of its anchored k bases, which the floor reads
+    double information_bits = 0;
+    // its anchors (unit ANCHORS): EXACT when discovered completely (listed without the mask),
+    // AT_LEAST when its discovery stopped (max_anchors + 1, or a stop), BOUNDS without the mask
+    // when its upper bound decided, UNKNOWN when not discovered
+    Count anchors = Count::unknown(Unit::ANCHORS);
+    WindowState state = WindowState::NOT_REACHED;
+    // its anchors extended (roots) and those an earlier window's right arm reached (owned)
+    uint64_t roots = 0;
+    uint64_t owned = 0;
+};
+
+/**
+ * Result::segments: the windows of each orientation and what the search did. |search| reuses
+ * Extension's names: COMPLETED (every window processed without a stop, some extended),
+ * NOT_ADMITTED (no stop, no window extended while some had anchors: "none_admitted"),
+ * STOPPED (a stop during the search), NOT_STARTED (a stop before its first window).
+ */
+struct SegmentCounts {
+    // W' (min(W, L)) and S (STEPS; 0 otherwise)
+    uint32_t window = 0;
+    uint32_t step = 0;
+    WindowChoice choice = WindowChoice::STEPS;
+    // STEPS: W' + S - 1, the length from which every maximal match holding only admitted
+    // windows holds one whole; unset otherwise
+    std::optional<uint32_t> complete_for_length;
+    // per orientation searched, the windows in plan order (offsets ascending)
+    std::map<Orientation, std::vector<WindowCount>> windows;
+    Extension search = Extension::NOT_STARTED;
+    // the root extents handed to the sink (each held its window whole)
+    uint64_t reported = 0;
+};
+
+/**
+ * One root anchor's extent, as the segment search hands it to its sink (valid during the call):
+ * the anchor of |window| (a start in Q) whose k-mer no earlier window's right arm reached there,
+ * and [from, to) in Q, the least start of its left walks and the greatest end of its right walks
+ * (walks of graph k-mers whose bases the oriented pattern admits there). Only extents holding
+ * their window whole (to >= window + W') are handed over.
+ */
+struct SegmentExtent {
+    Orientation orientation;
+    uint32_t window;
+    const Context &root;
+    uint32_t from;
+    uint32_t to;
+};
+
+/**
+ * The segment search's receiver and its memory account (Request::segment_sink). The search
+ * admits every memoised state (kSegmentStateBytes) before it holds it and releases what it held
+ * before it returns; a refusal ends the search with stop {EXTENSION, EXTERNAL} (the route writes
+ * stop_reason(): max_memory). extent() receives the reported extents in the search's order
+ * (window-major, then the window's anchors in answer order); false ends the search the same
+ * way (stop_reason(): max_segments with stop_at_threshold, max_memory).
+ */
+class SegmentSink {
+  public:
+    virtual ~SegmentSink() = default;
+
+    virtual bool admit(uint64_t bytes) = 0;
+    virtual void release(uint64_t bytes) = 0;
+    virtual bool extent(const SegmentExtent &extent) = 0;
+    // after a refusal: the reason the route writes; nullptr before
+    virtual const char* stop_reason() const = 0;
+};
+
+// the memory modelled per memoised (k-mer, offset) state of the segment search (a hash-map
+// entry: node, offset, extent, the map's link and bucket)
+constexpr uint64_t kSegmentStateBytes = 64;
+
+// [from, to) of the oriented pattern in the coordinates of the pattern as submitted (P): a
+// REVERSE interval of rc(P) is [L - to, L - from)
+inline std::pair<uint32_t, uint32_t> pattern_interval(Orientation orientation, uint32_t length,
+                                                      uint32_t from, uint32_t to) {
+    assert(from <= to && to <= length);
+    return orientation == Orientation::REVERSE
+        ? std::make_pair(length - to, length - from)
+        : std::make_pair(from, to);
+}
+
+// one segment of the graph level: an interval of P with the root anchors whose extent it is
+struct GraphSegment {
+    Orientation orientation;
+    // P's coordinates
+    uint32_t from;
+    uint32_t to;
+    // the root anchors with this extent (the count, unit ANCHORS)
+    uint64_t roots;
+    // the first of them as the search reported it: its window (a start in Q) and node
+    uint32_t window;
+    DeBruijnGraph::node_index first_root;
+};
+
+/**
+ * The graph level's segments: the extents a segment search reports, grouped by (orientation,
+ * interval), each with its root anchors, in answer order (orientation in plan order, P's from
+ * ascending, to descending), ordered as they arrive (no sort after the search). Its memory
+ * account holds the search's states and its own entries (kGraphSegmentBytes each), all admitted
+ * before they are held. With |stop_at_threshold| it stops the search once it holds more than
+ * |max_segments| segments (stop_reason "max_segments", the segment that crossed kept).
+ */
+class GraphSegmentStore final : public SegmentSink {
+  public:
+    // a std::map node: its links and colour, the key and the value
+    static constexpr uint64_t kGraphSegmentBytes = 96;
+
+    GraphSegmentStore(uint32_t length, uint64_t max_bytes,
+                      uint64_t max_segments = std::numeric_limits<uint64_t>::max(),
+                      bool stop_at_threshold = false)
+          : length_(length), max_bytes_(max_bytes), max_segments_(max_segments),
+            stop_at_threshold_(stop_at_threshold) {}
+
+    bool admit(uint64_t bytes) override;
+    void release(uint64_t bytes) override;
+    bool extent(const SegmentExtent &extent) override;
+    const char* stop_reason() const override { return reason_; }
+
+    // the segments in answer order, each passed to |f|
+    void for_each(const std::function<void(const GraphSegment&)> &f) const;
+    uint64_t size() const { return segments_.size(); }
+    // the extents received
+    uint64_t extents() const { return extents_; }
+    uint64_t held() const { return held_; }
+    uint64_t peak() const { return peak_; }
+
+  private:
+    // (orientation, P's from, L - P's to): to descending
+    typedef std::tuple<Orientation, uint32_t, uint32_t> Key;
+    struct Value {
+        uint64_t roots;
+        uint32_t window;
+        DeBruijnGraph::node_index first_root;
+    };
+
+    uint32_t length_;
+    uint64_t max_bytes_;
+    uint64_t max_segments_;
+    bool stop_at_threshold_;
+    uint64_t held_ = 0;
+    uint64_t peak_ = 0;
+    uint64_t extents_ = 0;
+    const char *reason_ = nullptr;
+    std::map<Key, Value> segments_;
+};
+
 // JSON notes of a pattern (§7.2), the ones the engine states:
 //  low_complexity_pattern    an exact pattern that sdust flags with the seeder's parameters
 //                            (T = 20, W = 64, is_low_complexity): why its counts are large. An
@@ -1387,6 +1636,16 @@ struct Result {
     // L > k with extend_paths: the time spent in phase 2 (the listing of the anchors and the
     // DFS; §7.2 timing.extension_ms), part of elapsed_ms; 0 when it did not run
     double extension_ms = 0;
+    /**
+     * L > k with Request::segments: the windows and what the search did (its anchors above
+     * keep their meaning: each orientation's first window, Q[0, k); its paths UNKNOWN, EXACT 0
+     * when every first window has EXACT 0 anchors; extension NOT_REQUESTED). The time of the
+     * search (every window's discovery and both arms) and of its left arms, parts of elapsed_ms;
+     * extension_ms is then the right arms'.
+     */
+    std::optional<SegmentCounts> segments;
+    double segments_ms = 0;
+    double left_extension_ms = 0;
 };
 
 
@@ -1532,6 +1791,43 @@ class PatternSearch {
      * of AnchorCounts (walks, supported, branches_pruned).
      */
     Result count(const Pattern &pattern, const Request &request, Budget &budget) const;
+    /*
+     * Segments (Request::segments, L > k; the graph level). Each searched orientation's Q is
+     * covered by the windows of SegmentPlan::choice; the windows run window-major (the first of
+     * every orientation in plan order, then the second, ...), each:
+     *  - its anchored k bases below the information floor: BELOW_FLOOR, not discovered (the
+     *    pattern is refused with information_below_floor only when every window of every
+     *    searched orientation is);
+     *  - discovery of the k-mers instantiating Q[s, s + k) exactly as a long pattern's anchors
+     *    (a peptide's window read by its codon automaton at the phase s mod 3; on a wrapped
+     *    PRIMARY graph the window and its reverse complement), stopped once more than
+     *    max_anchors are counted (NOT_ADMITTED, AT_LEAST: not a stop of the pattern);
+     *  - admission (EXACT <= max_anchors; without the mask an upper bound <= max_anchors, then
+     *    listed with the source dummies dropped), the anchors listed in answer order;
+     *  - per anchor, the clock read first: an anchor whose k-mer an earlier window's right arm
+     *    of this orientation reached at s is owned (not extended: that arm went on until nothing
+     *    continued, so it found what the anchor would); every other is a root, extended left
+     *    along incoming edges (positions s - 1, s - 2, ... down to the horizon, the previous
+     *    extended window's start + 1, 0 for the first) and then right along outgoing edges
+     *    until no allowed k-mer follows or L. Both arms memoise each (k-mer, offset) state they
+     *    expand with its extent (the right arm's per orientation, the left arm's per window), so
+     *    that each state is expanded once: the arms cost the distinct states, not the walks;
+     *  - a root's extent [least start, greatest end) holding the window whole (end >= s + W')
+     *    goes to the sink; it can hold no earlier extended window (its left walks would have
+     *    met that window's anchors, whose right arms would have reached it).
+     * Steps: each window's discovery as an anchor window's; the right arm one per outgoing edge;
+     * the left arm one per incoming edge examined plus its first base's BOSS bwd steps (Work).
+     * The clock: before each window, before every anchor, before every kReleaseClockStride-th
+     * node either arm expands, and at every kClockStride steps. A stop ends the search: the
+     * window it touched STOPPED, the later ones NOT_REACHED; stop {DISCOVERY, reason} in a
+     * window's discovery, {EXTENSION, reason} in its listing or an arm, {EXTENSION, EXTERNAL}
+     * when the sink refused (its stop_reason()). The root extents handed over before a stop are
+     * the search's exactly (each was handed over once both its arms completed).
+     * Memory: one window's discovery at a time (as a long pattern's anchors), the arms' stacks,
+     * and the memoised states admitted through the sink (kSegmentStateBytes each), all released
+     * before count() returns. Throws std::invalid_argument for a plan the route must refuse
+     * first (window below k, step 0 with STEPS, no segment_sink, a tracker or a path sink set).
+     */
 
     /**
      * The label-free path (§4.3): discovery exactly as count() — the same steps charged, the
@@ -1637,6 +1933,9 @@ class PatternSearch {
     // every count EXACT 0, nothing charged
     void answer_no_instance(const Pattern &pattern, const Request &request, bool enumerating,
                             Result *result) const;
+
+    // count() of a pattern longer than k with Request::segments (see count(), "Segments")
+    Result segments(const Pattern &pattern, const Request &request, Budget &budget) const;
 };
 
 
@@ -1799,6 +2098,28 @@ inline const char* to_string(Extension extension) {
         case Extension::NOT_ADMITTED: return "not_admitted";
         case Extension::STOPPED: return "stopped";
         case Extension::COMPLETED: return "completed";
+    }
+    return "unknown";
+}
+
+// a segment window's `state` (once wired)
+inline const char* to_string(WindowState state) {
+    switch (state) {
+        case WindowState::NOT_REACHED: return "not_reached";
+        case WindowState::BELOW_FLOOR: return "below_floor";
+        case WindowState::NOT_ADMITTED: return "not_admitted";
+        case WindowState::EXTENDED: return "extended";
+        case WindowState::STOPPED: return "stopped";
+    }
+    return "unknown";
+}
+
+// the request's `segment_windows` (FIRST has no request value yet)
+inline const char* to_string(WindowChoice choice) {
+    switch (choice) {
+        case WindowChoice::STEPS: return "steps";
+        case WindowChoice::ENDS: return "ends";
+        case WindowChoice::FIRST: return "first";
     }
     return "unknown";
 }
