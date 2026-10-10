@@ -25,9 +25,11 @@ set(METAGRAPH_CMAKE_ARGS
 )
 
 # Forward optional flags if they're defined
-foreach(variable BUILD_STATIC WITH_AVX WITH_MSSE42 Boost_USE_STATIC_LIBS OpenMP_ROOT ICU_ROOT)
+foreach(variable BUILD_STATIC WITH_AVX WITH_MSSE42 Boost_USE_STATIC_LIBS
+                 CMAKE_PREFIX_PATH OpenMP_ROOT ICU_ROOT)
     if(DEFINED ${variable})
-        list(APPEND METAGRAPH_CMAKE_ARGS "-D${variable}=${${variable}}")
+        string(REPLACE ";" "|" value "${${variable}}")
+        list(APPEND METAGRAPH_CMAKE_ARGS "-D${variable}=${value}")
     endif()
 endforeach()
 
@@ -36,6 +38,7 @@ ExternalProject_Add(metagraph-external
     GIT_REPOSITORY https://github.com/ratschlab/metagraph.git
     GIT_TAG ${METAGRAPH_GIT_TAG}
     SOURCE_SUBDIR metagraph
+    LIST_SEPARATOR |
     CMAKE_ARGS ${METAGRAPH_CMAKE_ARGS}
 )
 
