@@ -26,13 +26,10 @@ jobs:
       DESCRIPTOR: >-
         ${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}-${{ inputs.target_arch }}
       DEPS_PLATFORM: ${{ inputs.target_arch == 'x86_64' && 'osx-64' || 'osx-arm64' }}
-      CMAKE_PREFIX_PATH: ${{ github.workspace }}/.ci-mamba/envs/ci
       CMAKE_ARGS: >-
         -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
         -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
         -DBoost_USE_STATIC_LIBS=OFF
-        -DOpenMP_ROOT=${{ github.workspace }}/.ci-mamba/envs/ci
-        -DICU_ROOT=${{ github.workspace }}/.ci-mamba/envs/ci
 
     name: Build
 
@@ -58,11 +55,11 @@ jobs:
 
       - &install-macos-deps
         name: Install dependencies
-        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        id: dependencies
+        uses: mamba-org/setup-micromamba@v3
         with:
           micromamba-version: 2.9.0-0
           environment-name: ci
-          micromamba-root-path: ${{ github.workspace }}/.ci-mamba
           init-shell: none
           generate-run-shell: false
           cache-environment: true
@@ -76,9 +73,14 @@ jobs:
 
       - &use-macos-deps
         name: Prepare dependency environment
+        env:
+          DEPENDENCY_PREFIX: ${{ steps.dependencies.outputs.environment-path }}
         run: |
-          export PATH="$CMAKE_PREFIX_PATH/bin:$PATH"
-          echo "$CMAKE_PREFIX_PATH/bin" >> "$GITHUB_PATH"
+          export PATH="$DEPENDENCY_PREFIX/bin:$PATH"
+          echo "$DEPENDENCY_PREFIX/bin" >> "$GITHUB_PATH"
+          for variable in CMAKE_PREFIX_PATH OpenMP_ROOT ICU_ROOT; do
+            printf '%s=%s\n' "$variable" "$DEPENDENCY_PREFIX" >> "$GITHUB_ENV"
+          done
           # Match Homebrew's unprefixed allocator API, which bundled Folly expects.
           # Conda-forge's macOS jemalloc exports je_* symbols instead.
           archive="$RUNNER_TEMP/jemalloc-5.4.0.tar.bz2"
@@ -86,7 +88,7 @@ jobs:
           printf '%s  %s\n' 200776fac271093e7c2f21edd6d62657ecd2be578d9328633f2a86bfa6ef4f1d "$archive" | shasum -a 256 -c -
           tar -xjf "$archive" -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP/jemalloc-5.4.0"
-          ./configure --prefix="$CMAKE_PREFIX_PATH" --disable-debug --with-jemalloc-prefix=
+          ./configure --prefix="$DEPENDENCY_PREFIX" --disable-debug --with-jemalloc-prefix=
           make -j"$(getconf _NPROCESSORS_ONLN)" install
 
       - name: Cache ccache

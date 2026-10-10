@@ -314,7 +314,7 @@ if(APPLE)
 endif()
 
 if(APPLE)
-  if(NOT DEFINED ICU_ROOT)
+  if(NOT DEFINED ICU_ROOT AND NOT DEFINED ENV{ICU_ROOT})
     if(EXISTS ${HOMEBREW_DIR}/opt/icu4c)
       set(ICU_ROOT "${HOMEBREW_DIR}/opt/icu4c")
     else()
