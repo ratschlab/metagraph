@@ -489,7 +489,7 @@ TEST(ThreadPool, HelpWhileWaitingStolenException) {
     // With the worker parked, help_while_waiting() is the only thing that can
     // drain the queue. It pops the throwing task, so the exception surfaces
     // here instead of killing the parked worker.
-    EXPECT_THROW(pool.help_while_waiting(future).get(), std::runtime_error);
+    EXPECT_THROW((void)pool.help_while_waiting(future).get(), std::runtime_error);
 
     // Release the worker and synchronously drain the pool *before* the locals
     // it captures by reference (unblock, worker_started) go out of scope.
@@ -952,7 +952,7 @@ TEST(ThreadPool, HelpWhileWaitingCrossStealNotification) {
                     std::this_thread::yield();
                 }
 
-                pool.help_while_waiting(f).get();
+                (void)pool.help_while_waiting(f).get();
                 finished_hww.fetch_add(1, std::memory_order_release);
 
                 // Spin here to prevent returning to the worker loop.
@@ -1003,7 +1003,7 @@ TEST(ThreadPool, HelpWhileWaitingMultipleHelpers) {
                 });
             }
             // Help execute tasks (own and others') while waiting.
-            pool.help_while_waiting(last_future).get();
+            (void)pool.help_while_waiting(last_future).get();
             helpers_done.fetch_add(1, std::memory_order_release);
         });
     }
@@ -1052,8 +1052,8 @@ TEST(ThreadPool, HelpWhileWaitingTwoExternalHelpers) {
     auto future_b = make_future();
 
     // Two external threads call help_while_waiting concurrently.
-    std::thread helper_a([&]() { pool.help_while_waiting(future_a).get(); });
-    std::thread helper_b([&]() { pool.help_while_waiting(future_b).get(); });
+    std::thread helper_a([&]() { (void)pool.help_while_waiting(future_a).get(); });
+    std::thread helper_b([&]() { (void)pool.help_while_waiting(future_b).get(); });
 
     helper_a.join();
     helper_b.join();
@@ -1149,7 +1149,7 @@ TEST(ThreadPool, HelpWhileWaitingLatencyBenchmark) {
         });
 
         auto t0 = std::chrono::steady_clock::now();
-        pool.help_while_waiting(future).get();
+        (void)pool.help_while_waiting(future).get();
         auto t1 = std::chrono::steady_clock::now();
 
         total_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
