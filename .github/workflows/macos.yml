@@ -119,8 +119,8 @@ jobs:
 
       - name: Verify target architecture
         run: |
-          lipo -verify_arch "${{ inputs.target_arch }}" "metagraph/build/metagraph_${{ inputs.alphabet }}"
-          lipo -verify_arch "${{ inputs.target_arch }}" metagraph/build/unit_tests
+          lipo "metagraph/build/metagraph_${{ inputs.alphabet }}" -verify_arch "${{ inputs.target_arch }}"
+          lipo metagraph/build/unit_tests -verify_arch "${{ inputs.target_arch }}"
 
       - &build-other
         name: Build other
