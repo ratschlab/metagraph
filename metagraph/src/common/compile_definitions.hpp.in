@@ -37,6 +37,10 @@
 #cmakedefine USE_JEMALLOC
 #endif
 
+#ifndef JEMALLOC_NO_DEMANGLE
+#cmakedefine JEMALLOC_NO_DEMANGLE
+#endif
+
 #ifndef _SUPPORT_ZSTD
 #cmakedefine _SUPPORT_ZSTD 1
 #endif
