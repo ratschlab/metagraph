@@ -1259,6 +1259,90 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
     }
 }
 
+// The mirror of a held walk ("either" on a BASIC graph) is read only when it decides (SPEC
+// §20.9). On the graph of all 64 3-mers (one record of every 3-mer in a row) with one label
+// shared on every k-mer, ANNNNN has 1,024 forward walks at the label level, each selected by
+// any(shared) on its own support alone (a definite true, and count mode asks no label
+// evidence), so "either" reads no mirror: the same 1,024 exact as "context", no lookup, no
+// mirror row, the same annotation_rows -- 64, the 64 k-mers' rows each read once through the
+// pattern's row cache (the anchors' whole rows are among them) -- and under max_annotation_work
+// 4,000 both finish exact, where reading the 1,024 mirrors stopped "either" with bounds. A
+// predicate the own support cannot decide still reads the mirror: a label other carried by the
+// record TTTTTTTT only, any(other), selects AAAAAA alone (the one forward walk whose mirror
+// TTTTTT that record holds), found on the mirror's rows.
+TEST(PatternSupportedRoute, TheMirrorIsReadOnlyWhenItDecides) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const Index idx = build_rd(3, { { "shared", "h0", record } });
+    Ask r;
+    r.patterns = { "ANNNNN" };
+    r.kind = "iupac";
+    r.mode = "count";
+    r.strands = "forward";
+    r.level = "label_intersection";
+    r.predicate = "{\"any\": [\"shared\"]}";
+    for (uint64_t work : { uint64_t(0), uint64_t(4000) }) {
+        r.max_annotation_work = work;
+        r.predicate_strands = "context";
+        const Json::Value context = answer_of(idx, r)["patterns"][0];
+        r.predicate_strands = "either";
+        const Json::Value either = answer_of(idx, r)["patterns"][0];
+        for (const Json::Value *e : { &context, &either }) {
+            ASSERT_FALSE(e->isMember("error")) << compact(*e);
+            EXPECT_EQ("completed", (*e)["selection"]["pass"].asString()) << work;
+            EXPECT_EQ("exact", (*e)["counts"]["selected"]["relation"].asString()) << work;
+            EXPECT_EQ(1024u, (*e)["counts"]["selected"]["value"].asUInt64()) << work;
+            EXPECT_EQ(1024u, (*e)["counts"]["tested"]["value"].asUInt64()) << work;
+            EXPECT_TRUE((*e)["stop"].isNull()) << compact((*e)["stop"]);
+        }
+        EXPECT_EQ(64u, context["work"]["annotation_rows"].asUInt64());
+        EXPECT_EQ(context["work"]["annotation_rows"].asUInt64(),
+                  either["work"]["annotation_rows"].asUInt64());
+        EXPECT_EQ(0u, either["work"]["mirror_rows"].asUInt64());
+        EXPECT_EQ(0u, either["work"]["predicate_lookups"].asUInt64());
+        // the decisions' units: each walk's eval3 on its own support, 1 and 1 per leaf its
+        // present label is listed in ("context" charges more: its monotone pruning asks the
+        // predicate of every branch too)
+        EXPECT_EQ(2u * 1024, either["work"]["predicate_units"].asUInt64());
+        EXPECT_EQ(context["work"]["annotation_units"].asUInt64(),
+                  either["work"]["annotation_units"].asUInt64());
+    }
+
+    const Index two = build_rd(3, { { "shared", "h0", record }, { "other", "o0", "TTTTTTTT" } });
+    r.max_annotation_work = 0;
+    r.predicate_strands.clear();
+    r.predicate.clear();
+    const Json::Value plain = answer_of(two, r)["patterns"][0];
+    r.predicate = "{\"any\": [\"other\"]}";
+    r.predicate_strands = "context";
+    const Json::Value context = answer_of(two, r)["patterns"][0];
+    EXPECT_EQ(0u, context["counts"]["selected"]["value"].asUInt64());
+    EXPECT_EQ("exact", context["counts"]["selected"]["relation"].asString());
+    r.predicate_strands = "either";
+    const Json::Value either = answer_of(two, r)["patterns"][0];
+    EXPECT_EQ("completed", either["selection"]["pass"].asString());
+    EXPECT_EQ("exact", either["counts"]["selected"]["relation"].asString());
+    EXPECT_EQ(1u, either["counts"]["selected"]["value"].asUInt64());
+    // every walk's own support {shared} leaves any(other) undecided: every mirror is read --
+    // the 256 walks ending in T have theirs, a forward walk, among the held walks (no lookup),
+    // the other 768 are looked up and read
+    EXPECT_EQ(768u, either["work"]["predicate_lookups"].asUInt64());
+    EXPECT_LT(0u, either["work"]["mirror_rows"].asUInt64());
+    // the search's rows are a plain search's ("context" prunes on the monotone any(other),
+    // "either" holds every supported walk and prunes nothing), the mirrors' on top
+    EXPECT_EQ(plain["work"]["annotation_rows"].asUInt64()
+                      + either["work"]["mirror_rows"].asUInt64(),
+              either["work"]["annotation_rows"].asUInt64());
+}
+
 // "either" holds the supported walks for their decisions, at most max_predicate_contexts:
 // all_or_count withholds above it (not admitted), count does not admit them, partial decides
 // the first ones

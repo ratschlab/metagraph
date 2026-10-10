@@ -3403,7 +3403,13 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   held: 64 + 2L + 8 per predicate label of its support) and decided after the search, never pruned by the
   predicate. The mirror's support is taken from the held walks when the search covered the mirrors (`strands:
   "both"`, or a palindromic pattern: paired by sequence; a mirror the search did not hold has no support), else
-  **read**: the mirror walk's k-mers looked up (L units of `max_annotation_work`; `work.predicate_lookups`), a
+  **read only when it decides**: the walk is first evaluated on its own support (its labels sure, every other
+  label of the predicate maybe: Kleene, as below); a definite false selects nothing whatever the mirror
+  carries, and reads no mirror; a definite true selects the walk, and reads its mirror only under a projection
+  that lists label evidence (`selection_labels`, `selection_strands`: the mirror's labels and strands are part
+  of it); an undecided walk reads it (`work.mirror_rows`, `predicate_lookups` and the units count the mirrors
+  read; the decision's units are charged as every decision's). Then the **read**: the mirror walk's k-mers
+  looked up (L units of `max_annotation_work`; `work.predicate_lookups`), a
   k-mer not in the graph giving it no support, and its rows read by a search of its own over that one walk, as
   §20.7 reads (n rows, the first twice at `record_verified`; under `max_annotation_work`, the account and the
   deadline; `work.mirror_rows`, part of `work.annotation_rows`); the search's row cache is given back to the
@@ -4108,3 +4114,20 @@ paths (the fixtures `supported_paths_predicate*` with a projection; nothing else
 `integration_tests/test_pattern.py` (`TestPatternLongLabelName`: the review's reproduction, a 512 KiB FASTA
 header, `max_memory_mb: 8`, `partial` cut and `all_or_count` withheld, the same requests with a short name
 unchanged).
+
+**The mirror is read only when it decides (§20.9).** With `predicate_strands: "either"` on a BASIC graph, a held
+walk whose mirror the search had not covered had its mirror read before the predicate was asked, also when the
+walk's own support already decided it (`any(shared)` on a walk carrying `shared`), and in mode `count`, which
+lists no label evidence (the review of 2026-10-10, algorithms finding 3: on the graph of all 64 3-mers with one
+label on every k-mer, `ANNNNN` read 3,071 rows under `"either"` against 64 under `"context"`, and under
+`max_annotation_work: 4000` stopped with the bounds [20, 1024] where `"context"` finished exact 1,024). Now the
+walk is evaluated on its own support first (Kleene: its labels sure, every other label maybe): a definite false
+reads no mirror, a definite true reads it only under a projection that lists label evidence, an undecided walk
+reads it as before. Every `selected` set and count is the same; `work.annotation_rows`, `mirror_rows`,
+`predicate_lookups` and the units drop where the own support decides, and an undecided walk's decision costs its
+own-support evaluation beside the mirror's (fixture `supported_paths_predicate_mirror`: `work.predicate_units` 2 →
+4, nothing else of it). Test
+`PatternSupportedRoute.TheMirrorIsReadOnlyWhenItDecides` (the review's fixture at the label level: `"either"`
+reads 64 rows as `"context"` does, no lookup, both exact 1,024 under `max_annotation_work: 4000`; a predicate
+the own support cannot decide still reads every mirror). Fixtures: the `supported_paths_predicate_*` bodies
+whose decisions the own support makes change in their `work` fields only.

@@ -2299,6 +2299,33 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             return TestPatternMini.holds_names(v)
         return set().union(*(TestPatternMini.holds_names(q) for q in v))
 
+    @staticmethod
+    def kleene(p, sure):
+        """Strong Kleene, node by node, as the server decides a walk on its own support (SPEC
+        §20.9): the labels of |sure| are present, every other name the predicate lists may be;
+        True or False when the value cannot change whatever the others turn out to be, None
+        otherwise (sound, not complete: a leaf is decided exactly, a combinator from its
+        operands' values alone)."""
+        (op, v), = p.items()
+        if op in ('any', 'all', 'none', 'at_least'):
+            names = v['labels'] if op == 'at_least' else v
+            s = sum(n in sure for n in names)
+            total = len(names)
+            if op == 'any':
+                return True if s else None
+            if op == 'all':
+                return True if s == total else None
+            if op == 'none':
+                return False if s else None
+            return True if s >= v['n'] else None
+        if op == 'not':
+            x = TestPatternMini.kleene(v, sure)
+            return None if x is None else not x
+        values = [TestPatternMini.kleene(q, sure) for q in v]
+        if op == 'and':
+            return False if False in values else True if all(x is True for x in values) else None
+        return True if True in values else False if all(x is False for x in values) else None
+
     def test_predicate_strands_on_the_ndm_primer(self):
         """Strands on the mini (SPEC §19.5): none(546) on the blaNDM-1 forward primer selects
         no context with "either" and its 12 - contexts with "context"; a typo is reported
@@ -2433,16 +2460,22 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                         mirrored += entry['work']['mirror_rows'] > 0
                         self.assertEqual('completed', entry['selection']['pass'])
                         self.assertEqual(0, entry['work']['predicate_rows'])
-                        # one strand with "either": each supported walk's mirror is looked
-                        # up, and its rows read where every k-mer of it is in the graph
+                        keep = self.holds_names(pred)
+                        # one strand with "either": a supported walk's mirror is looked up
+                        # unless the walk's own support already decides the predicate (a
+                        # definite false; a definite true still reads it for the label
+                        # evidence predicate_only lists, SPEC §20.9), and its rows read
+                        # where every k-mer of it is in the graph
                         mirrors_read = predicate_strands == 'either' and strands == 'forward'
+                        undecided = [w for _, w in walks
+                                     if self.kleene(pred, support(w, 'record_verified')[0]
+                                                    & keep) is not False]
                         readable = any(all(self.records.has_kmer(revcomp(w)[i:i + k])
-                                           for i in range(len(w) - k + 1)) for _, w in walks)
+                                           for i in range(len(w) - k + 1)) for w in undecided)
                         self.assertEqual(mirrors_read and readable,
                                          entry['work']['mirror_rows'] > 0)
-                        self.assertEqual(len(walks) if mirrors_read else 0,
+                        self.assertEqual(len(undecided) if mirrors_read else 0,
                                          entry['work']['predicate_lookups'])
-                        keep = self.holds_names(pred)
                         for r in entry['results']:
                             self.assertEqual(evaluated(r['sequence']) & keep,
                                              set(r['selection_labels']))

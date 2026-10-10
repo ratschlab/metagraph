@@ -660,7 +660,11 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         }
         Held &h = held_[i];
         const std::string rc = reverse_complement_of(h.sequence);
+        uint64_t units = 0;
+        std::optional<bool> value;
         bool known = true;
+        // decided on the walk's own support, its mirror unread
+        bool own = false;
         if (rc == h.sequence) {
             mirror = h.support;
         } else if (const Held *m = held_with(rc)) {
@@ -668,12 +672,26 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         } else if (options_.mirrors_searched) {
             mirror.clear();
             known = complete_set;
-        } else if (!read_mirror(rc, &mirror)) {
-            break;
+        } else {
+            // the mirror is read only when its support can change the decision or would be
+            // listed: the walk's own support is evaluated first (its labels sure, every other
+            // label of the predicate maybe). A definite false selects nothing whatever the
+            // mirror carries; a definite true selects the walk, whose mirror is then read only
+            // for the label evidence a projection lists (selection_labels, selection_strands)
+            value = bound_.eval3(h.support.data(), h.support.size(), all_labels.data(),
+                                 all_labels.size(), &units);
+            own = value && (!*value || !options_.selection_labels);
+            if (!own) {
+                a.units += units;
+                units = 0;
+                value.reset();
+                if (!read_mirror(rc, &mirror))
+                    break;
+            }
         }
-        uint64_t units = 0;
-        std::optional<bool> value;
-        if (known) {
+        if (own) {
+            // (nothing listed of its labels: a rejected walk, or no label evidence asked)
+        } else if (known) {
             std::vector<LabelId> present;
             std::set_union(h.support.begin(), h.support.end(), mirror.begin(), mirror.end(),
                            std::back_inserter(present));
