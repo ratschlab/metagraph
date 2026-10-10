@@ -122,9 +122,10 @@ target_include_directories(fbvector SYSTEM PRIVATE
   ${Boost_INCLUDE_DIRS}
   external-libraries/folly
   ${PROJECT_BINARY_DIR}/external-libraries/folly/include
+  ${PROJECT_BINARY_DIR}/gen
   ${PROJECT_SOURCE_DIR}/src/common
 )
-target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES} ${Boost_LIBRARIES})
+target_link_libraries(fbvector PRIVATE folly ${JEMALLOC_LIBRARIES} ${Boost_LIBRARIES})
 set(FOLLY_FOUND TRUE PARENT_SCOPE)
 endfunction()
 

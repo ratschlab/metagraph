@@ -372,6 +372,7 @@ file(COPY external-libraries/spdlog/include/spdlog/fmt/bundled/
      DESTINATION ${PROJECT_BINARY_DIR}/gen/fmt)
 
 add_library(folly STATIC
+  external-libraries/folly/folly/lang/Exception.cpp
   external-libraries/folly/folly/lang/SafeAssert.cpp
   external-libraries/folly/folly/lang/ToAscii.cpp
 )
@@ -379,6 +380,7 @@ target_compile_features(folly PUBLIC cxx_std_20)
 target_include_directories(folly PRIVATE
   external-libraries/folly
   ${PROJECT_BINARY_DIR}/external-libraries/folly/include
+  ${PROJECT_BINARY_DIR}/gen
 )
 
 add_library(progress_bar STATIC
