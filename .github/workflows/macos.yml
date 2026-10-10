@@ -51,9 +51,37 @@ jobs:
         name: Checkout submodules
         run: git submodule update --init --recursive --depth 1
 
+      - &install-rosetta-homebrew
+        name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
+        if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
+        run: |
+          if [[ ! -d /usr/local/Homebrew ]]; then
+            echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+            # Homebrew/install#1140 removed Intel bootstrap support. Pin only the
+            # installer; it still installs the current Homebrew release.
+            installer_revision=f4aa1b1ca5b256954dbde0315455fb259cdfc45a
+            installer_path="${RUNNER_TEMP}/homebrew-install-intel.sh"
+            curl -fsSL "https://raw.githubusercontent.com/Homebrew/install/${installer_revision}/install.sh" -o "${installer_path}"
+            NONINTERACTIVE=1 arch -x86_64 /bin/bash "${installer_path}"
+          fi
+          if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+            echo "Replacing legacy brew wrapper..."
+            sudo rm -f /usr/local/bin/brew
+          fi
+          if [[ ! -f /usr/local/bin/brew ]]; then
+            sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+          fi
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
       - &install-macos-deps
         name: install dependencies
         run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c
+
+      - &install-openssl-cross-compile
+        name: (Only for cross-compilation) Install CMake and OpenSSL for target architecture
+        if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
+        run: brew install cmake openssl@3
 
       - &install-ccache-macos
         name: Install ccache (macOS)
@@ -88,6 +116,11 @@ jobs:
       - &build-unit-tests
         name: Build unit tests
         run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
+
+      - name: Verify target architecture
+        run: |
+          lipo -verify_arch "${{ inputs.target_arch }}" "metagraph/build/metagraph_${{ inputs.alphabet }}"
+          lipo -verify_arch "${{ inputs.target_arch }}" metagraph/build/unit_tests
 
       - &build-other
         name: Build other
@@ -124,7 +157,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - *install-rosetta-homebrew
+
       - *install-macos-deps
+
+      - *install-openssl-cross-compile
 
       - &download-build-artifacts
         name: Download build artifacts
@@ -152,7 +189,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - *install-rosetta-homebrew
+
       - *install-macos-deps
+
+      - *install-openssl-cross-compile
 
       - name: install dependencies for integration tests
         run: pip3 install parameterized --break-system-packages --user
@@ -186,7 +227,7 @@ jobs:
 
 
   examples:
-    if: ${{ inputs.build_type == 'Debug' || inputs.target_arch == 'x86_64' }}
+    if: ${{ inputs.build_type == 'Debug' || (inputs.platform == 'macos-latest' && inputs.target_arch == 'x86_64') }}
 
     runs-on: *platform
 
@@ -203,7 +244,11 @@ jobs:
 
       - *checkout-submodules-update
 
+      - *install-rosetta-homebrew
+
       - *install-macos-deps
+
+      - *install-openssl-cross-compile
 
       - *install-ccache-macos
 
