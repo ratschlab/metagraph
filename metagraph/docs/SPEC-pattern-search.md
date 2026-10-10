@@ -3614,7 +3614,8 @@ the defaults below the caps), the caps `max_annotation_work`, `max_labels`,
 - **`default_max_anchors`, `default_max_labels`** (§4.5, the owner's decision of 2026-10-09): two integer fields
   of the full block, on every route that serves it (phase 1: `/pattern/capabilities`, `/capabilities`, the
   `/traverse` block) and in the loading form; not gate fields (phase 2 drops them from the `/traverse` block). 53
-  bytes per document: `/traverse/capabilities` 5,490–5,658 bytes, `/capabilities` 4,859–5,344,
+  bytes per document: `/traverse/capabilities` 5,490–5,658 bytes, `/capabilities` 4,895–5,378 (34–36 of them
+  `max_graphs_without_selection`, §24, which landed in the same round),
   `/pattern/capabilities` 1,998–2,157 (the loading form 1,998); the largest, `/traverse/capabilities` of the
   unmasked server, 25,939 bytes under the budget of 31,744 (5,805 by the validator's measure). Every answer to a
   request that names neither field is byte-identical while default = cap (the fixtures of this build); the
