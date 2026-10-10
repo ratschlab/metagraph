@@ -131,6 +131,11 @@ class Config {
     uint64_t traverse_max_seed_bp = 100'000;
     size_t traverse_max_seed_labels = 10'000;
     uint64_t resolve_max_query_bp = 0;
+    // A multi-graph server: a POST /search or /pattern request without `graphs` queries every
+    // name of the graph list when the list has at most this many names, else it is refused
+    // (400). Stated by GET /capabilities (max_graphs_without_selection), so that a client can
+    // see the threshold before a longer list refuses its requests; at least 1
+    uint64_t max_graphs_without_selection = 10;
     // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
     // SPEC-labeled-traversal-core.md §10.3): 0 = off (a request's budgets as given, an omitted
     // one none). Set, a larger budget is lowered to it and an omitted one set to it, echoed as

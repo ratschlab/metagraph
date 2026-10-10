@@ -258,9 +258,13 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
 - **Selection.** `POST /pattern` on a multi-graph server takes `/search`'s `graphs`: a non-empty list of names of
   the server's graph list. Each selected (graph, annotation) pair is answered as a single-graph server answers the
   request, with its own deadline, caps, memory account and work budgets (the request's budgets apply per pair).
-  Without `graphs`, every name of a server that lists at most 10; above 10, 400 `invalid_request`. The service
+  Without `graphs`, every name of a server whose list has at most `max_graphs_without_selection` names (a server
+  flag, `--max-graphs-without-selection`, 10 by default, the same threshold on `/search`); above it, 400
+  `invalid_request` naming the threshold. `GET /capabilities` states it as `max_graphs_without_selection`
+  (`null` on a single-graph server): read it, and send `graphs` when the server lists more names (an added chunk
+  can take a list over the threshold and refuse every request without `graphs` from then on). The service
   sends **one graph per request**, one task per chunk (`graphs: ["{label}-{i}/{N}"]`, §3.1 item 3), as for
-  `/search`. On a single-graph server `graphs` is 400 `invalid_request`.
+  `/search`, so the threshold does not touch it. On a single-graph server `graphs` is 400 `invalid_request`.
 - **The answer is an envelope**: `{pattern_contract_version: 1, graphs: [the names answered, in byte order],
   answers: [...], timing: {elapsed_ms}}`. Each entry of `answers` is the single-graph answer (SPEC §8) of one pair
   plus `graph` (the name it was selected by), `graph_path`, `annotation_path` and `index_fp` (`null` without a
@@ -279,7 +283,9 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
   `{columns_disjoint, shared_columns, pairs: [{graph, graph_path, annotation_path, index_ns, index_fp, k,
   graph_mode, available, unavailable_reason, mask, counting, traversal: {regime, num_labels, has_coordinates,
   has_coord_to_header, supports_trace}}]}`, one entry per (name, pair), computed at start-up: one probe learns
-  every chunk (about 0.5 KB per entry: a list of thousands of chunks makes a document of megabytes; cache it).
+  every chunk (about 0.5 KB per entry: a list of thousands of chunks makes a document of megabytes; cache it);
+  and `max_graphs_without_selection` (integer, the threshold of the selection rule above; `null` on a
+  single-graph server).
   Gate each chunk on its own pair: its `graph_summary` entry, or `GET /pattern/capabilities?graph=NAME` (the
   pair's full block with `graph` and `graph_path`; without `graph` a 400). `GET /traverse/capabilities?graph=NAME`
   carries the same block with `details`. A pair's `available: false` keeps its `unavailable_reason` (item 6);

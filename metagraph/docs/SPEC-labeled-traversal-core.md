@@ -2621,7 +2621,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `routes.pattern_capabilities` (`"GET /pattern/capabilities"`; in multi-graph mode
     `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the `pattern` block
     (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
-    in multi-graph mode, `graph_summary` (`null` in single-graph mode; below, multi-graph mode).
+    in multi-graph mode, `graph_summary` and `max_graphs_without_selection` (both `null` in single-graph mode;
+    below, multi-graph mode).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
@@ -2962,7 +2963,13 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     bytes per entry, which makes the route's document large on a long graph list). `columns_disjoint`:
     no column name is a column of two distinct pairs — the chunks of an index partition its samples —, which
     licenses summing a label's counts and occurrences over the pairs; `shared_columns` counts the names that are
-    not (the start-up log names one). `null` on a single-graph server. Both GET routes state `in_ram`:
+    not (the start-up log names one). `null` on a single-graph server. Beside it, `max_graphs_without_selection`
+    (integer, `--max-graphs-without-selection`, at least 1, 10 by default): a `/search` or `/pattern` request
+    without `graphs` queries every name while the list has at most that many names and is refused (400, naming
+    the threshold) once it has more (`SPEC-pattern-search.md` §24.1: `/search`'s rule, the one flag for both
+    routes), stated so that a client can check it before an added name takes the list over it; `null` on a
+    single-graph server. `/traverse` and `/resolve` select one graph (`graph`, or `graphs: [name]`) and are not
+    bound by it. Both GET routes state `in_ram`:
     `{"routes": ["pattern", "resolve", "search", "traverse"], "loads": <a multi-graph server on mmap with
     --mem-cap-gb above 0>, "mem_cap_gb": <--mem-cap-gb>, "budgets_start": "after_load"}`.
   - **`GET /traverse/capabilities?graph=<name>[&graph_path=<path>]`** (feature level 3; a 400 before): the probe of

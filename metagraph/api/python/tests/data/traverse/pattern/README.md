@@ -27,7 +27,7 @@ candidates there (at most `caps.max_checked_entries`, 50 by default) has each te
 and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the server
 `unmasked_unchecked` has the check off.
 
-- `capabilities` (GET /capabilities, 200, masked): GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record)
+- `capabilities` (GET /capabilities, 200, masked): GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list)
 - `traverse_capabilities` (GET /traverse/capabilities, 200, masked): GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block with `details`, the route of the full block (SPEC §23)
 - `pattern_capabilities` (GET /pattern/capabilities, 200, masked): GET /pattern/capabilities on the same server: the full block, the document itself (SPEC §23)
 - `pattern_capabilities_loading` (GET /pattern/capabilities, 200, masked): HAND-MADE: GET /pattern/capabilities while the index loads (SPEC §23): 200, available null and the graph fields null, the contract, lists and caps as configured (the masked server's block as pattern_capabilities_json writes it without the graph)
@@ -38,7 +38,7 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 - `capabilities_built_at_load` (GET /capabilities, 200, built_at_load): the mini index as built, served with --pattern-build-mask: the block available, mask built_at_load (the mask built in memory at start-up), counting exact, otherwise as with the file
 - `traverse_capabilities_built_at_load` (GET /traverse/capabilities, 200, built_at_load): the same server on the probe route
 - `pattern_capabilities_built_at_load` (GET /pattern/capabilities, 200, built_at_load): the same server on the route of the full block
-- `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), and graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint)
+- `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)
 - `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one pair: that pair's full block, with `details`
 - `pattern_capabilities_multi_graph` (GET /pattern/capabilities, 200, multi): the multi-graph server on the route of the full block: the block of the pair ?graph= selects, naming it (graph, graph_path)
 - `pattern_capabilities_multi_graph_no_graph` (GET /pattern/capabilities, 400, multi): the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)

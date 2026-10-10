@@ -3602,9 +3602,15 @@ how the search service uses it; the route serves any number.
 
 - `graphs` names graphs of the server's graph list (`server_query GRAPHS.csv`, whose lines are `name,graph_path,
   annotation_path[,manifest_path[,index_ns]]`, SPEC-labeled-traversal-core.md §10.3), as `/search`'s field does:
-  a non-empty list of names, deduplicated; without it, every name of a server that lists at most 10 (`/search`'s
-  rule), else 400 `invalid_request`. A name can list several (graph, annotation) pairs (the chunks of an index):
-  each is answered.
+  a non-empty list of names, deduplicated; without it, every name of a server whose list has at most
+  `max_graphs_without_selection` names, else 400 `invalid_request` (`request.graphs: required on this server,
+  which hosts N graph names (more than M; GET /capabilities lists them)`, M the threshold). The threshold is
+  `/search`'s rule, one server flag for both routes: `--max-graphs-without-selection M` (an integer of at least 1,
+  default 10; a smaller value refuses to start), stated by `GET /capabilities` as `max_graphs_without_selection`
+  (§24.3), so that a client can check it before an added name takes the list over it; `/search`'s own refusal
+  (400, `Bad request: requests without names (no "graphs" field) are only supported for small indexes (<=M
+  names)`) names the same M. A name can list several (graph, annotation) pairs (the chunks of an index): each is
+  answered.
 - The pairs are answered in this order: the names in byte order, each name's pairs in the list's order, a pair
   listed twice under one name once (a pair listed under two names is answered under each).
 - Each pair is answered as a single-graph server answers the request without `graphs` (§3 to §19, the pair's own
@@ -3613,7 +3619,8 @@ how the search service uses it; the route serves any number.
   request. The pairs run in parallel on the server's graph pool (`-p` threads, shared with `/search`).
 - The order of the checks (§5 step 1): the body is one JSON text (§3) and an object (400 `invalid_request`);
   `graphs` (400 `invalid_request`: not a non-empty list of names, an unknown name, or absent on a server of more
-  than 10 names); an `in_ram` that is not a boolean (400 `invalid_request`); then each pair from §5 step 4 on (the
+  names than `max_graphs_without_selection`); an `in_ram` that is not a boolean (400 `invalid_request`); then
+  each pair from §5 step 4 on (the
   graph's support, the request's fields, …). A refusal of a pair refuses the request with that refusal — the first
   in the answers' order among those refused; the other pairs stop at their next clock reading — as `/search`
   fails a request when one of its graphs fails.
@@ -3683,7 +3690,11 @@ the server states `columns_disjoint: true` (§24.4).
   `details` (§23).
 - `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the
   graph fields and `predicate.access` `null`), with `available` `true` when a pair is served (else `false`, with
-  the first pair's reason); the pairs are `graph_summary`'s.
+  the first pair's reason); the pairs are `graph_summary`'s (§24.4). Its top-level `max_graphs_without_selection`
+  (integer, at least 1) is the threshold of §24.1's rule (`--max-graphs-without-selection`, 10 by default): a
+  `/pattern` or `/search` request without `graphs` queries every name while `graphs` (the document's list) has at
+  most that many entries, and is refused once it has more; `null` on a single-graph server, as `graph_summary`
+  (no list to select from).
 
 <!-- schema: capabilities_pair -->
 | field | type | meaning |
@@ -3760,6 +3771,10 @@ loading in parallel sample in parallel; about a second each on a warm page cache
   `graphs_single_graph`, `pattern_capabilities_multi_graph_no_graph`; the multi-graph capabilities bodies
   regenerated; `later_increment_graphs`, `resident_only` and `multi_graph` removed (their requests are answered
   otherwise now).
+- The threshold of §24.1's rule (how many names a server may list before a request needs `graphs`) is a server
+  flag, `--max-graphs-without-selection` (default 10, the value that was fixed before; at least 1), and
+  `GET /capabilities` states it as `max_graphs_without_selection` (`null` on a single-graph server). At the
+  default nothing but that key changes; the two refusal texts show the configured value.
 
 ## 25. Motif-level predicates (`predicate_scope: "motif"`)
 

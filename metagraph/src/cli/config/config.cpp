@@ -422,6 +422,18 @@ Config::Config(int argc, char *argv[]) {
             traverse_max_seed_labels = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             resolve_max_query_bp = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-graphs-without-selection")) {
+            // at least 1: with 0 no request without `graphs` could be answered, and the
+            // capabilities would state a threshold no list is within
+            const char *text = get_value(i++);
+            const std::optional<uint64_t> v = exact_integer(text);
+            if (!v || *v < 1) {
+                std::cerr << "Error: --max-graphs-without-selection must be an integer in "
+                             "[1, 2^53 - 1], got '" << text << "'" << std::endl;
+                print_usage_and_exit = true;
+            } else {
+                max_graphs_without_selection = *v;
+            }
         } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
             exact_ms(argv[i], get_value(i), &traverse_max_memory_mb);
             i++;
@@ -1820,6 +1832,7 @@ if (advanced) {
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
+            fprintf(stderr, "\t   --max-graphs-without-selection [INT] \ta POST /search or /pattern request without `graphs` queries every name of a graph list of at most this many names, and is refused (400) on a longer list; stated by GET /capabilities; at least 1 [10]\n");
             fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR] \t\tname of the index (-i / -a only) in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE] \tmanifest of the index bundle (-i / -a only); its digest is the index identity []\n");

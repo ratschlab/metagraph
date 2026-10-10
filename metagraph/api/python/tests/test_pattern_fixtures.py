@@ -2984,7 +2984,14 @@ class TestPatternFixtures(unittest.TestCase):
                      'routes.pattern_capabilities')
             if not multi:
                 check.ok(doc['graph_summary'] is None, 'graph_summary', 'null on one graph')
+                check.ok(doc['max_graphs_without_selection'] is None,
+                         'max_graphs_without_selection', 'null on one graph')
                 return
+            # SPEC §24.1: the threshold of the selection rule (a request without `graphs`
+            # queries every name of a list of at most that many), the server flag, at least 1
+            check.ok(is_int(doc['max_graphs_without_selection'])
+                     and doc['max_graphs_without_selection'] >= 1,
+                     'max_graphs_without_selection', 'an integer of at least 1')
             # SPEC §24: every pair of the list, what the pattern search and a traversal make
             # of it, and whether their columns are disjoint
             summary = doc['graph_summary']

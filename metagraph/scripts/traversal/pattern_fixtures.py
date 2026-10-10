@@ -489,6 +489,15 @@ def multi_capabilities(doc):
     pair = summary['pairs'][0]
     check((pair['available'], pair['mask'], pair['counting'], pair['graph_mode'], pair['k'])
           == (True, 'file', 'exact', 'basic', MINI_K), pair)
+    # the threshold of the selection rule: the default of --max-graphs-without-selection
+    check(doc['max_graphs_without_selection'] == 10, doc['max_graphs_without_selection'])
+
+
+def single_graph_selection(doc):
+    """GET /capabilities of a single-graph server: no graph list to select from, so
+    graph_summary and max_graphs_without_selection are null"""
+    check(doc['graph_summary'] is None and doc['max_graphs_without_selection'] is None,
+          {k: doc[k] for k in ('graph_summary', 'max_graphs_without_selection')})
 
 
 def names_the_pair(doc):
@@ -584,8 +593,9 @@ FIXTURES = [
     get('capabilities', 'masked', '/capabilities',
         'GET /capabilities of a single-graph server whose graph has its mask: `pattern` in '
         'features and routes, the block available (basic, mask file, counting exact, placement '
-        'record)',
-        expect_all(features(True), caps_block(True, mask='file', counting='exact'))),
+        'record); graph_summary and max_graphs_without_selection null (no graph list)',
+        expect_all(features(True), caps_block(True, mask='file', counting='exact'),
+                   single_graph_selection)),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
         'the same `pattern` block with `details`, the route of the full block (SPEC §23)',
@@ -610,7 +620,8 @@ FIXTURES = [
         'route listed, the block available, mask absent, counting upper_bound with the '
         'dummy_fraction sampled at load (value, 95% interval, samples, source sampled); it '
         'said available false, mask_required before',
-        expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'))),
+        expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'),
+                   single_graph_selection)),
     get('traverse_capabilities_mask_absent', 'unmasked', '/traverse/capabilities',
         'the same unmasked server on the probe route',
         expect_all(caps_block(True, mask='absent', counting='upper_bound'), details)),
@@ -621,7 +632,8 @@ FIXTURES = [
         'the mini index as built, served with --pattern-build-mask: the block available, mask '
         'built_at_load (the mask built in memory at start-up), counting exact, otherwise as '
         'with the file',
-        expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'))),
+        expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'),
+                   single_graph_selection)),
     get('traverse_capabilities_built_at_load', 'built_at_load', '/traverse/capabilities',
         'the same server on the probe route',
         expect_all(caps_block(True, mask='built_at_load', counting='exact'), details)),
@@ -630,9 +642,11 @@ FIXTURES = [
         full_block(True, mask='built_at_load', counting='exact')),
     get('capabilities_multi_graph', 'multi', '/capabilities',
         'a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block '
-        'with the contract and the caps and no graph (available: a pair is served), and '
+        'with the contract and the caps and no graph (available: a pair is served), '
         'graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, '
-        'traversal; columns_disjoint)',
+        'traversal; columns_disjoint) and max_graphs_without_selection (the threshold of the '
+        'selection rule: a request without `graphs` queries every name of a list of at most '
+        'that many, the server flag, 10 by default)',
         multi_capabilities),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
@@ -655,7 +669,8 @@ FIXTURES = [
         'a graph the engine does not recognise (a hash graph): the feature and route listed, '
         'the block available false, unavailable_reason representation_unsupported, graph_mode '
         'null and only k set',
-        expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k)),
+        expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k,
+                   single_graph_selection)),
     get('traverse_capabilities_representation_unsupported', 'hash', '/traverse/capabilities',
         'the same hash-graph server on the probe route',
         expect_all(caps_block(False, 'representation_unsupported'), only_k, details)),

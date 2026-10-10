@@ -239,6 +239,8 @@ class TestMultiGraphServer(TestingBase):
                          caps['routes']['pattern_capabilities'])
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': True,
                           'mem_cap_gb': 1, 'budgets_start': 'after_load'}, caps['in_ram'])
+        # the threshold of the selection rule (the default of --max-graphs-without-selection)
+        self.assertEqual(10, caps['max_graphs_without_selection'])
         # the server-wide block: the contract and the caps, no graph
         self.assertTrue(caps['pattern']['available'])
         self.assertIsNone(caps['pattern']['k'])
@@ -438,6 +440,53 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual({'error', 'code'}, set(body))
                 self.assertEqual(code, body['code'])
                 self.assertIn(words, body['error'])
+
+    def test_graphs_required_above_the_threshold(self):
+        """A request without `graphs` queries every name of a list of at most
+        --max-graphs-without-selection names (10 by default) and is refused on a longer list,
+        on /pattern as on /search, the refusal naming the threshold; GET /capabilities states
+        it, so a client can check it before an added name refuses its requests. A value below 1
+        does not start."""
+        d = self.tempdir.name
+        kleb = self.records['kleb'][0]
+        p = {'patterns': [{'dna': kleb[3000:3020]}], 'mode': 'count'}
+        s = {'FASTA': '>q\n' + kleb[3000:3100]}
+        # the default server lists four names, within the default threshold: every name
+        self.assertEqual(['ecoli', 'enterics', 'kleb', 'pseudo'], self.post('pattern', p)['graphs'])
+        ret = self.server.post('search', s)
+        self.assertEqual(200, ret.status_code, ret.text[:2000])
+        server = Server([self.csv, '--mmap', '--mem-cap-gb', '1',
+                         '--max-graphs-without-selection', '1'],
+                        os.path.join(d, 'server_threshold.log'))
+        try:
+            self.assertEqual(1, server.get('capabilities').json()['max_graphs_without_selection'])
+            ret = server.post('pattern', p)
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual({'code': 'invalid_request',
+                              'error': 'request.graphs: required on this server, which hosts 4 '
+                                       'graph names (more than 1; GET /capabilities lists them)'},
+                             ret.json())
+            ret = server.post('search', s)
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error': 'Bad request: requests without names (no "graphs" field) '
+                                       'are only supported for small indexes (<=1 names)'},
+                             ret.json())
+            # with `graphs` the threshold plays no part
+            ret = server.post('pattern', dict(p, graphs=['kleb']))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual(['kleb'], ret.json()['graphs'])
+            ret = server.post('search', dict(s, graphs=['kleb']))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+        finally:
+            server.stop()
+        for value in ('0', '-1', 'abc', '1.5', ''):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', self.csv, '--port', str(free_port()), '--address', '127.0.0.1',
+                '--max-graphs-without-selection', value],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+            self.assertNotEqual(0, res.returncode, value)
+            self.assertIn("--max-graphs-without-selection must be an integer in [1, 2^53 - 1], "
+                          f"got '{value}'", res.stderr.decode(), value)
 
     # -------------------------------------------------------------------- in_ram
 

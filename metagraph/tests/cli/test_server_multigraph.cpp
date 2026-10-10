@@ -190,6 +190,24 @@ TEST(MultiGraphSelection, PatternGraphNames) {
               "10; GET /capabilities lists them)",
               refusal_of([&] { pattern_graph_names(parse("{}"), many); }));
     EXPECT_EQ(many.size(), pattern_graph_names(parse("{}"), many, 11).size());
+    // the threshold is the server's (--max-graphs-without-selection), named by the refusal
+    EXPECT_EQ("request.graphs: required on this server, which hosts 3 graph names (more than "
+              "2; GET /capabilities lists them)",
+              refusal_of([&] { pattern_graph_names(parse("{}"), known, 2); }));
+    EXPECT_EQ(std::vector<std::string>({ "a", "b", "c" }),
+              pattern_graph_names(parse("{}"), known, 3));
+    EXPECT_EQ(std::vector<std::string>({ "a" }),
+              pattern_graph_names(parse(R"({"graphs": ["a"]})"), known, 1));
+}
+
+// GET /capabilities states the threshold of that rule: the flag on a multi-graph server, null
+// on a single-graph server (no list to select from, as graph_summary)
+TEST(MultiGraphSelection, CapabilitiesStateTheThreshold) {
+    const Json::Value multi = max_graphs_without_selection_json(true, 10);
+    EXPECT_TRUE(multi.isIntegral());
+    EXPECT_EQ(10u, multi.asUInt64());
+    EXPECT_EQ(1u, max_graphs_without_selection_json(true, 1).asUInt64());
+    EXPECT_TRUE(max_graphs_without_selection_json(false, 10).isNull());
 }
 
 

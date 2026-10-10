@@ -1001,7 +1001,8 @@ int run_server(Config *config) {
                 graphs_being_queried--;
             } else {
                 std::vector<std::string> graphs_to_query
-                        = filter_graphs_from_list(indexes, content_json, request_id);
+                        = filter_graphs_from_list(indexes, content_json, request_id,
+                                                  config->max_graphs_without_selection);
                 std::mutex mu;
                 std::vector<std::shared_future<std::exception_ptr>> futures;
                 for (const auto &name : graphs_to_query) {
@@ -1184,7 +1185,8 @@ int run_server(Config *config) {
         std::vector<std::string> names;
         std::optional<bool> in_ram;
         try {
-            names = pattern_graph_names(json, sorted_names(indexes));
+            names = pattern_graph_names(json, sorted_names(indexes),
+                                        config->max_graphs_without_selection);
             in_ram = in_ram_field(json);
         } catch (const std::invalid_argument &e) {
             throw PatternRefusal(400, "invalid_request", e.what());
@@ -1959,6 +1961,10 @@ int run_server(Config *config) {
             // per pair, so that a service learns a multi-graph server with one probe; null on a
             // single-graph server (pattern and GET /traverse/capabilities describe its graph)
             c["graph_summary"] = multi ? graph_summary : Json::Value();
+            // the threshold of /search's and /pattern's selection rule (a request without
+            // `graphs`), so that a client sees it before a longer list refuses its requests
+            c["max_graphs_without_selection"]
+                    = max_graphs_without_selection_json(multi, config->max_graphs_without_selection);
             c["release"] = config->index_release;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;

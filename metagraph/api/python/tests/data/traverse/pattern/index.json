@@ -21,7 +21,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record)"
+   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list)"
   },
   "traverse_capabilities": {
    "server": "masked",
@@ -120,7 +120,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), and graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint)"
+   "shows": "a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)"
   },
   "traverse_capabilities_multi_graph": {
    "server": "multi",

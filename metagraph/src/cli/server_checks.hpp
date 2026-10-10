@@ -260,13 +260,22 @@ GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_g
 /**
  * The names a POST /pattern request selects on a multi-graph server (/search's rule): its
  * `graphs`, a non-empty array of names of the graph list, deduplicated and sorted; without
- * `graphs`, every name of |known| when there are at most |max_without_graphs| of them. Throws
- * std::invalid_argument naming the problem (an unknown name, a wrong type, an empty list, a
- * server with more names and no `graphs`).
+ * `graphs`, every name of |known| when there are at most |max_without_graphs| of them (the
+ * server's --max-graphs-without-selection). Throws std::invalid_argument naming the problem
+ * (an unknown name, a wrong type, an empty list, a server with more names and no `graphs`,
+ * which names the threshold).
  */
 std::vector<std::string> pattern_graph_names(const Json::Value &request,
                                              const std::vector<std::string> &known,
                                              size_t max_without_graphs = 10);
+
+/**
+ * GET /capabilities' `max_graphs_without_selection`: on a multi-graph server the threshold of
+ * that rule (--max-graphs-without-selection, an integer of at least 1), so that a client can
+ * check it before an added name refuses its requests without `graphs`; null on a single-graph
+ * server, which has no list to select from.
+ */
+Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t threshold);
 
 /**
  * Whether the column names of a multi-graph server's annotations are disjoint: each name a

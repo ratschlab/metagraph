@@ -876,6 +876,10 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
     return names;
 }
 
+Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t threshold) {
+    return multi_graph ? Json::Value(Json::UInt64(threshold)) : Json::Value();
+}
+
 ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &columns,
                              const std::function<size_t(const std::string&)> &hash_of) {
     // the names by their hash, every collision resolved on the names themselves: 16 bytes per
