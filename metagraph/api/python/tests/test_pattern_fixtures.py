@@ -95,7 +95,9 @@ NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_incr
 LOW_COMPLEXITY_UNCUT = 191
 # (stop_unsupported is a retired slot code: '*' is a residue; no source writes it and no fixture
 # holds it)
-SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported')
+SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported',
+               # the route's own, after the work (SPEC §8.9): a label name no answer carries
+               'unrepresentable_label_name')
 KINDS = ('dna', 'iupac', 'protein')
 # what the extension of a pattern longer than k did (counts.paths.extension)
 EXTENSIONS = ('no_anchors', 'not_started', 'not_admitted', 'stopped', 'completed')
@@ -1633,6 +1635,12 @@ class Checker:
                 # SPEC §7.8: an exact pattern in suffix scope is exempt from the floor
                 self.ok(not self.exempt(pk, k, request), path,
                         'an exact pattern of L <= k in suffix scope is exempt from the floor')
+            if err['code'] == 'unrepresentable_label_name':
+                # SPEC §8.9: refused after its work for a name its lists would carry: only an
+                # answer that lists names can be; the message names the column, never the bytes
+                self.ok(labelled, path, 'unrepresentable_label_name on an answer without labels')
+                self.ok(re.search(r'column \d+', err['message']) is not None,
+                        path + '.error.message', 'the column is not named')
             return
 
         self.ok(pk.parsed(), path, 'answered outside the alphabet')
@@ -3619,15 +3627,18 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertLessEqual(RETIRED_REASONS, set(RETIRED))
         self.assertEqual(set(UNAVAILABLE), support | unavailable | RETIRED_REASONS)
         # the slot codes: the engine's PatternError code (bad_alphabet; stop_unsupported is
-        # retired) and its refusals of a parsed pattern (information_below_floor,
-        # scope_unsupported)
+        # retired), its refusals of a parsed pattern (information_below_floor,
+        # scope_unsupported) and the route's own, set after the work (kSlot* constants of
+        # pattern.cpp: unrepresentable_label_name)
         slots = set(re.findall(r'PatternError\(\s*"(\w+)"', engine_text))
         self.assertEqual({'bad_alphabet'}, slots)
         self.assertNotIn('stop_unsupported', engine_text)
         for code in ('information_below_floor', 'scope_unsupported'):
             self.assertIn(f'"{code}"', engine_text)
+        route_slots = set(re.findall(r'kSlot\w+\[\] = "(\w+)"', sources['pattern.cpp']))
+        self.assertEqual({'unrepresentable_label_name'}, route_slots)
         self.assertEqual(set(SLOT_ERRORS), slots | {'information_below_floor',
-                                                    'scope_unsupported'})
+                                                    'scope_unsupported'} | route_slots)
 
     def test_by_label_null_in_partial_is_valid(self):
         """SPEC §14.4: in partial, when the memory account cannot hold by_label, the answer has

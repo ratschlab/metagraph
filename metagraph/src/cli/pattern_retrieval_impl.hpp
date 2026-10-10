@@ -29,6 +29,7 @@
 #include "pattern_retrieval.hpp"
 #include "pattern_predicate.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
+#include "common/utils/string_utils.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/label_oracle.hpp"
 
@@ -36,6 +37,46 @@
 namespace mtg {
 namespace cli {
 namespace retrieval {
+
+/**
+ * The names of a pattern's label dictionary as the answer may carry them (SPEC §8.9,
+ * unrepresentable_label_name): a name is written only when it is valid UTF-8. jsoncpp
+ * replaces the bytes of any other by U+FFFD, and the replaced name can be another column's,
+ * so a client that fed it into a predicate would select the wrong column. Each dictionary
+ * label is validated once, where its name is first copied into the answer (at the cost of
+ * that copy; an answer that lists no name validates nothing), and the verdict kept per
+ * label. The first label found unrepresentable is recorded: the lists are still built and
+ * their charges released as for an answered entry, and the route refuses the entry in its
+ * slot, naming the column and never its bytes.
+ */
+class NameCheck {
+  public:
+    explicit NameCheck(const std::vector<graph::traversal::LabelRef> &dict)
+          : dict_(dict), state_(dict.size(), kUnknown) {}
+
+    // the name of dictionary label |id| when the answer may carry it; else an empty string,
+    // the label's column recorded if none was before
+    const std::string& name(graph::traversal::LabelId id) {
+        uint8_t &state = state_.at(id);
+        if (state == kUnknown)
+            state = utils::valid_utf8(dict_[id].name) ? kValid : kInvalid;
+        if (state == kValid)
+            return dict_[id].name;
+        if (!column_)
+            column_ = dict_[id].column;
+        return empty_;
+    }
+    const std::optional<graph::traversal::Column>& unrepresentable() const { return column_; }
+
+  private:
+    static constexpr uint8_t kUnknown = 0;
+    static constexpr uint8_t kValid = 1;
+    static constexpr uint8_t kInvalid = 2;
+    const std::vector<graph::traversal::LabelRef> &dict_;
+    std::vector<uint8_t> state_;
+    std::optional<graph::traversal::Column> column_;
+    std::string empty_;
+};
 
 /**
  * The memory model of the account (§5.3): deterministic prices of what the answer holds,

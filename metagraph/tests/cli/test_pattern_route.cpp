@@ -662,6 +662,92 @@ TEST(PatternRoute, CanonicalRowsAreTheAnnotationKeys) {
     }
 }
 
+// A label whose name is not valid UTF-8 (a FASTA header holding the byte 0xFF, beside a valid
+// label whose name is what jsoncpp's replacement of that byte would spell, U+FFFD) is never
+// written into the answer (SPEC §8.9, unrepresentable_label_name): the entry whose lists would
+// name it is refused in its slot, the column named and never its bytes, the other entry
+// answered with its name; an entry that lists no name (mode count, labels "none") is
+// unaffected; a predicate can name the valid column only, and selects it alone
+TEST(PatternRoute, UnrepresentableLabelNameRefusesTheEntry) {
+    const std::string invalid = "label\xff";
+    const std::string replaced = "label\xef\xbf\xbd";
+    auto g = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            31, { std::string(40, 'A'), std::string(40, 'C') }, { invalid, replaced });
+    const std::string a31(31, 'A'), c31(31, 'C');
+    const std::string patterns = "\"patterns\": [{\"dna\": \"" + a31 + "\", \"id\": \"invalid\"}, "
+                                 "{\"dna\": \"" + c31 + "\", \"id\": \"valid\"}]";
+    Json::StreamWriterBuilder compact;
+    compact["indentation"] = "";
+
+    // output.labels "all": the first entry refused, with the description of a parsed pattern
+    // and nothing of its work; the second answered, its label named
+    Json::Value out = run(*g, "{" + patterns + ", \"output\": {\"labels\": \"all\"}, "
+                              "\"allow_unbudgeted_annotation\": true}");
+    ASSERT_EQ(2u, out["patterns"].size());
+    const Json::Value &refused = out["patterns"][0];
+    ASSERT_TRUE(refused.isMember("error"));
+    EXPECT_EQ("unrepresentable_label_name", refused["error"]["code"].asString());
+    const std::string message = refused["error"]["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("column 0")) << message;
+    EXPECT_EQ(std::string::npos, message.find('\xff'));
+    EXPECT_EQ("invalid", refused["id"].asString());
+    EXPECT_EQ(a31, refused["pattern"].asString());
+    EXPECT_EQ(31u, refused["length"].asUInt64());
+    EXPECT_TRUE(refused.isMember("information_bits"));
+    for (const char *absent : { "results", "counts", "work", "by_label", "selection", "stop",
+                                "notes", "placement", "annotation" }) {
+        EXPECT_FALSE(refused.isMember(absent)) << absent;
+    }
+    const Json::Value &valid = out["patterns"][1];
+    EXPECT_FALSE(valid.isMember("error"));
+    EXPECT_EQ(1u, valid["counts"]["contexts"]["value"].asUInt64());
+    ASSERT_EQ(1u, valid["results"].size());
+    ASSERT_EQ(1u, valid["results"][0]["labels"].size());
+    EXPECT_EQ(replaced, valid["results"][0]["labels"][0]["column"].asString());
+    ASSERT_EQ(1u, valid["by_label"].size());
+    EXPECT_EQ(replaced, valid["by_label"][0]["column"].asString());
+    EXPECT_EQ(std::string::npos, Json::writeString(compact, out).find('\xff'));
+
+    // every entry refused: the other one is still answered on its own
+    out = run(*g, "{\"patterns\": [{\"dna\": \"" + a31 + "\"}], \"output\": {\"labels\": "
+                  "\"all\"}, \"allow_unbudgeted_annotation\": true}");
+    EXPECT_EQ("unrepresentable_label_name", out["patterns"][0]["error"]["code"].asString());
+
+    // no name listed: mode count, and the label-free path, answer both patterns
+    for (const std::string &body : { "{" + patterns + ", \"mode\": \"count\"}",
+                                     "{" + patterns + "}" }) {
+        out = run(*g, body);
+        ASSERT_EQ(2u, out["patterns"].size()) << body;
+        for (const Json::Value &e : out["patterns"]) {
+            EXPECT_FALSE(e.isMember("error")) << body;
+            EXPECT_EQ(1u, e["counts"]["contexts"]["value"].asUInt64()) << body;
+            EXPECT_EQ("exact", e["counts"]["contexts"]["relation"].asString()) << body;
+        }
+        EXPECT_EQ(std::string::npos, Json::writeString(compact, out).find('\xff'));
+    }
+
+    // the valid name in a predicate selects its own column only: the A context (column 0)
+    // is tested and not selected, the C context selected
+    out = run(*g, "{" + patterns + ", \"mode\": \"count\", \"predicate\": {\"any\": [\""
+                  + replaced + "\"]}, \"allow_unbudgeted_annotation\": true}");
+    ASSERT_EQ(2u, out["patterns"].size());
+    for (size_t i = 0; i < 2; ++i) {
+        const Json::Value &e = out["patterns"][static_cast<Json::ArrayIndex>(i)];
+        EXPECT_FALSE(e.isMember("error"));
+        EXPECT_EQ("completed", e["selection"]["pass"].asString());
+        EXPECT_EQ("exact", e["counts"]["tested"]["relation"].asString());
+        EXPECT_EQ(1u, e["counts"]["tested"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["counts"]["selected"]["relation"].asString());
+        EXPECT_EQ(i, e["counts"]["selected"]["value"].asUInt64());
+    }
+    EXPECT_EQ(1u, out["predicate"]["known"].asUInt64());
+
+    // a request name that is not UTF-8 names no column: refused with the request
+    EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),
+              refusal(*g, "{" + patterns + ", \"mode\": \"count\", \"predicate\": {\"any\": [\""
+                          + invalid + "\"]}, \"allow_unbudgeted_annotation\": true}"));
+}
+
 TEST(PatternRoute, TimeStopAnsweredWithinTheReserve) {
     auto g = tiny();
     PatternDelivery delivery;

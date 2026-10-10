@@ -397,13 +397,14 @@ void undo_output(std::vector<std::set<Occurrence>> *unions, const Inserted &inse
     }
 }
 
-// One label object of a result (§7.2): its column, its |support| and, with placement, its
-// occurrences (their count with record placement, and their list; null when not placed)
-Json::Value label_json(const ContextLabel &cl, const LabelRef &label, const char *support,
-                       const char *strand, size_t length, const LabelOracle &oracle,
-                       bool place, bool records) {
+// One label object of a result (§7.2): its column (|name|, |label|'s as NameCheck gives it),
+// its |support| and, with placement, its occurrences (their count with record placement, and
+// their list; null when not placed)
+Json::Value label_json(const ContextLabel &cl, const LabelRef &label, const std::string &name,
+                       const char *support, const char *strand, size_t length,
+                       const LabelOracle &oracle, bool place, bool records) {
     Json::Value l;
-    l["column"] = label.name;
+    l["column"] = name;
     l["support"] = support;
     if (!place)
         return l;
@@ -1211,13 +1212,14 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
                                      occurrences_total, Unit::PLACED_OCCURRENCES);
 
     // by_label: the per-label summary over the returned contexts (§7.2), in label order (null
-    // when the account could not hold it, above)
+    // when the account could not hold it, above). The names as the answer may carry them
+    retrieval::NameCheck names(dict);
     Json::Value by_label(Json::arrayValue);
     for (size_t r = 0; r < kept_labels && summary_held; ++r) {
         const LabelId id = order[r];
         Json::Value b;
         b["graph"] = graph_name;
-        b["column"] = dict[id].name;
+        b["column"] = names.name(id);
         const Relation rel = contexts_exact ? Relation::EXACT : Relation::AT_LEAST;
         b["contexts"] = count_json(rel, label_contexts[id], Unit::GRAPH_CONTEXTS);
         b["contexts_suffix"] = count_json(rel, label_suffix[id], Unit::GRAPH_CONTEXTS);
@@ -1252,12 +1254,13 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
         Json::Value labels(Json::arrayValue);
         const char *strand = strand_of(c.orientation);
         for (const ContextLabel &cl : lists[i]) {
-            labels.append(label_json(cl, dict[cl.label], "kmer", strand, length, m.oracle,
-                                     m.place, m.records));
+            labels.append(label_json(cl, dict[cl.label], names.name(cl.label), "kmer", strand,
+                                     length, m.oracle, m.place, m.records));
         }
         f["labels"] = std::move(labels);
         a.result_fields.push_back(std::move(f));
     }
+    a.unrepresentable = names.unrepresentable();
     // the labels are built: from now on they are written only
     pending.settle();
     m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
@@ -1878,13 +1881,15 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
                                      : any_placed ? Relation::AT_LEAST : Relation::UNKNOWN,
                                      occurrences_total, Unit::PLACED_OCCURRENCES);
 
-    // by_label: the per-label summary over the returned paths, in label order
+    // by_label: the per-label summary over the returned paths, in label order; the names as
+    // the answer may carry them
+    retrieval::NameCheck names(dict);
     Json::Value by_label(Json::arrayValue);
     for (size_t r = 0; r < kept_labels && summary_held; ++r) {
         const LabelId id = order[r];
         Json::Value b;
         b["graph"] = graph_name;
-        b["column"] = dict[id].name;
+        b["column"] = names.name(id);
         b["paths"] = count_json(labels_exact ? Relation::EXACT : Relation::AT_LEAST,
                                 label_paths[id], Unit::PATHS);
         b["paths_record_verified"] = count_json(
@@ -1937,7 +1942,7 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         const char *strand = strand_of(p.orientation);
         for (const ContextLabel &cl : lists[i]) {
             (cl.verified ? any_verified : any_unverified) = true;
-            labels.append(label_json(cl, dict[cl.label],
+            labels.append(label_json(cl, dict[cl.label], names.name(cl.label),
                                      cl.verified ? "record_verified" : "label_intersection",
                                      strand, length, m.oracle, m.place, m.records));
         }
@@ -1948,6 +1953,7 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         f["labels"] = std::move(labels);
         a.result_fields.push_back(std::move(f));
     }
+    a.unrepresentable = names.unrepresentable();
     pending.settle();
     m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
     return a;

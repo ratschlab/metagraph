@@ -12,6 +12,7 @@
 
 #include <json/json.h>
 
+#include "common/utils/string_utils.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "graph/traversal/walker.hpp"
 
@@ -342,8 +343,9 @@ std::string pct_escape(std::string_view raw);
 std::string front_code(std::string_view previous, std::string_view name);
 // strings in MGT (and in the JSON beside it) are UTF-8 (§2.1): well-formed UTF-8 (no
 // overlong forms, no surrogates, at most U+10FFFF). A label name that is not is never
-// replaced: the seed is refused (spec §6.1 step 4, cause unrepresentable_label_name)
-bool valid_utf8(std::string_view s);
+// replaced: the seed is refused (spec §6.1 step 4, cause unrepresentable_label_name); the
+// /pattern route refuses the entry that would list it (SPEC-pattern-search.md §8.9)
+using ::utils::valid_utf8;
 
 // a typed K value: i:<integer> | f:<float> | s:<percent-encoded string> | u (unlimited)
 struct KValue {

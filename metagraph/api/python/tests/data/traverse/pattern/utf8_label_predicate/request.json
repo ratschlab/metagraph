@@ -1,0 +1,19 @@
+{
+ "patterns": [
+  {
+   "dna": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "id": "invalid"
+  },
+  {
+   "dna": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+   "id": "valid"
+  }
+ ],
+ "mode": "count",
+ "predicate": {
+  "any": [
+   "label�"
+  ]
+ },
+ "allow_unbudgeted_annotation": true
+}

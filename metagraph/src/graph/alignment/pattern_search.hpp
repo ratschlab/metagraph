@@ -1036,9 +1036,10 @@ struct Work {
 };
 
 // A per-pattern refusal decided by the engine (JSON: the slot's error {code, message});
-// bad_alphabet comes earlier, from Pattern::parse
+// bad_alphabet comes earlier, from Pattern::parse; the route sets its own after the work
+// (unrepresentable_label_name: a label name the answer cannot carry)
 struct Refusal {
-    // "information_below_floor" | "scope_unsupported"
+    // "information_below_floor" | "scope_unsupported" | the route's "unrepresentable_label_name"
     std::string code;
     std::string message;
 };

@@ -113,6 +113,11 @@ const char *const kPatternGateCaps[] = {
 // sampled dummy fraction (index.dummy_fraction), not a bound
 constexpr const char kNoteEstimate[] = "estimate_sampled_dummy_fraction";
 
+// The slot error of a pattern whose lists would name a label whose name is not valid UTF-8
+// (SPEC §8.9): no answer carries such a name, so the entry is refused after its work, the
+// label named by its column
+constexpr const char kSlotUnrepresentableLabelName[] = "unrepresentable_label_name";
+
 // counting (capabilities and, on a graph without its mask, the answer's index): "exact" with
 // the dummy-edge mask, "upper_bound" without it
 constexpr const char kCountingExact[] = "exact";
@@ -2245,6 +2250,33 @@ Json::Value process_pattern_request(
         a.selection = std::move(s);
     };
 
+    /**
+     * A pattern whose label lists would carry the name of |column|, which is not valid UTF-8
+     * (SPEC §8.9, unrepresentable_label_name): jsoncpp would replace its bytes, and the
+     * replaced name can be another column's, so the answer never carries it. The entry is
+     * refused in its slot after its work, the label named by its column and never by its
+     * bytes, and nothing of the pattern is delivered (its results, labels, selection and
+     * supported-path blocks are dropped; their charges were released as for an answered
+     * entry). The other patterns are answered as usual.
+     */
+    auto refuse_unrepresentable = [&](Answered &a, graph::traversal::Column column) {
+        Refusal refusal;
+        refusal.code = kSlotUnrepresentableLabelName;
+        refusal.message = "the labels of this pattern include column " + std::to_string(column)
+            + ", whose name is not valid UTF-8: no answer carries such a name verbatim, and a "
+              "replaced name could be another label's, so the pattern is refused in its slot "
+              "and nothing of it is delivered; ask without labels (mode count, or output.labels "
+              "\"none\"), or rename the label in the index";
+        a.result->refusal = std::move(refusal);
+        a.results = Json::Value(Json::arrayValue);
+        a.released = 0;
+        a.labels.reset();
+        a.label_paths = false;
+        a.selection.reset();
+        a.constant = false;
+        a.supported.reset();
+    };
+
     std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
     for (const PatternSpec &spec : req.patterns) {
@@ -2286,6 +2318,8 @@ Json::Value process_pattern_request(
                     a.selection = std::move(s);
                 }
             }
+            if (a.labels && a.labels->unrepresentable)
+                refuse_unrepresentable(a, *a.labels->unrepresentable);
         }
         answered.push_back(std::move(a));
     }

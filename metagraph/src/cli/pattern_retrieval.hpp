@@ -302,6 +302,10 @@ struct LabelsAnswer {
     std::vector<std::string> notes;
     // this pattern's (not merged by apply_labels: the route states them)
     RetrievalCounters counters;
+    // a label the lists would name whose name is not valid UTF-8 (the first one, by its
+    // column): the answer never carries such a name, so the route refuses the pattern's entry
+    // in its slot (unrepresentable_label_name) and discards what was built here
+    std::optional<graph::traversal::Column> unrepresentable;
 };
 
 /**

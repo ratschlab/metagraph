@@ -2,6 +2,7 @@
 #define __STRING_UTILS_HPP__
 
 #include <string>
+#include <string_view>
 #include <deque>
 #include <vector>
 #include <cstdint>
@@ -11,6 +12,10 @@
 namespace utils {
 
 bool starts_with(const std::string &str, const std::string &prefix);
+
+// well-formed UTF-8: no overlong forms, no surrogates, at most U+10FFFF. What a JSON or MGT
+// string may carry; a label name (a FASTA header, a file name) need not be one
+bool valid_utf8(std::string_view s);
 
 bool ends_with(const std::string &str, const std::string &suffix);
 

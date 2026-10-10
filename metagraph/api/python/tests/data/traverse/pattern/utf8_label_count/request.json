@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "id": "invalid"
+  },
+  {
+   "dna": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+   "id": "valid"
+  }
+ ],
+ "mode": "count"
+}

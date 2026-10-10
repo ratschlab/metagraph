@@ -12,7 +12,8 @@
   "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)",
   "masked_no_map": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --no-coord-mapping --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy, its .seqs not loaded)",
   "masked_small_predicate_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-predicate-labels 4 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a predicate may list 4 names)",
-  "hash": "server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg --index-release fixtures-mini_refseq  (a hash graph of 1296536.fa at k = 31, column annotation by file name)"
+  "hash": "server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg --index-release fixtures-mini_refseq  (a hash graph of 1296536.fa at k = 31, column annotation by file name)",
+  "utf8_labels": "server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg --index-release fixtures-mini_refseq  (a BASIC graph at k = 31 of two records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, and C x 40 under the valid header label\\ufffd, built with --mask-dummy; column annotation by header)"
  },
  "fixtures": {
   "capabilities": {
@@ -149,6 +150,15 @@
    "hand_made": false,
    "headers": {},
    "shows": "the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)"
+  },
+  "traverse_capabilities_utf8_labels": {
+   "server": "utf8_labels",
+   "method": "GET",
+   "path": "/traverse/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /traverse/capabilities of the utf8_labels server (a BASIC graph with its mask file, counting exact, an unbudgeted column annotation by header): the block of a server one of whose labels the answers can never name (SPEC §8.9), nothing of it in the document"
   },
   "traverse_capabilities_primary": {
    "server": "primary",
@@ -1238,6 +1248,33 @@
    "hand_made": false,
    "headers": {},
    "shows": "the motif of a pattern longer than k is not asked of its walks: NDM-40 (2 anchors) is undecided, untested not_started, while its supported paths are selected; a pattern without anchors has no instance on this graph, and its motif says so: decided_by no_instance, the normal form on the empty union (none(562): true, labels_absent 1, a verdict on the empty set and no claim about 562)"
+  },
+  "utf8_label_refused": {
+   "server": "utf8_labels",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a label whose name is not valid UTF-8 (the header label\\xff) is never written into the answer (the owner's decision of 2026-10-10): the entry whose labels would name it is refused in its slot, unrepresentable_label_name, the label named by its column (0) and never by its bytes; the other entry is answered as usual, its label the valid name label\\ufffd, which a replacement of the bad byte would also spell"
+  },
+  "utf8_label_count": {
+   "server": "utf8_labels",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same patterns in mode count: no name is listed, so both entries are answered (exact 1 context each); only an answer that would carry the name is refused"
+  },
+  "utf8_label_predicate": {
+   "server": "utf8_labels",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the valid name in a predicate selects its own column only (a request name is valid UTF-8, so the unrepresentable column can never be named and so never selected): the A context, carried by column 0 alone, is tested and not selected; the C context is selected (access columns: single cells of a column annotation)"
   },
   "unknown_field": {
    "server": "masked",

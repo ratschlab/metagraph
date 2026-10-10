@@ -1138,6 +1138,7 @@ It costs no step.
 | `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position); for `protein`, a character that is not in `protein_residues` (the stop `*` is one, §12.2; the message, kept as `4596bb3b` wrote it, lists the 20 amino acids and X B Z J and does not name `*`) | `id`, `kind`, `error` |
 | `information_below_floor` | below the floor for its scope (§7.8) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error`; a peptide also `residues`, `genetic_code` |
 | `scope_unsupported` | `scope: "suffix"` on a wrapped PRIMARY graph, L ≤ k (§7.2) | as above |
+| `unrepresentable_label_name` | the owner's decision of 2026-10-10 (the rule of /traverse, SPEC-labeled-traversal-core.md §6.1 step 4, §7.0): a label the entry's lists (`labels`, `by_label`) would name has a name that is not valid UTF-8 (names come from FASTA headers and file names). No answer carries such a name verbatim, and a replaced one (U+FFFD, as jsoncpp would write it) can be another column's valid name, so a client that fed the returned name into a predicate would select the wrong column. The entry is refused **after its work**, the label named in the message by its column (never by its bytes), and nothing of the pattern is delivered (no `counts`, `work`, `results`, `selection`). Only an answer that would list a name can be refused so: `mode: "count"`, `output.labels: "none"`, and an entry whose lists hold no such label are unaffected, and the other entries of the request are answered as usual. A request name is valid UTF-8 (§19.3), so such a column is never named by a predicate and never selected (§19.4). The lever: ask without labels, or rename the label in the index | as above |
 
 ### 8.10 Notes
 
@@ -1380,7 +1381,7 @@ of its records (a graph the engine does not recognise: `representation_unsupport
 fixture's server, method, path and status; `README.md` says in one line what each shows. They cover the
 capabilities on both routes (each `mask` value: `file`, `built_at_load`, `absent`; multi-graph; PRIMARY), each
 mode, each `withheld` and `cut` reason, both scopes and every strand setting, IUPAC patterns, a palindrome, a
-pattern longer than k, the three error slots, the clamps, the relation `bounds` with a stop in a deferred scan
+pattern longer than k, the four error slots, the clamps, the relation `bounds` with a stop in a deferred scan
 (`max_steps_bounds`, `max_steps_bounds_withheld`), a `max_steps` stop whose release then met the work time
 (`max_steps_then_time`: `stop` keeps the first stop, the time shows as `cut: time` and `time_limited`, §7.6), a
 graph the engine does not recognise
@@ -1425,6 +1426,15 @@ occurrences of blaNDM-1; with J; and 14 residues without `long_search`: anchors 
 `record_verified`), `peptide_bad_residue` (`bad_alphabet` for U; its `*` pattern, refused `stop_unsupported` at
 `4596bb3b`, is answered since §18) and `genetic_code_unknown` (the 400 for table 7). The nine capabilities bodies of the single-graph servers gained the
 fields of §17; no other stored body changed.
+
+After the review of 2026-10-10 (§26): `utf8_label_refused`, `utf8_label_count` and `utf8_label_predicate`, on the
+server `utf8_labels` (a BASIC graph at k = 31 of two records written as bytes, A × 40 under the raw header
+`label\xff`, which is not UTF-8, and C × 40 under the valid header `label�`, what a replacement of the bad
+byte would spell; a column annotation by header, so the requests carry `allow_unbudgeted_annotation`): with
+`output.labels: "all"` the entry that would list the invalid name is refused (`unrepresentable_label_name`, §8.9)
+beside the valid one answered with its name; in mode `count` both are answered; and the valid name in a predicate
+selects its own column only (the A context tested and not selected). `traverse_capabilities_utf8_labels` is that
+server's probe document (every fixture server's is measured against the probe's budget, §23).
 
 Situations without a stored body: `withheld: annotation_budget` for a refused row (in `all_or_count`); `by_label:
 null` in `partial` (the mini's label names are too short to exhaust the account there; a real answer of a tiny
@@ -2020,7 +2030,7 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
 <!-- schema: label -->
 | field | type | meaning |
 |---|---|---|
-| `column` | string | the annotation column (its label as stored) |
+| `column` | string | the annotation column (its label as stored, always valid UTF-8: an entry whose lists would name a column whose name is not is refused in its slot, `unrepresentable_label_name`, §8.9; the same for `by_label`'s `column` and a path's labels, §12.1, §20.6) |
 | `support` | `"kmer"` | the label annotates the context's one k-mer (design §4.3) |
 | `occurrences` | count | `record` placement only: this label's distinct placed occurrences in this context, unit `placed_occurrences`, `exact` (also when `partial` lists fewer), `unknown` when the row's placement was refused or not reached |
 | `occurrence_list` | list \| null | `record` placement: objects of the `occurrence` table; `global`: of the `occurrence_global` table; `null` when not placed; absent for `none`, `none_canonical`, `not_requested` |
@@ -2772,8 +2782,10 @@ In mode `count` no projection is built (note `projection_not_read` when one was 
 (`request.predicate.and[1].none[0]: …`), unless said otherwise:
 
 - a predicate is a JSON object with **exactly one** member, one of the seven operators;
-- a name is a **non-empty JSON string**, an annotation column label as stored (case-sensitive, not trimmed; on
-  refseq33m a taxid written as a string, `"562"`); a number is refused with the fix (P7: `write a taxid as
+- a name is a **non-empty JSON string of valid UTF-8** (a JSON text is UTF-8; jsoncpp passes the bytes of a
+  string through, so a string holding other bytes is refused here, with its path: no column whose name the
+  answer cannot carry, §8.9, can be named), an annotation column label as stored (case-sensitive, not trimmed;
+  on refseq33m a taxid written as a string, `"562"`); a number is refused with the fix (P7: `write a taxid as
   "562"`, fixture `predicate_invalid`); a record header is not a predicate term in version 1 (P20: unknown,
   §19.4);
 - a list (`any`, `all`, `none`, `at_least.labels`) has at least one name and no name twice;
@@ -2795,7 +2807,10 @@ taxids 1296536, 158836, 287, 470, 546, 562, 573, 615, 72407): `{"and": [{"any": 
 
 The names are resolved once per request, before the first pattern, against the index's column labels (one hash
 lookup each; the work time read every 4,096 names). A name that is not a column is **unknown**: absent from every
-context. Unknown names are folded away before anything is read:
+context. A column whose name is not valid UTF-8 (§8.9) can never be named, since every request name is one
+(§19.3), and so is never selected; `selection_labels`, the motif's `labels_present` and `predicate.normal_form`
+carry request names only, so no refusal of §8.9 comes from them. Unknown names are folded away before anything
+is read:
 
 | form | with unknown names |
 |---|---|
@@ -3278,7 +3293,8 @@ with its occurrences (the surviving chains mapped to (`seq_id`, 1-based start, t
 `label_intersection` —; with `require_support: "record_verified"` the verified ones only, the others counted in
 `labels_excluded_unverified` (§12.1). `"predicate_only"` (§20.9): the predicate's labels among them
 (`labels_total` their number). `"none"`: the path result without labels (§12.1's seven fields). The result shape
-is §12.1's `path_result`, `by_label` is `by_label_paths`, `counts.labels.by_support` as there. The notes:
+is §12.1's `path_result`, `by_label` is `by_label_paths`, `counts.labels.by_support` as there; a label the lists
+would name whose name is not valid UTF-8 refuses the entry (`unrepresentable_label_name`, §8.9). The notes:
 `label_intersection_only` at the `label_intersection` level where no occurrence is listed (no coordinates,
 placement `none_canonical`, `output.occurrences: false`, or the level asked for on an index that could verify: the
 entry's `placement` is then `none`, this answer placing nothing),
@@ -4037,3 +4053,28 @@ fixtures are byte for byte the same. Tests: `PatternMotif.EmptyConstantAndWithou
 instance in every mode, `motif_without_pass` on a count `exact` 0, a constant normal form on an empty union),
 `PatternSupportedRoute.MotifNoInstance` (through the route: a short and a long pattern without an instance),
 `test_pattern_fixtures.py` (`no_instance` exactly for a pattern without an instance, `every_context` never for one).
+
+## 26. Changed after the review of 2026-10-10
+
+The outside review of 2026-10-10 (the pattern and traversal algorithms, and the route's resources) found no false
+count. It found one place where an answer could change a label's identity, output charges that left the listed
+names' bytes out of the memory account, and a mirror read that no decision needed. The fixes below change answers
+as stated; contract version 1 stays (additions only).
+
+**An unrepresentable label name refuses the entry (the owner's decision of 2026-10-10; §8.9, §14.5, §19.3, §19.4,
+§20.6).** The builds before it copied every label name into the answer verbatim: jsoncpp replaces the bytes of a
+name that is not valid UTF-8 by U+FFFD, and a valid name holding U+FFFD can be another column's, so a client that
+fed the returned name into a predicate selected the wrong column (the review's reproduction: a column `label\xff`
+beside a column `label�`; the first's context was answered under the second's name, and that name in a
+predicate selected nothing of it). Now the rule of /traverse (SPEC-labeled-traversal-core.md §6.1 step 4, §7.0)
+holds here: a pattern entry whose lists would name such a label is refused in its slot after its work, code
+`unrepresentable_label_name`, the label named by its column and never by its bytes, the other entries answered as
+usual; an entry that lists no name (mode `count`, `output.labels: "none"`, a long pattern's label-free paths) is
+unaffected; and a request name that is not valid UTF-8 is refused with the request (`invalid_request`, §19.3), so
+that no such column is ever named by a predicate or selected. Each dictionary label is validated once, where its
+name is first copied into the answer, at the cost of that copy; an answer that lists no name validates nothing.
+Fixtures `utf8_label_refused`, `utf8_label_count`, `utf8_label_predicate` (§11, server `utf8_labels`); tests
+`PatternRoute.UnrepresentableLabelNameRefusesTheEntry`, `integration_tests/test_pattern.py`
+(`TestPatternLabelNames`: the review's reproduction, the returned valid name selecting its own column only, a raw
+request name refused), `test_pattern_fixtures.py` (the slot code, only on an answer that lists names, the column
+named). No stored body of the mini index changes.

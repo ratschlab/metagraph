@@ -5,6 +5,7 @@
 
 #include <tsl/hopscotch_map.h>
 
+#include "common/utils/string_utils.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "json_helpers.hpp"
@@ -121,6 +122,14 @@ void Parser::names(const Json::Value &list, const std::string &path, Predicate::
         const char *end = nullptr;
         if (!name.getString(&begin, &end) || begin == end)
             throw invalid(item_path(path, i) + ": expected a non-empty string (a column label)");
+        // a JSON text is UTF-8, and jsoncpp passes the bytes of a string through: a name that
+        // is not valid UTF-8 is refused here, so that no column whose name the answer cannot
+        // carry (SPEC §8.9, unrepresentable_label_name) is ever named by a predicate, and so
+        // never selected
+        if (!utils::valid_utf8(std::string_view(begin, end - begin))) {
+            throw invalid(item_path(path, i) + ": a column label must be valid UTF-8 (JSON "
+                          "text is UTF-8; no column of an index can be named by other bytes)");
+        }
 
         if (out_.listed++ >= max_labels_)
             continue;

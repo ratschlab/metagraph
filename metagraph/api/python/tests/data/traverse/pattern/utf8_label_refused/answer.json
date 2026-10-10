@@ -1,0 +1,180 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": null,
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": true,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "all",
+  "occurrences": true
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "anchor_information_bits": null,
+   "error": {
+    "code": "unrepresentable_label_name",
+    "message": "the labels of this pattern include column 0, whose name is not valid UTF-8: no answer carries such a name verbatim, and a replaced name could be another label's, so the pattern is refused in its slot and nothing of it is delivered; ask without labels (mode count, or output.labels \"none\"), or rename the label in the index"
+   },
+   "id": "invalid",
+   "information_bits": 62.0,
+   "kind": "dna",
+   "length": 31,
+   "min_anchor_information_bits": null,
+   "pattern": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "anchors_truncated": [],
+   "annotation": "unbudgeted",
+   "by_label": [
+    {
+     "column": "label�",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": null,
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    }
+   ],
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "unit": "graph_contexts",
+     "value": 1
+    },
+    "labels": {
+     "relation": "exact",
+     "unit": "labels",
+     "value": 1
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "valid",
+   "information_bits": 62.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 31,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [
+    "low_complexity_pattern",
+    "annotation_unbudgeted"
+   ],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+   "placement": "none",
+   "results": [
+    {
+     "instance": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+     "kmer": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+     "labels": [
+      {
+       "column": "label�",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3,
+     "offset": 0,
+     "row": 2,
+     "strand": "+",
+     "support": "kmer"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 1,
+   "rows_refused": [],
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.057583,
+    "label_discovery_ms": 0.003208,
+    "placement_ms": 0.0
+   },
+   "withheld": null,
+   "work": {
+    "annotation_rows": 1,
+    "annotation_rows_distinct": 1,
+    "annotation_units": 9,
+    "mask_scans": 0,
+    "memory_bytes": 3140,
+    "ranges_visited": 32,
+    "steps": 32
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.823584
+ }
+}

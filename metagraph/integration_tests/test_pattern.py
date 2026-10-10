@@ -3422,6 +3422,103 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(a['work'], b['work'])
 
 
+@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
+class TestPatternLabelNames(PatternChecks, TestingBase):
+    """A label whose name is not valid UTF-8 is never written into an answer (SPEC §8.9,
+    unrepresentable_label_name; the owner's decision of 2026-10-10). Two records at k = 31: A x 40
+    under the raw header bytes label\\xff and C x 40 under the valid header label\\ufffd, which is
+    what a replacement of the bad byte would spell, so that a replaced name would be the other
+    column's; a column annotation by header (unbudgeted: the requests carry the waiver)."""
+
+    K = 31
+    INVALID = b'label\xff'
+    REPLACED = 'label�'
+    A = 'A' * 31
+    C = 'C' * 31
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        fasta = os.path.join(d, 'records.fa')
+        with open(fasta, 'wb') as f:
+            f.write(b'>' + cls.INVALID + b'\n' + b'A' * 40 + b'\n'
+                    + b'>' + cls.REPLACED.encode('utf-8') + b'\n' + b'C' * 40 + b'\n')
+        graph = os.path.join(d, 'graph.dbg')
+        cls._build_graph(fasta, graph, cls.K, 'succinct', extra_params='--mask-dummy --in-ram')
+        cls._annotate_graph(fasta, graph, os.path.join(d, 'anno'), 'column')
+        cls.server = Server(METAGRAPH, ['-i', graph, '-a', os.path.join(d, 'anno.column.annodbg')],
+                            os.path.join(d, 'server.log'))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+        super().tearDownClass()
+
+    def patterns(self):
+        return [{'dna': self.A, 'id': 'invalid'}, {'dna': self.C, 'id': 'valid'}]
+
+    def assertExact(self, count, value):
+        self.assertEqual(('exact', value), (count['relation'], count['value']), count)
+
+    def test_the_entry_that_would_name_it_is_refused(self):
+        """output.labels "all": the A pattern's one context is carried by the column whose name is
+        not UTF-8, so its entry is refused in its slot (the column named, never its bytes) while
+        the C pattern is answered with its valid name; nothing in the response bytes is the bad
+        byte. The review's reproduction: the valid name the answer returned, fed into a predicate,
+        selects its own column only, never the A context."""
+        ret = self.server.post('pattern', {'patterns': self.patterns(),
+                                           'output': {'labels': 'all'},
+                                           'allow_unbudgeted_annotation': True})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertNotIn(b'\xff', ret.content)
+        refused, valid = ret.json()['patterns']
+        self.assertEqual('unrepresentable_label_name', refused['error']['code'], refused)
+        self.assertIn('column 0', refused['error']['message'])
+        self.assertEqual({'id', 'kind', 'pattern', 'length', 'information_bits',
+                          'anchor_information_bits', 'min_anchor_information_bits', 'error'},
+                         set(refused))
+        self.assertNotIn('error', valid)
+        self.assertExact(valid['counts']['contexts'], 1)
+        self.assertEqual([self.REPLACED], [l['column'] for l in valid['by_label']])
+        self.assertEqual([[self.REPLACED]],
+                         [[l['column'] for l in r['labels']] for r in valid['results']])
+        returned = valid['by_label'][0]['column']
+        out = self.pattern(self.server, {'patterns': self.patterns(), 'mode': 'count',
+                                         'predicate': {'any': [returned]},
+                                         'allow_unbudgeted_annotation': True})
+        a, c = out['patterns']
+        for e in (a, c):
+            self.assertNotIn('error', e)
+            self.assertEqual('completed', e['selection']['pass'], e['selection'])
+            self.assertExact(e['counts']['tested'], 1)
+        self.assertExact(a['counts']['selected'], 0)
+        self.assertExact(c['counts']['selected'], 1)
+        self.assertEqual(1, out['predicate']['known'])
+
+    def test_an_answer_without_names_is_unaffected(self):
+        """Mode count and the label-free path list no name: both entries answered, exact 1."""
+        for extra in ({'mode': 'count'}, {}):
+            ret = self.server.post('pattern', {'patterns': self.patterns(), **extra})
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertNotIn(b'\xff', ret.content)
+            for e in ret.json()['patterns']:
+                self.assertNotIn('error', e, extra)
+                self.assertExact(e['counts']['contexts'], 1)
+
+    def test_a_request_name_that_is_not_utf8_is_refused(self):
+        """A predicate name holding the raw byte 0xFF names no column: 400 invalid_request, so
+        that the unrepresentable column can never be named and so never selected."""
+        body = (b'{"patterns": [{"dna": "' + self.A.encode() + b'"}], "mode": "count", '
+                b'"predicate": {"any": ["' + self.INVALID + b'"]}, '
+                b'"allow_unbudgeted_annotation": true}')
+        ret = self.server.post('pattern', body, raw=True)
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertEqual('invalid_request', ret.json()['code'], ret.text)
+        self.assertNotIn(b'\xff', ret.content)
+
+
 class TestPeptideOracle(unittest.TestCase):
     """The six-frame oracle the mini's peptide tests use (cached translations and a residue
     regex) finds what its plain definition finds: no server, no index, always run."""

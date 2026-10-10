@@ -987,10 +987,13 @@ LabelOrder order_labels(const std::vector<uint64_t> &counts, const std::vector<L
     return o;
 }
 
-Json::Value label_json(const PathLabel &pl, const LabelRef &label, const char *strand,
-                       size_t length, const LabelOracle &oracle, bool place, bool records) {
+// One label object of a supported path: its column (|name|, |label|'s as NameCheck gives
+// it), its support and, with placement, its occurrences
+Json::Value label_json(const PathLabel &pl, const LabelRef &label, const std::string &name,
+                       const char *strand, size_t length, const LabelOracle &oracle, bool place,
+                       bool records) {
     Json::Value l;
-    l["column"] = label.name;
+    l["column"] = name;
     l["support"] = pl.verified ? "record_verified" : "label_intersection";
     if (!place)
         return l;
@@ -1360,13 +1363,15 @@ LabelsAnswer SupportedPathSink::labels_answer(const Extraction &x, uint64_t rele
                                      occurrences_total, Unit::PLACED_OCCURRENCES);
 
     // by_label over the returned paths, in label order
+    // the names as the answer may carry them
+    retrieval::NameCheck names(dict);
     if (summary_held) {
         Json::Value by_label(Json::arrayValue);
         for (size_t r = 0; r < labels.listed; ++r) {
             const LabelId id = labels.order[r];
             Json::Value b;
             b["graph"] = graph_name;
-            b["column"] = dict[id].name;
+            b["column"] = names.name(id);
             b["paths"] = count_json(exact ? Relation::EXACT : Relation::AT_LEAST,
                                     label_paths[id], Unit::PATHS);
             b["paths_record_verified"] = count_json(
@@ -1401,7 +1406,8 @@ LabelsAnswer SupportedPathSink::labels_answer(const Extraction &x, uint64_t rele
         const char *strand = strand_of(paths_[i].orientation);
         for (const PathLabel &pl : lists[i]) {
             (pl.verified ? any_verified : any_unverified) = true;
-            list.append(label_json(pl, dict[pl.label], strand, length, oracle, place, records));
+            list.append(label_json(pl, dict[pl.label], names.name(pl.label), strand, length,
+                                   oracle, place, records));
         }
         f["support"] = !any_verified && !any_unverified ? Json::Value()
                      : any_verified && any_unverified ? Json::Value("mixed")
@@ -1409,6 +1415,7 @@ LabelsAnswer SupportedPathSink::labels_answer(const Extraction &x, uint64_t rele
         f["labels"] = std::move(list);
         a.result_fields.push_back(std::move(f));
     }
+    a.unrepresentable = names.unrepresentable();
     pending.settle();
     finish();
     return a;

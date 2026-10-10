@@ -185,6 +185,13 @@ TYPO = '5622'
 # poly-T run and a poly-G run
 NO_INSTANCE = 'T' * 38 + 'G' * 38
 SMALL_PREDICATE_CAP = 4
+# the utf8_labels server (SPEC §8.9, unrepresentable_label_name): two records at k = 31, A x 40
+# under the raw header bytes label\xff (not UTF-8) and C x 40 under the valid header
+# label�, what a replacement of the bad byte would spell; its patterns, one k-mer each
+UTF8_INVALID_HEADER = b'label\xff'
+UTF8_REPLACED_HEADER = 'label�'
+UTF8_A = 'A' * MINI_K
+UTF8_C = 'C' * MINI_K
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
 # 503 and the expectations
@@ -701,6 +708,11 @@ FIXTURES = [
         'the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)',
         lambda doc: check(set(doc) == {'error'} and 'needs ?graph=' in doc['error'], doc),
         status=400),
+    get('traverse_capabilities_utf8_labels', 'utf8_labels', '/traverse/capabilities',
+        'GET /traverse/capabilities of the utf8_labels server (a BASIC graph with its mask file, '
+        'counting exact, an unbudgeted column annotation by header): the block of a server one '
+        'of whose labels the answers can never name (SPEC §8.9), nothing of it in the document',
+        expect_all(caps_block(True, mask='file', counting='exact'), details)),
     get('traverse_capabilities_primary', 'primary', '/traverse/capabilities',
         'a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], '
         'strand_stated false, placement none_canonical, annotation unbudgeted (column)',
@@ -1795,6 +1807,39 @@ FIXTURES = [
                                             and e['motif']['labels_absent'] == 1,
                                             e['counts'])))),
 
+    # ---------------------------------------------------------------- label names (SPEC §8.9)
+    post('utf8_label_refused', 'utf8_labels',
+         {'patterns': [p(UTF8_A, ident='invalid'), p(UTF8_C, ident='valid')],
+          'output': {'labels': 'all'}, 'allow_unbudgeted_annotation': True}, 200,
+         'a label whose name is not valid UTF-8 (the header label\\xff) is never written into '
+         'the answer (the owner\'s decision of 2026-10-10): the entry whose labels would name it '
+         'is refused in its slot, unrepresentable_label_name, the label named by its column (0) '
+         'and never by its bytes; the other entry is answered as usual, its label the valid name '
+         'label\\ufffd, which a replacement of the bad byte would also spell',
+         entries(slot_error('unrepresentable_label_name'),
+                 expect_all(exact(1), complete, counted('labels', 'exact', 1),
+                            lambda e: check(e['by_label'][0]['column'] == UTF8_REPLACED_HEADER
+                                            and all(l['column'] == UTF8_REPLACED_HEADER
+                                                    for r in e['results']
+                                                    for l in r['labels']),
+                                            e['by_label'])))),
+    post('utf8_label_count', 'utf8_labels',
+         {'patterns': [p(UTF8_A, ident='invalid'), p(UTF8_C, ident='valid')], 'mode': 'count'},
+         200,
+         'the same patterns in mode count: no name is listed, so both entries are answered '
+         '(exact 1 context each); only an answer that would carry the name is refused',
+         entries(exact(1), exact(1))),
+    post('utf8_label_predicate', 'utf8_labels',
+         {'patterns': [p(UTF8_A, ident='invalid'), p(UTF8_C, ident='valid')], 'mode': 'count',
+          'predicate': {'any': [UTF8_REPLACED_HEADER]}, 'allow_unbudgeted_annotation': True},
+         200,
+         'the valid name in a predicate selects its own column only (a request name is valid '
+         'UTF-8, so the unrepresentable column can never be named and so never selected): the '
+         'A context, carried by column 0 alone, is tested and not selected; the C context is '
+         'selected (access columns: single cells of a column annotation)',
+         entries(selection('completed', ('exact', 1), ('exact', 0), access='columns'),
+                 selection('completed', ('exact', 1), ('exact', 1), access='columns'))),
+
     # ---------------------------------------------------------------- whole-request refusals
     post('unknown_field', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'bogus': 1}, 400,
@@ -1919,6 +1964,11 @@ SERVERS = {
     'hash': 'server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg'
             ' --index-release ' + INDEX_RELEASE + '  (a hash graph of ' + HASH_RECORD
             + ' at k = 31, column annotation by file name)',
+    'utf8_labels': 'server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg'
+                   ' --index-release ' + INDEX_RELEASE + '  (a BASIC graph at k = 31 of two '
+                   'records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, '
+                   'and C x 40 under the valid header label\\ufffd, built with --mask-dummy; '
+                   'column annotation by header)',
 }
 
 
@@ -2045,6 +2095,24 @@ def build_indexes(binary, mini, work):
             if res.returncode:
                 raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
 
+    utf8 = os.path.join(work, 'utf8')
+    if not os.path.isfile(os.path.join(utf8, 'anno.column.annodbg')):
+        os.makedirs(utf8, exist_ok=True)
+        # the headers are bytes: one is not UTF-8 (a text write would refuse or replace it)
+        with open(os.path.join(utf8, 'records.fa'), 'wb') as f:
+            f.write(b'>' + UTF8_INVALID_HEADER + b'\n' + b'A' * 40 + b'\n'
+                    + b'>' + UTF8_REPLACED_HEADER.encode('utf-8') + b'\n' + b'C' * 40 + b'\n')
+        for cmd in ([binary, 'build', '-p', '1', '--graph', 'succinct', '-k', str(MINI_K),
+                     '--mask-dummy', '--in-ram', '-o', 'graph', 'records.fa'],
+                    [binary, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-header',
+                     '-o', 'anno', 'records.fa']):
+            with open(log, 'ab') as f:
+                f.write(('$ (cd utf8) ' + ' '.join(cmd) + '\n').encode())
+                f.flush()
+                res = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=utf8)
+            if res.returncode:
+                raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
+
     with open(os.path.join(work, 'graphs.csv'), 'w') as f:
         f.write(f'{MULTI_GRAPH_NAME},{graph},{os.path.join(masked, MINI_ANNO)}\n')
     with open(os.path.join(work, 'mixed.csv'), 'w') as f:
@@ -2083,6 +2151,11 @@ def server_args(name, mini, work):
         hashed = os.path.join(work, 'hash')
         return ['-i', os.path.join(hashed, 'graph.orhashdbg'),
                 '-a', os.path.join(hashed, 'anno.column.annodbg'),
+                '--index-release', INDEX_RELEASE]
+    if name == 'utf8_labels':
+        utf8 = os.path.join(work, 'utf8')
+        return ['-i', os.path.join(utf8, 'graph.dbg'),
+                '-a', os.path.join(utf8, 'anno.column.annodbg'),
                 '--index-release', INDEX_RELEASE]
     if name == 'primary':
         primary = os.path.join(work, 'primary')

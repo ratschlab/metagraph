@@ -1,0 +1,333 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "alphabet": "$ACGT",
+ "attempts": {
+  "allowance_ms": 10000,
+  "bound": "SPEC-labeled-traversal-core.md section 6.8, the attempt's bound",
+  "cancel": "POST /traverse/cancel",
+  "cancel_fields": [
+   "attempt_id",
+   "wait_ms",
+   "not_after_ms"
+  ],
+  "client_check_ms": 100,
+  "clock_skew_allowance_ms": 2000,
+  "content_timeout_s": 900,
+  "delivery_reserve": {
+   "account_per_text_byte": {
+    "graphlet": 50.0,
+    "json": 30.0
+   },
+   "build_mbps": 10.0,
+   "calibration": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve: calibration",
+   "compress_mbps": 50.0,
+   "coordinate_account_per_text_byte": 12,
+   "margin": 1.25,
+   "measured_account_per_text_byte": {
+    "full": null,
+    "graphlet": null,
+    "summary": null,
+    "tree": null
+   },
+   "measured_build_mbps": null,
+   "measured_compress_mbps": null,
+   "measured_stop_ms": null,
+   "measured_text_bytes": 1048576,
+   "rate_window": 16,
+   "rule": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve",
+   "stop_ms": 1000
+  },
+  "fields": [
+   "attempt_id",
+   "budget_id",
+   "locus_id",
+   "not_after_ms",
+   "expect_server_instance"
+  ],
+  "hard_cap_ms": 899000,
+  "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
+  "instance": "SPEC-labeled-traversal-core.md section 5, expect_server_instance",
+  "not_after": "SPEC-labeled-traversal-core.md section 5, not_after_ms",
+  "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
+  "retention_count": 10000,
+  "retention_s": 3600,
+  "server_instance": "dfaf172836e96e7a",
+  "state": "GET /traverse/attempt/{attempt_id}",
+  "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+  "tombstone_max_s": 86400
+ },
+ "budgets": [
+  "max_memory_mb",
+  "max_work_units"
+ ],
+ "compression_level": 1,
+ "content_encodings": [
+  "gzip",
+  "deflate"
+ ],
+ "coordinates": {
+  "action": "drop_coordinates",
+  "cap_knob": "output.max_coordinate_occurrences",
+  "kinds": [],
+  "knob": "output.coordinates",
+  "limitation": "coordinates",
+  "max_occurrences_default": 16,
+  "output_bound": "SPEC-labeled-traversal-core.md section 7.1, record coordinates: what bounds the block",
+  "rule": "SPEC-labeled-traversal-core.md section 7.1, record coordinates",
+  "supported": false
+ },
+ "cost_models_available": [
+  "forbid",
+  "constant",
+  "table"
+ ],
+ "deadline_check": {
+  "chunk_target_ms": 50,
+  "max_uninterruptible_ms": null,
+  "observed_max_uninterruptible_ms": 0,
+  "poll_stride": 8,
+  "rule": "SPEC-labeled-traversal-core.md section 6.8, chunked deadlines"
+ },
+ "decode_cache": {
+  "path_cache_mb": 128,
+  "rule": "SPEC-labeled-traversal-core.md section 8.4, the row-diff path cache"
+ },
+ "detail_levels": [
+  "summary",
+  "tree",
+  "full",
+  "graphlet"
+ ],
+ "direct_access": true,
+ "feature_level": 6,
+ "graphlet_format": 1,
+ "has_coord_to_header": false,
+ "has_coordinates": false,
+ "in_ram": {
+  "budgets_start": "after_load",
+  "loads": false,
+  "mem_cap_gb": 0,
+  "routes": [
+   "pattern",
+   "resolve",
+   "search",
+   "traverse"
+  ]
+ },
+ "index_fp": null,
+ "index_meta_fp": "893f2347f50938fa",
+ "index_ns": null,
+ "k": 31,
+ "label_modes": [
+  "constrain",
+  "annotate"
+ ],
+ "max_memory_mb": 0,
+ "max_query_bp": 0,
+ "max_seed_bp": 100000,
+ "max_seed_labels": 10000,
+ "max_seeds": 64,
+ "max_time_ms": 30000.0,
+ "max_work_units": 0,
+ "memory_bound": "soft",
+ "num_labels": 2,
+ "pattern": {
+  "alphabet": "$ACGT",
+  "annotation": "unbudgeted",
+  "available": true,
+  "caps": {
+   "max_anchors": 1000,
+   "max_annotation_work": 100000000,
+   "max_checked_entries": 50,
+   "max_contexts": 10000,
+   "max_labels": 1000,
+   "max_labels_per_anchor": 64,
+   "max_memory_mb": 256,
+   "max_occurrences_per_label": 16,
+   "max_paths": 1000,
+   "max_patterns": 16,
+   "max_predicate_contexts": 100000,
+   "max_predicate_labels": 10000,
+   "max_predicate_work": 100000000,
+   "max_steps": 100000000,
+   "min_information_bits": 24,
+   "time_budget_ms": 600000
+  },
+  "caps_rule": "SPEC-pattern-search.md section 4.5",
+  "counting": "exact",
+  "default_genetic_code": 1,
+  "default_long_search": "anchors",
+  "default_max_anchors": 1000,
+  "default_max_labels": 1000,
+  "default_mode": "all_or_count",
+  "default_occurrences": true,
+  "default_projection": "none",
+  "default_scope": "any_offset",
+  "default_strands": "both",
+  "default_time_budget_ms": 60000,
+  "delivery_mbps": {
+   "build": 10,
+   "compress": 50
+  },
+  "details": "GET /pattern/capabilities",
+  "dummy_fraction": null,
+  "finalize_reserve_ms": 250,
+  "genetic_codes": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33
+  ],
+  "graph_cleaned": "unknown",
+  "graph_mode": "basic",
+  "in_ram": "accepted",
+  "k": 31,
+  "kinds": [
+   "dna",
+   "iupac",
+   "protein"
+  ],
+  "kinds_later_increment": [],
+  "long_patterns": "anchors_counted",
+  "long_search": [
+   "anchors",
+   "paths",
+   "supported_paths"
+  ],
+  "mask": "file",
+  "modes": [
+   "count",
+   "all_or_count",
+   "partial"
+  ],
+  "pattern_contract_version": 1,
+  "placement": "none",
+  "predicate": {
+   "access": "columns",
+   "operators": [
+    "any",
+    "all",
+    "none",
+    "at_least",
+    "and",
+    "or",
+    "not"
+   ],
+   "scopes": [
+    "context",
+    "motif"
+   ],
+   "strands": [
+    "either",
+    "context"
+   ]
+  },
+  "projections": [
+   "none",
+   "all",
+   "predicate_only"
+  ],
+  "projections_later_increment": [],
+  "protein_residues": [
+   "A",
+   "C",
+   "D",
+   "E",
+   "F",
+   "G",
+   "H",
+   "I",
+   "K",
+   "L",
+   "M",
+   "N",
+   "P",
+   "Q",
+   "R",
+   "S",
+   "T",
+   "V",
+   "W",
+   "Y",
+   "X",
+   "B",
+   "Z",
+   "J",
+   "*"
+  ],
+  "protein_rule": "SPEC-pattern-search.md section 12.2",
+  "records_shorter_than_k": "not_indexed",
+  "resident_only": false,
+  "scopes": [
+   "suffix",
+   "any_offset"
+  ],
+  "scopes_by_graph_mode": {
+   "basic": [
+    "suffix",
+    "any_offset"
+   ],
+   "canonical": [
+    "suffix",
+    "any_offset"
+   ],
+   "primary": [
+    "any_offset"
+   ]
+  },
+  "strand_stated": true,
+  "strands": [
+   "both",
+   "forward",
+   "reverse"
+  ],
+  "support": "label_intersection",
+  "unavailable_reason": null
+ },
+ "regime": "basic",
+ "release": "fixtures-mini_refseq",
+ "resolve": {
+  "time_budget": {
+   "accepted": true,
+   "check_kmers": 4096,
+   "check_labels": 4096,
+   "default": null,
+   "finalize_reserve_configurable": false,
+   "finalize_reserve_ms": 250,
+   "knob": "bounds.time_budget_ms",
+   "max_time_ms": 30000,
+   "rule": "SPEC-labeled-traversal-core.md section 4.5",
+   "stop_phases": [
+    "rows",
+    "support"
+   ]
+  }
+ },
+ "schema_version": 1,
+ "supports_trace": false,
+ "work_bound": "SPEC-labeled-traversal-core.md section 6.8, work units",
+ "work_check_interval": 65536
+}
