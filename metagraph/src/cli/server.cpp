@@ -783,6 +783,13 @@ int run_server(Config *config) {
             return single_identity;
         return identity_of_pair(resident_pairs.at(&index), index);
     };
+    // the pair's index_fp alone (the graph list's manifest digest, known at start-up; "" without
+    // a manifest): what the envelope entry of a /pattern pair states when its index could not
+    // be leased for the request (the meta fingerprint needs the index, index_fp does not)
+    auto fp_of_pair = [&](const GraphPair &pair) {
+        std::lock_guard<std::mutex> lock(identities_mutex);
+        return pair_identities[pair].fp;
+    };
     // the multi-graph server's per-pair summary of GET /capabilities and whether its pairs'
     // columns are disjoint, computed once its indexes are loaded
     Json::Value graph_summary;
@@ -1169,11 +1176,15 @@ int run_server(Config *config) {
      * POST /pattern on a multi-graph server, as /search: the request's `graphs` (every name
      * when there are at most 10 and it names none), each pair of each name answered as one
      * single-graph request would be (its own deadline, caps and memory account, starting after
-     * its index is loaded for it with `in_ram`), in parallel on the graphs' pool; the answers
-     * concatenated in ordered_pairs' order, each tagged with its pair (graph, graph_path,
-     * annotation_path) and its index_fp. A refusal of any pair refuses the request (the first
-     * in that order; the other pairs are stopped at their next clock reading). The answer is
-     * written by the latest of the pairs' deadlines, past it 503 deadline (|delivery|)
+     * its index is loaded for it with `in_ram`), in parallel on the graphs' pool; the envelope
+     * (pattern_envelope) carries one entry per pair in ordered_pairs' order, tagged with its
+     * pair (graph, graph_path, annotation_path) and its index_fp: the pair's answer, or the
+     * refusal the pair alone would have been answered (SPEC §24.1) -- its graph's support,
+     * its annotation, its deadline, a failure while it was processed. What no pair decides
+     * (the body, `graphs`, `in_ram`, the request's fields) is checked before any pair and
+     * refuses the whole request as before. The envelope is written by the latest deadline of
+     * the pairs that answered, past it 503 deadline (|delivery|); a refused pair binds
+     * nothing (one refused for its deadline has passed it).
      */
     auto multi_graph_pattern = [&](const std::string &content, size_t request_id,
                                    const std::function<bool()> &gone,
@@ -1191,80 +1202,92 @@ int run_server(Config *config) {
         } catch (const std::invalid_argument &e) {
             throw PatternRefusal(400, "invalid_request", e.what());
         }
-        // each pair's request: the body without the selection
+        // each pair's request: the body without the selection, its fields checked once here
+        // (the same for every pair), so that their refusal is the request's and not a pair's
         json.removeMember("graphs");
+        validate_pattern_request(json, pattern_limits(*config));
         const auto targets = ordered_pairs(indexes, names);
         logger->info("[Server] Request {}: /pattern on {} pair(s) of {} graph name(s){}",
                      request_id, targets.size(), names.size(),
                      in_ram.value_or(false) ? ", in_ram" : "");
 
         struct Slot {
-            Json::Value answer;
-            std::optional<PatternRefusal> refusal;
-            std::exception_ptr error;
+            Json::Value entry;
+            bool answered = false;
             bool aborted = false;
+            // when answered: the pair's deadline, from which the envelope's is taken
             graph::pattern::Deadline::Clock::time_point start;
             double budget_ms = 0;
         };
         std::vector<Slot> slots(targets.size());
-        // a refused pair stops the others: the request is refused whatever they answer
-        std::atomic<bool> failed { false };
-        auto stop = [&]() { return failed.load() || gone(); };
         std::vector<std::shared_future<void>> futures;
         for (size_t i = 0; i < targets.size(); ++i) {
             futures.push_back(graphs_pool.enqueue([&, i]() {
                 Slot &slot = slots[i];
-                const auto &[name, pair] = targets[i];
+                const std::string &name = targets[i].first;
+                const GraphPair &pair = targets[i].second;
+                // the pair's entry when it is refused: what it alone would have been answered
+                auto refused = [&](int http_status, const Json::Value &body) {
+                    slot.entry = pattern_pair_refused(name, pair.first, pair.second,
+                                                      fp_of_pair(pair), http_status, body);
+                };
                 try {
-                    if (stop()) {
+                    if (gone()) {
                         slot.aborted = true;
                         return;
                     }
                     const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                                   stop, /* for_pattern */ true);
+                                                   gone, /* for_pattern */ true);
                     const IndexIdentity identity = identity_of_pair(pair, lease->index());
                     PatternDelivery own;
-                    own.set_abort(stop);
+                    own.set_abort(gone);
                     slot.start = graph::pattern::Deadline::Clock::now();
                     Json::Value answer = process_pattern_request(json, lease->index(), *config,
                                                                  &identity, &own);
                     slot.budget_ms = answer["limits"]["time_budget_ms"].asDouble();
                     if (in_ram)
                         answer["timing"]["load_ms"] = lease->load_ms();
-                    answer["graph"] = name;
-                    answer["graph_path"] = pair.first;
-                    answer["annotation_path"] = pair.second;
-                    answer["index_fp"] = string_or_null(identity.fp);
-                    slot.answer = std::move(answer);
+                    slot.entry = pattern_pair_answered(name, pair.first, pair.second,
+                                                       identity.fp, std::move(answer));
+                    slot.answered = true;
                 } catch (const PatternRefusal &e) {
-                    slot.refusal = e;
-                    failed = true;
+                    logger->warn("[Server] Request {}: pair ({}, {}) of '{}' refused ({} {}): {}",
+                                 request_id, pair.first, pair.second, name, e.status(),
+                                 e.code(), e.what());
+                    refused(e.status(), e.body());
                 } catch (const graph::pattern::Aborted &) {
                     slot.aborted = true;
                 } catch (const LoadAbandoned &) {
                     slot.aborted = true;
+                } catch (const std::exception &e) {
+                    // a failure of this pair, as the route answers one for a single graph
+                    // (answer_request): 400 with its text, no code
+                    logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed: {}",
+                                 request_id, pair.first, pair.second, name, e.what());
+                    Json::Value body;
+                    body["error"] = e.what();
+                    refused(400, body);
                 } catch (...) {
-                    slot.error = std::current_exception();
-                    failed = true;
+                    logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed",
+                                 request_id, pair.first, pair.second, name);
+                    Json::Value body;
+                    body["error"] = "Internal server error";
+                    refused(500, body);
                 }
             }));
         }
         for (auto &future : futures) {
             future.wait();
         }
-        for (Slot &slot : slots) {
-            if (slot.refusal)
-                throw *slot.refusal;
-            if (slot.error)
-                std::rethrow_exception(slot.error);
-        }
         for (const Slot &slot : slots) {
             if (slot.aborted)
                 throw graph::pattern::Aborted();
         }
-        // the deadline of the writing: the latest of the pairs'
+        // the deadline of the writing: the latest of the answered pairs'
         const Slot *latest = nullptr;
         for (const Slot &slot : slots) {
+            if (!slot.answered)
+                continue;
             if (!latest || slot.start + std::chrono::duration<double, std::milli>(slot.budget_ms)
                     > latest->start + std::chrono::duration<double, std::milli>(latest->budget_ms)) {
                 latest = &slot;
@@ -1275,19 +1298,14 @@ int run_server(Config *config) {
                     latest->start, latest->budget_ms,
                     static_cast<double>(config->pattern_finalize_ms)));
         }
-        Json::Value out;
-        out["pattern_contract_version"] = graph::pattern::kPatternContractVersion;
-        Json::Value graphs(Json::arrayValue);
-        for (const std::string &name : names) {
-            graphs.append(name);
-        }
-        out["graphs"] = std::move(graphs);
-        Json::Value answers(Json::arrayValue);
+        std::vector<Json::Value> entries;
+        entries.reserve(slots.size());
         for (Slot &slot : slots) {
-            answers.append(std::move(slot.answer));
+            entries.push_back(std::move(slot.entry));
         }
-        out["answers"] = std::move(answers);
-        out["timing"]["elapsed_ms"] = timer.elapsed() * 1000;
+        Json::Value out = pattern_envelope(names, std::move(entries), timer.elapsed() * 1000);
+        logger->info("[Server] Request {}: /pattern envelope: {} pair(s) answered, {} refused",
+                     request_id, out["answered"].asUInt(), out["refused"].asUInt());
         delivery->check();
         return out;
     };

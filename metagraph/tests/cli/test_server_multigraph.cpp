@@ -211,6 +211,170 @@ TEST(MultiGraphSelection, CapabilitiesStateTheThreshold) {
 }
 
 
+// ---------------------------------------------------------------- the /pattern envelope
+
+namespace {
+
+std::set<std::string> members(const Json::Value &v) {
+    const auto names = v.getMemberNames();
+    return std::set<std::string>(names.begin(), names.end());
+}
+
+std::string compact(const Json::Value &v) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, v);
+}
+
+} // namespace
+
+// SPEC §24.1: an answered pair's entry is its single-graph answer, tagged with the pair and
+// its index_fp (null without a manifest), and outcome "answered"; nothing else is added
+TEST(MultiGraphEnvelope, AnAnsweredEntryIsTheAnswerTagged) {
+    const Json::Value answer = parse(R"({"pattern_contract_version": 1, "patterns": [{"id": "p"}],
+                                         "index": {"index_fp": null}, "limits": {},
+                                         "timing": {"elapsed_ms": 1.5}})");
+    const Json::Value entry = pattern_pair_answered("name", "/g.dbg", "/a.annodbg", "", answer);
+    for (const std::string &key : answer.getMemberNames()) {
+        EXPECT_EQ(answer[key], entry[key]) << key;
+    }
+    EXPECT_EQ("name", entry["graph"].asString());
+    EXPECT_EQ("/g.dbg", entry["graph_path"].asString());
+    EXPECT_EQ("/a.annodbg", entry["annotation_path"].asString());
+    EXPECT_TRUE(entry["index_fp"].isNull());
+    EXPECT_EQ("answered", entry["outcome"].asString());
+    EXPECT_EQ(answer.size() + 5, entry.size());
+    EXPECT_FALSE(entry.isMember("refusal"));
+    EXPECT_EQ("fp", pattern_pair_answered("n", "g", "a", "fp", answer)["index_fp"].asString());
+}
+
+// a refused pair's entry: the tags, outcome "refused", and the body the pair alone would have
+// been answered under `refusal` with its HTTP status (a refusal's {error, code}; a failure's
+// {error} without a code)
+TEST(MultiGraphEnvelope, ARefusedEntryCarriesThePairsOwnBody) {
+    const PatternRefusal e(400, "mask_invalid", "pattern: the mask marks a dummy edge valid");
+    const Json::Value entry = pattern_pair_refused("name", "/g.dbg", "/a.annodbg", "fp", e.status(),
+                                                   e.body());
+    EXPECT_EQ(std::set<std::string>({ "graph", "graph_path", "annotation_path", "index_fp",
+                                      "outcome", "refusal" }), members(entry));
+    EXPECT_EQ("name", entry["graph"].asString());
+    EXPECT_EQ("fp", entry["index_fp"].asString());
+    EXPECT_EQ("refused", entry["outcome"].asString());
+    const Json::Value &r = entry["refusal"];
+    EXPECT_EQ(std::set<std::string>({ "http_status", "error", "code" }), members(r));
+    EXPECT_EQ(400, r["http_status"].asInt());
+    EXPECT_EQ("mask_invalid", r["code"].asString());
+    EXPECT_EQ(e.what(), r["error"].asString());
+    // the 503 of the pair's deadline, as its own
+    const PatternRefusal late(503, "deadline", "pattern: the answer could not be written");
+    EXPECT_EQ(503, pattern_pair_refused("n", "g", "a", "", late.status(), late.body())
+                       ["refusal"]["http_status"].asInt());
+    // a failure while the pair was processed: its text alone
+    Json::Value failure;
+    failure["error"] = "Internal server error";
+    const Json::Value f = pattern_pair_refused("n", "g", "a", "", 500, failure);
+    EXPECT_TRUE(f["index_fp"].isNull());
+    EXPECT_EQ(std::set<std::string>({ "http_status", "error" }), members(f["refusal"]));
+    EXPECT_EQ(500, f["refusal"]["http_status"].asInt());
+}
+
+// the envelope: the names in order, every entry in order whatever its outcome, the counts of
+// each outcome; a 200 with every pair refused too
+TEST(MultiGraphEnvelope, EntriesInOrderWithTheirCounts) {
+    const Json::Value answer = parse(R"({"patterns": [], "index": {"index_fp": null}})");
+    Json::Value failure;
+    failure["error"] = "boom";
+    std::vector<Json::Value> entries;
+    entries.push_back(pattern_pair_answered("a", "/a1.dbg", "/a1.anno", "", answer));
+    entries.push_back(pattern_pair_refused("a", "/a2.dbg", "/a2.anno", "", 400,
+                                           PatternRefusal(400, "annotation_unbudgeted", "x").body()));
+    entries.push_back(pattern_pair_answered("b", "/b.dbg", "/b.anno", "fp", answer));
+    entries.push_back(pattern_pair_refused("c", "/c.dbg", "/c.anno", "", 500, failure));
+    const Json::Value out = pattern_envelope({ "a", "b", "c" }, entries, 12.5);
+    EXPECT_EQ(std::set<std::string>({ "pattern_contract_version", "graphs", "answered", "refused",
+                                      "answers", "timing" }), members(out));
+    EXPECT_EQ(1, out["pattern_contract_version"].asInt());
+    EXPECT_EQ(parse(R"(["a", "b", "c"])"), out["graphs"]);
+    EXPECT_EQ(2u, out["answered"].asUInt());
+    EXPECT_EQ(2u, out["refused"].asUInt());
+    ASSERT_EQ(4u, out["answers"].size());
+    for (size_t i = 0; i < entries.size(); ++i) {
+        EXPECT_EQ(entries[i], out["answers"][static_cast<Json::ArrayIndex>(i)]) << i;
+    }
+    EXPECT_EQ(12.5, out["timing"]["elapsed_ms"].asDouble());
+    EXPECT_EQ(1u, out["timing"].size());
+
+    const Json::Value none = pattern_envelope({ "a" }, { entries[1] }, 1.0);
+    EXPECT_EQ(0u, none["answered"].asUInt());
+    EXPECT_EQ(1u, none["refused"].asUInt());
+    EXPECT_EQ(1u, none["answers"].size());
+}
+
+// the identity panel: an envelope without a refused pair is the envelope of the build before
+// (every pair's answer with its four tags, graphs, timing) plus `answered`, `refused` and each
+// entry's `outcome`, byte for byte
+TEST(MultiGraphEnvelope, WithoutARefusalOnlyTheCountsAndOutcomeAreNew) {
+    const Json::Value answer = parse(R"({"pattern_contract_version": 1, "patterns": [{"id": "p"}],
+                                         "index": {"index_fp": "fp"}, "timing": {"elapsed_ms": 2}})");
+    Json::Value before;
+    before["pattern_contract_version"] = 1;
+    before["graphs"].append("a");
+    before["graphs"].append("b");
+    for (const char *name : { "a", "b" }) {
+        Json::Value tagged = answer;
+        tagged["graph"] = name;
+        tagged["graph_path"] = std::string("/") + name + ".dbg";
+        tagged["annotation_path"] = std::string("/") + name + ".anno";
+        tagged["index_fp"] = "fp";
+        before["answers"].append(tagged);
+    }
+    before["timing"]["elapsed_ms"] = 3.0;
+
+    std::vector<Json::Value> entries;
+    for (const char *name : { "a", "b" }) {
+        entries.push_back(pattern_pair_answered(name, std::string("/") + name + ".dbg",
+                                                std::string("/") + name + ".anno", "fp", answer));
+    }
+    Json::Value now = pattern_envelope({ "a", "b" }, entries, 3.0);
+    EXPECT_EQ(2u, now["answered"].asUInt());
+    EXPECT_EQ(0u, now["refused"].asUInt());
+    now.removeMember("answered");
+    now.removeMember("refused");
+    for (Json::Value &entry : now["answers"]) {
+        EXPECT_EQ("answered", entry["outcome"].asString());
+        entry.removeMember("outcome");
+    }
+    EXPECT_EQ(compact(before), compact(now));
+}
+
+// SPEC §24.1: what no pair decides is refused before any pair, with the single-graph
+// route's codes, from the body alone; a valid body passes (in_ram, a boolean, among its fields)
+TEST(MultiGraphEnvelope, RequestLevelChecksNeedNoGraph) {
+    const PatternLimits limits;
+    auto refusal = [&](const std::string &body) {
+        try {
+            validate_pattern_request(parse(body), limits);
+        } catch (const PatternRefusal &e) {
+            return std::to_string(e.status()) + " " + e.code();
+        }
+        return std::string("200");
+    };
+    EXPECT_EQ("200", refusal(R"({"patterns": [{"dna": "ACGTACGTACGTAC"}], "mode": "count"})"));
+    EXPECT_EQ("200", refusal(R"({"patterns": [{"dna": "ACGTACGTACGTAC"}], "in_ram": true})"));
+    EXPECT_EQ("400 invalid_request", refusal(R"({"patterns": [{"dna": "ACGT"}], "mode": "x"})"));
+    EXPECT_EQ("400 invalid_request", refusal(R"({"patterns": []})"));
+    EXPECT_EQ("400 invalid_request", refusal(R"({"patterns": [{"dna": "ACGT"}], "nope": 1})"));
+    EXPECT_EQ("400 invalid_request", refusal(R"({"patterns": [{"dna": "ACGT"}], "in_ram": "yes"})"));
+    EXPECT_EQ("400 invalid_request", refusal("[]"));
+    EXPECT_EQ("400 later_increment",
+              refusal(R"({"patterns": [{"dna": "ACGT"}], "budget_split": "even"})"));
+    EXPECT_EQ("400 genetic_code_unknown",
+              refusal(R"({"patterns": [{"protein": "MKV"}], "genetic_code": 7})"));
+    // the selection is the server's: the handler takes `graphs` off before asking
+    EXPECT_EQ("400 invalid_request", refusal(R"({"patterns": [{"dna": "ACGT"}], "graphs": ["a"]})"));
+}
+
+
 // ---------------------------------------------------------------- in_ram
 
 // /search's rule: a load only for in_ram, on a server on mmap, of a pair within the capacity

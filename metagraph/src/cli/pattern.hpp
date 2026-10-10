@@ -248,6 +248,16 @@ class PatternDelivery {
 Json::Value parse_pattern_body(const std::string &content);
 
 /**
+ * The checks of process_pattern_request that need no graph (SPEC §5 steps 5 to 9: the body
+ * is an object, its fields, the patterns, the predicate), thrown as process_pattern_request
+ * throws them (400 invalid_request, later_increment, genetic_code_unknown,
+ * predicate_too_large); nothing else is done. A multi-graph server asks it once before its
+ * pairs (SPEC §24.1), so that such a refusal is the request's and not every pair's; each pair
+ * then starts from its graph's support (step 4) and refuses on its own.
+ */
+void validate_pattern_request(const Json::Value &json, const PatternLimits &limits);
+
+/**
  * Answers one /pattern request (the JSON contract of pattern_contract_version 1) on the
  * single graph of |anno_graph| under |limits|, stating |release|. The deadline starts on
  * entry (the body was parsed), read from |clock| (the steady clock when null; injectable so

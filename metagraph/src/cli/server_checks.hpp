@@ -278,6 +278,35 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
 Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t threshold);
 
 /**
+ * The envelope POST /pattern answers on a multi-graph server (SPEC §24.1): one entry per
+ * selected (name, pair) in the answers' order, each the outcome of that pair alone.
+ *  - pattern_pair_answered: the pair's single-graph answer |answer| (SPEC §8) tagged with its
+ *    pair -- graph (the name it was selected by), graph_path, annotation_path, index_fp (null
+ *    when |index_fp| is empty: no manifest in the graph list) -- and outcome "answered";
+ *  - pattern_pair_refused: the same tags, outcome "refused", and `refusal`: |http_status| and
+ *    the members of |body|, the body a single-graph server would have answered for the pair
+ *    ({error, code} for a refusal, {error} for an unexpected failure);
+ *  - pattern_envelope: pattern_contract_version, graphs (|names|, in byte order), answered and
+ *    refused (how many entries have each outcome), answers (|entries| in order) and
+ *    timing.elapsed_ms. It is a 200 whenever the request itself was valid, every pair refused
+ *    included; the request's own refusals (its fields, `graphs`) stay whole-request 400s.
+ */
+Json::Value pattern_pair_answered(const std::string &name,
+                                  const std::string &graph_path,
+                                  const std::string &annotation_path,
+                                  const std::string &index_fp,
+                                  Json::Value answer);
+Json::Value pattern_pair_refused(const std::string &name,
+                                 const std::string &graph_path,
+                                 const std::string &annotation_path,
+                                 const std::string &index_fp,
+                                 int http_status,
+                                 const Json::Value &body);
+Json::Value pattern_envelope(const std::vector<std::string> &names,
+                             std::vector<Json::Value> entries,
+                             double elapsed_ms);
+
+/**
  * Whether the column names of a multi-graph server's annotations are disjoint: each name a
  * column of one (graph, annotation) pair only, so that a label's counts and occurrences
  * summed over the pairs count each column once (the chunks of an index that partition its

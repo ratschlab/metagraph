@@ -26,6 +26,7 @@
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "graph/alignment/pattern_search.hpp"
 #include "server_utils.hpp"
 #include "traverse.hpp"
 
@@ -878,6 +879,71 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
 
 Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t threshold) {
     return multi_graph ? Json::Value(Json::UInt64(threshold)) : Json::Value();
+}
+
+namespace {
+
+// the tags of a pair's entry in the envelope, set on |entry|
+void tag_pattern_pair(Json::Value *entry,
+                      const std::string &name,
+                      const std::string &graph_path,
+                      const std::string &annotation_path,
+                      const std::string &index_fp) {
+    (*entry)["graph"] = name;
+    (*entry)["graph_path"] = graph_path;
+    (*entry)["annotation_path"] = annotation_path;
+    (*entry)["index_fp"] = index_fp.empty() ? Json::Value() : Json::Value(index_fp);
+}
+
+} // namespace
+
+Json::Value pattern_pair_answered(const std::string &name,
+                                  const std::string &graph_path,
+                                  const std::string &annotation_path,
+                                  const std::string &index_fp,
+                                  Json::Value answer) {
+    tag_pattern_pair(&answer, name, graph_path, annotation_path, index_fp);
+    answer["outcome"] = "answered";
+    return answer;
+}
+
+Json::Value pattern_pair_refused(const std::string &name,
+                                 const std::string &graph_path,
+                                 const std::string &annotation_path,
+                                 const std::string &index_fp,
+                                 int http_status,
+                                 const Json::Value &body) {
+    Json::Value entry;
+    tag_pattern_pair(&entry, name, graph_path, annotation_path, index_fp);
+    entry["outcome"] = "refused";
+    Json::Value refusal = body;
+    refusal["http_status"] = http_status;
+    entry["refusal"] = std::move(refusal);
+    return entry;
+}
+
+Json::Value pattern_envelope(const std::vector<std::string> &names,
+                             std::vector<Json::Value> entries,
+                             double elapsed_ms) {
+    Json::Value out;
+    out["pattern_contract_version"] = graph::pattern::kPatternContractVersion;
+    Json::Value graphs(Json::arrayValue);
+    for (const std::string &name : names) {
+        graphs.append(name);
+    }
+    out["graphs"] = std::move(graphs);
+    Json::UInt answered = 0;
+    Json::UInt refused = 0;
+    Json::Value answers(Json::arrayValue);
+    for (Json::Value &entry : entries) {
+        (entry["outcome"].asString() == "refused" ? refused : answered)++;
+        answers.append(std::move(entry));
+    }
+    out["answered"] = answered;
+    out["refused"] = refused;
+    out["answers"] = std::move(answers);
+    out["timing"]["elapsed_ms"] = elapsed_ms;
+    return out;
 }
 
 ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &columns,

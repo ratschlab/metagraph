@@ -5,7 +5,9 @@ column annotations, each listed under a name of its own and two of them also und
 together (a name spanning two graphs). What such a server serves, as /search does:
 
   - POST /pattern takes /search's `graphs`; each selected pair is answered as a single-graph
-    server answers it, tagged with its pair, the answers concatenated;
+    server answers it, tagged with its pair, the answers concatenated in an envelope; a pair
+    the request is refused on is a refused entry of the envelope (the pair's own body under
+    `refusal`), the other pairs answered, while what no pair decides stays the request's 400;
   - POST /traverse and /resolve take `graphs: [name]` beside `graph`, two spellings of one
     request; a seed the graph does not hold is a per-seed result (outcome.walks not_in_graph,
     its k-mers present), whichever spelling named the graph;
@@ -21,6 +23,7 @@ and the server's answers without the new fields.
 
 import json
 import os
+import random
 import shlex
 import socket
 import subprocess
@@ -44,6 +47,8 @@ CHUNKS = [
 ]
 # a name over two graphs, as a production list names an index's chunks
 SPLIT = ('enterics', ['ecoli', 'kleb'])
+# what an envelope entry carries beside the pair's own answer (SPEC §24.1)
+TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome')
 
 
 def free_port():
@@ -91,9 +96,10 @@ def untimed(value):
 
 
 class Server:
-    """A server_query process on a free port, ready once GET /stats answers 200."""
+    """A server_query process on a free port, ready once GET /stats answers 200; |threads| is
+    its -p (the graph pool the pairs of a request run on, and its HTTP threads)."""
 
-    def __init__(self, args, log_path, timeout=300):
+    def __init__(self, args, log_path, timeout=300, threads=4):
         os.environ['NO_PROXY'] = '127.0.0.1'
         for _ in range(20):
             self.port = free_port()
@@ -101,7 +107,7 @@ class Server:
             self.log = open(log_path, 'ab')
             self.process = subprocess.Popen(
                 shlex.split(METAGRAPH) + ['server_query'] + args
-                + ['--port', str(self.port), '--address', '127.0.0.1', '-p', '4'],
+                + ['--port', str(self.port), '--address', '127.0.0.1', '-p', str(threads)],
                 stdout=self.log, stderr=subprocess.STDOUT)
             if self._wait_ready(timeout):
                 return
@@ -222,6 +228,19 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
         return json.loads(res.stdout.decode().strip().split('\n')[-1])
 
+    def cli_refusal(self, chunk, request):
+        """`metagraph pattern` on the chunk's files when it refuses the request: the body a
+        single-graph server answers (the CLI writes it and exits 1)"""
+        path = os.path.join(self.tempdir.name, f'refusal_{chunk}.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        graph, anno = self.pairs[chunk]
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', graph, '-a',
+                                                       anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode, res.stderr.decode()[-2000:])
+        return json.loads(res.stdout.decode().strip().split('\n')[-1])
+
     def post(self, route, payload, status=200):
         ret = self.server.post(route, payload)
         self.assertEqual(status, ret.status_code, ret.text[:2000])
@@ -298,18 +317,19 @@ class TestMultiGraphServer(TestingBase):
 
     def test_a_pair_the_pattern_search_does_not_serve(self):
         """A graph the engine does not recognise (a hash graph) beside a served one: its summary
-        entry and its block say why, a request naming it is refused with its reason (the whole
-        request, as /search fails on one graph), and the server-wide block is available while
-        one pair is served -- with the first pair's reason when none is."""
+        entry and its block say why, a request naming it answers 200 with that pair as a
+        refused entry of the envelope carrying its reason (alone: the envelope with its one
+        entry refused, nothing answered), and the server-wide block is available while one
+        pair is served -- with the first pair's reason when none is."""
         d = self.tempdir.name
-        out = os.path.join(d, 'hash')
-        os.makedirs(out, exist_ok=True)
+        out_dir = os.path.join(d, 'hash')
+        os.makedirs(out_dir, exist_ok=True)
         record = os.path.join(FASTA, '1296536.fa')
-        self._run_command(f'{METAGRAPH} build -p 4 --graph hash -k {K} -o {out}/graph {record}',
+        self._run_command(f'{METAGRAPH} build -p 4 --graph hash -k {K} -o {out_dir}/graph {record}',
                           'build hash')
-        self._run_command(f'{METAGRAPH} annotate -p 4 -i {out}/graph.orhashdbg --anno-filename '
-                          f'-o {out}/anno {record}', 'annotate hash')
-        hashed = f'hashed,{out}/graph.orhashdbg,{out}/anno.column.annodbg\n'
+        self._run_command(f'{METAGRAPH} annotate -p 4 -i {out_dir}/graph.orhashdbg --anno-filename '
+                          f'-o {out_dir}/anno {record}', 'annotate hash')
+        hashed = f'hashed,{out_dir}/graph.orhashdbg,{out_dir}/anno.column.annodbg\n'
         for name, lines, available in (
                 ('mixed', hashed + f'ecoli,{self.pairs["ecoli"][0]},{self.pairs["ecoli"][1]}\n',
                  True),
@@ -332,11 +352,22 @@ class TestMultiGraphServer(TestingBase):
                                  (block['available'], block['unavailable_reason']))
                 p = {'patterns': [{'dna': 'ACGTTGCAACGTTGCAAG'}], 'mode': 'count'}
                 ret = server.post('pattern', dict(p, graphs=list(pair_names(caps))))
-                self.assertEqual(400, ret.status_code, ret.text)
-                self.assertEqual('representation_unsupported', ret.json()['code'])
+                self.assertEqual(200, ret.status_code, ret.text)
+                out = ret.json()
+                self.assertEqual((1 if available else 0, 1), (out['answered'], out['refused']))
+                entry = {a['graph']: a for a in out['answers']}['hashed']
+                self.assertEqual('refused', entry['outcome'])
+                self.assertEqual({'http_status', 'error', 'code'}, set(entry['refusal']))
+                self.assertEqual((400, 'representation_unsupported'),
+                                 (entry['refusal']['http_status'], entry['refusal']['code']))
+                self.assertEqual((f'{out_dir}/graph.orhashdbg', f'{out_dir}/anno.column.annodbg', None),
+                                 (entry['graph_path'], entry['annotation_path'], entry['index_fp']))
                 if available:
+                    self.assertEqual('answered', {a['graph']: a for a in out['answers']}
+                                     ['ecoli']['outcome'])
                     ret = server.post('pattern', dict(p, graphs=['ecoli']))
                     self.assertEqual(200, ret.status_code, ret.text)
+                    self.assertEqual((1, 0), (ret.json()['answered'], ret.json()['refused']))
             finally:
                 server.stop()
 
@@ -397,6 +428,9 @@ class TestMultiGraphServer(TestingBase):
         out = self.post('pattern', dict(request, graphs=['pseudo', 'ecoli', 'ecoli']))
         self.assertEqual(['ecoli', 'pseudo'], out['graphs'])
         self.assertEqual(1, out['pattern_contract_version'])
+        self.assertEqual({'pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
+                          'timing'}, set(out))
+        self.assertEqual((2, 0), (out['answered'], out['refused']))
         self.assertEqual(['ecoli', 'pseudo'], [a['graph'] for a in out['answers']])
         for answer in out['answers']:
             chunk = answer['graph']
@@ -404,8 +438,8 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(self.pairs[chunk], (answer['graph_path'],
                                                      answer['annotation_path']))
                 self.assertIsNone(answer['index_fp'])
-                tagless = {k: v for k, v in answer.items()
-                           if k not in ('graph', 'graph_path', 'annotation_path', 'index_fp')}
+                self.assertEqual('answered', answer['outcome'])
+                tagless = {k: v for k, v in answer.items() if k not in TAGS}
                 # the answer of a single-graph server on the pair's files
                 self.assertEqual(untimed(self.cli_pattern(chunk, request)), untimed(tagless))
         # the masked chunk counts exactly: the contexts of its records' k-mers
@@ -434,7 +468,13 @@ class TestMultiGraphServer(TestingBase):
                 (dict(p, graphs=['ecoli'], in_ram='yes'), 400, 'invalid_request', 'in_ram'),
                 (dict(p, graphs=['ecoli'], budget_split=1), 400, 'later_increment',
                  'budget_split'),
-                (dict(p, graphs=['ecoli'], mode='x'), 400, 'invalid_request', 'mode')):
+                (dict(p, graphs=['ecoli'], mode='x'), 400, 'invalid_request', 'mode'),
+                # the request's own fault first, although the pair would be refused too (the
+                # column annotation under output.labels "all": annotation_unbudgeted)
+                (dict(p, graphs=['kleb'], mode='all_or_count', output={'labels': 'all'},
+                      budget_split=1), 400, 'later_increment', 'budget_split'),
+                (dict(p, graphs=['kleb'], mode='all_or_count', output={'labels': 'all'},
+                      time_budget_ms='soon'), 400, 'invalid_request', 'time_budget_ms')):
             with self.subTest(payload=payload):
                 body = self.post('pattern', payload, status)
                 self.assertEqual({'error', 'code'}, set(body))
@@ -487,6 +527,107 @@ class TestMultiGraphServer(TestingBase):
             self.assertNotEqual(0, res.returncode, value)
             self.assertIn("--max-graphs-without-selection must be an integer in [1, 2^53 - 1], "
                           f"got '{value}'", res.stderr.decode(), value)
+
+    def test_a_refused_pair_is_an_entry_of_the_envelope(self):
+        """A pair the request cannot be answered on -- here output.labels "all" on a column
+        annotation, annotation_unbudgeted -- is a refused entry of the envelope: its tags,
+        outcome "refused", and under `refusal` the body a single-graph server answers for it
+        (the CLI's, byte for byte) with its HTTP status; the other pairs answer, the request is
+        200. A name over two graphs lists each pair's own outcome. Every pair refused is still
+        the envelope, answered 0."""
+        ecoli = self.records['ecoli'][0]
+        request = {'patterns': [{'dna': ecoli[123456:123476], 'id': 'p'}],
+                   'mode': 'all_or_count', 'output': {'labels': 'all'}}
+        out = self.post('pattern', dict(request, graphs=['kleb', 'ecoli']))
+        self.assertEqual((['ecoli', 'kleb'], 1, 1),
+                         (out['graphs'], out['answered'], out['refused']))
+        answered, refused = out['answers']
+        self.assertEqual(('ecoli', 'answered'), (answered['graph'], answered['outcome']))
+        self.assertNotIn('refusal', answered)
+        tagless = {k: v for k, v in answered.items() if k not in TAGS}
+        self.assertEqual(untimed(self.cli_pattern('ecoli', request)), untimed(tagless))
+        self.assertEqual({'graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome',
+                          'refusal'}, set(refused))
+        self.assertEqual(('kleb', self.pairs['kleb'][0], self.pairs['kleb'][1], None, 'refused'),
+                         (refused['graph'], refused['graph_path'], refused['annotation_path'],
+                          refused['index_fp'], refused['outcome']))
+        body = self.cli_refusal('kleb', request)
+        self.assertEqual({'error', 'code'}, set(body))
+        self.assertEqual('annotation_unbudgeted', body['code'])
+        self.assertEqual(dict(body, http_status=400), refused['refusal'])
+        self.assertIn("refused (400 annotation_unbudgeted)", self.server.text())
+        # a name over two graphs: each pair's outcome, in the list's order
+        both = self.post('pattern', dict(request, graphs=['enterics']))
+        self.assertEqual([('enterics', self.pairs['ecoli'][0], 'answered'),
+                          ('enterics', self.pairs['kleb'][0], 'refused')],
+                         [(a['graph'], a['graph_path'], a['outcome']) for a in both['answers']])
+        self.assertEqual((1, 1), (both['answered'], both['refused']))
+        self.assertEqual(untimed(answered['patterns']), untimed(both['answers'][0]['patterns']))
+        self.assertEqual(refused['refusal'], both['answers'][1]['refusal'])
+        # every pair refused
+        none = self.post('pattern', dict(request, graphs=['pseudo', 'kleb']))
+        self.assertEqual((['kleb', 'pseudo'], 0, 2),
+                         (none['graphs'], none['answered'], none['refused']))
+        self.assertEqual([('kleb', 'refused', 400, 'annotation_unbudgeted'),
+                          ('pseudo', 'refused', 400, 'annotation_unbudgeted')],
+                         [(a['graph'], a['outcome'], a['refusal']['http_status'],
+                           a['refusal']['code']) for a in none['answers']])
+
+    def test_a_pair_past_its_deadline_is_refused_while_the_others_answer(self):
+        """A pair whose answer could not be written by its time_budget_ms is a refused entry
+        (503 deadline) while the other pairs answer. Each pair's deadline starts with its own
+        work, and the envelope is written by the latest deadline of the pairs that answered:
+        on a server with one pool thread the pairs run one after the other in the answers'
+        order, so the later pair's deadline is still ahead when the first has overrun its own.
+        The first pair is the largest chunk with a short pattern asked sixteen times (hundreds
+        of thousands of contexts to release, never within the budget); with a finalisation
+        reserve of 0 ms and the delivery estimate made negligible its work stops at its
+        deadline, which the writing of its answer is then past (SPEC §7.6: nothing partial is
+        sent); the second a graph of 2 kbp, answered in milliseconds."""
+        d = self.tempdir.name
+        tiny = os.path.join(d, 'tiny')
+        os.makedirs(tiny, exist_ok=True)
+        fasta = os.path.join(tiny, 'tiny.fa')
+        rng = random.Random(7)
+        with open(fasta, 'w') as f:
+            f.write('>tiny\n' + ''.join(rng.choice('ACGT') for _ in range(2000)) + '\n')
+        self._run_command(f'{METAGRAPH} build -p 4 --mode basic --graph succinct --state stat '
+                          f'-k {K} -o {tiny}/graph {fasta}', 'build tiny')
+        self._annotate_graph([fasta], f'{tiny}/graph.dbg', f'{tiny}/anno', 'column',
+                             anno_type='filename')
+        csv = os.path.join(d, 'deadline.csv')
+        with open(csv, 'w') as f:
+            f.write(f'big,{self.pairs["pseudo"][0]},{self.pairs["pseudo"][1]}\n'
+                    f'tiny,{tiny}/graph.dbg,{tiny}/anno.column.annodbg\n')
+        server = Server([csv, '--pattern-finalize-ms', '0', '--pattern-delivery-build-mbps',
+                         '1e9', '--pattern-delivery-compress-mbps', '1e9',
+                         '--pattern-max-contexts', '1000000'],
+                        os.path.join(d, 'server_deadline.log'), threads=1)
+        try:
+            request = {'patterns': [{'dna': 'ACGT'}] * 16, 'mode': 'partial', 'scope': 'suffix',
+                       'strands': 'both', 'max_contexts': 1000000, 'time_budget_ms': 50,
+                       'output': {'labels': 'none'}}
+            ret = server.post('pattern', request)
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            out = ret.json()
+            self.assertEqual((['big', 'tiny'], 1, 1),
+                             (out['graphs'], out['answered'], out['refused']))
+            big, small = out['answers']
+            self.assertEqual(('big', 'refused'), (big['graph'], big['outcome']))
+            self.assertEqual({'http_status': 503, 'code': 'deadline'},
+                             {k: v for k, v in big['refusal'].items() if k != 'error'})
+            self.assertIn('could not be written within time_budget_ms (50 ms, the finalisation '
+                          'reserve of 0 ms included)', big['refusal']['error'])
+            self.assertEqual(('tiny', 'answered'), (small['graph'], small['outcome']))
+            self.assertEqual(50, small['limits']['time_budget_ms'])
+            self.assertEqual(16, len(small['patterns']))
+            for e in small['patterns']:
+                self.assertNotIn('error', e)
+                self.assertEqual('exact', e['counts']['contexts']['relation'])
+                self.assertEqual(e['counts']['contexts']['value'], len(e['results']))
+            self.assertIn('refused (503 deadline)', server.text())
+        finally:
+            server.stop()
 
     # -------------------------------------------------------------------- in_ram
 

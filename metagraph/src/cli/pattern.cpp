@@ -1305,6 +1305,10 @@ Json::Value parse_pattern_body(const std::string &content) {
     return json;
 }
 
+void validate_pattern_request(const Json::Value &json, const PatternLimits &limits) {
+    parse_request(json, limits);
+}
+
 Json::Value process_pattern_request(const Json::Value &json,
                                     const AnnotatedDBG &anno_graph,
                                     const Config &config,
