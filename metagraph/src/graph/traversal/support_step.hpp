@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,6 +40,15 @@ namespace traversal {
  *    trace does not see this, `trace_record_boundaries`). At this level a frame also keeps the
  *    KMER membership beside the chains, so that a label carried on every k-mer but held whole
  *    by no record can still be listed with `label_intersection` support (DESIGN-pattern-search.md §4.3).
+ *    Only the anchor frame (depth 0) stores the chain runs: a chain's coordinate at depth d is
+ *    its anchor coordinate plus d (UP) or minus d (DOWN) and its record end never changes, so
+ *    a frame below the anchor keeps one bit per chain of the anchor (set while the chain
+ *    carries the walk) and reads the runs through the anchor's chains, which the frames of a
+ *    walk share (AnchorChains). A step scans a label's set bits as runs of consecutive
+ *    surviving chains of one anchor run — the same runs the merge would have stored — and
+ *    merges them with the row's coordinate runs as before; a walk of n k-mers over a k-mer
+ *    carried by tens of thousands of records costs n bitmaps of as many bits, not n copies of
+ *    its chain runs (the memory measurement of 2026-10-10, the owner's decision on it).
  *
  * Strands (one orientation per walk: the strand is consistent for one search direction and
  * never flips half-way): a label supports a walk in ONE orientation as a whole —
@@ -64,7 +74,9 @@ namespace traversal {
  * coordinates carry no strand: only SPELLED frames at the KMER level are meaningful there.
  *
  * Units, charged by the caller: 1 per label of either list a label merge
- * compares, 1 per chain run and per coordinate run of a label a chain merge compares, 1 per
+ * compares, 1 per chain run and per coordinate run of a label a chain merge compares (a chain
+ * run: a maximal run of consecutive chains of one record that still carry the walk — the
+ * anchor's runs as opened, below it the runs of set bits inside one anchor run), 1 per
  * coordinate turned into runs (a row's, once), 1 per label, per run and per record lookup when
  * a frame is opened. Every call returns its units; Frame::price() gives, before a step, an upper bound of
  * its units and of the bytes of the frame it builds, so that the caller can gate the work and
@@ -73,8 +85,10 @@ namespace traversal {
  * round compares or maps one or two elements), never less often, and stops when it is expired
  * (Clock::stopped; its output is then incomplete).
  *
- * Memory (the walker's CostModel convention: an element of a vector is charged twice its
- * size): Frame::bytes() and RowRuns::bytes(), and their bounds before they are built.
+ * Memory (the walker's CostModel convention: an element of a vector that grows is charged
+ * twice its size; a bitmap assigned to its size once): Frame::bytes() and RowRuns::bytes(),
+ * and their bounds before they are built. The anchor's chains count in the anchor frame's
+ * bytes only; a frame below it is charged its labels and its bits.
  */
 namespace support_step {
 
@@ -232,11 +246,30 @@ struct Price {
 };
 
 /**
+ * The chains of a TRACE anchor: its labels' chain runs as opened, which the frames stepped
+ * from the anchor share, each holding one bit per chain. The chains are numbered across the
+ * anchor, label by label, run by run, coordinate by coordinate: label i's chains are
+ * chain_begin[i] .. chain_begin[i + 1] - 1, its runs runs[run_begin[i] .. run_begin[i + 1]).
+ * Owned jointly (std::shared_ptr) by the anchor frame and the frames below it, so that a
+ * frame may be moved, swapped or stepped into while other frames stand on its anchor (a
+ * stack that grows as a std::vector, two buffers used in turn).
+ */
+struct AnchorChains {
+    std::vector<uint32_t> run_begin;        // labels + 1 offsets into |runs|
+    std::vector<uint64_t> chain_begin;      // labels + 1: the number of each label's first chain
+    std::vector<ChainRun> runs;
+
+    uint64_t num_chains() const { return chain_begin.empty() ? 0 : chain_begin.back(); }
+};
+
+/**
  * The support of one walk in one orientation at one level, as it stands after the walk's
  * last step: the labels carrying every k-mer so far (ascending ids) and, at the TRACE level,
  * each label's chains (none when no record holds the walk whole: the label is then carried,
  * not verified). Opened at the walk's first k-mer (its anchor) and stepped one base at a time
- * on the frame's arm into another frame (the caller's stack reuses their buffers).
+ * on the frame's arm into another frame (the caller's stack reuses their buffers). The anchor
+ * holds the chain runs; a frame below it holds which of the anchor's chains survive, one bit
+ * each, and per label its index among the anchor's labels and its number of chain runs.
  */
 class Frame {
   public:
@@ -277,10 +310,15 @@ class Frame {
     bool complete() const { return complete_; }
 
     const std::vector<LabelId>& labels() const { return labels_; }
-    // TRACE: the chains of labels()[i], ascending
-    const ChainRun* chains(size_t i) const { return runs_.data() + run_begin_[i]; }
-    size_t num_chains(size_t i) const { return run_begin_[i + 1] - run_begin_[i]; }
-    size_t total_chains() const { return runs_.size(); }
+    // TRACE: the chain runs of labels()[i] (the maximal runs of consecutive chains of one
+    // record that carry the walk), and all labels' together; 0 at the KMER level
+    size_t num_chain_runs(size_t i) const;
+    size_t total_chain_runs() const { return runs_; }
+    // TRACE: the chains of labels()[i] that carry the walk (below the anchor: its set bits,
+    // counted word by word)
+    uint64_t num_alive(size_t i) const;
+    // TRACE: the anchor's chains, shared by the frames stepped from it (null at the KMER level)
+    const AnchorChains* anchor() const { return anchor_.get(); }
     // whether some label supports the walk at the frame's level (TRACE: some chain survives)
     bool supported() const;
     // TRACE: the first coordinates of the record occurrences of the frame's walk (SPELLED) or
@@ -288,11 +326,21 @@ class Frame {
     // chain's lowest coordinate along the walk; appended to |out|, units its runs
     uint64_t starts(size_t i, std::vector<CoordRun> *out) const;
 
-    uint64_t bytes() const { return model_bytes(level_, labels_.size(), runs_.size(), kmer_.size()); }
-    // what a frame of |labels| labels and |runs| chain runs holds, its k-mer of k bases with it
-    static uint64_t model_bytes(Support level, size_t labels, size_t runs, size_t k);
+    uint64_t bytes() const;
+    // what an anchor frame of |labels| labels and |runs| chain runs holds, its k-mer of k
+    // bases with it
+    static uint64_t anchor_bytes(Support level, size_t labels, size_t runs, size_t k);
+    // what a frame below an anchor of |chains| chains holds with |labels| labels
+    static uint64_t step_bytes(Support level, size_t labels, uint64_t chains, size_t k);
 
   private:
+    // a label of a frame below the anchor: the same label's index among the anchor's labels,
+    // and the frame's chain runs of it
+    struct LabelRef {
+        uint32_t anchor = 0;
+        uint32_t runs = 0;
+    };
+
     Orientation orientation_ = Orientation::SPELLED;
     Arm arm_ = Arm::RIGHT;
     Support level_ = Support::KMER;
@@ -300,8 +348,10 @@ class Frame {
     uint32_t depth_ = 0;
     std::string kmer_;
     std::vector<LabelId> labels_;
-    std::vector<uint32_t> run_begin_;           // TRACE: labels_.size() + 1 offsets
-    std::vector<ChainRun> runs_;
+    uint64_t runs_ = 0;                         // TRACE: the chain runs of all labels
+    std::shared_ptr<AnchorChains> anchor_;      // TRACE: built by open(), shared by step()
+    std::vector<LabelRef> refs_;                // TRACE below the anchor: one per label
+    std::vector<uint64_t> bits_;                // TRACE below the anchor: one per anchor chain
 };
 
 // How a label supports a walk in one orientation

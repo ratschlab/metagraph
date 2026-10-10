@@ -262,7 +262,7 @@ std::unique_ptr<Frame> walk_frames(const Records &idx, const std::string &walk,
                 const auto &b = row.labels();
                 auto it = std::lower_bound(b.begin(), b.end(), frame->labels()[i]);
                 if (it != b.end() && *it == frame->labels()[i])
-                    expected += frame->num_chains(i) + row.num_runs(it - b.begin());
+                    expected += frame->num_chain_runs(i) + row.num_runs(it - b.begin());
             }
         }
         const uint64_t u = frame->step(base, row_kmer(orientation, kmer), row, next.get());
@@ -287,10 +287,12 @@ void check_against_scan(const Records &idx, const Frame &f, const std::string &p
     if (f.level() == Support::TRACE) {
         for (size_t i = 0; i < f.labels().size(); ++i) {
             std::vector<CoordRun> starts;
-            EXPECT_EQ(f.num_chains(i), f.starts(i, &starts));
+            EXPECT_EQ(f.num_chain_runs(i), f.starts(i, &starts));
             const std::vector<Coord> expected = occurrences(idx, f.labels()[i], held);
             EXPECT_EQ(expected, expand(starts)) << context << " " << part << " label "
                                                 << f.labels()[i];
+            EXPECT_EQ(expected.size(), f.num_alive(i)) << context << " " << part << " label "
+                                                       << f.labels()[i];
             any |= !expected.empty();
         }
     } else {
@@ -562,7 +564,7 @@ TEST(SupportStep, RandomRecordsAgainstAScanOfTheRecords) {
                             break;
                         bool verified = false, carried_only = false;
                         for (size_t i = 0; i < f->labels().size(); ++i) {
-                            (f->num_chains(i) ? verified : carried_only) = true;
+                            (f->num_chain_runs(i) ? verified : carried_only) = true;
                         }
                         mixed_frames += verified && carried_only;
                     }
@@ -595,7 +597,8 @@ TEST(SupportStep, TwoRecordsOfOneLabelK3) {
             check_against_scan(idx, f, part, name(arm));
         });
         EXPECT_EQ((std::vector<LabelId>{ 0 }), trace->labels());     // carried
-        EXPECT_EQ(0u, trace->num_chains(0));                         // not verified
+        EXPECT_EQ(0u, trace->num_chain_runs(0));                     // not verified
+        EXPECT_EQ(0u, trace->num_alive(0));
         EXPECT_FALSE(trace->supported());
     }
     // the same chain without the record mapping survives: the coordinates 0 and 1 are
@@ -603,9 +606,14 @@ TEST(SupportStep, TwoRecordsOfOneLabelK3) {
     Frame open, next;
     open.open(Orientation::SPELLED, Arm::RIGHT, Support::TRACE, "ACG", "ACG",
               idx.row("ACG", true));
+    ASSERT_EQ(1u, open.anchor()->runs.size());
+    EXPECT_EQ((ChainRun { 0, 0, unbounded(Direction::UP) }), open.anchor()->runs[0]);
     open.step('T', "CGT", idx.row("CGT", true), &next);
     EXPECT_TRUE(next.supported());
-    EXPECT_EQ((ChainRun { 1, 1, unbounded(Direction::UP) }), *next.chains(0));
+    EXPECT_EQ(1u, next.num_alive(0));
+    std::vector<CoordRun> starts;
+    EXPECT_EQ(1u, next.starts(0, &starts));
+    EXPECT_EQ((std::vector<CoordRun>{ { 0, 0 } }), starts);
 }
 
 // The strand rule: a label holding a walk's first k-mers on + and its last on - does not
@@ -684,7 +692,7 @@ TEST(SupportStep, CrossRecordChainDiesAtTheBoundary) {
         std::vector<CoordRun> a;
         f->starts(0, &a);
         EXPECT_EQ((std::vector<Coord>{ 2 }), expand(a));            // a0, 1-based 3-9
-        EXPECT_EQ(0u, f->num_chains(1));                             // B: carried only
+        EXPECT_EQ(0u, f->num_chain_runs(1));                         // B: carried only
 
         auto g = walk_frames(idx, "CGTACC", Orientation::SPELLED, arm, Support::TRACE,
                              [&](const Frame &f, const std::string &part) {
@@ -765,7 +773,8 @@ TEST(SupportStep, HomopolymerIsOneRunPerStep) {
         for (size_t s = 0; s < steps; ++s) {
             const uint64_t u = frame.step('A', kmer, row, &next);
             EXPECT_EQ(4u, u);            // 1 + 1 labels, 1 + 1 runs: O(1), whatever the length
-            EXPECT_EQ(1u, next.total_chains());
+            EXPECT_EQ(1u, next.total_chain_runs());
+            EXPECT_EQ(29970u - (s + 1), next.num_alive(0));
             units += u;
             std::swap(frame, next);
         }
@@ -781,6 +790,190 @@ TEST(SupportStep, HomopolymerIsOneRunPerStep) {
                     idx.row(rc(kmer), true), idx.record_of());
         EXPECT_FALSE(mirror.supported());
     }
+}
+
+// ------------------------------------------------------------------ the frames below the anchor
+
+// A chain dies at its record's end at depth 5 while its label stays carried (the walk's last
+// k-mer lies in another record of the label), in both directions and both orientations: the
+// walk ACGTACCAAT (k = 5) in the record GGACGTACCAA up to its last k-mer, which CCAATG holds
+// (UP: right arm as spelled, left arm as the reverse complement), and in CGTACCAATGG from its
+// second k-mer, its first held by TTACGTAGG (DOWN: left arm as spelled, right arm as the
+// reverse complement)
+TEST(SupportStep, ChainDiesAtItsRecordEndAtDepth) {
+    const std::string walk = "ACGTACCAAT";
+    const Records up(5, { { "GGACGTACCAA", "CCAATG" } });
+    const Records down(5, { { "CGTACCAATGG", "TTACGTAGG" } });
+    struct Case {
+        const Records *idx;
+        Arm arm;
+        Orientation orientation;
+        Coord anchor;       // the chain's coordinate when opened
+    };
+    for (const Case &c : { Case { &up, Arm::RIGHT, Orientation::SPELLED, 2 },
+                           Case { &up, Arm::LEFT, Orientation::REVERSE_COMPLEMENT, 2 },
+                           Case { &down, Arm::LEFT, Orientation::SPELLED, 4 },
+                           Case { &down, Arm::RIGHT, Orientation::REVERSE_COMPLEMENT, 4 } }) {
+        const std::string context = std::string(name(c.arm)) + " " + to_string(c.orientation);
+        const std::string w = c.orientation == Orientation::SPELLED ? walk : rc(walk);
+        auto last = walk_frames(*c.idx, w, c.orientation, c.arm, Support::TRACE,
+                                [&](const Frame &f, const std::string &part) {
+            check_against_scan(*c.idx, f, part, context);
+            ASSERT_EQ((std::vector<LabelId>{ 0 }), f.labels()) << context << " " << part;
+            if (f.depth() < 5) {
+                EXPECT_EQ(1u, f.num_alive(0)) << context << " " << part;
+                EXPECT_EQ(1u, f.num_chain_runs(0)) << context << " " << part;
+                EXPECT_TRUE(f.supported()) << context << " " << part;
+                std::vector<CoordRun> starts;
+                f.starts(0, &starts);
+                const Coord start = f.direction() == Direction::UP ? c.anchor
+                                                                   : c.anchor - f.depth();
+                EXPECT_EQ((std::vector<CoordRun>{ { start, start } }), starts)
+                        << context << " " << part;
+            } else {
+                EXPECT_EQ(0u, f.num_alive(0)) << context << " " << part;
+                EXPECT_EQ(0u, f.num_chain_runs(0)) << context << " " << part;
+                EXPECT_FALSE(f.supported()) << context << " " << part;
+            }
+        });
+        EXPECT_EQ(5u, last->depth());
+        EXPECT_FALSE(last->supported());
+    }
+}
+
+// A homopolymer run shrinks by one chain per step and to one chain when the walk leaves it:
+// the record of 300 As and a C (k = 31) holds the walk A^(31 + s) C once; the frames below
+// the anchor hold one bit per chain, so their bytes do not grow with the 270 chains
+TEST(SupportStep, HomopolymerRunShrinksToOneChain) {
+    const size_t k = 31, s = 100;
+    // the record and the walk read from the arm's end: on the left arm C A^(31 + s), read from A^31
+    const Records right(k, { { std::string(300, 'A') + "C" } });
+    const Records left(k, { { "C" + std::string(300, 'A') } });
+    const std::string kmer(k, 'A');
+    ASSERT_EQ(1u, right.row(kmer, true).total_runs());
+    for (Arm arm : { Arm::RIGHT, Arm::LEFT }) {
+        const std::string walk = arm == Arm::RIGHT ? std::string(k + s, 'A') + "C"
+                                                   : "C" + std::string(k + s, 'A');
+        const Records &records = arm == Arm::RIGHT ? right : left;
+        auto last = walk_frames(records, walk, Orientation::SPELLED, arm, Support::TRACE,
+                                [&](const Frame &f, const std::string &part) {
+            check_against_scan(records, f, part, name(arm));
+            ASSERT_EQ(1u, f.labels().size());
+            EXPECT_EQ(1u, f.num_chain_runs(0));
+            EXPECT_EQ(f.depth() <= s ? 270 - f.depth() : 1, f.num_alive(0)) << name(arm) << " " << part;
+            if (f.depth())
+                EXPECT_EQ(Frame::step_bytes(Support::TRACE, 1, 270, k), f.bytes());
+        });
+        EXPECT_EQ(s + 1, last->depth());
+        std::vector<CoordRun> starts;
+        EXPECT_EQ(1u, last->starts(0, &starts));
+        EXPECT_EQ(1u, last->num_alive(0));
+        // the right arm: A^31 at 0..269, A^30 C at 270, the walk's first k-mer at 270 - (s + 1);
+        // the left arm: C A^30 at 0, A^31 at 1..270, the walk's first k-mer (C A^30) at 0
+        const Coord start = arm == Arm::RIGHT ? 270 - (s + 1) : 0;
+        EXPECT_EQ((std::vector<CoordRun>{ { start, start } }), starts) << name(arm);
+    }
+}
+
+// The survival bits of every depth equal the run-based merge applied step by step from the
+// opened chains: random rows (labels, coordinates), with and without record bounds, in both
+// directions; the frames' chain runs are the reference's runs, one by one, their units the
+// reference's. The two frames are used in turn, so the anchor's object is overwritten at
+// depth 2 while the deeper frames still stand on its chains
+TEST(SupportStep, SurvivalBitsEqualTheRunBasedMerge) {
+    std::mt19937 gen(23);
+    size_t compared = 0, bounded = 0;
+    for (size_t t = 0; t < 400; ++t) {
+        const size_t num_labels = 1 + gen() % 6;
+        const Coord n = 1 + gen() % 150;
+        const bool records = gen() % 2;
+        // the records: per label, [ends[i - 1] + 1, ends[i]]
+        std::vector<std::vector<Coord>> ends(num_labels);
+        for (auto &e : ends) {
+            for (Coord c = 0; c < n; ++c) {
+                if (c + 1 == n || gen() % 8 == 0)
+                    e.push_back(c);
+            }
+        }
+        RecordOf record_of;
+        if (records) {
+            record_of = [&](LabelId label, Coord c) {
+                const auto &e = ends[label];
+                const size_t i = std::lower_bound(e.begin(), e.end(), c) - e.begin();
+                return RecordRange { i ? e[i - 1] + 1 : 0, e[i] };
+            };
+            ++bounded;
+        }
+        const size_t steps = 1 + gen() % 12;
+        std::vector<RowRuns> rows;
+        for (size_t d = 0; d <= steps; ++d) {
+            RowRuns row(true);
+            for (LabelId l = 0; l < num_labels; ++l) {
+                if (gen() % 5 == 0)
+                    continue;
+                const std::vector<Coord> coords = random_coords(gen, n, 0.2 + 0.1 * (t % 5));
+                if (!coords.empty())
+                    row.add(l, coords.data(), coords.size());
+            }
+            rows.push_back(std::move(row));
+        }
+        for (Arm arm : { Arm::RIGHT, Arm::LEFT }) {
+            const Direction d = direction(arm, Orientation::SPELLED);
+            // the reference: each label's chain runs, continued with continue_chains
+            std::vector<LabelId> labels = rows[0].labels();
+            std::vector<std::vector<ChainRun>> chains(labels.size());
+            for (size_t i = 0; i < labels.size(); ++i) {
+                open_chains(d, labels[i], rows[0].runs(i), rows[0].num_runs(i), record_of,
+                            &chains[i]);
+            }
+            Frame f, next;
+            f.open(Orientation::SPELLED, arm, Support::TRACE, "AAA", "AAA", rows[0], record_of);
+            for (size_t s = 1; s <= steps; ++s) {
+                const RowRuns &row = rows[s];
+                std::vector<LabelId> next_labels;
+                std::vector<std::vector<ChainRun>> next_chains;
+                uint64_t expected_units = labels.size() + row.num_labels();
+                for (size_t i = 0; i < labels.size(); ++i) {
+                    const auto &b = row.labels();
+                    auto it = std::lower_bound(b.begin(), b.end(), labels[i]);
+                    if (it == b.end() || *it != labels[i])
+                        continue;
+                    const size_t j = it - b.begin();
+                    next_labels.push_back(labels[i]);
+                    next_chains.emplace_back();
+                    expected_units += continue_chains(d, chains[i].data(), chains[i].size(),
+                                                      row.runs(j), row.num_runs(j),
+                                                      &next_chains.back());
+                }
+                EXPECT_EQ(expected_units, f.step('A', "AAA", row, &next)) << name(arm) << " trial " << t;
+                std::swap(f, next);
+                labels = std::move(next_labels);
+                chains = std::move(next_chains);
+                ASSERT_EQ(labels, f.labels()) << name(arm) << " trial " << t << " depth " << s;
+                const Coord back = d == Direction::UP ? s : 0;
+                for (size_t i = 0; i < labels.size(); ++i) {
+                    std::vector<CoordRun> starts;
+                    EXPECT_EQ(chains[i].size(), f.starts(i, &starts));
+                    EXPECT_EQ(chains[i].size(), f.num_chain_runs(i));
+                    ASSERT_EQ(chains[i].size(), starts.size()) << name(arm) << " trial " << t;
+                    for (size_t r = 0; r < starts.size(); ++r) {
+                        EXPECT_EQ((CoordRun { chains[i][r].first - back, chains[i][r].last - back }),
+                                  starts[r]) << name(arm) << " trial " << t << " depth " << s;
+                    }
+                    EXPECT_EQ(expand(chains[i].data(), chains[i].size()).size(), f.num_alive(i));
+                    ++compared;
+                }
+                size_t total = 0;
+                for (const auto &c : chains) {
+                    total += c.size();
+                }
+                EXPECT_EQ(total, f.total_chain_runs());
+                EXPECT_EQ(total > 0, f.supported());
+            }
+        }
+    }
+    EXPECT_GT(compared, 2000u);
+    EXPECT_GT(bounded, 100u);
 }
 
 // ------------------------------------------------------------------ the API's guards

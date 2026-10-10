@@ -599,8 +599,8 @@ SupportTracker::Verdict PathTracker::open(const SearchState &anchor) {
         // the frame's labels and its chains, at least one per coordinate run (a run that
         // crosses into the next record of its column is split there, charged as found)
         const Support level = chains_ ? Support::TRACE : Support::KMER;
-        const uint64_t price = step::Frame::model_bytes(level, r->num_labels(), r->total_runs(),
-                                                        m.k);
+        const uint64_t price = step::Frame::anchor_bytes(level, r->num_labels(), r->total_runs(),
+                                                         m.k);
         if (!env_.account.charge(price)) {
             stop_ = "max_memory";
             return Verdict::STOPPED;
@@ -623,7 +623,7 @@ SupportTracker::Verdict PathTracker::open(const SearchState &anchor) {
         }
         if (bytes < price)
             env_.account.release(price - bytes);
-        const bool supported = prune_on_chains_ ? f.total_chains() > 0 : !f.labels().empty();
+        const bool supported = prune_on_chains_ ? f.total_chain_runs() > 0 : !f.labels().empty();
         if (!supported) {
             env_.account.release(bytes);
             return Verdict::DEAD;
@@ -674,7 +674,7 @@ SupportTracker::Verdict PathTracker::push(const SearchState &child) {
         const uint64_t bytes = next.bytes();
         assert(bytes <= price.bytes);
         env_.account.release(price.bytes - std::min(bytes, price.bytes));
-        const bool supported = prune_on_chains_ ? next.total_chains() > 0
+        const bool supported = prune_on_chains_ ? next.total_chain_runs() > 0
                                                 : !next.labels().empty();
         if (!supported) {
             env_.account.release(bytes);
@@ -719,7 +719,7 @@ size_t PathTracker::walk_num_labels() const {
 size_t PathTracker::walk_num_runs(size_t i) const {
     const Impl &m = *impl_;
     assert(m.depth);
-    return chains_ ? m.frames[m.depth - 1].num_chains(i) : 0;
+    return chains_ ? m.frames[m.depth - 1].num_chain_runs(i) : 0;
 }
 
 void PathTracker::frame_support(std::vector<LabelId> *out) const {
@@ -729,7 +729,7 @@ void PathTracker::frame_support(std::vector<LabelId> *out) const {
         return;
     const step::Frame &f = m.frames[m.depth - 1];
     for (size_t i = 0; i < f.labels().size(); ++i) {
-        if (!prune_on_chains_ || f.num_chains(i) > 0)
+        if (!prune_on_chains_ || f.num_chain_runs(i) > 0)
             out->push_back(f.labels()[i]);
     }
 }
@@ -747,8 +747,8 @@ bool PathTracker::walk_labels(bool occurrences, std::vector<WalkLabel> *out) {
     for (size_t i = 0; i < f.labels().size(); ++i) {
         WalkLabel w;
         w.label = f.labels()[i];
-        w.verified = prune_on_chains_ && f.num_chains(i) > 0;
-        if (occurrences && chains_ && f.num_chains(i)) {
+        w.verified = prune_on_chains_ && f.num_chain_runs(i) > 0;
+        if (occurrences && chains_ && f.num_chain_runs(i)) {
             starts.clear();
             f.starts(i, &starts);
             const Column column = m.recorder->labels()[w.label].column;

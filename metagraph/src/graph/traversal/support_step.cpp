@@ -123,22 +123,151 @@ inline bool moved(Direction direction, const ChainRun &run, Coord *lo, Coord *hi
     return true;
 }
 
-} // namespace
+// ----- bitmaps: one bit per chain, bit c in word c / 64
 
-uint64_t continue_chains(Direction direction, const ChainRun *chains, size_t n,
-                         const CoordRun *row, size_t m, std::vector<ChainRun> *out,
-                         Clock *clock) {
-    // Both lists are ascending and disjoint, and moving every chain by the same one keeps
-    // them so (clipping at a record's end only shortens a run), so the intersection is one
-    // merge: each round consumes a chain run or a row run
+constexpr uint64_t kAll = ~uint64_t(0);
+
+inline size_t words_for(uint64_t bits) {
+    return (bits + 63) / 64;
+}
+
+// the first set bit of |bits| in [from, end), or end
+inline uint64_t next_set(const uint64_t *bits, uint64_t from, uint64_t end) {
+    if (from >= end)
+        return end;
+    uint64_t w = from >> 6;
+    uint64_t word = bits[w] & (kAll << (from & 63));
+    const uint64_t last = (end - 1) >> 6;
+    while (!word) {
+        if (++w > last)
+            return end;
+        word = bits[w];
+    }
+    return std::min(end, (w << 6) + static_cast<uint64_t>(__builtin_ctzll(word)));
+}
+
+// the first clear bit of |bits| in [from, end), or end
+inline uint64_t next_clear(const uint64_t *bits, uint64_t from, uint64_t end) {
+    if (from >= end)
+        return end;
+    uint64_t w = from >> 6;
+    uint64_t word = ~bits[w] & (kAll << (from & 63));
+    const uint64_t last = (end - 1) >> 6;
+    while (!word) {
+        if (++w > last)
+            return end;
+        word = ~bits[w];
+    }
+    return std::min(end, (w << 6) + static_cast<uint64_t>(__builtin_ctzll(word)));
+}
+
+// sets the bits [first, last] of |bits|
+inline void set_bits(uint64_t *bits, uint64_t first, uint64_t last) {
+    const uint64_t wa = first >> 6, wb = last >> 6;
+    const uint64_t ma = kAll << (first & 63);
+    const uint64_t mb = kAll >> (63 - (last & 63));
+    if (wa == wb) {
+        bits[wa] |= ma & mb;
+        return;
+    }
+    bits[wa] |= ma;
+    for (uint64_t w = wa + 1; w < wb; ++w) {
+        bits[w] = kAll;
+    }
+    bits[wb] |= mb;
+}
+
+// the set bits of |bits| in [from, end)
+inline uint64_t count_set(const uint64_t *bits, uint64_t from, uint64_t end) {
+    uint64_t count = 0;
+    for (uint64_t p = from; p < end; ) {
+        uint64_t word = bits[p >> 6] & (kAll << (p & 63));
+        const uint64_t word_end = (p | 63) + 1;
+        if (end < word_end)
+            word &= kAll >> (word_end - end);
+        count += __builtin_popcountll(word);
+        p = word_end;
+    }
+    return count;
+}
+
+/**
+ * The chain runs of one label of a frame, read in order, each in the ANCHOR's coordinates
+ * (where its chains stood when the walk began) with the number of its first chain: the
+ * anchor's own runs when |bits| is null, else the maximal runs of set bits inside each
+ * anchor run — the chains that still carry the walk, consecutive in one record.
+ */
+class ChainRuns {
+  public:
+    ChainRuns(const AnchorChains &anchor, size_t label, const uint64_t *bits)
+          : run_(anchor.runs.data() + anchor.run_begin[label]),
+            end_(anchor.runs.data() + anchor.run_begin[label + 1]),
+            chain_(anchor.chain_begin[label]), pos_(chain_), bits_(bits) {}
+
+    bool next(ChainRun *run, uint64_t *chain) {
+        while (run_ != end_) {
+            const uint64_t end = chain_ + (run_->last - run_->first + 1);
+            if (!bits_) {
+                *run = *run_;
+                *chain = chain_;
+                ++run_;
+                chain_ = end;
+                return true;
+            }
+            const uint64_t p = next_set(bits_, pos_, end);
+            if (p == end) {
+                ++run_;
+                chain_ = pos_ = end;
+                continue;
+            }
+            const uint64_t q = next_clear(bits_, p + 1, end);
+            *run = ChainRun { run_->first + (p - chain_), run_->first + (q - 1 - chain_),
+                              run_->record_end };
+            *chain = p;
+            pos_ = q;
+            if (q == end) {
+                ++run_;
+                chain_ = end;
+            }
+            return true;
+        }
+        return false;
+    }
+
+  private:
+    const ChainRun *run_;
+    const ChainRun *end_;
+    uint64_t chain_;            // the number of run_'s first chain
+    uint64_t pos_;              // the next bit to read, in run_
+    const uint64_t *bits_;
+};
+
+/**
+ * One step of n chain runs, read from |chains| (next(ChainRun*, uint64_t*): the run at its
+ * current coordinates and the number of its first chain), against the row runs row[0, m):
+ * each chain moved by one in |direction|, unless that passes its record's end, and kept where
+ * the row holds the coordinate it moved to. Both lists are ascending and disjoint, and moving
+ * every chain by the same one keeps them so (clipping at a record's end only shortens a run),
+ * so the intersection is one merge: each round consumes a chain run or a row run. Every
+ * surviving piece of a chain run goes to |out| (piece(first, last, run, chain): the next
+ * coordinates [first, last], the run it comes from and the number of its first chain).
+ * Returns the units: n + m, or on a stop by |clock| the runs consumed so far.
+ */
+template <class Source, class Sink>
+uint64_t merge_chains(Direction direction, size_t n, Source &chains,
+                      const CoordRun *row, size_t m, Sink &out, Clock *clock) {
     size_t i = 0, j = 0;
+    ChainRun run;
+    uint64_t chain = 0;
     Coord lo = 0, hi = 0;
     bool have = false;
     while (i < n && j < m) {
         if (clock && !clock->tick())
             return i + j;
         if (!have) {
-            if (!moved(direction, chains[i], &lo, &hi)) {
+            if (!chains.next(&run, &chain))
+                throw std::logic_error("support_step: a frame holds fewer chain runs than counted");
+            if (!moved(direction, run, &lo, &hi)) {
                 ++i;
                 continue;
             }
@@ -151,9 +280,7 @@ uint64_t continue_chains(Direction direction, const ChainRun *chains, size_t n,
             ++i;
             have = false;
         } else {
-            // a part of one chain run: its record's end stays with it
-            out->push_back(ChainRun { std::max(lo, r.first), std::min(hi, r.last),
-                                      chains[i].record_end });
+            out.piece(std::max(lo, r.first), std::min(hi, r.last), run, chain);
             if (hi <= r.last) {
                 ++i;
                 have = false;
@@ -163,6 +290,34 @@ uint64_t continue_chains(Direction direction, const ChainRun *chains, size_t n,
         }
     }
     return n + m;
+}
+
+// chain runs from an array, at their current coordinates
+struct ArrayChains {
+    const ChainRun *chains;
+    bool next(ChainRun *run, uint64_t *chain) {
+        *run = *chains++;
+        *chain = 0;
+        return true;
+    }
+};
+
+// the pieces as chain runs: a part of one chain run, its record's end staying with it
+struct RunSink {
+    std::vector<ChainRun> *out;
+    void piece(Coord first, Coord last, const ChainRun &run, uint64_t) {
+        out->push_back(ChainRun { first, last, run.record_end });
+    }
+};
+
+} // namespace
+
+uint64_t continue_chains(Direction direction, const ChainRun *chains, size_t n,
+                         const CoordRun *row, size_t m, std::vector<ChainRun> *out,
+                         Clock *clock) {
+    ArrayChains source { chains };
+    RunSink sink { out };
+    return merge_chains(direction, n, source, row, m, sink, clock);
 }
 
 // ------------------------------------------------------------------ RowRuns
@@ -230,6 +385,53 @@ void check_row(Orientation orientation, std::string_view kmer, std::string_view 
 
 } // namespace
 
+namespace {
+
+// |run|, read in the anchor's coordinates, where its chains stand after |depth| steps in
+// |direction|
+inline ChainRun at_depth(Direction direction, uint32_t depth, ChainRun run) {
+    if (direction == Direction::UP) {
+        run.first += depth;
+        run.last += depth;
+    } else {
+        run.first -= depth;
+        run.last -= depth;
+    }
+    return run;
+}
+
+// the chain runs of one label of a frame at the coordinates they stand at after |depth| steps
+struct CurrentChains {
+    ChainRuns runs;
+    Direction direction;
+    uint32_t depth;
+
+    bool next(ChainRun *run, uint64_t *chain) {
+        if (!runs.next(run, chain))
+            return false;
+        *run = at_depth(direction, depth, *run);
+        return true;
+    }
+};
+
+// the pieces of a step as bits of the next frame: the chain that moved to coordinate x stood
+// at x - 1 (UP) or x + 1 (DOWN), |run.first| is where the run's first chain stood, and the
+// chains of a run are numbered in the order of their coordinates
+struct BitSink {
+    Direction direction;
+    uint64_t *bits;
+    uint32_t runs = 0;
+
+    void piece(Coord first, Coord last, const ChainRun &run, uint64_t chain) {
+        const Coord from = direction == Direction::UP ? first - 1 : first + 1;
+        const uint64_t offset = chain + (from - run.first);
+        set_bits(bits, offset, offset + (last - first));
+        ++runs;
+    }
+};
+
+} // namespace
+
 uint64_t Frame::open(Orientation orientation, Arm arm, Support level, std::string_view kmer,
                      std::string_view row_kmer, const RowRuns &row,
                      const RecordOf &record_of, Clock *clock) {
@@ -245,23 +447,43 @@ uint64_t Frame::open(Orientation orientation, Arm arm, Support level, std::strin
     depth_ = 0;
     kmer_.assign(kmer.data(), kmer.size());
     labels_.assign(row.labels().begin(), row.labels().end());
-    run_begin_.clear();
-    runs_.clear();
+    runs_ = 0;
+    refs_.clear();
+    bits_.clear();
     uint64_t units = labels_.size();
-    if (level_ == Support::TRACE) {
-        const Direction dir = direction();
-        run_begin_.reserve(labels_.size() + 1);
-        for (size_t i = 0; i < labels_.size(); ++i) {
-            run_begin_.push_back(runs_.size());
-            units += open_chains(dir, labels_[i], row.runs(i), row.num_runs(i), record_of,
-                                 &runs_, clock);
-            if (clock && clock->stopped)
-                return units;
-        }
-        if (runs_.size() > std::numeric_limits<uint32_t>::max())
-            throw std::length_error("support_step: a frame of more than 2^32 chain runs");
-        run_begin_.push_back(runs_.size());
+    if (level_ != Support::TRACE) {
+        anchor_.reset();
+        complete_ = true;
+        return units;
     }
+    // the block is reused when no frame stepped from an earlier anchor still shares it
+    if (!anchor_ || anchor_.use_count() != 1)
+        anchor_ = std::make_shared<AnchorChains>();
+    AnchorChains &a = *anchor_;
+    a.run_begin.clear();
+    a.chain_begin.clear();
+    a.runs.clear();
+    const Direction dir = direction();
+    a.run_begin.reserve(labels_.size() + 1);
+    a.chain_begin.reserve(labels_.size() + 1);
+    uint64_t chains = 0;
+    for (size_t i = 0; i < labels_.size(); ++i) {
+        a.run_begin.push_back(a.runs.size());
+        a.chain_begin.push_back(chains);
+        const size_t from = a.runs.size();
+        units += open_chains(dir, labels_[i], row.runs(i), row.num_runs(i), record_of,
+                             &a.runs, clock);
+        if (clock && clock->stopped)
+            return units;
+        for (size_t r = from; r < a.runs.size(); ++r) {
+            chains += a.runs[r].last - a.runs[r].first + 1;
+        }
+    }
+    if (a.runs.size() > std::numeric_limits<uint32_t>::max())
+        throw std::length_error("support_step: a frame of more than 2^32 chain runs");
+    a.run_begin.push_back(a.runs.size());
+    a.chain_begin.push_back(chains);
+    runs_ = a.runs.size();
     complete_ = true;
     return units;
 }
@@ -269,15 +491,12 @@ uint64_t Frame::open(Orientation orientation, Arm arm, Support level, std::strin
 Price Frame::price(const RowRuns &row) const {
     Price price;
     price.units = labels_.size() + row.num_labels();
-    size_t runs = 0;
     if (level_ == Support::TRACE) {
-        // a chain merge compares the runs of a label on both lists, and each run it outputs
-        // is a part of one of them: at most both lists' runs
-        runs = runs_.size() + row.total_runs();
-        price.units += runs;
+        // a chain merge compares the runs of a label on both lists: at most both lists' runs
+        price.units += runs_ + row.total_runs();
     }
-    price.bytes = model_bytes(level_, std::min(labels_.size(), row.num_labels()), runs,
-                              kmer_.size());
+    price.bytes = step_bytes(level_, std::min(labels_.size(), row.num_labels()),
+                             anchor_ ? anchor_->num_chains() : 0, kmer_.size());
     return price;
 }
 
@@ -306,12 +525,19 @@ uint64_t Frame::step(char base, std::string_view row_kmer, const RowRuns &row, F
     next->level_ = level_;
     next->depth_ = depth_ + 1;
     next->labels_.clear();
-    next->run_begin_.clear();
-    next->runs_.clear();
+    next->runs_ = 0;
+    next->refs_.clear();
+    const bool trace = level_ == Support::TRACE;
+    if (trace) {
+        next->anchor_ = anchor_;
+        next->bits_.assign(words_for(anchor_->num_chains()), uint64_t(0));
+    } else {
+        next->anchor_.reset();
+        next->bits_.clear();
+    }
 
     // the label merge, and for a label on both lists (TRACE) the merge of its chains with its
     // coordinate runs
-    const bool trace = level_ == Support::TRACE;
     const Direction dir = direction();
     const std::vector<LabelId> &a = labels_;
     const std::vector<LabelId> &b = row.labels();
@@ -327,9 +553,14 @@ uint64_t Frame::step(char base, std::string_view row_kmer, const RowRuns &row, F
         } else {
             next->labels_.push_back(a[i]);
             if (trace) {
-                next->run_begin_.push_back(next->runs_.size());
-                chain_units += continue_chains(dir, chains(i), num_chains(i), row.runs(j),
-                                               row.num_runs(j), &next->runs_, clock);
+                const uint32_t ai = depth_ ? refs_[i].anchor : static_cast<uint32_t>(i);
+                CurrentChains source { ChainRuns(*anchor_, ai, depth_ ? bits_.data() : nullptr),
+                                       dir, depth_ };
+                BitSink sink { dir, next->bits_.data() };
+                chain_units += merge_chains(dir, num_chain_runs(i), source, row.runs(j),
+                                            row.num_runs(j), sink, clock);
+                next->refs_.push_back(LabelRef { ai, sink.runs });
+                next->runs_ += sink.runs;
                 if (clock && clock->stopped)
                     return i + j + chain_units;
             }
@@ -337,37 +568,66 @@ uint64_t Frame::step(char base, std::string_view row_kmer, const RowRuns &row, F
             ++j;
         }
     }
-    if (trace) {
-        if (next->runs_.size() > std::numeric_limits<uint32_t>::max())
-            throw std::length_error("support_step: a frame of more than 2^32 chain runs");
-        next->run_begin_.push_back(next->runs_.size());
-    }
     next->complete_ = true;
     return a.size() + b.size() + chain_units;
 }
 
+size_t Frame::num_chain_runs(size_t i) const {
+    if (level_ != Support::TRACE)
+        return 0;
+    if (depth_)
+        return refs_[i].runs;
+    return anchor_->run_begin[i + 1] - anchor_->run_begin[i];
+}
+
+uint64_t Frame::num_alive(size_t i) const {
+    if (level_ != Support::TRACE)
+        return 0;
+    const size_t ai = depth_ ? refs_[i].anchor : i;
+    const uint64_t from = anchor_->chain_begin[ai], end = anchor_->chain_begin[ai + 1];
+    return depth_ ? count_set(bits_.data(), from, end) : end - from;
+}
+
 bool Frame::supported() const {
-    return level_ == Support::TRACE ? !runs_.empty() : !labels_.empty();
+    return level_ == Support::TRACE ? runs_ > 0 : !labels_.empty();
 }
 
 uint64_t Frame::starts(size_t i, std::vector<CoordRun> *out) const {
     if (level_ != Support::TRACE)
         throw std::logic_error("support_step: a label-level frame has no chains");
-    // a chain moving UP stands at the walk's highest coordinate, one moving DOWN at its
-    // lowest; every coordinate of a chain lies in its record
-    const Coord back = direction() == Direction::UP ? depth_ : 0;
-    const size_t n = num_chains(i);
-    const ChainRun *runs = chains(i);
-    for (size_t r = 0; r < n; ++r) {
-        out->push_back(CoordRun { runs[r].first - back, runs[r].last - back });
+    // the runs stand in the anchor's coordinates: a chain moving UP began at the walk's lowest
+    // coordinate, one moving DOWN stands depth() below where it began; every coordinate of
+    // a chain lies in its record
+    const Coord back = direction() == Direction::UP ? 0 : depth_;
+    ChainRuns runs(*anchor_, depth_ ? refs_[i].anchor : i, depth_ ? bits_.data() : nullptr);
+    ChainRun run;
+    uint64_t chain = 0, n = 0;
+    while (runs.next(&run, &chain)) {
+        out->push_back(CoordRun { run.first - back, run.last - back });
+        ++n;
     }
     return n;
 }
 
-uint64_t Frame::model_bytes(Support level, size_t labels, size_t runs, size_t k) {
+uint64_t Frame::bytes() const {
+    if (!depth_)
+        return anchor_bytes(level_, labels_.size(), runs_, kmer_.size());
+    return step_bytes(level_, labels_.size(), anchor_ ? anchor_->num_chains() : 0, kmer_.size());
+}
+
+uint64_t Frame::anchor_bytes(Support level, size_t labels, size_t runs, size_t k) {
+    uint64_t bytes = sizeof(Frame) + 2 * k + 2 * labels * sizeof(LabelId);
+    if (level == Support::TRACE) {
+        bytes += sizeof(AnchorChains) + 2 * (labels + 1) * (sizeof(uint32_t) + sizeof(uint64_t))
+                    + 2 * runs * sizeof(ChainRun);
+    }
+    return bytes;
+}
+
+uint64_t Frame::step_bytes(Support level, size_t labels, uint64_t chains, size_t k) {
     uint64_t bytes = sizeof(Frame) + 2 * k + 2 * labels * sizeof(LabelId);
     if (level == Support::TRACE)
-        bytes += 2 * (labels + 1) * sizeof(uint32_t) + 2 * runs * sizeof(ChainRun);
+        bytes += 2 * labels * sizeof(LabelRef) + words_for(chains) * sizeof(uint64_t);
     return bytes;
 }
 
@@ -388,8 +648,8 @@ uint64_t combine(const Frame &spelled, const Frame &reverse_complement,
         throw std::invalid_argument("support_step: combine takes two complete frames of one walk");
     }
     auto held = [](const Frame &f, size_t i) {
-        return f.level() == Support::TRACE && f.num_chains(i) ? Held::RECORD_VERIFIED
-                                                              : Held::LABEL_INTERSECTION;
+        return f.level() == Support::TRACE && f.num_chain_runs(i) ? Held::RECORD_VERIFIED
+                                                                  : Held::LABEL_INTERSECTION;
     };
     const std::vector<LabelId> &a = spelled.labels();
     const std::vector<LabelId> &b = reverse_complement.labels();
