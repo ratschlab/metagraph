@@ -64,7 +64,7 @@ Prerequisites
 Before compiling MetaGraph, install the following dependencies:
 
 - cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang
+- GNU GCC, LLVM Clang, or AppleClang with a C++20-capable standard library
 - bzip2
 
 *Optional:*
@@ -100,25 +100,13 @@ Before compiling MetaGraph, install the following dependencies:
 
     .. group-tab:: brew + GNU gcc
 
-        GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
+        Install the current GCC formula and build dependencies::
 
-            brew install gcc autoconf automake libtool cmake make libdeflate
-            [[ "$OSTYPE" == "darwin"* ]] \
-                && brew remove -f boost \
-                && brew install --cc=gcc-7 boost \
-                && brew install gcc@9
-            [[ "$OSTYPE" != "darwin"* ]] \
-                && brew install gcc@9 libomp \
-                && brew remove -f openssl@1.1 boost \
-                && brew install --cc=gcc-9 openssl@1.1 boost
+            brew install gcc libomp cmake make bzip2 boost jemalloc autoconf automake libtool libdeflate
 
-        Then, the following environment variables have to be set::
-
-            echo "\
-            # Use gcc-9 with cmake
-            export CC=\"\$(which gcc-9)\"
-            export CXX=\"\$(which g++-9)\"
-            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+        Set ``CC`` and ``CXX`` to the versioned compiler executables installed by
+        Homebrew when configuring CMake. Use a Boost build compatible with that
+        compiler. The former GCC 9 instructions do not meet the C++20 requirement.
 
     .. group-tab:: brew + LLVM Clang
 

@@ -23,6 +23,7 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
+# Keep legacy dependency targets at C++17. Folly propagates C++20 to MetaGraph.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -291,7 +292,7 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 add_library(eigen INTERFACE)
-target_include_directories(eigen INTERFACE external-libraries/eigen)
+target_include_directories(eigen SYSTEM INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
 # Allow MetaGraph's custom Find*.cmake modules to be picked up even when the
@@ -366,10 +367,15 @@ target_compile_options(zlib
     -Wno-maybe-uninitialized
 )
 
+# Expose spdlog's bundled fmt under the include path required by Folly.
+file(COPY external-libraries/spdlog/include/spdlog/fmt/bundled/
+     DESTINATION ${PROJECT_BINARY_DIR}/gen/fmt)
+
 add_library(folly STATIC
   external-libraries/folly/folly/lang/SafeAssert.cpp
   external-libraries/folly/folly/lang/ToAscii.cpp
 )
+target_compile_features(folly PUBLIC cxx_std_20)
 target_include_directories(folly PRIVATE
   external-libraries/folly
   ${PROJECT_BINARY_DIR}/external-libraries/folly/include
@@ -468,7 +474,6 @@ add_library(metagraph-core STATIC ${metagraph_core_files})
 target_include_directories(metagraph-core PUBLIC
   ${PROJECT_SOURCE_DIR}/src
   external-libraries/KMC/kmc_api
-  ${SDSL_INSTALL}/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/cpp_progress_bar
@@ -478,7 +483,6 @@ target_include_directories(metagraph-core PUBLIC
   ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/jsoncpp/include
   external-libraries/DYNAMIC/include
 )
 
@@ -503,6 +507,8 @@ endif()
 
 # TODO: move ASIO out of here once it replaces sprintf with snprintf
 target_include_directories(metagraph-core SYSTEM PUBLIC
+  ${SDSL_INSTALL}/include
+  external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
 )

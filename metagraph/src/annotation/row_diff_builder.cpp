@@ -432,7 +432,7 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
             node_index v = start;
             std::vector<node_index> path;
             while (path.size() < max_length
-                    && !fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
+                    && !fetch_and_set_bit(visited.data(), v, true, __ATOMIC_ACQ_REL)) {
                 path.push_back(v);
                 if (!graph.has_no_outgoing(v))
                     v = row_diff_successor(graph, v, rd_succ);
@@ -442,11 +442,11 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
                 return;
 
             // Either a sink, or a cyclic dependency
-            if (!fetch_and_set_bit(finalised.data(), v, true, std::memory_order_acq_rel))
-                set_bit(terminal->data(), v, true, std::memory_order_relaxed);
+            if (!fetch_and_set_bit(finalised.data(), v, true, __ATOMIC_ACQ_REL))
+                set_bit(terminal->data(), v, true, __ATOMIC_RELAXED);
 
             for (node_index v : path) {
-                set_bit(finalised.data(), v, true, std::memory_order_release);
+                set_bit(finalised.data(), v, true, __ATOMIC_RELEASE);
             }
         }, []() { return false; }, num_threads);
 

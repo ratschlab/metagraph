@@ -458,7 +458,7 @@ void DeBruijnGraph
                 assert(in_graph(node));
                 visited[node] = true;
                 callback(node, sequence);
-                sequence.assign(sequence.begin() + 1, sequence.end());
+                sequence.erase(0, 1);
 
                 auto next_node = npos;
                 char next_c = '\0';
