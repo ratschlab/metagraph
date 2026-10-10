@@ -327,6 +327,9 @@ SCHEMA = {
                      'delivery_mbps',
                      # a predicate (SPEC §19.12)
                      'predicate',
+                     # the max_anchors and max_labels of a request that names none, at most
+                     # their caps (SPEC §4.5)
+                     'default_max_anchors', 'default_max_labels',
                      # in_ram accepted (SPEC §24)
                      'in_ram'],
     'delivery_mbps': ['build', 'compress'],
@@ -2738,6 +2741,12 @@ class Checker:
         self.ok(is_num(b['default_time_budget_ms'])
                 and b['finalize_reserve_ms'] < b['default_time_budget_ms']
                 <= b['caps']['time_budget_ms'], path + '.default_time_budget_ms')
+        # the defaults of max_anchors and max_labels (SPEC §4.5): integers at most their caps
+        # (the server refuses a larger default at start-up), not among the caps
+        for cap in ('max_anchors', 'max_labels'):
+            self.ok(is_int(b['default_' + cap]) and 0 <= b['default_' + cap] <= b['caps'][cap]
+                    and 'default_' + cap not in b['caps'], f'{path}.default_{cap}',
+                    'at most caps.' + cap)
         self.ok(isinstance(b['caps_rule'], str), path + '.caps_rule')
         # in_ram is accepted, as /search accepts it (SPEC §24): the index is loaded for the
         # request where the server runs on mmap
@@ -4283,8 +4292,16 @@ class TestPatternFixtures(unittest.TestCase):
             with open(SPEC, encoding='utf-8') as f:
                 spec = f.read()
             for flag, value in (('--pattern-default-time-ms', caps['default_time_budget_ms']),
-                                ('--pattern-max-time-ms', caps['caps']['time_budget_ms'])):
+                                ('--pattern-max-time-ms', caps['caps']['time_budget_ms']),
+                                # the two other defaults a host sets apart from the caps
+                                ('--pattern-default-max-anchors', caps['default_max_anchors']),
+                                ('--pattern-max-anchors', caps['caps']['max_anchors']),
+                                ('--pattern-default-max-labels', caps['default_max_labels']),
+                                ('--pattern-max-labels', caps['caps']['max_labels'])):
                 self.assertIn(f'| `{flag}` | {value:,} |', spec, flag)
+        # a default is at most its cap (the server refuses a larger one at start-up)
+        self.assertLessEqual(caps['default_max_anchors'], caps['caps']['max_anchors'])
+        self.assertLessEqual(caps['default_max_labels'], caps['caps']['max_labels'])
 
     def test_capabilities_documents_keep_a_kibibyte(self):
         """Every capabilities document of every fixture server -- GET /traverse/capabilities is

@@ -222,12 +222,13 @@ struct ParsedRequest {
     bool predicate_scope_named = false;
 };
 
-// A cap of the request (max_contexts, max_anchors, max_steps): the server's cap when omitted,
-// else the request's integer >= |min|, lowered to the cap and listed when above it
+// A cap of the request (max_contexts, max_anchors, max_steps): |omitted| when the field is
+// absent (the server's cap, or for max_anchors and max_labels the server's default, at most
+// the cap), else the request's integer >= |min|, lowered to the cap and listed when above it
 uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
-                        Json::Value *clamped) {
+                        Json::Value *clamped, uint64_t omitted) {
     if (!f.has(key))
-        return cap;
+        return omitted;
     const Json::Value &v = f.raw(key);
     if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0))
         throw invalid(f.path(key) + ": expected a non-negative integer");
@@ -239,6 +240,12 @@ uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
         return cap;
     }
     return x;
+}
+
+// the same for a cap that is also its field's default
+uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
+                        Json::Value *clamped) {
+    return capped_integer(f, key, cap, min, clamped, cap);
 }
 
 /**
@@ -378,7 +385,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     req.request.max_contexts = capped_integer(f, "max_contexts", limits.max_contexts, 0,
                                               &req.clamped);
     req.request.max_anchors = capped_integer(f, "max_anchors", limits.max_anchors, 0,
-                                             &req.clamped);
+                                             &req.clamped, limits.default_max_anchors);
     req.max_steps = capped_integer(f, "max_steps", limits.max_steps, 1, &req.clamped);
     req.request.min_information_bits = limits.min_information_bits;
     // the server's policy, read on a graph without its mask only
@@ -427,7 +434,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                                            1, &req.clamped);
     r.max_memory_bytes = capped_integer(f, "max_memory_mb", limits.max_memory_mb, 1,
                                         &req.clamped) << 20;
-    r.max_labels = capped_integer(f, "max_labels", limits.max_labels, 0, &req.clamped);
+    r.max_labels = capped_integer(f, "max_labels", limits.max_labels, 0, &req.clamped,
+                                  limits.default_max_labels);
     r.max_occurrences_per_label = capped_integer(f, "max_occurrences_per_label",
                                                  limits.max_occurrences_per_label, 0,
                                                  &req.clamped);
@@ -1239,6 +1247,7 @@ PatternLimits pattern_limits(const Config &config) {
     PatternLimits limits;
     limits.max_contexts = config.pattern_max_contexts;
     limits.max_anchors = config.pattern_max_anchors;
+    limits.default_max_anchors = config.pattern_default_max_anchors;
     limits.max_paths = config.pattern_max_paths;
     limits.max_steps = config.pattern_max_steps;
     limits.default_time_ms = static_cast<double>(config.pattern_default_time_ms);
@@ -1251,6 +1260,7 @@ PatternLimits pattern_limits(const Config &config) {
     limits.max_annotation_work = config.pattern_max_annotation_work;
     limits.max_memory_mb = config.pattern_max_memory_mb;
     limits.max_labels = config.pattern_max_labels;
+    limits.default_max_labels = config.pattern_default_max_labels;
     limits.max_occurrences_per_label = config.pattern_max_occurrences;
     limits.max_predicate_contexts = config.pattern_max_predicate_contexts;
     limits.max_predicate_work = config.pattern_max_predicate_work;
@@ -2601,6 +2611,11 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["predicate"] = std::move(predicate);
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
+    // the max_anchors and max_labels of a request that names none: at most caps.max_anchors
+    // and caps.max_labels (a larger default is refused at start-up), equal to them unless the
+    // operator lowers them. In the full block only (SPEC §23: a later addition)
+    p["default_max_anchors"] = uint_json(limits.default_max_anchors);
+    p["default_max_labels"] = uint_json(limits.default_max_labels);
     p["finalize_reserve_ms"] = number_json(limits.finalize_ms);
     // the rates of the time kept back for the answer (SPEC §7.6), MB/s, stated as numbers
     Json::Value delivery;

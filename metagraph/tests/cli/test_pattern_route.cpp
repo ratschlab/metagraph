@@ -1096,6 +1096,29 @@ TEST(PatternRoute, Capabilities) {
     other.delivery_build_mbps = 2.5;
     other.delivery_compress_mbps = 12.5;
     EXPECT_EQ(7u, pattern_capabilities_json(g.get(), other, false)["caps"]["max_paths"].asUInt64());
+    // the defaults of max_anchors and max_labels, stated apart from their caps (the caps unless
+    // the server lowers them: SPEC §4.5), in the full block, not among the gate keys (§23)
+    EXPECT_EQ(caps["caps"]["max_anchors"], caps["default_max_anchors"]);
+    EXPECT_EQ(caps["caps"]["max_labels"], caps["default_max_labels"]);
+    EXPECT_TRUE(caps["default_max_anchors"].isUInt64());
+    EXPECT_TRUE(caps["default_max_labels"].isUInt64());
+    other.max_anchors = 20;
+    other.default_max_anchors = 9;
+    other.max_labels = 30;
+    other.default_max_labels = 8;
+    {
+        const Json::Value c = pattern_capabilities_json(g.get(), other, false);
+        EXPECT_EQ(20u, c["caps"]["max_anchors"].asUInt64());
+        EXPECT_EQ(9u, c["default_max_anchors"].asUInt64());
+        EXPECT_EQ(30u, c["caps"]["max_labels"].asUInt64());
+        EXPECT_EQ(8u, c["default_max_labels"].asUInt64());
+        for (const char *key : { "default_max_anchors", "default_max_labels" }) {
+            EXPECT_FALSE(c["caps"].isMember(key)) << key;
+            for (const std::string &gate : pattern_gate_keys()) {
+                EXPECT_NE(gate, key);
+            }
+        }
+    }
     // the prose fields are references to the SPEC, the rates of the time kept back for the
     // answer numbers (MB/s, the server's flags as configured)
     EXPECT_EQ(2.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["build"]
@@ -1214,6 +1237,67 @@ TEST(PatternRoute, TraverseBlockIsTheFullBlockWithDetails) {
     EXPECT_EQ((std::vector<std::string> { "available", "pattern_contract_version",
                                           "unavailable_reason" }),
               forms[2].getMemberNames());
+}
+
+// SPEC §4.5: max_anchors and max_labels of a request that names neither are the server's
+// defaults (--pattern-default-max-anchors, --pattern-default-max-labels), at most their caps;
+// a named value is read against the cap as before: kept up to it, lowered to it (not to the
+// default) and listed above it. With default == cap (the server's own defaults) every answer
+// is as before
+TEST(PatternRoute, DefaultsBelowTheCaps) {
+    auto g = tiny();
+    PatternLimits below = limits();
+    below.max_anchors = 50;
+    below.default_max_anchors = 5;
+    below.max_labels = 40;
+    below.default_max_labels = 1;
+    // a labelled partial retrieval (the tiny graph's column annotation is unbudgeted); AACG
+    // lies in both records, so the two labels are cut to the default of one
+    const std::string p = "\"patterns\": [{\"dna\": \"AACG\"}], \"mode\": \"partial\", "
+                          "\"output\": {\"labels\": \"all\"}, "
+                          "\"allow_unbudgeted_annotation\": true";
+    Json::Value out = run(*g, "{" + p + "}", nullptr, nullptr, below);
+    EXPECT_EQ(5u, out["limits"]["max_anchors"].asUInt64());
+    EXPECT_EQ(1u, out["limits"]["max_labels"].asUInt64());
+    EXPECT_EQ(0u, out["limits"]["clamped"].size());
+    const Json::Value &e = out["patterns"][0];
+    ASSERT_EQ(1u, e["by_label"].size());
+    EXPECT_EQ("max_labels", e["labels_cut"]["reason"].asString());
+    EXPECT_EQ(1u, e["labels_cut"]["returned"].asUInt64());
+    EXPECT_EQ(2u, e["counts"]["labels"]["value"].asUInt64());
+    // the label kept is the first of the order (contexts desc, column asc): the same as the
+    // first of a request that names the cap
+    const Json::Value all = run(*g, "{" + p + ", \"max_labels\": 40}", nullptr, nullptr, below);
+    ASSERT_EQ(2u, all["patterns"][0]["by_label"].size());
+    EXPECT_EQ(all["patterns"][0]["by_label"][0], e["by_label"][0]);
+    EXPECT_TRUE(all["patterns"][0]["labels_cut"].isNull());
+    // a named value up to the cap is kept, above the cap lowered to the cap and listed
+    out = run(*g, "{" + p + ", \"max_anchors\": 50, \"max_labels\": 40}", nullptr, nullptr,
+              below);
+    EXPECT_EQ(50u, out["limits"]["max_anchors"].asUInt64());
+    EXPECT_EQ(40u, out["limits"]["max_labels"].asUInt64());
+    EXPECT_EQ(0u, out["limits"]["clamped"].size());
+    out = run(*g, "{" + p + ", \"max_anchors\": 51, \"max_labels\": 41}", nullptr, nullptr,
+              below);
+    EXPECT_EQ(50u, out["limits"]["max_anchors"].asUInt64());
+    EXPECT_EQ(40u, out["limits"]["max_labels"].asUInt64());
+    ASSERT_EQ(2u, out["limits"]["clamped"].size());
+    for (const Json::Value &c : out["limits"]["clamped"]) {
+        const bool anchors = c["field"].asString() == "max_anchors";
+        EXPECT_TRUE(anchors || c["field"].asString() == "max_labels") << c;
+        EXPECT_EQ(anchors ? 51u : 41u, c["requested"].asUInt64());
+        EXPECT_EQ(anchors ? 50u : 40u, c["effective"].asUInt64());
+    }
+    // a value below the default is kept as named (the default is not a floor)
+    out = run(*g, "{" + p + ", \"max_anchors\": 2, \"max_labels\": 0}", nullptr, nullptr, below);
+    EXPECT_EQ(2u, out["limits"]["max_anchors"].asUInt64());
+    EXPECT_EQ(0u, out["limits"]["max_labels"].asUInt64());
+    // the server's own limits: default == cap, the answer as before (both labels listed)
+    out = run(*g, "{" + p + "}");
+    EXPECT_EQ(limits().max_anchors, out["limits"]["max_anchors"].asUInt64());
+    EXPECT_EQ(limits().max_labels, out["limits"]["max_labels"].asUInt64());
+    EXPECT_EQ(2u, out["patterns"][0]["by_label"].size());
+    EXPECT_TRUE(out["patterns"][0]["labels_cut"].isNull());
 }
 
 

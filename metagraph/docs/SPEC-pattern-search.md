@@ -169,14 +169,14 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `strands` | `"both"` \| `"forward"` \| `"reverse"` | `"both"` | `forward` searches P, `reverse` rc(P); a palindrome is searched once whatever is named (§7.3) |
 | `stop_at_threshold` | boolean | `false` | stop a pattern's discovery once its running lower bound passes its threshold (§7.5; on a graph without its mask its running upper bound, §7.4); checked in discovery only, so a pattern can still end `exact` above its threshold with no stop |
 | `max_contexts` | integer ≥ 0 | `caps.max_contexts` (10,000) | per pattern; above the cap: lowered and listed in `limits.clamped` |
-| `max_anchors` | integer ≥ 0 | `caps.max_anchors` (1,000) | per pattern, L > k: the `stop_at_threshold` threshold; lowered like `max_contexts` |
+| `max_anchors` | integer ≥ 0 | `default_max_anchors` (1,000; `caps.max_anchors` unless the host lowers the default, §4.5) | per pattern, L > k: the `stop_at_threshold` threshold; above `caps.max_anchors`: lowered like `max_contexts` |
 | `max_steps` | integer ≥ 1 | `caps.max_steps` (10⁸) | per **request**: the patterns spend one budget in request order (§7.6); lowered like `max_contexts` |
 | `time_budget_ms` | number > `finalize_reserve_ms` | `default_time_budget_ms` (60,000) | the request's deadline (§7.6); above `caps.time_budget_ms` (600,000): lowered to it and listed |
 | `output` | object (§4.3) | `{"labels": default_projection}` | what a retrieval returns |
 | `max_labels_per_anchor` | integer ≥ 1 | `caps.max_labels_per_anchor` (64) | increment 3: the labels kept per row (§14.2); lowered like `max_contexts` |
 | `max_annotation_work` | integer ≥ 1 | `caps.max_annotation_work` (10⁸) | increment 3: the annotation work of the request, in the oracle's units (§14.4); lowered like `max_contexts` |
 | `max_memory_mb` | integer ≥ 1 | `caps.max_memory_mb` (256) | increment 3: the request's memory account (§14.4); lowered like `max_contexts` |
-| `max_labels` | integer ≥ 0 | `caps.max_labels` (1,000) | increment 3, `partial` only: the labels listed per pattern (§14.5); lowered like `max_contexts` |
+| `max_labels` | integer ≥ 0 | `default_max_labels` (1,000; `caps.max_labels` unless the host lowers the default, §4.5) | increment 3, `partial` only: the labels listed per pattern (§14.5); above `caps.max_labels`: lowered like `max_contexts` |
 | `max_occurrences_per_label` | integer ≥ 0 | `caps.max_occurrences_per_label` (16) | increment 3, `partial` only: the placed occurrences listed per label (§14.5); lowered like `max_contexts` |
 | `allow_unbudgeted_annotation` | boolean | `false` | increment 3: read an annotation without the budget-aware decode (§14.4) |
 | `long_search` | `"anchors"` \| `"paths"` \| `"supported_paths"` | `"anchors"` | increment 4 (§12.1): `"paths"` extends every pattern longer than k into its paths; increment 5s (§20): `"supported_paths"` into the walks some label supports along their whole length, reading the annotation in every mode; `"anchors"` answers byte for byte as the field's absence (§7.7). A pattern of at most k bases is answered alike under all three. Any other value, `null` included, is 400 `invalid_request` |
@@ -277,7 +277,8 @@ They are served now, §4.1–§4.3.)
 | flag | default | request field | above it |
 |---|---|---|---|
 | `--pattern-max-contexts` | 10,000 | `max_contexts` (default = cap) | lowered, listed in `limits.clamped` |
-| `--pattern-max-anchors` | 1,000 | `max_anchors` (default = cap) | lowered, listed |
+| `--pattern-max-anchors` | 1,000 | `max_anchors` (default = `default_max_anchors`) | lowered, listed |
+| `--pattern-default-max-anchors` | 1,000 | `max_anchors` when omitted (`default_max_anchors`); at most `--pattern-max-anchors`: named above it, refused at start-up with both flags named; not named, it follows a cap lowered under it (a cap alone is still its field's default) | — |
 | `--pattern-max-paths` | 1,000 | `max_paths` (default = cap; increment 4) | lowered, listed |
 | `--pattern-max-steps` | 100,000,000 | `max_steps` (default = cap) | lowered, listed |
 | `--pattern-default-time-ms` | 60,000 | `time_budget_ms` when omitted | — |
@@ -291,7 +292,8 @@ They are served now, §4.1–§4.3.)
 | `--pattern-max-labels-per-anchor` | 64 | `max_labels_per_anchor` (default = cap) | lowered, listed |
 | `--pattern-max-annotation-work` | 100,000,000 | `max_annotation_work` (default = cap) | lowered, listed |
 | `--pattern-max-memory-mb` | 256 | `max_memory_mb` (default = cap) | lowered, listed |
-| `--pattern-max-labels` | 1,000 | `max_labels` (default = cap) | lowered, listed |
+| `--pattern-max-labels` | 1,000 | `max_labels` (default = `default_max_labels`) | lowered, listed |
+| `--pattern-default-max-labels` | 1,000 | `max_labels` when omitted (`default_max_labels`); at most `--pattern-max-labels`: named above it, refused at start-up with both flags named; not named, it follows a cap lowered under it | — |
 | `--pattern-max-occurrences` | 16 | `max_occurrences_per_label` (default = cap) | lowered, listed |
 | `--pattern-max-predicate-contexts` | 100,000 | `max_predicate_contexts` (default = cap; increment 5b) | lowered, listed |
 | `--pattern-max-predicate-work` | 100,000,000 | `max_predicate_work` (default = cap; increment 5b) | lowered, listed; at least 1 (refused at start-up below) |
@@ -301,9 +303,11 @@ They are served now, §4.1–§4.3.)
 **Every cap of the capabilities' `caps`, classified** (the capabilities' `caps_rule` refers here):
 
 - **the maximum of a request field** — a larger value is lowered to the cap and listed in `limits.clamped`, an
-  omitted one is the cap: `max_contexts`, `max_anchors`, `max_paths`, `max_steps`, `time_budget_ms` (an omitted
-  one is `default_time_budget_ms` instead), `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`,
-  `max_labels`, `max_occurrences_per_label`, `max_predicate_contexts`, `max_predicate_work`;
+  omitted one is the cap: `max_contexts`, `max_anchors` (an omitted one is `default_max_anchors` instead, at most
+  the cap), `max_paths`, `max_steps`, `time_budget_ms` (an omitted one is `default_time_budget_ms` instead),
+  `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels` (an omitted one is
+  `default_max_labels` instead, at most the cap), `max_occurrences_per_label`, `max_predicate_contexts`,
+  `max_predicate_work`;
 - **the server's policy** — no request field lowers it: `max_patterns` (a longer `patterns` list is refused,
   400), `min_information_bits` (the floor, §7.8), `max_checked_entries` (§7.4) and `max_predicate_labels` (400
   `predicate_too_large`, §19.3).
@@ -311,10 +315,21 @@ They are served now, §4.1–§4.3.)
 The rules they bound are §7.4 (the check of few unchecked candidates), §7.6 (the time kept back for the answer),
 §12.1 (the two admissions of `long_search: "paths"`) and §19 (a predicate's admissions and budgets).
 
-The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`; the two
+The capabilities state every value in force (`caps`, `default_time_budget_ms`, `default_max_anchors`,
+`default_max_labels`, `finalize_reserve_ms`; the two
 delivery rates in `delivery_mbps`, since the owner's decision P9, §18, in `caps_rule`'s prose before), and every
 answer echoes the effective ones (`limits`, §8.3), except
-`max_checked_entries`, which no request field sets and only `caps` states (§18). The delivery rates
+`max_checked_entries`, which no request field sets and only `caps` states (§18). **The two defaults below the
+caps** (the owner's decision of 2026-10-09): a host may raise `--pattern-max-anchors` and `--pattern-max-labels`
+for the caller who asks (10,000 on the staging host) while a request that names neither field keeps the former
+values (`--pattern-default-max-anchors`, `--pattern-default-max-labels`, 1,000 each; a named default above its cap
+is refused at start-up, the message naming both flags and both values; a default the operator does not name follows
+a cap lowered under 1,000, so a lowered cap alone keeps meaning what it did). A named value is read against the
+cap exactly as before:
+kept up to it, lowered to it (not to the default) and listed above it. The cut orders are unchanged: labels by
+(contexts desc, column asc), on supported paths by (paths desc, column asc). A client that sets the fields
+explicitly sees no change; one that omits them reads `default_max_anchors` / `default_max_labels` when present
+(every build since this one), else `caps.max_anchors` / `caps.max_labels`. The delivery rates
 are starting estimates, conservative on the hosts measured (§7.6); an operator who raises
 `--pattern-max-contexts` or `--pattern-max-patterns`, or serves on a slow or busy host, lowers them or raises
 `--pattern-finalize-ms`. A clamp is never silent: `limits.clamped` lists it. The
@@ -1242,6 +1257,8 @@ It costs no step.
 | `in_ram` | string | `"accepted"` | §24: `in_ram` is accepted, as `/search` accepts it; whether this server loads an index for it is `GET /capabilities`' `in_ram.loads` |
 | `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not); increment 5b: `max_predicate_contexts`, `max_predicate_work` and `max_predicate_labels` (no request field: the names a predicate may list, §19.3) |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
+| `default_max_anchors` | integer | 1,000 | the `max_anchors` of a request that names none (§4.5): at most `caps.max_anchors` (the server refuses a larger named default at start-up; one not named follows a lowered cap), equal to it unless the operator lowers it (`--pattern-default-max-anchors`). In the full block only (§23); a client reads it when present, else `caps.max_anchors` |
+| `default_max_labels` | integer | 1,000 | the `max_labels` of a request that names none (§4.5): at most `caps.max_labels`, likewise (`--pattern-default-max-labels`). In the full block only; a client reads it when present, else `caps.max_labels` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
 | `caps_rule` | string | `"SPEC-pattern-search.md section 4.5"` | a reference to §4.5, where every cap of `caps` is classified: a request field's maximum (lowered and listed in `limits.clamped` above it) or the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`, `max_predicate_labels`), with the sections of the rules they bound. Printable ASCII; for people, not parsed |
 | `delivery_mbps` | object (`delivery_mbps` below) | | the owner's decision P9 (§18): the rates in force of the time kept back for the answer (§7.6) |
@@ -3566,7 +3583,8 @@ These are the fields the search service gates on or parses (its interface invent
 which `test_pattern_fixtures.py` compares with this table. The full block's fields not in it: `default_mode`,
 `default_projection`, `projections_later_increment`, `kinds_later_increment`, `protein_rule`, `default_scope`,
 `default_strands`, `graph_cleaned`, `records_shorter_than_k`, `resident_only`, `caps_rule`, `delivery_mbps`,
-`predicate`, `alphabet`, `strand_stated`, `dummy_fraction`, the caps `max_annotation_work`, `max_labels`,
+`predicate`, `alphabet`, `strand_stated`, `dummy_fraction`, `default_max_anchors`, `default_max_labels` (§4.5,
+the defaults below the caps), the caps `max_annotation_work`, `max_labels`,
 `max_occurrences_per_label`, `max_checked_entries`, `max_predicate_contexts`, `max_predicate_work` and
 `max_predicate_labels`, and every later addition.
 
@@ -3593,6 +3611,14 @@ which `test_pattern_fixtures.py` compares with this table. The full block's fiel
   float as 24 characters). With the additions of §20, §24 and §25 (the fixture bodies of this build, compact JSON):
   `/traverse/capabilities` 5,437–5,605 bytes, `/capabilities` 4,806–5,291 (the multi-graph server's with
   `graph_summary` and `in_ram`), `/pattern/capabilities` 102–2,104; the largest 26,139 bytes under the budget.
+- **`default_max_anchors`, `default_max_labels`** (§4.5, the owner's decision of 2026-10-09): two integer fields
+  of the full block, on every route that serves it (phase 1: `/pattern/capabilities`, `/capabilities`, the
+  `/traverse` block) and in the loading form; not gate fields (phase 2 drops them from the `/traverse` block). 53
+  bytes per document: `/traverse/capabilities` 5,490–5,658 bytes, `/capabilities` 4,859–5,344,
+  `/pattern/capabilities` 1,998–2,157 (the loading form 1,998); the largest, `/traverse/capabilities` of the
+  unmasked server, 25,939 bytes under the budget of 31,744 (5,805 by the validator's measure). Every answer to a
+  request that names neither field is byte-identical while default = cap (the fixtures of this build); the
+  capabilities bodies of every fixture server regenerated, the hand-made `pattern_capabilities_loading` with them.
 - Requests to `POST /pattern`, `/traverse` and `/resolve` are answered as before: no answer carries these texts.
 - Fixtures (§11): `pattern_capabilities`, `pattern_capabilities_unmasked`, `pattern_capabilities_built_at_load`,
   `pattern_capabilities_multi_graph`, `pattern_capabilities_graph_param` (400) and the hand-made

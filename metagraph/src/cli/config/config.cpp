@@ -6,6 +6,7 @@
 #include <cstring>
 #include <iostream>
 #include <optional>
+#include <tuple>
 #include <unordered_set>
 #include <filesystem>
 
@@ -493,6 +494,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--pattern-max-anchors")) {
             exact_ms(argv[i], get_value(i), &pattern_max_anchors);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-default-max-anchors")) {
+            exact_ms(argv[i], get_value(i), &pattern_default_max_anchors);
+            pattern_default_max_anchors_named = true;
+            i++;
         } else if (!strcmp(argv[i], "--pattern-max-paths")) {
             exact_ms(argv[i], get_value(i), &pattern_max_paths);
             i++;
@@ -526,6 +531,10 @@ Config::Config(int argc, char *argv[]) {
             i++;
         } else if (!strcmp(argv[i], "--pattern-max-labels")) {
             exact_ms(argv[i], get_value(i), &pattern_max_labels);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-default-max-labels")) {
+            exact_ms(argv[i], get_value(i), &pattern_default_max_labels);
+            pattern_default_max_labels_named = true;
             i++;
         } else if (!strcmp(argv[i], "--pattern-max-occurrences")) {
             exact_ms(argv[i], get_value(i), &pattern_max_occurrences);
@@ -844,6 +853,29 @@ Config::Config(int argc, char *argv[]) {
                      "and --pattern-default-time-ms above --pattern-finalize-ms and at most "
                      "--pattern-max-time-ms" << std::endl;
         print_usage_and_exit = true;
+    }
+    // the max_anchors and max_labels of a request that names none are values a request may
+    // name: at most their caps (an omitted field must never get more than a named one could).
+    // A default the operator did not name follows a cap lowered under it (a cap alone keeps
+    // meaning what it did: the field's default too); a named one above its cap is refused
+    if (identity == PATTERN || identity == SERVER_QUERY) {
+        for (const auto &[flag, value, named, cap_flag, cap]
+                 : { std::make_tuple("--pattern-default-max-anchors", &pattern_default_max_anchors,
+                                     pattern_default_max_anchors_named, "--pattern-max-anchors",
+                                     pattern_max_anchors),
+                     std::make_tuple("--pattern-default-max-labels", &pattern_default_max_labels,
+                                     pattern_default_max_labels_named, "--pattern-max-labels",
+                                     pattern_max_labels) }) {
+            if (*value <= cap)
+                continue;
+            if (!named) {
+                *value = cap;
+                continue;
+            }
+            std::cerr << "Error: " << flag << " (" << *value << ") must be at most " << cap_flag
+                      << " (" << cap << ")" << std::endl;
+            print_usage_and_exit = true;
+        }
     }
     // a /pattern deadline the transport cannot honour would be accepted and echoed, and the
     // connection closed at the content timeout before any answer or 503: the cap stays under it
@@ -1788,7 +1820,8 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-min-information-bits [FLOAT] \tinformation floor of a pattern (bits; an exact pattern in suffix scope is exempt) [24]\n");
             fprintf(stderr, "\t   --pattern-max-checked-entries [INT] \twithout a dummy-edge mask: a pattern with at most this many unchecked candidate k-mers has each tested (k - 1 steps each), its counts exact; 0: none; at most 1000 [50]\n");
             fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
-            fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-anchors [INT] \tmaximum of max_anchors per pattern longer than k [1000]\n");
+            fprintf(stderr, "\t   --pattern-default-max-anchors [INT] \tmax_anchors of a request that names none, at most --pattern-max-anchors (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths or supported_paths (retrieval threshold, partial's cap) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
             fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
@@ -1800,7 +1833,8 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
             fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
-            fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-labels [INT] \tmaximum of max_labels: labels listed per pattern in mode partial [1000]\n");
+            fprintf(stderr, "\t   --pattern-default-max-labels [INT] \tmax_labels of a request that names none, at most --pattern-max-labels (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-contexts [INT] \tdefault and maximum of max_predicate_contexts: the raw contexts a predicate's selection may test per pattern [100000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-work [INT] \tdefault and maximum of max_predicate_work per request (a predicate's selection: annotation work units) [100000000]\n");
@@ -1856,7 +1890,8 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-min-information-bits [FLOAT] \tinformation floor of a pattern (bits; an exact pattern in suffix scope is exempt) [24]\n");
             fprintf(stderr, "\t   --pattern-max-checked-entries [INT] \twithout a dummy-edge mask: a pattern with at most this many unchecked candidate k-mers has each tested (k - 1 steps each), its counts exact; 0: none; at most 1000 [50]\n");
             fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
-            fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-anchors [INT] \tmaximum of max_anchors per pattern longer than k [1000]\n");
+            fprintf(stderr, "\t   --pattern-default-max-anchors [INT] \tmax_anchors of a request that names none, at most --pattern-max-anchors (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths or supported_paths (retrieval threshold, partial's cap) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
             fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
@@ -1868,7 +1903,8 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
             fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
-            fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-labels [INT] \tmaximum of max_labels: labels listed per pattern in mode partial [1000]\n");
+            fprintf(stderr, "\t   --pattern-default-max-labels [INT] \tmax_labels of a request that names none, at most --pattern-max-labels (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-contexts [INT] \tdefault and maximum of max_predicate_contexts: the raw contexts a predicate's selection may test per pattern [100000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-work [INT] \tdefault and maximum of max_predicate_work per request (a predicate's selection: annotation work units) [100000000]\n");

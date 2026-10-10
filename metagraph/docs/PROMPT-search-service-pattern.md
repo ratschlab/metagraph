@@ -64,7 +64,9 @@ today carries `attempts`, `coordinates` and `deadline_check` and no feature list
 both. The block: `modes`, `projections` (the list the host offers **now**: `["none"]` at milestone 1,
 `["none", "all"]` since milestone 3, `["none", "all", "predicate_only"]` since 5b; gate the label projections on this list, never on
 a milestone number),
-scopes per graph mode, the caps and floors, `placement` and `support` the index can give, `mask`,
+scopes per graph mode, the caps and floors (and the host's defaults for `max_labels` and `max_anchors`, which
+may lie below their caps: `default_max_labels`, `default_max_anchors`, see "Defaults below the caps" below),
+`placement` and `support` the index can give, `mask`,
 `annotation: budgeted | unbudgeted`, `pattern_contract_version` (accept only a version the service implements,
 1 today; refuse a missing, malformed or other one, a higher one included, since a higher version means a field
 changed meaning; within version 1 read fields by presence and pass unknown values of the extensible
@@ -321,6 +323,23 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
 - **Codes**: `resident_only` is retired (no build answers it any more; an older one may: pass it through);
   `multi_graph_later_increment` is answered by no route of this build; `budget_split` stays 400
   `later_increment`.
+
+**Defaults below the caps: `max_labels` and `max_anchors` (in the build since round D, 2026-10-10; SPEC §4.5,
+§10.2).** The owner's decision of 2026-10-09: the staging host raises `--pattern-max-labels` and
+`--pattern-max-anchors` to 10,000 for the callers who ask, while a request that names neither field keeps 1,000
+(`--pattern-default-max-labels`, `--pattern-default-max-anchors`; a default above its cap is refused at start-up).
+Additions to contract version 1; nothing else changes:
+- **The block** gains `default_max_labels` and `default_max_anchors` (integers; in the full block on every route,
+  not gate fields). Read each when present, else `caps.max_labels` / `caps.max_anchors` (on an older build the
+  default is the cap). `caps.max_labels` and `caps.max_anchors` stay the ceilings a named value is checked against.
+- **What the service sends**: `max_labels: 100` on every labelled request by default (the service's own default,
+  below the host's; a caller may raise it, up to `caps.max_labels`), and `max_anchors` only when a caller raises it
+  (then within `caps.max_anchors`; an omitted field gets the host's `default_max_anchors`). `limits` echoes the
+  effective values as before. The cut orders are unchanged: labels by (contexts desc, column asc); on supported
+  paths by (paths desc, column asc).
+- A named value is read against the cap exactly as before: kept up to the cap, lowered to it (not to the default)
+  and listed in `limits.clamped` above it; the service's validator keeps refusing values above the service's own
+  ceilings at submit (§3.1 item 5).
 
 ## 2. When
 

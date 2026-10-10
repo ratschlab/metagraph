@@ -192,7 +192,12 @@ class Config {
     uint64_t pattern_max_checked_entries = 50;
     static constexpr uint64_t kMaxPatternCheckedEntries = 1'000;
     uint64_t pattern_max_contexts = 10'000;
+    // the maximum of max_anchors, and the value of a request that names none (at most the
+    // maximum: a named default above it is refused at start-up, one not named follows a maximum
+    // lowered under it; the other caps are their fields' defaults)
     uint64_t pattern_max_anchors = 1'000;
+    uint64_t pattern_default_max_anchors = 1'000;
+    bool pattern_default_max_anchors_named = false;
     // long_search "paths" (§4.2): the default and maximum of max_paths, the retrieval threshold
     // on the completed paths of a pattern longer than k (all_or_count releases them only when
     // their exact count is at most this; partial's cap)
@@ -229,6 +234,10 @@ class Config {
     uint64_t pattern_max_annotation_work = 100'000'000;
     uint64_t pattern_max_memory_mb = 256;
     uint64_t pattern_max_labels = 1'000;
+    // max_labels of a request that names none: at most pattern_max_labels (a named default
+    // above it is refused at start-up, one not named follows a lowered maximum)
+    uint64_t pattern_default_max_labels = 1'000;
+    bool pattern_default_max_labels_named = false;
     uint64_t pattern_max_occurrences = 16;
     // a predicate's selection (SPEC-pattern-search.md §19.2, §19.3): the default and maximum of
     // max_predicate_contexts (the raw contexts a pattern's selection may test) and of

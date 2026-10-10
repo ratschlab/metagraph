@@ -86,7 +86,9 @@ FIXTURES_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
                                'traversal', 'pattern_fixtures.py')
 
 # the server's defaults (--pattern-* flags; §5.3): each cap is its field's maximum and default,
-# but time_budget_ms defaults to 60 s under a 600 s cap
+# but time_budget_ms defaults to 60 s under a 600 s cap, and max_anchors and max_labels have
+# defaults of their own (--pattern-default-max-anchors, --pattern-default-max-labels), equal to
+# the caps unless the operator lowers them
 DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 100000000,
                 'time_budget_ms': 600000, 'min_information_bits': 24, 'max_patterns': 16,
                 # output.labels "all"
@@ -103,6 +105,8 @@ DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 1000000
                 'max_predicate_labels': 10000}
 DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
+DEFAULT_MAX_ANCHORS = 1000
+DEFAULT_MAX_LABELS = 1000
 
 IUPAC = {'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'R': 'AG', 'Y': 'CT', 'S': 'CG', 'W': 'AT',
          'K': 'GT', 'M': 'AC', 'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG', 'N': 'ACGT'}
@@ -923,6 +927,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             # in_ram accepted (as /search's): the budgets start after a load
             'resident_only': False, 'in_ram': 'accepted', 'caps': DEFAULT_CAPS,
             'default_time_budget_ms': DEFAULT_TIME_MS,
+            # the defaults of max_anchors and max_labels, the caps unless lowered
+            'default_max_anchors': DEFAULT_MAX_ANCHORS,
+            'default_max_labels': DEFAULT_MAX_LABELS,
             'finalize_reserve_ms': DEFAULT_FINALIZE_MS,
             # the delivery rates as numbers (MB/s), the prose rules SPEC references
             'delivery_mbps': {'build': 10, 'compress': 50},
@@ -959,6 +966,86 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             # coordinates and record mapping, a budgeted row-diff annotation
             self.assertEqual(('record', 'record_verified', 'budgeted'),
                              (p['placement'], p['support'], p['annotation']))
+
+    def test_defaults_below_the_caps(self):
+        """SPEC §4.5: a host raises --pattern-max-labels and --pattern-max-anchors for the
+        callers who ask while a request that names neither field keeps the defaults
+        (--pattern-default-max-labels, --pattern-default-max-anchors): the capabilities state
+        both on every route, `limits` echoes the effective values, a named value is read
+        against the cap as before, and the default cuts partial's label list where the cap
+        would not."""
+        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno,
+                                    '--pattern-max-labels', '10000',
+                                    '--pattern-default-max-labels', '1000',
+                                    '--pattern-max-anchors', '10000',
+                                    '--pattern-default-max-anchors', '1000'],
+                        os.path.join(self.tempdir.name, 'server_defaults.log'))
+        try:
+            full = server.get('pattern/capabilities').json()
+            for block in (full, server.get('capabilities').json()['pattern'],
+                          server.get('traverse/capabilities').json()['pattern']):
+                self.assertEqual((10000, 1000, 10000, 1000),
+                                 (block['caps']['max_labels'], block['default_max_labels'],
+                                  block['caps']['max_anchors'], block['default_max_anchors']))
+            self.assertEqual(dict(DEFAULT_CAPS, max_labels=10000, max_anchors=10000),
+                             full['caps'])
+            # a request that names neither: the defaults, nothing clamped, at most 1,000
+            # labels listed (the mini has far fewer: the list is whole)
+            request = {'patterns': [{'dna': self.NDM_F}], 'mode': 'partial',
+                       'output': {'labels': 'all'}}
+            out = self.pattern(server, request)
+            self.assertEqual((1000, 1000, []), (out['limits']['max_labels'],
+                                                out['limits']['max_anchors'],
+                                                out['limits']['clamped']))
+            entry = out['patterns'][0]
+            self.assertLessEqual(len(entry['by_label']), 1000)
+            self.assertIsNone(entry['labels_cut'])
+            # the same answer as the default server's (whose default is its cap)
+            base = self.pattern(self.server, request)
+            self.assertEqual(untimed(base)['patterns'], untimed(out)['patterns'])
+            # a named value up to the cap is kept; above it lowered to the cap (not to the
+            # default) and listed
+            out = self.pattern(server, dict(request, max_labels=5000, max_anchors=10000))
+            self.assertEqual((5000, 10000, []), (out['limits']['max_labels'],
+                                                 out['limits']['max_anchors'],
+                                                 out['limits']['clamped']))
+            out = self.pattern(server, dict(request, max_labels=20000, max_anchors=10001))
+            self.assertEqual((10000, 10000), (out['limits']['max_labels'],
+                                              out['limits']['max_anchors']))
+            self.assertEqual([{'field': 'max_anchors', 'requested': 10001, 'effective': 10000},
+                              {'field': 'max_labels', 'requested': 20000, 'effective': 10000}],
+                             sorted(out['limits']['clamped'], key=lambda c: c['field']))
+        finally:
+            server.stop()
+        # a default below the labels of the pattern cuts the list where the cap would not: the
+        # first two of (contexts desc, column asc), the cut stated, the count whole; and a cap
+        # lowered under 1,000 without its default flag takes the default with it (a cap alone
+        # keeps meaning what it did: the field's default too)
+        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno,
+                                    '--pattern-default-max-labels', '2',
+                                    '--pattern-max-anchors', '500'],
+                        os.path.join(self.tempdir.name, 'server_default_two.log'))
+        try:
+            block = server.get('pattern/capabilities').json()
+            self.assertEqual((1000, 2, 500, 500),
+                             (block['caps']['max_labels'], block['default_max_labels'],
+                              block['caps']['max_anchors'], block['default_max_anchors']))
+            self.assertEqual(500, self.pattern(server, request)['limits']['max_anchors'])
+            full = self.pattern(self.server, request)['patterns'][0]
+            self.assertGreater(len(full['by_label']), 2)
+            entry = self.pattern(server, request)['patterns'][0]
+            self.assertEqual({'reason': 'max_labels', 'returned': 2}, entry['labels_cut'])
+            self.assertEqual(full['by_label'][:2], entry['by_label'])
+            self.assertEqual(full['counts'], entry['counts'])
+            # naming the field lifts the default up to the cap
+            entry = self.pattern(server, dict(request, max_labels=3))['patterns'][0]
+            self.assertEqual({'reason': 'max_labels', 'returned': 3}, entry['labels_cut'])
+            self.assertEqual(full['by_label'][:3], entry['by_label'])
+            entry = self.pattern(server, dict(request, max_labels=1000))['patterns'][0]
+            self.assertEqual(full['by_label'], entry['by_label'])
+            self.assertIsNone(entry['labels_cut'])
+        finally:
+            server.stop()
 
     # ------------------------------------------------------------ the label-free retrieval
 
@@ -3130,6 +3217,65 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         self.assertEqual((7, 1000, 3), (limits['max_predicate_contexts'],
                                         limits['max_predicate_work'],
                                         limits['max_predicate_labels']))
+
+    def test_default_caps_at_start_up(self):
+        """SPEC §4.5: --pattern-default-max-labels and --pattern-default-max-anchors are at
+        most their caps, refused at start-up above them with both flags (and both values)
+        named, on the server and the CLI alike; equal to the cap they start; both usages name
+        the flags; the CLI applies the default as the server does."""
+        cases = (('--pattern-default-max-labels', '--pattern-max-labels'),
+                 ('--pattern-default-max-anchors', '--pattern-max-anchors'))
+        for command in ('server_query', 'pattern'):
+            for flag, cap_flag in cases:
+                cmd = shlex.split(METAGRAPH) + [command, '-i', self.graph_basic, '-a',
+                                                self.anno_basic, cap_flag, '10', flag, '11']
+                if command == 'server_query':
+                    cmd += ['--port', str(free_port()), '--address', '127.0.0.1']
+                else:
+                    cmd += [os.path.join(self.tempdir.name, 'none.json')]
+                try:
+                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                         timeout=120)
+                except subprocess.TimeoutExpired:
+                    self.fail(f'{command} started with {flag} 11 above {cap_flag} 10')
+                self.assertNotEqual(0, res.returncode, (command, flag))
+                self.assertIn(f'{flag} (11) must be at most {cap_flag} (10)',
+                              res.stderr.decode(), (command, flag))
+            res = subprocess.run(shlex.split(METAGRAPH) + [command], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            text = (res.stdout + res.stderr).decode()
+            for flag, _ in cases:
+                self.assertIn(flag, text, command)
+        # the CLI: a labelled partial request that names neither field gets the defaults: the
+        # named one (3 under the cap 10), and for max_anchors, whose default is not named, the
+        # cap lowered under 1,000 (7: a cap alone keeps meaning what it did); a default equal
+        # to its cap starts; a cap of its own lowers a named value
+        path = os.path.join(self.tempdir.name, 'request_default_caps.json')
+        with open(path, 'w') as f:
+            json.dump({'patterns': [{'iupac': self.PATTERNS[0]}], 'mode': 'partial',
+                       'output': {'labels': 'all'}, 'allow_unbudgeted_annotation': True}, f)
+        base = shlex.split(METAGRAPH) + ['pattern', '--json', '--pattern-min-information-bits',
+                                         str(self.FLOOR), '-i', self.graph_basic, '-a',
+                                         self.anno_basic, '--pattern-max-labels', '10',
+                                         '--pattern-max-anchors', '7']
+        for default_labels, expected in (('3', 3), ('10', 10)):
+            res = subprocess.run(base + ['--pattern-default-max-labels', default_labels, path],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stderr.decode())
+            limits = json.loads(res.stdout)['limits']
+            self.assertEqual((expected, 7, []), (limits['max_labels'], limits['max_anchors'],
+                                                 limits['clamped']), default_labels)
+        with open(path, 'w') as f:
+            json.dump({'patterns': [{'iupac': self.PATTERNS[0]}], 'mode': 'partial',
+                       'output': {'labels': 'all'}, 'allow_unbudgeted_annotation': True,
+                       'max_labels': 11, 'max_anchors': 5}, f)
+        res = subprocess.run(base + ['--pattern-default-max-labels', '3', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        limits = json.loads(res.stdout)['limits']
+        self.assertEqual((10, 5), (limits['max_labels'], limits['max_anchors']))
+        self.assertEqual([{'field': 'max_labels', 'requested': 11, 'effective': 10}],
+                         limits['clamped'])
 
     def test_cli(self):
         request = {'patterns': [{'iupac': p} for p in self.PATTERNS], 'mode': 'count'}

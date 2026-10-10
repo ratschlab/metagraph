@@ -24,6 +24,8 @@
  "counting": null,
  "default_genetic_code": 1,
  "default_long_search": "anchors",
+ "default_max_anchors": 1000,
+ "default_max_labels": 1000,
  "default_mode": "all_or_count",
  "default_occurrences": true,
  "default_projection": "none",

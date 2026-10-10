@@ -107,11 +107,15 @@ struct InvalidPatternRequest {
  * ones, so that both answer alike). Each is a request field's maximum: a larger request value
  * is lowered to it and listed in limits.clamped (the /traverse convention), never refused,
  * never silently kept; and each is the field's default, except the time budget, whose default
- * (60 s) lies under its maximum (600 s) (§5.3).
+ * (60 s) lies under its maximum (600 s) (§5.3), and max_anchors and max_labels, whose defaults
+ * (default_max_anchors, default_max_labels) are at most their maxima (equal by default).
  */
 struct PatternLimits {
     uint64_t max_contexts = 10'000;
     uint64_t max_anchors = 1'000;
+    // max_anchors of a request that names none (--pattern-default-max-anchors): at most
+    // max_anchors, the server refuses a larger one at start-up
+    uint64_t default_max_anchors = 1'000;
     // long_search "paths": the retrieval threshold on the completed paths of a pattern longer
     // than k (all_or_count) and partial's cap on them
     uint64_t max_paths = 1'000;
@@ -137,6 +141,9 @@ struct PatternLimits {
     uint64_t max_annotation_work = 100'000'000;
     uint64_t max_memory_mb = 256;
     uint64_t max_labels = 1'000;
+    // max_labels of a request that names none (--pattern-default-max-labels): at most
+    // max_labels, likewise
+    uint64_t default_max_labels = 1'000;
     uint64_t max_occurrences_per_label = 16;
     // a predicate's selection (SPEC §19.2): the raw contexts a pattern's selection may test
     // (its compute admission) and the selection's work per request (the oracle's units),
