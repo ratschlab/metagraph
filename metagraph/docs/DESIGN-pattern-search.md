@@ -999,7 +999,10 @@ them (§9).
 As decided (the owner, 2026-10-09: "the same logic as for the general search", "no new recipe"; SPEC §24):
 `/pattern` takes `/search`'s `graphs`, answers each selected (graph, annotation) pair as a single-graph server
 answers it (its own deadline, caps and memory account: the request's budgets apply per pair), in parallel on
-`graphs_pool`, and returns the answers concatenated, each tagged with its pair and `index_fp`. The requester
+`graphs_pool`, and returns the answers concatenated, each tagged with its pair and `index_fp`. A pair the request
+would be refused on (its graph, its annotation, its deadline) is a refused entry of that envelope, the other pairs
+answered (the owner's decision of 2026-10-10, SPEC §24.1; before it a refused pair refused the request, as
+`/search` fails on one graph); what no pair decides stays the request's 400. The requester
 merges, as the search service merges `/search`'s answers of a chunked database, sending one graph per request
 (PROMPT §3.1 items 2 and 3); `GET /capabilities` states every pair (`graph_summary`) and whether the pairs' columns
 are disjoint, which licenses summing a label's counts over them.

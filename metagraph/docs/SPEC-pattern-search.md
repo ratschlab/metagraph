@@ -325,7 +325,9 @@ server lowers them, so that a direct caller is not refused for a budget the host
 
 A request is refused by the first check it fails, in this order:
 
-1. multi-graph server: the order of §24 (the body, `graphs`, `in_ram`, then each pair from step 4 on);
+1. multi-graph server: the order of §24.1 (the body, `graphs`, `in_ram`, then the request's fields -- steps 5 to 9,
+   whose refusals are the request's -- then each pair from step 4 on, on its own: a pair's refusal, steps 4, 10, 11
+   and the 503 `deadline`, is that pair's entry of the 200 envelope, not the request's);
 2. the single index still loading: 503, no `code` (§6);
 3. the body is not one RFC 8259 JSON text (§3: a comment, a trailing comma, anything after the value, a
    duplicated member name, nesting deeper than 1,000): 400 `invalid_request`;
@@ -362,6 +364,12 @@ A request is refused by the first check it fails, in this order:
 ## 6. Whole-request refusals
 
 The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`.
+
+On a multi-graph server (§24.1) a refusal that one pair alone would be answered -- its graph's support (step 4 of
+§5), its annotation (steps 10 and 11), its 503 `deadline`, a failure while it is processed -- is carried inside the
+200 envelope as that pair's entry (`outcome: "refused"`, `refusal: {http_status, ...this body}`), the other pairs
+answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the request's fields: steps 3 and 5 to
+9) refuse the request as below.
 
 <!-- schema: refusal -->
 | field | type | meaning |
@@ -3619,15 +3627,28 @@ how the search service uses it; the route serves any number.
   request. The pairs run in parallel on the server's graph pool (`-p` threads, shared with `/search`).
 - The order of the checks (§5 step 1): the body is one JSON text (§3) and an object (400 `invalid_request`);
   `graphs` (400 `invalid_request`: not a non-empty list of names, an unknown name, or absent on a server of more
-  names than `max_graphs_without_selection`); an `in_ram` that is not a boolean (400 `invalid_request`); then
-  each pair from §5 step 4 on (the
-  graph's support, the request's fields, …). A refusal of a pair refuses the request with that refusal — the first
-  in the answers' order among those refused; the other pairs stop at their next clock reading — as `/search`
-  fails a request when one of its graphs fails.
-- The answer is written by the latest of the pairs' deadlines; past it, 503 `deadline` (§7.6). With one graph this
-  is the single-graph rule exactly. The texts of several pairs are written together, each pair's work having kept
-  back the time for its own text only, so a request naming many graphs can reach the 503 where each alone would
-  not: name one graph per request where the answer is large.
+  names than `max_graphs_without_selection`); an `in_ram` that is not a boolean (400 `invalid_request`); the
+  request's fields (§5 steps 5 to 9, the same for every pair: 400 `invalid_request`, `later_increment`,
+  `genetic_code_unknown`, `predicate_too_large`), checked once before any pair; then each pair from §5 step 4 on,
+  on its own.
+- **A pair's refusal is its entry** (the owner's decision of 2026-10-10; before it, a refusal of any pair refused
+  the request with that refusal, as `/search` fails a request when one of its graphs fails). What one pair alone
+  would have been refused -- its graph's support (`mask_invalid`, `representation_unsupported`,
+  `primary_unwrapped`, `alphabet_untested`, `alphabet_unsupported`), its annotation (`annotation_unbudgeted`,
+  `support_unavailable`), its 503 `deadline` (its answer not written by its own `time_budget_ms`), a failure
+  while it is processed (§6's 400 or 500 without a code) -- is that pair's entry with `outcome: "refused"` and
+  `refusal` (`pair_refusal`: the body of §6 the pair alone would have been answered, with its `http_status`),
+  while the other pairs run on and are answered. The request answers 200 whenever its own checks passed and the
+  envelope is written, every pair refused included (`answered: 0`). The refusals that no pair decides stay the
+  request's 400.
+- The envelope is written by the latest deadline of the pairs that answered; past it, 503 `deadline` (§7.6). A
+  refused pair binds nothing: one refused for its deadline has passed it, one refused before its work has none;
+  with no pair answered the envelope has no deadline. With one graph that answered this is the single-graph rule
+  exactly. The texts of several pairs are written together, each pair's work having kept back the time for its
+  own text only, so a request naming many graphs can reach the 503 where each alone would not: name one graph
+  per request where the answer is large. Each pair's deadline starts with its own work (after its load, §24.2;
+  after its turn on the pool when the pool has fewer threads than the request has pairs), so a pair past its
+  deadline is answered as a refused entry beside pairs whose later deadlines the envelope still met.
 - A client that left is not answered (§3), at any point: while a load waits for memory, during the work, while
   the answer is written.
 
@@ -3636,7 +3657,9 @@ how the search service uses it; the route serves any number.
 |---|---|---|
 | `pattern_contract_version` | integer | 1 |
 | `graphs` | list of strings | the names answered: `graphs` deduplicated (every name without it), in byte order |
-| `answers` | list of objects | one per pair, in the order above: the answer of §8 on that pair, with the fields of `answer_pair` |
+| `answered` | integer | the entries with `outcome: "answered"` |
+| `refused` | integer | the entries with `outcome: "refused"`; `answered + refused` is the number of entries |
+| `answers` | list of objects | one per pair, in the order above: the answer of §8 on that pair with the fields of `answer_pair`, or, for a refused pair, the fields of `answer_pair` alone (`refusal` among them) |
 | `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included. Varies between runs |
 
 <!-- schema: answer_pair -->
@@ -3645,11 +3668,22 @@ how the search service uses it; the route serves any number.
 | `graph` | string | the name the pair was selected by |
 | `graph_path` | string | the pair's graph, as the list spells it |
 | `annotation_path` | string | the pair's annotation, likewise |
-| `index_fp` | string \| null | the pair's index identity (its `index.index_fp`): what a requester merging the answers of several pairs, or of several requests, joins on; `null` without a manifest in the list (joins unverifiable) |
+| `index_fp` | string \| null | the pair's index identity (its `index.index_fp`): what a requester merging the answers of several pairs, or of several requests, joins on; `null` without a manifest in the list (joins unverifiable). A refused entry states it from the graph list's manifest alone |
+| `outcome` | string | `answered`: the entry is the pair's answer (§8) with these tags; `refused`: the pair alone would have been refused, the entry is these tags and `refusal`, nothing of an answer |
+| `refusal` | object | refused entries only: `pair_refusal` |
+
+<!-- schema: pair_refusal -->
+| field | type | meaning |
+|---|---|---|
+| `http_status` | integer | the status the pair alone would have been answered: 400 for every refusal of §6 but the deadline, 503 for `deadline`; a failure while the pair was processed 400 (a standard exception, its text) or 500 (`Internal server error`), as §6 states them for a request |
+| `error` | string | §6's `error`: for people; may change |
+| `code` | string | §6's `code`, the one a single-graph server would have answered; absent for a failure, as its body has none |
 
 A requester merges the answers (`PROMPT-search-service-pattern.md` §3.1 item 2): counts of different pairs are
 counts of different graphs. A label's counts and occurrences summed over pairs are each column's once only when
-the server states `columns_disjoint: true` (§24.4).
+the server states `columns_disjoint: true` (§24.4). A refused entry is that pair's refusal, to be handled as the
+same body from a single-graph server would be (§6, "what a client does with a failure"), and says nothing about
+the other pairs.
 
 ### 24.2 `in_ram`
 
@@ -3775,6 +3809,14 @@ loading in parallel sample in parallel; about a second each on a warm page cache
   flag, `--max-graphs-without-selection` (default 10, the value that was fixed before; at least 1), and
   `GET /capabilities` states it as `max_graphs_without_selection` (`null` on a single-graph server). At the
   default nothing but that key changes; the two refusal texts show the configured value.
+- 2026-10-10 (the owner's decision): a refused pair no longer refuses the request. The envelope carries each
+  pair's own outcome (`outcome`, a refused pair's `refusal` with its `http_status`) and counts them (`answered`,
+  `refused`); it is a 200 whenever the request's own checks passed, every pair refused included; its deadline is
+  the latest of the answered pairs'. The request's fields are checked once before any pair, so their refusal is
+  the request's 400 even where a pair would have been refused too (before, the pair's refusal came first). An
+  envelope without a refused pair changes by `answered`, `refused` and each entry's `outcome` only; single-graph
+  answers and refusals are unchanged. Fixture `multi_graph_refused_pair` (server `multi_mixed`: the masked copy
+  and the hash graph under one list).
 
 ## 25. Motif-level predicates (`predicate_scope: "motif"`)
 

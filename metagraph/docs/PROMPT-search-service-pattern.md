@@ -266,13 +266,19 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
   sends **one graph per request**, one task per chunk (`graphs: ["{label}-{i}/{N}"]`, §3.1 item 3), as for
   `/search`, so the threshold does not touch it. On a single-graph server `graphs` is 400 `invalid_request`.
 - **The answer is an envelope**: `{pattern_contract_version: 1, graphs: [the names answered, in byte order],
-  answers: [...], timing: {elapsed_ms}}`. Each entry of `answers` is the single-graph answer (SPEC §8) of one pair
-  plus `graph` (the name it was selected by), `graph_path`, `annotation_path` and `index_fp` (`null` without a
-  manifest in the list). The job unwraps it per task and merges as in §3.1 item 2: counts of different pairs are
-  counts of different graphs. A refusal of any pair refuses the whole request with that pair's refusal, as
-  `/search` fails on one graph; with one graph per request a refusal stays with its chunk. The texts of several
-  pairs are written together under the latest pair's deadline, so a request naming many graphs can answer 503
-  `deadline` where each alone would not.
+  answered, refused, answers: [...], timing: {elapsed_ms}}`. Each entry of `answers` carries `graph` (the name it
+  was selected by), `graph_path`, `annotation_path`, `index_fp` (`null` without a manifest in the list) and
+  `outcome`: `"answered"` -- the entry is the single-graph answer (SPEC §8) of that pair plus these tags -- or
+  `"refused"` -- the entry is these tags and `refusal: {http_status, error[, code]}`, the body a single-graph
+  server would have answered for that pair alone (its graph's support, its annotation, its 503 `deadline`, a
+  failure while it was processed), and nothing of an answer (the owner's decision of 2026-10-10; before it, a
+  refusal of any pair refused the whole request with that pair's refusal). `answered` and `refused` count the
+  entries of each outcome. The request is 200 whenever its own checks passed (the body, `graphs`, `in_ram`, the
+  request's fields: those stay whole-request 400s), every pair refused included. The job unwraps it per task and
+  merges as in §3.1 item 2: counts of different pairs are counts of different graphs; a refused entry is handled
+  as the same refusal from a single-graph server would be, for that chunk only. The texts of several pairs are
+  written together under the latest deadline of the pairs that answered, so a request naming many graphs can
+  answer 503 `deadline` where each alone would not.
 - **Labels across chunks.** §3.1 item 2 keeps label counts per task. A label's counts and occurrences may be
   summed over the chunks of a server only where its `GET /capabilities` states `graph_summary.columns_disjoint:
   true` (no column name in two pairs: chunks that partition the samples); `shared_columns` counts the names that
