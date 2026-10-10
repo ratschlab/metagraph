@@ -3652,7 +3652,8 @@ the defaults below the caps), the caps `max_annotation_work`, `max_labels`,
   split): an integer cap of the full block, on every route that serves it (phase 1: `/pattern/capabilities`,
   `/capabilities`, the `/traverse` block) and in the loading form; not a gate field (phase 2 drops it from the
   `/traverse` block) and not a request field (`--pattern-row-cache-mb`, the server's policy, §4.5; no answer echoes
-  it in `limits`). 18 bytes per document: `/traverse/capabilities` 5,508–5,676 bytes, `/capabilities` 4,913–5,396,
+  it in `limits`). 18 bytes per document: `/traverse/capabilities` 5,508–5,676 bytes, `/capabilities` 4,940–5,423
+  (27 of them `max_request_body_mb`, §24, of the same round),
   `/pattern/capabilities` 2,016–2,175 (the loading form 2,016); the largest, `/traverse/capabilities` of the
   unmasked server, 25,921 bytes under the budget of 31,744 (5,823 by the validator's measure). At the default (64)
   every answer to `POST /pattern` is byte-identical (the fixtures of this build: no stored answer changed); the
