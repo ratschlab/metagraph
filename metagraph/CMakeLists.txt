@@ -330,8 +330,12 @@ if(APPLE)
   get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
 endif()
 
-set(Boost_USE_STATIC_LIBS ON)
+option(Boost_USE_STATIC_LIBS "Link Boost statically" ON)
+if(BUILD_STATIC)
+  set(Boost_USE_STATIC_LIBS ON)
+endif()
 find_package(Boost REQUIRED COMPONENTS iostreams)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate)
 
 # makes ASIO not depend on boost (used by Simple-Web-Server via CMake variable)
 set(USE_STANDALONE_ASIO ON)
@@ -493,11 +497,6 @@ target_link_directories(metagraph-core INTERFACE
   ${SDSL_INSTALL}/lib
 )
 
-if(APPLE)
-  target_link_directories(metagraph-core INTERFACE ${HOMEBREW_DIR}/lib)
-  target_include_directories(metagraph-core SYSTEM PUBLIC ${HOMEBREW_DIR}/include)
-endif()
-
 if(ICU_DATA_LIBRARY_PATH)
   target_link_directories(metagraph-core INTERFACE ${ICU_DATA_LIBRARY_PATH})
 endif()
@@ -564,7 +563,7 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts
   zlib
-  deflate
+  ${LIBDEFLATE_LIBRARY}
   Boost::iostreams
   -lsdsl
   jsoncpp_lib

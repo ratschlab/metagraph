@@ -34,6 +34,11 @@ endif()
 if(DEFINED WITH_MSSE42)
     list(APPEND METAGRAPH_CMAKE_ARGS -DWITH_MSSE42=${WITH_MSSE42})
 endif()
+foreach(variable Boost_USE_STATIC_LIBS OpenMP_ROOT ICU_ROOT)
+    if(DEFINED ${variable})
+        list(APPEND METAGRAPH_CMAKE_ARGS "-D${variable}=${${variable}}")
+    endif()
+endforeach()
 
 # Download and build MetaGraph as an external project
 ExternalProject_Add(metagraph-external
@@ -50,32 +55,12 @@ set(METAGRAPH_INSTALL_DIR ${INSTALL_DIR})
 # Create our example executable
 add_executable(external_query ../src/basic_query.cpp)
 
-# On macOS, add Homebrew library paths and detect OpenMP (same as main MetaGraph)
-if(APPLE)
-    target_link_directories(external_query PRIVATE /usr/local/lib)
-    if(EXISTS /opt/homebrew/lib)
-        target_link_directories(external_query PRIVATE /opt/homebrew/lib)
-    endif()
-    target_include_directories(external_query SYSTEM PRIVATE
-        /usr/local/include
-        /opt/homebrew/include
-    )
-    if (NOT DEFINED OpenMP_ROOT)
-        execute_process(
-            COMMAND brew --prefix libomp
-            OUTPUT_VARIABLE HOMEBREW_LIBOMP_PREFIX
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-        if(HOMEBREW_LIBOMP_PREFIX)
-            set(OpenMP_ROOT "${HOMEBREW_LIBOMP_PREFIX}" CACHE PATH "Path to OpenMP")
-        endif()
-    endif()
-endif()
-
 # Find required system dependencies for MetaGraph
-find_package(OpenMP REQUIRED)
+include(${CMAKE_CURRENT_LIST_DIR}/../../CMakeListsHelpers.txt)
+findOpenMP()
 find_package(Boost REQUIRED COMPONENTS iostreams)
+find_library(JEMALLOC_LIBRARY NAMES jemalloc)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate)
 
 # Use the installed includes and libraries
 target_include_directories(external_query PRIVATE ${METAGRAPH_INSTALL_DIR}/include)
@@ -89,8 +74,8 @@ set(EXTERNAL_LIBS
     metagraph-core
     Boost::iostreams
     OpenMP::OpenMP_CXX
-    jemalloc
-    deflate
+    ${JEMALLOC_LIBRARY}
+    ${LIBDEFLATE_LIBRARY}
 )
 
 # Add atomic library only for GNU compilers or non-macOS systems
