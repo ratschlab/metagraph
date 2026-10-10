@@ -650,8 +650,13 @@ RequestAnswer answer_request(const std::string &content, const std::string &enco
         if (!encoding.empty()) {
             Timer compressing;
             const size_t text_bytes = ret.size();
+            // in pieces of kCompressPieceBytes, so that a stop (an attempt at its bound, a
+            // client gone) is seen at least every 4 MiB of text: the check per 32 KiB block of
+            // output alone runs once per tens of MiB on a text that compresses strongly. The
+            // compressed bytes are those of one call over the whole text
+            // (GraphletServer.CompressionPiecesOfTheServerKeepTheBytes)
             ret = compress_string(ret, control ? control->compression_level : Z_BEST_COMPRESSION,
-                                  encoding == "gzip", check);
+                                  encoding == "gzip", check, kCompressPieceBytes);
             if (control && control->on_compressed)
                 control->on_compressed(text_bytes, compressing.elapsed());
             answer.header.emplace_back("Content-Encoding", encoding);

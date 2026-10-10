@@ -272,7 +272,7 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 - **The answer is built within the reserve.** After the work, the loops over the labels (a discovery's ranking
   and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, the selection
   once it is done, the JSON every 4,096 labels, candidates or seeds, its text every 64 KiB and its compression
-  every block (the server's transport check, as `/pattern`'s). Past the budget the answer is **503**
+  every block of output and every 4 MiB of text (the server's transport check, as `/pattern`'s). Past the budget the answer is **503**
   `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
   finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial
   answer; the CLI writes that body and exits 1. (A 503 with `Retry-After` and no `code` is still the loading
@@ -986,7 +986,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     to `poll_stride` − 1 heads after it, while a cancel is seen at the next poll of any kind —
     leaving the rest to deliver what was walked; the response is built and written under the
     bound — checked every 4096 objects of the JSON tree and of the MGT text, every 64 KiB of the JSON text,
-    between compression blocks and once before it is handed to the transport — and one not ready by the bound
+    between compression blocks and before each 4 MiB piece of text the compressor takes (a text that compresses
+    strongly fills a block only every tens of MiB), and once before it is handed to the transport — and one not ready by the bound
     is not written: 503 with `usage` (reason `deadline`). **The bound itself is compared only at those delivery
     checks** (the walk's polls compare the walk-until, below it), so past the bound the attempt runs on until
     its next delivery check (then the 503) or its handler's return: the rest of the piece it was in when the
@@ -1218,10 +1219,13 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   of text with gzip and 3.51 without (185 MB of text: 590 and 764 MB), and now by 1.52 and 2.57 (394 and 584
   MB) — not by one and two: jemalloc keeps the pages of the texts freed during the assembly for a while. No byte
   changes, and nothing of it is promised: no budget bounds a whole response (§6.8, memory_bound_soft). The
-  compressor takes the text in pieces of at most 2^32 − 1 bytes, zlib's input counter, so a text of 4 GiB or
+  compressor takes the text in pieces (zlib counts its input in 32 bits), so a text of 4 GiB or
   more is compressed whole; it was cut to its size modulo 2^32 and answered 200 *(U13-04; an output change on
-  every route that compresses, a level-6 correction, §10.3)*; a text below 4 GiB is compressed by the same
-  calls, its bytes unchanged.
+  every route that compresses, a level-6 correction, §10.3)*. The pieces are 4 MiB of text, the delivery
+  check before each (review of 2026-10-10: with the whole text as one piece the check ran only per 32 KiB block
+  of output, a few times over 64 MiB of a text that compresses strongly); they are fed without a flush, so the
+  compressed bytes are those of one call over the whole text (held by `CompressionPiecesOfTheServerKeepTheBytes`
+  over 64 MiB of one repeated line, 8 MiB of random bytes and a short text, in both containers).
 - **The deadline record** *(R8; feature level 5; in `timing` only, never in an untimed body)*. Per seed,
   `timing.deadline`: `longest_piece {ms, kind, rows, coordinates}` — the seed's longest uninterruptible piece,
   `kind` one of `read` (an annotation read in one piece), `chunk`, `rest` (the piece that ended a split read),

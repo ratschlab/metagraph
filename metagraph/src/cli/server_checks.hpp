@@ -144,17 +144,21 @@ std::string assemble_traverse_response(const Json::Value &envelope,
                                        double *max_gap_ms = nullptr);
 
 // |text| compressed by zlib at |level| (1-9), in a gzip container when |gzip|, else a zlib
-// stream; |check| called before each 32 KiB block of output, its exception (after the stream
-// is released) reaching the caller. zlib counts its input in 32 bits: the text is handed over
-// in pieces of at most |max_piece| bytes (0: the most zlib takes, 2^32 - 1), so a text of any
-// size is compressed whole; a text of one piece is compressed in one call (|max_piece|
-// below that is for tests)
+// stream; |check| called before each 32 KiB block of output and before each piece of input,
+// its exception (after the stream is released) reaching the caller. zlib counts its input in
+// 32 bits: the text is handed over in pieces of at most |max_piece| bytes (0: the most zlib
+// takes, 2^32 - 1), so a text of any size is compressed whole. The pieces are fed without a
+// flush, so the stream is byte for byte the one of a single call whatever |max_piece| is
 std::string compress_string(const std::string &text, int level, bool gzip,
                             const std::function<void()> &check = nullptr,
                             size_t max_piece = 0);
 
 // The interval of the checks of json_text and assemble_traverse_response (bytes of text)
 constexpr size_t kDeliveryCheckBytes = size_t(1) << 16;
+// The piece of text the server hands zlib at a time (compress_string's |max_piece|): the check
+// between pieces runs at least every 4 MiB of input, where the check per 32 KiB block of output
+// alone can be far apart on a text that compresses strongly
+constexpr size_t kCompressPieceBytes = size_t(4) << 20;
 
 /**
  * One line of a multi-graph list (`server_query GRAPHS.csv`):

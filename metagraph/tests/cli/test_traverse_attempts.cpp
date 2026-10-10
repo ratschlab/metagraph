@@ -1969,6 +1969,46 @@ TEST(GraphletServer, CompressionTakesTheTextInPieces) {
     EXPECT_EQ(3u, calls);
 }
 
+// The server hands zlib its text in pieces of kCompressPieceBytes (4 MiB), so that the stop
+// check runs at least once per piece: on a text that compresses strongly the check per 32 KiB
+// block of output alone ran a few times over 64 MiB. The pieces are fed without a flush, so
+// the stream is byte for byte the one of a single call over the whole text: a 64 MiB text of
+// one repeated line, 8 MiB of random bytes, a short text, in both containers
+TEST(GraphletServer, CompressionPiecesOfTheServerKeepTheBytes) {
+    std::string repetitive;
+    while (repetitive.size() < (size_t(64) << 20)) {
+        repetitive += "{\"label\": \"GCF_000005845.2\", \"count\": 31, \"loss\": 0.0},\n";
+    }
+    repetitive.resize(size_t(64) << 20);
+    std::mt19937_64 rng(11);
+    std::string random(size_t(8) << 20, '\0');
+    for (size_t i = 0; i + 8 <= random.size(); i += 8) {
+        const uint64_t x = rng();
+        memcpy(&random[i], &x, 8);
+    }
+    const std::string shorter = "{\"ready\": true}";
+    struct Case { const std::string *text; int level; size_t min_checks; };
+    for (const Case &c : { Case { &repetitive, Z_BEST_COMPRESSION, 16 },
+                           Case { &random, 1, 256 },
+                           Case { &shorter, Z_BEST_COMPRESSION, 1 } }) {
+        for (bool gzip : { false, true }) {
+            size_t checks_whole = 0, checks_pieces = 0;
+            const std::string whole
+                = compress_string(*c.text, c.level, gzip, [&]() { checks_whole++; });
+            const std::string pieces
+                = compress_string(*c.text, c.level, gzip, [&]() { checks_pieces++; },
+                                  kCompressPieceBytes);
+            EXPECT_EQ(whole, pieces) << c.text->size() << " bytes, gzip " << gzip;
+            EXPECT_GE(checks_pieces, c.min_checks) << c.text->size() << " bytes, gzip " << gzip;
+            EXPECT_GE(checks_pieces, checks_whole) << c.text->size() << " bytes, gzip " << gzip;
+            // the repetitive text: a handful of output blocks, so the checks came from the pieces
+            if (c.text == &repetitive) {
+                EXPECT_LT(checks_whole, 8u) << gzip;
+            }
+        }
+    }
+}
+
 // What process_request writes (answer_request, without the HTTP library) for every outcome of
 // a request: everything for a route that does not ask whether its client left (every route but
 // /pattern: no control, or a control without |gone|); and, for a route that asks
