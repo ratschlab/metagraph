@@ -1748,13 +1748,14 @@ uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
 
     uint64_t num_dummy_sink_edges = 0;
 
-    // skip the main dummy source
-    for (edge_index i = 2; i < W_->size(); ++i) {
-        assert(get_W(i) != alph_size);
-        if (!get_W(i)) {
-            (*mask)[i] = true;
-            num_dummy_sink_edges++;
-        }
+    // Enumerate W = $ instead of scanning every edge. Skip the reserved position 0
+    // and the main dummy source at position 1.
+    const uint64_t occurrences = W_->rank(0, num_edges());
+    for (uint64_t r = W_->rank(0, 1) + 1; r <= occurrences; ++r) {
+        const edge_index i = W_->select(0, r);
+        assert(i >= 2 && i < W_->size() && !get_W(i));
+        (*mask)[i] = true;
+        num_dummy_sink_edges++;
     }
 
     assert(num_dummy_sink_edges == rank_W(num_edges(), 0) - 1);
