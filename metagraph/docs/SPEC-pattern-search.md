@@ -3303,13 +3303,20 @@ answered entry of a pattern longer than k has `rows_refused` (§14.4), in every 
   interrupted: what its decode reached), and turning its hits into runs 1 unit per hit and coordinate.
 - **Narrowing** a branch's support: 1 unit per label of the branch and per label of the row compared (a linear
   merge of two sorted lists); at `record_verified` 1 unit per chain run and per coordinate run of the label in
-  the row (chains as sorted lists of intervals of consecutive starts, shifted by one per step and merged with the
-  row's coordinate runs; a homopolymer's thousands of coordinates are one run). Charged before the merge (both
-  sizes are known by then); the clock read every 4,096 rounds.
+  the row (a chain run: a maximal run of consecutive chains of one record that still carry the walk — the
+  anchor's runs as opened, below it the runs of surviving chains inside one anchor run, read from the frame's
+  survival bits —, shifted by one per step and merged with the row's coordinate runs; a homopolymer's thousands
+  of coordinates are one run). Charged before the merge (both sizes are known by then); the clock read every
+  4,096 rounds.
 - **Memory** (the request's account, `max_memory_mb`, which exists in every mode here): per branch frame (one
-  per depth of the depth-first stack, at most n = L − k + 1) its labels (8 bytes each) and its chain runs (48
-  bytes each: first, last and the record end, twice), admitted before the frame is built and released when the
-  search backs out of it; 64 bytes per anchor while the anchors' whole rows are read; a row in the
+  per depth of the depth-first stack, at most n = L − k + 1) its labels (8 bytes each); at `record_verified`
+  the anchor frame alone holds the chain runs (48 bytes each: first, last and the record end, twice; 24 bytes
+  per label for their offsets and chain numbers), and every frame below it holds one bit per chain of the
+  anchor — which chains still carry the walk: a chain's coordinate at depth d is its anchor coordinate plus d
+  (minus d on the other strand) and its record end never changes — with 16 bytes per label beside its id (its
+  anchor index and its chain runs, twice), so a 500-base walk over a k-mer carried by 38,000 record chains
+  holds 470 bitmaps of 4.8 KB, not 470 copies of its chain runs. A frame is admitted before it is built and
+  released when the search backs out of it; 64 bytes per anchor while the anchors' whole rows are read; a row in the
   cache as its `DecodeBudget` models it, inside the allotment of §20.3 (charged when the extension begins,
   released when the pattern ends); a kept supported path's descriptor (`path_descriptor_bytes`: 512 + 2k + 3L +
   192n, §12.1) with its labels and occurrence runs, admitted before it is copied, within half of what the account
@@ -3513,6 +3520,20 @@ planted repeats (mosaics) at both levels, the design's k = 3 example, the thresh
 both strand settings and every `strands` (mirror walks read and found), monotone pruning, the held walks above
 `max_predicate_contexts`, constant predicates, sweeps of `max_annotation_work`, `max_steps`, a virtual clock and
 the account; `PatternSupport.*` (`tests/cli/test_pattern_support.cpp`) for the trackers.
+
+**The frames of the search (the owner's decision of 2026-10-10 on the memory measurement)**: a `record_verified`
+frame below the anchor keeps one survival bit per chain of the anchor instead of its own copy of the chain runs
+(§20.7). The measurement on staging's refseq index had found 0.4–3.8 MiB per frame on conserved genes (the 16S
+27F region: 3,381–3,696 labels and 38,187 chains per path), so a 500-base pattern's 470 frames needed 190–520 MiB
+and stopped with `max_memory` at 256 MiB, where the same search at `label_intersection` needed 15–20 KiB per
+frame. The chain runs, their order, the occurrences, every count and the units are what the stored runs gave;
+answers are byte for byte the same apart from `work.memory_bytes`, `timing` and where a memory stop lands
+(fixture `supported_paths_memory`: with its 1 MB account the sixth entry's stop comes three rows later, its
+`rows_refused` entry, `candidates_examined`, `annotation_rows`, `annotation_units`, `extension_edges` and
+`steps` with it; the stop reason, the paths listed and the counts' values are the same). The supported-path
+fixtures regenerated. Tests: `SupportStep.ChainDiesAtItsRecordEndAtDepth` (both directions and orientations),
+`HomopolymerRunShrinksToOneChain` (the frames' bytes constant over 270 chains),
+`SurvivalBitsEqualTheRunBasedMerge` (random rows against the run-based merge, step by step).
 
 ## 23. `GET /pattern/capabilities`, and the gate block of `GET /traverse/capabilities`
 

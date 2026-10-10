@@ -416,7 +416,18 @@ verified while another only carries the constituent k-mers. As built (review GPT
 its k-mer's position, found by a leapfrog join from the shortest list with galloping seeks; consecutive chains are
 one run (a homopolymer's path is a few units of work per k-mer, not one per coordinate), each run is placed record
 by record, and the runs are kept (charged to the memory account) for the output, which no longer joins again;
-every seek, run and record is clocked. Each returned label states its `support`:
+every seek, run and record is clocked. The supported-path search (`long_search: "supported_paths"`, SPEC §20)
+carries the chains along the walk instead of joining at its end: its anchor frame opens one chain per coordinate
+of the first k-mer's row, split at the records' ends, and holds them as runs with their record ends; every frame
+below it holds one bit per chain of the anchor — which chains still carry the walk, a chain's coordinate at
+depth d being its anchor coordinate plus d (or minus d on the other strand) and its record end fixed — and
+reads the runs through the anchor's, which the frames of a walk share. A step scans a label's set bits as runs of
+consecutive surviving chains inside one anchor run and merges them with the row's coordinate runs, the same
+merge and the same units as a step over stored runs, so the occurrences and every count are what stored runs
+give; what changes is the memory: a 500-base walk over a k-mer carried by 38,000 record chains holds 470
+bitmaps of 4.8 KB, not 470 copies of its chain runs (0.4–3.8 MiB each on staging's conserved genes, the
+measurement of 2026-10-10 behind the owner's decision; the label-level frames of the same searches cost 15–20
+KiB). Each returned label states its `support`:
 - `record_verified`: the label's coordinates for the path are consecutive, the first maps to (`seq_id`, local)
   through the `CoordToHeader`, and local + n − 1 < `num_kmers_in_sequence(column, seq_id)`
   (`coord_to_header.hpp`), so the last k-mer is inside the same record. Possible only on a **BASIC** index with
