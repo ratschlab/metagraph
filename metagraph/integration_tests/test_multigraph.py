@@ -52,21 +52,26 @@ def free_port():
         return s.getsockname()[1]
 
 
-def records_of(paths):
+def named_records_of(paths):
+    """The (header, sequence) of every record of the FASTA files, in their order"""
     out = []
     for path in paths:
-        seq = []
+        header, seq = None, []
         with open(path) as f:
             for line in f:
                 if line.startswith('>'):
                     if seq:
-                        out.append(''.join(seq))
-                    seq = []
+                        out.append((header, ''.join(seq)))
+                    header, seq = line[1:].strip(), []
                 else:
                     seq.append(line.strip().upper())
         if seq:
-            out.append(''.join(seq))
+            out.append((header, ''.join(seq)))
     return out
+
+
+def records_of(paths):
+    return [seq for _, seq in named_records_of(paths)]
 
 
 def revcomp(s):
@@ -147,6 +152,7 @@ class TestMultiGraphServer(TestingBase):
         d = cls.tempdir.name
         cls.pairs = {}
         cls.records = {}
+        cls.named_records = {}
         cls.columns = {}
         for name, files, masked, anno in CHUNKS:
             out = os.path.join(d, name)
@@ -167,6 +173,8 @@ class TestMultiGraphServer(TestingBase):
             assert all(os.path.exists(p) for p in cls.pairs[name]), cls.pairs[name]
             # the longest record first (the tests cut their seeds and patterns from it)
             cls.records[name] = sorted(records_of(fastas), key=len, reverse=True)
+            cls.named_records[name] = sorted(named_records_of(fastas), key=lambda r: len(r[1]),
+                                             reverse=True)
             cls.columns[name] = fastas
         cls.csv = os.path.join(d, 'graphs.csv')
         with open(cls.csv, 'w') as f:
@@ -465,6 +473,58 @@ class TestMultiGraphServer(TestingBase):
         # /search as it always was
         query = {'FASTA': f'>q\n{seed}', 'graphs': ['ecoli'], 'discovery_fraction': 0.5}
         self.assertEqual(self.post('search', query), self.post('search', dict(query, in_ram=True)))
+
+    def test_in_ram_shares_the_resident_header_index(self):
+        """The copy an `in_ram` load makes is built with the resident pair's record mapping (the
+        .seqs: the sequence headers and their reverse index, built once at start-up), so a load
+        builds no header index: the log's one build line (ecoli, the pair with a mapping, at
+        start-up) stays the only one, and requests with header labels on /resolve, /traverse and
+        /pattern answer with in_ram as without, timing apart."""
+        built = 'Sequence header index built'
+        log = self.server.text()
+        self.assertEqual(1, log.count(built), log[-3000:])
+        self.assertLess(log.index(built), log.index('All graphs were loaded'))
+        header, record = self.named_records['ecoli'][0]
+        seed = record[20000:20100]
+
+        r = {'graphs': ['ecoli'], 'sequence': seed, 'labels': [header]}
+        resident = self.post('resolve', r)
+        loaded = self.post('resolve', dict(r, in_ram=True))
+        self.assertEqual([(header, 'header')],
+                         [(l['label'], l['kind']) for l in resident['labels']])
+        self.assertEqual(untimed(resident), untimed(loaded))
+        self.assertGreater(loaded['timing']['load_ms'], 0)
+        d = {'graphs': ['ecoli'], 'sequence': seed,
+             'discover': {'max_labels': 10, 'kind': 'header'}}
+        resident = self.post('resolve', d)
+        self.assertIn(header, [l['label'] for l in resident['labels']])
+        self.assertEqual(untimed(resident), untimed(self.post('resolve', dict(d, in_ram=True))))
+
+        t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed, 'labels': [header]}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                          'output': {'detail': 'full'}}}
+        resident = self.post('traverse', t)
+        loaded = self.post('traverse', dict(t, in_ram=True))
+        self.assertEqual([(header, 'header')],
+                         [(l['name'], l['kind']) for l in resident['results'][0]['label_dict']])
+        self.assertEqual(untimed(resident['results']), untimed(loaded['results']))
+        self.assertGreater(loaded['timing']['load_ms'], 0)
+
+        # /pattern's copy shares it too: the record labels of its paths
+        p = {'patterns': [{'dna': record[30000:30040]}], 'long_search': 'paths',
+             'output': {'labels': 'all'}, 'graphs': ['ecoli']}
+        resident = self.post('pattern', p)
+        loaded = self.post('pattern', dict(p, in_ram=True))
+        self.assertEqual(untimed(resident), untimed(loaded))
+        self.assertGreater(loaded['answers'][0]['timing']['load_ms'], 0)
+        results = resident['answers'][0]['patterns'][0]['results']
+        self.assertTrue(results, resident)
+        self.assertEqual('record_verified', results[0]['support'], results[0])
+
+        # every load above shared the mapping: nothing was built after start-up
+        log = self.server.text()
+        self.assertEqual(1, log.count(built), log[-3000:])
+        self.assertGreaterEqual(log.count('loaded into RAM for it'), 4)
 
     # -------------------------------------------------------------------- the fan-out of /traverse
 

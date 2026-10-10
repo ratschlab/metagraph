@@ -298,14 +298,17 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
 // Build the AnnotatedDBG from a graph future. Annotation and CTH loads run
 // in parallel with the graph load; the graph is awaited only when needed
 // (for row_diff set_graph and for the final PRIMARY wrap).
+// |shared_coord_to_header|: the mapping of this annotation that another index holds, used
+// instead of loading the .seqs (initialize_annotated_dbg); null loads it.
 std::unique_ptr<AnnotatedDBG>
 build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
                     const Config &config,
-                    size_t max_chunks_open) {
+                    size_t max_chunks_open,
+                    std::shared_ptr<const annot::CoordToHeader> shared_coord_to_header = nullptr) {
     // Construct the annotation. The bulk load is graph-independent and runs
     // in parallel with the graph load.
     std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation;
-    std::unique_ptr<annot::CoordToHeader> coord_to_header;
+    std::shared_ptr<const annot::CoordToHeader> coord_to_header;
     if (!config.infbase_annotators.size()) {
         // No annotators configured: build an empty annotation sized to the graph.
         auto graph = graph_future.get();
@@ -328,8 +331,23 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         if (!loaded)
             exit(1);
 
-        // CTH load (graph-independent) — overlaps with graph load.
-        coord_to_header = load_coord_to_header(*annotation, config);
+        // The mapping another index of this annotation holds is shared (a column per label,
+        // as the .seqs of this annotation has: a mapping of another annotation is not, and the
+        // .seqs is loaded instead); else the CTH load (graph-independent) overlaps with the
+        // graph load.
+        if (shared_coord_to_header
+                && shared_coord_to_header->num_columns() != annotation->num_labels()) {
+            logger->warn("The record mapping offered for {} has {} columns, the annotation {} "
+                         "labels: not the mapping of this annotation; its .seqs is loaded",
+                         config.infbase_annotators.at(0), shared_coord_to_header->num_columns(),
+                         annotation->num_labels());
+            shared_coord_to_header = nullptr;
+        }
+        if (shared_coord_to_header) {
+            coord_to_header = std::move(shared_coord_to_header);
+        } else {
+            coord_to_header = load_coord_to_header(*annotation, config);
+        }
 
         using namespace annot::matrix;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation->get_matrix());
@@ -377,10 +395,11 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return build_annotated_dbg(async_load_critical_dbg(config), config, kDefaultMaxChunksOpen);
 }
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config,
-                                                       const PatternPreparation &prep) {
+std::unique_ptr<AnnotatedDBG>
+initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
+                         std::shared_ptr<const annot::CoordToHeader> coord_to_header) {
     return build_annotated_dbg(async_load_critical_dbg(config.infbase, prep), config,
-                               kDefaultMaxChunksOpen);
+                               kDefaultMaxChunksOpen, std::move(coord_to_header));
 }
 
 std::pair<std::shared_future<std::shared_ptr<DeBruijnGraph>>,

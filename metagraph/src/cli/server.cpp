@@ -1113,9 +1113,12 @@ int run_server(Config *config) {
     // the resident one, or with `in_ram` (in_ram_plan, /search's rule: the server on mmap, the
     // pair's files within --mem-cap-gb) a copy loaded into RAM for the request once its memory
     // is reserved (/search's wait, abandoned when |gone| answers true: LoadAbandoned), prepared
-    // as the resident one was — for /pattern its mask checked and its dummy fraction sampled,
-    // for the traversal routes the reverse index of its headers built — so that the request's
-    // work, and its budgets, start on a ready index after the load
+    // as the resident one was — for /pattern its mask checked and its dummy fraction sampled —
+    // so that the request's work, and its budgets, start on a ready index after the load. The
+    // copy's record mapping (the sequence headers and their reverse index, built at start-up)
+    // is the resident pair's own object: the copy is of the same files, the same .seqs, so a
+    // mapping loaded and indexed again would be identical, for seconds and gigabytes per
+    // request on a chunk with millions of records
     auto lease_index = [&](const GraphPair &pair, bool in_ram, size_t request_id,
                            const std::function<bool()> &gone, bool for_pattern) {
         const AnnotatedDBG &resident = *graphs_cache.at(pair);
@@ -1146,9 +1149,10 @@ int run_server(Config *config) {
             preparation.check_mask = for_pattern;
             preparation.sample_fraction = for_pattern;
             preparation.progress = false;
-            loaded = initialize_annotated_dbg(config_copy, preparation);
-            if (!for_pattern)
-                build_header_index(*loaded);
+            // the resident index of this very pair (graphs_cache's key is the pair, its
+            // annotation path the one loaded here), so its mapping is this annotation's .seqs
+            loaded = initialize_annotated_dbg(config_copy, preparation,
+                                              resident.share_coord_to_header());
         } catch (...) {
             reservations.release(bytes);
             throw;

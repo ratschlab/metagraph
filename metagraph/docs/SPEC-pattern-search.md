@@ -3654,8 +3654,10 @@ the server states `columns_disjoint: true` (§24.4).
   its graphs into RAM (no `--mmap`) and a single-graph server serve from the index they hold. `in_ram: false`, or
   no field: the index the server holds.
 - The copy is prepared as the resident index was at start-up before the work starts: its mask checked (§24.5) and,
-  without a mask, its dummy fraction sampled (in RAM, milliseconds); its identity is the pair's (`index_fp` per
-  (graph, annotation) pair, so a per-request load states the same `index`).
+  without a mask, its dummy fraction sampled (in RAM, milliseconds); its record mapping (the `.seqs`: the sequence
+  headers and their reverse index, SPEC-labeled-traversal-core.md §10.3) is the resident pair's own object, neither
+  loaded nor built again, so a labelled answer on the copy is the resident's; its identity is the pair's
+  (`index_fp` per (graph, annotation) pair, so a per-request load states the same `index`).
 - **The budgets start after the load**: the deadline (`time_budget_ms`, the finalisation reserve), the caps and
   the memory account apply to the work only. `timing.load_ms` (top level) states the time before the deadline
   started, the wait for the memory and the load; `0` when nothing was loaded, without the reason (a pair above the

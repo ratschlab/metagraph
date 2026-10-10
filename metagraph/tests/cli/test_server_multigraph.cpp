@@ -18,6 +18,8 @@
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 #include "../test_helpers.hpp"
+#include "cli/config/config.hpp"
+#include "cli/pattern.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
@@ -25,7 +27,10 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/coord_to_header.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 
@@ -33,7 +38,9 @@
 // traversal request selects (graph, graphs), the names a /pattern request selects, the
 // reservations and the plan of `in_ram`, the columns' overlap; the sampled check of a mask at
 // load (load_annotated_graph.hpp); a seed a graph does not hold as a per-seed result
-// (process_traverse_request); and an attempt's bound after a load (traverse_attempts.hpp)
+// (process_traverse_request); an attempt's bound after a load (traverse_attempts.hpp); and
+// the record mapping an `in_ram` load's copy shares with the resident pair
+// (initialize_annotated_dbg with AnnotatedDBG::share_coord_to_header)
 
 namespace {
 
@@ -611,4 +618,179 @@ TEST(GraphletAttempt, LoadComesBeforeTheBound) {
     d->set_bound(1, 1000, 0, 898'500.0);
     EXPECT_EQ(899'000, d->bound_ms());
     EXPECT_EQ("content_timeout", d->usage_json("completed")["bound"]["capped_by"].asString());
+}
+
+
+// ---------------------------------------------------------------- the mapping of an in_ram load
+
+namespace {
+
+// |value| without its "timing" members at every level: the answers compared apart from timing
+Json::Value untimed(const Json::Value &value) {
+    if (value.isObject()) {
+        Json::Value out(Json::objectValue);
+        for (const std::string &key : value.getMemberNames()) {
+            if (key != "timing")
+                out[key] = untimed(value[key]);
+        }
+        return out;
+    }
+    if (value.isArray()) {
+        Json::Value out(Json::arrayValue);
+        for (const Json::Value &v : value) {
+            out.append(untimed(v));
+        }
+        return out;
+    }
+    return value;
+}
+
+// A pair on disk as a graph list names it: a BASIC succinct graph of two records in one
+// column (`annotate --anno-filename`) with the records' coordinates, and its record mapping
+// (the .seqs: the headers acc1 and acc2), in a fresh directory
+struct PairOnDisk {
+    std::string dir;
+    std::string graph;
+    std::string annotation;
+    std::vector<std::string> records;
+};
+
+PairOnDisk write_pair(const std::string &name) {
+    const size_t k = 11;
+    std::mt19937 rng(17);
+    PairOnDisk pair;
+    pair.dir = test_dump_dir() + "/multigraph_in_ram_" + name;
+    fs::remove_all(pair.dir);
+    fs::create_directories(pair.dir);
+    pair.records = { random_seq(120, &rng), random_seq(90, &rng) };
+    const uint64_t n1 = pair.records[0].size() - k + 1;
+    const uint64_t n2 = pair.records[1].size() - k + 1;
+    auto index = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            k, pair.records, { "F", "F" }, DeBruijnGraph::BASIC, true, { 0, n1 });
+    pair.graph = pair.dir + "/graph" + DBGSuccinct::kExtension;
+    dynamic_cast<const DBGSuccinct&>(index->get_graph()).serialize(pair.graph);
+    const std::string anno_base = pair.dir + "/anno";
+    index->get_annotator().serialize(anno_base);
+    pair.annotation = anno_base + annot::ColumnCoordAnnotator::kExtension;
+    annot::CoordToHeader cth({ { "acc1", "acc2" } }, { { n1, n2 } });
+    cth.serialize(anno_base);
+    return pair;
+}
+
+// The Config a server loads |pair| with (-i, -a); made from a command line as main() makes
+// it (the Config sets the swap path; the one the other tests use is restored)
+std::unique_ptr<Config> config_of(const PairOnDisk &pair) {
+    const fs::path swap = utils::get_swap_path();
+    std::ofstream(pair.dir + "/request.json") << "{}";
+    std::vector<std::string> args = { "metagraph", "pattern", "-i", pair.graph, "-a",
+                                      pair.annotation, pair.dir + "/request.json" };
+    std::vector<char*> argv;
+    for (std::string &a : args) {
+        argv.push_back(a.data());
+    }
+    argv.push_back(nullptr);
+    auto config = std::make_unique<Config>(static_cast<int>(args.size()), argv.data());
+    utils::set_swap_path(swap);
+    return config;
+}
+
+} // namespace
+
+// The copy an `in_ram` load makes is built with the resident pair's record mapping: the same
+// object, whose reverse header index was built once at start-up and is not built again, for
+// the traversal routes' copy and for /pattern's (its mask checked, its dummy fraction
+// sampled); header-label requests on the copy answer as on the resident. Without the
+// resident's mapping the .seqs is loaded, as every load does; a mapping of another
+// annotation is not shared
+TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
+    const PairOnDisk pair = write_pair("shared");
+    ASSERT_TRUE(fs::exists(pair.graph));
+    ASSERT_TRUE(fs::exists(pair.annotation));
+    ASSERT_TRUE(fs::exists(pair.dir + "/anno" + annot::CoordToHeader::kExtension));
+    auto config = config_of(pair);
+    PatternPreparation none;
+    none.progress = false;
+    PatternPreparation for_pattern;
+    for_pattern.check_mask = true;
+    for_pattern.sample_fraction = true;
+    for_pattern.progress = false;
+
+    // the resident pair: its header index built as the server builds it at start-up
+    auto resident = initialize_annotated_dbg(*config, none);
+    ASSERT_TRUE(resident->get_coord_to_header());
+    EXPECT_EQ(0u, resident->get_coord_to_header()->num_header_index_builds());
+    EXPECT_EQ(2u, resident->get_coord_to_header()->build_header_index());
+    EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
+
+    // the copies: the resident's object, nothing loaded or built for them
+    auto copy = initialize_annotated_dbg(*config, none, resident->share_coord_to_header());
+    auto pattern_copy = initialize_annotated_dbg(*config, for_pattern,
+                                                 resident->share_coord_to_header());
+    EXPECT_EQ(resident->get_coord_to_header(), copy->get_coord_to_header());
+    EXPECT_EQ(resident->get_coord_to_header(), pattern_copy->get_coord_to_header());
+    EXPECT_EQ(resident->share_coord_to_header(), copy->share_coord_to_header());
+    EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
+
+    // header-label requests: the copies answer as the resident does
+    const std::string &acc1 = pair.records[0];
+    Json::Value resolve = parse(R"({"labels": ["acc1", "acc2", "F"]})");
+    resolve["sequence"] = acc1.substr(20, 60);
+    Json::Value discover = parse(R"({"discover": {"max_labels": 10, "kind": "header"}})");
+    discover["sequence"] = acc1.substr(20, 60);
+    Json::Value traverse = parse(R"({"seeds": [{"labels": ["acc1"]}], "strategy":
+                                    {"direction": "right", "bounds": {"max_extension_bp": 30},
+                                     "output": {"detail": "full", "timing": false}}})");
+    traverse["seeds"][0]["sequence"] = acc1.substr(0, 40);
+    for (const AnnotatedDBG *index : { copy.get(), pattern_copy.get() }) {
+        EXPECT_EQ(untimed(process_resolve_request(resolve, *resident, "")),
+                  untimed(process_resolve_request(resolve, *index, "")));
+        EXPECT_EQ(untimed(process_resolve_request(discover, *resident, "")),
+                  untimed(process_resolve_request(discover, *index, "")));
+        EXPECT_EQ(untimed(process_traverse_request(traverse, *resident, "")),
+                  untimed(process_traverse_request(traverse, *index, "")));
+    }
+    // (the answers name the headers: the mapping was read)
+    const Json::Value answered = process_resolve_request(resolve, *copy, "");
+    ASSERT_EQ(3u, answered["labels"].size()) << answered;
+    EXPECT_EQ("acc1", answered["labels"][0]["label"].asString());
+    EXPECT_EQ("header", answered["labels"][0]["kind"].asString());
+    const Json::Value discovered = process_resolve_request(discover, *copy, "");
+    ASSERT_EQ(1u, discovered["labels"].size()) << discovered;
+    EXPECT_EQ("acc1", discovered["labels"][0]["label"].asString());
+    // /pattern on its copy: the record labels of its paths as the resident's (a column
+    // annotation's reads are unbudgeted: allowed, as a request on such an index asks)
+    const Json::Value pattern = parse_pattern_body(
+            "{\"patterns\": [{\"dna\": \"" + acc1.substr(30, 40) + "\"}], "
+            "\"long_search\": \"paths\", \"output\": {\"labels\": \"all\"}, "
+            "\"allow_unbudgeted_annotation\": true}");
+    PatternLimits caps;
+    caps.min_information_bits = 0;
+    const Json::Value on_resident = process_pattern_request(pattern, *resident, caps, "");
+    EXPECT_EQ(untimed(on_resident),
+              untimed(process_pattern_request(pattern, *pattern_copy, caps, "")));
+    ASSERT_EQ(1u, on_resident["patterns"][0]["results"].size()) << on_resident;
+    EXPECT_EQ("record_verified",
+              on_resident["patterns"][0]["results"][0]["support"].asString()) << on_resident;
+    // one index, the resident's, for all of it
+    EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
+
+    // without the resident's mapping the .seqs is loaded: another object with an index of
+    // its own, built by its first header lookup
+    auto loaded = initialize_annotated_dbg(*config, none);
+    ASSERT_TRUE(loaded->get_coord_to_header());
+    EXPECT_NE(resident->get_coord_to_header(), loaded->get_coord_to_header());
+    EXPECT_EQ(0u, loaded->get_coord_to_header()->num_header_index_builds());
+    EXPECT_EQ(untimed(process_resolve_request(resolve, *resident, "")),
+              untimed(process_resolve_request(resolve, *loaded, "")));
+    EXPECT_EQ(1u, loaded->get_coord_to_header()->num_header_index_builds());
+    EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
+
+    // a mapping of another annotation (two columns to this one's label) is not shared
+    auto other = std::make_shared<annot::CoordToHeader>(
+            std::vector<std::vector<std::string>>{ { "x" }, { "y" } },
+            std::vector<std::vector<uint64_t>>{ { 3 }, { 4 } });
+    auto refused = initialize_annotated_dbg(*config, none, other);
+    ASSERT_TRUE(refused->get_coord_to_header());
+    EXPECT_NE(other.get(), refused->get_coord_to_header());
+    EXPECT_EQ(2u, refused->get_coord_to_header()->build_header_index());
 }

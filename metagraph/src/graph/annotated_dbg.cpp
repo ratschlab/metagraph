@@ -47,7 +47,7 @@ AnnotatedSequenceGraph
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            std::unique_ptr<Annotator>&& annotation,
                            bool force_fast,
-                           std::unique_ptr<annot::CoordToHeader> coord_to_header)
+                           std::shared_ptr<const annot::CoordToHeader> coord_to_header)
       : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg),
         coord_to_header_(std::move(coord_to_header)) {}
 

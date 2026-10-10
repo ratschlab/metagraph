@@ -66,10 +66,12 @@ class AnnotatedSequenceGraph {
 
 class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
+    // |coord_to_header|: the mapping loaded with the annotation (a unique_ptr converts), or
+    // the one another index of the same annotation already holds (share_coord_to_header)
     AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                  std::unique_ptr<Annotator>&& annotation,
                  bool force_fast = false,
-                 std::unique_ptr<annot::CoordToHeader> coord_to_header = {});
+                 std::shared_ptr<const annot::CoordToHeader> coord_to_header = {});
 
     using AnnotatedSequenceGraph::get_labels;
 
@@ -79,6 +81,14 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // This mapping transforms file-based coordinates to sequence-header-based coordinates
     // for query results. The returned pointer is valid for the lifetime of this object.
     const annot::CoordToHeader* get_coord_to_header() const { return coord_to_header_.get(); }
+
+    // The mapping to build another index of the same annotation with (a server's copy of a
+    // pair loaded into RAM for one request): the mapping depends on the .seqs alone, so the
+    // copy shares the object and its reverse header index instead of loading and building
+    // identical ones. Null without a mapping.
+    std::shared_ptr<const annot::CoordToHeader> share_coord_to_header() const {
+        return coord_to_header_;
+    }
 
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
@@ -141,7 +151,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
   private:
     DeBruijnGraph &dbg_;
-    std::unique_ptr<annot::CoordToHeader> coord_to_header_;
+    std::shared_ptr<const annot::CoordToHeader> coord_to_header_;
 };
 
 } // namespace graph
