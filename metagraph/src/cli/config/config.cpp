@@ -435,6 +435,10 @@ Config::Config(int argc, char *argv[]) {
             } else {
                 max_graphs_without_selection = *v;
             }
+        } else if (!strcmp(argv[i], "--max-request-body-mb")) {
+            // in MiB, at most 1 TiB: the library takes the bound as a size_t of bytes
+            bounded(argv[i], get_value(i), 1048576, &max_request_body_mb);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
             exact_ms(argv[i], get_value(i), &traverse_max_memory_mb);
             i++;
@@ -1879,6 +1883,7 @@ if (advanced) {
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
             fprintf(stderr, "\t   --max-graphs-without-selection [INT] \ta POST /search or /pattern request without `graphs` queries every name of a graph list of at most this many names, and is refused (400) on a longer list; stated by GET /capabilities; at least 1 [10]\n");
+            fprintf(stderr, "\t   --max-request-body-mb [INT] \tlargest request body read, in MiB: a request with a longer body is dropped (its connection closed without a response, logged); stated by GET /capabilities; 0 = unlimited [0]\n");
             fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR] \t\tname of the index (-i / -a only) in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE] \tmanifest of the index bundle (-i / -a only); its digest is the index identity []\n");

@@ -2632,7 +2632,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the `pattern` block
     (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
     in multi-graph mode, `graph_summary` and `max_graphs_without_selection` (both `null` in single-graph mode;
-    below, multi-graph mode).
+    below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
+    the server reads, `null` when unlimited).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
@@ -2979,7 +2980,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     the threshold) once it has more (`SPEC-pattern-search.md` §24.1: `/search`'s rule, the one flag for both
     routes), stated so that a client can check it before an added name takes the list over it; `null` on a
     single-graph server. `/traverse` and `/resolve` select one graph (`graph`, or `graphs: [name]`) and are not
-    bound by it. Both GET routes state `in_ram`:
+    bound by it. In both modes `GET /capabilities` states `max_request_body_mb` beside it (integer MiB,
+    `--max-request-body-mb`, below; `null` when unlimited, the default): a client that may send a large body
+    reads the limit here, since the refusal of a longer body has no status (the connection is closed). Both GET
+    routes state `in_ram`:
     `{"routes": ["pattern", "resolve", "search", "traverse"], "loads": <a multi-graph server on mmap with
     --mem-cap-gb above 0>, "mem_cap_gb": <--mem-cap-gb>, "budgets_start": "after_load"}`.
   - **`GET /traverse/capabilities?graph=<name>[&graph_path=<path>]`** (feature level 3; a 400 before): the probe of
@@ -2992,7 +2996,17 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   it lowers, never sets, and which is never above 899 000 ms on the server, §4.5), `--traverse-max-seeds` (64),
   `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
   unlimited for each. A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
-  `max_seed_bp` are refusals (400), not clamps. **The budgets' maxima** *(feature level 4; R16, the owner's
+  `max_seed_bp` are refusals (400), not clamps. **The request-body limit** *(review of 2026-10-10, resources
+  finding 2)*: `--max-request-body-mb N` (an integer in [0, 1 048 576] MiB; 0 = unlimited, the default; stated by
+  `GET /capabilities` as `max_request_body_mb`, `null` when unlimited) bounds what the HTTP library reads of a
+  request, headers and body, on every route. A request with a longer body — a `Content-Length` above it, or a
+  chunked body growing past it — is dropped before any route runs: the library closes the connection **without a
+  response** (it builds a 413 it never sends; a JSON refusal would need a patch of the vendored library), and
+  the server logs it once per occurrence at warning level (`POST /traverse from <address> dropped: its body (<n>
+  bytes | chunked) exceeds --max-request-body-mb N MiB; connection closed without a response`). A client sees a
+  reset connection, not a status; it reads the limit from the capabilities. The limit is in MiB of bytes on the
+  wire (a body right at N MiB passes); it is not a cap on a pattern's length or a seed's (those have their own,
+  above). **The budgets' maxima** *(feature level 4; R16, the owner's
   decision)*: `--traverse-max-memory-mb` (an integer in [0, 1 048 576]) and `--traverse-max-work-units` (an integer
   in [0, 2⁵³ − 1]), both 0 = off by default — a budget changes how a walk stops, so a deployment that did not
   choose one keeps the results it always gave. Set, a request's larger `bounds.max_memory_mb` /

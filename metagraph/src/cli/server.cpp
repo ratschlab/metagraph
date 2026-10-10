@@ -404,10 +404,20 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     server_startup.config.port = config.port;
     server_startup.config.timeout_request = 30;    // 30 sec to finish headers
     server_startup.config.timeout_content = kContentTimeoutS;   // 15 minutes for body/compute (per request) max
+    if (config.max_request_body_mb) {
+        // the library's bound on a request's headers and body (size_t max by default): a
+        // Content-Length above it, or a chunked body growing past it, is reported to on_error as
+        // message_size and the connection dropped — the 413 the library builds there is never
+        // sent (server_http.hpp, read_request_and_content)
+        server_startup.config.max_request_streambuf_size
+                = static_cast<size_t>(config.max_request_body_mb) << 20;
+    }
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
     logger->info("[Server] Maximum connections: {}", num_threads);
+    if (config.max_request_body_mb)
+        logger->info("[Server] Maximum request body: {} MiB", config.max_request_body_mb);
     return std::thread([&server_startup, on_accepting]() {
         server_startup.start([on_accepting](unsigned short) {
             if (on_accepting)
@@ -1983,6 +1993,9 @@ int run_server(Config *config) {
             // `graphs`), so that a client sees it before a longer list refuses its requests
             c["max_graphs_without_selection"]
                     = max_graphs_without_selection_json(multi, config->max_graphs_without_selection);
+            // the largest request body the server reads (a longer one is dropped), so that a
+            // client can check it before a request is cut off without a response
+            c["max_request_body_mb"] = max_request_body_mb_json(config->max_request_body_mb);
             c["release"] = config->index_release;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;
@@ -2087,8 +2100,20 @@ int run_server(Config *config) {
     };
     server.default_resource["POST"] = server.default_resource["GET"];
 
-    server.on_error = [](shared_ptr<HttpServer::Request> /*request*/,
-                         const SimpleWeb::error_code &ec) {
+    server.on_error = [config](shared_ptr<HttpServer::Request> request,
+                               const SimpleWeb::error_code &ec) {
+        if (ec == SimpleWeb::make_error_code::make_error_code(SimpleWeb::errc::message_size)) {
+            // a body over --max-request-body-mb: the library closes the connection without a
+            // response (it builds a 413 it never sends), so this log line is the only trace
+            const auto it = request->header.find("Content-Length");
+            logger->warn("[Server] {} {} from {} dropped: its body ({}) exceeds "
+                         "--max-request-body-mb {} MiB; connection closed without a response",
+                         request->method, request->path,
+                         request->remote_endpoint().address().to_string(),
+                         it != request->header.end() ? it->second + " bytes" : "chunked",
+                         config->max_request_body_mb);
+            return;
+        }
         // Handle errors here, ignoring a few trivial ones.
         if (ec.value() != asio::stream_errc::eof
                 && ec.value() != asio::error::operation_aborted) {

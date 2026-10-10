@@ -210,6 +210,16 @@ TEST(MultiGraphSelection, CapabilitiesStateTheThreshold) {
     EXPECT_TRUE(max_graphs_without_selection_json(false, 10).isNull());
 }
 
+// GET /capabilities states the request-body limit beside it: the flag in MiB, null when
+// unlimited (the flag's 0, its default)
+TEST(MultiGraphSelection, CapabilitiesStateTheRequestBodyLimit) {
+    const Json::Value set = max_request_body_mb_json(64);
+    EXPECT_TRUE(set.isIntegral());
+    EXPECT_EQ(64u, set.asUInt64());
+    EXPECT_EQ(1u, max_request_body_mb_json(1).asUInt64());
+    EXPECT_TRUE(max_request_body_mb_json(0).isNull());
+}
+
 
 // ---------------------------------------------------------------- the /pattern envelope
 

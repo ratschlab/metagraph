@@ -136,6 +136,12 @@ class Config {
     // (400). Stated by GET /capabilities (max_graphs_without_selection), so that a client can
     // see the threshold before a longer list refuses its requests; at least 1
     uint64_t max_graphs_without_selection = 10;
+    // The largest request body the server reads, in MiB (0 = unlimited, the default): the
+    // HTTP library's max_request_streambuf_size. A Content-Length above it, or a chunked body
+    // growing past it, is reported to on_error as message_size and the connection is closed
+    // without a response. Stated by GET /capabilities (max_request_body_mb, null when
+    // unlimited)
+    uint64_t max_request_body_mb = 0;
     // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
     // SPEC-labeled-traversal-core.md §10.3): 0 = off (a request's budgets as given, an omitted
     // one none). Set, a larger budget is lowered to it and an omitted one set to it, echoed as

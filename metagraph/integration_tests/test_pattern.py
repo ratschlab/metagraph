@@ -3690,11 +3690,14 @@ class TestPatternRegression(TestingBase):
         # opt-in bounds.time_budget_ms (SPEC-labeled-traversal-core.md §4.5): a capabilities
         # block, not a feature, since /resolve is listed already; `in_ram` (accepted as /search
         # accepts it), `graph_summary` and `max_graphs_without_selection` (both null on a
-        # single-graph server), SPEC-pattern-search.md §24
+        # single-graph server), SPEC-pattern-search.md §24, and `max_request_body_mb` (the
+        # largest request body read, --max-request-body-mb; null: unlimited, the default)
         self.assertEqual(set(a) | {'pattern', 'resolve', 'in_ram', 'graph_summary',
-                                   'max_graphs_without_selection'}, set(b))
+                                   'max_graphs_without_selection', 'max_request_body_mb'},
+                         set(b))
         self.assertIsNone(b['graph_summary'])
         self.assertIsNone(b['max_graphs_without_selection'])
+        self.assertIsNone(b['max_request_body_mb'])
         self.assertFalse(b['in_ram']['loads'])
         self.assertTrue(b['resolve']['time_budget']['accepted'])
         self.assertIsNone(b['resolve']['time_budget']['default'])

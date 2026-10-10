@@ -3045,6 +3045,11 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok(doc['routes'].get('pattern_capabilities')
                      == (DETAILS + '?graph={name}[&graph_path={path}]' if multi else DETAILS),
                      'routes.pattern_capabilities')
+            # the largest request body the server reads (--max-request-body-mb, MiB): an
+            # integer of at least 1, or null when unlimited (the fixture servers)
+            check.ok(doc['max_request_body_mb'] is None
+                     or (is_int(doc['max_request_body_mb']) and doc['max_request_body_mb'] >= 1),
+                     'max_request_body_mb', 'an integer of at least 1, or null')
             if not multi:
                 check.ok(doc['graph_summary'] is None, 'graph_summary', 'null on one graph')
                 check.ok(doc['max_graphs_without_selection'] is None,

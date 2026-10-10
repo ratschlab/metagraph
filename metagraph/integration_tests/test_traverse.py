@@ -2247,16 +2247,19 @@ class TestTraverseAPI(TestTraverseBase):
         # 'in_ram': the routes that accept it and whether this server loads (a single-graph
         # server does not); 'graph_summary': a multi-graph server's pairs, null here;
         # 'max_graphs_without_selection': the names a request may leave unselected on a
-        # multi-graph server, null here (SPEC-pattern-search.md §24.1)
+        # multi-graph server, null here (SPEC-pattern-search.md §24.1); 'max_request_body_mb':
+        # the largest request body the server reads (--max-request-body-mb), null here
+        # (unlimited; test_api_request_body_limit starts a server with one)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
                           'graph_summary', 'graphs', 'in_ram', 'max_graphs_without_selection',
-                          'mode', 'pattern', 'ready', 'release', 'resolve', 'routes',
-                          'schema_version', 'server_instance'},
+                          'max_request_body_mb', 'mode', 'pattern', 'ready', 'release',
+                          'resolve', 'routes', 'schema_version', 'server_instance'},
                          set(c))
-        self.assertEqual((6, 'single', None, None, None, True, 1),
+        self.assertEqual((6, 'single', None, None, None, None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['graph_summary'],
-                          c['max_graphs_without_selection'], c['ready'], c['schema_version']))
+                          c['max_graphs_without_selection'], c['max_request_body_mb'],
+                          c['ready'], c['schema_version']))
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': False,
                           'mem_cap_gb': 0, 'budgets_start': 'after_load'}, c['in_ram'])
         self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts', 'pattern'],
@@ -2321,6 +2324,96 @@ class TestTraverseAPI(TestTraverseBase):
         client = graphlet_lib.TraverseClient(self.host, self.port)
         self.assertEqual('single', client.server_capabilities()['mode'])
         self.assertEqual(probe['index_meta_fp'], client.capabilities()['index_meta_fp'])
+
+    def test_api_request_body_limit(self):
+        """--max-request-body-mb N (SPEC-labeled-traversal-core.md §10.3; 0 = unlimited, the
+        default): GET /capabilities states it as max_request_body_mb (null on this class's
+        server, test_api_server_capabilities), and a request with a longer body is dropped by
+        the HTTP library before any route runs: the connection is closed without a response
+        (the library builds a 413 it never sends), a Content-Length over the limit and a chunked
+        body growing past it alike, each logged at warning level; the server goes on
+        answering. A value out of [0, 1048576] refuses to start."""
+        port = _free_port()
+        url = f'http://{self.host}:{port}'
+        log_path = f'{self.tempdir.name}/body-limit-{port}.log'
+        with open(log_path, 'w') as log:
+            proc = subprocess.Popen(
+                shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                          '--port', str(port), '--address', self.host, '-p', '2',
+                                          '--max-request-body-mb', '1'],
+                stdout=log, stderr=subprocess.STDOUT)
+        try:
+            for _ in range(600):
+                try:
+                    ret = requests.get(url + '/capabilities', timeout=2)
+                    if ret.ok and ret.json()['ready']:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            caps = requests.get(url + '/capabilities').json()
+            self.assertIs(type(caps['max_request_body_mb']), int)
+            self.assertEqual(1, caps['max_request_body_mb'])
+            request = {'seeds': [{'sequence': self.element}],
+                       'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                                    'output': {'detail': 'summary', 'timing': False}}}
+            oversized = json.dumps(dict(request, padding='x' * (2 << 20))).encode()
+            self.assertGreater(len(oversized), 2 << 20)
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                requests.post(url + '/traverse', data=oversized, timeout=30)
+
+            def send_and_read(payloads):
+                # what comes back on the wire: nothing, the connection closed (a reset or a
+                # broken pipe while sending, else an empty read)
+                sock = socket.create_connection((self.host, port))
+                sock.settimeout(10)
+                try:
+                    for payload in payloads:
+                        sock.sendall(payload)
+                    return sock.recv(4096)
+                except socket.timeout:
+                    self.fail('neither an answer nor a close within 10 s')
+                except OSError:
+                    return b''
+                finally:
+                    sock.close()
+            self.assertEqual(b'', send_and_read([
+                b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n'
+                + b'Content-Length: %d\r\n\r\n' % len(oversized), oversized[:1000]]))
+            chunk = b'x' * 65536
+            self.assertEqual(b'', send_and_read(
+                [b'POST /traverse HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n']
+                + [b'%x\r\n' % len(chunk) + chunk + b'\r\n'] * 40 + [b'0\r\n\r\n']))
+            # the server goes on answering: the same request without the padding
+            ret = requests.post(url + '/traverse', data=json.dumps(request))
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            self.assertEqual('complete', ret.json()['results'][0]['outcome']['walks'])
+            self.assertEqual(200, requests.get(url + '/capabilities').status_code)
+        finally:
+            proc.kill()
+            proc.wait()
+        with open(log_path) as f:
+            text = f.read()
+        self.assertIn('[Server] Maximum request body: 1 MiB', text)
+        dropped = [line for line in text.splitlines() if ' dropped: its body (' in line]
+        self.assertGreaterEqual(len(dropped), 3, text[-3000:])
+        for line in dropped:
+            self.assertIn('[warning]', line)
+            self.assertIn('POST /traverse from 127.0.0.1 dropped: its body (', line)
+            self.assertIn('exceeds --max-request-body-mb 1 MiB; connection closed without a '
+                          'response', line)
+        self.assertTrue(any('(chunked)' in line for line in dropped), dropped)
+        self.assertTrue(any('(%d bytes)' % len(oversized) in line for line in dropped), dropped)
+        # a value out of range refuses to start
+        for value in ('-1', '1048577', '1.5', 'x'):
+            out = subprocess.run(
+                shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                          '--port', str(_free_port()), '--address', self.host,
+                                          '--max-request-body-mb', value],
+                capture_output=True, text=True, timeout=120)
+            self.assertNotEqual(0, out.returncode, value)
+            self.assertIn("--max-request-body-mb must be an integer in [0, 1048576], got '%s'"
+                          % value, out.stderr + out.stdout, value)
 
     def test_api_attempts(self):
         """Attempts: a request with attempt_id (budget_id and locus_id echoed) states its

@@ -886,6 +886,10 @@ Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t thresho
     return multi_graph ? Json::Value(Json::UInt64(threshold)) : Json::Value();
 }
 
+Json::Value max_request_body_mb_json(uint64_t mb) {
+    return mb ? Json::Value(Json::UInt64(mb)) : Json::Value();
+}
+
 namespace {
 
 // the tags of a pair's entry in the envelope, set on |entry|

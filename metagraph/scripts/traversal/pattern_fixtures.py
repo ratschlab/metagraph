@@ -498,13 +498,18 @@ def multi_capabilities(doc):
           == (True, 'file', 'exact', 'basic', MINI_K), pair)
     # the threshold of the selection rule: the default of --max-graphs-without-selection
     check(doc['max_graphs_without_selection'] == 10, doc['max_graphs_without_selection'])
+    # the request-body limit: null, the fixture servers start without --max-request-body-mb
+    check(doc['max_request_body_mb'] is None, doc['max_request_body_mb'])
 
 
 def single_graph_selection(doc):
     """GET /capabilities of a single-graph server: no graph list to select from, so
-    graph_summary and max_graphs_without_selection are null"""
-    check(doc['graph_summary'] is None and doc['max_graphs_without_selection'] is None,
-          {k: doc[k] for k in ('graph_summary', 'max_graphs_without_selection')})
+    graph_summary and max_graphs_without_selection are null; max_request_body_mb null too
+    (the fixture servers start without --max-request-body-mb)"""
+    check(doc['graph_summary'] is None and doc['max_graphs_without_selection'] is None
+          and doc['max_request_body_mb'] is None,
+          {k: doc[k] for k in ('graph_summary', 'max_graphs_without_selection',
+                               'max_request_body_mb')})
 
 
 def names_the_pair(doc):

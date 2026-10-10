@@ -282,6 +282,13 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
 Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t threshold);
 
 /**
+ * GET /capabilities' `max_request_body_mb`: the largest request body the server reads, in MiB
+ * (--max-request-body-mb); null when unlimited (the flag's 0, its default). A longer body is
+ * dropped by the HTTP library: the connection is closed without a response.
+ */
+Json::Value max_request_body_mb_json(uint64_t mb);
+
+/**
  * The envelope POST /pattern answers on a multi-graph server (SPEC §24.1): one entry per
  * selected (name, pair) in the answers' order, each the outcome of that pair alone.
  *  - pattern_pair_answered: the pair's single-graph answer |answer| (SPEC §8) tagged with its

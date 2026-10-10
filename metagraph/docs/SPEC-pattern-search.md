@@ -3792,7 +3792,13 @@ the other pairs.
   (integer, at least 1) is the threshold of §24.1's rule (`--max-graphs-without-selection`, 10 by default): a
   `/pattern` or `/search` request without `graphs` queries every name while `graphs` (the document's list) has at
   most that many entries, and is refused once it has more; `null` on a single-graph server, as `graph_summary`
-  (no list to select from).
+  (no list to select from). Beside them, in both modes, `max_request_body_mb` (integer MiB; `null`: unlimited,
+  the default): the largest request body the server reads, the server flag `--max-request-body-mb N` (an integer
+  in [0, 1 048 576], 0 = unlimited). A request with a longer body — a `Content-Length` above it, or a chunked body
+  growing past it — is dropped before any route runs: the HTTP library closes the connection without a response
+  (it builds a 413 it never sends), on every route, and the server logs it at warning level
+  (`SPEC-labeled-traversal-core.md` §10.3, the caps). A client that may send large bodies reads the limit here
+  rather than from the refusal, which has no status.
 
 <!-- schema: capabilities_pair -->
 | field | type | meaning |
