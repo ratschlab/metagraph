@@ -343,8 +343,12 @@ SCHEMA = {
     'motif_label': ['column', 'contexts', 'strands'],
     # a multi-graph server (SPEC §24): its answer, the tags of each pair's answer, the block of
     # one pair (GET /pattern/capabilities?graph=), and GET /capabilities' graph_summary
-    'answer_multi': ['pattern_contract_version', 'graphs', 'answers', 'timing'],
-    'answer_pair': ['graph', 'graph_path', 'annotation_path', 'index_fp'],
+    'answer_multi': ['pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
+                     'timing'],
+    'answer_pair': ['graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome', 'refusal'],
+    # a refused entry's `refusal`: the body the pair alone would have been answered, with its
+    # HTTP status (no code for an unexpected failure)
+    'pair_refusal': ['http_status', 'error', 'code'],
     'capabilities_pair': ['graph', 'graph_path'],
     'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs'],
     'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
@@ -1364,9 +1368,11 @@ class Checker:
         self.budget(a, request, limits)
 
     def multi_answer(self, a, request, pairs):
-        """A multi-graph server's answer (SPEC §24): the names answered, one answer per pair
-        (|pairs| per name on the fixture server) each tagged with its pair and its index_fp, and
-        the request's time"""
+        """A multi-graph server's answer (SPEC §24.1): the names answered, one entry per pair
+        (|pairs| per name on the fixture server) each tagged with its pair and its index_fp and
+        stating its outcome -- answered (the pair's answer) or refused (`refusal`: the body
+        the pair alone would have been answered, with its HTTP status, and nothing of an
+        answer) -- the counts of the outcomes, and the request's time"""
         self.keys(a, SCHEMA['answer_multi'], 'answer')
         self.ok(a['pattern_contract_version'] == 1, 'pattern_contract_version')
         asked = request.get('graphs')
@@ -1378,13 +1384,44 @@ class Checker:
         names = [x['graph'] for x in a['answers']]
         self.ok(names == sorted(names) and set(names) == set(a['graphs']), 'answers',
                 'in the order of the names')
+        tags = [f for f in SCHEMA['answer_pair'] if f != 'refusal']
+        outcomes = [x.get('outcome') for x in a['answers']]
+        self.ok(all(o in ('answered', 'refused') for o in outcomes), 'answers',
+                'each entry\'s outcome, answered or refused')
+        self.ok(a['answered'] == outcomes.count('answered')
+                and a['refused'] == outcomes.count('refused'), 'answered',
+                'answered and refused count the entries of each outcome')
         for i, x in enumerate(a['answers']):
             path = f'answers[{i}]'
-            self.ok(set(SCHEMA['answer_pair']) <= set(x), path, 'tagged with its pair')
+            self.ok(set(tags) <= set(x), path, 'tagged with its pair')
             self.ok(isinstance(x['graph_path'], str) and isinstance(x['annotation_path'], str),
                     path + '.graph_path')
+            if x['outcome'] == 'refused':
+                self.keys(x, SCHEMA['answer_pair'], path)
+                self.ok(x['index_fp'] is None or isinstance(x['index_fp'], str),
+                        path + '.index_fp')
+                self.pair_refusal(x['refusal'], path + '.refusal')
+                continue
+            self.ok('refusal' not in x, path, 'an answered entry carries no refusal')
             self.ok(x['index_fp'] == x['index']['index_fp'], path + '.index_fp',
                     'the pair\'s index_fp')
+
+    def pair_refusal(self, r, path):
+        """The refusal of one pair of a multi-graph request (SPEC §24.1): the body the pair
+        alone would have been answered (a refusal's {error, code}; a failure's {error}) with
+        its HTTP status: 503 is the deadline, every refusal with a code else 400, a failure
+        without a code 400 or 500."""
+        self.ok(isinstance(r, dict) and set(r) <= set(SCHEMA['pair_refusal'])
+                and {'http_status', 'error'} <= set(r), path, 'http_status, error[, code]')
+        self.ok(isinstance(r['error'], str) and r['error'], path + '.error')
+        if 'code' in r:
+            self.one_of(r['code'], REFUSALS, path + '.code')
+            self.ok((r['http_status'] == 503) is (r['code'] == 'deadline'), path + '.http_status',
+                    '503 is the deadline, every other refusal 400')
+            self.ok(r['http_status'] in (400, 503), path + '.http_status')
+        else:
+            self.ok(r['http_status'] in (400, 500), path + '.http_status',
+                    'a failure without a code: 400 or 500')
 
     def budget(self, a, request, limits):
         """SPEC §7.6, one budget per request: the steps of all patterns sum to at most max_steps,
@@ -2792,16 +2829,17 @@ class TestPatternFixtures(unittest.TestCase):
         cls.bodies = {name: (load(name, 'request.json'), load(name, 'answer.json'))
                       for name in cls.fixtures}
         # a multi-graph server's answers (SPEC §24) as stored; the checks of every answer see
-        # the answer of the fixture server's one pair, the pair's tags taken off, which is
-        # the single-graph answer (test_multi_graph_answers checks the envelope)
+        # the answer of the fixture server's one answered pair, the pair's tags and outcome
+        # taken off, which is the single-graph answer (test_multi_graph_answers checks the
+        # envelope, the refused entries among its rules)
         cls.multi_answers = {}
         for name, f in cls.fixtures.items():
             request, answer = cls.bodies[name]
             if f['method'] == 'POST' and f['status'] == 200 and 'answers' in answer:
                 cls.multi_answers[name] = answer
-                assert len(answer['answers']) == 1, name
-                pair = {k: v for k, v in answer['answers'][0].items()
-                        if k not in SCHEMA['answer_pair']}
+                answered = [x for x in answer['answers'] if x.get('outcome') == 'answered']
+                assert len(answered) == 1, name
+                pair = {k: v for k, v in answered[0].items() if k not in SCHEMA['answer_pair']}
                 cls.bodies[name] = (request, pair)
 
     def full_block(self, name):
@@ -3173,9 +3211,12 @@ class TestPatternFixtures(unittest.TestCase):
                 self.bodies['pattern_capabilities_multi_graph_no_graph'][1])
 
     def test_multi_graph_answers(self):
-        """SPEC §24: a multi-graph server's answers are the pair answers, tagged; each rule
-        refuses an answer that breaks it -- a tag missing, another index_fp, the names
-        unsorted or another count of answers, a field of the envelope more."""
+        """SPEC §24.1: a multi-graph server's answers are the pair answers, tagged, each with
+        its outcome, a refused pair's entry its own refusal; each rule refuses an answer that
+        breaks it -- a tag missing, another index_fp, the names unsorted or another count of
+        answers, a field of the envelope more, an outcome unknown or miscounted, a refusal in
+        an answered entry, an answer's field in a refused one, a refusal without its status,
+        with an unknown code, or with the deadline's code under another status."""
         self.assertTrue(self.multi_answers, 'the multi-graph fixtures')
 
         def run(name, mutate=None):
@@ -3186,8 +3227,9 @@ class TestPatternFixtures(unittest.TestCase):
 
         for name, a in self.multi_answers.items():
             run(name)
-            # the answer the other checks read is the pair's without its tags
-            pair = {k: v for k, v in a['answers'][0].items() if k not in SCHEMA['answer_pair']}
+            # the answer the other checks read is the answered pair's without its tags
+            answered = [x for x in a['answers'] if x['outcome'] == 'answered']
+            pair = {k: v for k, v in answered[0].items() if k not in SCHEMA['answer_pair']}
             self.assertEqual(pair, self.bodies[name][1], name)
         name = 'multi_graph_count'
         cases = [
@@ -3197,9 +3239,36 @@ class TestPatternFixtures(unittest.TestCase):
             (lambda a: a['answers'].append(copy.deepcopy(a['answers'][0])), 'one per pair'),
             (lambda a: a.update(index={}), 'fields'),
             (lambda a: a['timing'].update(load_ms=0), 'fields'),
+            (lambda a: a['answers'][0].pop('outcome'), 'outcome'),
+            (lambda a: a['answers'][0].update(outcome='maybe'), 'outcome'),
+            (lambda a: a.update(answered=0, refused=1), 'count the entries'),
+            (lambda a: a['answers'][0].update(refusal={'http_status': 400, 'error': 'x'}),
+             'no refusal'),
         ]
         for mutate, says in cases:
             with self.subTest(says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+        # the refused entry: the mixed server's fixture
+        name = 'multi_graph_refused_pair'
+        self.assertIn(name, self.multi_answers)
+        refused = self.multi_answers[name]['answers'][0]
+        self.assertEqual(('hashed', 'refused', 400, 'representation_unsupported'),
+                         (refused['graph'], refused['outcome'],
+                          refused['refusal']['http_status'], refused['refusal']['code']))
+        self.assertEqual((1, 1), (self.multi_answers[name]['answered'],
+                                  self.multi_answers[name]['refused']))
+        cases = [
+            (lambda a: a['answers'][0].update(patterns=[]), 'answers\\[0\\]'),
+            (lambda a: a['answers'][0]['refusal'].pop('http_status'), 'http_status'),
+            (lambda a: a['answers'][0]['refusal'].update(code='nope'), 'code'),
+            (lambda a: a['answers'][0]['refusal'].update(http_status=503), '503 is the deadline'),
+            (lambda a: a['answers'][0]['refusal'].update(code='deadline'), '503 is the deadline'),
+            (lambda a: a['answers'][0]['refusal'].update(limits={}), 'http_status, error'),
+            (lambda a: a.update(answered=2, refused=0), 'count the entries'),
+        ]
+        for mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
                 with self.assertRaisesRegex(AssertionError, says):
                     run(name, mutate)
 
@@ -4240,9 +4309,11 @@ class TestPatternFixtures(unittest.TestCase):
                                                    f'over the budget of {budget}')
         # every server a fixture runs on but the ones answering no GET (variants of a measured
         # server by a flag: masked_small_predicate_cap's document is the masked one's with a
-        # smaller caps.max_predicate_labels, one digit shorter)
+        # smaller caps.max_predicate_labels, one digit shorter; multi_mixed's is the multi one's
+        # with the hash pair's graph_summary entry, the hash server's reason in it)
         self.assertEqual({f['server'] for f in self.fixtures.values()}
-                         - {'masked_no_map', 'unmasked_unchecked', 'masked_small_predicate_cap'},
+                         - {'masked_no_map', 'unmasked_unchecked', 'masked_small_predicate_cap',
+                            'multi_mixed'},
                          servers)
         # the measure: exact on what it does not bound from above
         self.assertEqual(len(json.dumps({'a': [1, 'b', None, True, {}]}, separators=(',', ':'))),

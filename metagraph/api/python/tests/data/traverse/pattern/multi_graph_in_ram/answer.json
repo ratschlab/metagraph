@@ -1,4 +1,5 @@
 {
+ "answered": 1,
  "answers": [
   {
    "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
@@ -26,6 +27,7 @@
     "time_budget_ms": 60000
    },
    "mode": "count",
+   "outcome": "answered",
    "output": null,
    "pattern_contract_version": 1,
    "patterns": [
@@ -146,7 +148,7 @@
       "-"
      ],
      "timing": {
-      "elapsed_ms": 0.104958
+      "elapsed_ms": 0.45
      },
      "work": {
       "mask_scans": 0,
@@ -156,7 +158,7 @@
     }
    ],
    "timing": {
-    "elapsed_ms": 0.154458,
+    "elapsed_ms": 0.504333,
     "load_ms": 0.0
    }
   }
@@ -165,7 +167,8 @@
   "mini_refseq"
  ],
  "pattern_contract_version": 1,
+ "refused": 0,
  "timing": {
-  "elapsed_ms": 0.24779199999999998
+  "elapsed_ms": 0.9235
  }
 }

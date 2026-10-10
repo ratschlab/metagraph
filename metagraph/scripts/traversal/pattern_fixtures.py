@@ -29,6 +29,10 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              the mini index as built, served with --pattern-build-mask: the same mask built in
              memory at start-up (capabilities mask: built_at_load)
   multi      a multi-graph server (graphs CSV) carrying the masked copy as `mini_refseq`
+  multi_mixed
+             a multi-graph server carrying the masked copy as `mini_refseq` and the hash graph
+             as `hashed`: a pair the route serves beside one it does not (SPEC §24.1: the
+             refused pair is an entry of the envelope, the other answered)
   primary    a PRIMARY index of the mini's NDM-carrying records (562.fa, 573.fa), served
              wrapped in CanonicalDBG: orientations instead of strands, no suffix scope; its
              column annotation has no budget-aware decode (annotation: unbudgeted)
@@ -105,6 +109,9 @@ INDEX_NAME = 'mini_refseq'
 INDEX_RELEASE = 'fixtures-mini_refseq'
 PRIMARY_NAME = 'mini_primary'
 MULTI_GRAPH_NAME = 'mini_refseq'
+# the hash graph's name on the mixed multi-graph server (before mini_refseq in byte order: the
+# envelope's first entry)
+HASHED_NAME = 'hashed'
 
 # ----------------------------------------------------------------------- the patterns
 #
@@ -507,14 +514,42 @@ def names_the_pair(doc):
 
 def multi_answers(*per_answer):
     """POST /pattern on a multi-graph server: one answer per selected pair, each tagged with
-    its pair and checked by its own check"""
+    its pair, outcome answered, and checked by its own check; the counts of the outcomes"""
     def run(answer):
         check(len(answer['answers']) == len(per_answer), len(answer['answers']))
+        check((answer['answered'], answer['refused']) == (len(per_answer), 0),
+              (answer['answered'], answer['refused']))
         check(answer['graphs'] == sorted({a['graph'] for a in answer['answers']}), answer['graphs'])
         for a, c in zip(answer['answers'], per_answer):
             check(a['graph'] == MULTI_GRAPH_NAME and a['graph_path'].endswith(MINI_GRAPH)
-                  and a['annotation_path'].endswith(MINI_ANNO) and a['index_fp'] is None, a)
+                  and a['annotation_path'].endswith(MINI_ANNO) and a['index_fp'] is None
+                  and a['outcome'] == 'answered' and 'refusal' not in a, a)
             c(a)
+    return run
+
+
+def multi_refused_pair(per_answer):
+    """POST /pattern on the mixed multi-graph server naming both pairs (SPEC §24.1): 200, the
+    hash pair a refused entry carrying the refusal it alone would have been answered
+    (representation_unsupported, http_status 400) and nothing of an answer, the mini pair
+    answered and checked by |per_answer|; the names in byte order, the counts of the outcomes"""
+    def run(answer):
+        check(answer['graphs'] == [HASHED_NAME, MULTI_GRAPH_NAME], answer['graphs'])
+        check((answer['answered'], answer['refused']) == (1, 1),
+              (answer['answered'], answer['refused']))
+        refused, answered = answer['answers']
+        check(set(refused) == {'graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome',
+                               'refusal'}, sorted(refused))
+        check(refused['graph'] == HASHED_NAME and refused['graph_path'].endswith('.orhashdbg')
+              and refused['annotation_path'].endswith('.column.annodbg')
+              and refused['index_fp'] is None and refused['outcome'] == 'refused', refused)
+        check(set(refused['refusal']) == {'http_status', 'error', 'code'}
+              and refused['refusal']['http_status'] == 400
+              and refused['refusal']['code'] == 'representation_unsupported', refused['refusal'])
+        check(answered['graph'] == MULTI_GRAPH_NAME and answered['graph_path'].endswith(MINI_GRAPH)
+              and answered['annotation_path'].endswith(MINI_ANNO) and answered['index_fp'] is None
+              and answered['outcome'] == 'answered' and 'refusal' not in answered, answered)
+        per_answer(answered)
     return run
 
 
@@ -1802,6 +1837,15 @@ FIXTURES = [
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': ['nope']}, 400,
          '400 invalid_request: a name the graph list does not have',
          refused('invalid_request')),
+    post('multi_graph_refused_pair', 'multi_mixed',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [MULTI_GRAPH_NAME, HASHED_NAME]},
+         200,
+         'a pair the route does not serve (a hash graph) beside one it does: 200, the envelope '
+         'with the hash pair a refused entry (outcome refused, `refusal` the body it alone '
+         'would have been answered with its http_status: representation_unsupported) and the '
+         'mini pair answered (outcome answered), answered 1 and refused 1; a refusal that no '
+         'pair decides (the request\'s fields, graphs) stays the whole request\'s 400',
+         multi_refused_pair(entries(exact(24)))),
     post('representation_unsupported', 'hash',
          {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
          '400 representation_unsupported: a graph the engine does not recognise (a hash graph), '
@@ -1849,6 +1893,10 @@ SERVERS = {
     'multi': 'server_query {work}/graphs.csv --index-release ' + INDEX_RELEASE
              + '  (one line: ' + MULTI_GRAPH_NAME + ',{work}/masked/graph_k31.dbg,'
                '{work}/masked/' + MINI_ANNO + '; its graphs loaded into RAM, no --mmap)',
+    'multi_mixed': 'server_query {work}/mixed.csv --index-release ' + INDEX_RELEASE
+                   + '  (two lines: the multi server\'s, and ' + HASHED_NAME
+                   + ',{work}/hash/graph.orhashdbg,{work}/hash/anno.column.annodbg, the hash '
+                     'graph the route does not serve; loaded into RAM, no --mmap)',
     'primary': 'server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg'
                ' --index-name ' + PRIMARY_NAME + ' --index-release ' + INDEX_RELEASE
                + '  (a PRIMARY graph of ' + ' and '.join(PRIMARY_RECORDS)
@@ -1993,6 +2041,10 @@ def build_indexes(binary, mini, work):
 
     with open(os.path.join(work, 'graphs.csv'), 'w') as f:
         f.write(f'{MULTI_GRAPH_NAME},{graph},{os.path.join(masked, MINI_ANNO)}\n')
+    with open(os.path.join(work, 'mixed.csv'), 'w') as f:
+        f.write(f'{MULTI_GRAPH_NAME},{graph},{os.path.join(masked, MINI_ANNO)}\n'
+                f'{HASHED_NAME},{os.path.join(hashed, "graph.orhashdbg")},'
+                f'{os.path.join(hashed, "anno.column.annodbg")}\n')
 
 
 def server_args(name, mini, work):
@@ -2013,6 +2065,8 @@ def server_args(name, mini, work):
     if name == 'multi':
         # one name and one manifest describe one index: a multi-graph server takes neither
         return [os.path.join(work, 'graphs.csv'), '--index-release', INDEX_RELEASE]
+    if name == 'multi_mixed':
+        return [os.path.join(work, 'mixed.csv'), '--index-release', INDEX_RELEASE]
     if name == 'masked_no_map':
         return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
                 '--no-coord-mapping'] + ident

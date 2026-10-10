@@ -2,6 +2,18 @@
  "answered": 1,
  "answers": [
   {
+   "annotation_path": "{work}/hash/anno.column.annodbg",
+   "graph": "hashed",
+   "graph_path": "{work}/hash/graph.orhashdbg",
+   "index_fp": null,
+   "outcome": "refused",
+   "refusal": {
+    "code": "representation_unsupported",
+    "error": "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one wrapped in CanonicalDBG): the pattern lookup narrows BOSS ranges",
+    "http_status": 400
+   }
+  },
+  {
    "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
    "graph": "mini_refseq",
    "graph_path": "{work}/masked/graph_k31.dbg",
@@ -148,7 +160,7 @@
       "-"
      ],
      "timing": {
-      "elapsed_ms": 0.378416
+      "elapsed_ms": 0.39825
      },
      "work": {
       "mask_scans": 0,
@@ -158,16 +170,17 @@
     }
    ],
    "timing": {
-    "elapsed_ms": 0.464083
+    "elapsed_ms": 0.448834
    }
   }
  ],
  "graphs": [
+  "hashed",
   "mini_refseq"
  ],
  "pattern_contract_version": 1,
- "refused": 0,
+ "refused": 1,
  "timing": {
-  "elapsed_ms": 0.910625
+  "elapsed_ms": 0.963625
  }
 }

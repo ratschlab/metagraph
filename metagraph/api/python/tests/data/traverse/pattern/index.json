@@ -8,6 +8,7 @@
   "unmasked_unchecked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-checked-entries 0 --index-name mini_refseq --index-release fixtures-mini_refseq  (the same, no unchecked candidate tested: every count with unchecked candidates bounds)",
   "built_at_load": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-build-mask --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built, its mask built in memory at start-up)",
   "multi": "server_query {work}/graphs.csv --index-release fixtures-mini_refseq  (one line: mini_refseq,{work}/masked/graph_k31.dbg,{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg; its graphs loaded into RAM, no --mmap)",
+  "multi_mixed": "server_query {work}/mixed.csv --index-release fixtures-mini_refseq  (two lines: the multi server's, and hashed,{work}/hash/graph.orhashdbg,{work}/hash/anno.column.annodbg, the hash graph the route does not serve; loaded into RAM, no --mmap)",
   "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)",
   "masked_no_map": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --no-coord-mapping --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy, its .seqs not loaded)",
   "masked_small_predicate_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-predicate-labels 4 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a predicate may list 4 names)",
@@ -1318,6 +1319,15 @@
    "hand_made": false,
    "headers": {},
    "shows": "400 invalid_request: a name the graph list does not have"
+  },
+  "multi_graph_refused_pair": {
+   "server": "multi_mixed",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a pair the route does not serve (a hash graph) beside one it does: 200, the envelope with the hash pair a refused entry (outcome refused, `refusal` the body it alone would have been answered with its http_status: representation_unsupported) and the mini pair answered (outcome answered), answered 1 and refused 1; a refusal that no pair decides (the request's fields, graphs) stays the whole request's 400"
   },
   "representation_unsupported": {
    "server": "hash",
