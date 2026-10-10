@@ -3144,14 +3144,16 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(['G1'], out['graphs'])
             self.assertEqual(1, len(out['answers']))
             answer = out['answers'][0]
-            self.assertEqual(('G1', self.graph_basic, self.anno_basic, None),
+            self.assertEqual(('G1', self.graph_basic, self.anno_basic, None, 'answered'),
                              (answer['graph'], answer['graph_path'], answer['annotation_path'],
-                              answer['index_fp']))
-            # the pair's answer is the single-graph server's on the same files
+                              answer['index_fp'], answer['outcome']))
+            self.assertEqual((1, 0), (out['answered'], out['refused']))
+            # the pair's answer is the single-graph server's on the same files, apart from
+            # the entry's tags and outcome (SPEC §24.1)
             alone = single.post('pattern', request).json()
             for a in (answer, alone):
                 a.pop('timing')
-            for key in ('graph', 'graph_path', 'annotation_path', 'index_fp'):
+            for key in ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome'):
                 answer.pop(key)
             self.assertEqual(alone, answer)
             # nor is a refusal written to a client that left
@@ -3607,10 +3609,12 @@ class TestPatternRegression(TestingBase):
         # the stated gains: `pattern` (this route) and `resolve`, the block of /resolve's
         # opt-in bounds.time_budget_ms (SPEC-labeled-traversal-core.md §4.5): a capabilities
         # block, not a feature, since /resolve is listed already; `in_ram` (accepted as /search
-        # accepts it) and `graph_summary` (null on a single-graph server), SPEC-pattern-search.md
-        # §24
-        self.assertEqual(set(a) | {'pattern', 'resolve', 'in_ram', 'graph_summary'}, set(b))
+        # accepts it), `graph_summary` and `max_graphs_without_selection` (both null on a
+        # single-graph server), SPEC-pattern-search.md §24
+        self.assertEqual(set(a) | {'pattern', 'resolve', 'in_ram', 'graph_summary',
+                                   'max_graphs_without_selection'}, set(b))
         self.assertIsNone(b['graph_summary'])
+        self.assertIsNone(b['max_graphs_without_selection'])
         self.assertFalse(b['in_ram']['loads'])
         self.assertTrue(b['resolve']['time_budget']['accepted'])
         self.assertIsNone(b['resolve']['time_budget']['default'])

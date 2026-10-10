@@ -2245,15 +2245,18 @@ class TestTraverseAPI(TestTraverseBase):
         # §7.3; test_pattern.py checks the block itself); 'resolve': the block of /resolve's
         # deadline (SPEC §4.5; test_api_resolve_deadline checks it)
         # 'in_ram': the routes that accept it and whether this server loads (a single-graph
-        # server does not); 'graph_summary': a multi-graph server's pairs, null here
+        # server does not); 'graph_summary': a multi-graph server's pairs, null here;
+        # 'max_graphs_without_selection': the names a request may leave unselected on a
+        # multi-graph server, null here (SPEC-pattern-search.md §24.1)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
-                          'graph_summary', 'graphs', 'in_ram', 'mode', 'pattern', 'ready',
-                          'release', 'resolve', 'routes', 'schema_version', 'server_instance'},
+                          'graph_summary', 'graphs', 'in_ram', 'max_graphs_without_selection',
+                          'mode', 'pattern', 'ready', 'release', 'resolve', 'routes',
+                          'schema_version', 'server_instance'},
                          set(c))
-        self.assertEqual((6, 'single', None, None, True, 1),
+        self.assertEqual((6, 'single', None, None, None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['graph_summary'],
-                          c['ready'], c['schema_version']))
+                          c['max_graphs_without_selection'], c['ready'], c['schema_version']))
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': False,
                           'mem_cap_gb': 0, 'budgets_start': 'after_load'}, c['in_ram'])
         self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts', 'pattern'],

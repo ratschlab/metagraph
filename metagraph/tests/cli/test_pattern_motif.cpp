@@ -598,8 +598,9 @@ bool check_motif(const Oracle &o, const Ask &r, const Pass &run, bool memory_cut
     const bool complete = m.basis == MotifBasis::EVERY_CONTEXT
                             || m.basis == MotifBasis::NO_INSTANCE;
     EXPECT_EQ(completed && !m.stop, complete);
-    if (complete)
+    if (complete) {
         EXPECT_EQ(contexts.empty(), m.basis == MotifBasis::NO_INSTANCE);
+    }
     EXPECT_EQ(completed, m.untested == MotifUntested::NONE);
     EXPECT_EQ(completed, j["untested"].isNull());
     if (m.stop) {
