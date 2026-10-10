@@ -140,10 +140,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.4045,
-    "extension_ms": 0.342875,
-    "selection_ms": 0.003792,
-    "support_ms": 0.28541699999999987
+    "elapsed_ms": 0.35275,
+    "extension_ms": 0.311833,
+    "selection_ms": 0.00275,
+    "support_ms": 0.263419
    },
    "work": {
     "anchor_rows": 2,
@@ -153,7 +153,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67127326,
+    "memory_bytes": 67117568,
     "mirror_rows": 0,
     "motif_units": 0,
     "predicate_lookups": 0,
@@ -270,9 +270,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 1.1045,
+    "elapsed_ms": 1.486625,
     "extension_ms": 0.0,
-    "selection_ms": 4.1e-05,
+    "selection_ms": 0.0,
     "support_ms": 0.0
    },
    "work": {
@@ -283,7 +283,7 @@
     "extension_branches": 0,
     "extension_edges": 0,
     "mask_scans": 0,
-    "memory_bytes": 67127326,
+    "memory_bytes": 67117568,
     "mirror_rows": 0,
     "motif_units": 0,
     "predicate_lookups": 0,
@@ -311,6 +311,6 @@
   "vacuous": true
  },
  "timing": {
-  "elapsed_ms": 1.605334
+  "elapsed_ms": 1.903625
  }
 }

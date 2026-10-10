@@ -148,9 +148,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.341,
-    "extension_ms": 0.30125,
-    "support_ms": 0.2604579999999999
+    "elapsed_ms": 0.504417,
+    "extension_ms": 0.423292,
+    "support_ms": 0.3199999999999999
    },
    "withheld": null,
    "work": {
@@ -161,7 +161,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67128538,
+    "memory_bytes": 67118858,
     "ranges_visited": 62,
     "row_cache_evictions": 0,
     "row_cache_hits": 0,
@@ -170,6 +170,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.394
+  "elapsed_ms": 0.565334
  }
 }

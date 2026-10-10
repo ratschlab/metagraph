@@ -266,9 +266,9 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.172125,
-    "extension_ms": 0.126958,
-    "support_ms": 0.029997000000000003
+    "elapsed_ms": 0.264042,
+    "extension_ms": 0.183291,
+    "support_ms": 0.04583300000000001
    },
    "withheld": null,
    "work": {
@@ -279,7 +279,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67116784,
+    "memory_bytes": 67117024,
     "ranges_visited": 82,
     "row_cache_evictions": 0,
     "row_cache_hits": 12,
@@ -288,6 +288,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.232333
+  "elapsed_ms": 0.355917
  }
 }
