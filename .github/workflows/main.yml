@@ -72,7 +72,7 @@ jobs:
       with_avx: ${{ matrix.with_avx }}
 
   # ========================================================================
-  # macOS builds (all valid combinations)
+  # Native Apple Silicon builds
   # ========================================================================
 
 
@@ -80,34 +80,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Apple Silicon Release
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-latest
-            target_arch: arm64
-          # Intel Release
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-15-intel
-            target_arch: x86_64
-          # Apple Silicon runner + Rosetta for x86_64
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-latest
-            target_arch: x86_64
-          # Debug run on Apple Silicon
-          - alphabet: DNA
-            build_type: Debug
-            platform: macos-latest
-            target_arch: arm64
-    name: MacOS (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+        build_type: [Debug, Release]
+    name: MacOS (DNA, ${{ matrix.build_type }}, arm64)
     uses: ./.github/workflows/macos.yml
     with:
       build_type: ${{ matrix.build_type }}
-      platform: ${{ matrix.platform }}
-      alphabet: ${{ matrix.alphabet }}
-      target_arch: ${{ matrix.target_arch }}
+      alphabet: DNA
   # ========================================================================
   # Workflow tests
   # ========================================================================
