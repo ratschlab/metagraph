@@ -79,9 +79,9 @@ jobs:
         run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c
 
       - &install-openssl-cross-compile
-        name: (Only for cross-compilation) Install CMake and OpenSSL for target architecture
+        name: (Only for cross-compilation) Install OpenSSL for target architecture
         if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
-        run: brew install cmake openssl@3
+        run: brew install openssl@3
 
       - &install-ccache-macos
         name: Install ccache (macOS)
