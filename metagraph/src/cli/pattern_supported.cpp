@@ -30,8 +30,12 @@ using node_index = DeBruijnGraph::node_index;
 
 // The memory model of the selection (SPEC §20.9), twice the elements as everywhere in the
 // account: a held walk (its descriptor, its sequence, its support's ids); a listed path's
-// selection labels (the ids and, beside each, the walks carrying it); a held walk's entry in
-// the index of the held walks by sequence (the mirrors' lookup)
+// selection labels: the ids and, beside each, the walks carrying it (the selection's list,
+// freed with the pattern), and the text the answer keeps of them, its selection_labels
+// strings (32 + the names' lengths) and its selection_strands (32 + 24 per label), the model
+// of a listed context's (§19.9), which stay with the result object until the request ends as
+// every label built for the answer does (§14.4); a held walk's entry in the index of the held
+// walks by sequence (the mirrors' lookup)
 constexpr uint64_t kHeldBytes = 64;
 constexpr uint64_t kHeldLabelBytes = 8;
 constexpr uint64_t kSelectionLabelsBytes = 64;
@@ -42,8 +46,24 @@ uint64_t held_bytes(size_t length, size_t labels) {
     return kHeldBytes + 2 * length + kHeldLabelBytes * labels;
 }
 
-uint64_t selection_bytes(size_t labels) {
-    return kSelectionLabelsBytes + kSelectionLabelBytes * labels;
+// the names' lengths of the labels |ids| of |dict|: what their copies in the answer hold
+uint64_t names_length(const std::vector<LabelRef> &dict, const std::vector<LabelId> &ids) {
+    uint64_t length = 0;
+    for (LabelId id : ids) {
+        length += dict[id].name.size();
+    }
+    return length;
+}
+
+// the part of a listed path's selection labels the answer keeps
+uint64_t selection_text_bytes(size_t labels, uint64_t names_length) {
+    return retrieval::selection_labels_bytes(names_length)
+            + retrieval::selection_strands_bytes(labels);
+}
+
+uint64_t selection_bytes(size_t labels, uint64_t names_length) {
+    return kSelectionLabelsBytes + kSelectionLabelBytes * labels
+            + selection_text_bytes(labels, names_length);
 }
 
 double ms_since(std::chrono::steady_clock::time_point t) {
@@ -134,8 +154,11 @@ void PathSelection::begin_pattern(const PathSelectionOptions &options, size_t le
 }
 
 void PathSelection::end_pattern() {
-    tracker_.env().account.release(kept_bytes_);
+    // the listed paths' text stays with the answer: only the rest is given back
+    tracker_.env().account.release(kept_bytes_ - std::min(answer_bytes_, kept_bytes_));
     kept_bytes_ = 0;
+    kept_text_ = 0;
+    answer_bytes_ = 0;
     std::vector<std::vector<LabelId>>().swap(kept_labels_);
     drop_held();
 }
@@ -238,9 +261,12 @@ bool PathSelection::decide_now(const PathView &path) {
     if (keeping_) {
         retrieval::Account &account = tracker_.env().account;
         uint64_t bytes = 0;
+        uint64_t text = 0;
         bool fits = true;
         if (options_.selection_labels) {
-            bytes = selection_bytes(present_.size());
+            const uint64_t names = names_length(bound_.labels(), present_);
+            bytes = selection_bytes(present_.size(), names);
+            text = selection_text_bytes(present_.size(), names);
             fits = account.charge(bytes);
         }
         if (!fits) {
@@ -258,12 +284,14 @@ bool PathSelection::decide_now(const PathView &path) {
                 if (options_.selection_labels)
                     kept_labels_.push_back(present_);
                 kept_bytes_ += bytes;
+                kept_text_ += text;
             } else {
                 account.release(bytes);
                 if (after < before) {
                     // all_or_count: more selected than the list holds, none is kept
                     account.release(kept_bytes_);
                     kept_bytes_ = 0;
+                    kept_text_ = 0;
                     kept_labels_.clear();
                 }
             }
@@ -459,15 +487,17 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     const Count &supported = anchors.supported;
 
     // the release of |chosen| (sink indices, ascending): retained, their selection labels in
-    // label order; |cut_at|: the list ended there by the account
+    // label order; |text| the bytes of their selection labels' strings, which stay with the
+    // answer
     auto release = [&](const std::vector<size_t> &chosen,
                        const std::vector<std::vector<LabelId>> &labels,
-                       const std::vector<std::vector<uint8_t>> &rows) {
+                       const std::vector<std::vector<uint8_t>> &rows, uint64_t text) {
         sink_.retain(chosen);
         a.listed = chosen.size();
         a.named = chosen.size();
         if (!options_.selection_labels)
             return;
+        answer_bytes_ += text;
         // the label order over the listed paths: paths desc, column asc
         const std::vector<LabelRef> &dict = bound_.labels();
         std::vector<uint64_t> paths(dict.size(), 0);
@@ -533,14 +563,14 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
                 a.withheld = "output_budget";
                 set_stop("output", "max_memory");
             } else {
-                release(all, kept_labels_, {});
+                release(all, kept_labels_, {}, kept_text_);
                 a.complete = a.listed == selected_;
             }
             if (a.withheld)
                 sink_.retain({});
             return done();
         }
-        release(all, kept_labels_, {});
+        release(all, kept_labels_, {}, kept_text_);
         if (memory) {
             a.cut = "max_memory";
             a.output_cut = true;
@@ -695,18 +725,21 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     std::vector<std::vector<uint8_t>> rows;
     bool memory = false;
     uint64_t label_bytes = 0;
+    uint64_t label_text = 0;
     auto list = [&](size_t i) {
         if (held_[i].kept == std::numeric_limits<size_t>::max()) {
             memory = true;
             return false;
         }
         if (options_.selection_labels) {
-            const uint64_t bytes = selection_bytes(decided_labels[i].size());
+            const uint64_t names = names_length(bound_.labels(), decided_labels[i]);
+            const uint64_t bytes = selection_bytes(decided_labels[i].size(), names);
             if (!account.charge(bytes)) {
                 memory = true;
                 return false;
             }
             label_bytes += bytes;
+            label_text += selection_text_bytes(decided_labels[i].size(), names);
             labels.push_back(std::move(decided_labels[i]));
             rows.push_back(std::move(decided_rows[i]));
         }
@@ -741,7 +774,7 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             return done();
         }
         kept_bytes_ += label_bytes;
-        release(chosen, labels, rows);
+        release(chosen, labels, rows, label_text);
         a.complete = true;
         return done();
     }
@@ -756,7 +789,7 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         list(i);
     }
     kept_bytes_ += label_bytes;
-    release(chosen, labels, rows);
+    release(chosen, labels, rows, label_text);
     if (memory) {
         a.cut = "max_memory";
         a.output_cut = true;

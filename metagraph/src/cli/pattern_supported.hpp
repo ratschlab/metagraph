@@ -201,9 +201,14 @@ class PathSelection final : public graph::pattern::SupportTracker,
     uint64_t tested_ = 0;
     uint64_t selected_ = 0;
     // decided at completion: the selection labels of the paths the sink keeps (aligned with its
-    // paths()), and their bytes held; the list ended by the account (output_cut_)
+    // paths()), their bytes held (kept_bytes_; of them, the text of their strings in the answer,
+    // kept_text_) and the text of the listed paths' (answer_bytes_), which stays with the answer
+    // when the pattern ends while the rest is given back; the list ended by the account
+    // (output_cut_)
     std::vector<std::vector<graph::traversal::LabelId>> kept_labels_;
     uint64_t kept_bytes_ = 0;
+    uint64_t kept_text_ = 0;
+    uint64_t answer_bytes_ = 0;
     bool output_cut_ = false;
     // "either": the walks held, their bytes, and why holding ended (over_: more than
     // max_predicate_contexts in all_or_count or count; hold_cut_: partial's reason;

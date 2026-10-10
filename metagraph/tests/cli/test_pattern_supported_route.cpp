@@ -1182,6 +1182,83 @@ TEST(PatternSupportedRoute, MirrorWalksAreAnnotationWork) {
               plain["work"]["memory_bytes"].asUInt64() * 5 / 4);
 }
 
+// A listed path's selection_labels are charged with their names' bytes (SPEC §20.9), not as ids
+// alone: on the graph of all 64 3-mers (one record of every 3-mer in a row) NNNN has 256
+// supported paths at the label level (the record holds only 123 of the 4-mers whole), each
+// selected by any(<the one label>) and listing its name; a name of 64 KiB under an account of
+// 1 MiB (max_labels 0: the paths' own label lists copy nothing) cannot be listed 256 times
+// (16 MiB), so partial ends the list at the account, stop {output, max_memory}, with an answer
+// below the account, and all_or_count withholds; a short name lists every path
+TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const std::string long_name(64 * 1024, 'x');
+    auto body = [&](const std::string &name, const std::string &mode) {
+        return "{\"patterns\": [{\"iupac\": \"NNNN\"}], \"mode\": \"" + mode + "\", \"strands\": "
+               "\"forward\", \"long_search\": \"supported_paths\", \"supported_paths_level\": "
+               "\"label_intersection\", \"predicate\": {\"any\": [\"" + name + "\"]}, "
+               "\"predicate_strands\": \"context\", \"output\": {\"labels\": \"all\", "
+               "\"occurrences\": false}, \"max_labels\": 0}";
+    };
+    auto answer = [&](const Index &idx, const std::string &name, const std::string &mode) {
+        RetrievalHooks hooks;
+        hooks.coord_to_header = idx.cth.get();
+        hooks.max_memory_bytes = 1 << 20;
+        return process_pattern_request(parse_pattern_body(body(name, mode)), *idx.anno,
+                                       route_limits(), "rel", nullptr, nullptr, nullptr, &hooks);
+    };
+    {
+        const Index idx = build_rd(3, { { long_name, "h0", record } });
+        Json::Value out = answer(idx, long_name, "partial");
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        EXPECT_EQ("exact", e["counts"]["selected"]["relation"].asString());
+        EXPECT_EQ(256u, e["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ("output", e["stop"]["phase"].asString());
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+        EXPECT_EQ("max_memory", e["cut"]["reason"].asString());
+        const size_t listed = e["results"].size();
+        EXPECT_LT(0u, listed);
+        EXPECT_GT(256u, listed);
+        EXPECT_EQ(listed, e["returned"].asUInt64());
+        for (const Json::Value &r : e["results"]) {
+            ASSERT_EQ(1u, r["selection_labels"].size());
+            EXPECT_EQ(long_name, r["selection_labels"][0].asString());
+            EXPECT_EQ("context", r["selection_strands"][0].asString());
+        }
+        // the account holds the listed copies of the name, and the answer is within it
+        EXPECT_LE(listed * long_name.size(), e["work"]["memory_bytes"].asUInt64());
+        EXPECT_GE(1u << 20, e["work"]["memory_bytes"].asUInt64());
+        EXPECT_GT(1u << 20, compact(out).size());
+
+        out = answer(idx, long_name, "all_or_count");
+        const Json::Value &w = out["patterns"][0];
+        EXPECT_EQ("output_budget", w["withheld"]["reason"].asString());
+        EXPECT_EQ("max_memory", w["stop"]["reason"].asString());
+        EXPECT_EQ(0u, w["results"].size());
+        EXPECT_EQ(256u, w["counts"]["selected"]["value"].asUInt64());
+        EXPECT_GT(256u * 1024, compact(out).size());
+    }
+    {
+        const Index idx = build_rd(3, { { "a", "h0", record } });
+        for (const char *mode : { "partial", "all_or_count" }) {
+            const Json::Value e = answer(idx, "a", mode)["patterns"][0];
+            EXPECT_TRUE(e["stop"].isNull()) << mode;
+            EXPECT_TRUE(e["cut"].isNull()) << mode;
+            EXPECT_TRUE(e["withheld"].isNull()) << mode;
+            EXPECT_EQ(256u, e["results"].size()) << mode;
+        }
+    }
+}
+
 // "either" holds the supported walks for their decisions, at most max_predicate_contexts:
 // all_or_count withholds above it (not admitted), count does not admit them, partial decides
 // the first ones

@@ -3519,6 +3519,99 @@ class TestPatternLabelNames(PatternChecks, TestingBase):
         self.assertNotIn(b'\xff', ret.content)
 
 
+@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
+class TestPatternLongLabelName(PatternChecks, TestingBase):
+    """The output charges count the listed names' bytes (SPEC §14.4, §20.9; the review of
+    2026-10-10, resources finding 1): a complete BASIC k = 3 graph (one record holding all 64
+    3-mers) whose one label is a FASTA header of 512 KiB, and the same record under a short
+    header. NNNN has 256 supported paths; with the long label selected by a context-strand
+    predicate and output.labels requested (max_labels 0: the paths' own label lists empty, so
+    only the selection_labels copy the name) under max_memory_mb 8, the 256 copies of the name
+    (128 MiB) cannot be listed: partial cuts the list at the account (stop {output, max_memory})
+    with an answer far below 8 MiB, all_or_count withholds; the short name lists every path."""
+
+    K = 3
+    LONG = 'x' * (512 * 1024)
+    SHORT = 'short'
+    # every 3-mer, one after another: the graph of all 64 3-mers, hence of all 256 4-mer walks
+    RECORD = ''.join(a + b + c for a in 'ACGT' for b in 'ACGT' for c in 'ACGT')
+    MIB = 1024 * 1024
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        cls.servers = {}
+        for name, header in (('long', cls.LONG), ('short', cls.SHORT)):
+            fasta = os.path.join(d, f'{name}.fa')
+            with open(fasta, 'w') as f:
+                f.write(f'>{header}\n{cls.RECORD}\n')
+            graph = os.path.join(d, f'{name}.dbg')
+            cls._build_graph(fasta, graph, cls.K, 'succinct',
+                             extra_params='--mask-dummy --in-ram')
+            cls._annotate_graph(fasta, graph, os.path.join(d, f'anno_{name}'), 'column')
+            cls.servers[name] = Server(
+                METAGRAPH, ['-i', graph, '-a', os.path.join(d, f'anno_{name}.column.annodbg'),
+                            '--pattern-min-information-bits', '0'],
+                os.path.join(d, f'server_{name}.log'))
+
+    @classmethod
+    def tearDownClass(cls):
+        for server in cls.servers.values():
+            server.stop()
+        super().tearDownClass()
+
+    def request(self, name, mode):
+        return {'patterns': [{'iupac': 'NNNN'}], 'mode': mode,
+                'long_search': 'supported_paths', 'strands': 'forward',
+                'predicate': {'any': [name]}, 'predicate_strands': 'context',
+                'output': {'labels': 'all', 'occurrences': False}, 'max_labels': 0,
+                'max_memory_mb': 8, 'allow_unbudgeted_annotation': True}
+
+    def test_a_long_name_in_many_paths_is_stopped_by_the_account(self):
+        server = self.servers['long']
+        ret = server.post('pattern', self.request(self.LONG, 'partial'))
+        self.assertEqual(200, ret.status_code, ret.text[:500])
+        e = ret.json()['patterns'][0]
+        self.assertNotIn('error', e)
+        self.assertEqual(('exact', 256),
+                         (e['counts']['selected']['relation'], e['counts']['selected']['value']))
+        self.assertEqual({'phase': 'output', 'reason': 'max_memory'}, e['stop'])
+        self.assertEqual('max_memory', e['cut']['reason'])
+        self.assertTrue(0 < len(e['results']) < 256, len(e['results']))
+        self.assertEqual(len(e['results']), e['returned'])
+        for r in e['results']:
+            self.assertEqual([self.LONG], r['selection_labels'])
+            self.assertEqual(['context'], r['selection_strands'])
+        # the answer holds the listed copies of the name and no more
+        self.assertLess(len(ret.content), 8 * self.MIB)
+        self.assertLessEqual(e['work']['memory_bytes'], 8 * self.MIB)
+        self.assertGreaterEqual(e['work']['memory_bytes'], len(e['results']) * len(self.LONG))
+        # all_or_count: all or nothing, so nothing
+        ret = server.post('pattern', self.request(self.LONG, 'all_or_count'))
+        self.assertEqual(200, ret.status_code, ret.text[:500])
+        e = ret.json()['patterns'][0]
+        self.assertEqual({'phase': 'output', 'reason': 'max_memory'}, e['stop'])
+        self.assertEqual('output_budget', e['withheld']['reason'])
+        self.assertEqual([], e['results'])
+        self.assertEqual(256, e['counts']['selected']['value'])
+        self.assertLess(len(ret.content), 2 * self.MIB)
+
+    def test_a_short_name_lists_every_path(self):
+        server = self.servers['short']
+        for mode in ('partial', 'all_or_count'):
+            ret = server.post('pattern', self.request(self.SHORT, mode))
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            e = ret.json()['patterns'][0]
+            self.assertNotIn('error', e, mode)
+            self.assertIsNone(e['stop'], mode)
+            self.assertIsNone(e['cut'], mode)
+            self.assertIsNone(e['withheld'], mode)
+            self.assertEqual(256, len(e['results']), mode)
+            self.assertTrue(all(r['selection_labels'] == [self.SHORT] for r in e['results']))
+
+
 class TestPeptideOracle(unittest.TestCase):
     """The six-frame oracle the mini's peptide tests use (cached translations and a residue
     regex) finds what its plain definition finds: no server, no index, always run."""

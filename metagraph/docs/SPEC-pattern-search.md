@@ -1073,7 +1073,7 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `steps` | integer | every step this pattern charged (k − 1 for each candidate the check of §7.4 tested) |
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps); increment 5s, L > k under `"supported_paths"` in every mode: every row its search read (§20.6) |
 | `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4, §20.7) |
-| `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4, §20.7) |
+| `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4, §20.7 and §20.9; every copy of a label's name the answer holds counted at its length, the listed paths' `selection_labels` included) |
 | `anchor_rows` | integer | increment 5s, L > k under `"supported_paths"`: of `annotation_rows`, the anchors' rows read whole for the permitted set (§20.3) |
 | `row_cache_hits` | integer | likewise: the search's steps whose row came from the pattern's row cache (§20.3) |
 | `row_cache_evictions` | integer | likewise: the times the row cache was emptied to make room (a row after it may be read again, counted again) |
@@ -1695,7 +1695,8 @@ none); `counts.occurrences` the deduplicated `record_verified` occurrences summe
 **Memory and the deadline** (labels: §14.4's account). A released path costs 512 + 2k + 3L + 192n bytes, charged
 before its result object is built (`partial`: at most half of the account; the first that does not fit ends the
 list: `cut: max_memory` and `stop {output, max_memory}`, `all_or_count` withheld `output_budget`); a path's label
-list costs 32 + 8 per label (when it does not fit: `stop {output, max_memory}`, that path and the later ones
+list costs 32 + 8 per label (its ids; each label built for the answer then 256 + its name's length, §14.4; when
+either does not fit: `stop {output, max_memory}`, that path and the later ones
 `output_budget`). Rows are read one per read, each once per step, work units as for contexts. Not in the account,
 as the label-free descriptors (§7.6, "Memory"): the paths the engine retains during the extension (at most
 `max_paths`, O(L) each) before their release; without labels the route has no account (bounded by `max_paths`
@@ -1945,7 +1946,12 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
   `anchors_truncated` entry) 384 + k, a label of a result 256 + its name's length (its copy of the name), a
   `by_label` entry 512 + its name's length (per pattern; GPT-2 finding 3: every retained copy of a name is
   charged before it is built), a placed occurrence 256 + its record name's length
-  (`global`: 192), an occurrence in a label's deduplication set 64. What the reads and the deduplication sets
+  (`global`: 192), an occurrence in a label's deduplication set 64, a listed supported path's `selection_labels`
+  and `selection_strands` (§20.9) 64 + 10 per label for the selection's ids (freed with the pattern) and 32 +
+  the names' lengths + 32 + 24 per label for their strings in the answer (the model of a listed context's,
+  §19.9; the review of 2026-10-10: the ids alone let one long name in many paths build an answer far past
+  `max_memory_mb`). Every copy of a label's name the answer holds is priced at its length where it is made.
+  What the reads and the deduplication sets
   hold is freed after each pattern; the dictionary, the descriptors, the statements and the labels built stay
   (the buffered answer). The label caches of the reused classes get no allotment (nothing is cached). The order:
   - the descriptors, each charged as the engine releases its context and before its result object is built: in
@@ -3386,7 +3392,12 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   cannot become true again once false (the support only shrinks along a walk): the search also prunes a branch on
   whose support it is already false (`branches_pruned_by_predicate`), so its rows are not read; then
   `supported_paths` is `at_least` and `counts.paths` too, and `selected` `exact` when the search completed. A
-  non-monotone normal form prunes on support only.
+  non-monotone normal form prunes on support only. Under a projection that reads labels, a selected path's
+  `selection_labels` and `selection_strands` are charged to the account before the sink keeps it: 64 + 10 per
+  label for the selection's ids (freed with the pattern) and 32 + the names' lengths + 32 + 24 per label for
+  their strings in the answer (§19.9's model), which stay with the result object until the request ends as every
+  label built does (§14.4); when they do not fit, the list ends before the path (`partial`: `cut: max_memory`,
+  `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`).
 - **`"either"` on a BASIC graph**: the decision of a walk needs its mirror's support, which only the end of the
   search gives, so the supported walks are **held** (at most `max_predicate_contexts`, each charged before it is
   held: 64 + 2L + 8 per predicate label of its support) and decided after the search, never pruned by the
@@ -3398,7 +3409,8 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   deadline; `work.mirror_rows`, part of `work.annotation_rows`); the search's row cache is given back to the
   account before, so the mirrors' allotment replaces it. A walk whose mirror is not known (the search stopped
   before it, `partial` held the first walks only) is decided only when no mirror support can change the value
-  (Kleene, as §19.7's undecided labels), else left undecided.
+  (Kleene, as §19.7's undecided labels), else left undecided. A decided walk the release lists is charged its
+  `selection_labels` and `selection_strands` as a path decided at completion is (above), when it is listed.
 - **More held walks than `max_predicate_contexts`**: `all_or_count` and `count`: not admitted
   (`selection.pass: "not_admitted"`, `withheld: predicate_above_threshold`; with `stop_at_threshold` the search
   stops there, `stop {extension, max_predicate_contexts}`, `pass: "not_started"`, `withheld: threshold_crossed`);
@@ -4078,3 +4090,21 @@ Fixtures `utf8_label_refused`, `utf8_label_count`, `utf8_label_predicate` (§11,
 (`TestPatternLabelNames`: the review's reproduction, the returned valid name selecting its own column only, a raw
 request name refused), `test_pattern_fixtures.py` (the slot code, only on an answer that lists names, the column
 named). No stored body of the mini index changes.
+
+**The output charges count the listed names' bytes (§14.4, §20.9, §8.7's `memory_bytes`).** A listed supported
+path's `selection_labels` were charged as ids alone (64 + 10 per label) while the answer holds a copy of every
+listed name and a strand string beside it, so one long name in many selected paths built an answer far past
+`max_memory_mb` without a memory stop (the review of 2026-10-10, resources finding 1: a 512 KiB name, 256 paths,
+`max_memory_mb: 8`, a 128 MiB answer with `stop: null`). Now each listed path's `selection_labels` and
+`selection_strands` are charged as a listed context's are (§19.9: 32 + the names' lengths, 32 + 24 per label)
+beside the ids, before the sink keeps the path (decided at completion) or when the release lists it (held
+walks); the ids are freed with the pattern and the strings stay with the result object until the request ends,
+as every label built does. The other per-label output charges (a result's labels, `by_label`, a context's
+`selection_labels`, the motif's labels) already priced the name at its length; §12.1 and §14.4 now say so of
+each. `work.memory_bytes` grows by the names' text in every answer that lists `selection_labels` of supported
+paths (the fixtures `supported_paths_predicate*` with a projection; nothing else changes in them). Tests:
+`PatternSupportedRoute.SelectionLabelNamesAreCharged` (a 64 KiB name under a 1 MiB account: the list ends with
+`cut: max_memory` and the answer stays far below the account; a short name lists every path),
+`integration_tests/test_pattern.py` (`TestPatternLongLabelName`: the review's reproduction, a 512 KiB FASTA
+header, `max_memory_mb: 8`, `partial` cut and `all_or_count` withheld, the same requests with a short name
+unchanged).
