@@ -114,6 +114,9 @@ add_library(fbvector STATIC
   external-libraries/folly/folly/memory/Malloc.cpp
 )
 target_compile_features(fbvector PUBLIC cxx_std_20)
+if(Jemalloc_FOUND)
+  target_compile_definitions(fbvector PRIVATE USE_JEMALLOC JEMALLOC_NO_DEMANGLE)
+endif()
 target_include_directories(fbvector SYSTEM PRIVATE
   ${JEMALLOC_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
