@@ -25,16 +25,7 @@ set(METAGRAPH_CMAKE_ARGS
 )
 
 # Forward optional flags if they're defined
-if(DEFINED BUILD_STATIC)
-    list(APPEND METAGRAPH_CMAKE_ARGS -DBUILD_STATIC=${BUILD_STATIC})
-endif()
-if(DEFINED WITH_AVX)
-    list(APPEND METAGRAPH_CMAKE_ARGS -DWITH_AVX=${WITH_AVX})
-endif()
-if(DEFINED WITH_MSSE42)
-    list(APPEND METAGRAPH_CMAKE_ARGS -DWITH_MSSE42=${WITH_MSSE42})
-endif()
-foreach(variable Boost_USE_STATIC_LIBS OpenMP_ROOT ICU_ROOT)
+foreach(variable BUILD_STATIC WITH_AVX WITH_MSSE42 Boost_USE_STATIC_LIBS OpenMP_ROOT ICU_ROOT)
     if(DEFINED ${variable})
         list(APPEND METAGRAPH_CMAKE_ARGS "-D${variable}=${${variable}}")
     endif()

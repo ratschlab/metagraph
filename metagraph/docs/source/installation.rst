@@ -63,7 +63,7 @@ Prerequisites
 ^^^^^^^^^^^^^
 Before compiling MetaGraph, install the following dependencies:
 
-- cmake 3.10 or higher
+- cmake 3.19 or higher
 - GNU GCC, LLVM Clang, or AppleClang with a C++20-capable standard library
 - bzip2
 
