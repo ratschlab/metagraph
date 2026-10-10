@@ -117,7 +117,7 @@ PREDICATE_SCOPES = ('shard_context',)
 # decided a motif, why not every context was tested, the evaluation's own stops
 PREDICATE_SCOPE_VALUES = ('context', 'motif')
 MOTIF_SCOPES = ('shard_motif',)
-MOTIF_BASES = ('every_context', 'tested_contexts', 'constant')
+MOTIF_BASES = ('every_context', 'tested_contexts', 'constant', 'no_instance')
 MOTIF_UNTESTED = ('discovery', 'release', 'not_admitted', 'not_started', 'selection')
 MOTIF_STOPS = ('time', 'max_memory')
 PROJECTIONS = ('none', 'all', 'predicate_only')
@@ -1046,8 +1046,10 @@ class Checker:
         contexts' labels -- decided by every context (labels_present every label found, the
         value the normal form on them, labels_absent the others), by the labels found on the
         tested ones (a presence claim only: Kleene-definite on them), by a constant normal form,
-        or undecided with the cause; labels present in label order, each with its contexts and
-        strands; a pattern longer than k undecided, but one without anchors (the empty union)."""
+        by the pattern having no instance (the empty, complete union: no_instance, never
+        every_context), or undecided with the cause; labels present in label order, each with
+        its contexts and strands; a pattern longer than k undecided, but one without anchors
+        (no_instance)."""
         m = e['motif']
         mp = path + '.motif'
         self.keys(m, SCHEMA['motif'], mp)
@@ -1071,7 +1073,7 @@ class Checker:
                 self.ok(l['column'] in names, lp + '.column', 'a label of the normal form')
                 self.count(l['contexts'], 'graph_contexts', lp + '.contexts', graph=False)
                 self.ok(l['contexts']['relation']
-                        == ('exact' if basis == 'every_context' else 'at_least'),
+                        == ('exact' if basis in ('every_context', 'no_instance') else 'at_least'),
                         lp + '.contexts', 'exact with every context tested, else at_least')
                 self.ok(is_int(l['contexts']['value']) and l['contexts']['value'] >= 1,
                         lp + '.contexts', 'found on a context')
@@ -1097,9 +1099,17 @@ class Checker:
                     'the normal form on the union')
             self.ok(m['labels_absent'] == m['labels'] - len(found), mp + '.labels_absent',
                     'the labels of the normal form not found')
-            self.ok(L <= k and (e['selection']['pass'] == 'completed' or no_context)
-                    or (L > k and no_context), mp + '.decided_by',
-                    'every context tested: the pass completed, or no context')
+            self.ok(L <= k and e['selection']['pass'] == 'completed' and not no_context,
+                    mp + '.decided_by',
+                    'every context tested: the pass completed on at least one context')
+        elif basis == 'no_instance':
+            self.ok(no_context, mp + '.decided_by', 'no instance: the raw count exact 0')
+            self.ok(m['untested'] is None and m['stop'] is None and present == [], mp,
+                    'no instance: nothing to test, nothing found')
+            self.ok(m['selected'] is predicate_holds(nf, set()), mp + '.selected',
+                    'the normal form on the empty set')
+            self.ok(m['labels_absent'] == m['labels'], mp + '.labels_absent',
+                    'every label of the normal form')
         elif basis == 'tested_contexts':
             self.ok(m['untested'] is not None and present is not None, mp,
                     'decided by the labels found: some context untested')
@@ -1121,6 +1131,9 @@ class Checker:
         if L > k and not no_context and basis != 'constant':
             self.ok(m['untested'] == 'not_started' and basis is None, mp,
                     'a pattern longer than k: not asked of its walks')
+        if no_context and isinstance(nf, dict) and m['stop'] is None:
+            self.ok(basis == 'no_instance', mp + '.decided_by',
+                    'a pattern without an instance says so (constant first)')
         if m['stop'] is not None:
             self.ok(e['stop'] is not None, path + '.stop', 'the motif\'s stop on the entry')
         if m['stop'] == 'time':
@@ -3481,7 +3494,7 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertIn('extension', phases)
         self.assertTrue(pruned and mirrors)
         self.assertLessEqual({('every_context', None), ('tested_contexts', 'selection'),
-                              (None, 'not_started')}, motifs)
+                              ('no_instance', None), (None, 'not_started')}, motifs)
 
     def test_time_limited_is_the_clocks(self):
         """SPEC §7.6/§7.9, both ways: an entry the clock touched (its stop, or only its cut) is
@@ -4218,10 +4231,12 @@ class TestPatternFixtures(unittest.TestCase):
         """SPEC §25: the stored bodies pass, and each rule refuses an answer that breaks it -- a
         value that is not the normal form on the union, an absence claim from an incomplete
         pass, a tested_contexts value the labels found do not decide (or an undecided one they
-        do), every_context where a context went untested or for a pattern longer than k with
-        anchors, the labels found out of label order, with strands their rows do not give or
-        more contexts than tested, the motif's units outside the selection's, the block or the
-        scope missing or where no motif was asked, and the capabilities' scopes."""
+        do), every_context where a context went untested, for a pattern longer than k with
+        anchors or for one without an instance, no_instance for a pattern with contexts (and a
+        pattern without an instance decided any other way, or undecided), the labels found out
+        of label order, with strands their rows do not give or more contexts than tested, the
+        motif's units outside the selection's, the block or the scope missing or where no motif
+        was asked, and the capabilities' scopes."""
         def motif(i, **fields):
             return lambda a: a['patterns'][i]['motif'].update(fields)
 
@@ -4250,8 +4265,21 @@ class TestPatternFixtures(unittest.TestCase):
              'at most the contexts tested'),
             ('motif_long_patterns', motif(0, selected=True, decided_by='every_context',
                                           untested=None, labels_absent=1),
-             'the pass completed, or no context'),
-            ('motif_long_patterns', motif(1, selected=False), 'the normal form on the union'),
+             'the pass completed on at least one context'),
+            # the pattern without an instance: its value the normal form on the empty set, every
+            # label absent, nothing untested; never every_context, constant or undecided
+            ('motif_long_patterns', motif(1, selected=False), 'the normal form on the empty set'),
+            ('motif_long_patterns', motif(1, labels_absent=0), 'every label of the normal form'),
+            ('motif_long_patterns', motif(1, untested='not_started'),
+             'nothing to test, nothing found'),
+            ('motif_long_patterns', motif(1, decided_by='every_context'),
+             'the pass completed on at least one context'),
+            ('motif_long_patterns', motif(1, decided_by='constant'), 'a constant normal form'),
+            ('motif_long_patterns', motif(1, selected=None, decided_by=None,
+                                          untested='not_started', labels_absent=None),
+             'a pattern without an instance says so'),
+            # no_instance only without an instance
+            ('motif_context', motif(0, decided_by='no_instance'), 'the raw count exact 0'),
             ('motif_context', lambda a: a['patterns'][0]['work'].update(motif_units=10 ** 9),
              'part of predicate_units'),
             ('motif_context', lambda a: a['patterns'][0].pop('motif'), 'fields'),

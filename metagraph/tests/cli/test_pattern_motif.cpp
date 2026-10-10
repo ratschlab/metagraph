@@ -593,7 +593,13 @@ bool check_motif(const Oracle &o, const Ask &r, const Pass &run, bool memory_cut
         EXPECT_TRUE(j["selected"].isNull());
         EXPECT_TRUE(j["decided_by"].isNull());
     }
-    EXPECT_EQ(completed && !m.stop, m.basis == MotifBasis::EVERY_CONTEXT);
+    // a completed pass decides on the complete union: every_context with a context tested,
+    // no_instance without one (nothing to test), never the one for the other
+    const bool complete = m.basis == MotifBasis::EVERY_CONTEXT
+                            || m.basis == MotifBasis::NO_INSTANCE;
+    EXPECT_EQ(completed && !m.stop, complete);
+    if (complete)
+        EXPECT_EQ(contexts.empty(), m.basis == MotifBasis::NO_INSTANCE);
     EXPECT_EQ(completed, m.untested == MotifUntested::NONE);
     EXPECT_EQ(completed, j["untested"].isNull());
     if (m.stop) {
@@ -636,8 +642,7 @@ bool check_motif(const Oracle &o, const Ask &r, const Pass &run, bool memory_cut
         EXPECT_LE(l.contexts, seen.contexts.count(name) ? seen.contexts.at(name) : 0) << name;
         EXPECT_GE(l.contexts, 1u);
         EXPECT_EQ(l.contexts, e["contexts"]["value"].asUInt64());
-        EXPECT_EQ(m.basis == MotifBasis::EVERY_CONTEXT ? "exact" : "at_least",
-                  e["contexts"]["relation"].asString());
+        EXPECT_EQ(complete ? "exact" : "at_least", e["contexts"]["relation"].asString());
         // its first context carries it
         EXPECT_LT(l.first, run.tested.size());
         if (l.first >= run.tested.size())
@@ -669,7 +674,7 @@ bool check_motif(const Oracle &o, const Ask &r, const Pass &run, bool memory_cut
         EXPECT_EQ(seen.names(), found) << "the union is the decided contexts' labels";
     }
 
-    if (m.basis == MotifBasis::EVERY_CONTEXT) {
+    if (complete) {
         EXPECT_EQ(truth.names(), found);
         for (const auto &[name, n] : truth.contexts) {
             EXPECT_EQ(strands_name(truth.on.at(name), o.canonical), json_strands[name]) << name;
@@ -680,7 +685,8 @@ bool check_motif(const Oracle &o, const Ask &r, const Pass &run, bool memory_cut
             }
         }
         EXPECT_EQ(known.size() - found.size(), j["labels_absent"].asUInt64());
-        EXPECT_EQ("every_context", j["decided_by"].asString());
+        EXPECT_EQ(contexts.empty() ? "no_instance" : "every_context",
+                  j["decided_by"].asString());
     } else {
         EXPECT_TRUE(j["labels_absent"].isNull());
         // three-valued on what was found: the oracle's strong Kleene over the same sets
@@ -791,11 +797,12 @@ TEST(PatternMotif, MotifIsNotTheContextSelection) {
 
 // Every pattern, scope, strand set and predicate_strands over random indexes: the motif value
 // is the predicate on the union of the contexts' labels (both strands with "either"), every
-// label's context count and strands the oracle's. Mutations tried: the mirror row left out of
-// the union under "either"; a context counted once per row instead of once; the union taken
-// over the selected contexts only; the label order by id: each fails.
+// label's context count and strands the oracle's; a pattern none of the records' k-mers holds
+// (in the strands asked) is no_instance, the others every_context. Mutations tried: the mirror
+// row left out of the union under "either"; a context counted once per row instead of once;
+// the union taken over the selected contexts only; the label order by id: each fails.
 TEST(PatternMotif, MotifIsThePredicateOnTheUnion) {
-    uint64_t differs = 0, checked = 0;
+    uint64_t differs = 0, checked = 0, no_instance = 0;
     std::mt19937 rng(7);
     for (unsigned seed = 1; seed <= 6; ++seed) {
         const std::vector<Record> records = seed == 1 ? kR1 : random_records(8, seed);
@@ -828,7 +835,12 @@ TEST(PatternMotif, MotifIsThePredicateOnTheUnion) {
                     continue;
                 }
                 ASSERT_EQ(SelectionPass::COMPLETED, o.answer.pass);
-                ASSERT_EQ(MotifBasis::EVERY_CONTEXT, o.answer.motif->basis);
+                // decided on the complete union: every_context, or no_instance without a
+                // context (check_motif ties the two to the oracle's contexts)
+                const MotifBasis basis = o.answer.motif->basis;
+                ASSERT_TRUE(basis == MotifBasis::EVERY_CONTEXT
+                            || basis == MotifBasis::NO_INSTANCE);
+                no_instance += basis == MotifBasis::NO_INSTANCE;
                 const bool value = check_motif(oracle, r, o);
                 ++checked;
                 differs += value != (o.answer.selected.value > 0);
@@ -836,8 +848,11 @@ TEST(PatternMotif, MotifIsThePredicateOnTheUnion) {
         }
     }
     EXPECT_GT(checked, 150u);
-    // the motif and the context-level selection do differ in this panel
+    // the motif and the context-level selection do differ in this panel, and some pattern of
+    // it has no instance
     EXPECT_GT(differs, 0u);
+    EXPECT_GT(no_instance, 0u);
+    EXPECT_LT(no_instance, checked / 2);
 }
 
 // On a CANONICAL graph one row serves a k-mer and its reverse complement: the union is the
@@ -1231,27 +1246,52 @@ TEST(PatternMotif, DeadlineAtEveryReading) {
     }
 }
 
-// Without contexts the union is empty and complete: the value is the normal form's on the
-// empty set (none(A) true, any(A) false); a constant normal form decides without a context; a
-// pass that did not run is undecided. The motif block's shape.
+// Without contexts the pattern has no instance: the union is empty and complete, the value the
+// normal form's on the empty set (none(A) true, any(A) false, and(any(A), none(B)) false), the
+// basis no_instance (never every_context, which needs a tested context), every label absent; a
+// tested context gives every_context; a constant normal form decides without a context, on an
+// empty union too (constant before no_instance); a pass that did not run is undecided. The
+// motif block's shape. Mutation tried: no_instance folded into every_context: fails.
 TEST(PatternMotif, EmptyConstantAndWithoutPass) {
     const Index idx = build(kK, kR1);
     const Oracle oracle(idx);
     for (const auto &[predicate, value] : std::vector<std::pair<std::string, bool>>{
-            { "{\"none\": [\"c1\"]}", true }, { "{\"any\": [\"c1\"]}", false } }) {
-        for (const gp::Mode mode : { gp::Mode::COUNT, gp::Mode::ALL_OR_COUNT }) {
+            { "{\"none\": [\"c1\"]}", true }, { "{\"any\": [\"c1\"]}", false },
+            { "{\"and\": [{\"any\": [\"c1\"]}, {\"none\": [\"c2\"]}]}", false } }) {
+        for (const gp::Mode mode : { gp::Mode::COUNT, gp::Mode::ALL_OR_COUNT,
+                                     gp::Mode::PARTIAL }) {
             Ask r;
             r.pattern = "CCCCCC";   // no k-mer of R1 holds it
             r.predicate = predicate;
             r.mode = mode;
             const Pass o = run(idx, r);
+            SCOPED_TRACE(predicate + " " + gp::to_string(mode));
             ASSERT_EQ(gp::Relation::EXACT, o.raw.relation);
             ASSERT_EQ(0u, o.raw.value);
+            ASSERT_EQ(SelectionPass::COMPLETED, o.answer.pass);
             EXPECT_EQ(value, o.answer.motif->value);
-            EXPECT_EQ(MotifBasis::EVERY_CONTEXT, o.answer.motif->basis);
+            EXPECT_EQ(MotifBasis::NO_INSTANCE, o.answer.motif->basis);
+            EXPECT_EQ(MotifUntested::NONE, o.answer.motif->untested);
             EXPECT_EQ(value, check_motif(oracle, r, o));
-            EXPECT_EQ(1u, o.motif["labels_absent"].asUInt64());
+            EXPECT_EQ("no_instance", o.motif["decided_by"].asString());
+            EXPECT_TRUE(o.motif["untested"].isNull());
+            EXPECT_EQ(0u, o.motif["labels_present"].size());
+            EXPECT_EQ(o.motif["labels"].asUInt64(), o.motif["labels_absent"].asUInt64());
+            EXPECT_GE(o.motif["labels_absent"].asUInt64(), 1u);
+            EXPECT_TRUE(o.motif["stop"].isNull());
         }
+    }
+    {
+        // the same predicate on a pattern with contexts: every_context
+        Ask r;
+        r.pattern = "AC";
+        r.predicate = "{\"none\": [\"c1\"]}";
+        const Pass o = run(idx, r);
+        ASSERT_EQ(SelectionPass::COMPLETED, o.answer.pass);
+        EXPECT_GT(o.raw.value, 0u);
+        EXPECT_EQ(MotifBasis::EVERY_CONTEXT, o.answer.motif->basis);
+        EXPECT_EQ("every_context", o.motif["decided_by"].asString());
+        check_motif(oracle, r, o);
     }
     const MotifAnswer t = constant_motif(true);
     EXPECT_EQ(true, t.value);
@@ -1277,13 +1317,40 @@ TEST(PatternMotif, EmptyConstantAndWithoutPass) {
     EXPECT_EQ(0u, j["labels_present"].size());
     EXPECT_TRUE(j["labels_absent"].isNull());
     EXPECT_TRUE(j["stop"].isNull());
-    const MotifAnswer z = retrieval.motif_without_pass(
-            SelectionPass::NOT_ADMITTED, gp::Count::exact(gp::Unit::GRAPH_CONTEXTS, 0));
-    EXPECT_EQ(true, z.value);
-    EXPECT_EQ(MotifBasis::EVERY_CONTEXT, z.basis);
+    // a raw count exact 0 without a pass (a long pattern's anchors): no_instance, every label
+    // absent, in either pass
+    for (const SelectionPass pass : { SelectionPass::NOT_ADMITTED, SelectionPass::NOT_STARTED }) {
+        const MotifAnswer z = retrieval.motif_without_pass(
+                pass, gp::Count::exact(gp::Unit::GRAPH_CONTEXTS, 0));
+        EXPECT_EQ(true, z.value);
+        EXPECT_EQ(MotifBasis::NO_INSTANCE, z.basis);
+        EXPECT_EQ(MotifUntested::NONE, z.untested);
+        EXPECT_STREQ("no_instance", to_string(z.basis));
+        const Json::Value zj = retrieval.motif_json(z);
+        EXPECT_EQ(true, zj["selected"].asBool());
+        EXPECT_EQ("no_instance", zj["decided_by"].asString());
+        EXPECT_TRUE(zj["untested"].isNull());
+        EXPECT_EQ(1u, zj["labels"].asUInt64());
+        EXPECT_EQ(0u, zj["labels_present"].size());
+        EXPECT_EQ(1u, zj["labels_absent"].asUInt64());
+        EXPECT_TRUE(zj["stop"].isNull());
+    }
     EXPECT_THROW(retrieval.motif_without_pass(SelectionPass::COMPLETED,
                                               gp::Count::exact(gp::Unit::GRAPH_CONTEXTS, 0)),
                  std::logic_error);
+    // a constant normal form stays constant on an empty union (zz is no column: any(zz) is
+    // false), whatever the count
+    PatternRetrieval folded(*idx.anno, gp::GraphMode::BASIC, RetrievalLimits(), budget);
+    folded.bind(predicate::Predicate::parse(parse_pattern_body("{\"any\": [\"zz\"]}"), 10),
+                SelectionLimits());
+    ASSERT_TRUE(folded.bound() && folded.bound()->constant());
+    for (const gp::Count &count : { gp::Count::exact(gp::Unit::GRAPH_CONTEXTS, 0),
+                                    gp::Count::at_least(gp::Unit::GRAPH_CONTEXTS, 3) }) {
+        const MotifAnswer k0 = folded.motif_without_pass(SelectionPass::NOT_STARTED, count);
+        EXPECT_EQ(false, k0.value);
+        EXPECT_EQ(MotifBasis::CONSTANT, k0.basis);
+        EXPECT_EQ("constant", folded.motif_json(k0)["decided_by"].asString());
+    }
     const Json::Value c = retrieval.motif_json(constant_motif(false));
     EXPECT_EQ(false, c["selected"].asBool());
     EXPECT_EQ("constant", c["decided_by"].asString());

@@ -140,10 +140,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.14875,
-    "extension_ms": 0.131833,
-    "selection_ms": 0.001666,
-    "support_ms": 0.11333500000000003
+    "elapsed_ms": 0.4045,
+    "extension_ms": 0.342875,
+    "selection_ms": 0.003792,
+    "support_ms": 0.28541699999999987
    },
    "work": {
     "anchor_rows": 2,
@@ -243,7 +243,7 @@
    "min_anchor_information_bits": 62.0,
    "mode": "count",
    "motif": {
-    "decided_by": "every_context",
+    "decided_by": "no_instance",
     "labels": 1,
     "labels_absent": 1,
     "labels_present": [],
@@ -270,9 +270,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.996958,
+    "elapsed_ms": 1.1045,
     "extension_ms": 0.0,
-    "selection_ms": 4.2e-05,
+    "selection_ms": 4.1e-05,
     "support_ms": 0.0
    },
    "work": {
@@ -311,6 +311,6 @@
   "vacuous": true
  },
  "timing": {
-  "elapsed_ms": 1.172417
+  "elapsed_ms": 1.605334
  }
 }

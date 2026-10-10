@@ -1780,11 +1780,12 @@ FIXTURES = [
           'predicate_scope': 'motif'}, 200,
          'the motif of a pattern longer than k is not asked of its walks: NDM-40 (2 anchors) '
          'is undecided, untested not_started, while its supported paths are selected; a pattern '
-         'without anchors has no instance on this graph, so its motif is decided on the empty '
-         'union (none(562): true, every_context, labels_absent 1)',
+         'without anchors has no instance on this graph, and its motif says so: decided_by '
+         'no_instance, the normal form on the empty union (none(562): true, labels_absent 1, a '
+         'verdict on the empty set and no claim about 562)',
          entries(expect_all(motif(None, None, untested='not_started', present=[]),
                             selection('completed', ('exact', 2), ('exact', 0))),
-                 expect_all(motif(True, 'every_context', present=[]),
+                 expect_all(motif(True, 'no_instance', present=[]),
                             lambda e: check(e['counts']['anchors']['value'] == 0
                                             and e['motif']['labels_absent'] == 1,
                                             e['counts'])))),

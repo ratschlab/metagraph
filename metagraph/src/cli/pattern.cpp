@@ -2233,7 +2233,7 @@ Json::Value process_pattern_request(
         if (req.motif) {
             // the motif of a pattern longer than k is not asked of its walks (SPEC §25): it is
             // undecided, untested not_started, but for a pattern without anchors, which has no
-            // instance on this graph (the normal form's value on the empty union)
+            // instance on this graph (no_instance: the normal form's value on the empty union)
             s.answer.motif = retrieval->motif_without_pass(SelectionPass::NOT_STARTED,
                                                            a.result->anchors->total);
         }

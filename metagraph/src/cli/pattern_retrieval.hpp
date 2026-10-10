@@ -374,19 +374,26 @@ struct SelectionRequest {
  * records hold the motif inside a k-mer of the index, on the strand selection_strands states.
  *
  * Exact only when every raw context was tested (the pass completed: tested exact and equal to
- * the raw count). Otherwise the labels found on the tested contexts are present for sure and
- * every other label of the normal form may or may not be: the value is Kleene's
- * (Bound::eval3), definite only when no completion of the untested contexts can change it
- * (any(A) with A found is true; none(C) with C found is false), else undecided.
+ * the raw count). A pattern with no instance on the graph (nothing to test) is decided on the
+ * empty, complete union and says so (NO_INSTANCE), so that EVERY_CONTEXT always means tested
+ * on real contexts; a constant normal form is CONSTANT before either. Otherwise the labels
+ * found on the tested contexts are present for sure and every other label of the normal form
+ * may or may not be: the value is Kleene's (Bound::eval3), definite only when no completion of
+ * the untested contexts can change it (any(A) with A found is true; none(C) with C found is
+ * false), else undecided.
  */
 enum class MotifBasis {
-    // every raw context was tested: U is the motif's union, the value exact
+    // every raw context was tested, at least one of them: U is the motif's union, the value
+    // exact
     EVERY_CONTEXT,
     // not every context was tested, but the labels found decide the value whatever the
     // untested contexts carry
     TESTED_CONTEXTS,
     // the normal form is a constant: decided without a context
     CONSTANT,
+    // the pattern has no instance on this graph (its raw count, or a long pattern's anchors,
+    // exact 0): U is empty and complete, the value the normal form's on the empty set
+    NO_INSTANCE,
     // not known: the untested contexts may change it, or the evaluation did not run (stop)
     UNDECIDED,
 };
@@ -694,16 +701,17 @@ class PatternRetrieval {
     Json::Value selection_strands_json(const SelectionAnswer &answer, size_t j) const;
     /**
      * The motif of a pattern whose pass did not run (|pass| NOT_ADMITTED or NOT_STARTED, e.g.
-     * a pattern longer than k), its raw count |raw|: undecided, nothing found; but a raw count
-     * exact 0 has no context to test, and the value is then the normal form's on the empty
-     * set (Bound::vacuous) when the predicate is bound. select() answers its own early
-     * returns alike.
+     * a pattern longer than k), its raw count |raw| (a long pattern's anchors): undecided,
+     * nothing found; but a constant normal form is CONSTANT, and a raw count exact 0 has no
+     * context to test: the pattern has no instance on this graph, and the value is the normal
+     * form's on the empty set (Bound::vacuous), NO_INSTANCE, when the predicate is bound.
+     * select() answers its own early returns alike.
      */
     MotifAnswer motif_without_pass(SelectionPass pass, const graph::pattern::Count &raw) const;
     /**
      * The answer's motif block of |motif|:
      *   {"selected": true | false | null,
-     *    "decided_by": "every_context" | "tested_contexts" | "constant" | null,
+     *    "decided_by": "every_context" | "tested_contexts" | "constant" | "no_instance" | null,
      *    "untested": null | "discovery" | "release" | "not_admitted" | "not_started"
      *                | "selection",
      *    "labels": <the normal form's labels>,
@@ -711,7 +719,7 @@ class PatternRetrieval {
      *                        "strands": "context" | "reverse_complement" | "both"
      *                                   | "either"}, ...] | null,
      *    "labels_absent": <labels - present> | null (every_context: an absence claim;
-     *                     constant: 0; null otherwise),
+     *                     no_instance: every label; constant: 0; null otherwise),
      *    "stop": null | "time" | "max_memory"}
      * A label's contexts are exact when every context was tested, at_least otherwise. The
      * labels' bytes were charged by the pass; the text is the caller's to count

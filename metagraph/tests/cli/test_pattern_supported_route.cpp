@@ -1431,4 +1431,64 @@ TEST(PatternSupportedRoute, MotifAgainstTheUnion) {
     EXPECT_FALSE(a["limits"].isMember("predicate_scope"));
 }
 
+// A pattern without an instance on the graph (no context of a short one, no anchor of a long
+// one) is decided on the empty, complete union and says so: no_instance, selected the normal
+// form on the empty set, every label absent, nothing untested, under both long searches; a
+// constant normal form is constant there too; a pattern with a context stays every_context.
+TEST(PatternSupportedRoute, MotifNoInstance) {
+    const size_t k = 5;
+    const Index idx = build_rd(k, { { "A", "a0", "TACGG" }, { "C", "c0", "CACCC" },
+                                    { "D", "d0", "GTTTC" } });
+    for (const auto &[predicate, value] : std::vector<std::pair<std::string, bool>>{
+            { "{\"any\": [\"A\"]}", false }, { "{\"none\": [\"A\"]}", true },
+            { "{\"and\": [{\"any\": [\"A\"]}, {\"none\": [\"C\"]}]}", false },
+            { "{\"at_least\": {\"n\": 1, \"labels\": [\"A\", \"C\", \"D\"]}}", false } }) {
+        for (const std::string long_search : { "anchors", "supported_paths" }) {
+            Ask r;
+            // no k-mer of the records holds GAG or its reverse complement CTC
+            r.patterns = { "GAG", "GAGAGAGAGA", "AC" };
+            r.long_search = long_search;
+            r.mode = "count";
+            r.predicate = predicate;
+            r.predicate_scope = "motif";
+            const Json::Value a = answer_of(idx, r);
+            SCOPED_TRACE(predicate + " " + long_search);
+            std::set<std::string> names;
+            o_names(parse_pattern_body(predicate), &names);
+            const Json::Value &s = a["patterns"][0];
+            const Json::Value &l = a["patterns"][1];
+            EXPECT_EQ("exact", s["counts"]["contexts"]["relation"].asString()) << compact(s);
+            EXPECT_EQ(0u, s["counts"]["contexts"]["value"].asUInt64());
+            EXPECT_EQ("exact", l["counts"]["anchors"]["relation"].asString()) << compact(l);
+            EXPECT_EQ(0u, l["counts"]["anchors"]["value"].asUInt64());
+            for (const Json::Value *e : { &s, &l }) {
+                const Json::Value &m = (*e)["motif"];
+                ASSERT_TRUE(m.isObject()) << compact(*e);
+                EXPECT_EQ(Json::Value(value), m["selected"]) << compact(m);
+                EXPECT_EQ("no_instance", m["decided_by"].asString()) << compact(m);
+                EXPECT_TRUE(m["untested"].isNull()) << compact(m);
+                EXPECT_EQ(names.size(), m["labels"].asUInt64());
+                EXPECT_TRUE(m["labels_present"].isArray() && m["labels_present"].empty());
+                EXPECT_EQ(names.size(), m["labels_absent"].asUInt64());
+                EXPECT_TRUE(m["stop"].isNull());
+            }
+            EXPECT_EQ("every_context", a["patterns"][2]["motif"]["decided_by"].asString())
+                    << compact(a["patterns"][2]);
+        }
+    }
+    // a constant normal form (Z is no column) stays constant on the empty union
+    Ask r;
+    r.patterns = { "GAG", "GAGAGAGAGA" };
+    r.mode = "count";
+    r.predicate = "{\"any\": [\"Z\"]}";
+    r.predicate_scope = "motif";
+    const Json::Value a = answer_of(idx, r);
+    ASSERT_EQ(2u, a["patterns"].size());
+    for (const Json::Value &e : a["patterns"]) {
+        EXPECT_EQ("constant", e["motif"]["decided_by"].asString()) << compact(e);
+        EXPECT_EQ(false, e["motif"]["selected"].asBool());
+        EXPECT_EQ(0u, e["motif"]["labels_absent"].asUInt64());
+    }
+}
+
 } // namespace

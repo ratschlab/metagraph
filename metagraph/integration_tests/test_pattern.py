@@ -2412,6 +2412,51 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                           for n, f in found.items()}, got)
                         self.assertEqual(len(keep) - len(found), m['labels_absent'])
 
+    def test_motif_no_instance(self):
+        """SPEC §25.3, §25.4: a pattern without an instance (absent16; a long one without
+        anchors) is decided on the empty, complete union and says so: decided_by no_instance,
+        selected the normal form on the empty set, every label absent, nothing untested, under
+        both long searches; a tested context keeps every_context; a constant normal form stays
+        constant on the empty union (constant before no_instance)."""
+        names = sorted(self.columns)
+        absent_long = 'T' * 38 + 'G' * 38
+        self.assertEqual(0, len(self.contexts(self.absent16)))
+        keys = ('selected', 'decided_by', 'untested', 'labels', 'labels_present',
+                'labels_absent', 'stop')
+        for pred, value in (({'any': [names[0]]}, False), ({'none': [names[0]]}, True),
+                            ({'and': [{'any': [names[0]]}, {'none': [names[1]]}]}, False),
+                            ({'at_least': {'n': 1, 'labels': names[:2]}}, False)):
+            labels = len(self.holds_names(pred))
+            for long_search in ('anchors', 'supported_paths'):
+                out = self.pattern(self.server, {
+                    'patterns': [{'dna': self.absent16}, {'dna': absent_long},
+                                 {'dna': self.NDM_F}],
+                    'mode': 'count', 'long_search': long_search, 'predicate': pred,
+                    'predicate_scope': 'motif'})
+                short, long_, present = out['patterns']
+                with self.subTest(predicate=pred, long_search=long_search):
+                    self.assertEqual(('exact', 0), (short['counts']['contexts']['relation'],
+                                                    short['counts']['contexts']['value']))
+                    self.assertEqual(('exact', 0), (long_['counts']['anchors']['relation'],
+                                                    long_['counts']['anchors']['value']))
+                    for e in (short, long_):
+                        self.assertEqual({'selected': value, 'decided_by': 'no_instance',
+                                          'untested': None, 'labels': labels,
+                                          'labels_present': [], 'labels_absent': labels,
+                                          'stop': None}, {x: e['motif'][x] for x in keys})
+                    self.assertEqual(('every_context', None),
+                                     (present['motif']['decided_by'],
+                                      present['motif']['untested']))
+                    self.assertGreater(present['counts']['tested']['value'], 0)
+        out = self.pattern(self.server, {
+            'patterns': [{'dna': self.absent16}, {'dna': absent_long}], 'mode': 'count',
+            'long_search': 'supported_paths', 'predicate': {'any': ['no-such-column']},
+            'predicate_scope': 'motif'})
+        for e in out['patterns']:
+            self.assertEqual(('constant', False, 0, []),
+                             (e['motif']['decided_by'], e['motif']['selected'],
+                              e['motif']['labels_absent'], e['motif']['labels_present']))
+
     def test_cli_answers_as_the_server(self):
         """`metagraph pattern` answers each request file as the server: one process over a panel
         (counts and a partial retrieval, paths with labels and record verification, peptides,

@@ -62,6 +62,7 @@ const char* to_string(MotifBasis basis) {
         case MotifBasis::EVERY_CONTEXT: return "every_context";
         case MotifBasis::TESTED_CONTEXTS: return "tested_contexts";
         case MotifBasis::CONSTANT: return "constant";
+        case MotifBasis::NO_INSTANCE: return "no_instance";
         case MotifBasis::UNDECIDED: return "undecided";
     }
     return "undecided";
@@ -323,9 +324,10 @@ MotifAnswer PatternRetrieval::motif_without_pass(SelectionPass pass, const Count
     motif.labels = b->labels().size();
     motif.present.emplace();
     if (raw.relation == Relation::EXACT && raw.value == 0) {
-        // no context to test: the union is empty, and the value the normal form's on it
+        // no context to test: the pattern has no instance on this graph, the union is empty
+        // and complete, and the value the normal form's on it
         motif.value = b->vacuous();
-        motif.basis = MotifBasis::EVERY_CONTEXT;
+        motif.basis = MotifBasis::NO_INSTANCE;
         motif.untested = MotifUntested::NONE;
     }
     return motif;
@@ -334,7 +336,9 @@ MotifAnswer PatternRetrieval::motif_without_pass(SelectionPass pass, const Count
 Json::Value PatternRetrieval::motif_json(const MotifAnswer &motif) const {
     const Impl &m = *impl_;
     const predicate::Bound *b = bound();
-    const bool every = motif.basis == MotifBasis::EVERY_CONTEXT;
+    // the union is complete: every context tested, or none to test
+    const bool complete = motif.basis == MotifBasis::EVERY_CONTEXT
+                            || motif.basis == MotifBasis::NO_INSTANCE;
     Json::Value v;
     v["selected"] = motif.value ? Json::Value(*motif.value) : Json::Value();
     v["decided_by"] = motif.basis == MotifBasis::UNDECIDED ? Json::Value()
@@ -349,8 +353,8 @@ Json::Value PatternRetrieval::motif_json(const MotifAnswer &motif) const {
         for (const MotifLabel &l : *motif.present) {
             Json::Value e;
             e["column"] = b->labels().at(l.label).name;
-            e["contexts"] = count_json(every ? Relation::EXACT : Relation::AT_LEAST, l.contexts,
-                                       Unit::GRAPH_CONTEXTS);
+            e["contexts"] = count_json(complete ? Relation::EXACT : Relation::AT_LEAST,
+                                       l.contexts, Unit::GRAPH_CONTEXTS);
             const uint8_t both = SelectionAnswer::kOnContext
                                     | SelectionAnswer::kOnReverseComplement;
             e["strands"] = m.mode != GraphMode::BASIC ? "either"
@@ -363,7 +367,7 @@ Json::Value PatternRetrieval::motif_json(const MotifAnswer &motif) const {
     } else {
         v["labels_present"] = Json::Value();
     }
-    v["labels_absent"] = (every || motif.basis == MotifBasis::CONSTANT) && motif.present
+    v["labels_absent"] = (complete || motif.basis == MotifBasis::CONSTANT) && motif.present
             ? Json::Value(uint_json(motif.labels - motif.present->size())) : Json::Value();
     v["stop"] = motif.stop ? Json::Value(motif.stop) : Json::Value();
     return v;

@@ -1237,7 +1237,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the motif of a pattern longer than k is not asked of its walks: NDM-40 (2 anchors) is undecided, untested not_started, while its supported paths are selected; a pattern without anchors has no instance on this graph, so its motif is decided on the empty union (none(562): true, every_context, labels_absent 1)"
+   "shows": "the motif of a pattern longer than k is not asked of its walks: NDM-40 (2 anchors) is undecided, untested not_started, while its supported paths are selected; a pattern without anchors has no instance on this graph, and its motif says so: decided_by no_instance, the normal form on the empty union (none(562): true, labels_absent 1, a verdict on the empty set and no claim about 562)"
   },
   "unknown_field": {
    "server": "masked",

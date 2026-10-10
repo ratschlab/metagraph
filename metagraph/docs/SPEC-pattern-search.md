@@ -3883,11 +3883,11 @@ part of `work.predicate_units`):
 | field | type | meaning |
 |---|---|---|
 | `selected` | boolean \| null | the normal form on U: `true`, `false`, or `null` when not decided (§25.4) |
-| `decided_by` | `"every_context"` \| `"tested_contexts"` \| `"constant"` \| null | what decided it: every raw context was tested (U is the motif's union: exact); not every one, but the labels found decide the value whatever the untested contexts carry; a constant normal form (§19.4); `null` when not decided |
+| `decided_by` | `"every_context"` \| `"tested_contexts"` \| `"constant"` \| `"no_instance"` \| null | what decided it: every raw context was tested, at least one (U is the motif's union: exact); not every one, but the labels found decide the value whatever the untested contexts carry; a constant normal form (§19.4); the pattern has no instance on this graph (U empty and complete, below); `null` when not decided. The precedence is §25.4's |
 | `untested` | `"discovery"` \| `"release"` \| `"not_admitted"` \| `"not_started"` \| `"selection"` \| null | why not every raw context was tested, the first cause in the pipeline's order: the raw count is not `exact` (discovery stopped, or not every candidate was resolved), fewer raw contexts reached the pass than the raw count (`partial`'s release cut at `max_predicate_contexts`, or the descriptors' admission), the raw count above `max_predicate_contexts` (nothing read), the pass did not start (§19.7's `not_started`, a pattern longer than k), the pass stopped or a row was refused; `null` when every context was tested (or none needed to be) |
 | `labels` | integer | the labels of the normal form (0 for a constant) |
-| `labels_present` | list of `motif_label` \| null | the labels of the normal form found in U, in label order (`contexts` descending, then `column` ascending): every one of U with `every_context`, those found on the tested contexts otherwise; `null` when they were not listed (the binding stopped, or a time stop before the evaluation) |
-| `labels_absent` | integer \| null | `labels` − the labels present, with `every_context` (an absence claim, §25.6) and `constant` (0); `null` otherwise |
+| `labels_present` | list of `motif_label` \| null | the labels of the normal form found in U, in label order (`contexts` descending, then `column` ascending): every one of U with `every_context` (`[]` with `no_instance`), those found on the tested contexts otherwise; `null` when they were not listed (the binding stopped, or a time stop before the evaluation) |
+| `labels_absent` | integer \| null | `labels` − the labels present, with `every_context` (an absence claim, §25.6), `no_instance` (every label of the normal form: no claim about any of them, §25.6) and `constant` (0); `null` otherwise |
 | `stop` | `"time"` \| `"max_memory"` \| null | the evaluation's own stop: the work time passed before it (`stop {output, time}` on the entry), or the account could not hold its list of undecided labels (`stop {output, max_memory}`); `null` when it ran (or the binding's stop, when no label is known) |
 
 <!-- schema: motif_label -->
@@ -3897,12 +3897,15 @@ part of `work.predicate_units`):
 | `contexts` | count | unit `graph_contexts`: the tested contexts whose evaluated set holds it, each (k-mer, offset) pair once as `counts.contexts` counts them; `exact` with `every_context`, `at_least` otherwise |
 | `strands` | `"context"` \| `"reverse_complement"` \| `"both"` \| `"either"` | over those contexts, the rows it was found on (§19.10's `selection_strands`): the contexts' own k-mers, their reverse complements' only (`"either"`), both; `"either"` on CANONICAL and PRIMARY graphs |
 
-A pattern of at most k bases with a raw count `exact` 0 has no context to test: its union is empty and complete,
-`decided_by: "every_context"`, `selected` the normal form's value on the empty set (§19.4's `vacuous`). **A pattern
-longer than k** is not asked (its walks are not contexts; under `"supported_paths"` its supported paths are selected
-as §20.9 says): `selected: null`, `decided_by: null`, `untested: "not_started"`, `labels_present: []` — but a
-pattern without anchors (`counts.anchors` `exact` 0) has no instance on this graph, and its motif is decided as
-above, on the empty union (fixture `motif_long_patterns`).
+A pattern of at most k bases with a raw count `exact` 0 has **no instance** on this graph: no context to test, its
+union empty and complete. Its motif says so: `decided_by: "no_instance"`, `selected` the normal form's value on the
+empty set (§19.4's `vacuous`), `untested: null`, `labels_present: []`, `labels_absent` every label of the normal
+form, `stop: null` — a verdict on the empty set, not evidence about any label (§25.6). `every_context` is answered
+only when at least one real context was tested, so that a client wanting evidence of absence tells the two apart in
+this one field. **A pattern longer than k** is not asked (its walks are not contexts; under `"supported_paths"` its
+supported paths are selected as §20.9 says): `selected: null`, `decided_by: null`, `untested: "not_started"`,
+`labels_present: []` — but a pattern without anchors (`counts.anchors` `exact` 0) has no instance on this graph,
+and its motif is `no_instance` as above (fixture `motif_long_patterns`).
 
 ### 25.4 Exact, or decided by the labels found
 
@@ -3913,6 +3916,12 @@ when no completion of the untested contexts can change it — `any(A)` with A fo
 `false`, `and(any(A), none(C))` with A found and C not undecided — and published then with `decided_by:
 "tested_contexts"`, else `selected: null`. A union found empty on an incomplete pass is undecided without an
 evaluation.
+
+What decides a motif, in order of precedence: a **constant** normal form is `constant`, on an empty union too (no
+context is needed, §19.4); then a pattern with **no instance** (the raw count, or a long pattern's `counts.anchors`,
+`exact` 0) is `no_instance`; then the **pass**: `every_context` when it completed (so at least one context was
+tested), `tested_contexts` when the labels found decide an incomplete one, else undecided. `every_context` never
+stands for an empty union.
 
 ### 25.5 Budgets
 
@@ -3937,12 +3946,17 @@ evaluation.
   (`labels_absent` is `null`).
 - `decided_by: "constant"`: the normal form folds to a constant on this index (§19.4: its known labels decide
   nothing, or none is a column).
+- `decided_by: "no_instance"`: the pattern does not occur in this graph — no k-mer of the index holds it (or, longer
+  than k, no anchor of it), as `counts.contexts` or `counts.anchors` `exact` 0 already says. `selected` is the
+  normal form on the empty set: a verdict on nothing, not evidence about any label. The absence claim of
+  `every_context` holds of every label trivially (no record of any column holds the pattern), and `labels_absent`
+  says no more than that; a client wanting evidence about a label has none here.
 - Never licensed: anything about `predicate.unknown_labels` (they are no columns of this index), about other
   graphs or chunks, about occurrences of the motif that no k-mer of the index holds (§9).
 - **Several chunks** (§24): each chunk folds away the names it lacks (§19.4), so a per-chunk `selected` must not be
   combined: `and(any(A), none(C))` is `false` on a chunk without A. The motif over the chunks is the predicate on
-  the union of their `labels_present`: exact when every chunk answered `every_context`, else Kleene's value with
-  each incomplete chunk's other labels undecided.
+  the union of their `labels_present`: exact when every chunk answered `every_context` or `no_instance`, else
+  Kleene's value with each incomplete chunk's other labels undecided.
 
 ### 25.7 Capabilities
 
@@ -3956,7 +3970,7 @@ evaluation.
 | `motif_context` | NDM-F, `strands: "reverse"`, `count`, `and(any 562, none 546)`, `"context"` | 12 contexts tested in 12 rows, 12 selected; `motif`: `selected: true`, `every_context`, `labels_present` [562: `exact` 12, `"context"`], `labels_absent` 1 (546 carries none of the 12 contexts as deposited) |
 | `motif_either` | the same with `"either"` | 24 rows (12 lookups): 546 holds the primer on its other strand (`"reverse_complement"`), 562 on both: `selected: false`, `every_context`, `labels_absent` 0 |
 | `motif_tested_contexts` | GCG12, `count`, `any(287)`, `"context"`, `max_predicate_work` 3000 | the pass stopped after 9 of 1,828 contexts (`stop {selection, max_predicate_work}`), 287 on 8 of them: `selected: true`, `tested_contexts`, `untested: "selection"`, 287 `at_least` 8, `labels_absent: null` |
-| `motif_long_patterns` | NDM-40 and a 76-base pattern without anchors, `"supported_paths"`, `count`, `none(562)` | NDM-40: its supported paths selected (2 tested, 0 selected), `motif` undecided, `untested: "not_started"`; the other: `counts.anchors` `exact` 0, `motif` `selected: true`, `every_context`, `labels_absent` 1 |
+| `motif_long_patterns` | NDM-40 and a 76-base pattern without anchors, `"supported_paths"`, `count`, `none(562)` | NDM-40: its supported paths selected (2 tested, 0 selected), `motif` undecided, `untested: "not_started"`; the other: `counts.anchors` `exact` 0, `motif` `selected: true`, `no_instance`, `labels_present` `[]`, `labels_absent` 1 (no claim about 562: the pattern is absent) |
 
 ### 25.9 What changed
 
@@ -3968,3 +3982,13 @@ evaluation.
 `PatternMotif.*` (`tests/cli/test_pattern_motif.cpp`: the union scanned from the records' k-mers, two- and
 three-valued evaluators of the request's JSON, sweeps of `max_predicate_work`, the account and a virtual clock;
 the same reads as the context-level pass) and `PatternSupportedRoute.MotifAgainstTheUnion` (through the route).
+
+**`no_instance` (the owner's decision of 2026-10-10)**: `decided_by` gains `"no_instance"` for a pattern with no
+instance on the graph (the raw count, or a long pattern's `counts.anchors`, `exact` 0), which the builds before it
+answered as `every_context` on the empty union; `every_context` now means that at least one real context was tested
+(the precedence of §25.4). An added value of an extensible enumeration: a client that does not know it claims
+nothing from it, as the contract asks. Fixture `motif_long_patterns` changes (its second entry); the other motif
+fixtures are byte for byte the same. Tests: `PatternMotif.EmptyConstantAndWithoutPass` (short patterns without an
+instance in every mode, `motif_without_pass` on a count `exact` 0, a constant normal form on an empty union),
+`PatternSupportedRoute.MotifNoInstance` (through the route: a short and a long pattern without an instance),
+`test_pattern_fixtures.py` (`no_instance` exactly for a pattern without an instance, `every_context` never for one).

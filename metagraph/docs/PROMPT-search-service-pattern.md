@@ -242,16 +242,21 @@ predicate, for patterns of at most k bases: the predicate asked once of the patt
 its contexts' labels ("present in A, absent throughout C"), from the same reads as the context selection (no
 extra cost but the evaluation). Gate on the block's `predicate.scopes` listing `"motif"`; mode `count` is enough.
 Each entry gains `motif`: `selected` (`true`, `false`, `null`), `decided_by` (`every_context`: every context
-tested, an exact answer; `tested_contexts`: not every context was tested but the labels found decide it;
-`constant`; `null`: undecided, `untested` says why), `labels_present` (each label of the predicate found, with
-its `contexts` and `strands`), `labels_absent` (only with `every_context`). **What to claim**: with
+tested, at least one, an exact answer; `tested_contexts`: not every context was tested but the labels found decide
+it; `constant`; `no_instance`: the pattern does not occur in this graph, so the verdict is on the empty set — in
+the build since round D, 2026-10-10; the builds before it answered `every_context` there; `null`: undecided,
+`untested` says why), `labels_present` (each label of the predicate found, with its `contexts` and `strands`),
+`labels_absent` (only with `every_context`, `no_instance` and `constant`). **What to claim**: with
 `every_context`, a label of the predicate not in `labels_present` carries no context of the pattern on this
 index, in the strands searched (with `"either"`, on neither strand of its records); with `tested_contexts` only
-presences; never anything about unknown labels or other chunks. **Across chunks** (a multi-graph database): never
-combine per-chunk `selected` values (each chunk folds away the names it lacks); take the union of the chunks'
-`labels_present` and evaluate the request's predicate on it — exact when every chunk says `every_context`. A
-pattern longer than k answers `untested: "not_started"` (motifs of long patterns are not asked), except one
-without anchors (no instance: decided on the empty union).
+presences; with `no_instance`, say "the pattern does not occur in this graph" — `selected` is the predicate on
+the empty set, not evidence about any label, so present neither it nor `labels_absent` as a finding about a label
+(a user asking "present in A, absent throughout C" learns that the pattern is absent from every sample, which is
+a different and stronger fact than `selected: false` suggests); never anything about unknown labels or other
+chunks. **Across chunks** (a multi-graph database): never combine per-chunk `selected` values (each chunk folds
+away the names it lacks); take the union of the chunks' `labels_present` and evaluate the request's predicate on
+it — exact when every chunk says `every_context` or `no_instance`. A pattern longer than k answers
+`untested: "not_started"` (motifs of long patterns are not asked), except one without anchors (`no_instance`).
 
 **Multi-graph servers and `in_ram` (in the build since round C, 2026-10-09; SPEC §24,
 `SPEC-labeled-traversal-core.md` §6.1 and §10.3).** The owner: pattern search and traversal on a multi-graph server
