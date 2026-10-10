@@ -6,21 +6,8 @@
 
 #if _USE_FOLLY
 // Don't re-define the type traits for uint128_t in folly that break the build
-#include <folly/Portability.h>
+#include <folly/folly-config.h>
 #undef FOLLY_SUPPLY_MISSING_INT128_TRAITS
-
-#if defined(USE_JEMALLOC) && !defined(FOLLY_SANITIZE)
-#include <jemalloc/jemalloc.h>
-// The je_* aliases support both prefixed and unprefixed jemalloc builds.
-// Keep the adaptation inside Folly; do not rename standard malloc/free calls.
-namespace folly {
-constexpr auto malloc_usable_size = ::je_malloc_usable_size;
-constexpr auto nallocx = ::je_nallocx;
-constexpr auto sdallocx = ::je_sdallocx;
-constexpr auto xallocx = ::je_xallocx;
-}
-#endif
-
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>
     template <typename... Args>
