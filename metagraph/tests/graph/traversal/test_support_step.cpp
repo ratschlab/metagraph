@@ -861,8 +861,9 @@ TEST(SupportStep, HomopolymerRunShrinksToOneChain) {
             ASSERT_EQ(1u, f.labels().size());
             EXPECT_EQ(1u, f.num_chain_runs(0));
             EXPECT_EQ(f.depth() <= s ? 270 - f.depth() : 1, f.num_alive(0)) << name(arm) << " " << part;
-            if (f.depth())
+            if (f.depth()) {
                 EXPECT_EQ(Frame::step_bytes(Support::TRACE, 1, 270, k), f.bytes());
+            }
         });
         EXPECT_EQ(s + 1, last->depth());
         std::vector<CoordRun> starts;
