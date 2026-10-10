@@ -1622,9 +1622,10 @@ int run_server(Config *config) {
                 limits.max_work_units = config->traverse_max_work_units;
                 limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
                 limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
-                // a request that names its graph as /search does (`graphs`), sending its seeds to
-                // graphs that need not hold them: a seed a graph does not hold is its result
-                limits.not_in_graph_per_seed = selection.via_graphs;
+                // a multi-graph server's graphs are the chunks of an index, which the fan-out
+                // of /search sends each seed to whether or not they hold it: a seed a chunk does
+                // not hold is its result, whichever spelling (`graph`, `graphs`) named the chunk
+                limits.not_in_graph_per_seed = multi;
                 if (in_ram)
                     limits.load_ms = lease ? lease->load_ms() : 0.0;
                 return process_traverse_request(json, index, config->index_release, limits,

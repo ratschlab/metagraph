@@ -4832,10 +4832,10 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     return rj;
 }
 
-// A seed with a k-mer the graph does not have, in a request that sent its seeds to graphs that
-// need not hold them (TraverseLimits::not_in_graph_per_seed): no walk, outcome.walks
-// "not_in_graph", the walker's message as `error` (the graph runs of its k-mers) and
-// not_in_graph {kmers, kmers_present} — 0 present: none of it is in this graph; some: only
+// A seed with a k-mer the graph does not have, on a server whose graphs need not hold the seeds
+// sent to them (TraverseLimits::not_in_graph_per_seed: a multi-graph server's chunks): no walk,
+// outcome.walks "not_in_graph", the walker's message as `error` (the graph runs of its k-mers)
+// and not_in_graph {kmers, kmers_present} — 0 present: none of it is in this graph; some: only
 // part of it, which is not a seed here (§6.1 step 2) — in the shape of a failed seed, without
 // a limitation: no knob of the request would get past it. Under a memory budget it states
 // memory_bound_soft, as every result does
@@ -5281,13 +5281,14 @@ Json::Value process_traverse_request(const Json::Value &json,
             throw;
         } catch (const SeedNotInGraph &e) {
             if (!limits.not_in_graph_per_seed) {
-                // the whole request fails (400), as every malformed seed fails it
+                // the only graph of this server (or the CLI's): the whole request fails (400),
+                // as every malformed seed fails it
                 walked("failed", "");
                 throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
                                      + "': " + e.what());
             }
-            // a graph of a fan-out that does not hold the seed: stated per seed, the other
-            // seeds traversed
+            // a chunk of a multi-graph server that does not hold the seed: stated per seed, the
+            // other seeds traversed
             walked("not_in_graph", "", true);
             Json::Value absent = not_in_graph_seed_to_json(seed, e, req.strategy,
                                                            oracle.decode_charged(),

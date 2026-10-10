@@ -830,7 +830,6 @@ GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_g
                                         "reads: expected [name]");
         }
         selection.name = graphs[0].asString();
-        selection.via_graphs = true;
     } else {
         if (!request.isMember("graph") || !request["graph"].isString())
             throw std::invalid_argument("Bad request: 'graph' (index name) is required in "

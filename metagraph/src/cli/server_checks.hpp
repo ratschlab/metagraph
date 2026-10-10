@@ -245,16 +245,15 @@ std::optional<bool> in_ram_field(const Json::Value &request);
 /**
  * The graph a POST /resolve or /traverse request selects (the request's fields; the pair is
  * then chosen by the graph list's rules, select_traverse_pair): |name| and |graph_path|
- * (when given as a string); |via_graphs| when the request named it with `graphs` ([name], the
- * form /search takes), which also makes a seed the graph does not hold a per-seed result
- * (TraverseLimits::not_in_graph_per_seed). On a single-graph server (|multi_graph| false)
- * `graph` and `graph_path`, then `graphs`, are refused, and nothing is selected (|name| empty).
- * Throws std::invalid_argument with the message a 400 states.
+ * (when given as a string). The name is `graph`, or `graphs` ([name], the form /search takes):
+ * two spellings of one selection, which nothing downstream tells apart. On a single-graph
+ * server (|multi_graph| false) `graph` and `graph_path`, then `graphs`, are refused, and
+ * nothing is selected (|name| empty). Throws std::invalid_argument with the message a 400
+ * states.
  */
 struct GraphSelection {
     std::string name;
     std::optional<std::string> graph_path;
-    bool via_graphs = false;
 };
 GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_graph);
 

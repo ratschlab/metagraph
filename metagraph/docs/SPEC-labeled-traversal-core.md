@@ -553,14 +553,16 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 1. `|sequence| ≥ k`; every character is in `graph.alphabet()` minus `'$'` after the build's case mapping
    (DNA builds: upper-case; `N` is invalid in DNA builds). The first invalid position is reported.
 2. `nodes = map_to_nodes_sequentially(walk graph, sequence)`; every node ≠ npos, otherwise the seed is rejected
-   with its `graph_runs` (a partially present sequence is never treated as one seed). A request that selected its
-   graph with `graphs` (§10.3, multi-graph mode: the fan-out of `/search`, which sends each seed to graphs that
-   need not hold it) gets such a seed as its result instead — `{"seed": {…}, "error": "Seed is not fully present
-   in the graph; graph runs: …", "not_in_graph": {"kmers": n, "kmers_present": p}, "limitations": […],
-   "outcome": {"walks": "not_in_graph", …}}`, no arms, no graphlet, `p` the seed's k-mers this graph has (0: none;
-   a partially present seed is answered so too) — and the other seeds are traversed; `limitations` is empty but
-   for `memory_bound_soft` under a memory budget, and a request with `output.coordinates` states `coordinates:
-   null` with its reason, as for a failed seed.
+   with its `graph_runs` (a partially present sequence is never treated as one seed). On a multi-graph server
+   (§10.3: its graphs are the chunks of an index, which the fan-out of `/search` sends each seed to whether or not
+   they hold it) such a seed is the request's result instead, whichever spelling (`graph`, `graphs`) named the
+   chunk — `{"seed": {…}, "error": "Seed is not fully present in the graph; graph runs: …", "not_in_graph":
+   {"kmers": n, "kmers_present": p}, "limitations": […], "outcome": {"walks": "not_in_graph", …}}`, no arms, no
+   graphlet, `p` the seed's k-mers this graph has (0: none; a partially present seed is answered so too) — and the
+   other seeds are traversed; `limitations` is empty but for `memory_bound_soft` under a memory budget, and a
+   request with `output.coordinates` states `coordinates: null` with its reason, as for a failed seed. On a
+   single-graph server (and in the CLI) the seed is the caller's error: the whole request's 400, as for every
+   malformed seed.
 3. Every seed label must resolve (else the request is rejected naming the label). Each label must support every
    seed k-mer under `support`; labels that do not are **dropped** with `{reason: seed_unsupported, runs}`. A seed
    with no remaining label is rejected. `validated_seed_id` is computed over the remaining labels; a supplied
@@ -637,8 +639,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
    traversed as usual. The `derivation` entry names the request field that would get past the cause (§7.0); a
    client distinguishes the two shapes by `outcome.walks` (or the presence of `error`). Everything that
    *is* the caller's own doing still fails the whole request with HTTP 400: a malformed seed (too short, invalid
-   character, not fully present in the graph — but with `graphs`, step 2), an unknown or duplicate **explicit**
-   label, and every strategy error.
+   character, not fully present in the graph — on a single-graph server; a multi-graph server answers that seed
+   per seed, step 2), an unknown or duplicate **explicit** label, and every strategy error.
 5. The seed is never rewritten.
 6. The permitted universe is `P = seed labels ∪ extra`. A seed whose `validated_seed_id` repeats an earlier seed
    of the same request is traversed again and its result carries `duplicate: true` (the `duplicate_of` reference
@@ -2924,12 +2926,14 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     pair is not echoed (its identity is); a name with one pair ignores `graph_path`. The release id is
     server-wide (`--index-release ID`), in both modes.
   - **`graphs: [name]`** (the owner's decision of 2026-10-09): `/search`'s field, accepted by `/traverse` and
-    `/resolve` as an alias of `graph` (one name: a traversal reads one graph; `graph_path` selects as above). With
-    both fields, a list that is not one name, or on a single-graph server, 400. A request that selects with
-    `graphs` is a fan-out's — the service sends `/traverse` to every selected chunk, without a presence check, as
-    it sends `/search` — so a seed the chunk does not hold (or holds in part) is its result, `outcome.walks:
-    "not_in_graph"` with `not_in_graph.kmers_present` (§6.1 step 2), not the whole request's 400; with `graph` the
-    400 stays.
+    `/resolve` as an alias of `graph`, the older spelling (one name: a traversal reads one graph; `graph_path`
+    selects as above). With both fields, a list that is not one name, or on a single-graph server, 400. The two
+    spellings are one request and get one answer, byte for byte (the owner's decision of 2026-10-10; until it, the
+    per-seed result below came with `graphs` only). A request to a multi-graph server is a fan-out's — the service
+    sends `/traverse` to every selected chunk, without a presence check, as it sends `/search` — so a seed the
+    chunk does not hold (or holds in part) is its result, `outcome.walks: "not_in_graph"` with
+    `not_in_graph.kmers_present` (§6.1 step 2), not the whole request's 400. On a single-graph server the 400
+    stays: a seed that is not in the only graph is the caller's error.
   - **`in_ram`** (the owner's decisions of 2026-10-09): `/traverse` and `/resolve` accept it exactly as `/search`:
     on a multi-graph server that runs on mmap, `in_ram: true` loads the selected pair into RAM for the request when
     its graph and annotation fit `--mem-cap-gb` (the load waits until that much of it is free — one pool with

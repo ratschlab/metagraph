@@ -80,7 +80,7 @@ std::string random_seq(size_t length, std::mt19937 *rng) {
 
 // SPEC-T §10.3, routing: on a single-graph server graph / graph_path and graphs are refused
 // (the first with the message it always had); on a multi-graph server graph or graphs ([name],
-// /search's form) names the graph, never both, and only graphs makes absent seeds results
+// /search's form) names the graph, never both, and both spell one selection
 TEST(MultiGraphSelection, GraphOrGraphsNamesOneGraph) {
     const std::string single_graph = "Bad request: this server hosts a single graph; remove "
                                      "the 'graph' / 'graph_path' field";
@@ -98,7 +98,6 @@ TEST(MultiGraphSelection, GraphOrGraphsNamesOneGraph) {
     GraphSelection s = traverse_graph_selection(parse(R"({"graph": "a"})"), true);
     EXPECT_EQ("a", s.name);
     EXPECT_FALSE(s.graph_path);
-    EXPECT_FALSE(s.via_graphs);
     s = traverse_graph_selection(parse(R"({"graph": "a", "graph_path": "p.dbg"})"), true);
     EXPECT_EQ("p.dbg", s.graph_path.value_or(""));
     EXPECT_EQ("Bad request: 'graph' (index name) is required in multi-graph mode",
@@ -109,11 +108,14 @@ TEST(MultiGraphSelection, GraphOrGraphsNamesOneGraph) {
     EXPECT_FALSE(traverse_graph_selection(parse(R"({"graph": "a", "graph_path": 1})"), true)
                          .graph_path);
 
-    // graphs: one name, as /search takes it
+    // graphs: one name, as /search takes it — the selection graph makes, under another spelling
     s = traverse_graph_selection(parse(R"({"graphs": ["b"], "graph_path": "q.dbg"})"), true);
     EXPECT_EQ("b", s.name);
     EXPECT_EQ("q.dbg", s.graph_path.value_or(""));
-    EXPECT_TRUE(s.via_graphs);
+    const GraphSelection spelled_graph
+            = traverse_graph_selection(parse(R"({"graph": "b", "graph_path": "q.dbg"})"), true);
+    EXPECT_EQ(spelled_graph.name, s.name);
+    EXPECT_EQ(spelled_graph.graph_path, s.graph_path);
     const std::string one = "Bad request: 'graphs' names the one graph a traversal reads: "
                             "expected [name]";
     for (const char *body : { R"({"graphs": []})", R"({"graphs": ["a", "b"]})",
@@ -460,10 +462,11 @@ uint64_t present_in(const std::string &seed, const std::set<std::string> &kmers,
 
 } // namespace
 
-// A request that sent its seeds to a graph that need not hold them (`graphs`): a seed with a
-// k-mer the graph does not have is answered per seed — outcome.walks not_in_graph, its k-mers
-// and those the graph has (counted here on the records) — and the other seeds are walked as
-// alone; without it the request fails as it always did
+// A request to a graph that need not hold its seeds (a multi-graph server's chunk, whichever
+// spelling named it; TraverseLimits::not_in_graph_per_seed): a seed with a k-mer the graph does
+// not have is answered per seed — outcome.walks not_in_graph, its k-mers and those the graph
+// has (counted here on the records) — and the other seeds are walked as alone; on the only
+// graph of a server (the limits' default) the request fails as it always did
 TEST(TraverseNotInGraph, AbsentSeedsAreResults) {
     const size_t k = 11;
     std::mt19937 rng(5);
@@ -494,7 +497,7 @@ TEST(TraverseNotInGraph, AbsentSeedsAreResults) {
     TraverseLimits fan_out;
     fan_out.not_in_graph_per_seed = true;
 
-    // without: the request fails, naming the seed and its graph runs, as before
+    // the only graph of a server: the request fails, naming the seed and its graph runs
     try {
         process_traverse_request(request({ present, absent }), *index, "");
         ADD_FAILURE() << "an absent seed was answered";

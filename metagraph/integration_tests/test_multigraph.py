@@ -6,8 +6,9 @@ together (a name spanning two graphs). What such a server serves, as /search doe
 
   - POST /pattern takes /search's `graphs`; each selected pair is answered as a single-graph
     server answers it, tagged with its pair, the answers concatenated;
-  - POST /traverse and /resolve take `graphs: [name]` beside `graph`; with it a seed the graph
-    does not hold is a per-seed result (outcome.walks not_in_graph, its k-mers present);
+  - POST /traverse and /resolve take `graphs: [name]` beside `graph`, two spellings of one
+    request; a seed the graph does not hold is a per-seed result (outcome.walks not_in_graph,
+    its k-mers present), whichever spelling named the graph;
   - `in_ram` on /pattern, /traverse and /resolve loads the pair into RAM for the request (a
     server on mmap, the pair within --mem-cap-gb), the budgets after the load, timing.load_ms;
   - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint;
@@ -477,7 +478,9 @@ class TestMultiGraphServer(TestingBase):
         seen = set()
         for chunk in ('ecoli', 'kleb', 'pseudo'):
             kmers = self.kmers(chunk)
-            out = self.post('traverse', dict(request, graphs=[chunk]))
+            via_graphs = self.server.post('traverse', dict(request, graphs=[chunk]))
+            self.assertEqual(200, via_graphs.status_code, via_graphs.text[:2000])
+            out = via_graphs.json()
             for result in out['results']:
                 seed = seeds[result['seed']['seed_id']]
                 present = sum(seed[i:i + K] in kmers for i in range(len(seed) - K + 1))
@@ -491,13 +494,11 @@ class TestMultiGraphServer(TestingBase):
                         self.assertEqual('not_in_graph', result['outcome']['walks'])
                         self.assertEqual({'kmers': len(seed) - K + 1, 'kmers_present': present},
                                          result['not_in_graph'])
-            # with graph (not graphs): the request fails on its first absent seed, as before
-            absent = any(sum(s[i:i + K] in kmers for i in range(len(s) - K + 1))
-                         < len(s) - K + 1 for s in seeds.values())
-            ret = self.server.post('traverse', dict(request, graph=chunk))
-            self.assertEqual(400 if absent else 200, ret.status_code, chunk)
-            if absent:
-                self.assertIn('Seed is not fully present in the graph', ret.json()['error'])
+            # graph, the older spelling: the same bytes, the spelling not echoed (the request
+            # was a 400 on its first absent seed before round D)
+            via_graph = self.server.post('traverse', dict(request, graph=chunk))
+            self.assertEqual(200, via_graph.status_code, via_graph.text[:2000])
+            self.assertEqual(via_graphs.content, via_graph.content, chunk)
         # every case was met: walked, partly present, absent
         self.assertEqual({'walked', 'partly', 'absent'}, seen)
         # the seed of a chunk walks there as in a request that names the graph with graph

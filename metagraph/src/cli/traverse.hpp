@@ -382,10 +382,10 @@ struct TraverseLimits {
     // narrow_bytes) instead of its defaults; what it keeps never changes a response
     std::optional<std::tuple<uint32_t, uint32_t, uint64_t>> path_cache_retention;
     // Not a cap: a seed with a k-mer the graph does not have fails the whole request (400) when
-    // false; when true — a request that selected its graph with `graphs`, the fan-out of /search
-    // over a server's graphs, which sends each seed to graphs that may not hold it — the seed's
-    // result states it (outcome.walks "not_in_graph", not_in_graph {kmers, kmers_present}) and
-    // the other seeds are traversed
+    // false — a single-graph server, the CLI: the seed was meant for this graph; when true — a
+    // multi-graph server, whose graphs are the chunks of an index the fan-out of /search sends
+    // each seed to, whether or not they hold it — the seed's result states it (outcome.walks
+    // "not_in_graph", not_in_graph {kmers, kmers_present}) and the other seeds are traversed
     bool not_in_graph_per_seed = false;
     // Not a cap: the time the request waited for and spent loading its index into RAM
     // (`in_ram`) before its work began; the attempt's bound starts after it (usage.bound.load_ms)

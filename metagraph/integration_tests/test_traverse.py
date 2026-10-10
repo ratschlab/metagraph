@@ -1907,6 +1907,23 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(400, ret.status_code)
         self.assertIn('seeds', ret.json()['error'])
 
+    def test_api_seed_not_in_graph_is_400(self):
+        """A single-graph server: a seed the graph does not hold is the caller's error, the
+        whole request's 400 naming the seed and its graph runs (SPEC §6.1 step 2; only a
+        multi-graph server's chunks answer such a seed per seed)."""
+        present = self.element[:60]
+        mutated = present[:30] + ('A' if present[30] != 'A' else 'C') + present[31:]
+        text = ''.join(self.records.values())
+        self.assertTrue(any(mutated[i:i + K] not in text for i in range(len(mutated) - K + 1)))
+        ret = self._post('traverse', {
+            'seeds': [{'seed_id': 'ok', 'sequence': present},
+                      {'seed_id': 'no', 'sequence': mutated}],
+            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10}},
+        })
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertIn("seed 'no': Seed is not fully present in the graph", ret.json()['error'])
+        self.assertNotIn('results', ret.json())
+
     def test_api_routing_fields_are_accepted(self):
         """A 'graph' field must not trip the strict unknown-field check.
 

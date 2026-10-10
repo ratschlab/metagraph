@@ -297,12 +297,15 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
   index of the chunk's record headers (seconds on a chunk with millions of records, `traversal.has_coord_to_header`;
   inside `load_ms`, outside the budgets).
 - **Traversal: `graphs: [name]`.** `/traverse` and `/resolve` take `graphs` with one name as an alias of `graph`
-  (both fields, a list of another length, or `graphs` on a single-graph server: 400, no code). With `graphs`, a
-  seed the chunk does not hold, fully or in part, is a **200 per-seed result**, not the request's 400:
-  `outcome.walks: "not_in_graph"`, `not_in_graph: {kmers, kmers_present}` (the seed's k-mers, and those this chunk
-  has), the `error` text, no arms and no graphlet, `usage.per_seed[].outcome: "not_in_graph"`; the other seeds are
-  walked. The traversal job fans out to every chunk without a presence check, as for `/search`, and reads
-  `not_in_graph` as "no walk on this chunk", never as a failure. With `graph` the 400 stays.
+  (both fields, a list of another length, or `graphs` on a single-graph server: 400, no code). The two spellings
+  are one request and get the same answer, byte for byte. On a multi-graph server a seed the chunk does not hold,
+  fully or in part, is a **200 per-seed result**, not the request's 400: `outcome.walks: "not_in_graph"`,
+  `not_in_graph: {kmers, kmers_present}` (the seed's k-mers, and those this chunk has), the `error` text, no arms
+  and no graphlet, `usage.per_seed[].outcome: "not_in_graph"`; the other seeds are walked. The traversal job fans
+  out to every chunk without a presence check, as for `/search`, and reads `not_in_graph` as "no walk on this
+  chunk", never as a failure. On a single-graph server the 400 stays (the seed was meant for its only graph).
+  Builds before 2026-10-10 answered the 400 under `graph` on a multi-graph server too; `graphs` gets the per-seed
+  result on every build that takes it.
 - **Codes**: `resident_only` is retired (no build answers it any more; an older one may: pass it through);
   `multi_graph_later_increment` is answered by no route of this build; `budget_split` stays 400
   `later_increment`.
