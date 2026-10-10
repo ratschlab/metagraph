@@ -51,32 +51,9 @@ jobs:
         name: Checkout submodules
         run: git submodule update --init --recursive --depth 1
 
-      - &install-rosetta-homebrew
-        name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
-        if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
-        run: |
-          if [[ ! -d /usr/local/Homebrew ]]; then
-            echo "Installing Intel Homebrew to /usr/local under Rosetta..."
-            arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-          fi
-          if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
-            echo "Replacing legacy brew wrapper..."
-            sudo rm -f /usr/local/bin/brew
-          fi
-          if [[ ! -f /usr/local/bin/brew ]]; then
-            sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
-          fi
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
-          echo "/usr/local/sbin" >> "$GITHUB_PATH"
-
       - &install-macos-deps
         name: install dependencies
         run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c
-
-      - &install-openssl-cross-compile
-        name: (Only for cross-compilation) Install OpenSSL for target architecture
-        if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
-        run: brew install openssl@3
 
       - &install-ccache-macos
         name: Install ccache (macOS)
@@ -147,11 +124,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - *install-rosetta-homebrew
-
       - *install-macos-deps
-
-      - *install-openssl-cross-compile
 
       - &download-build-artifacts
         name: Download build artifacts
@@ -179,11 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - *install-rosetta-homebrew
-
       - *install-macos-deps
-
-      - *install-openssl-cross-compile
 
       - name: install dependencies for integration tests
         run: pip3 install parameterized --break-system-packages --user
@@ -217,7 +186,7 @@ jobs:
 
 
   examples:
-    if: ${{ inputs.build_type == 'Debug' || (inputs.platform == 'macos-latest' && inputs.target_arch == 'x86_64') }}
+    if: ${{ inputs.build_type == 'Debug' || inputs.target_arch == 'x86_64' }}
 
     runs-on: *platform
 
@@ -234,11 +203,7 @@ jobs:
 
       - *checkout-submodules-update
 
-      - *install-rosetta-homebrew
-
       - *install-macos-deps
-
-      - *install-openssl-cross-compile
 
       - *install-ccache-macos
 

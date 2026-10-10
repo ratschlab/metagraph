@@ -91,11 +91,6 @@ jobs:
             build_type: Release
             platform: macos-15-intel
             target_arch: x86_64
-          # Apple Silicon runner + Rosetta for x86_64
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-latest
-            target_arch: x86_64
           # Debug run on Apple Silicon
           - alphabet: DNA
             build_type: Debug
