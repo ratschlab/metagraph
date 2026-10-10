@@ -3509,6 +3509,77 @@ TEST(Walker, RefusalRecordingIsLinearInTheLabels) {
     }
 }
 
+// a digest of a serialised result that is the same on every platform (std::hash is not)
+uint64_t fnv1a(const std::string &s) {
+    uint64_t h = 14695981039346656037ull;
+    for (unsigned char c : s) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+// the fork AAAC / AAAG (k = 3) under n labels, every label on both branches
+std::unique_ptr<AnnotatedDBG> label_fork(size_t n, std::vector<std::string> *names) {
+    std::vector<std::string> seqs, labels;
+    names->clear();
+    for (size_t i = 0; i < n; ++i) {
+        names->push_back("L" + std::to_string(i));
+        for (const char *s : { "AAAC", "AAAG" }) {
+            seqs.push_back(s);
+            labels.push_back(names->back());
+        }
+    }
+    return build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, seqs, labels, DeBruijnGraph::BASIC);
+}
+
+// The branch counters of a permitted ambiguity (every source with two continuations whose
+// branches are below the limit) are set in one pass over the candidates' entries, from one
+// table over the ambiguous sources; a scan of every candidate per source was quadratic in the
+// labels on a fork every label takes (the review of 2026-10-10: 556 ms for the one head at
+// 16,000 labels). The fork under every label with unlimited branches and one base of
+// extension: at 50 labels the result is pinned by the digest taken before the change (every
+// label ends on both branches with one branch counted); 4,000 labels run within a sanity bound.
+TEST(Walker, AmbiguousBranchCountersAreLinearInTheLabels) {
+    Strategy st = strategy(Strategy::kUnlimited, false);
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 1;
+    std::vector<std::string> names;
+    {
+        auto anno = label_fork(50, &names);
+        auto res = run(*anno, "AAA", names, st);
+        const ArmResult &arm = res.arms[kRight];
+        check_invariants(arm, st);
+        ASSERT_EQ(2u, arm.paths.size());
+        std::set<std::string> flanks;
+        for (const PathResult &p : arm.paths) {
+            flanks.insert(spell_path(arm, p));
+            ASSERT_EQ(50u, p.end_labels.size());
+            for (const LabelEnd &e : p.end_labels) {
+                EXPECT_EQ(1u, e.branches) << e.label;
+            }
+        }
+        EXPECT_EQ((std::set<std::string>{ "C", "G" }), flanks);
+        ASSERT_EQ(1u, arm.branch_events.size());
+        std::vector<LabelId> all(50);
+        std::iota(all.begin(), all.end(), 0);
+        EXPECT_EQ(all, arm.branch_events[0].ambiguous);
+        EXPECT_TRUE(arm.branch_events[0].dropped.empty());
+        EXPECT_TRUE(arm.branch_events[0].refused.empty());
+        EXPECT_EQ(16296621859609334216ull, fnv1a(serialize(res))) << serialize(res);
+    }
+    {
+        auto anno = label_fork(4000, &names);
+        const auto start = std::chrono::steady_clock::now();
+        auto res = run(*anno, "AAA", names, st);
+        const double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start).count();
+        EXPECT_EQ(2u, res.arms[kRight].paths.size());
+        EXPECT_LT(ms, 2000) << "4,000 labels";
+    }
+}
+
 // A successor the loss budget refuses to a source is stated whether or not the source goes on
 // along another one. Blocks X, U, P, V, Q: A carries X·U·P, B carries X·V and U's last k - 1
 // bases + Q, the seed is X under {A, B}. B leaves along V; at the end of U, A goes on along P

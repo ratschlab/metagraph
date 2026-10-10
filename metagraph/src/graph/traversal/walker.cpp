@@ -363,13 +363,15 @@ struct ArmState {
 // Per-label scratch of process_item, sized |label_dict| once and cleared over the
 // touched labels only, so that a step costs O(|σ| + |A(v)|) and not O(|label_dict|).
 // |marked| is set and cleared within one pass (the sources excluded in one
-// re-minimisation round, the predecessors on one successor); |budget_checked| marks the
-// sources whose loss-budget refusals were recorded with their label end.
+// re-minimisation round, the sources of a permitted ambiguity, the predecessors on one
+// successor); |branches_next| holds, under that mark, the branch count a marked source's
+// entries take; |budget_checked| marks the sources whose loss-budget refusals were recorded
+// with their label end.
 struct Scratch {
     std::vector<uint8_t> trace_broken, excluded, seen, has_cont, stays, only_hairpin,
                          in_quorum_fail, superseded, blocked, is_touched, marked,
                          budget_checked;
-    std::vector<uint32_t> cont_count;
+    std::vector<uint32_t> cont_count, branches_next;
     std::vector<const char*> qtext;
     std::vector<LabelId> touched;
 
@@ -380,6 +382,7 @@ struct Scratch {
             v->assign(n, 0);
         }
         cont_count.assign(n, 0);
+        branches_next.assign(n, 0);
         qtext.assign(n, "");
         touched.clear();
     }
@@ -5088,17 +5091,30 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     // the rounds after the first are re-minimisations; counted by the commit (or the cap
     // below), never by a head the budget refuses
     plan.reminimisations = rounds - 1;
+    // The permitted ambiguities: every entry of a source with two or more continuations
+    // takes the source's branch count plus one. The sources are marked, with the count their
+    // entries take, in one pass over the state (in its order, which is the order of
+    // ambiguous_taken), and every successor's entries are visited once — a scan of every
+    // successor per source is Θ(|σ| × Σ|successor states|) at a node where every source is
+    // ambiguous (496 ms for one head at 16,000 labels on a two-way fork)
     for (const Entry &src : item.state) {
         if (sc.excluded[src.label] || sc.cont_count[src.label] < 2)
             continue;
         ambiguous_taken.push_back(src.label);
+        sc.marked[src.label] = 1;
+        sc.branches_next[src.label] = src.branches + 1;
+    }
+    if (!ambiguous_taken.empty()) {
         for (Cand &c : cands_) {
             if (!c.admissible())
                 continue;
             for (Entry &e : c.state) {
-                if (e.pred == src.label)
-                    e.branches = src.branches + 1;
+                if (sc.marked[e.pred])
+                    e.branches = sc.branches_next[e.pred];
             }
+        }
+        for (LabelId l : ambiguous_taken) {
+            sc.marked[l] = 0;
         }
     }
 
