@@ -18,6 +18,7 @@
   "max_predicate_work": 100000000,
   "max_steps": 100000000,
   "min_information_bits": 24,
+  "row_cache_mb": 64,
   "time_budget_ms": 600000
  },
  "caps_rule": "SPEC-pattern-search.md section 4.5",

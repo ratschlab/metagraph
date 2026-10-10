@@ -145,6 +145,11 @@ struct PatternLimits {
     // max_labels, likewise
     uint64_t default_max_labels = 1'000;
     uint64_t max_occurrences_per_label = 16;
+    // long_search "supported_paths" (SPEC §20.3): the ceiling of a pattern's row cache (MiB),
+    // which gets a quarter of what the request's account has left when the pattern's
+    // extension begins, at most this. Not a request field: the server's policy
+    // (--pattern-row-cache-mb), stated in caps
+    uint64_t row_cache_mb = 64;
     // a predicate's selection (SPEC §19.2): the raw contexts a pattern's selection may test
     // (its compute admission) and the selection's work per request (the oracle's units),
     // request fields' maxima like the others; and the names a predicate may list, the server's

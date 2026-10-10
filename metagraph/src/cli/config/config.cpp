@@ -539,6 +539,9 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--pattern-max-occurrences")) {
             exact_ms(argv[i], get_value(i), &pattern_max_occurrences);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-row-cache-mb")) {
+            exact_ms(argv[i], get_value(i), &pattern_row_cache_mb);
+            i++;
         } else if (!strcmp(argv[i], "--pattern-max-predicate-contexts")) {
             exact_ms(argv[i], get_value(i), &pattern_max_predicate_contexts);
             i++;
@@ -904,6 +907,14 @@ Config::Config(int argc, char *argv[]) {
         std::cerr << "Error: --pattern-max-labels-per-anchor, --pattern-max-annotation-work and "
                      "--pattern-max-memory-mb must be at least 1, and --pattern-max-memory-mb "
                      "at most 2^40" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // the supported-path search's row cache: a ceiling of at least one MiB (a cache that
+    // holds no row would read every row of a walk again), in bytes within 64 bits
+    if ((identity == PATTERN || identity == SERVER_QUERY)
+            && (pattern_row_cache_mb < 1 || pattern_row_cache_mb > (uint64_t(1) << 40))) {
+        std::cerr << "Error: --pattern-row-cache-mb must be at least 1 and at most 2^40"
+                  << std::endl;
         print_usage_and_exit = true;
     }
     // a predicate's selection: its work budget is at least one unit, as max_predicate_work's
@@ -1836,6 +1847,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tmaximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-default-max-labels [INT] \tmax_labels of a request that names none, at most --pattern-max-labels (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
+            fprintf(stderr, "\t   --pattern-row-cache-mb [INT] \tceiling of the row cache of a supported-path search (MiB): a pattern's cache gets a quarter of what the request's memory account has left, at most this; not a request field (capabilities caps.row_cache_mb) [64]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-contexts [INT] \tdefault and maximum of max_predicate_contexts: the raw contexts a predicate's selection may test per pattern [100000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-work [INT] \tdefault and maximum of max_predicate_work per request (a predicate's selection: annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-labels [INT] \tthe names a predicate may list (a larger one is refused, predicate_too_large); at most 1000000 [10000]\n");
@@ -1906,6 +1918,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tmaximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-default-max-labels [INT] \tmax_labels of a request that names none, at most --pattern-max-labels (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
+            fprintf(stderr, "\t   --pattern-row-cache-mb [INT] \tceiling of the row cache of a supported-path search (MiB): a pattern's cache gets a quarter of what the request's memory account has left, at most this; not a request field (capabilities caps.row_cache_mb) [64]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-contexts [INT] \tdefault and maximum of max_predicate_contexts: the raw contexts a predicate's selection may test per pattern [100000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-work [INT] \tdefault and maximum of max_predicate_work per request (a predicate's selection: annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-labels [INT] \tthe names a predicate may list (a larger one is refused, predicate_too_large); at most 1000000 [10000]\n");

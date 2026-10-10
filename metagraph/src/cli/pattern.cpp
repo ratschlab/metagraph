@@ -441,6 +441,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                                                  &req.clamped);
     r.allow_unbudgeted = f.boolean("allow_unbudgeted_annotation", r.allow_unbudgeted);
     r.chunk_target_ms = limits.chunk_target_ms;
+    // the server's, not a request field: the supported-path search's row cache ceiling
+    r.row_cache_bytes = limits.row_cache_mb << 20;
 
     // the paths of a pattern longer than k, opt-in: every walk, or the supported ones
     const std::string long_search = f.str("long_search", kLongSearchAnchors);
@@ -1262,6 +1264,7 @@ PatternLimits pattern_limits(const Config &config) {
     limits.max_labels = config.pattern_max_labels;
     limits.default_max_labels = config.pattern_default_max_labels;
     limits.max_occurrences_per_label = config.pattern_max_occurrences;
+    limits.row_cache_mb = config.pattern_row_cache_mb;
     limits.max_predicate_contexts = config.pattern_max_predicate_contexts;
     limits.max_predicate_work = config.pattern_max_predicate_work;
     limits.max_predicate_labels = config.pattern_max_predicate_labels;
@@ -2585,6 +2588,9 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     caps["max_labels_per_anchor"] = uint_json(limits.max_labels_per_anchor);
     caps["max_annotation_work"] = uint_json(limits.max_annotation_work);
     caps["max_memory_mb"] = uint_json(limits.max_memory_mb);
+    // not a request field (caps_rule): the ceiling of a supported-path search's row cache,
+    // which gets a quarter of what the account has left, at most this (SPEC §20.3)
+    caps["row_cache_mb"] = uint_json(limits.row_cache_mb);
     caps["max_labels"] = uint_json(limits.max_labels);
     caps["max_occurrences_per_label"] = uint_json(limits.max_occurrences_per_label);
     // a predicate's selection (SPEC §19.2, §19.3); max_predicate_labels is not a request field

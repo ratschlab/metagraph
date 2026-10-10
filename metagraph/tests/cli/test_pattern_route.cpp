@@ -1300,6 +1300,34 @@ TEST(PatternRoute, DefaultsBelowTheCaps) {
     EXPECT_TRUE(out["patterns"][0]["labels_cut"].isNull());
 }
 
+// SPEC §20.3, §4.5: the ceiling of a supported-path search's row cache is the server's
+// (--pattern-row-cache-mb), stated as caps.row_cache_mb in the full block, not a gate cap and
+// not a request field: no answer echoes it in `limits`
+TEST(PatternRoute, RowCacheCeilingInTheCaps) {
+    auto g = tiny();
+    const Json::Value caps = pattern_capabilities_json(g.get(), limits(), false);
+    EXPECT_TRUE(caps["caps"]["row_cache_mb"].isUInt64());
+    EXPECT_EQ(limits().row_cache_mb, caps["caps"]["row_cache_mb"].asUInt64());
+    EXPECT_EQ(64u, caps["caps"]["row_cache_mb"].asUInt64());
+    PatternLimits other = limits();
+    other.row_cache_mb = 3;
+    EXPECT_EQ(3u, pattern_capabilities_json(g.get(), other, false)["caps"]["row_cache_mb"]
+                          .asUInt64());
+    // the loading form states it too (the caps as configured, SPEC §23.1)
+    EXPECT_EQ(3u, pattern_capabilities_json(nullptr, other, false)["caps"]["row_cache_mb"]
+                          .asUInt64());
+    for (const std::string &gate : pattern_gate_keys()) {
+        EXPECT_NE("caps.row_cache_mb", gate);
+    }
+    const std::string body = "{\"patterns\": [{\"dna\": \"AACGT\"}], "
+                             "\"long_search\": \"supported_paths\", "
+                             "\"allow_unbudgeted_annotation\": true}";
+    for (const PatternLimits &l : { limits(), other }) {
+        const Json::Value out = run(*g, body, nullptr, nullptr, l);
+        EXPECT_FALSE(out["limits"].isMember("row_cache_mb"));
+        EXPECT_EQ(limits().max_memory_mb, out["limits"]["max_memory_mb"].asUInt64());
+    }
+}
 
 // ---------------------------------------------------------------- without the mask (#16)
 

@@ -102,7 +102,9 @@ DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 1000000
                 # a predicate (SPEC §19): the raw contexts a selection may test, its work per
                 # request, and the names a predicate may list (no request field)
                 'max_predicate_contexts': 100000, 'max_predicate_work': 100000000,
-                'max_predicate_labels': 10000}
+                'max_predicate_labels': 10000,
+                # no request field: the ceiling of a supported-path search's row cache (MiB)
+                'row_cache_mb': 64}
 DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
 DEFAULT_MAX_ANCHORS = 1000
@@ -1046,6 +1048,84 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertIsNone(entry['labels_cut'])
         finally:
             server.stop()
+
+    # a pattern whose supported-path search reads more rows than a 1 MiB row cache holds: an
+    # anchor on every 31-mer of GCGGCGGCGGCG... (47 in the GC-rich records; the 12 fixed bases
+    # are the information floor), each walked 169 bases on (every base N: the walk follows the
+    # graph), one row per k-mer entered: about 7,900 rows, 2.5 MiB as the cache models them
+    ROW_CACHE_PATTERN = 'GCGGCGGCGGCG' + 'N' * 188
+
+    def test_row_cache_ceiling(self):
+        """SPEC §20.3, §4.5: the ceiling of a supported-path search's row cache is the
+        server's (--pattern-row-cache-mb, 64 MiB by default; the cache gets a quarter of what
+        the request's memory account has left, at most the ceiling): every route's block
+        states it as caps.row_cache_mb, no answer echoes it in `limits`, and a value below 1
+        refuses start-up. Under a ceiling of 1 MiB a pattern whose walks read more rows than
+        that has its cache emptied and refilled (work.row_cache_evictions) where the default
+        keeps every row, and the paths, their labels and the counts are the same."""
+        for block in (self.server.get('pattern/capabilities').json(),
+                      self.server.get('capabilities').json()['pattern'],
+                      self.server.get('traverse/capabilities').json()['pattern']):
+            self.assertEqual(64, block['caps']['row_cache_mb'])
+        request = {'patterns': [{'iupac': self.ROW_CACHE_PATTERN}], 'mode': 'partial',
+                   'strands': 'forward', 'long_search': 'supported_paths',
+                   'output': {'labels': 'all'}}
+        base = self.pattern(self.server, request)
+        self.assertNotIn('row_cache_mb', base['limits'])
+        entry = base['patterns'][0]
+        self.assertEqual(0, entry['work']['row_cache_evictions'])
+        self.assertGreater(entry['work']['annotation_rows'], 1000)
+        self.assertGreater(len(entry['results']), 0)
+        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno,
+                                    '--pattern-row-cache-mb', '1'],
+                        os.path.join(self.tempdir.name, 'server_row_cache.log'))
+        try:
+            full = server.get('pattern/capabilities').json()
+            for block in (full, server.get('capabilities').json()['pattern'],
+                          server.get('traverse/capabilities').json()['pattern']):
+                self.assertEqual(1, block['caps']['row_cache_mb'])
+            self.assertEqual(dict(DEFAULT_CAPS, row_cache_mb=1), full['caps'])
+            small = self.pattern(server, request)
+            self.assertNotIn('row_cache_mb', small['limits'])
+            self.assertEqual(base['limits'], small['limits'])
+            e = small['patterns'][0]
+            self.assertGreater(e['work']['row_cache_evictions'], 0)
+            # a row read again after an eviction is read (and charged) again, never fewer
+            self.assertGreaterEqual(e['work']['annotation_rows'],
+                                    entry['work']['annotation_rows'])
+            self.assertGreaterEqual(e['work']['annotation_units'],
+                                    entry['work']['annotation_units'])
+
+            # the same answer: the account's peak (the allotment is charged to it) and the
+            # work of the reads aside
+            def same(x):
+                x = untimed(x)
+                for key in ('annotation_rows', 'annotation_units', 'row_cache_hits',
+                            'row_cache_evictions', 'memory_bytes'):
+                    x['patterns'][0]['work'].pop(key)
+                return x
+            self.assertEqual(same(base), same(small))
+        finally:
+            server.stop()
+        # refused at start-up below 1, on the server and the CLI alike; both usages name it
+        for command in ('server_query', 'pattern'):
+            cmd = shlex.split(METAGRAPH) + [command, '-i', self.graph, '-a', self.anno,
+                                            '--pattern-row-cache-mb', '0']
+            if command == 'server_query':
+                cmd += ['--port', str(free_port()), '--address', '127.0.0.1']
+            else:
+                cmd += [os.path.join(self.tempdir.name, 'none.json')]
+            try:
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     timeout=120)
+            except subprocess.TimeoutExpired:
+                self.fail(f'{command} started with --pattern-row-cache-mb 0')
+            self.assertNotEqual(0, res.returncode, command)
+            self.assertIn('--pattern-row-cache-mb must be at least 1', res.stderr.decode(),
+                          command)
+            res = subprocess.run(shlex.split(METAGRAPH) + [command], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            self.assertIn('--pattern-row-cache-mb', (res.stdout + res.stderr).decode(), command)
 
     # ------------------------------------------------------------ the label-free retrieval
 

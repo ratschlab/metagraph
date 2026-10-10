@@ -153,6 +153,10 @@ struct RetrievalLimits {
     uint64_t max_annotation_work = 100'000'000;
     // the request's memory account (bytes)
     uint64_t max_memory_bytes = uint64_t(256) << 20;
+    // the ceiling of a supported-path search's row cache (bytes; the server's
+    // --pattern-row-cache-mb, never a request's): a pattern's cache gets a quarter of what the
+    // account has left when its extension begins, at most this (PathTracker::cache_allotment)
+    uint64_t row_cache_bytes = uint64_t(64) << 20;
     // partial only: the labels listed per pattern, in label order (contexts desc, column asc)
     uint64_t max_labels = 1'000;
     // partial only: the placed occurrences listed per label, over its deduplicated union

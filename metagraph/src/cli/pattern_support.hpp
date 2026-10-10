@@ -32,7 +32,8 @@
  *     record_verified when a chain survived, with the chains' occurrences —, nothing read again.
  *
  * Rows are read once per pattern while the row cache holds them: a fixed allotment of the
- * account (a quarter of what is left when the pattern starts, at most 64 MiB) holds the rows as
+ * account (a quarter of what is left when the pattern starts, at most the server's ceiling,
+ * RetrievalLimits::row_cache_bytes) holds the rows as
  * the steps use them (labels and coordinate runs), evicted wholesale when the next one does not
  * fit, and the row-diff path cache in what the rows leave of it; a row read again after an
  * eviction is charged again.
@@ -247,8 +248,9 @@ class PathTracker final : public graph::pattern::SupportTracker {
     const Json::Value& rows_refused() const { return rows_refused_; }
     const PathSupportWork& work() const { return work_; }
 
-    // the row cache's allotment for a pattern starting when the account has |left| bytes left
-    static uint64_t cache_allotment(uint64_t left);
+    // the row cache's allotment for a pattern starting when the account has |left| bytes left,
+    // under the server's |ceiling| (RetrievalLimits::row_cache_bytes): min(ceiling, left / 4)
+    static uint64_t cache_allotment(uint64_t left, uint64_t ceiling);
 
   private:
     struct Impl;

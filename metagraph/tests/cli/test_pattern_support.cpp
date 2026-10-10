@@ -512,6 +512,8 @@ struct Ask {
     uint64_t max_anchors = 1'000'000;
     bool stop_at_threshold = false;
     uint64_t max_memory = uint64_t(1) << 30;
+    // the server's ceiling of the row cache (RetrievalLimits::row_cache_bytes)
+    uint64_t row_cache = uint64_t(64) << 20;
     uint64_t max_work = std::numeric_limits<uint64_t>::max() / 4;
     uint64_t max_steps = 1'000'000'000;
     uint64_t max_labels = 1'000'000;
@@ -557,6 +559,7 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     RetrievalLimits limits;
     limits.max_annotation_work = ask.max_work;
     limits.max_memory_bytes = ask.max_memory;
+    limits.row_cache_bytes = ask.row_cache;
     limits.occurrences = ask.occurrences;
     limits.max_labels = ask.max_labels;
     limits.max_occurrences_per_label = ask.max_occurrences;
@@ -1148,7 +1151,7 @@ TEST(PatternSupport, TheAccountKeepsTheReturnedPathsOnly) {
             EXPECT_LE(out.peak, ask.max_memory);
             // the search held the row cache's allotment and its frames at once
             if (out.work.frames_peak_bytes) {
-                EXPECT_GE(out.peak, PathTracker::cache_allotment(ask.max_memory)
+                EXPECT_GE(out.peak, PathTracker::cache_allotment(ask.max_memory, ask.row_cache)
                                         + out.work.frames_peak_bytes);
             }
             returned += out.x->returned;
@@ -1665,6 +1668,51 @@ TEST(PatternSupport, TheRowCacheChangesNoAnswer) {
                 EXPECT_EQ(full.units, out.units);
             } else if (out.work.rows > full.work.rows) {
                 // rows read again after an eviction, charged again
+                ++evicted;
+                EXPECT_LT(full.units, out.units);
+            }
+        }
+    }
+    EXPECT_LT(5u, evicted);
+}
+
+TEST(PatternSupport, TheRowCacheCeilingChangesNoAnswer) {
+    // the server's ceiling (RetrievalLimits::row_cache_bytes, --pattern-row-cache-mb) bounds
+    // the allotment where the account does not: min(ceiling, left / 4); under a small one
+    // rows are evicted and read again (charged again), and the supported paths and their
+    // labels are those of the default ceiling
+    EXPECT_EQ(uint64_t(64) << 20, PathTracker::cache_allotment(uint64_t(1) << 30,
+                                                                uint64_t(64) << 20));
+    EXPECT_EQ(uint64_t(1) << 20, PathTracker::cache_allotment(uint64_t(1) << 30,
+                                                               uint64_t(1) << 20));
+    EXPECT_EQ(uint64_t(256) << 10, PathTracker::cache_allotment(uint64_t(1) << 20,
+                                                                 uint64_t(1) << 20));
+    EXPECT_EQ(0u, PathTracker::cache_allotment(3, uint64_t(1) << 20));
+    std::mt19937 rng(98);
+    uint64_t evicted = 0;
+    for (int t = 0; t < 40; ++t) {
+        const size_t k = 3 + rng() % 3;
+        const std::vector<Record> records = random_records(rng, k);
+        const Index idx = build_rd(k, records);
+        const auto [text, peptide] = random_pattern(rng, records, k);
+        Ask large;
+        const Outcome full = run_support(idx, text, peptide, large);
+        ASSERT_FALSE(full.result.stop);
+        for (uint64_t ceiling : { 500, 1'000, 2'000, 4'000 }) {
+            Ask small = large;
+            small.row_cache = ceiling;
+            const Outcome out = run_support(idx, text, peptide, small);
+            // the account is large: the ceiling alone bounds the cache, and nothing stops
+            ASSERT_FALSE(out.result.stop) << ceiling;
+            EXPECT_FALSE(out.output_cut);
+            check_prefix(full, out);
+            EXPECT_EQ(full.paths.size(), out.paths.size());
+            EXPECT_GE(out.work.rows, full.work.rows);
+            EXPECT_GE(out.units, full.units);
+            if (!out.work.evictions && !out.work.uncached_rows) {
+                EXPECT_EQ(full.work.rows, out.work.rows);
+                EXPECT_EQ(full.units, out.units);
+            } else if (out.work.rows > full.work.rows) {
                 ++evicted;
                 EXPECT_LT(full.units, out.units);
             }

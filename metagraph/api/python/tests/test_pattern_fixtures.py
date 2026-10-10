@@ -422,7 +422,10 @@ CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_infor
         'max_patterns'] + LIMITS_LABELS + ['max_paths', 'max_checked_entries',
                                            # a predicate (SPEC §19.12)
                                            'max_predicate_contexts', 'max_predicate_work',
-                                           'max_predicate_labels']
+                                           'max_predicate_labels',
+                                           # the row cache of a supported-path search (SPEC
+                                           # §20.3): the server's ceiling, no request field
+                                           'row_cache_mb']
 # the limits a predicate answer echoes (SPEC §19.10)
 LIMITS_PREDICATE = ['max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
                     'predicate_strands']
@@ -3164,7 +3167,7 @@ class TestPatternFixtures(unittest.TestCase):
             # in exactly one of the two lists (the request field's name is the cap's)
             self.assertEqual(1, sum(cap in n for n in named), cap)
         policy = {'max_patterns', 'min_information_bits', 'max_checked_entries',
-                  'max_predicate_labels'}
+                  'max_predicate_labels', 'row_cache_mb'}
         self.assertEqual(policy, set(named[1]) & caps)
         # a request field's maximum is a field of the request
         self.assertLessEqual(caps - policy, set(SCHEMA['request']))

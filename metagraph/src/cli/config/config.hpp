@@ -239,6 +239,12 @@ class Config {
     uint64_t pattern_default_max_labels = 1'000;
     bool pattern_default_max_labels_named = false;
     uint64_t pattern_max_occurrences = 16;
+    // long_search "supported_paths" (SPEC-pattern-search.md §20.3): the ceiling of a pattern's
+    // row cache (MiB), which gets a quarter of what the request's memory account has left when
+    // the pattern's extension begins, at most this. Not a request field: the server's policy,
+    // stated in the capabilities' caps (row_cache_mb); the operator follows the workload with
+    // it (exact DNA patterns read every row once, peptides and wide rows read rows again)
+    uint64_t pattern_row_cache_mb = 64;
     // a predicate's selection (SPEC-pattern-search.md §19.2, §19.3): the default and maximum of
     // max_predicate_contexts (the raw contexts a pattern's selection may test) and of
     // max_predicate_work (the selection's work per request, the oracle's units, a budget of its

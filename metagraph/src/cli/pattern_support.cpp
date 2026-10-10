@@ -46,8 +46,6 @@ using node_index = DeBruijnGraph::node_index;
 
 // a row in the row cache: its key and the map's node beside the runs (RowRuns::bytes)
 constexpr uint64_t kRowEntryBytes = 64;
-// the most a pattern's row cache may hold
-constexpr uint64_t kMaxCacheAllotment = uint64_t(64) << 20;
 
 // the memory model of a kept path's labels: the list, and per label and per run of
 // occurrences its record, twice its size (the convention of the walker's cost model)
@@ -171,8 +169,8 @@ struct PathTracker::Impl {
     }
 };
 
-uint64_t PathTracker::cache_allotment(uint64_t left) {
-    return std::min(kMaxCacheAllotment, left / 4);
+uint64_t PathTracker::cache_allotment(uint64_t left, uint64_t ceiling) {
+    return std::min(ceiling, left / 4);
 }
 
 PathTracker::PathTracker(const PathSupportEnv &env, const PathSupportOptions &options)
@@ -288,8 +286,9 @@ bool PathTracker::prepare(const std::vector<Context> &anchors) {
         return false;
     };
 
-    // the row cache's allotment, and the row-diff path cache in what the rows leave of it
-    m.allotment = cache_allotment(env_.account.left());
+    // the row cache's allotment (a quarter of what the account has left, at most the server's
+    // ceiling), and the row-diff path cache in what the rows leave of it
+    m.allotment = cache_allotment(env_.account.left(), env_.limits.row_cache_bytes);
     const bool held = env_.account.charge(m.allotment);
     assert(held);
     (void)held;
