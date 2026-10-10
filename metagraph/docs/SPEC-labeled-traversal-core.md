@@ -2359,7 +2359,13 @@ the path ends (also at a cap, §6.8). At a structural branch, fetch all successo
 are never emitted. Results do not depend on `batch_kmers` (T23). *(Efficiency pass:)* a chain stops at the
 radius — at most `min(batch_kmers, max_extension_bp − d − 1)` nodes from a level at depth d: a head at the radius
 is ended, not expanded, so neither its successors nor the rows beyond it are ever asked for (before, a chain ran
-`batch_kmers` nodes whatever the radius left: 1,047 rows read for 32 consumed on refseq33m) —, and the lookahead
+`batch_kmers` nodes whatever the radius left: 1,047 rows read for 32 consumed on refseq33m) —, a chain ends at a
+seed node and at a node it holds already — the walk blocks a successor that re-enters the seed (§6.5) and consumed
+the entry of a node when it first reached it, so a chain past either is never consumed (the node's own key is
+still mapped: the head before it fetches the row of its blocked or revisited successor; on the self-loop AAA with
+seed AAA the walk takes no step, while a chain ran the whole batch: 15.9 ms rightward and 182 ms leftward at
+`batch_kmers` 100,000, the left window prepending one base at a time — it is built reversed and reversed once,
+review of 2026-10-10) —, and the lookahead
 is skipped once the seed's deadline has passed and paced by it at every depth, depth 0 included (§6.8, chunked
 deadlines: no later level runs then, so nothing it would read can be consumed). Only physical work changes
 — `timing`, including its counters `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` and `cache_hits`, which

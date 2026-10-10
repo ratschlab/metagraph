@@ -3580,6 +3580,50 @@ TEST(Walker, AmbiguousBranchCountersAreLinearInTheLabels) {
     }
 }
 
+// The lookahead's chains end where the walk would stop consuming them: at a seed node (the
+// walk blocks a successor that re-enters the seed) and at a node the chain holds already (the
+// walk consumed that node's entry when it first reached it). On the self-loop AAA (k = 3, seed
+// AAA) the walk takes no step on either arm, its one successor being the seed, yet a chain of
+// batch_kmers 100,000 ran the whole batch (15.9 ms rightward, 182 ms leftward, the left
+// window prepending one base at a time). The result and the contract counters are those of
+// batch_kmers 0, and the batch costs no measurable time.
+TEST(Walker, LookaheadStopsAtTheSeedAndInsideItsOwnChain) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAAA" }, { "A" }, DeBruijnGraph::BASIC);
+    for (auto direction : { Strategy::RIGHT, Strategy::LEFT, Strategy::BOTH }) {
+        Strategy st = strategy(0);
+        st.direction = direction;
+        st.max_extension_bp = 200'000;
+        st.batch_kmers = 0;
+        const std::string where = "direction " + std::to_string(direction);
+        auto base = run(*anno, "AAA", { "A" }, st);
+        for (const ArmResult &arm : base.arms) {
+            if (!arm.requested)
+                continue;
+            check_invariants(arm, st);
+            EXPECT_EQ(0u, arm.steps) << where;
+            ASSERT_EQ(1u, arm.paths.size()) << where;
+            EXPECT_EQ(0u, arm.paths[0].length_bp) << where;
+            EXPECT_EQ(1u, arm.paths[0].end_reasons[static_cast<size_t>(EndReason::REACHED_SEED)])
+                << where;
+        }
+        for (size_t batch : { 1, 100'000 }) {
+            Strategy sb = st;
+            sb.batch_kmers = batch;
+            const auto start = std::chrono::steady_clock::now();
+            auto res = run(*anno, "AAA", { "A" }, sb);
+            const double ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start).count();
+            EXPECT_EQ(serialize(base), serialize(res)) << where << " batch " << batch;
+            EXPECT_EQ(base.annotation_counters.keys_mapped, res.annotation_counters.keys_mapped)
+                << where << " batch " << batch;
+            EXPECT_EQ(base.annotation_counters.rows_requested,
+                      res.annotation_counters.rows_requested) << where << " batch " << batch;
+            EXPECT_LT(ms, 50) << where << " batch " << batch;
+        }
+    }
+}
+
 // A successor the loss budget refuses to a source is stated whether or not the source goes on
 // along another one. Blocks X, U, P, V, Q: A carries X·U·P, B carries X·V and U's last k - 1
 // bases + Q, the seed is X under {A, B}. B leaves along V; at the end of U, A goes on along P

@@ -4223,7 +4223,10 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
     std::vector<node_index> chain_curs;      // nodes whose successors were enumerated
     std::vector<Lookahead> chain_entries;    // their lookahead entries
     std::vector<node_index> chain_nodes;     // single successors, in walking order
-    std::string window;                      // spelling of |chain_nodes|, natural orientation
+    // the spelling of |chain_nodes| in natural orientation; on the left arm it grows at the
+    // front, so it is built reversed and reversed once before the key mapping
+    std::string window;
+    tsl::hopscotch_set<node_index> chain_seen;   // the nodes of the chain being built
     std::string kmer, next_kmer;
     bool stop = false;
     for (size_t i = 0; i < items.size() && !stop; ++i) {
@@ -4231,6 +4234,13 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             continue;
         node_index cur = succs[i][0].node;
         if (arm.lookahead.count(cur))
+            continue;
+        // A chain ends where the walk stops consuming it: a successor that is a seed node is
+        // blocked (check_structure), never expanded, and a node the chain holds already had its
+        // entry consumed when the walk first reached it (a cycle back into the chain). On the
+        // self-loop AAA with seed AAA the walk takes no step, while a chain ran the whole batch
+        // (182 ms leftward at batch_kmers 100,000, prepending to the window base by base)
+        if (seed_nodes_.count(cur))
             continue;
         // The chain stops at the radius: its n-th node (n from 0, the item's successor at
         // ext_bp + 1 + n) is enumerated and its single successor's row warmed only when that
@@ -4270,6 +4280,7 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             Lookahead la;
             la.succs = enumerate(arm, cur, kmer);
             chain_curs.push_back(cur);
+            chain_seen.insert(cur);
             const bool single = la.succs.size() == 1;
             const char c = single ? la.succs[0].ch : 0;
             const node_index nxt = single ? la.succs[0].node : npos;
@@ -4279,14 +4290,25 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             succ_kmer(arm.arm, kmer, c, &next_kmer);
             kmer.swap(next_kmer);
             if (chain_nodes.empty()) {
-                window = kmer;
-            } else if (arm.arm == Arm::RIGHT) {
-                window.push_back(c);
+                if (arm.arm == Arm::RIGHT) {
+                    window = kmer;
+                } else {
+                    window.assign(kmer.rbegin(), kmer.rend());
+                }
             } else {
-                window.insert(window.begin(), c);
+                window.push_back(c);
             }
             chain_nodes.push_back(nxt);
             cur = nxt;
+            // the chain ends at a seed node or a node it holds (above); the node's key is
+            // still mapped, since the head before it fetches the row of its blocked or
+            // revisited successor
+            if (seed_nodes_.count(nxt) || chain_seen.count(nxt))
+                break;
+        }
+        // one erasure per node: clearing the set is linear in its capacity, the longest chain
+        for (node_index n : chain_curs) {
+            chain_seen.erase(n);
         }
         // a chain's keys are mapped in one call, as long as the chain: polled before it
         if (stop || (!chain_nodes.empty() && stopped())) {
@@ -4298,7 +4320,9 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             if (arm.arm == Arm::RIGHT) {
                 keys = oracle_.keys_of_path(chain_nodes, window);
             } else {
-                // the window is in natural orientation: the walked nodes appear reversed
+                // the window, built reversed, in natural orientation, where the walked nodes
+                // appear reversed
+                std::reverse(window.begin(), window.end());
                 std::vector<node_index> natural(chain_nodes.rbegin(), chain_nodes.rend());
                 keys = oracle_.keys_of_path(natural, window);
                 std::reverse(keys.begin(), keys.end());
