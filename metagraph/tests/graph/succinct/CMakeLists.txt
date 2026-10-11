@@ -21,7 +21,6 @@ enableCCache()
 findOpenMP()
 buildProgressBar(EXTERNAL_LIB_DIR progress_bar)
 buildMersenneTwister(EXTERNAL_LIB_DIR mersenne_twister)
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 
 enable_testing()
 findGTest()
@@ -41,7 +40,7 @@ target_link_libraries(tests
     metagraph_common
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
-    ${SDSL_LIBRARY}
+
     ${progress_bar}
     ${mersenne_twister}
     test_utils

@@ -12,7 +12,6 @@ include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 
 add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 buildProgressBar(${EXTERNAL_LIB_DIR} progress_bar)
 
 
@@ -31,7 +30,7 @@ target_include_directories(metagraph_graph_base
 
 target_link_libraries(metagraph_graph_base
   PUBLIC
-    ${SDSL_LIBRARY}
+
     ${mersenne_twister}
     progress_bar
     metagraph_common

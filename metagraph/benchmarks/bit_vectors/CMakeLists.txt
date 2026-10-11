@@ -17,10 +17,8 @@ enable_testing()
 findGTest()
 
 # Check if 128 bit integers are supported
-try_compile(MODE_TI
-  "${PROJECT_BINARY_DIR}"
-  "${EXTERNAL_LIB_DIR}/sdsl-lite/CMakeModules/check_mode_ti.cpp"
-)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("int main() { unsigned __int128 value = 1; return value >> 64; }" MODE_TI)
 if(MODE_TI)
   string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
 endif()
@@ -62,9 +60,6 @@ include_directories(
   ${EXTERNAL_LIB_DIR}/spdlog/include
   "../../src/"
 )
-link_directories(
-  ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
 
 file(GLOB benchmark_files "*.cpp"
   ../../src/common/data_generation.cpp
@@ -79,7 +74,6 @@ add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM
 
 add_executable(benchmark_bit_vectors ${benchmark_files})
 target_link_libraries(benchmark_bit_vectors
-  -lsdsl
   ${OpenMP_CXX_LIBRARIES}
   benchmark_main
   benchmark

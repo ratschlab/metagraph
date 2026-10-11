@@ -176,7 +176,7 @@ bitmap_vector::bitmap_vector(const sdsl::bit_vector &vector)
       : num_set_bits_(sdsl::util::cnt_one_bits(vector)), bit_vector_(vector) {}
 
 bitmap_vector::bitmap_vector(std::initializer_list<bool> init)
-      : bitmap_vector(sdsl::bit_vector(init)) {}
+      : bitmap_vector(sdsl::bit_vector(init.begin(), init.end())) {}
 
 bitmap_vector::bitmap_vector(sdsl::bit_vector&& vector) noexcept
       : num_set_bits_(sdsl::util::cnt_one_bits(vector)),
@@ -254,7 +254,7 @@ bitmap_adaptive::bitmap_adaptive(uint64_t size, const std::set<uint64_t> &bits)
       : bitmap_(new bitmap_set(size, bits)) {}
 
 bitmap_adaptive::bitmap_adaptive(std::initializer_list<bool> bitmap)
-      : bitmap_adaptive(sdsl::bit_vector(bitmap)) {}
+      : bitmap_adaptive(sdsl::bit_vector(bitmap.begin(), bitmap.end())) {}
 
 bitmap_adaptive::bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> bits)
       : bitmap_adaptive(size, std::set<uint64_t>(bits)) {}

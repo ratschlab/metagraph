@@ -610,13 +610,6 @@ TEST(BOSSConstruct, RedundantDummySinkInChunkedConstruction) {
 }
 
 
-bool operator==(const sdsl::sd_vector<> &first, const sdsl::sd_vector<> &second) {
-    return (first.m_size == second.m_size
-            && first.m_wl == second.m_wl
-            && first.m_low == second.m_low
-            && first.m_high == second.m_high);
-}
-
 // Test that suffix ranges survive a serialize→load round-trip with a single k-mer.
 TEST(BOSSConstruct, SuffixRangesSingleKmer) {
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {

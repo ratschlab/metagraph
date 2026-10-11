@@ -53,12 +53,11 @@ add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
 
 add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
-    ${SDSL_LIBRARY}
+
     glog::glog
     spdlog::spdlog
     z

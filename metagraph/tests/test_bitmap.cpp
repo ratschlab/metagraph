@@ -161,7 +161,7 @@ Bitmap build_bitmap(const sdsl::bit_vector &data) {
 
 template <class Bitmap>
 Bitmap build_bitmap(const std::initializer_list<bool> &data) {
-    return build_bitmap<Bitmap>(sdsl::bit_vector(data));
+    return build_bitmap<Bitmap>(sdsl::bit_vector(data.begin(), data.end()));
 }
 
 template <class Bitmap>
