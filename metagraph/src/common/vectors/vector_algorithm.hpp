@@ -185,21 +185,6 @@ prev_bit(const t_int_vec &v,
          uint64_t max_steps = std::numeric_limits<uint64_t>::max());
 
 
-// Return an int_vector whose limbs are aligned to alignment bytes.
-// This is useful for algorithms requiring access to larger words in the underlying
-// vector (atomic increment, SIMD, etc.)
-template <int t_width = 0>
-inline sdsl::int_vector<t_width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
-                                                    uint8_t width = 0,
-                                                    size_t alignment = 8);
-
-inline sdsl::bit_vector aligned_bit_vector(size_t size = 0,
-                                           bool val = 0,
-                                           size_t alignment = 8) {
-    return aligned_int_vector<1>(size, val, 1, alignment);
-}
-
-
 // Predict the memory footprint in bits for sdsl::sd_vector<>
 uint64_t footprint_sd_vector(uint64_t size, uint64_t num_set_bits);
 
@@ -615,42 +600,6 @@ prev_bit(const t_int_vec &v, uint64_t idx, uint64_t max_steps) {
             return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
     }
     return v.bit_size();
-}
-
-template <int t_width>
-inline sdsl::int_vector<t_width>
-aligned_int_vector(size_t size, uint64_t val, uint8_t width, size_t alignment) {
-    assert(__builtin_popcountll(alignment) == 1);
-    assert(alignment >= 8);
-
-    // This is a dirty hack to allow for reallocating an int_vector<t_width>'s
-    // underlying storage
-    struct int_vector_access {
-        typename sdsl::int_vector<t_width>::size_type m_size;
-        uint64_t *m_data;
-        typename sdsl::int_vector<t_width>::int_width_type m_width;
-        std::shared_ptr<sdsl::mmap_context> m_mmap_context;
-    };
-    static_assert(sizeof(sdsl::int_vector<t_width>) == sizeof(int_vector_access));
-    assert(!t_width || t_width == width);
-
-    sdsl::int_vector<t_width> v;
-    auto &v_cast = reinterpret_cast<int_vector_access&>(v);
-    v_cast.m_size = size * width;
-    v_cast.m_width = width;
-    free(v_cast.m_data);
-
-    // Round up to the nearest multiple of |alignment| bytes
-    size_t capacity_bytes = ((((v_cast.m_size + 7) >> 3) + alignment - 1) / alignment) * alignment;
-    if (posix_memalign((void**)&v_cast.m_data, alignment, capacity_bytes) || !v_cast.m_data)
-        throw std::bad_alloc();
-
-    memset(v_cast.m_data, 0, capacity_bytes);
-
-    if (val)
-        sdsl::util::set_to_value(v, val);
-
-    return v;
 }
 
 #endif // __VECTOR_ALGORITHM_HPP__

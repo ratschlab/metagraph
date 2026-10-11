@@ -352,7 +352,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
 
     // the in and out counts are stored interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
+    sdsl::int_vector<> counts(indicator.size() * 2, 0, width);
 
     const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
     const auto &binmat = anno_graph.get_annotator().get_matrix();
