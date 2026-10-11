@@ -182,6 +182,8 @@ Config::Config(int argc, char *argv[]) {
                 print_usage_and_exit = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
             print_column_names = true;
+        } else if (!strcmp(argv[i], "--check-names")) {
+            check_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--print-counts-hist")) {
@@ -1608,6 +1610,9 @@ if (advanced) {
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
             fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
+            fprintf(stderr, "\t   --check-names \tcheck the names of the annotation (-a): every label name valid UTF-8 and, for a coordinate\n"
+                            "\t                 \tannotation with its record mapping (.seqs), every record header valid UTF-8 and distinct\n"
+                            "\t                 \twithin its column; prints one JSON object (record: 0-based in its column), exits 1 on a failure [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {

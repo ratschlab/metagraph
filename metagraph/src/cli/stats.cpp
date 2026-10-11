@@ -1,5 +1,8 @@
 #include "stats.hpp"
 
+#include <filesystem>
+#include <optional>
+
 #include <ips4o/ips4o.hpp>
 
 #include "common/algorithms.hpp"
@@ -413,14 +416,125 @@ void print_coord_to_header_stats(const std::string &fname) {
     std::cout << "========================================================" << std::endl;
 }
 
+Json::Value index_names_report(const std::vector<std::string> &labels,
+                               const annot::CoordToHeader *mapping) {
+    const size_t kMaxFirst = 10;
+    Json::Value first(Json::arrayValue);
+    auto note = [&](const char *kind, const char *problem, uint64_t column,
+                    const std::optional<size_t> &record, std::string_view bytes,
+                    const std::optional<size_t> &duplicate_of = std::nullopt) {
+        if (first.size() >= kMaxFirst)
+            return;
+        Json::Value entry(Json::objectValue);
+        entry["kind"] = kind;
+        entry["problem"] = problem;
+        entry["column"] = Json::UInt64(column);
+        entry["record"] = record ? Json::Value(Json::UInt64(*record)) : Json::Value();
+        entry["hex"] = utils::to_hex(bytes);
+        if (duplicate_of)
+            entry["duplicate_of"] = Json::UInt64(*duplicate_of);
+        first.append(entry);
+    };
+
+    uint64_t labels_invalid = 0;
+    for (size_t c = 0; c < labels.size(); ++c) {
+        if (!utils::valid_utf8(labels[c])) {
+            ++labels_invalid;
+            note("label", "invalid_utf8", c, std::nullopt, labels[c]);
+        }
+    }
+
+    uint64_t num_headers = 0;
+    uint64_t headers_invalid = 0;
+    uint64_t duplicates = 0;
+    if (mapping) {
+        for (uint64_t col = 0; col < mapping->num_columns(); ++col) {
+            const auto &headers = mapping->get_headers(col);
+            num_headers += headers.size();
+            for (size_t s = 0; s < headers.size(); ++s) {
+                if (!utils::valid_utf8(headers[s])) {
+                    ++headers_invalid;
+                    note("header", "invalid_utf8", col, s, headers[s]);
+                }
+            }
+            annot::CoordToHeader::find_duplicate_headers(headers,
+                [&](size_t first_record, size_t repeat) {
+                    ++duplicates;
+                    note("header", "duplicate", col, repeat, headers[repeat], first_record);
+                    return true;
+                }
+            );
+        }
+    }
+
+    Json::Value report(Json::objectValue);
+    report["labels"] = Json::UInt64(labels.size());
+    report["labels_invalid_utf8"] = Json::UInt64(labels_invalid);
+    report["headers_checked"] = mapping != nullptr;
+    report["headers"] = Json::UInt64(num_headers);
+    report["headers_invalid_utf8"] = Json::UInt64(headers_invalid);
+    report["duplicate_record_headers"] = Json::UInt64(duplicates);
+    report["first_invalid"] = first;
+    report["names_ok"] = !labels_invalid && !headers_invalid && !duplicates;
+    return report;
+}
+
+// --check-names on the annotation |fname|: its label encoder and, for a coordinate annotation,
+// the record mapping the loader reads beside it, never the matrix. The report is the only
+// thing written to stdout (the logger's info level goes there too, so nothing is logged at
+// it). Returns whether every check holds.
+bool check_index_names(const std::string &fname, const Config &config) {
+    std::vector<std::string> labels;
+    try {
+        labels = read_labels(fname);
+    } catch (const std::exception &e) {
+        logger->error("Cannot read the labels of '{}': {}", fname, e.what());
+        exit(1);
+    }
+
+    std::unique_ptr<annot::CoordToHeader> mapping;
+    auto annotation = initialize_annotation(fname, config);
+    if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(&annotation->get_matrix())) {
+        const std::string seqs = utils::remove_suffix(fname, annotation->file_extension())
+                + annot::CoordToHeader::kExtension;
+        if (std::filesystem::exists(seqs)) {
+            mapping = std::make_unique<annot::CoordToHeader>();
+            if (!mapping->load(seqs))
+                exit(1);
+            logger->trace("Checking the names of '{}' and of its record mapping '{}'",
+                          fname, seqs);
+        } else {
+            logger->trace("Checking the names of '{}' (no record mapping at '{}')", fname, seqs);
+        }
+    } else {
+        logger->trace("Checking the names of '{}' (not a coordinate annotation: no record"
+                      " mapping)", fname);
+    }
+
+    const Json::Value report = index_names_report(labels, mapping.get());
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "  ";
+    std::cout << Json::writeString(builder, report) << std::endl;
+    return report["names_ok"].asBool();
+}
+
 int print_stats(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
 
+    bool names_ok = true;
+    auto annotation_stats = [&](const std::string &file) {
+        if (!config->check_names) {
+            print_annotation_stats(file, *config);
+        } else if (!check_index_names(file, *config)) {
+            names_ok = false;
+        }
+    };
+
     for (const auto &file : files) {
         if (utils::ends_with(file, ".annodbg")) {
-            print_annotation_stats(file, *config);
+            annotation_stats(file);
             continue;
         }
 
@@ -455,10 +569,10 @@ int print_stats(Config *config) {
     }
 
     for (const std::string &file : config->infbase_annotators) {
-        print_annotation_stats(file, *config);
+        annotation_stats(file);
     }
 
-    return 0;
+    return names_ok ? 0 : 1;
 }
 
 int compare(Config *config) {
