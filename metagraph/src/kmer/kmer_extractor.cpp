@@ -426,7 +426,7 @@ __VA_ARGS__ KmerExtractorT<LogSigma>
 
 KmerExtractorTDecl()
 ::KmerExtractorT(const char alph[],
-                 const uint8_t char_to_code[128],
+                 std::span<const uint8_t, 128> char_to_code,
                  const std::vector<uint8_t> &complement_code)
       : alphabet(alph),
         char_to_code_(char_to_code),
@@ -439,7 +439,7 @@ KmerExtractorTDecl()
 
 KmerExtractorTDecl(typename KmerExtractorT<LogSigma>::TAlphabet)
 ::encode(char s) const {
-    return ::encode(s, char_to_code_);
+    return ::encode(s, char_to_code_.data());
 }
 
 KmerExtractorTDecl(char)
@@ -449,7 +449,7 @@ KmerExtractorTDecl(char)
 
 KmerExtractorTDecl(std::vector<typename KmerExtractorT<LogSigma>::TAlphabet>)
 ::encode(std::string_view sequence) const {
-    return ::encode(sequence, char_to_code_);
+    return ::encode(sequence, char_to_code_.data());
 }
 
 KmerExtractorTDecl(std::string)
