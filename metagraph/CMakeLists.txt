@@ -526,12 +526,12 @@ endforeach()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/compile_definitions.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/gen/common/compile_definitions.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/include/common/compile_definitions.hpp
     @ONLY
 )
 
 # Add the generated header to include path
-target_include_directories(metagraph-core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_include_directories(metagraph-core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/gen/include)
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})

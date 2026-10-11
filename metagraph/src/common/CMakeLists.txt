@@ -66,8 +66,8 @@ set(_USE_FOLLY 1)
 set(MODE_TI 1)
 set(SPDLOG_FMT_EXTERNAL 1)
 configure_file(compile_definitions.hpp.in
-    ${PROJECT_BINARY_DIR}/gen/common/compile_definitions.hpp @ONLY)
-target_include_directories(metagraph_common PUBLIC ${PROJECT_BINARY_DIR}/gen)
+    ${PROJECT_BINARY_DIR}/gen/include/common/compile_definitions.hpp @ONLY)
+target_include_directories(metagraph_common PUBLIC ${PROJECT_BINARY_DIR}/gen/include)
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
