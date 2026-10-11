@@ -71,3 +71,6 @@
 [submodule "metagraph/external-libraries/sshash"]
 	path = metagraph/external-libraries/sshash
 	url = https://github.com/ratschlab/sshash
+[submodule "metagraph/external-libraries/fmt"]
+	path = metagraph/external-libraries/fmt
+	url = https://github.com/fmtlib/fmt.git

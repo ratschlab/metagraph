@@ -84,9 +84,17 @@ if(NOT CPPNOFS)
 endif()
 endfunction()
 
+function (buildLogging)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+set(SPDLOG_FMT_EXTERNAL ON)
+add_subdirectory(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/fmt fmt)
+add_subdirectory(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/spdlog spdlog)
+endfunction()
+
 function (findFolly)
+set(FOLLY_SOURCE_DIR ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/folly)
 unset(FOLLY_FOUND PARENT_SCOPE)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_FUNCTION_LIST_DIR})
 find_package(Jemalloc)
 
 if(Jemalloc_FOUND)
@@ -102,44 +110,31 @@ set(_folly_old_req_includes "${CMAKE_REQUIRED_INCLUDES}")
 if(JEMALLOC_INCLUDE_DIRS)
   list(APPEND CMAKE_REQUIRED_INCLUDES ${JEMALLOC_INCLUDE_DIRS})
 endif()
-include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
+include(${FOLLY_SOURCE_DIR}/CMake/FollyConfigChecks.cmake)
 set(CMAKE_REQUIRED_INCLUDES "${_folly_old_req_includes}")
 configure_file(
-  external-libraries/folly/CMake/folly-config.h.cmake
+  ${FOLLY_SOURCE_DIR}/CMake/folly-config.h.cmake
   ${PROJECT_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
 )
-# Expose spdlog's bundled fmt under the include path required by Folly.
-# Remove obsolete copies without touching unchanged headers or forcing rebuilds.
-file(GLOB_RECURSE copied_fmt_headers RELATIVE "${PROJECT_BINARY_DIR}/gen/fmt"
-     "${PROJECT_BINARY_DIR}/gen/fmt/*")
-foreach(header IN LISTS copied_fmt_headers)
-  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/spdlog/include/spdlog/fmt/bundled/${header}")
-    file(REMOVE "${PROJECT_BINARY_DIR}/gen/fmt/${header}")
-  endif()
-endforeach()
-file(COPY external-libraries/spdlog/include/spdlog/fmt/bundled/
-     DESTINATION ${PROJECT_BINARY_DIR}/gen/fmt)
-
 add_library(folly STATIC
-  external-libraries/folly/folly/lang/Exception.cpp
-  external-libraries/folly/folly/lang/SafeAssert.cpp
-  external-libraries/folly/folly/lang/ToAscii.cpp
-  external-libraries/folly/folly/ScopeGuard.cpp
-  external-libraries/folly/folly/memory/detail/MallocImpl.cpp
-  external-libraries/folly/folly/memory/Malloc.cpp
+  ${FOLLY_SOURCE_DIR}/folly/lang/Exception.cpp
+  ${FOLLY_SOURCE_DIR}/folly/lang/SafeAssert.cpp
+  ${FOLLY_SOURCE_DIR}/folly/lang/ToAscii.cpp
+  ${FOLLY_SOURCE_DIR}/folly/ScopeGuard.cpp
+  ${FOLLY_SOURCE_DIR}/folly/memory/detail/MallocImpl.cpp
+  ${FOLLY_SOURCE_DIR}/folly/memory/Malloc.cpp
 )
 target_compile_features(folly PUBLIC cxx_std_20)
 if(Jemalloc_FOUND)
   target_compile_definitions(folly PRIVATE USE_JEMALLOC JEMALLOC_NO_DEMANGLE)
 endif()
-target_include_directories(folly SYSTEM PRIVATE
-  ${JEMALLOC_INCLUDE_DIRS}
-  external-libraries/folly
-  ${PROJECT_BINARY_DIR}/external-libraries/folly/include
-  ${PROJECT_BINARY_DIR}/gen
-  ${PROJECT_SOURCE_DIR}/src/common
+target_include_directories(folly SYSTEM
+  PRIVATE ${JEMALLOC_INCLUDE_DIRS}
+  PUBLIC
+    ${FOLLY_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/external-libraries/folly/include
 )
-target_link_libraries(folly PRIVATE Boost::headers ${JEMALLOC_LIBRARIES})
+target_link_libraries(folly PUBLIC fmt::fmt PRIVATE Boost::headers ${JEMALLOC_LIBRARIES})
 set(FOLLY_FOUND TRUE PARENT_SCOPE)
 endfunction()
 

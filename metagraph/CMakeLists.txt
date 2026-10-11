@@ -331,7 +331,8 @@ IF(APPLE)
     set(CMAKE_USE_PTHREADS_INIT 1)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
-add_subdirectory(external-libraries/spdlog)
+buildLogging()
+list(APPEND METAGRAPH_PUBLIC_DEFS SPDLOG_FMT_EXTERNAL)
 set(SSHASH_BUILD_EXECUTABLES OFF)
 add_subdirectory(external-libraries/sshash SYSTEM)
 target_include_directories(sshash_static PRIVATE external-libraries/zlib)
@@ -448,6 +449,7 @@ target_include_directories(metagraph-core PUBLIC
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  external-libraries/fmt/include
   ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
@@ -547,6 +549,7 @@ set(METALIBS ${METALIBS}
   mersenne_twister
   sdust
   spdlog::spdlog
+  fmt::fmt
   sshash_static
   XXSDS_DYNAMIC
   ips4o

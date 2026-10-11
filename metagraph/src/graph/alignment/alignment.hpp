@@ -8,7 +8,7 @@
 #include <vector>
 
 #include <json/json.h>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"

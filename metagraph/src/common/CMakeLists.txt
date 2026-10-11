@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 cmake_minimum_required(VERSION 3.19)
 project(metagraph_common)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
@@ -9,6 +9,8 @@ set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
+find_package(Boost REQUIRED)
+buildLogging()
 findFolly()
 find_package(glog REQUIRED)
 checkFileSystem() # check for std::filesystem::temp_directory_path
@@ -23,7 +25,6 @@ target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall 
 target_include_directories(metagraph_common
   PRIVATE
     ${PROJECT_PARENT_DIR}/src/
-    ${PROJECT_SOURCE_DIR}/external-libraries/folly/include
   PUBLIC
     ${EXTERNAL_LIB_DIR}/asio/asio/include
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
@@ -32,7 +33,6 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    ${EXTERNAL_LIB_DIR}/spdlog/include
     ${EXTERNAL_LIB_DIR}/zlib
     /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
@@ -48,20 +48,23 @@ IF(APPLE)
     set(CMAKE_USE_PTHREADS_INIT 1)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
-set(SPDLOG_BUILD_TESTING FALSE)
-add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
-
 add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
 
 target_link_libraries(metagraph_common
   PUBLIC
-    ${FOLLY_LIBRARIES}
+    folly
     ${FILESYSTEM_LIBRARY}
     glog::glog
     spdlog::spdlog
     z
 )
 target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
+set(_USE_FOLLY 1)
+set(MODE_TI 1)
+set(SPDLOG_FMT_EXTERNAL 1)
+configure_file(compile_definitions.hpp.in
+    ${PROJECT_BINARY_DIR}/gen/common/compile_definitions.hpp @ONLY)
+target_include_directories(metagraph_common PUBLIC ${PROJECT_BINARY_DIR}/gen)
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
