@@ -38,7 +38,7 @@ static const std::vector<std::pair<std::string, GraphLoader>> kGraphLoaders = {
 
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     for (const auto &[extension, load] : kGraphLoaders) {
-        if (utils::ends_with(filename, extension))
+        if (filename.ends_with(extension))
             return load(filename);
     }
     auto exts = utils::get_firsts<std::vector<std::string>>(kGraphLoaders);

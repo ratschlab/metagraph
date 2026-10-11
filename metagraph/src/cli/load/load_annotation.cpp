@@ -18,67 +18,67 @@ const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
-    if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
+    if (filename.ends_with(annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
-    } else if (utils::ends_with(filename, annot::ColumnCoordAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::ColumnCoordAnnotator::kExtension)) {
         return Config::AnnotationType::ColumnCoord;
 
-    } else if (utils::ends_with(filename, annot::MultiBRWTCoordAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::MultiBRWTCoordAnnotator::kExtension)) {
         return Config::AnnotationType::BRWTCoord;
 
-    } else if (utils::ends_with(filename, annot::RowDiffCoordAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffCoordAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffCoord;
 
-    } else if (utils::ends_with(filename, annot::RowDiffBRWTCoordAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffBRWTCoordAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffBRWTCoord;
 
-    } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
 
-    } else if (utils::ends_with(filename, annot::RowCompressed<>::kExtension)) {
+    } else if (filename.ends_with(annot::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
-    } else if (utils::ends_with(filename, annot::MultiBRWTAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
-    } else if (utils::ends_with(filename, annot::RowDiffBRWTAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffBRWT;
 
-    } else if (utils::ends_with(filename, annot::BinRelWTAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::BinRelWTAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT;
 
-    } else if (utils::ends_with(filename, annot::RowFlatAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
-    } else if (utils::ends_with(filename, annot::RowSparseAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowSparseAnnotator::kExtension)) {
         return Config::AnnotationType::RowSparse;
 
-    } else if (utils::ends_with(filename, annot::RowDiffRowFlatAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffRowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffRowFlat;
 
-    } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffRowSparseAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
-    } else if (utils::ends_with(filename, annot::RowDiffDiskAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffDisk;
 
-    } else if (utils::ends_with(filename, annot::IntRowDiffDiskAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::IntRowDiffDiskAnnotator::kExtension)) {
         return Config::AnnotationType::IntRowDiffDisk;
 
-    } else if (utils::ends_with(filename, annot::RowDiffDiskCoordAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RowDiffDiskCoordAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffDiskCoord;
 
-    } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
-    } else if (utils::ends_with(filename, annot::RbBRWTAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::RbBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RbBRWT;
 
-    } else if (utils::ends_with(filename, annot::IntMultiBRWTAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::IntMultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::IntBRWT;
 
-    } else if (utils::ends_with(filename, annot::IntRowDiffBRWTAnnotator::kExtension)) {
+    } else if (filename.ends_with(annot::IntRowDiffBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::IntRowDiffBRWT;
 
     } else {

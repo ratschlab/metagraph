@@ -316,7 +316,7 @@ int align_to_graph(Config *config) {
     assert(config->infbase.size());
 
     // For graph-only outputs/queries, avoid starting annotation loading.
-    const bool graph_only_path = utils::ends_with(config->outfbase, ".gfa")
+    const bool graph_only_path = config->outfbase.ends_with(".gfa")
                                  || config->map_sequences;
     std::shared_ptr<DeBruijnGraph> graph;
     std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
@@ -329,7 +329,7 @@ int align_to_graph(Config *config) {
         anno_dbg_future = std::move(loaded.second);
     }
 
-    if (utils::ends_with(config->outfbase, ".gfa")) {
+    if (config->outfbase.ends_with(".gfa")) {
         gfa_map_files(config, files, *graph);
         return 0;
     }
