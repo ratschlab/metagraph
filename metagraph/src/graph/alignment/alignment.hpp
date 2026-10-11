@@ -349,8 +349,6 @@ class Alignment {
     Cigar cigar_;
 };
 
-inline std::ostream& operator<<(std::ostream &out, const Alignment &a);
-
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
         // 1) score is less, or
@@ -452,8 +450,10 @@ template <> struct formatter<mtg::graph::align::Alignment> {
 };
 } // namespace fmt
 
-inline std::ostream& mtg::graph::align::operator<<(std::ostream &out, const Alignment &a) {
+namespace mtg::graph::align {
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
     return out << fmt::format("{}", a);
 }
+} // namespace mtg::graph::align
 
 #endif  // __ALIGNER_ALIGNMENT_HPP__
