@@ -214,7 +214,7 @@ void test_bit_vector_queries() {
 
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     vector.reset(new T(numbers));
     ASSERT_TRUE(vector);
     reference_based_test(*vector, numbers);
@@ -315,7 +315,7 @@ void test_bit_vector_set(bit_vector_dyn *vector, sdsl::bit_vector *numbers) {
 TEST(bit_vector_dyn, set) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     bit_vector_dyn vector(numbers);
 
     test_bit_vector_set(&vector, &numbers);
@@ -347,7 +347,7 @@ void test_bit_vector_ins_del(bit_vector_dyn *vector,
 TEST(bit_vector_dyn, InsertDelete) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     bit_vector_dyn vector(numbers);
 
     test_bit_vector_ins_del(&vector, numbers);
@@ -364,7 +364,7 @@ TEST(bit_vector_dyn, Serialization) {
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
     for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
+        sdsl::bit_vector numbers(init_list.begin(), init_list.end());
         std::unique_ptr<bit_vector> vector { new bit_vector_dyn(numbers) };
         ASSERT_TRUE(vector);
         std::ofstream outstream(test_dump_basename, std::ios::binary);
@@ -380,13 +380,29 @@ TEST(bit_vector_dyn, Serialization) {
     }
 }
 
-template <class bit_vector_type>
-uint64_t space_taken(const bit_vector_type &vec) {
+template <class T>
+uint64_t serialized_size_in_bits(const T &vec) {
     std::ofstream outstream(test_dump_basename, std::ios::binary);
     vec.serialize(outstream);
     outstream.close();
     std::ifstream instream(test_dump_basename, std::ios::binary | std::ifstream::ate);
     return instream.tellg() * 8;
+}
+
+template <class T>
+uint64_t approximate_memory_in_bits(const T &vec) {
+    // Serialized storage approximates the allocated buffers, not the objects.
+    uint64_t object_bytes = sizeof(T);
+    if constexpr (std::is_base_of_v<bit_vector_adaptive, T>) {
+        // Adaptive vectors own a separately allocated concrete vector.
+        switch (vec.representation_tag()) {
+            case bit_vector_adaptive::SD_VECTOR: object_bytes += sizeof(bit_vector_sd); break;
+            case bit_vector_adaptive::RRR_VECTOR: object_bytes += sizeof(bit_vector_rrr<>); break;
+            case bit_vector_adaptive::STAT_VECTOR: object_bytes += sizeof(bit_vector_stat); break;
+            case bit_vector_adaptive::IL4096_VECTOR: object_bytes += sizeof(bit_vector_il<4096>); break;
+        }
+    }
+    return object_bytes * 8 + serialized_size_in_bits(vec);
 }
 
 TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
@@ -403,7 +419,7 @@ TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
             const double TOLERANCE = size > 1'000'000 ? 0.01 : 0.012;
             for (double density : { .05, .2, .4, .5, .7, .9, .95 }) {
                 sdsl::bit_vector bv = gen.generate_random_column(size, density);
-                uint64_t footprint = space_taken(TypeParam(bv));
+                uint64_t footprint = approximate_memory_in_bits(TypeParam(bv));
                 EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
                         footprint * (1 - TOLERANCE)) << "Density: " << density;
                 EXPECT_LE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
@@ -422,7 +438,7 @@ TEST(select_support_mcl, PredictedMemoryFootprint) {
         for (double density : { .05, .2, .4, .5, .7, .9, .98 }) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
 
-            uint64_t footprint = space_taken(sdsl::select_support_mcl<1>(&bv));
+            uint64_t footprint = serialized_size_in_bits(sdsl::select_support_mcl<1>(&bv));
             EXPECT_GE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
                       footprint * (1 - TOLERANCE)) << "Size: " << size << "\tDensity: " << density;
             EXPECT_LE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
@@ -441,7 +457,7 @@ TYPED_TEST(BitVectorTest, Serialization) {
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
     for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
+        sdsl::bit_vector numbers(init_list.begin(), init_list.end());
         std::unique_ptr<bit_vector> vector { new TypeParam(numbers) };
         ASSERT_TRUE(vector);
         std::ofstream outstream(test_dump_basename, std::ios::binary);
@@ -471,7 +487,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
         std::ofstream outstream(test_dump_basename, std::ios::binary);
         std::unique_ptr<bit_vector> vector { new TypeParam(sdsl::bit_vector(100, 0)) };
         vector->serialize(outstream);
-        sdsl::bit_vector numbers(init_list);
+        sdsl::bit_vector numbers(init_list.begin(), init_list.end());
         vector.reset(new TypeParam(numbers));
         vector->serialize(outstream);
         outstream.close();
@@ -499,7 +515,7 @@ TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
     for (auto init_list : init_lists) {
-        sdsl::bit_vector bv(init_list);
+        sdsl::bit_vector bv(init_list.begin(), init_list.end());
         {
             std::ofstream outstream(test_dump_basename, std::ios::binary);
             sdsl::sd_vector<>(bv).serialize(outstream);
@@ -523,7 +539,7 @@ TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
 TYPED_TEST(BitVectorTest, MoveConstructor) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     TypeParam first(numbers);
     TypeParam second(std::move(first));
     reference_based_test(second, numbers);
@@ -533,7 +549,7 @@ TYPED_TEST(BitVectorTest, MoveConstructor) {
 TYPED_TEST(BitVectorTest, MoveAssignment) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     TypeParam first(numbers);
     TypeParam second;
     second = std::move(first);
@@ -543,7 +559,7 @@ TYPED_TEST(BitVectorTest, MoveAssignment) {
 TEST(bit_vector_sd, MoveAssignmentSparse) {
     std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     bit_vector_sd first(numbers);
     ASSERT_FALSE(first.is_inverted());
     bit_vector_sd second;
@@ -554,7 +570,7 @@ TEST(bit_vector_sd, MoveAssignmentSparse) {
 TEST(bit_vector_sd, MoveAssignmentDense) {
     std::initializer_list<bool> init_list = { 1, 1, 0, 1, 0, 0, 1, 0,
                                               1, 1, 0, 1, 1, 1, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     bit_vector_sd first(numbers);
     ASSERT_TRUE(first.is_inverted());
     bit_vector_sd second;
@@ -566,7 +582,7 @@ TEST(bit_vector_sd, InitializeByBitsSparse) {
     std::vector<uint64_t> set_bits = { 3, 6, 9, 14, 15 };
     std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     bit_vector_sd first(numbers);
     ASSERT_FALSE(first.is_inverted());
     bit_vector_sd second(
@@ -583,7 +599,7 @@ TEST(bit_vector_sd, InitializeByBitsDense) {
     std::vector<uint64_t> set_bits = { 0, 1, 3, 6, 8, 9, 11, 12, 13, 14, 15 };
     std::initializer_list<bool> init_list = { 1, 1, 0, 1, 0, 0, 1, 0,
                                               1, 1, 0, 1, 1, 1, 1, 1 };
-    sdsl::bit_vector numbers(init_list);
+    sdsl::bit_vector numbers(init_list.begin(), init_list.end());
     bit_vector_sd first(numbers);
     ASSERT_TRUE(first.is_inverted());
     bit_vector_sd second(

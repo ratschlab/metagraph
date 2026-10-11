@@ -30,8 +30,6 @@ target_include_directories(metagraph_succinct
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar
 )
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
-
 buildProgressBar(${EXTERNAL_LIB_DIR} progress_bar)
 buildMersenneTwister(${EXTERNAL_LIB_DIR} mesenne_twister)
 
@@ -39,11 +37,9 @@ target_link_libraries(metagraph_succinct
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
-    ${SDSL_LIBRARY}
     mersenne_twister
     progress_bar
     kmer
     metagraph_common
     metagraph_graph_base
 )
-

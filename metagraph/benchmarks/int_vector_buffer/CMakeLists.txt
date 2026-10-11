@@ -16,15 +16,6 @@ findOpenMP()
 enable_testing()
 findGTest()
 
-# Check if 128 bit integers are supported
-try_compile(MODE_TI
-  "${PROJECT_BINARY_DIR}"
-  "${EXTERNAL_LIB_DIR}/sdsl-lite/CMakeModules/check_mode_ti.cpp"
-)
-if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
-endif()
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   file(STRINGS "/proc/cpuinfo" _cpuinfo)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -62,9 +53,6 @@ include_directories(
   ${EXTERNAL_LIB_DIR}/spdlog/include
   "../../src/"
 )
-link_directories(
-  ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
 
 file(GLOB benchmark_files "*.cpp")
 
@@ -72,7 +60,6 @@ add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM
 
 add_executable(benchmark_int_vector_buffer ${benchmark_files})
 target_link_libraries(benchmark_int_vector_buffer
-  -lsdsl
   ${OpenMP_CXX_LIBRARIES}
   benchmark_main
   benchmark

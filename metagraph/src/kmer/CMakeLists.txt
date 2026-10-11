@@ -27,11 +27,9 @@ target_include_directories(kmer
     ..
 )
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(kmer
   PUBLIC
     ${FOLLY_LIBRARIES}
-    ${SDSL_LIBRARY}
     metagraph_common
 )
 

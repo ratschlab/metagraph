@@ -20,7 +20,6 @@ list(FILTER test_files  EXCLUDE REGEX "benchmark_.*")
 
 add_executable(tests ${test_files})
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_include_directories(tests
   PRIVATE
     ${GTEST_INCLUDE_DIRS}
@@ -39,7 +38,7 @@ target_link_libraries(tests
     test_utils
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
-    ${SDSL_LIBRARY}
+
 )
 target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 

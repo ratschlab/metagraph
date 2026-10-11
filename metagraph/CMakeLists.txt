@@ -157,11 +157,11 @@ if(APPLE)
 endif()
 
 # Check if 128 bit integers are supported
-try_compile(MODE_TI
+try_compile(METAGRAPH_HAS_UINT128
   "${PROJECT_BINARY_DIR}"
-  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
+  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/MODETI.cpp"
 )
-if(MODE_TI)
+if(METAGRAPH_HAS_UINT128)
   list(APPEND METAGRAPH_PUBLIC_DEFS MODE_TI)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
       add_compile_options(-mcx16)
@@ -266,23 +266,6 @@ endif()
 set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-
-# Build sdsl-lite out-of-tree and install locally to avoid target clashes
-include(ExternalProject)
-set(SDSL_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/sdsl)
-ExternalProject_Add(SDSL
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/sdsl-lite
-  CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
-             -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
-             -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
-             -DCMAKE_POSITION_INDEPENDENT_CODE=${CMAKE_POSITION_INDEPENDENT_CODE}
-)
-# Delete gtest headers after install
-ExternalProject_Add_Step(SDSL remove_gtest
-  COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
-  DEPENDEES install
-)
-
 
 add_library(ips4o INTERFACE)
 target_include_directories(ips4o INTERFACE external-libraries/ips4o)
@@ -410,6 +393,7 @@ else()
   set(HTSLIB_CC "${CMAKE_C_COMPILER}")
 endif()
 
+include(ExternalProject)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
@@ -464,7 +448,6 @@ add_library(metagraph-core STATIC ${metagraph_core_files})
 target_include_directories(metagraph-core PUBLIC
   ${PROJECT_SOURCE_DIR}/src
   external-libraries/KMC/kmc_api
-  ${SDSL_INSTALL}/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/cpp_progress_bar
@@ -490,7 +473,6 @@ endif()
 target_link_directories(metagraph-core INTERFACE
   ${PROJECT_BINARY_DIR}/KMC
   ${HTSLIB_INSTALL}/lib
-  ${SDSL_INSTALL}/lib
 )
 
 if(APPLE)
@@ -504,6 +486,7 @@ endif()
 
 # TODO: move ASIO out of here once it replaces sprintf with snprintf
 target_include_directories(metagraph-core SYSTEM PUBLIC
+  external-libraries/sdsl-lite/include
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
 )
@@ -557,7 +540,7 @@ target_include_directories(metagraph-core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/gen
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
-add_dependencies(metagraph-core HTSLIB SDSL)
+add_dependencies(metagraph-core HTSLIB)
 
 
 set(METALIBS ${METALIBS}
@@ -566,7 +549,6 @@ set(METALIBS ${METALIBS}
   zlib
   deflate
   Boost::iostreams
-  -lsdsl
   jsoncpp_lib
   progress_bar
   mersenne_twister
@@ -729,7 +711,6 @@ if(LINK_LIBS)
 endif()
 
 # Add external libraries built by ExternalProject (not CMake targets)
-string(APPEND BUNDLE_LIBS_LIST ";${SDSL_INSTALL}/lib/libsdsl.a")
 string(APPEND BUNDLE_LIBS_LIST ";${HTSLIB_INSTALL}/lib/libhts.a")
 string(APPEND BUNDLE_LIBS_LIST ";${PROJECT_BINARY_DIR}/KMC/libKMC.a")
 
@@ -738,7 +719,6 @@ string(APPEND BUNDLE_LIBS_LIST ";${PROJECT_BINARY_DIR}/KMC/libKMC.a")
 install(CODE "
   set(PROJECT_BINARY_DIR \"${PROJECT_BINARY_DIR}\")
   set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
-  set(SDSL_INSTALL \"${SDSL_INSTALL}\")
   set(HTSLIB_INSTALL \"${HTSLIB_INSTALL}\")
   set(CMAKE_AR \"${CMAKE_AR}\")
   set(BUNDLE_LIBS_LIST \"${BUNDLE_LIBS_LIST}\")
@@ -841,7 +821,7 @@ if(METAGRAPH_BUILD_EXECUTABLE)
 
   add_executable(benchmarks ${benchmark_files})
   target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-  target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
+  target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
 
   target_compile_options(benchmarks PRIVATE)
 

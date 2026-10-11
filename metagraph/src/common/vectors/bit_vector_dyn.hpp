@@ -78,7 +78,7 @@ bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &v) {
 }
 
 bit_vector_dyn::bit_vector_dyn(std::initializer_list<bool> init)
-      : bit_vector_dyn(sdsl::bit_vector(init)) {}
+      : bit_vector_dyn(sdsl::bit_vector(init.begin(), init.end())) {}
 
 std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
     return std::make_unique<bit_vector_dyn>(*this);
