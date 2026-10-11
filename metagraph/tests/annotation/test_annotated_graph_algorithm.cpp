@@ -126,6 +126,38 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByManyLabels) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    for (size_t num_labels : {127, 128, 255, 256}) {
+        std::vector<std::string> sequences(num_labels, "AAACCCGGG");
+        std::vector<std::string> labels;
+        tsl::hopscotch_set<std::string> initial_labels, later_labels;
+        for (size_t i = 0; i < num_labels; ++i) {
+            labels.push_back(std::to_string(i));
+            (i < num_labels / 2 ? initial_labels : later_labels).insert(labels.back());
+        }
+        auto anno_graph = build_anno_graph<Graph, Annotation>(3, sequences, labels);
+        std::unordered_set<std::string> expected;
+        anno_graph->get_graph().call_kmers([&](auto, const std::string &kmer) {
+            expected.insert(kmer);
+        });
+        DifferentialAssemblyConfig config {
+            .label_mask_in_unitig_fraction = 0.0,
+            .label_mask_in_kmer_fraction = 1.0,
+            .label_mask_out_unitig_fraction = 1.0,
+            .label_mask_out_kmer_fraction = 0.0
+        };
+        for (size_t threads : {1, 4}) {
+            auto masked = mask_nodes_by_label(*anno_graph, initial_labels, {}, later_labels, {},
+                                              config, threads);
+            std::unordered_set<std::string> observed;
+            masked->call_kmers([&](auto, const std::string &kmer) { observed.insert(kmer); });
+            EXPECT_EQ(expected, observed) << num_labels << " labels, " << threads << " threads";
+        }
+    }
+}
+
 template <class Graph, class Annotation = ColumnCompressed<>>
 void test_mask_unitigs(double inlabel_fraction,
                        double outlabel_fraction,
