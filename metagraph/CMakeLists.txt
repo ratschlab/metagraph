@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16...3.30)
+cmake_minimum_required(VERSION 3.19...3.30)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
@@ -23,6 +23,7 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
+# Keep legacy dependency targets at C++17. Folly propagates C++20 to MetaGraph.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -274,7 +275,7 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 add_library(eigen INTERFACE)
-target_include_directories(eigen INTERFACE external-libraries/eigen)
+target_include_directories(eigen SYSTEM INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
 # Allow MetaGraph's custom Find*.cmake modules to be picked up even when the
@@ -297,7 +298,7 @@ if(APPLE)
 endif()
 
 if(APPLE)
-  if(NOT DEFINED ICU_ROOT)
+  if(NOT DEFINED ICU_ROOT AND NOT DEFINED ENV{ICU_ROOT})
     if(EXISTS ${HOMEBREW_DIR}/opt/icu4c)
       set(ICU_ROOT "${HOMEBREW_DIR}/opt/icu4c")
     else()
@@ -315,6 +316,8 @@ endif()
 
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate HINTS ENV LIBRARY_PATH
+             PATHS ${HOMEBREW_DIR}/lib REQUIRED)
 
 # makes ASIO not depend on boost (used by Simple-Web-Server via CMake variable)
 set(USE_STANDALONE_ASIO ON)
@@ -343,15 +346,6 @@ target_compile_options(zlib
     -Wno-unknown-warning-option
     -Wno-unused-parameter
     -Wno-maybe-uninitialized
-)
-
-add_library(folly STATIC
-  external-libraries/folly/folly/lang/SafeAssert.cpp
-  external-libraries/folly/folly/lang/ToAscii.cpp
-)
-target_include_directories(folly PRIVATE
-  external-libraries/folly
-  ${PROJECT_BINARY_DIR}/external-libraries/folly/include
 )
 
 add_library(progress_bar STATIC
@@ -457,7 +451,6 @@ target_include_directories(metagraph-core PUBLIC
   ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/jsoncpp/include
   external-libraries/DYNAMIC/include
 )
 
@@ -477,7 +470,6 @@ target_link_directories(metagraph-core INTERFACE
 
 if(APPLE)
   target_link_directories(metagraph-core INTERFACE ${HOMEBREW_DIR}/lib)
-  target_include_directories(metagraph-core SYSTEM PUBLIC ${HOMEBREW_DIR}/include)
 endif()
 
 if(ICU_DATA_LIBRARY_PATH)
@@ -487,6 +479,7 @@ endif()
 # TODO: move ASIO out of here once it replaces sprintf with snprintf
 target_include_directories(metagraph-core SYSTEM PUBLIC
   external-libraries/sdsl-lite/include
+  external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
 )
@@ -496,11 +489,11 @@ findFolly()
 if(FOLLY_FOUND)
   list(APPEND METAGRAPH_PUBLIC_DEFS _USE_FOLLY)
   if(Jemalloc_FOUND)
-    list(APPEND METAGRAPH_PUBLIC_DEFS USE_JEMALLOC)
+    # Keep the stable je_* aliases available before any jemalloc header inclusion.
+    list(APPEND METAGRAPH_PUBLIC_DEFS USE_JEMALLOC JEMALLOC_NO_DEMANGLE)
   else()
     message(WARNING "Jemalloc not found, some optimizations will be disabled.")
   endif()
-  set(METALIBS ${METALIBS} fbvector)
   target_include_directories(metagraph-core SYSTEM PUBLIC
     external-libraries/folly
     ${PROJECT_BINARY_DIR}/external-libraries/folly/include
@@ -547,7 +540,7 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts
   zlib
-  deflate
+  ${LIBDEFLATE_LIBRARY}
   Boost::iostreams
   jsoncpp_lib
   progress_bar
@@ -578,52 +571,8 @@ if(BUILD_STATIC AND NOT APPLE)
   set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl -Wl,--whole-archive -lpthread -Wl,--no-whole-archive)
 endif()
 
-# check for std::filesystem::temp_directory_path
-include(CheckCXXSourceRuns)
-set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-check_cxx_source_runs("
-    #include <iostream>
-    #include <filesystem>
-    int main() {
-        std::cout << std::filesystem::temp_directory_path();
-        return 0;
-    }
-" CPPNOFS)
-if(NOT CPPNOFS)
-  set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-  set(CMAKE_REQUIRED_LIBRARIES "c++fs")
-  check_cxx_source_runs("
-      #include <iostream>
-      #include <filesystem>
-      int main() {
-          std::cout << std::filesystem::temp_directory_path();
-          return 0;
-      }
-  " CPPFS)
-  unset(CMAKE_REQUIRED_FLAGS)
-  unset(CMAKE_REQUIRED_LIBRARIES)
-  if(CPPFS)
-    set(METALIBS ${METALIBS} -lc++fs)
-  else()
-    set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-    set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
-    check_cxx_source_runs("
-        #include <iostream>
-        #include <filesystem>
-        int main() {
-            std::cout << std::filesystem::temp_directory_path();
-            return 0;
-        }
-    " STDCPPFS)
-    unset(CMAKE_REQUIRED_FLAGS)
-    unset(CMAKE_REQUIRED_LIBRARIES)
-    if(STDCPPFS)
-      set(METALIBS ${METALIBS} -lstdc++fs)
-    else()
-      message(FATAL_ERROR "std::filesystem not found")
-    endif()
-  endif()
-endif()
+checkFileSystem()
+list(APPEND METALIBS ${FILESYSTEM_LIBRARY})
 
 target_link_libraries(metagraph-core PUBLIC ${METALIBS})
 add_subdirectory(external-libraries/Simple-Web-Server)

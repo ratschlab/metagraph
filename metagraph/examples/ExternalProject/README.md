@@ -25,6 +25,7 @@ See [`CMakeLists.txt`](CMakeLists.txt) for the complete configuration:
 Minimal example:
 
 ```cmake
+cmake_minimum_required(VERSION 3.19)
 include(ExternalProject)
 
 ExternalProject_Add(metagraph-external
@@ -39,6 +40,7 @@ ExternalProject_Add(metagraph-external
 ExternalProject_Get_Property(metagraph-external INSTALL_DIR)
 
 add_executable(your_app main.cpp)
+target_compile_features(your_app PRIVATE cxx_std_20)
 
 target_include_directories(your_app PRIVATE ${INSTALL_DIR}/include)
 target_link_directories(your_app PRIVATE ${INSTALL_DIR}/lib)

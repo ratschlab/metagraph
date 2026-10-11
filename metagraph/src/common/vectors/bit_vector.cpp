@@ -174,7 +174,7 @@ bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t r = 1; r <= m; ++r) {
-            set_bit(result.data(), select1(r), true, std::memory_order_relaxed);
+            set_bit(result.data(), select1(r), true, __ATOMIC_RELAXED);
         }
 
     } else if ((size() - m)
@@ -186,7 +186,7 @@ bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t r = 1; r <= num_zeros; ++r) {
-            unset_bit(result.data(), select0(r), true, std::memory_order_relaxed);
+            unset_bit(result.data(), select0(r), true, __ATOMIC_RELAXED);
         }
 
     } else {

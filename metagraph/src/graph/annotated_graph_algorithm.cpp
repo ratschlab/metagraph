@@ -16,7 +16,7 @@ typedef AnnotatedDBG::Annotator::Label Label;
 
 typedef std::function<size_t()> LabelCountCallback;
 
-constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
+constexpr int MO_RELAXED = __ATOMIC_RELAXED;
 
 uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
                       uint64_t i,
@@ -410,13 +410,13 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     std::atomic_thread_fence(std::memory_order_release);
 
     masked_graph.call_unitigs([&](const std::string &unitig, const std::vector<node_index> &path) {
-        total_unitigs.fetch_add(1, MO_RELAXED);
+        total_unitigs.fetch_add(1, std::memory_order_relaxed);
 
         size_t last = 0;
         for (const auto &pair : get_kept_intervals(unitig, path)) {
             const auto &[begin, end] = pair;
-            kept_unitigs.fetch_add(1, MO_RELAXED);
-            num_kept_nodes.fetch_add(end - begin, MO_RELAXED);
+            kept_unitigs.fetch_add(1, std::memory_order_relaxed);
+            num_kept_nodes.fetch_add(end - begin, std::memory_order_relaxed);
             for ( ; last < begin; ++last) {
                 unset_bit(mask.data(), path[last], parallel, MO_RELAXED);
             }
