@@ -12,6 +12,7 @@
   "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)",
   "masked_no_map": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --no-coord-mapping --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy, its .seqs not loaded)",
   "masked_small_predicate_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-predicate-labels 4 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a predicate may list 4 names)",
+  "masked_protein_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-mismatches-protein 1 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a peptide may be searched within 1 substituted residue, a dna or iupac pattern within 3)",
   "hash": "server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg --index-release fixtures-mini_refseq  (a hash graph of 1296536.fa at k = 31, column annotation by file name)",
   "utf8_labels": "server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg --index-release fixtures-mini_refseq  (a BASIC graph at k = 31 of two records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, and C x 40 under the valid header label\\ufffd, built with --mask-dummy; column annotation by header)"
  },
@@ -1374,6 +1375,141 @@
    "hand_made": false,
    "headers": {},
    "shows": "400 representation_unsupported: a graph the engine does not recognise (a hash graph), whatever the request asks"
+  },
+  "pattern_capabilities_protein_cap": {
+   "server": "masked_protein_cap",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /pattern/capabilities of the masked copy served with --pattern-max-mismatches-protein 1 (the staging configuration): the full block's mismatches object (SPEC §21.12) with max {dna 3, iupac 3, protein 1}, default 0, the units, protein_substitutes sense_codons, edits [substitution], order mismatches_first, levels_rule, and later_increment (the patterns longer than k, the labels, a predicate, the supported paths)"
+  },
+  "mismatch_neighbours": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_mismatches 2 on a 31-mer (one offset: the k-mer neighbours of NOTE-mismatch-search.md): counts.contexts.by_mismatches exact per level (2, 2, 2), the total their sum; every result with its level (mismatches) and its substitutions in the submitted pattern's coordinates on both strands (position 17 A -> G; 17 and 21 C -> T), the closest first; limits.max_mismatches, the entry's mismatch_information_bits (49.9 of 62), work.steps_by_mismatches"
+  },
+  "mismatch_primer": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode count, a 20-mer within 2 substitutions at every offset: by_mismatches (24, 24, 24) beside by_offset and by_strand, which stay totals over the levels"
+  },
+  "mismatch_iupac": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "an IUPAC pattern within 1 substitution: a substitution is a base outside the position's set (the R at position 8 admits the variants that were level 1 of the exact 20-mer: level 0 now 48), never at N (position 15); the level-2 variants are level 1 (position 12 C -> T)"
+  },
+  "mismatch_peptide": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a peptide within one substituted residue (SPEC §21.3, sense substitutes): 10 exact contexts and 8 at level 1, each result's residue_substitution naming the residue, the residue found and its codon in the peptide's reading direction (E -> A GCG, H -> Y TAT), on both strands"
+  },
+  "mismatch_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode partial within 2 substitutions: the first max_contexts (3) in (mismatches, node, offset, orientation) order, the closest first (both exact contexts, then one at level 1), cut max_contexts; the counts per level exact"
+  },
+  "mismatch_stop_level": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_steps spent inside the work of level 2: levels 0 and 1 exact (the passes, SPEC §21.4), level 2 at_least (1 of its 2 contexts found), the total at_least, stop {discovery, max_steps, mismatch_level 2}, steps_by_mismatches (62, 650, 788)"
+  },
+  "mismatch_stop_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same stop in mode partial: the levels below the stopped one released whole and the level-2 context found before the stop, cut max_steps"
+  },
+  "mismatch_stop_unknown": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_steps spent in the first step of level 1: level 0 exact, level 1 at_least 0, level 2 unknown (never started), stop.mismatch_level 1, steps_by_mismatches (62, 1, 0)"
+  },
+  "mismatch_unmasked": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the mini as built (no mask) within 2 substitutions: the counts per level exact where the search proves them or the check of few unchecked candidates settles them, else bounds with an estimate (SPEC §21.6)"
+  },
+  "mismatch_slots": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the error slots of SPEC §21.8: a 16-mer below the floor within 2 substitutions (21.9 bits; max_mismatches_within_floor 1: within 1 it would be served); a pattern longer than k (mismatches_above_cap, max_mismatches_cap 0: a later increment, its anchor windows' bits stated); the third pattern answered"
+  },
+  "mismatch_above_cap": {
+   "server": "masked_protein_cap",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a server with --pattern-max-mismatches-protein 1: a peptide asked within 2 substitutions is answered in its slot (mismatches_above_cap, max_mismatches_cap 1, never lowered), the dna pattern beside it answered"
+  },
+  "mismatch_zero": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_mismatches 0 is the field's absence: the answer of the `count` fixture, byte for byte apart from timing (nothing of SPEC §21 in it)"
+  },
+  "mismatch_invalid": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 invalid_request: max_mismatches outside 0 .. 3 (the contract's maximum; a fraction, a string, null or a boolean alike)"
+  },
+  "mismatch_later_increment": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 later_increment: substitutions with output.labels \"all\" (likewise \"predicate_only\", a predicate or long_search \"supported_paths\") are not served yet (SPEC §21.16; the capabilities' mismatches.later_increment)"
   },
   "deadline_503": {
    "server": "masked",

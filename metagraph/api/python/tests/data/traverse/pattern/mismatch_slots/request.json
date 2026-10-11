@@ -1,0 +1,18 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGT",
+   "id": "floor"
+  },
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "long"
+  },
+  {
+   "dna": "GTTATCGTTTTTCAGCAACCCCTTGTATCTG",
+   "id": "ok"
+  }
+ ],
+ "max_mismatches": 2,
+ "mode": "count"
+}

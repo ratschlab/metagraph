@@ -1,0 +1,1046 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_mismatches": 1,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_mismatches": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 48
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 24
+      }
+     },
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 6
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 36
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 36
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 6
+     },
+     "unit": "graph_contexts",
+     "value": 72
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "var20_RN",
+   "information_bits": 37.0,
+   "kind": "iupac",
+   "length": 20,
+   "max_mismatches": 1,
+   "min_anchor_information_bits": null,
+   "min_anchor_mismatch_information_bits": null,
+   "mismatch_information_bits": 31.1926450779424,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "TTTCAGCARCCCCTTNTATC",
+   "results": [
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "GAAAGCCAGATACAAGGGGCTGCTGAAAAAC",
+     "mismatches": 0,
+     "node": 5167,
+     "offset": 8,
+     "row": 5166,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "GAAAGCCAGATACAAGGGGTTGCTGAAAAAC",
+     "mismatches": 0,
+     "node": 5177,
+     "offset": 8,
+     "row": 5176,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "TGAAAGCCAGATACAAGGGGCTGCTGAAAAA",
+     "mismatches": 0,
+     "node": 16828,
+     "offset": 9,
+     "row": 16827,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "TGAAAGCCAGATACAAGGGGTTGCTGAAAAA",
+     "mismatches": 0,
+     "node": 16857,
+     "offset": 9,
+     "row": 16856,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "GTGAAAGCCAGATACAAGGGGCTGCTGAAAA",
+     "mismatches": 0,
+     "node": 57787,
+     "offset": 10,
+     "row": 57786,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "GTGAAAGCCAGATACAAGGGGTTGCTGAAAA",
+     "mismatches": 0,
+     "node": 57880,
+     "offset": 10,
+     "row": 57879,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "CGTGAAAGCCAGATACAAGGGGCTGCTGAAA",
+     "mismatches": 0,
+     "node": 277775,
+     "offset": 11,
+     "row": 277774,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "CGTGAAAGCCAGATACAAGGGGTTGCTGAAA",
+     "mismatches": 0,
+     "node": 278259,
+     "offset": 11,
+     "row": 278258,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "CAGATACAAGGGGCTGCTGAAAAACGATAAC",
+     "mismatches": 0,
+     "node": 296479,
+     "offset": 2,
+     "row": 296478,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "CAGATACAAGGGGTTGCTGAAAAACGATAAC",
+     "mismatches": 0,
+     "node": 296480,
+     "offset": 2,
+     "row": 296479,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TTTTCAGCAACCCCTTGTATCTGGCTTTCAC",
+     "mismatches": 0,
+     "node": 842765,
+     "offset": 1,
+     "row": 842764,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TTTTCAGCAGCCCCTTGTATCTGGCTTTCAC",
+     "mismatches": 0,
+     "node": 842766,
+     "offset": 1,
+     "row": 842765,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "AGCCAGATACAAGGGGCTGCTGAAAAACGAT",
+     "mismatches": 0,
+     "node": 923139,
+     "offset": 5,
+     "row": 923138,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "AGCCAGATACAAGGGGTTGCTGAAAAACGAT",
+     "mismatches": 0,
+     "node": 923140,
+     "offset": 5,
+     "row": 923139,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "CCAGATACAAGGGGCTGCTGAAAAACGATAA",
+     "mismatches": 0,
+     "node": 1383235,
+     "offset": 3,
+     "row": 1383234,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "CCAGATACAAGGGGTTGCTGAAAAACGATAA",
+     "mismatches": 0,
+     "node": 1383236,
+     "offset": 3,
+     "row": 1383235,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "AAAGCCAGATACAAGGGGCTGCTGAAAAACG",
+     "mismatches": 0,
+     "node": 1533188,
+     "offset": 7,
+     "row": 1533187,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "AAAGCCAGATACAAGGGGTTGCTGAAAAACG",
+     "mismatches": 0,
+     "node": 1533189,
+     "offset": 7,
+     "row": 1533188,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "AGATACAAGGGGCTGCTGAAAAACGATAACC",
+     "mismatches": 0,
+     "node": 1623667,
+     "offset": 1,
+     "row": 1623666,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "AGATACAAGGGGTTGCTGAAAAACGATAACC",
+     "mismatches": 0,
+     "node": 1623668,
+     "offset": 1,
+     "row": 1623667,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TTTCAGCAACCCCTTGTATCTGGCTTTCACG",
+     "mismatches": 0,
+     "node": 1744289,
+     "offset": 0,
+     "row": 1744288,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TTTCAGCAGCCCCTTGTATCTGGCTTTCACG",
+     "mismatches": 0,
+     "node": 1744290,
+     "offset": 0,
+     "row": 1744289,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "GATACAAGGGGCTGCTGAAAAACGATAACCA",
+     "mismatches": 0,
+     "node": 1964683,
+     "offset": 0,
+     "row": 1964682,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "GATACAAGGGGTTGCTGAAAAACGATAACCA",
+     "mismatches": 0,
+     "node": 1964684,
+     "offset": 0,
+     "row": 1964683,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "ATCGTTTTTCAGCAACCCCTTGTATCTGGCT",
+     "mismatches": 0,
+     "node": 3451401,
+     "offset": 6,
+     "row": 3451400,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "ATCGTTTTTCAGCAGCCCCTTGTATCTGGCT",
+     "mismatches": 0,
+     "node": 3451402,
+     "offset": 6,
+     "row": 3451401,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "GGTTATCGTTTTTCAGCAACCCCTTGTATCT",
+     "mismatches": 0,
+     "node": 3776855,
+     "offset": 10,
+     "row": 3776854,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "GGTTATCGTTTTTCAGCAGCCCCTTGTATCT",
+     "mismatches": 0,
+     "node": 3776856,
+     "offset": 10,
+     "row": 3776855,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TTTTTCAGCAACCCCTTGTATCTGGCTTTCA",
+     "mismatches": 0,
+     "node": 4150966,
+     "offset": 2,
+     "row": 4150965,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TTTTTCAGCAGCCCCTTGTATCTGGCTTTCA",
+     "mismatches": 0,
+     "node": 4150967,
+     "offset": 2,
+     "row": 4150966,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "AAGCCAGATACAAGGGGCTGCTGAAAAACGA",
+     "mismatches": 0,
+     "node": 4643013,
+     "offset": 6,
+     "row": 4643012,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "AAGCCAGATACAAGGGGTTGCTGAAAAACGA",
+     "mismatches": 0,
+     "node": 4643014,
+     "offset": 6,
+     "row": 4643013,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TATCGTTTTTCAGCAACCCCTTGTATCTGGC",
+     "mismatches": 0,
+     "node": 6216457,
+     "offset": 7,
+     "row": 6216456,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TATCGTTTTTCAGCAGCCCCTTGTATCTGGC",
+     "mismatches": 0,
+     "node": 6216458,
+     "offset": 7,
+     "row": 6216457,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TTATCGTTTTTCAGCAACCCCTTGTATCTGG",
+     "mismatches": 0,
+     "node": 6581533,
+     "offset": 8,
+     "row": 6581532,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TTATCGTTTTTCAGCAGCCCCTTGTATCTGG",
+     "mismatches": 0,
+     "node": 6581534,
+     "offset": 8,
+     "row": 6581533,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGCTGCTGAAA",
+     "kmer": "GCCAGATACAAGGGGCTGCTGAAAAACGATA",
+     "mismatches": 0,
+     "node": 6984672,
+     "offset": 4,
+     "row": 6984671,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAGGGGTTGCTGAAA",
+     "kmer": "GCCAGATACAAGGGGTTGCTGAAAAACGATA",
+     "mismatches": 0,
+     "node": 6984673,
+     "offset": 4,
+     "row": 6984672,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TGGTTATCGTTTTTCAGCAACCCCTTGTATC",
+     "mismatches": 0,
+     "node": 7123379,
+     "offset": 11,
+     "row": 7123378,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TGGTTATCGTTTTTCAGCAGCCCCTTGTATC",
+     "mismatches": 0,
+     "node": 7123382,
+     "offset": 11,
+     "row": 7123381,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "TCGTTTTTCAGCAACCCCTTGTATCTGGCTT",
+     "mismatches": 0,
+     "node": 7482235,
+     "offset": 5,
+     "row": 7482234,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "TCGTTTTTCAGCAGCCCCTTGTATCTGGCTT",
+     "mismatches": 0,
+     "node": 7482236,
+     "offset": 5,
+     "row": 7482235,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "GTTATCGTTTTTCAGCAACCCCTTGTATCTG",
+     "mismatches": 0,
+     "node": 7550171,
+     "offset": 9,
+     "row": 7550170,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "GTTATCGTTTTTCAGCAGCCCCTTGTATCTG",
+     "mismatches": 0,
+     "node": 7550172,
+     "offset": 9,
+     "row": 7550171,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "CGTTTTTCAGCAACCCCTTGTATCTGGCTTT",
+     "mismatches": 0,
+     "node": 8142627,
+     "offset": 4,
+     "row": 8142626,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "CGTTTTTCAGCAGCCCCTTGTATCTGGCTTT",
+     "mismatches": 0,
+     "node": 8142628,
+     "offset": 4,
+     "row": 8142627,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAACCCCTTGTATC",
+     "kmer": "GTTTTTCAGCAACCCCTTGTATCTGGCTTTC",
+     "mismatches": 0,
+     "node": 8294365,
+     "offset": 3,
+     "row": 8294364,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTCAGCAGCCCCTTGTATC",
+     "kmer": "GTTTTTCAGCAGCCCCTTGTATCTGGCTTTC",
+     "mismatches": 0,
+     "node": 8294366,
+     "offset": 3,
+     "row": 8294365,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "GAAAGCCAGATACAAAGGGCTGCTGAAAAAC",
+     "mismatches": 1,
+     "node": 5166,
+     "offset": 8,
+     "row": 5165,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "TGAAAGCCAGATACAAAGGGCTGCTGAAAAA",
+     "mismatches": 1,
+     "node": 16827,
+     "offset": 9,
+     "row": 16826,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "GTGAAAGCCAGATACAAAGGGCTGCTGAAAA",
+     "mismatches": 1,
+     "node": 57786,
+     "offset": 10,
+     "row": 57785,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "CGTGAAAGCCAGATACAAAGGGCTGCTGAAA",
+     "mismatches": 1,
+     "node": 277772,
+     "offset": 11,
+     "row": 277771,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "CAGATACAAAGGGCTGCTGAAAAACGATAAC",
+     "mismatches": 1,
+     "node": 296478,
+     "offset": 2,
+     "row": 296477,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TTTTCAGCAGCCCTTTGTATCTGGCTTTCAC",
+     "mismatches": 1,
+     "node": 842767,
+     "offset": 1,
+     "row": 842766,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "AGCCAGATACAAAGGGCTGCTGAAAAACGAT",
+     "mismatches": 1,
+     "node": 923138,
+     "offset": 5,
+     "row": 923137,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "CCAGATACAAAGGGCTGCTGAAAAACGATAA",
+     "mismatches": 1,
+     "node": 1383234,
+     "offset": 3,
+     "row": 1383233,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "AAAGCCAGATACAAAGGGCTGCTGAAAAACG",
+     "mismatches": 1,
+     "node": 1533187,
+     "offset": 7,
+     "row": 1533186,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "AGATACAAAGGGCTGCTGAAAAACGATAACC",
+     "mismatches": 1,
+     "node": 1623666,
+     "offset": 1,
+     "row": 1623665,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TTTCAGCAGCCCTTTGTATCTGGCTTTCACG",
+     "mismatches": 1,
+     "node": 1744291,
+     "offset": 0,
+     "row": 1744290,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "GATACAAAGGGCTGCTGAAAAACGATAACCA",
+     "mismatches": 1,
+     "node": 1964682,
+     "offset": 0,
+     "row": 1964681,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "ATCGTTTTTCAGCAGCCCTTTGTATCTGGCT",
+     "mismatches": 1,
+     "node": 3451403,
+     "offset": 6,
+     "row": 3451402,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "GGTTATCGTTTTTCAGCAGCCCTTTGTATCT",
+     "mismatches": 1,
+     "node": 3776912,
+     "offset": 10,
+     "row": 3776911,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TTTTTCAGCAGCCCTTTGTATCTGGCTTTCA",
+     "mismatches": 1,
+     "node": 4150968,
+     "offset": 2,
+     "row": 4150967,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "AAGCCAGATACAAAGGGCTGCTGAAAAACGA",
+     "mismatches": 1,
+     "node": 4643012,
+     "offset": 6,
+     "row": 4643011,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TATCGTTTTTCAGCAGCCCTTTGTATCTGGC",
+     "mismatches": 1,
+     "node": 6216460,
+     "offset": 7,
+     "row": 6216459,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TTATCGTTTTTCAGCAGCCCTTTGTATCTGG",
+     "mismatches": 1,
+     "node": 6581541,
+     "offset": 8,
+     "row": 6581540,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "GATACAAAGGGCTGCTGAAA",
+     "kmer": "GCCAGATACAAAGGGCTGCTGAAAAACGATA",
+     "mismatches": 1,
+     "node": 6984671,
+     "offset": 4,
+     "row": 6984670,
+     "strand": "-",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TGGTTATCGTTTTTCAGCAGCCCTTTGTATC",
+     "mismatches": 1,
+     "node": 7123640,
+     "offset": 11,
+     "row": 7123639,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "TCGTTTTTCAGCAGCCCTTTGTATCTGGCTT",
+     "mismatches": 1,
+     "node": 7482237,
+     "offset": 5,
+     "row": 7482236,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "GTTATCGTTTTTCAGCAGCCCTTTGTATCTG",
+     "mismatches": 1,
+     "node": 7550188,
+     "offset": 9,
+     "row": 7550187,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "CGTTTTTCAGCAGCCCTTTGTATCTGGCTTT",
+     "mismatches": 1,
+     "node": 8142629,
+     "offset": 4,
+     "row": 8142628,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    },
+    {
+     "instance": "TTTCAGCAGCCCTTTGTATC",
+     "kmer": "GTTTTTCAGCAGCCCTTTGTATCTGGCTTTC",
+     "mismatches": 1,
+     "node": 8294367,
+     "offset": 3,
+     "row": 8294366,
+     "strand": "+",
+     "substitutions": [
+      {
+       "expected": "C",
+       "found": "T",
+       "position": 12
+      }
+     ]
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 72,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.894667
+   },
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 1711,
+    "steps": 1711,
+    "steps_by_mismatches": {
+     "0": 255,
+     "1": 1456
+    }
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.913333
+ }
+}

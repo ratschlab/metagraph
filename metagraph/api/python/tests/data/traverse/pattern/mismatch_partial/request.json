@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "GTTATCGTTTTTCAGCAACCCCTTGTATCTG",
+   "id": "var31"
+  }
+ ],
+ "max_mismatches": 2,
+ "mode": "partial",
+ "max_contexts": 3,
+ "output": {
+  "labels": "none"
+ }
+}

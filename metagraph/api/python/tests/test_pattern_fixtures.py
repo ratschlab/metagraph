@@ -6,7 +6,10 @@ answered with bounds and an estimate, their tiny blocks checked and exact, and t
 peptides; the work counters, the low-complexity note on completed searches only, the
 capabilities' references and their byte budget; and a request's predicate, SPEC §19: the
 selection of each pattern of at most k bases, its relations, the projection "predicate_only"
-and the predicate block):
+and the predicate block; and bounded mismatches, SPEC §21: the counts per level, each result's
+level and substitutions against the validator's own IUPAC table and genetic codes, the slot
+mismatches_above_cap, the floor's max_mismatches_within_floor and the capabilities' mismatches
+object):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -97,7 +100,10 @@ LOW_COMPLEXITY_UNCUT = 191
 # holds it)
 SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported',
                # the route's own, after the work (SPEC §8.9): a label name no answer carries
-               'unrepresentable_label_name')
+               'unrepresentable_label_name',
+               # the route's own, before the work (SPEC §21.8): max_mismatches above the cap
+               # applied to the pattern (its kind's, or 0 for a pattern longer than k)
+               'mismatches_above_cap')
 KINDS = ('dna', 'iupac', 'protein')
 # what the extension of a pattern longer than k did (counts.paths.extension)
 EXTENSIONS = ('no_anchors', 'not_started', 'not_admitted', 'stopped', 'completed')
@@ -236,7 +242,9 @@ SCHEMA = {
                 # supported paths (SPEC §20.2) and the motif-level predicate (SPEC §25.2)
                 'supported_paths_level', 'predicate_scope',
                 # the server's (SPEC §24): the graphs of a multi-graph server, the load into RAM
-                'graphs', 'in_ram'],
+                'graphs', 'in_ram',
+                # bounded mismatches (SPEC §21.2)
+                'max_mismatches'],
     'request_pattern': ['id', 'dna', 'iupac', 'protein'],
     'request_output': ['labels', 'occurrences', 'paths'],
     'refusal': ['error', 'code'],
@@ -254,7 +262,9 @@ SCHEMA = {
                'max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
                'predicate_strands',
                # supported paths (SPEC §20.2), the motif-level predicate (SPEC §25.2)
-               'supported_paths_level', 'predicate_scope', 'clamped'],
+               'supported_paths_level', 'predicate_scope',
+               # bounded mismatches (SPEC §21.8): echoed above 0 only
+               'max_mismatches', 'clamped'],
     'clamped': ['field', 'requested', 'effective'],
     'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms',
                # the labels of paths (SPEC §12.1)
@@ -275,12 +285,19 @@ SCHEMA = {
               # a predicate (SPEC §19.10)
               'selection', 'absence_filter',
               # the motif-level predicate (SPEC §25.3)
-              'motif'],
+              'motif',
+              # bounded mismatches (SPEC §21.8): the entry's fields, the cap of the slot
+              # mismatches_above_cap, the floor slot's largest admitted max_mismatches
+              'max_mismatches', 'mismatch_information_bits',
+              'min_anchor_mismatch_information_bits', 'max_mismatches_cap',
+              'max_mismatches_within_floor'],
     'counts': ['contexts', 'anchors', 'paths', 'labels', 'occurrences', 'tested', 'selected',
                # long_search "supported_paths" (SPEC §20.4)
                'supported_paths'],
     'count': ['value', 'relation', 'unit', 'lower', 'upper', 'estimate'],
-    'contexts_count': ['suffix', 'by_offset', 'by_strand', 'by_orientation'],
+    'contexts_count': ['suffix', 'by_offset', 'by_strand', 'by_orientation',
+                       # bounded mismatches (SPEC §21.6): per level
+                       'by_mismatches'],
     'anchors_count': ['by_strand', 'by_orientation'],
     # long_search "paths" (SPEC §12.1)
     'paths_count': ['by_strand', 'by_orientation', 'candidates_examined', 'extension'],
@@ -299,12 +316,17 @@ SCHEMA = {
              'predicate_rows', 'predicate_units', 'predicate_lookups',
              # the supported-path search (SPEC §20.6, §20.9), the motif (SPEC §25.3)
              'anchor_rows', 'row_cache_hits', 'row_cache_evictions', 'mirror_rows',
-             'motif_units'],
-    'stop': ['phase', 'reason'],
+             'motif_units',
+             # bounded mismatches (SPEC §21.6): the steps per level
+             'steps_by_mismatches'],
+    # the level whose work a stop interrupted (SPEC §21.7)
+    'stop': ['phase', 'reason', 'mismatch_level'],
     'reason': ['reason'],
     'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row', 'support',
                'labels_status', 'labels_total', 'labels', 'selection_labels',
-               'selection_strands'],
+               'selection_strands',
+               # bounded mismatches (SPEC §21.8): the level and the substitutions
+               'mismatches', 'substitutions'],
     # a path (a result of a pattern longer than k under long_search "paths")
     'path_result': ['sequence', 'anchor_kmer', 'instance', 'offset', 'strand', 'orientation',
                     'nodes', 'rows', 'support', 'labels_status', 'labels_total', 'labels',
@@ -333,7 +355,9 @@ SCHEMA = {
                      # their caps (SPEC §4.5)
                      'default_max_anchors', 'default_max_labels',
                      # in_ram accepted (SPEC §24)
-                     'in_ram'],
+                     'in_ram',
+                     # bounded mismatches (SPEC §21.12), the full block only
+                     'mismatches'],
     'delivery_mbps': ['build', 'compress'],
     # a predicate (SPEC §19): the predicate's operators (each a one-member object), the
     # answer's predicate block, an entry's selection, and the capabilities' predicate object
@@ -342,6 +366,12 @@ SCHEMA = {
                         'strands', 'motif_scope'],
     'selection': ['pass', 'support', 'access'],
     'capabilities_predicate': ['operators', 'strands', 'scopes', 'access'],
+    # bounded mismatches (SPEC §21): the capabilities object, a substitution of a dna or iupac
+    # pattern's instance, a substituted residue of a peptide's
+    'capabilities_mismatches': ['max', 'default', 'unit', 'protein_substitutes', 'edits', 'order',
+                                'levels_rule', 'later_increment'],
+    'substitution': ['position', 'expected', 'found'],
+    'residue_substitution': ['residue', 'expected', 'found', 'codon'],
     # the motif-level predicate (SPEC §25.3): an entry's motif block and a label found
     'motif': ['selected', 'decided_by', 'untested', 'labels', 'labels_present', 'labels_absent',
               'stop'],
@@ -431,6 +461,21 @@ CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_infor
 # the limits a predicate answer echoes (SPEC §19.10)
 LIMITS_PREDICATE = ['max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
                     'predicate_strands']
+# bounded mismatches (SPEC §21): the contract's maximum, the entry's fields with max_mismatches
+# above 0, and the capabilities object's values (protein_substitutes an extensible enumeration;
+# later_increment what a build does not serve with substitutions yet, a later build dropping
+# what it serves)
+MAX_MISMATCHES = 3
+ENTRY_MISMATCHES = ['max_mismatches', 'mismatch_information_bits',
+                    'min_anchor_mismatch_information_bits']
+MISMATCH_UNITS = {'dna': 'base', 'iupac': 'base', 'protein': 'residue'}
+PROTEIN_SUBSTITUTES = ('sense_codons',)
+MISMATCH_EDITS = ['substitution']
+MISMATCH_ORDER = 'mismatches_first'
+LEVELS_RULE = 'SPEC-pattern-search.md section 21.4'
+MISMATCH_LATER = ['long_patterns', 'labels', 'predicate', 'supported_paths']
+# the phases whose stop names the level it interrupted (SPEC §21.7)
+LEVEL_STOP_PHASES = ('discovery', 'mask_scan')
 
 
 def load(*path):
@@ -606,6 +651,11 @@ def revcomp(s):
     return s.translate(COMPLEMENT)[::-1]
 
 
+def residue_of(codon, table):
+    """The residue a codon codes in NCBI table |table| ('*' for a stop)."""
+    return GENETIC_CODES[table][CODONS_TCAG.index(codon)]
+
+
 def codons_of(residue, table):
     """The codons of a peptide's residue in an NCBI table (X: every codon that is not a stop,
     B: D or N, Z: E or Q, J: I or L; '*': the stop codons -- none in the tables without an
@@ -707,6 +757,70 @@ class Kind:
         """SPEC §12.2: a pattern without instances of at most k bases is answered exact 0
         without a search, before the information floor and the budget (note no_stop_codon)."""
         return not self.has_instances() and self.length() <= k
+
+    # ------------------------------------------------------------- bounded mismatches (§21)
+
+    def substitutes(self, i):
+        """SPEC §21.3: the codons that substitute residue i of a peptide: the sense codons of
+        the other residues (never a stop codon; X and '*' have none)."""
+        if self.text[i] == '*':
+            return set()
+        sense = {c for c, aa in zip(CODONS_TCAG, GENETIC_CODES[self.table]) if aa != '*'}
+        return sense - self.codons[i]
+
+    def mismatch_bits(self, m, begin=0, end=None):
+        """SPEC §21.5: 2 (end - begin) - log2 |B|, B the strings over the bases [begin, end)
+        within m substitutions: per position its set's bases and the others; per residue the
+        strings its codons spell over the window's bases of it and those only its substitutes
+        spell (a codon cut by the window counts as substituted only when its bases inside agree
+        with none of its own)."""
+        end = self.length() if end is None else end
+        f = [1.0] + [0.0] * m
+        if not self.protein:
+            steps = [(len(IUPAC[c]), 4 - len(IUPAC[c])) for c in self.text[begin:end]]
+        else:
+            steps = []
+            for i, codons in enumerate(self.codons):
+                lo, hi = max(begin, 3 * i) - 3 * i, min(end, 3 * i + 3) - 3 * i
+                if lo < hi:
+                    own = {c[lo:hi] for c in codons} or {''}
+                    other = {c[lo:hi] for c in self.substitutes(i)} - own
+                    steps.append((len(own), len(other)))
+        for same, sub in steps:
+            f = [f[u] * same + (f[u - 1] * sub if u else 0) for u in range(m + 1)]
+        return 2 * (end - begin) - math.log2(sum(f))
+
+    def substitutions(self, s, reverse):
+        """SPEC §21.8: the substitutions of the instance |s| of the oriented pattern (P, or
+        rc(P) when |reverse|), in P's coordinates: (position, expected, found) for dna and
+        iupac, (residue, expected, found, codon) for a peptide; None when |s| instantiates
+        the pattern at no level (a stop codon where P has a residue, a sense codon at '*')."""
+        L = self.length()
+        if len(s) != L or not set(s) <= set('ACGT'):
+            return None
+        out = []
+        if not self.protein:
+            q = revcomp(self.text) if reverse else self.text
+            for i, base in enumerate(s):
+                if base in IUPAC[q[i]]:
+                    continue
+                if reverse:
+                    out.append((L - 1 - i, self.text[L - 1 - i], base.translate(COMPLEMENT)))
+                else:
+                    out.append((i, self.text[i], base))
+            return sorted(out)
+        m = len(self.text)
+        for i in range(m):
+            # residue i of P: for rc(P) the reverse complement of the instance's codon m - 1 - i
+            codon = s[3 * (m - 1 - i):3 * (m - i)] if reverse else s[3 * i:3 * i + 3]
+            if reverse:
+                codon = revcomp(codon)
+            if codon in self.codons[i]:
+                continue
+            if codon not in self.substitutes(i):
+                return None
+            out.append((i, self.text[i], residue_of(codon, self.table), codon))
+        return out
 
 
 class Checker:
@@ -825,6 +939,39 @@ class Checker:
         for k, v in c[key].items():
             self.count(v, unit, f'{path}.{key}.{k}')
         self.summed(c, list(c[key].values()), f'{path}.{key}')
+
+    def by_mismatches(self, c, e, m, path):
+        """SPEC §21.6: the contexts per level, keys "0" to "m", the total their sum under the
+        algebra; a stop in the work of level t (stop.mismatch_level) leaves the levels below
+        it as they completed (never at_least or unknown), level t at_least, bounds or unknown,
+        the levels above unknown; without such a stop no level is at_least or unknown."""
+        by = c['by_mismatches']
+        self.keys(by, [str(t) for t in range(m + 1)], path + '.by_mismatches')
+        levels = [by[str(t)] for t in range(m + 1)]
+        for t, v in enumerate(levels):
+            self.count(v, 'graph_contexts', f'{path}.by_mismatches.{t}')
+        self.summed(c, levels, path + '.by_mismatches')
+        stop = e['stop']
+        if stop is not None and stop['phase'] in LEVEL_STOP_PHASES:
+            at = stop.get('mismatch_level')
+            if not is_int(at):
+                self.ok(False, path + '.by_mismatches', 'a stop of the search names its level')
+                return
+            for t, v in enumerate(levels):
+                if t < at:
+                    self.ok(v['relation'] in ('exact', 'bounds'), f'{path}.by_mismatches.{t}',
+                            'a level below the stopped one is complete')
+                elif t == at:
+                    self.ok(v['relation'] in ('at_least', 'bounds', 'unknown'),
+                            f'{path}.by_mismatches.{t}', 'the stopped level')
+                    self.ok(stop['phase'] != 'mask_scan' or v['relation'] == 'bounds',
+                            f'{path}.by_mismatches.{t}', 'a stop in the scans leaves bounds')
+                else:
+                    self.ok(v['relation'] == 'unknown', f'{path}.by_mismatches.{t}',
+                            'a level above the stopped one never ran')
+        else:
+            self.ok(all(v['relation'] in ('exact', 'bounds') for v in levels),
+                    path + '.by_mismatches', 'every level complete without a stop of the search')
 
     # ------------------------------------------------------------- predicates (5b)
 
@@ -1294,8 +1441,15 @@ class Checker:
                            and ((paths or supported) and labelled or f != 'require_support')
                            and (supported or f != 'supported_paths_level')
                            and (predicate or f not in LIMITS_PREDICATE)
-                           and ('predicate_scope' in request or f != 'predicate_scope')],
+                           and ('predicate_scope' in request or f != 'predicate_scope')
+                           and (request.get('max_mismatches', 0) > 0 or f != 'max_mismatches')],
                   'limits')
+        if request.get('max_mismatches', 0) > 0:
+            # SPEC §21.8: as requested, never lowered or clamped
+            self.ok(limits['max_mismatches'] == request['max_mismatches'], 'limits.max_mismatches',
+                    'as requested')
+            self.ok(all(c['field'] != 'max_mismatches' for c in limits['clamped']),
+                    'limits.clamped', 'max_mismatches is never lowered')
         if 'predicate_scope' in request:
             self.ok(limits['predicate_scope'] == request['predicate_scope'],
                     'limits.predicate_scope', 'as requested')
@@ -1606,8 +1760,11 @@ class Checker:
         pk = Kind(asked, request)
         self.ok(e['kind'] == pk.kind, path + '.kind')
         text = pk.text
-        # a peptide's entry states its residues and its genetic code
-        description = ENTRY_DESCRIPTION + (['residues', 'genetic_code'] if pk.protein else [])
+        # a peptide's entry states its residues and its genetic code; with max_mismatches
+        # above 0 every answered or engine-refused entry states the fields of SPEC §21.8
+        m = request.get('max_mismatches', 0)
+        description = ENTRY_DESCRIPTION + (['residues', 'genetic_code'] if pk.protein else []) \
+            + (ENTRY_MISMATCHES if m else [])
 
         self.estimated = False
         if 'error' in e:
@@ -1621,13 +1778,32 @@ class Checker:
                 self.ok(not pk.parsed(), path, 'bad_alphabet for a pattern inside the alphabet')
                 return
             # SPEC §12.2: a pattern without instances of at most k bases is answered, exact 0,
-            # before the information floor (no slot error)
-            self.ok(not pk.answered_unsearched(k), path,
+            # before the information floor (no slot error); SPEC §21.8: its cap is checked
+            # before that
+            self.ok(not pk.answered_unsearched(k) or err['code'] == 'mismatches_above_cap', path,
                     'a slot error for a pattern without instances of at most k bases')
             self.ok(pk.parsed(), path, 'an engine slot for a pattern outside the alphabet')
-            self.keys(e, description + ['error'], path)
+            self.ok(err['code'] != 'mismatches_above_cap' or m > 0, path,
+                    'mismatches_above_cap without max_mismatches')
+            floor_within = err['code'] == 'information_below_floor' and m > 0
+            self.keys(e, description + ['error']
+                      + (['max_mismatches_cap'] if err['code'] == 'mismatches_above_cap' else [])
+                      + (['max_mismatches_within_floor'] if floor_within else []), path)
             self.description(e, pk, k, path, request)
-            if err['code'] == 'information_below_floor':
+            L = pk.length()
+            if err['code'] == 'mismatches_above_cap':
+                # SPEC §21.8: the cap applied -- 0 for a pattern longer than k (a later
+                # increment), else the kind's cap of the capabilities -- and the request above it
+                cap = e['max_mismatches_cap']
+                self.ok(is_int(cap) and 0 <= cap < m, path + '.max_mismatches_cap',
+                        f'{cap!r}: a cap below the request\'s {m}')
+                if L > k:
+                    self.ok(cap == 0, path + '.max_mismatches_cap',
+                            'a pattern longer than k: the cap is 0')
+                elif self.capabilities is not None:
+                    self.ok(cap == self.capabilities['mismatches']['max'][pk.kind],
+                            path + '.max_mismatches_cap', 'the kind\'s cap of the capabilities')
+            if err['code'] == 'information_below_floor' and not m:
                 bits = e['min_anchor_information_bits'] if e['length'] > k \
                     else e['information_bits']
                 self.ok(bits < a['limits']['min_information_bits'], path,
@@ -1635,6 +1811,22 @@ class Checker:
                 # SPEC §7.8: an exact pattern in suffix scope is exempt from the floor
                 self.ok(not self.exempt(pk, k, request), path,
                         'an exact pattern of L <= k in suffix scope is exempt from the floor')
+            if floor_within:
+                # SPEC §21.5: the floor gates the bits left within the substitutions, with no
+                # exemption; the slot states the largest smaller max_mismatches it admits (0
+                # under the rule without substitutions, its exemption included), null when none
+                floor = a['limits']['min_information_bits']
+                bits = e['min_anchor_mismatch_information_bits'] if L > k \
+                    else e['mismatch_information_bits']
+                self.ok(bits < floor, path, 'refused above the floor')
+                admitted = [t for t in range(m)
+                            if (t == 0 and (self.exempt(pk, k, request)
+                                            or pk.bits() >= floor))
+                            or (t > 0 and pk.mismatch_bits(t) >= floor)]
+                within = e['max_mismatches_within_floor']
+                self.ok(within == (max(admitted) if admitted else None),
+                        path + '.max_mismatches_within_floor',
+                        f'{within!r}, expected {max(admitted) if admitted else None}')
             if err['code'] == 'unrepresentable_label_name':
                 # SPEC §8.9: refused after its work for a name its lists would carry: only an
                 # answer that lists names can be; the message names the column, never the bytes
@@ -1661,9 +1853,17 @@ class Checker:
         self.description(e, pk, k, path, request)
         # SPEC §7.8: a pattern answered is exempt or at or above the floor (for L > k: every
         # searched anchor window)
-        bits = e['min_anchor_information_bits'] if L > k else e['information_bits']
-        self.ok(self.exempt(pk, k, request) or bits >= a['limits']['min_information_bits']
-                or pk.answered_unsearched(k), path, 'answered below the floor')
+        if m:
+            # SPEC §21: patterns of at most k bases only, the floor on the bits left within
+            # the substitutions, with no exemption
+            self.ok(L <= k, path, 'a pattern longer than k answered with substitutions')
+            self.ok(e['mismatch_information_bits'] >= a['limits']['min_information_bits']
+                    or pk.answered_unsearched(k), path,
+                    'answered below the floor (no exemption with substitutions)')
+        else:
+            bits = e['min_anchor_information_bits'] if L > k else e['information_bits']
+            self.ok(self.exempt(pk, k, request) or bits >= a['limits']['min_information_bits']
+                    or pk.answered_unsearched(k), path, 'answered below the floor')
         self.ok(e['mode'] == mode, path + '.mode')
         scope = 'long' if L > k else request.get('scope', 'any_offset')
         self.ok(e['scope'] == scope, path + '.scope', f'{e["scope"]!r}, expected {scope!r}')
@@ -1712,7 +1912,8 @@ class Checker:
             c = counts['contexts']
             self.count(c, 'graph_contexts', path + '.counts.contexts',
                        extra=['suffix', 'by_offset',
-                              'by_strand' if strand_stated else 'by_orientation'])
+                              'by_strand' if strand_stated else 'by_orientation']
+                       + (['by_mismatches'] if m else []))
             self.count(c['suffix'], 'graph_contexts', path + '.counts.contexts.suffix')
             offsets = [k - L] if scope == 'suffix' else list(range(k - L + 1))
             self.keys(c['by_offset'], [str(o) for o in offsets],
@@ -1723,6 +1924,8 @@ class Checker:
                     'the count at offset k - L')
             self.summed(c, list(c['by_offset'].values()), path + '.counts.contexts.by_offset')
             self.by_orientation(c, e, strand_stated, 'graph_contexts', path + '.counts.contexts')
+            if m:
+                self.by_mismatches(c, e, m, path + '.counts.contexts')
             total = c
         for f, unit in (('labels', 'labels'), ('occurrences', 'placed_occurrences')):
             if labelled and f == 'labels' and (paths or supported):
@@ -1751,9 +1954,18 @@ class Checker:
                   # a predicate: the selection's work, and the account (every mode)
                   + (['predicate_rows', 'predicate_units', 'predicate_lookups']
                      + ([] if labelled or supported else ['memory_bytes']) if predicate else [])
-                  + (['motif_units'] if motif else []),
+                  + (['motif_units'] if motif else [])
+                  # bounded mismatches (SPEC §21.6): the steps per level
+                  + (['steps_by_mismatches'] if m else []),
                   path + '.work')
-        self.ok(all(is_int(v) and v >= 0 for v in w.values()), path + '.work')
+        self.ok(all(is_int(v) and v >= 0 for v in w.values() if not isinstance(v, dict)),
+                path + '.work')
+        if m:
+            s = w['steps_by_mismatches']
+            self.keys(s, [str(t) for t in range(m + 1)], path + '.work.steps_by_mismatches')
+            self.ok(all(is_int(v) and v >= 0 for v in s.values())
+                    and sum(s.values()) == w['steps'], path + '.work.steps_by_mismatches',
+                    'the steps per level sum to steps')
         self.ok(w['steps'] >= w['ranges_visited'] + w.get('extension_edges', 0), path + '.work',
                 'steps >= ranges_visited (+ extension_edges, one step each)')
         # SPEC §8.7: the counters beside the steps
@@ -1796,7 +2008,13 @@ class Checker:
                         'no coordinates read: nothing verified')
         stop = e['stop']
         if stop is not None:
-            self.keys(stop, SCHEMA['stop'], path + '.stop')
+            # SPEC §21.7: a stop of the search's own work names the level it interrupted
+            level_named = bool(m) and stop.get('phase') in LEVEL_STOP_PHASES
+            self.keys(stop, ['phase', 'reason'] + (['mismatch_level'] if level_named else []),
+                      path + '.stop')
+            if level_named:
+                self.ok(is_int(stop['mismatch_level']) and 0 <= stop['mismatch_level'] <= m,
+                        path + '.stop.mismatch_level', f'a level 0 .. {m}')
             self.one_of(stop['phase'], STOP_PHASES, path + '.stop.phase')
             self.one_of(stop['reason'], STOP_REASONS, path + '.stop.reason')
             self.ok(total['relation'] != 'exact'
@@ -2039,6 +2257,32 @@ class Checker:
         else:
             for f in ('anchor_information_bits', 'min_anchor_information_bits'):
                 self.ok(e[f] is None, path + '.' + f)
+        m = request.get('max_mismatches', 0)
+        if m:
+            # SPEC §21.5, §21.8: the request's value, the bits left within it (never above the
+            # information bits), and for a pattern longer than k the least over the searched
+            # anchor windows
+            self.ok(e['max_mismatches'] == m, path + '.max_mismatches', 'the request\'s')
+            bits = pk.mismatch_bits(m)
+            self.ok(is_num(e['mismatch_information_bits'])
+                    and abs(e['mismatch_information_bits'] - bits) < 1e-9,
+                    path + '.mismatch_information_bits',
+                    f'{e["mismatch_information_bits"]}, expected {bits}')
+            self.ok(e['mismatch_information_bits'] <= e['information_bits'] + 1e-9,
+                    path + '.mismatch_information_bits', 'at most the information bits')
+            if L > k:
+                windows = []
+                if strands in ('both', 'forward') or pk.palindromic():
+                    windows.append(pk.mismatch_bits(m, 0, k))
+                if strands in ('both', 'reverse') and not pk.palindromic():
+                    windows.append(pk.mismatch_bits(m, L - k, L))
+                self.ok(is_num(e['min_anchor_mismatch_information_bits'])
+                        and abs(e['min_anchor_mismatch_information_bits'] - min(windows)) < 1e-9,
+                        path + '.min_anchor_mismatch_information_bits',
+                        'the least over the searched anchor windows')
+            else:
+                self.ok(e['min_anchor_mismatch_information_bits'] is None,
+                        path + '.min_anchor_mismatch_information_bits', 'null for L <= k')
 
     @staticmethod
     def exempt(pk, k, request):
@@ -2350,18 +2594,45 @@ class Checker:
         # the results of a predicate request are its selected contexts, with their
         # selection_labels when the projection reads labels
         predicate = 'predicate' in a
+        # bounded mismatches (SPEC §21.8): the request's max_mismatches, echoed above 0
+        m = a['limits'].get('max_mismatches', 0)
         L = pk.length()
         results = e['results']
         key = 'strand' if strand_stated else 'orientation'
         allowed = set(e['strands'])
         order = []
+        per_level = {}
         for i, r in enumerate(results):
             rp = f'{path}.results[{i}]'
             self.keys(r, ['kmer', 'instance', 'offset', key, 'node', 'row']
                       + (['support', 'labels_status', 'labels_total', 'labels'] if labelled
                          else [])
                       + (['selection_labels', 'selection_strands'] if labelled and predicate
-                         else []), rp)
+                         else [])
+                      + (['mismatches', 'substitutions'] if m else []), rp)
+            if m:
+                # the level and the substitutions, in P's coordinates, recomputed from the
+                # instance with the validator's own tables
+                reverse = r[key] in ('-', 'reverse')
+                self.ok(is_int(r['mismatches']) and 0 <= r['mismatches'] <= m,
+                        rp + '.mismatches', f'{r["mismatches"]!r}: a level 0 .. {m}')
+                expected = pk.substitutions(r['instance'], reverse)
+                self.ok(expected is not None, rp + '.instance',
+                        f'{r["instance"]} instantiates the oriented pattern at no level')
+                listed = []
+                for j, s in enumerate(r['substitutions']):
+                    sp = f'{rp}.substitutions[{j}]'
+                    if pk.protein:
+                        self.keys(s, SCHEMA['residue_substitution'], sp)
+                        listed.append((s['residue'], s['expected'], s['found'], s['codon']))
+                    else:
+                        self.keys(s, SCHEMA['substitution'], sp)
+                        listed.append((s['position'], s['expected'], s['found']))
+                self.ok(listed == (expected or []), rp + '.substitutions',
+                        f'{listed}, expected {expected}')
+                self.ok(len(listed) == r['mismatches'], rp + '.mismatches',
+                        'the level is the number of substitutions')
+                per_level[r['mismatches']] = per_level.get(r['mismatches'], 0) + 1
             self.ok(isinstance(r['kmer'], str) and len(r['kmer']) == k
                     and set(r['kmer']) <= set('ACGTN'), rp + '.kmer')
             self.ok(is_int(r['offset']) and 0 <= r['offset'] <= k - L, rp + '.offset')
@@ -2369,15 +2640,26 @@ class Checker:
                 self.ok(r['offset'] == k - L, rp + '.offset', 'suffix scope: offset k - L')
             self.ok(r['instance'] == r['kmer'][r['offset']:r['offset'] + L], rp + '.instance')
             self.ok(r[key] in allowed, rp + '.' + key, f'{r[key]!r} not searched')
-            self.ok(pk.instance(r['instance'], r[key] in ('-', 'reverse')), rp + '.instance',
-                    f'{r["instance"]} does not instantiate the oriented pattern')
+            if not m:
+                self.ok(pk.instance(r['instance'], r[key] in ('-', 'reverse')), rp + '.instance',
+                        f'{r["instance"]} does not instantiate the oriented pattern')
             self.ok(is_int(r['node']) and r['node'] >= 1, rp + '.node')
             self.ok(r['row'] is None or (is_int(r['row']) and r['row'] >= 0), rp + '.row')
             if a['index']['graph_mode'] == 'basic' and r['row'] is not None:
                 self.ok(r['row'] == r['node'] - 1, rp + '.row', 'node - 1 on a basic graph')
-            order.append((r['node'], r['offset'], ORIENTATION_RANK[r[key]]))
+            # SPEC §21.7: with substitutions the level comes first
+            order.append(((r['mismatches'],) if m else ())
+                         + (r['node'], r['offset'], ORIENTATION_RANK[r[key]]))
         self.ok(order == sorted(order) and len(set(order)) == len(order), path + '.results',
-                'ordered by (node, offset, orientation), each context once')
+                'ordered by (' + ('mismatches, ' if m else '')
+                + 'node, offset, orientation), each context once')
+        if m and L <= k and results and e['retrieval_complete'] and not predicate:
+            # every context returned: the results per level are the level's exact count
+            for t in range(m + 1):
+                level = e['counts']['contexts']['by_mismatches'][str(t)]
+                self.ok(level['relation'] == 'exact' and per_level.get(t, 0) == level['value'],
+                        f'{path}.counts.contexts.by_mismatches.{t}',
+                        f'{per_level.get(t, 0)} results at the level, the count {level["value"]}')
         # the results and the counts beside them
         contexts = [(r[key], r['kmer'], r['offset']) for r in results]
         self.ok(len(set(contexts)) == len(contexts), path + '.results',
@@ -2760,6 +3042,31 @@ class Checker:
         self.ok(('predicate_only' in b['projections'])
                 is ('predicate_only' not in b['projections_later_increment']),
                 path + '.projections', 'predicate_only served or announced')
+        # SPEC §21.12: the mismatches object: the caps per kind (at most the contract's 3, the
+        # peptides' at most the dna's), the default 0, the units, the rule of a residue's
+        # substitutes, the edits, the order, the levels rule (a reference to §21.4) and what is
+        # not served with substitutions yet (a later build drops what it serves)
+        mm = b['mismatches']
+        self.keys(mm, SCHEMA['capabilities_mismatches'], path + '.mismatches')
+        self.keys(mm['max'], KINDS, path + '.mismatches.max')
+        self.ok(all(is_int(v) and 0 <= v <= MAX_MISMATCHES for v in mm['max'].values()),
+                path + '.mismatches.max', f'integers 0 .. {MAX_MISMATCHES}')
+        self.ok(mm['max']['iupac'] == mm['max']['dna'], path + '.mismatches.max',
+                'dna and iupac share --pattern-max-mismatches')
+        self.ok(mm['max']['protein'] <= mm['max']['dna'], path + '.mismatches.max',
+                'a peptide is never allowed more substitutions than a dna pattern')
+        self.ok(mm['default'] == 0, path + '.mismatches.default', 'an omitted field is 0')
+        self.ok(mm['unit'] == MISMATCH_UNITS, path + '.mismatches.unit')
+        self.one_of(mm['protein_substitutes'], PROTEIN_SUBSTITUTES,
+                    path + '.mismatches.protein_substitutes')
+        self.ok(mm['edits'] == MISMATCH_EDITS, path + '.mismatches.edits', 'substitutions only')
+        self.ok(mm['order'] == MISMATCH_ORDER, path + '.mismatches.order')
+        self.ok(mm['levels_rule'] == LEVELS_RULE and all(' ' <= c <= '~' for c in mm['levels_rule']),
+                path + '.mismatches.levels_rule', f'a reference to {LEVELS_RULE}')
+        later = mm['later_increment']
+        self.ok(isinstance(later, list)
+                and later == [x for x in MISMATCH_LATER if x in later],
+                path + '.mismatches.later_increment', f'a sublist of {MISMATCH_LATER}, in order')
         self.ok(1 <= b['caps']['max_predicate_work'] and b['caps']['max_predicate_labels']
                 <= 1_000_000, path + '.caps', 'the predicate caps in their ranges')
         self.ok(is_num(b['default_time_budget_ms'])
@@ -2993,6 +3300,14 @@ class TestPatternFixtures(unittest.TestCase):
                  'predicate_only needs a predicate')
         check.ok(set(request.get('output', {})) <= set(SCHEMA['request_output']),
                  'request.output')
+        # SPEC §21.2, §21.16: 0 to 3; above 0 without the labels, a predicate or the supported
+        # paths (later increments, refused)
+        m = request.get('max_mismatches', 0)
+        check.ok(is_int(m) and 0 <= m <= MAX_MISMATCHES, 'request.max_mismatches')
+        check.ok(not m or (request.get('output', {}).get('labels', 'none') == 'none'
+                           and 'predicate' not in request
+                           and request.get('long_search') != 'supported_paths'),
+                 'request.max_mismatches', 'answered with a later increment\'s combination')
 
     def refusal(self, check, f, answer):
         if f['status'] == 503 and 'code' not in answer:
@@ -3511,6 +3826,41 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertTrue(pruned and mirrors)
         self.assertLessEqual({('every_context', None), ('tested_contexts', 'selection'),
                               ('no_instance', None), (None, 'not_started')}, motifs)
+        # bounded mismatches (SPEC §21): every max_mismatches, each kind answered within
+        # substitutions, a result on each strand with a substitution, a stop that names its
+        # level (the levels below exact, the one above unknown), the floor slot with its
+        # largest admitted max_mismatches, the slot above the cap for a kind and for a pattern
+        # longer than k, and the 400s of the field's values and of the later increments
+        asked, kinds, strands, named, within, caps = set(), set(), set(), set(), set(), set()
+        for name, f in self.fixtures.items():
+            request, answer = self.bodies[name]
+            if f['method'] != 'POST' or f['status'] != 200:
+                continue
+            m = request.get('max_mismatches', 0)
+            if not m:
+                continue
+            asked.add(m)
+            for e in answer['patterns']:
+                if 'error' in e:
+                    if e['error']['code'] == 'mismatches_above_cap':
+                        caps.add('long' if e['length'] > answer['index']['k'] else e['kind'])
+                    if e['error']['code'] == 'information_below_floor':
+                        within.add(e['max_mismatches_within_floor'])
+                    continue
+                kinds.add(e['kind'])
+                for r in e.get('results', []):
+                    if r['mismatches']:
+                        strands.add(r['strand'])
+                if e['stop'] and 'mismatch_level' in e['stop']:
+                    by = e['counts']['contexts']['by_mismatches']
+                    named.add((e['stop']['mismatch_level'],
+                               tuple(by[str(t)]['relation'] for t in range(m + 1))))
+        self.assertEqual({1, 2}, asked)
+        self.assertEqual(set(KINDS), kinds)
+        self.assertEqual({'+', '-'}, strands)
+        self.assertIn((2, ('exact', 'exact', 'at_least')), named)
+        self.assertLessEqual({1}, within)
+        self.assertLessEqual({'protein', 'long'}, caps)
 
     def test_time_limited_is_the_clocks(self):
         """SPEC §7.6/§7.9, both ways: an entry the clock touched (its stop, or only its cut) is
@@ -3636,7 +3986,7 @@ class TestPatternFixtures(unittest.TestCase):
         for code in ('information_below_floor', 'scope_unsupported'):
             self.assertIn(f'"{code}"', engine_text)
         route_slots = set(re.findall(r'kSlot\w+\[\] = "(\w+)"', sources['pattern.cpp']))
-        self.assertEqual({'unrepresentable_label_name'}, route_slots)
+        self.assertEqual({'unrepresentable_label_name', 'mismatches_above_cap'}, route_slots)
         self.assertEqual(set(SLOT_ERRORS), slots | {'information_below_floor',
                                                     'scope_unsupported'} | route_slots)
 
@@ -4316,6 +4666,106 @@ class TestPatternFixtures(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'scopes'):
             Checker(Raising(), 'capabilities').block(b, 'pattern', False)
 
+    def test_mismatch_rules_refuse_what_v1_never_answers(self):
+        """Bounded mismatches (SPEC §21): the stored answers pass, and each rule they rest on
+        refuses an answer that breaks it: a level's count off its sum, a level missing, an
+        exact level above a stopped one, a result's level or substitution off its instance,
+        results out of the level-first order, the steps per level off their sum, a stop
+        without its level, the slot's cap off the capabilities, the floor slot's largest
+        admitted max_mismatches off, limits.max_mismatches missing, and the capabilities
+        object off its values."""
+        def result0(e, i=0):
+            return e['patterns'][0]['results'][i]
+
+        def with_first_substituted(e):
+            for r in e['patterns'][0]['results']:
+                if r['mismatches']:
+                    return r
+            raise AssertionError('no substituted result')
+
+        def level(e, t, **fields):
+            e['patterns'][0]['counts']['contexts']['by_mismatches'][str(t)].update(fields)
+
+        def pop_level(e, t):
+            e['patterns'][0]['counts']['contexts']['by_mismatches'].pop(str(t))
+
+        def swap_first_two(e):
+            r = e['patterns'][0]['results']
+            r[0], r[-1] = r[-1], r[0]
+
+        def found_off(e):
+            s = with_first_substituted(e)['substitutions'][0]
+            s['found'] = 'A' if s['found'] != 'A' else 'C'
+
+        def level_off(e):
+            r = with_first_substituted(e)
+            r['mismatches'] += 1
+
+        def exact_above_stop(e):
+            level(e, 2, relation='exact')
+
+        def steps_off(e):
+            e['patterns'][0]['work']['steps_by_mismatches']['0'] += 1
+
+        def cap_off(e):
+            for p in e['patterns']:
+                if 'max_mismatches_cap' in p:
+                    p['max_mismatches_cap'] += 1
+
+        def within_off(e):
+            for p in e['patterns']:
+                if 'max_mismatches_within_floor' in p:
+                    p['max_mismatches_within_floor'] = 0
+
+        def no_limit(e):
+            e['limits'].pop('max_mismatches')
+
+        def no_stop_level(e):
+            e['patterns'][0]['stop'].pop('mismatch_level')
+
+        def bits_off(e):
+            e['patterns'][0]['mismatch_information_bits'] += 1
+
+        cases = [
+            ('mismatch_neighbours', lambda e: level(e, 1, value=99), 'sum of its parts'),
+            ('mismatch_neighbours', lambda e: pop_level(e, 2), 'fields'),
+            ('mismatch_neighbours', swap_first_two, 'ordered by \\(mismatches'),
+            ('mismatch_neighbours', found_off, 'substitutions'),
+            ('mismatch_neighbours', level_off, 'the level is the number of substitutions'),
+            ('mismatch_neighbours', steps_off, 'sum to steps'),
+            ('mismatch_neighbours', no_limit, 'fields'),
+            ('mismatch_neighbours', bits_off, 'mismatch_information_bits'),
+            ('mismatch_peptide', found_off, 'substitutions'),
+            ('mismatch_stop_level', exact_above_stop,
+             'never ran|stopped level|exact parts make an exact total'),
+            ('mismatch_stop_level', no_stop_level, 'fields|names its level'),
+            ('mismatch_above_cap', cap_off, 'cap'),
+            ('mismatch_slots', cap_off, 'the cap is 0'),
+            ('mismatch_slots', within_off, 'max_mismatches_within_floor'),
+        ]
+        self.assertRefusesMutations(cases)
+        # the capabilities object
+        def block(**fields):
+            b = copy.deepcopy(self.capabilities_of('masked'))
+            b['mismatches'].update(fields)
+            Checker(Raising(), 'hand-made capabilities').block(b, 'pattern', False)
+        block(later_increment=['labels', 'predicate'])
+        block(max={'dna': 3, 'iupac': 3, 'protein': 1})
+        for fields, says in ((dict(default=1), 'an omitted field is 0'),
+                             (dict(max={'dna': 4, 'iupac': 4, 'protein': 4}), 'integers 0'),
+                             (dict(max={'dna': 2, 'iupac': 3, 'protein': 1}), 'share'),
+                             (dict(max={'dna': 1, 'iupac': 1, 'protein': 2}), 'never allowed more'),
+                             (dict(edits=['substitution', 'insertion']), 'substitutions only'),
+                             (dict(protein_substitutes='all_codons'), 'protein_substitutes'),
+                             (dict(later_increment=['labels', 'long_patterns']), 'in order'),
+                             (dict(levels_rule='SPEC-pattern-search.md section 21.5'),
+                              'a reference')):
+            with self.assertRaisesRegex(AssertionError, says):
+                block(**fields)
+        # the protein-cap server's document states its lowered cap
+        self.assertEqual(1, self.capabilities_of('masked_protein_cap')['mismatches']['max']
+                         ['protein'])
+
     def test_documents_state_the_built_deadline(self):
         """The route's default deadline and its cap, as the SPEC and the service's request
         (PROMPT-search-service-pattern.md §1 and §3.2) state them, are the capabilities'."""
@@ -4344,7 +4794,8 @@ class TestPatternFixtures(unittest.TestCase):
                                 ('--pattern-default-max-anchors', caps['default_max_anchors']),
                                 ('--pattern-max-anchors', caps['caps']['max_anchors']),
                                 ('--pattern-default-max-labels', caps['default_max_labels']),
-                                ('--pattern-max-labels', caps['caps']['max_labels'])):
+                                ('--pattern-max-labels', caps['caps']['max_labels']),
+                                ('--pattern-max-mismatches', caps['mismatches']['max']['dna'])):
                 self.assertIn(f'| `{flag}` | {value:,} |', spec, flag)
         # a default is at most its cap (the server refuses a larger one at start-up)
         self.assertLessEqual(caps['default_max_anchors'], caps['caps']['max_anchors'])

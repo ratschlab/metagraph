@@ -1,0 +1,370 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_mismatches": 1,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_mismatches": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 10
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 8
+      }
+     },
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 9
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 9
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 8
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 10
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 9
+     },
+     "unit": "graph_contexts",
+     "value": 18
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": 1,
+   "id": "var_pep",
+   "information_bits": 44.24511249783653,
+   "kind": "protein",
+   "length": 30,
+   "max_mismatches": 1,
+   "min_anchor_information_bits": null,
+   "min_anchor_mismatch_information_bits": null,
+   "mismatch_information_bits": 36.46539314269313,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "FSKSVELHDK",
+   "residues": 10,
+   "results": [
+    {
+     "instance": "TTCTCAAAATCGGTGGAGCTGCATGACAAA",
+     "kmer": "TTCTCAAAATCGGTGGAGCTGCATGACAAAG",
+     "mismatches": 0,
+     "node": 22559,
+     "offset": 0,
+     "row": 22558,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGAGCTGCATGACAAA",
+     "kmer": "GTTCTCAAAATCGGTGGAGCTGCATGACAAA",
+     "mismatches": 0,
+     "node": 82493,
+     "offset": 1,
+     "row": 82492,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGAGCTGCATGACAAG",
+     "kmer": "GTTCTCAAAATCGGTGGAGCTGCATGACAAG",
+     "mismatches": 0,
+     "node": 82494,
+     "offset": 1,
+     "row": 82493,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTGTCATGCAGCTCCACCGATTTGGAGAA",
+     "kmer": "TTTGTCATGCAGCTCCACCGATTTGGAGAAC",
+     "mismatches": 0,
+     "node": 180807,
+     "offset": 0,
+     "row": 180806,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "CTTGTCATGCAGCTCCACCGATTTTGAGAA",
+     "kmer": "CTTGTCATGCAGCTCCACCGATTTTGAGAAC",
+     "mismatches": 0,
+     "node": 181622,
+     "offset": 0,
+     "row": 181621,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTGTCATGCAGCTCCACCGATTTTGAGAA",
+     "kmer": "TTTGTCATGCAGCTCCACCGATTTTGAGAAC",
+     "mismatches": 0,
+     "node": 181623,
+     "offset": 0,
+     "row": 181622,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTGTCATGCAGCTCCACCGATTTGGAGAA",
+     "kmer": "CTTTGTCATGCAGCTCCACCGATTTGGAGAA",
+     "mismatches": 0,
+     "node": 911698,
+     "offset": 1,
+     "row": 911697,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "CTTGTCATGCAGCTCCACCGATTTTGAGAA",
+     "kmer": "CCTTGTCATGCAGCTCCACCGATTTTGAGAA",
+     "mismatches": 0,
+     "node": 914207,
+     "offset": 1,
+     "row": 914206,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTTGTCATGCAGCTCCACCGATTTTGAGAA",
+     "kmer": "CTTTGTCATGCAGCTCCACCGATTTTGAGAA",
+     "mismatches": 0,
+     "node": 914208,
+     "offset": 1,
+     "row": 914207,
+     "strand": "-",
+     "substitutions": []
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGAGCTGCATGACAAG",
+     "kmer": "TTCTCAAAATCGGTGGAGCTGCATGACAAGG",
+     "mismatches": 0,
+     "node": 4188267,
+     "offset": 0,
+     "row": 4188266,
+     "strand": "+",
+     "substitutions": []
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGCGCTGCATGACAAA",
+     "kmer": "TTCTCAAAATCGGTGGCGCTGCATGACAAAG",
+     "mismatches": 1,
+     "node": 22560,
+     "offset": 0,
+     "row": 22559,
+     "strand": "+",
+     "substitutions": [
+      {
+       "codon": "GCG",
+       "expected": "E",
+       "found": "A",
+       "residue": 5
+      }
+     ]
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGCGCTGCATGACAAA",
+     "kmer": "GTTCTCAAAATCGGTGGCGCTGCATGACAAA",
+     "mismatches": 1,
+     "node": 82495,
+     "offset": 1,
+     "row": 82494,
+     "strand": "+",
+     "substitutions": [
+      {
+       "codon": "GCG",
+       "expected": "E",
+       "found": "A",
+       "residue": 5
+      }
+     ]
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGAGCTGTATGACAAG",
+     "kmer": "GTTCTCAAAATCGGTGGAGCTGTATGACAAG",
+     "mismatches": 1,
+     "node": 82608,
+     "offset": 1,
+     "row": 82607,
+     "strand": "+",
+     "substitutions": [
+      {
+       "codon": "TAT",
+       "expected": "H",
+       "found": "Y",
+       "residue": 7
+      }
+     ]
+    },
+    {
+     "instance": "TTTGTCATGCAGCGCCACCGATTTTGAGAA",
+     "kmer": "TTTGTCATGCAGCGCCACCGATTTTGAGAAC",
+     "mismatches": 1,
+     "node": 181620,
+     "offset": 0,
+     "row": 181619,
+     "strand": "-",
+     "substitutions": [
+      {
+       "codon": "GCG",
+       "expected": "E",
+       "found": "A",
+       "residue": 5
+      }
+     ]
+    },
+    {
+     "instance": "CTTGTCATACAGCTCCACCGATTTTGAGAA",
+     "kmer": "CTTGTCATACAGCTCCACCGATTTTGAGAAC",
+     "mismatches": 1,
+     "node": 181621,
+     "offset": 0,
+     "row": 181620,
+     "strand": "-",
+     "substitutions": [
+      {
+       "codon": "TAT",
+       "expected": "H",
+       "found": "Y",
+       "residue": 7
+      }
+     ]
+    },
+    {
+     "instance": "TTTGTCATGCAGCGCCACCGATTTTGAGAA",
+     "kmer": "CTTTGTCATGCAGCGCCACCGATTTTGAGAA",
+     "mismatches": 1,
+     "node": 914205,
+     "offset": 1,
+     "row": 914204,
+     "strand": "-",
+     "substitutions": [
+      {
+       "codon": "GCG",
+       "expected": "E",
+       "found": "A",
+       "residue": 5
+      }
+     ]
+    },
+    {
+     "instance": "CTTGTCATACAGCTCCACCGATTTTGAGAA",
+     "kmer": "CCTTGTCATACAGCTCCACCGATTTTGAGAA",
+     "mismatches": 1,
+     "node": 914206,
+     "offset": 1,
+     "row": 914205,
+     "strand": "-",
+     "substitutions": [
+      {
+       "codon": "TAT",
+       "expected": "H",
+       "found": "Y",
+       "residue": 7
+      }
+     ]
+    },
+    {
+     "instance": "TTCTCAAAATCGGTGGAGCTGTATGACAAG",
+     "kmer": "TTCTCAAAATCGGTGGAGCTGTATGACAAGG",
+     "mismatches": 1,
+     "node": 4188306,
+     "offset": 0,
+     "row": 4188305,
+     "strand": "+",
+     "substitutions": [
+      {
+       "codon": "TAT",
+       "expected": "H",
+       "found": "Y",
+       "residue": 7
+      }
+     ]
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 18,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 8.488
+   },
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 36468,
+    "steps": 36468,
+    "steps_by_mismatches": {
+     "0": 556,
+     "1": 35912
+    }
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 8.530208
+ }
+}

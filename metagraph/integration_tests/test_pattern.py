@@ -109,6 +109,21 @@ DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
 DEFAULT_MAX_ANCHORS = 1000
 DEFAULT_MAX_LABELS = 1000
+# bounded mismatches (SPEC §21): the contract's maximum, and the capabilities' mismatches object
+# of a server at the default caps
+MAX_MISMATCHES = 3
+MISMATCHES_BLOCK = {'max': {'dna': 3, 'iupac': 3, 'protein': 3}, 'default': 0,
+                    'unit': {'dna': 'base', 'iupac': 'base', 'protein': 'residue'},
+                    'protein_substitutes': 'sense_codons', 'edits': ['substitution'],
+                    'order': 'mismatches_first',
+                    'levels_rule': 'SPEC-pattern-search.md section 21.4',
+                    'later_increment': ['long_patterns', 'labels', 'predicate',
+                                        'supported_paths']}
+# blaNDM-1 (on both strands of several of the mini's records): its first 40 bases, whose first
+# 31 are one k-mer, its forward primer (20 bases), and the 16S V4 primer 515F (IUPAC)
+NDM_40 = 'ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA'
+NDM_F = 'GGTTTGGCGATCTGGTTTTC'
+P515F = 'GTGYCAGCMGCCGCGGTAA'
 
 IUPAC = {'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'R': 'AG', 'Y': 'CT', 'S': 'CG', 'W': 'AT',
          'K': 'GT', 'M': 'AC', 'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG', 'N': 'ACGT'}
@@ -162,6 +177,21 @@ def residue_admits(residue, aa):
 
 def peptide_codons(residue, table):
     return {c for c, aa in zip(CODONS_TCAG, GENETIC_CODES[table]) if residue_admits(residue, aa)}
+
+
+def peptide_substitutes(residue, table):
+    """SPEC §21.3: the codons that substitute a residue: the sense codons of the other residues
+    (a stop codon never substitutes; X and '*' have none)."""
+    if residue == '*':
+        return set()
+    sense = {c for c, aa in zip(CODONS_TCAG, GENETIC_CODES[table]) if aa != '*'}
+    return sense - peptide_codons(residue, table)
+
+
+def pieces_of(n, m):
+    """The bounds of m + 1 pieces of n positions (the pigeonhole: an instance within m
+    substitutions matches one of them exactly)."""
+    return [round(i * n / (m + 1)) for i in range(m + 2)]
 
 
 def peptide_prefix(residues, table, s, reverse):
@@ -330,6 +360,49 @@ class Records:
                 for m in rx.finditer(seq):
                     if m.start() + k <= len(seq):
                         out.add((strand, seq[m.start():m.start() + k]))
+        return out
+
+    def hamming_contexts(self, pattern, k, m, scope='any_offset', strands='both'):
+        """{(strand, k-mer, offset, level, substitutions)}: the graph contexts of |pattern|
+        (L <= k) within m substitutions on a BASIC graph (SPEC §21), each with its level and
+        its substitutions ((position, expected, found), in the submitted pattern's
+        coordinates, SPEC §21.8). The candidates come from the pigeonhole -- an instance within
+        m substitutions matches one of m + 1 pieces of the oriented pattern exactly -- and are
+        then counted base by base with the test's own IUPAC table."""
+        p = pattern.upper()
+        L = len(p)
+        assert L <= k
+        out = set()
+        for strand, q in self.oriented(p, strands, True):
+            bounds = pieces_of(L, m)
+            pieces = [(bounds[i], pattern_regex(q[bounds[i]:bounds[i + 1]]))
+                      for i in range(m + 1)]
+            for island in self.sequences(False):
+                starts = set()
+                for offset, rx in pieces:
+                    for match in rx.finditer(island):
+                        start = match.start() - offset
+                        if 0 <= start <= len(island) - L:
+                            starts.add(start)
+                for i in starts:
+                    instance = island[i:i + L]
+                    subs = []
+                    for j in range(L):
+                        if instance[j] in IUPAC[q[j]]:
+                            continue
+                        if strand == '-':
+                            subs.append((L - 1 - j, p[L - 1 - j],
+                                         instance[j].translate(COMPLEMENT)))
+                        else:
+                            subs.append((j, p[j], instance[j]))
+                    if len(subs) > m:
+                        continue
+                    subs = tuple(sorted(subs))
+                    for s in range(max(0, i + L - k), min(i, len(island) - k) + 1):
+                        o = i - s
+                        if scope == 'suffix' and o != k - L:
+                            continue
+                        out.add((strand, island[s:s + k], o, len(subs), subs))
         return out
 
     def has_kmer(self, kmer, canonical=False):
@@ -940,6 +1013,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'predicate': {'operators': ['any', 'all', 'none', 'at_least', 'and', 'or', 'not'],
                           'strands': ['either', 'context'], 'scopes': ['context', 'motif'],
                           'access': 'rows'},
+            # bounded mismatches (SPEC §21.12): the caps per kind at the defaults, the rules
+            'mismatches': MISMATCHES_BLOCK,
         }
         self.assertEqual(expected, {x: p[x] for x in expected})
         self.assertEqual(['any_offset'], p['scopes_by_graph_mode']['primary'])
@@ -1958,6 +2033,258 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
     # ------------------------------------------------------------ labels
 
     NDM_F = 'GGTTTGGCGATCTGGTTTTC'   # blaNDM-1 forward primer: its k-mers carry 7 to 9 taxa
+
+    # ------------------------------------------------------------ bounded mismatches (§21)
+
+    def peptide_mismatch_contexts(self, residues, table, m):
+        """{(strand, k-mer, offset, level, substitutions)}: the contexts of a peptide of at most
+        k bases within m substituted residues (SPEC §21.3: a residue substituted by a sense codon
+        of another residue; a stop codon where the peptide has a residue, or a sense codon at
+        '*', is no instance), from the six-frame translations: the candidates match one of m + 1
+        pieces of the peptide exactly, each is then read codon by codon; a substitution is
+        (residue, expected, found, codon in the peptide's reading direction)."""
+        k, r, L = self.k, len(residues), 3 * len(residues)
+        bounds = pieces_of(r, m)
+        pieces = [(bounds[i], peptide_regex(residues[bounds[i]:bounds[i + 1]]))
+                  for i in range(m + 1)]
+        own = [peptide_codons(x, table) for x in residues]
+        other = [peptide_substitutes(x, table) for x in residues]
+        code = dict(zip(CODONS_TCAG, GENETIC_CODES[table]))
+        out = set()
+        for recs in self.columns.values():
+            for _, seq in recs:
+                seq = seq.upper()
+                for strand, frame, aa in translated_frames(seq, table):
+                    t = seq if strand == '+' else revcomp(seq)
+                    starts = set()
+                    for offset, rx in pieces:
+                        for match in rx.finditer(aa):
+                            start = match.start() - offset
+                            if 0 <= start <= len(aa) - r:
+                                starts.add(start)
+                    for j in starts:
+                        subs = []
+                        for x in range(r):
+                            codon = t[frame + 3 * (j + x):frame + 3 * (j + x) + 3]
+                            if codon in own[x]:
+                                continue
+                            if codon not in other[x]:
+                                subs = None
+                                break
+                            subs.append((x, residues[x], code[codon], codon))
+                        if subs is None or len(subs) > m:
+                            continue
+                        start = frame + 3 * j
+                        i = start if strand == '+' else len(seq) - start - L
+                        for s in range(max(0, i + L - k), min(i, len(seq) - k) + 1):
+                            out.add((strand, seq[s:s + k], i - s, len(subs), tuple(subs)))
+        return out
+
+    def assertMismatchEntry(self, entry, expected, m, length):
+        """An entry answered within m substitutions against the oracle's contexts: every level's
+        count exact (SPEC §21.6), the entry's fields of §21.8, the steps per level summing to
+        the steps, and in a retrieval mode the results the oracle's with their levels and
+        substitutions, in (level, node, offset, orientation) order, complete."""
+        by = entry['counts']['contexts']['by_mismatches']
+        self.assertEqual({str(t) for t in range(m + 1)}, set(by))
+        for t in range(m + 1):
+            self.assertCount(by[str(t)], sum(1 for x in expected if x[3] == t))
+        self.assertCount({x: entry['counts']['contexts'][x]
+                          for x in ('value', 'relation', 'unit')}, len(expected))
+        self.assertEqual(m, entry['max_mismatches'])
+        self.assertIsNone(entry['min_anchor_mismatch_information_bits'])
+        self.assertLess(entry['mismatch_information_bits'], entry['information_bits'])
+        steps = entry['work']['steps_by_mismatches']
+        self.assertEqual({str(t) for t in range(m + 1)}, set(steps))
+        self.assertEqual(entry['work']['steps'], sum(steps.values()))
+        self.assertIsNone(entry['stop'])
+        if 'results' not in entry:
+            return
+        self.assertCompleteRetrieval(entry)
+        got = set()
+        for r in entry['results']:
+            subs = tuple(tuple(s[f] for f in ('residue', 'expected', 'found', 'codon'))
+                         if 'residue' in s
+                         else tuple(s[f] for f in ('position', 'expected', 'found'))
+                         for s in r['substitutions'])
+            self.assertEqual(len(subs), r['mismatches'])
+            self.assertEqual(r['kmer'][r['offset']:r['offset'] + length], r['instance'])
+            got.add((r['strand'], r['kmer'], r['offset'], r['mismatches'], subs))
+        self.assertEqual(expected, got)
+        order = [(r['mismatches'], r['node'], r['offset'], self.ORIENTATION_RANK[r['strand']])
+                 for r in entry['results']]
+        self.assertEqual(sorted(order), order)
+        self.assertEqual(len(entry['results']), entry['returned'])
+
+    def test_mismatches_against_the_fasta(self):
+        """SPEC §21: patterns of at most k bases within 1 and 2 substitutions against a Hamming
+        scan of the mini's records (the test's own IUPAC table): the first 31 bases of blaNDM-1
+        (one offset: the k-mer neighbours), its forward primer at every offset, the 515F primer
+        with its IUPAC codes and a 16-mer of the records; count and retrieval modes agree; the
+        unmasked mini's per-level counts are exact or bounds holding the masked counts."""
+        ndm31 = NDM_40[:31]
+        for text, kind, m in ((ndm31, 'dna', 1), (ndm31, 'dna', 2), (NDM_F, 'dna', 1),
+                              (NDM_F, 'dna', 2), (P515F, 'iupac', 1), (self.p16, 'dna', 1)):
+            with self.subTest(pattern=text, m=m):
+                expected = self.records.hamming_contexts(text, self.k, m)
+                self.assertGreater(len(expected), 0)
+                request = {'patterns': [{kind: text}], 'max_mismatches': m,
+                           'output': {'labels': 'none'}}
+                out = self.pattern(self.server, request)
+                self.assertEqual(m, out['limits']['max_mismatches'])
+                self.assertNotIn('max_mismatches', [c['field'] for c in out['limits']['clamped']])
+                entry = out['patterns'][0]
+                self.assertMismatchEntry(entry, expected, m, len(text))
+                count = self.pattern(self.server, dict(request, mode='count'))['patterns'][0]
+                self.assertEqual(entry['counts'], count['counts'])
+                self.assertMismatchEntry(count, expected, m, len(text))
+                unmasked = self.pattern(self.unmasked_server,
+                                        dict(request, mode='count'))['patterns'][0]
+                for t in range(m + 1):
+                    c = unmasked['counts']['contexts']['by_mismatches'][str(t)]
+                    masked = count['counts']['contexts']['by_mismatches'][str(t)]['value']
+                    if c['relation'] == 'exact':
+                        self.assertEqual(masked, c['value'], t)
+                    else:
+                        self.assertEqual('bounds', c['relation'], t)
+                        self.assertLessEqual(c['lower'], masked, t)
+                        self.assertLessEqual(masked, c['upper'], t)
+        # the 31-mer's neighbours: the records hold blaNDM-1 variants, so some context lies
+        # above level 0 within 2 substitutions
+        expected = self.records.hamming_contexts(ndm31, self.k, 2)
+        self.assertEqual(1, len({o for _, _, o, _, _ in expected}))
+
+    def test_peptide_mismatches_against_the_six_frames(self):
+        """SPEC §21.3: peptides within one substituted residue against the six-frame
+        translations read codon by codon with the test's own tables (a substitution a sense
+        codon of another residue, never a stop codon; X, B, Z, J by their sets)."""
+        for residues, table in (('MELPNIMHPV', 1), ('MELPNIMHPV', 11), ('MZLPBJMHPV', 1),
+                                ('TARMADKLR*', 1)):
+            with self.subTest(peptide=residues, table=table):
+                expected = self.peptide_mismatch_contexts(residues, table, 1)
+                self.assertGreater(len(expected), 0)
+                request = {'patterns': [{'protein': residues}], 'genetic_code': table,
+                           'max_mismatches': 1, 'output': {'labels': 'none'}}
+                entry = self.pattern(self.server, request)['patterns'][0]
+                self.assertPeptideEntry(entry, residues, table)
+                self.assertMismatchEntry(entry, expected, 1, 30)
+                for r in entry['results']:
+                    for s in r['substitutions']:
+                        self.assertNotEqual('*', s['found'])
+                        self.assertIn(s['codon'], peptide_codons(s['found'], table))
+                        self.assertNotIn(s['codon'], peptide_codons(s['expected'], table))
+                        self.assertNotEqual('*', s['expected'])
+                # the exact contexts are the level-0 ones
+                exact = self.peptide_contexts(residues, table)
+                self.assertEqual(exact, {(s, kmer, o) for s, kmer, o, level, _ in expected
+                                         if level == 0})
+
+    def test_mismatch_stop_leaves_the_lower_levels_exact(self):
+        """SPEC §21.4, §21.6: a budget spent inside the work of level 2 leaves levels 0 and 1
+        exact, level 2 at_least, the total at_least, stop.mismatch_level 2 (partial releases
+        the lower levels whole, all_or_count withholds); spent inside level 1, level 2 never
+        starts (unknown)."""
+        request = {'patterns': [{'dna': NDM_F}], 'max_mismatches': 2, 'mode': 'count'}
+        full = self.pattern(self.server, request)['patterns'][0]
+        steps = full['work']['steps_by_mismatches']
+        s0, s1, s2 = steps['0'], steps['1'], steps['2']
+        self.assertGreater(s1, 1)
+        self.assertGreater(s2, 1)
+        expected = self.records.hamming_contexts(NDM_F, self.k, 2)
+        n = [sum(1 for x in expected if x[3] == t) for t in range(3)]
+        for mode in ('count', 'all_or_count', 'partial'):
+            with self.subTest(mode=mode):
+                e = self.pattern(self.server, dict(request, mode=mode, max_steps=s0 + s1 + 1,
+                                                   output={'labels': 'none'}))['patterns'][0]
+                by = e['counts']['contexts']['by_mismatches']
+                self.assertCount(by['0'], n[0])
+                self.assertCount(by['1'], n[1])
+                self.assertEqual('at_least', by['2']['relation'])
+                self.assertLessEqual(by['2']['value'], n[2])
+                self.assertEqual('at_least', e['counts']['contexts']['relation'])
+                self.assertEqual({'phase': 'discovery', 'reason': 'max_steps',
+                                  'mismatch_level': 2}, e['stop'])
+                self.assertEqual(s0 + s1 + 1, e['work']['steps'])
+                self.assertEqual({'0': s0, '1': s1, '2': 1}, e['work']['steps_by_mismatches'])
+                if mode == 'partial':
+                    self.assertEqual({'reason': 'max_steps'}, e['cut'])
+                    got = {(r['strand'], r['kmer'], r['offset']) for r in e['results']
+                           if r['mismatches'] < 2}
+                    self.assertEqual({(s, kmer, o) for s, kmer, o, level, _ in expected
+                                      if level < 2}, got)
+                elif mode == 'all_or_count':
+                    self.assertEqual({'reason': 'discovery_budget'}, e['withheld'])
+        e = self.pattern(self.server, dict(request, max_steps=s0 + 1))['patterns'][0]
+        by = e['counts']['contexts']['by_mismatches']
+        self.assertCount(by['0'], n[0])
+        self.assertEqual('at_least', by['1']['relation'])
+        self.assertCount(by['2'], None, 'unknown')
+        self.assertEqual(1, e['stop']['mismatch_level'])
+        self.assertEqual({'0': s0, '1': 1, '2': 0}, e['work']['steps_by_mismatches'])
+        # without substitutions a stop names no level
+        plain = self.pattern(self.server, {'patterns': [{'dna': NDM_F}], 'mode': 'count',
+                                           'max_steps': 1})['patterns'][0]
+        self.assertEqual({'phase', 'reason'}, set(plain['stop']))
+
+    def test_mismatch_slots_and_refusals(self):
+        """SPEC §21.2, §21.8, §21.16: the field's values refused, the later increments' combinations
+        refused by name, the floor slot with its largest admitted max_mismatches, a pattern longer
+        than k answered in its slot with the cap 0, and 0 the field's absence."""
+        for value in (4, -1, 1.5, '1', None, True):
+            ret = self.server.post('pattern', {'patterns': [{'dna': NDM_F}],
+                                               'max_mismatches': value})
+            self.assertEqual((400, 'invalid_request'), (ret.status_code, ret.json()['code']),
+                             value)
+        for extra in ({'output': {'labels': 'all'}}, {'predicate': {'any': ['562']}},
+                      {'long_search': 'supported_paths'},
+                      {'output': {'labels': 'predicate_only'}, 'predicate': {'any': ['562']}},
+                      {'mode': 'count', 'output': {'labels': 'all'}}):
+            ret = self.server.post('pattern', dict({'patterns': [{'dna': NDM_F}],
+                                                    'max_mismatches': 1}, **extra))
+            self.assertEqual((400, 'later_increment'), (ret.status_code, ret.json()['code']),
+                             extra)
+            self.assertIn('mismatches.later_increment', ret.json()['error'])
+        out = self.pattern(self.server, {'patterns': [{'id': 'floor', 'dna': NDM_F[:16]},
+                                                      {'id': 'long', 'dna': NDM_40},
+                                                      {'id': 'ok', 'dna': NDM_F}],
+                                         'max_mismatches': 2, 'mode': 'count'})
+        floor, long_, ok = out['patterns']
+        self.assertEqual('information_below_floor', floor['error']['code'])
+        self.assertEqual(2, floor['max_mismatches'])
+        self.assertEqual(32.0, floor['information_bits'])
+        self.assertAlmostEqual(32 - math.log2(1 + 48 + 1080), floor['mismatch_information_bits'],
+                               places=9)
+        self.assertEqual(1, floor['max_mismatches_within_floor'])
+        self.assertNotIn('counts', floor)
+        self.assertNotIn('max_mismatches_cap', floor)
+        self.assertEqual('mismatches_above_cap', long_['error']['code'])
+        self.assertEqual(0, long_['max_mismatches_cap'])
+        self.assertIn('longer than k', long_['error']['message'])
+        self.assertEqual((2, 80.0, 62.0, 62.0),
+                         (long_['max_mismatches'], long_['information_bits'],
+                          long_['anchor_information_bits'], long_['min_anchor_information_bits']))
+        self.assertAlmostEqual(62 - math.log2(1 + 93 + 4185),
+                               long_['min_anchor_mismatch_information_bits'], places=9)
+        self.assertNotIn('counts', long_)
+        self.assertIn('counts', ok)
+        self.assertEqual(2, out['limits']['max_mismatches'])
+        # a pattern longer than k with 0: answered as before (anchors counted)
+        e = self.pattern(self.server, {'patterns': [{'dna': NDM_40}], 'max_mismatches': 0,
+                                       'mode': 'count'})['patterns'][0]
+        self.assertEqual('exact', e['counts']['anchors']['relation'])
+        # 0 is the field's absence: the same answer apart from the timings, nothing of §21
+        request = {'patterns': [{'dna': NDM_F}, {'protein': 'MELPNIMHPV'}, {'dna': NDM_40}],
+                   'output': {'labels': 'none'}}
+
+        def untimed(answer):
+            answer.pop('timing')
+            for e in answer['patterns']:
+                e.pop('timing', None)
+            return answer
+        a = untimed(self.pattern(self.server, request))
+        b = untimed(self.pattern(self.server, dict(request, max_mismatches=0)))
+        self.assertEqual(a, b)
+        self.assertNotIn('mismatch', json.dumps(b))
 
     def placed_oracle(self, pattern):
         """{(column, seq_id, 1-based start, strand)}: every occurrence of the oriented pattern
@@ -3377,6 +3704,74 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         self.assertEqual((7, 1000, 3), (limits['max_predicate_contexts'],
                                         limits['max_predicate_work'],
                                         limits['max_predicate_labels']))
+
+    def test_mismatch_caps_at_start_up(self):
+        """SPEC §21.12: --pattern-max-mismatches and --pattern-max-mismatches-protein are at most
+        3, the latter at most the former (refused at start-up with both flags and both values
+        named), on the server and the CLI alike; both usages name the flags; the CLI applies the
+        caps as the server does (a peptide above the protein cap: its slot mismatches_above_cap
+        naming the cap; the protein cap follows a lowered general one)."""
+        for command in ('server_query', 'pattern'):
+            for flags, says in ((['--pattern-max-mismatches', '4'],
+                                 '--pattern-max-mismatches must be an integer in [0, 3]'),
+                                (['--pattern-max-mismatches-protein', '4'],
+                                 '--pattern-max-mismatches-protein must be an integer in [0, 3]'),
+                                (['--pattern-max-mismatches', '2',
+                                  '--pattern-max-mismatches-protein', '3'],
+                                 '--pattern-max-mismatches-protein (3) must be at most '
+                                 '--pattern-max-mismatches (2)')):
+                cmd = shlex.split(METAGRAPH) + [command, '-i', self.graph_basic, '-a',
+                                                self.anno_basic] + flags
+                if command == 'server_query':
+                    cmd += ['--port', str(free_port()), '--address', '127.0.0.1']
+                else:
+                    cmd += [os.path.join(self.tempdir.name, 'none.json')]
+                try:
+                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                         timeout=120)
+                except subprocess.TimeoutExpired:
+                    self.fail(f'{command} started with {flags}')
+                self.assertNotEqual(0, res.returncode, (command, flags))
+                self.assertIn(says, res.stderr.decode(), (command, flags))
+            res = subprocess.run(shlex.split(METAGRAPH) + [command], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            text = (res.stdout + res.stderr).decode()
+            for flag in ('--pattern-max-mismatches', '--pattern-max-mismatches-protein'):
+                self.assertIn(flag, text, command)
+        path = os.path.join(self.tempdir.name, 'request_mismatch_caps.json')
+        with open(path, 'w') as f:
+            json.dump({'patterns': [{'dna': 'ACGACGTTAGGA', 'id': 'dna'},
+                                    {'protein': 'MKLVD', 'id': 'pep'}],
+                       'mode': 'count', 'max_mismatches': 2}, f)
+        base = shlex.split(METAGRAPH) + ['pattern', '--json', '--pattern-min-information-bits',
+                                         str(self.FLOOR), '-i', self.graph_basic, '-a',
+                                         self.anno_basic]
+        # the protein cap alone: the peptide's slot, the dna pattern answered
+        res = subprocess.run(base + ['--pattern-max-mismatches-protein', '1', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        out = json.loads(res.stdout)
+        self.assertEqual(2, out['limits']['max_mismatches'])
+        dna, pep = out['patterns']
+        self.assertIn('counts', dna)
+        self.assertEqual(3, len(dna['counts']['contexts']['by_mismatches']))
+        self.assertEqual(('mismatches_above_cap', 1, 2),
+                         (pep['error']['code'], pep['max_mismatches_cap'], pep['max_mismatches']))
+        self.assertIn('mismatches.max.protein', pep['error']['message'])
+        # the general cap lowered to 1: the protein cap follows it, both patterns above it
+        res = subprocess.run(base + ['--pattern-max-mismatches', '1', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        for e in json.loads(res.stdout)['patterns']:
+            self.assertEqual(('mismatches_above_cap', 1),
+                             (e['error']['code'], e['max_mismatches_cap']), e['id'])
+        # equal caps start, and serve both
+        res = subprocess.run(base + ['--pattern-max-mismatches', '2',
+                                     '--pattern-max-mismatches-protein', '2', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        for e in json.loads(res.stdout)['patterns']:
+            self.assertNotIn('error', e, e['id'])
 
     def test_default_caps_at_start_up(self):
         """SPEC §4.5: --pattern-default-max-labels and --pattern-default-max-anchors are at

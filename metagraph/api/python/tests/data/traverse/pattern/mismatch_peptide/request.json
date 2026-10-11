@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "protein": "FSKSVELHDK",
+   "id": "var_pep"
+  }
+ ],
+ "max_mismatches": 1,
+ "output": {
+  "labels": "none"
+ }
+}

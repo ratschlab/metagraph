@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "iupac": "TTTCAGCARCCCCTTNTATC",
+   "id": "var20_RN"
+  }
+ ],
+ "max_mismatches": 1,
+ "output": {
+  "labels": "none"
+ }
+}

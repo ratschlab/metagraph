@@ -1,0 +1,10 @@
+{
+ "patterns": [
+  {
+   "dna": "GTTATCGTTTTTCAGCAACCCCTTGTATCTG",
+   "id": "var31"
+  }
+ ],
+ "max_mismatches": 2,
+ "mode": "count"
+}

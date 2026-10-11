@@ -42,6 +42,10 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
   masked_small_predicate_cap
              the masked copy served with --pattern-max-predicate-labels 4: a predicate of more
              names is refused (predicate_too_large)
+  masked_protein_cap
+             the masked copy served with --pattern-max-mismatches-protein 1 (the staging
+             configuration, SPEC §21.12): a peptide asked within 2 substitutions is answered in
+             its slot (mismatches_above_cap), a dna pattern within 3
   hash       a hash graph (build --graph hash) of one mini record (1296536.fa) with a column
              annotation: a graph the engine does not recognise (representation_unsupported)
 
@@ -185,6 +189,26 @@ TYPO = '5622'
 # poly-T run and a poly-G run
 NO_INSTANCE = 'T' * 38 + 'G' * 38
 SMALL_PREDICATE_CAP = 4
+# bounded mismatches (SPEC §21): a 31-mer of the mini's Klebsiella record (573) whose
+# neighbours within 2 substitutions the index holds -- two k-mers at each level (one per
+# strand): the variant G at position 17 (A in the pattern), and G at 17 with T at 21 --, its
+# 20-mer starting at position 9 (one offset, 24 contexts per level within 2), that 20-mer with
+# the varying position 8 widened to R (the level-1 variants become exact) and a position that
+# does not vary widened to N (never substituted); a 10-residue window of an E. coli record (562)
+# whose index neighbours within one substituted residue are E -> A (codon GCG) and H -> Y (TAT);
+# a 16-mer below the floor within 2 (21.9 bits) but not within 1 (26.4); and the protein cap of
+# the masked_protein_cap server
+VAR31 = 'GTTATCGTTTTTCAGCAACCCCTTGTATCTG'
+VAR20 = VAR31[9:29]
+VAR20_IUPAC = VAR20[:8] + 'R' + VAR20[9:15] + 'N' + VAR20[16:]
+VAR_PEP = 'FSKSVELHDK'
+FLOOR16 = NDM_F[:16]
+PROTEIN_MISMATCH_CAP = 1
+# the steps the search of VAR31 within 2 substitutions charges per level on the masked copy (62,
+# 650, 5,593): a budget of 63 stops in the first step of level 1 (level 2 never starts), one of
+# 1,500 inside level 2 after one of its two contexts was found
+MISMATCH_STOP_IN_LEVEL_1 = 63
+MISMATCH_STOP_IN_LEVEL_2 = 1500
 # the utf8_labels server (SPEC §8.9, unrepresentable_label_name): two records at k = 31, A x 40
 # under the raw header bytes label\xff (not UTF-8) and C x 40 under the valid header
 # label�, what a replacement of the bad byte would spell; its patterns, one k-mer each
@@ -433,6 +457,56 @@ def predicate_block(normal_form=None, unknown=None, vacuous=None, strands=None):
             check(b['vacuous'] is vacuous, b)
         if strands is not None:
             check(b['strands'] == strands, b)
+    return run
+
+
+def levels(*values):
+    """counts.contexts.by_mismatches: exact counts per level, keys "0" .. "m" (SPEC §21.6)."""
+    def run(entry):
+        by = entry['counts']['contexts']['by_mismatches']
+        check(list(by) == [str(t) for t in range(len(values))], by)
+        for t, v in enumerate(values):
+            check(by[str(t)] == {'value': v, 'relation': 'exact', 'unit': 'graph_contexts'},
+                  (t, by[str(t)]))
+    return run
+
+
+def level_relations(*relations):
+    """counts.contexts.by_mismatches: the relation per level (a stopped search, SPEC §21.6)."""
+    def run(entry):
+        by = entry['counts']['contexts']['by_mismatches']
+        check([by[str(t)]['relation'] for t in range(len(relations))] == list(relations), by)
+    return run
+
+
+def stopped_in_level(t):
+    """stop {discovery, max_steps} naming the level whose work it interrupted (SPEC §21.7)."""
+    def run(entry):
+        check(entry['stop'] == {'phase': 'discovery', 'reason': 'max_steps',
+                                'mismatch_level': t}, entry['stop'])
+    return run
+
+
+def substituted(*expected):
+    """The substitutions of the returned results, as a set of (strand, level, (field values...))
+    tuples: what the fixture shows about the coordinates (SPEC §21.8)."""
+    def run(entry):
+        got = set()
+        for r in entry['results']:
+            for s in r['substitutions']:
+                got.add((r['strand'], r['mismatches'], tuple(sorted(s.items()))))
+        check(got == {(strand, level, tuple(sorted(s.items())))
+                      for strand, level, s in expected}, got)
+    return run
+
+
+def mismatch_slot(code, **fields):
+    """An error slot of SPEC §21.8 with the stated fields (max_mismatches_cap, or
+    max_mismatches_within_floor)."""
+    def run(entry):
+        check(entry['error']['code'] == code, entry.get('error'))
+        for name, value in fields.items():
+            check(entry.get(name) == value, (name, entry.get(name)))
     return run
 
 
@@ -1903,6 +1977,139 @@ FIXTURES = [
          'whatever the request asks',
          refused('representation_unsupported')),
 
+    # ---------------------------------------------------------------- bounded mismatches
+    get('pattern_capabilities_protein_cap', 'masked_protein_cap', '/pattern/capabilities',
+        'GET /pattern/capabilities of the masked copy served with --pattern-max-mismatches-protein '
+        '1 (the staging configuration): the full block\'s mismatches object (SPEC §21.12) with '
+        'max {dna 3, iupac 3, protein 1}, default 0, the units, protein_substitutes sense_codons, '
+        'edits [substitution], order mismatches_first, levels_rule, and later_increment (the '
+        'patterns longer than k, the labels, a predicate, the supported paths)',
+        lambda doc: check(doc['mismatches']['max'] == {'dna': 3, 'iupac': 3,
+                                                       'protein': PROTEIN_MISMATCH_CAP}
+                          and doc['mismatches']['later_increment']
+                          == ['long_patterns', 'labels', 'predicate', 'supported_paths'],
+                          doc['mismatches'])),
+    post('mismatch_neighbours', 'masked',
+         {'patterns': [p(VAR31, ident='var31')], 'max_mismatches': 2,
+          'output': {'labels': 'none'}}, 200,
+         'max_mismatches 2 on a 31-mer (one offset: the k-mer neighbours of '
+         'NOTE-mismatch-search.md): counts.contexts.by_mismatches exact per level (2, 2, 2), '
+         'the total their sum; every result with its level (mismatches) and its substitutions '
+         'in the submitted pattern\'s coordinates on both strands (position 17 A -> G; 17 and 21 '
+         'C -> T), the closest first; limits.max_mismatches, the entry\'s '
+         'mismatch_information_bits (49.9 of 62), work.steps_by_mismatches',
+         entries(expect_all(exact(6), complete, levels(2, 2, 2),
+                            substituted(('+', 1, {'position': 17, 'expected': 'A', 'found': 'G'}),
+                                        ('-', 1, {'position': 17, 'expected': 'A', 'found': 'G'}),
+                                        ('+', 2, {'position': 17, 'expected': 'A', 'found': 'G'}),
+                                        ('+', 2, {'position': 21, 'expected': 'C', 'found': 'T'}),
+                                        ('-', 2, {'position': 17, 'expected': 'A', 'found': 'G'}),
+                                        ('-', 2, {'position': 21, 'expected': 'C', 'found': 'T'})),
+                            field('max_mismatches', 2)))),
+    post('mismatch_primer', 'masked',
+         {'patterns': [p(VAR20, ident='var20')], 'max_mismatches': 2, 'mode': 'count'}, 200,
+         'mode count, a 20-mer within 2 substitutions at every offset: by_mismatches (24, 24, 24) '
+         'beside by_offset and by_strand, which stay totals over the levels',
+         entries(expect_all(exact(72), levels(24, 24, 24)))),
+    post('mismatch_iupac', 'masked',
+         {'patterns': [p(VAR20_IUPAC, 'iupac', 'var20_RN')], 'max_mismatches': 1,
+          'output': {'labels': 'none'}}, 200,
+         'an IUPAC pattern within 1 substitution: a substitution is a base outside the '
+         'position\'s set (the R at position 8 admits the variants that were level 1 of the '
+         'exact 20-mer: level 0 now 48), never at N (position 15); the level-2 variants are '
+         'level 1 (position 12 C -> T)',
+         entries(expect_all(exact(72), complete, levels(48, 24),
+                            lambda e: check(all(s['position'] == 12 for r in e['results']
+                                                for s in r['substitutions']), e['results'])))),
+    post('mismatch_peptide', 'masked',
+         {'patterns': [p(VAR_PEP, 'protein', 'var_pep')], 'max_mismatches': 1,
+          'output': {'labels': 'none'}}, 200,
+         'a peptide within one substituted residue (SPEC §21.3, sense substitutes): 10 exact '
+         'contexts and 8 at level 1, each result\'s residue_substitution naming the residue, the '
+         'residue found and its codon in the peptide\'s reading direction (E -> A GCG, H -> Y '
+         'TAT), on both strands',
+         entries(expect_all(exact(18), complete, levels(10, 8),
+                            lambda e: check({(s['residue'], s['expected'], s['found'], s['codon'])
+                                             for r in e['results'] for s in r['substitutions']}
+                                            == {(5, 'E', 'A', 'GCG'), (7, 'H', 'Y', 'TAT')},
+                                            e['results'])))),
+    post('mismatch_partial', 'masked',
+         {'patterns': [p(VAR31, ident='var31')], 'max_mismatches': 2, 'mode': 'partial',
+          'max_contexts': 3, 'output': {'labels': 'none'}}, 200,
+         'mode partial within 2 substitutions: the first max_contexts (3) in (mismatches, node, '
+         'offset, orientation) order, the closest first (both exact contexts, then one at level '
+         '1), cut max_contexts; the counts per level exact',
+         entries(expect_all(exact(6), levels(2, 2, 2), cut('max_contexts'), field('returned', 3),
+                            lambda e: check([r['mismatches'] for r in e['results']] == [0, 0, 1],
+                                            e['results'])))),
+    post('mismatch_stop_level', 'masked',
+         {'patterns': [p(VAR31, ident='var31')], 'max_mismatches': 2, 'mode': 'count',
+          'max_steps': MISMATCH_STOP_IN_LEVEL_2}, 200,
+         'max_steps spent inside the work of level 2: levels 0 and 1 exact (the passes, SPEC '
+         '§21.4), level 2 at_least (1 of its 2 contexts found), the total at_least, stop '
+         '{discovery, max_steps, mismatch_level 2}, steps_by_mismatches (62, 650, 788)',
+         entries(expect_all(relation('at_least'), level_relations('exact', 'exact', 'at_least'),
+                            stopped_in_level(2)))),
+    post('mismatch_stop_partial', 'masked',
+         {'patterns': [p(VAR31, ident='var31')], 'max_mismatches': 2, 'mode': 'partial',
+          'max_steps': MISMATCH_STOP_IN_LEVEL_2, 'output': {'labels': 'none'}}, 200,
+         'the same stop in mode partial: the levels below the stopped one released whole and the '
+         'level-2 context found before the stop, cut max_steps',
+         entries(expect_all(level_relations('exact', 'exact', 'at_least'), stopped_in_level(2),
+                            cut('max_steps'), field('returned', 5)))),
+    post('mismatch_stop_unknown', 'masked',
+         {'patterns': [p(VAR31, ident='var31')], 'max_mismatches': 2, 'mode': 'count',
+          'max_steps': MISMATCH_STOP_IN_LEVEL_1}, 200,
+         'max_steps spent in the first step of level 1: level 0 exact, level 1 at_least 0, '
+         'level 2 unknown (never started), stop.mismatch_level 1, steps_by_mismatches (62, 1, 0)',
+         entries(expect_all(level_relations('exact', 'at_least', 'unknown'), stopped_in_level(1),
+                            lambda e: check(e['work']['steps_by_mismatches']
+                                            == {'0': 62, '1': 1, '2': 0}, e['work'])))),
+    post('mismatch_unmasked', 'unmasked',
+         {'patterns': [p(VAR31, ident='var31')], 'max_mismatches': 2, 'mode': 'count'}, 200,
+         'the mini as built (no mask) within 2 substitutions: the counts per level exact where '
+         'the search proves them or the check of few unchecked candidates settles them, else '
+         'bounds with an estimate (SPEC §21.6)',
+         entries(lambda e: check(all(e['counts']['contexts']['by_mismatches'][str(t)]['relation']
+                                     in ('exact', 'bounds') for t in range(3)), e['counts']))),
+    post('mismatch_slots', 'masked',
+         {'patterns': [p(FLOOR16, ident='floor'), p(NDM_40, ident='long'), p(VAR31, ident='ok')],
+          'max_mismatches': 2, 'mode': 'count'}, 200,
+         'the error slots of SPEC §21.8: a 16-mer below the floor within 2 substitutions (21.9 '
+         'bits; max_mismatches_within_floor 1: within 1 it would be served); a pattern longer '
+         'than k (mismatches_above_cap, max_mismatches_cap 0: a later increment, its anchor '
+         'windows\' bits stated); the third pattern answered',
+         entries(mismatch_slot('information_below_floor', max_mismatches_within_floor=1,
+                               max_mismatches=2),
+                 mismatch_slot('mismatches_above_cap', max_mismatches_cap=0),
+                 exact(6))),
+    post('mismatch_above_cap', 'masked_protein_cap',
+         {'patterns': [p(VAR_PEP, 'protein', 'var_pep'), p(VAR31, ident='var31')],
+          'max_mismatches': 2, 'output': {'labels': 'none'}}, 200,
+         'a server with --pattern-max-mismatches-protein 1: a peptide asked within 2 '
+         'substitutions is answered in its slot (mismatches_above_cap, max_mismatches_cap 1, '
+         'never lowered), the dna pattern beside it answered',
+         entries(mismatch_slot('mismatches_above_cap', max_mismatches_cap=1, max_mismatches=2),
+                 expect_all(exact(6), levels(2, 2, 2)))),
+    post('mismatch_zero', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F'), p(NDM_R, ident='NDM-R'),
+                       p(ABSENT_20, ident='absent')],
+          'mode': 'count', 'max_mismatches': 0}, 200,
+         'max_mismatches 0 is the field\'s absence: the answer of the `count` fixture, byte for '
+         'byte apart from timing (nothing of SPEC §21 in it)',
+         entries(exact(24), exact(24), exact(0))),
+    post('mismatch_invalid', 'masked',
+         {'patterns': [p(NDM_F)], 'max_mismatches': 4}, 400,
+         '400 invalid_request: max_mismatches outside 0 .. 3 (the contract\'s maximum; a '
+         'fraction, a string, null or a boolean alike)',
+         refused('invalid_request')),
+    post('mismatch_later_increment', 'masked',
+         {'patterns': [p(NDM_F)], 'max_mismatches': 1, 'output': {'labels': 'all'}}, 400,
+         '400 later_increment: substitutions with output.labels "all" (likewise "predicate_only", '
+         'a predicate or long_search "supported_paths") are not served yet (SPEC §21.16; the '
+         'capabilities\' mismatches.later_increment)',
+         refused('later_increment')),
+
     # ---------------------------------------------------------------- hand-made
     post('deadline_503', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'partial', 'time_budget_ms': TINY_BUDGET_MS,
@@ -1961,6 +2168,13 @@ SERVERS = {
                                   + ' --index-release ' + INDEX_RELEASE
                                   + '  (the masked copy; a predicate may list '
                                   + str(SMALL_PREDICATE_CAP) + ' names)',
+    'masked_protein_cap': 'server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/'
+                          + MINI_ANNO + ' --pattern-max-mismatches-protein '
+                          + str(PROTEIN_MISMATCH_CAP) + ' --index-name ' + INDEX_NAME
+                          + ' --index-release ' + INDEX_RELEASE
+                          + '  (the masked copy; a peptide may be searched within '
+                          + str(PROTEIN_MISMATCH_CAP) + ' substituted residue, a dna or iupac '
+                            'pattern within 3)',
     'hash': 'server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg'
             ' --index-release ' + INDEX_RELEASE + '  (a hash graph of ' + HASH_RECORD
             + ' at k = 31, column annotation by file name)',
@@ -2148,6 +2362,9 @@ def server_args(name, mini, work):
     if name == 'masked_small_predicate_cap':
         return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
                 '--pattern-max-predicate-labels', str(SMALL_PREDICATE_CAP)] + ident
+    if name == 'masked_protein_cap':
+        return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
+                '--pattern-max-mismatches-protein', str(PROTEIN_MISMATCH_CAP)] + ident
     if name == 'hash':
         hashed = os.path.join(work, 'hash')
         return ['-i', os.path.join(hashed, 'graph.orhashdbg'),

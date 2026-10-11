@@ -51,7 +51,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "43f0bd4e5d2e0336",
+  "server_instance": "027065f36c4d9590",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -219,6 +219,31 @@
    "supported_paths"
   ],
   "mask": null,
+  "mismatches": {
+   "default": 0,
+   "edits": [
+    "substitution"
+   ],
+   "later_increment": [
+    "long_patterns",
+    "labels",
+    "predicate",
+    "supported_paths"
+   ],
+   "levels_rule": "SPEC-pattern-search.md section 21.4",
+   "max": {
+    "dna": 3,
+    "iupac": 3,
+    "protein": 3
+   },
+   "order": "mismatches_first",
+   "protein_substitutes": "sense_codons",
+   "unit": {
+    "dna": "base",
+    "iupac": "base",
+    "protein": "residue"
+   }
+  },
   "modes": [
    "count",
    "all_or_count",
