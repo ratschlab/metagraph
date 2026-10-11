@@ -626,10 +626,13 @@ aligned_int_vector(size_t size, uint64_t val, uint8_t width, size_t alignment) {
     // This is a dirty hack to allow for reallocating an int_vector<t_width>'s
     // underlying storage
     struct int_vector_access {
+        decltype(sdsl::int_vector<t_width>().growth_factor) growth_factor;
         typename sdsl::int_vector<t_width>::size_type m_size;
+        typename sdsl::int_vector<t_width>::size_type m_capacity;
         uint64_t *m_data;
         typename sdsl::int_vector<t_width>::int_width_type m_width;
         std::shared_ptr<sdsl::mmap_context> m_mmap_context;
+        const sdsl::int_vector<t_width> &raw_vec;
     };
     static_assert(sizeof(sdsl::int_vector<t_width>) == sizeof(int_vector_access));
     assert(!t_width || t_width == width);
@@ -639,9 +642,11 @@ aligned_int_vector(size_t size, uint64_t val, uint8_t width, size_t alignment) {
     v_cast.m_size = size * width;
     v_cast.m_width = width;
     free(v_cast.m_data);
+    v_cast.m_data = nullptr;
+    v_cast.m_capacity = ((v_cast.m_size + 63) >> 6) << 6;
 
     // Round up to the nearest multiple of |alignment| bytes
-    size_t capacity_bytes = ((((v_cast.m_size + 7) >> 3) + alignment - 1) / alignment) * alignment;
+    size_t capacity_bytes = ((((v_cast.m_capacity >> 3) + 8) + alignment - 1) / alignment) * alignment;
     if (posix_memalign((void**)&v_cast.m_data, alignment, capacity_bytes) || !v_cast.m_data)
         throw std::bad_alloc();
 

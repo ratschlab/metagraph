@@ -61,7 +61,7 @@ target_include_directories(external_query PRIVATE ${METAGRAPH_INSTALL_DIR}/inclu
 target_link_directories(external_query PRIVATE ${METAGRAPH_INSTALL_DIR}/lib)
 
 # Link MetaGraph and external system dependencies
-# metagraph-core.a now bundles all internal dependencies (zlib, sdsl, hts, spdlog, folly, etc.)
+# metagraph-core.a now bundles all internal dependencies (zlib, hts, spdlog, folly, etc.)
 # We only need to link against external system dependencies
 set(EXTERNAL_LIBS
     metagraph-cli
