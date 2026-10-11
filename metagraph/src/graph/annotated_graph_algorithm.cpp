@@ -346,7 +346,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         atomic_add(values, *it * 2, in_count, vector_backup_mutex);
                         atomic_add(values, *it * 2 + 1, out_count, vector_backup_mutex);
 
-                        set_bit(mask.data(), *it, in_count, std::memory_order_relaxed);
+                        set_bit(mask.data(), *it, num_threads > 1, std::memory_order_relaxed);
                     }
                 }
             }, num_threads, true);
