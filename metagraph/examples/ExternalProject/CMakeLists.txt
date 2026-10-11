@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set MetaGraph version
 set(METAGRAPH_GIT_TAG "master" CACHE STRING "Git tag/branch/commit for MetaGraph")
+set(METAGRAPH_SOURCE_DIR "" CACHE PATH "Use an existing MetaGraph checkout instead of downloading it")
 
 # Set alphabet (DNA or Protein)
 if(NOT DEFINED CMAKE_DBG_ALPHABET)
@@ -33,12 +34,23 @@ foreach(variable BUILD_STATIC WITH_AVX WITH_MSSE42
     endif()
 endforeach()
 
-# Download and build MetaGraph as an external project
+if(METAGRAPH_SOURCE_DIR)
+    set(METAGRAPH_SOURCE_ARGS
+        SOURCE_DIR "${METAGRAPH_SOURCE_DIR}"
+        DOWNLOAD_COMMAND "" UPDATE_COMMAND ""
+    )
+else()
+    set(METAGRAPH_SOURCE_ARGS
+        GIT_REPOSITORY https://github.com/ratschlab/metagraph.git
+        GIT_TAG ${METAGRAPH_GIT_TAG}
+        # ExternalProject updates the selected revision's submodules explicitly.
+        GIT_CONFIG fetch.recurseSubmodules=false
+    )
+endif()
+
+# Build MetaGraph as an external project
 ExternalProject_Add(metagraph-external
-    GIT_REPOSITORY https://github.com/ratschlab/metagraph.git
-    GIT_TAG ${METAGRAPH_GIT_TAG}
-    # ExternalProject updates the selected revision's submodules explicitly.
-    GIT_CONFIG fetch.recurseSubmodules=false
+    ${METAGRAPH_SOURCE_ARGS}
     SOURCE_SUBDIR metagraph
     LIST_SEPARATOR |
     CMAKE_ARGS ${METAGRAPH_CMAKE_ARGS}
