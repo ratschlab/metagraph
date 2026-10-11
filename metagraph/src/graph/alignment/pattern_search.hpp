@@ -45,11 +45,24 @@
  *    SupportTracker and a PathSink through Request::support and Request::sink, and to read
  *    AnchorCounts::walks, supported, branches_pruned and pruned_before_completion. Without them
  *    the extension is the plain one of long_search "paths".
+ *  - `segments` (not served yet: the engine API only, the graph level; no route sets it): a
+ *    pattern longer than k anchored on several k-windows (Request::segments, SegmentPlan), each
+ *    anchor extended left (incoming edges, Model::bases_left) and right until no continuation
+ *    fits, every root anchor's extent handed to a SegmentSink (GraphSegmentStore groups them
+ *    into the segments of each orientation). See PatternSearch::count, "Segments".
  *  - graphs without the dummy-edge mask: served, see "Graphs without the dummy-edge mask" at
  *    PatternSearch. Their counts that the engine could not resolve are BOUNDS [lower, U]
  *    (Count), the route adding the estimate U x f with f from sample_real_fraction(); the lists
  *    stay exact. A pattern with few unchecked candidates is checked entry by entry and counted
  *    exactly (Request::max_checked_entries; the route passes --pattern-max-checked-entries).
+ *  - bounded mismatches (not served yet: no route sets Request::max_mismatches; SPEC §21 is
+ *    the contract to come): the engine answers DNA, IUPAC and peptide patterns of L <= k with
+ *    ContextCounts::by_mismatches, Work::steps_by_mismatches, Stop::mismatch_level,
+ *    Context::mismatches (substitutions() gives the positions, residue_substitutions() a
+ *    peptide's residues and codons), Result::mismatch_information_bits and, on a floor
+ *    refusal, Result::max_mismatches_within_floor; patterns of L > k with their anchors per
+ *    level (AnchorCounts::by_mismatches, Result::min_anchor_mismatch_information_bits), the
+ *    extension not yet.
  *
  * For every type here nothing is weakened silently: every count carries its unit and its
  * relation, and a count is never promoted by assumption.
@@ -59,11 +72,13 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -230,11 +245,11 @@ constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
  *    going on), and a bound on the score a branch can still reach (a bound(state) the DFS
  *    prunes on). The DFS would then key its work by (node, state); the trackers and sinks keep
  *    their interfaces (a walk is still a walk).
- *  - a selective anchor: a Model that also steps left (prev(), the codon automaton read
- *    backwards), with SearchState::side LEFT along incoming edges. It also needs start(window,
- *    offset) for a window at offset w (Pattern::start derives a peptide's codon phase from the
- *    window's length alone), and a left arm's SearchState: spelled growing at the left,
- *    position = w - depth, base the node's first base (support_step's Arm::LEFT).
+ *  - a selective anchor (each orientation anchored on its least ambiguous window): the Model's
+ *    left arm and its start at any offset exist (start_at, start_left, bases_left, prev, used by
+ *    the segment search); what is open is the choice of the window by its anchor count (a
+ *    WindowChoice) and a support tracker's left frames (SearchState::side LEFT, spelled growing
+ *    at the left, base the node's first base: support_step's Arm::LEFT).
  *  - the entry point: only extend_anchor<Pattern> is instantiated, from
  *    PatternRun::extend_listed with the oriented Pattern, and the anchor phase does not ask the
  *    Model. Another Model needs a per-orientation `const Model*` (a Request field or a
@@ -264,6 +279,31 @@ class Model {
         (void)s;
         return position == length();
     }
+
+    /**
+     * The arms of a search anchored on a window inside the pattern (the segment search): its
+     * anchor is a k-mer instantiating positions [offset, offset + |anchor_kmer|.size()), read
+     * from the graph; the right arm then appends bases at positions offset + k, offset + k + 1,
+     * ..., the left arm prepends bases at offset - 1, offset - 2, ... down to 0.
+     *  start_at    the right arm's state after the anchor (what start() is for offset 0): next()
+     *              and bases() go on from it at position offset + |anchor_kmer|.size()
+     *  start_left  the left arm's state before the anchor: what the bases at positions >=
+     *              offset that the left arm's next base can depend on (for a peptide, the bases
+     *              of the codon of position offset - 1 that lie inside the anchor)
+     *  bases_left  the bases allowed at |position| (the one left of the leftmost spelled base) in
+     *              left state |s|; 0: none
+     *  prev        the left state after |base| (one of bases_left(s, position)) at |position|
+     * Both arms read one language: a string x at offset t is admitted iff the pattern admits it
+     * there position by position (for a peptide: every residue x overlaps has a codon agreeing
+     * with x on the positions inside x), so that a walk the left arm spells from an anchor is
+     * one the right arm spells from its leftmost k-mer, which instantiates the window at its
+     * offset. The defaults belong to a model without a left arm: start_at at offset 0 is
+     * start(), everything else throws std::logic_error (no search asks it).
+     */
+    virtual State start_at(uint32_t offset, std::string_view anchor_kmer) const;
+    virtual State start_left(uint32_t offset, std::string_view anchor_kmer) const;
+    virtual BaseSet bases_left(State s, uint32_t position) const;
+    virtual State prev(State s, uint32_t position, char base) const;
 
   protected:
     Model() = default;
@@ -357,6 +397,15 @@ class Pattern final : public Model {
      * Empty for DNA and IUPAC.
      */
     const std::vector<CodonSet>& codon_sets() const { return codons_; }
+    /**
+     * PROTEIN: per residue, in the order of codon_sets(), the codons that substitute it under
+     * Request::max_mismatches (SPEC §21.3): the sense codons of the other residues
+     * (GeneticCode::sense() less the residue's own codons). None for X (every sense codon is
+     * its own) and for '*' (a stop is never substituted, and a stop codon never substitutes a
+     * residue). For the reverse complement, the original's in reverse order, each codon
+     * reverse-complemented. Empty for DNA and IUPAC.
+     */
+    const std::vector<CodonSet>& substitute_sets() const { return substitutes_; }
 
     /**
      * The engine's one primitive (§3): the bases allowed at |position| after the bases
@@ -390,6 +439,21 @@ class Pattern final : public Model {
     bool accepting(State, uint32_t position) const override { return position == length(); }
 
     /**
+     * The arms of the segment search (Model::start_at and the left arm). DNA and IUPAC: state 0
+     * everywhere, bases_left(0, p) == positions()[p]. A peptide: start_at reads the anchor's
+     * last (offset + k) mod 3 bases (the codon prefix at position offset + k, as start() reads k
+     * mod 3); the left state holds the bases already spelled at the later positions of the codon
+     * of the next position to the left (none when that position ends a codon), so that
+     * bases_left is the exact codon test: the bases b at codon position j of residue p / 3 such
+     * that some codon of the residue agrees with the known later bases and has b at j. A base
+     * other than A, C, G, T among the known ones admits nothing (as allowed()).
+     */
+    State start_at(uint32_t offset, std::string_view anchor_kmer) const override;
+    State start_left(uint32_t offset, std::string_view anchor_kmer) const override;
+    BaseSet bases_left(State s, uint32_t position) const override;
+    State prev(State s, uint32_t position, char base) const override;
+
+    /**
      * The information of the positions [begin, end) (§3): DNA and IUPAC, the sum of
      * log2(4 / |set_i|); PROTEIN, 2 (end - begin) - log2(the number of distinct strings the
      * automaton admits over those positions), computed per residue as the strings its codons
@@ -404,6 +468,26 @@ class Pattern final : public Model {
      */
     double information_bits(size_t begin, size_t end) const;
     double information_bits() const { return information_bits(0, length()); }
+
+    /**
+     * The information left when up to |max_mismatches| substitutions are allowed (SPEC §21.5,
+     * mismatch_information_bits): 2 (end - begin) - log2 |B|, B the strings over the positions
+     * [begin, end) within |max_mismatches| substitutions, a position of set size s admitting s
+     * matching and 4 - s substituting bases (an N none). |B| = sum over u <= max_mismatches of
+     * f[u], f the product DP f'[u] = f[u] s + f[u - 1] (4 - s) over the positions, kept in log
+     * space (the ball of a long pattern overflows every integer type): O((end - begin) m), no
+     * clock, as information_bits. With 0 it is information_bits(begin, end) itself.
+     * PROTEIN: the same DP over the residues the positions cover, a residue admitting the
+     * strings its codons spell over its positions in [begin, end) (at least one, as
+     * information_bits counts a residue without codons) and as substitutions the strings its
+     * substitutes (substitute_sets) spell there that none of its own codons spells: a codon cut
+     * by the window's edge counts as substituted only when its bases inside the window agree
+     * with no codon of its own (the least count any completion gives).
+     */
+    double mismatch_information_bits(size_t begin, size_t end, uint8_t max_mismatches) const;
+    double mismatch_information_bits(uint8_t max_mismatches) const {
+        return mismatch_information_bits(0, length(), max_mismatches);
+    }
 
     /**
      * False iff the pattern has no instance at all: a peptide holding a '*' read in a genetic
@@ -448,6 +532,8 @@ class Pattern final : public Model {
     std::vector<BaseSet> positions_;
     // PROTEIN only
     std::vector<CodonSet> codons_;
+    // PROTEIN only: per residue, substitute_sets()
+    std::vector<CodonSet> substitutes_;
     int genetic_code_ = 0;
     bool has_instances_ = true;
 };
@@ -498,6 +584,53 @@ enum class Strands { BOTH, FORWARD, REVERSE };
 // the extension's support tracker and path sink, declared with the results below
 class SupportTracker;
 class PathSink;
+// the segment search's receiver, declared with the results below
+class SegmentSink;
+
+/**
+ * Which windows the segment search anchors on, in each orientation alike (offsets in its own
+ * oriented pattern Q, ascending; W' the effective window, L the length):
+ *  STEPS  0, step, 2 step, ... while <= L - W', and L - W' when it is not one of them
+ *  ENDS   0 and L - W' (one window when they coincide): the prefix and the suffix
+ *  FIRST  0 only: the extents of the anchors of Q[0, k)
+ * A choice by rarity (each orientation anchored on its least ambiguous window, the selective
+ * anchor) is a further value: the driver discovers a window and extends it in separate steps
+ * (SegmentRun::discover_window, extend_window), so that such a choice discovers the candidate
+ * windows first and extends the chosen one.
+ */
+enum class WindowChoice : uint8_t { STEPS, ENDS, FIRST };
+
+/**
+ * The segment search of a pattern longer than k (Request::segments, read by count() only): the
+ * oriented pattern Q is covered by windows of W' = min(window, L) bases, each anchored on its
+ * first k bases; every anchor of an admitted window is extended left and right until no
+ * continuation fits, and each root anchor's extent [from, to) goes to Request::segment_sink when
+ * it holds its window whole (see PatternSearch::count, "Segments"). Not JSON fields yet: the
+ * route is to set them for long_search "segments".
+ */
+struct SegmentPlan {
+    bool enabled = false;
+    // W, in bases: the window a reported segment must hold whole; 0 is k, below k is refused
+    // (std::invalid_argument); above L the window is L
+    uint32_t window = 0;
+    // S, in bases, >= 1: the distance between consecutive window starts (STEPS only)
+    uint32_t step = 15;
+    WindowChoice choice = WindowChoice::STEPS;
+    // the most windows per orientation (server policy): a pattern with more is refused in its
+    // slot with "too_many_windows", the message naming the step that fits
+    uint32_t max_windows = 1000;
+};
+
+// the window starts of one orientation (see WindowChoice) for a pattern of |length| bases and
+// the effective window |window| (1 <= window <= length); |step| >= 1 for STEPS
+std::vector<uint32_t> segment_window_offsets(uint32_t length, uint32_t window, uint32_t step,
+                                             WindowChoice choice);
+
+/**
+ * The most substitutions a request may allow (the owner's cap, SPEC §21.1). The levels
+ * 0 .. kMaxMismatches fit the two bits a retained range keeps for its level.
+ */
+constexpr uint8_t kMaxMismatches = 3;
 
 /**
  * The per-pattern semantics of a request. The route fills it from the request JSON with the
@@ -631,6 +764,39 @@ struct Request {
      */
     SupportTracker *support = nullptr;
     PathSink *sink = nullptr;
+    /**
+     * The most substitutions an instance may hold, 0 .. kMaxMismatches (SPEC §21). 0 (the
+     * default) is the search without substitutions: none of the code of the level passes
+     * runs, and every answer is the one of a request without this field. A substitution is a
+     * pattern position whose base in the instance lies outside the position's set (DNA,
+     * IUPAC; an N position never holds one) or, for a peptide, a residue whose codon is a
+     * sense codon of another residue (Pattern::substitute_sets: never at X or '*', never a
+     * stop codon), counted once whatever the number of its bases that differ. The search runs
+     * level by level: pass t finds the instances with exactly t substitutions (every base
+     * search, then that level's scans and check), so that a stop in pass t leaves every level
+     * below t complete (ContextCounts::by_mismatches, Stop::mismatch_level). The information
+     * floor gates Pattern::mismatch_information_bits (L > k: the least over the searched
+     * anchor windows), with no exemption (min_information_bits). Not a JSON field yet (the
+     * route does not set it). Served for every kind; for L > k the anchors are counted per
+     * level (AnchorCounts::by_mismatches; an anchor is the anchor window within the
+     * substitutions, a window that cuts a codon counting it as substituted only when its
+     * bases inside the window agree with none of its own codons) and released on
+     * release_anchors, while the extension is not served yet. Above kMaxMismatches, or for
+     * L > k with extend_paths or with segments, count() and enumerate() throw
+     * std::invalid_argument.
+     */
+    uint8_t max_mismatches = 0;
+    /**
+     * L > k: the segment search instead of the anchors (and of extend_paths, which it
+     * ignores), count() only (enumerate() refuses it: std::invalid_argument). |segment_sink|
+     * receives the extents and holds the search's memory (SegmentSink); it must be set when
+     * segments.enabled and outlive the call. The graph level only: a request with
+     * |support| or |sink| set is refused (std::invalid_argument), as is one with
+     * max_mismatches (a segment holds no substitution). A pattern of at most k bases is
+     * answered as without them.
+     */
+    SegmentPlan segments;
+    SegmentSink *segment_sink = nullptr;
 };
 
 // the server's default of Request::max_checked_entries (--pattern-max-checked-entries: a block
@@ -706,6 +872,11 @@ enum class StopPhase { DISCOVERY, MASK_SCAN, EXTRACTION, EXTENSION };
 struct Stop {
     StopPhase phase;
     StopReason reason;
+    // Request::max_mismatches > 0 and a stop of the search's own work (DISCOVERY or MASK_SCAN,
+    // a request-wide stop before the pattern included): the level of the pass it came in, whose
+    // work it interrupted or, at the clock reading that starts the pass, prevented. The levels
+    // below it are complete, the levels above it UNKNOWN. Unset otherwise (an EXTRACTION stop)
+    std::optional<uint8_t> mismatch_level = std::nullopt;
 };
 
 /**
@@ -915,6 +1086,17 @@ struct ContextCounts {
     std::map<uint32_t, Count> by_offset;
     // one entry per orientation searched
     std::map<Orientation, Count> by_orientation;
+    /**
+     * Request::max_mismatches m > 0: per level t = 0 .. m, the contexts whose instance holds
+     * exactly t substitutions against the oriented pattern of their orientation, zero counts
+     * included; |total| is their sum under Count's algebra (as is every by_offset and
+     * by_orientation count over its levels). A level whose pass completed is EXACT (on a graph
+     * without the mask EXACT or BOUNDS); a stop in pass t leaves the levels below t as they
+     * completed, level t AT_LEAST (discovery) or BOUNDS (its scans or its check) or UNKNOWN
+     * (the stop came at the clock reading that starts it), the levels above UNKNOWN. Empty
+     * without mismatches.
+     */
+    std::vector<Count> by_mismatches;
 };
 
 /**
@@ -1002,6 +1184,10 @@ struct AnchorCounts {
      */
     uint64_t candidates_examined = 0;
     Extension extension = Extension::NOT_REQUESTED;
+    // Request::max_mismatches m > 0: per level t = 0 .. m the anchors whose window holds exactly
+    // t substitutions, with ContextCounts::by_mismatches' relations; |total| is their sum.
+    // Empty without mismatches
+    std::vector<Count> by_mismatches;
 };
 
 // JSON work: what the search spent, charged against Budget
@@ -1033,6 +1219,36 @@ struct Work {
     // diagnostic, not a JSON field of contract version 1: the most range descriptors held at
     // once for the release (24 bytes each; see PatternSearch::enumerate, "Memory")
     uint64_t spans_retained_peak = 0;
+    // Request::max_mismatches m > 0: per level t = 0 .. m the steps its pass charged (its
+    // discovery, scans and check; 0 for a pass not run), summing to |steps|; empty otherwise
+    std::vector<uint64_t> steps_by_mismatches;
+    /**
+     * The segment search (Request::segments; 0 otherwise). Its right arm counts as the
+     * extension above (extension_edges one step per outgoing edge, extension_anchors the roots
+     * whose right arm began, extension_branches its branchings); beside it:
+     *  segment_windows                   the windows whose discovery began (all orientations)
+     *  segment_anchors_extended          the root anchors extended (both arms)
+     *  segment_anchors_owned             the anchors an earlier window's right arm had reached
+     *                                    at their own window start: not extended
+     *  segment_occurrences_below_window  root extents that held no admitted window whole (not
+     *                                    handed to the sink)
+     *  segment_states_memoised           the distinct (k-mer, offset) states the arms expanded
+     *                                    and memoised beside the roots, both arms
+     *  left_edges                        the incoming edges the left arm examined, one step each
+     *  left_backward_steps               the BOSS bwd steps their first bases (and the roots'
+     *                                    own) cost, one step each: 2 for the incoming edge a
+     *                                    node's bwd names, k - 2 for any other (a wrapped
+     *                                    PRIMARY graph: k - 2 for every edge)
+     *  left_horizon_cuts                 allowed incoming k-mers not entered for the horizon
+     */
+    uint64_t segment_windows = 0;
+    uint64_t segment_anchors_extended = 0;
+    uint64_t segment_anchors_owned = 0;
+    uint64_t segment_occurrences_below_window = 0;
+    uint64_t segment_states_memoised = 0;
+    uint64_t left_edges = 0;
+    uint64_t left_backward_steps = 0;
+    uint64_t left_horizon_cuts = 0;
 };
 
 // A per-pattern refusal decided by the engine (JSON: the slot's error {code, message});
@@ -1135,7 +1351,72 @@ struct Context {
     std::vector<DeBruijnGraph::node_index> path = {};
     // a path only: the L bases it spells (its first k are the anchor's k-mer)
     std::string sequence = {};
+    // Request::max_mismatches > 0: the substitutions its instance holds against the oriented
+    // pattern of its orientation (its level); 0 without mismatches. The positions are
+    // substitutions() (a peptide's residues residue_substitutions()), computed from the
+    // instance
+    uint8_t mismatches = 0;
 };
+
+/**
+ * One substitution of an instance (SPEC §21.8, schema substitution), in the coordinates of
+ * the submitted pattern P.
+ */
+struct Substitution {
+    // 0-based position in P
+    uint32_t position;
+    // P's code there (a base or an IUPAC code, upper case)
+    char expected;
+    // the instance's base at that position read in P's orientation: for a REVERSE context the
+    // complement of the instance's base at L - 1 - position
+    char found;
+};
+
+/**
+ * The substitutions of |instance|, the L bases a context of |orientation| spells at its offset
+ * (kmer.substr(offset, L)), against the submitted DNA or IUPAC pattern |pattern| (P, as parsed,
+ * never its reverse complement), ascending by position. FORWARD and PALINDROMIC: the instance
+ * instantiates P, position i is instance[i]; REVERSE: it instantiates rc(P), position i of P is
+ * the complement of instance[L - 1 - i]. A position holds a substitution when that base is
+ * outside P's set there (an N position never does). Their number is the context's level
+ * (Context::mismatches). O(L). Throws std::invalid_argument for a peptide
+ * (residue_substitutions), for an instance of another length, and for a base other than A, C,
+ * G, T (no context spells one at a pattern position).
+ */
+std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
+                                        std::string_view instance);
+
+/**
+ * One substituted residue of a peptide's instance (SPEC §21.8, schema residue_substitution),
+ * in the coordinates of the submitted peptide P.
+ */
+struct ResidueSubstitution {
+    // 0-based residue of P
+    uint32_t residue;
+    // P's residue there (an amino acid, or B, Z, J; never X or '*', which are not substituted)
+    char expected;
+    // the residue the instance's codon codes in P's genetic code (never '*')
+    char found;
+    // that codon in P's reading direction: for a REVERSE context the reverse complement of the
+    // instance's three bases at [L - 3 residue - 3, L - 3 residue)
+    std::string codon;
+};
+
+/**
+ * The substituted residues of |instance|, the L = 3m bases a context of |orientation| spells
+ * at its offset (or a path's sequence), against the submitted peptide |pattern| (P as parsed,
+ * never its reverse complement), ascending by residue. FORWARD and PALINDROMIC: residue i is
+ * instance[3i, 3i + 3); REVERSE: the instance instantiates rc(P), and residue i of P is the
+ * reverse complement of instance[L - 3i - 3, L - 3i). A residue is substituted when that codon
+ * is one of its substitutes (Pattern::substitute_sets) rather than its own; their number is the
+ * context's level (Context::mismatches). O(L). Throws std::invalid_argument for a DNA or IUPAC
+ * pattern (substitutions), for an instance of another length, for a base other than A, C, G, T,
+ * and for a codon that is neither the residue's own nor a substitute (a stop where P has no
+ * '*', a sense codon at '*': no instance at any level).
+ */
+std::vector<ResidueSubstitution> residue_substitutions(const Pattern &pattern,
+                                                       Orientation orientation,
+                                                       std::string_view instance);
 
 
 // ---------------------------------------------------------------- the search state
@@ -1280,6 +1561,178 @@ class PathSink {
     virtual bool stopped_at_threshold() const { return false; }
 };
 
+
+// ---------------------------------------------------------------- segments
+
+/**
+ * What became of one window of the segment search (JSON, once wired: a segment_window's state):
+ *  NOT_REACHED   a stop came before it
+ *  BELOW_FLOOR   its anchored k bases are below the information floor: not discovered
+ *  NOT_ADMITTED  more anchors than max_anchors (its discovery stopped at max_anchors + 1:
+ *                AT_LEAST; or EXACT above; without the mask an upper bound above, BOUNDS, or
+ *                the candidates counted when the cap stopped the discovery, WindowCount::
+ *                candidates): not extended
+ *  EXTENDED      admitted and every anchor processed (also with 0 anchors)
+ *  STOPPED       a stop came during its discovery, listing or extension
+ */
+enum class WindowState : uint8_t { NOT_REACHED, BELOW_FLOOR, NOT_ADMITTED, EXTENDED, STOPPED };
+
+// one window of one orientation
+struct WindowCount {
+    // its start in the oriented pattern Q (the route states P's coordinates)
+    uint32_t offset = 0;
+    // the information bits of its anchored k bases, which the floor reads
+    double information_bits = 0;
+    // its anchors (unit ANCHORS): EXACT when discovered completely (listed without the mask),
+    // AT_LEAST when its discovery stopped (max_anchors + 1, or a stop), BOUNDS without the mask
+    // when its upper bound decided, UNKNOWN when not discovered
+    Count anchors = Count::unknown(Unit::ANCHORS);
+    WindowState state = WindowState::NOT_REACHED;
+    // its anchors extended (roots) and those an earlier window's right arm reached (owned)
+    uint64_t roots = 0;
+    uint64_t owned = 0;
+    // a graph without the mask, the window NOT_ADMITTED by its per-window cap: the candidates its
+    // discovery counted before the cap stopped it (its k-mers and the source dummies among them,
+    // which nothing told apart), AT_LEAST and above max_anchors, which is what the cap compared.
+    // |anchors| then states only what the discovery proved (AT_LEAST, often 0): its true count
+    // has no upper bound, the discovery having stopped. Unset otherwise
+    std::optional<Count> candidates;
+};
+
+/**
+ * Result::segments: the windows of each orientation and what the search did. |search| reuses
+ * Extension's names: COMPLETED (every window processed without a stop, some extended),
+ * NOT_ADMITTED (no stop, no window extended while some had anchors: "none_admitted"),
+ * STOPPED (a stop during the search), NOT_STARTED (a stop before its first window).
+ */
+struct SegmentCounts {
+    // W' (min(W, L)) and S (STEPS; 0 otherwise)
+    uint32_t window = 0;
+    uint32_t step = 0;
+    WindowChoice choice = WindowChoice::STEPS;
+    // STEPS: W' + S - 1, the length from which every maximal match holding only admitted
+    // windows holds one whole; unset otherwise
+    std::optional<uint32_t> complete_for_length;
+    // per orientation searched, the windows in plan order (offsets ascending)
+    std::map<Orientation, std::vector<WindowCount>> windows;
+    Extension search = Extension::NOT_STARTED;
+    // the root extents handed to the sink (each held its window whole)
+    uint64_t reported = 0;
+};
+
+/**
+ * One root anchor's extent, as the segment search hands it to its sink (valid during the call):
+ * the anchor of |window| (a start in Q) whose k-mer no earlier window's right arm reached there,
+ * and [from, to) in Q, the least start of its left walks and the greatest end of its right walks
+ * (walks of graph k-mers whose bases the oriented pattern admits there). Only extents holding
+ * their window whole (to >= window + W') are handed over.
+ */
+struct SegmentExtent {
+    Orientation orientation;
+    uint32_t window;
+    const Context &root;
+    uint32_t from;
+    uint32_t to;
+};
+
+/**
+ * The segment search's receiver and its memory account (Request::segment_sink). The search
+ * admits every memoised state (kSegmentStateBytes) before it holds it and releases what it held
+ * before it returns; a refusal ends the search with stop {EXTENSION, EXTERNAL} (the route writes
+ * stop_reason(): max_memory). extent() receives the reported extents in the search's order
+ * (window-major, then the window's anchors in answer order); false ends the search the same
+ * way (stop_reason(): max_segments with stop_at_threshold, max_memory).
+ */
+class SegmentSink {
+  public:
+    virtual ~SegmentSink() = default;
+
+    virtual bool admit(uint64_t bytes) = 0;
+    virtual void release(uint64_t bytes) = 0;
+    virtual bool extent(const SegmentExtent &extent) = 0;
+    // after a refusal: the reason the route writes; nullptr before
+    virtual const char* stop_reason() const = 0;
+};
+
+// the memory modelled per memoised (k-mer, offset) state of the segment search (a hash-map
+// entry: node, offset, extent, the map's link and bucket)
+constexpr uint64_t kSegmentStateBytes = 64;
+
+// [from, to) of the oriented pattern in the coordinates of the pattern as submitted (P): a
+// REVERSE interval of rc(P) is [L - to, L - from)
+inline std::pair<uint32_t, uint32_t> pattern_interval(Orientation orientation, uint32_t length,
+                                                      uint32_t from, uint32_t to) {
+    assert(from <= to && to <= length);
+    return orientation == Orientation::REVERSE
+        ? std::make_pair(length - to, length - from)
+        : std::make_pair(from, to);
+}
+
+// one segment of the graph level: an interval of P with the root anchors whose extent it is
+struct GraphSegment {
+    Orientation orientation;
+    // P's coordinates
+    uint32_t from;
+    uint32_t to;
+    // the root anchors with this extent (the count, unit ANCHORS)
+    uint64_t roots;
+    // the first of them as the search reported it: its window (a start in Q) and node
+    uint32_t window;
+    DeBruijnGraph::node_index first_root;
+};
+
+/**
+ * The graph level's segments: the extents a segment search reports, grouped by (orientation,
+ * interval), each with its root anchors, in answer order (orientation in plan order, P's from
+ * ascending, to descending), ordered as they arrive (no sort after the search). Its memory
+ * account holds the search's states and its own entries (kGraphSegmentBytes each), all admitted
+ * before they are held. With |stop_at_threshold| it stops the search once it holds more than
+ * |max_segments| segments (stop_reason "max_segments", the segment that crossed kept).
+ */
+class GraphSegmentStore final : public SegmentSink {
+  public:
+    // a std::map node: its links and colour, the key and the value
+    static constexpr uint64_t kGraphSegmentBytes = 96;
+
+    GraphSegmentStore(uint32_t length, uint64_t max_bytes,
+                      uint64_t max_segments = std::numeric_limits<uint64_t>::max(),
+                      bool stop_at_threshold = false)
+          : length_(length), max_bytes_(max_bytes), max_segments_(max_segments),
+            stop_at_threshold_(stop_at_threshold) {}
+
+    bool admit(uint64_t bytes) override;
+    void release(uint64_t bytes) override;
+    bool extent(const SegmentExtent &extent) override;
+    const char* stop_reason() const override { return reason_; }
+
+    // the segments in answer order, each passed to |f|
+    void for_each(const std::function<void(const GraphSegment&)> &f) const;
+    uint64_t size() const { return segments_.size(); }
+    // the extents received
+    uint64_t extents() const { return extents_; }
+    uint64_t held() const { return held_; }
+    uint64_t peak() const { return peak_; }
+
+  private:
+    // (orientation, P's from, L - P's to): to descending
+    typedef std::tuple<Orientation, uint32_t, uint32_t> Key;
+    struct Value {
+        uint64_t roots;
+        uint32_t window;
+        DeBruijnGraph::node_index first_root;
+    };
+
+    uint32_t length_;
+    uint64_t max_bytes_;
+    uint64_t max_segments_;
+    bool stop_at_threshold_;
+    uint64_t held_ = 0;
+    uint64_t peak_ = 0;
+    uint64_t extents_ = 0;
+    const char *reason_ = nullptr;
+    std::map<Key, Value> segments_;
+};
+
 // JSON notes of a pattern (§7.2), the ones the engine states:
 //  low_complexity_pattern    an exact pattern that sdust flags with the seeder's parameters
 //                            (T = 20, W = 64, is_low_complexity): why its counts are large. An
@@ -1341,6 +1794,18 @@ struct Result {
     // L > k: the bits of each searched orientation's anchor window (an addition to the JSON
     // of contract version 1 when the route publishes it)
     std::map<Orientation, double> anchor_window_bits;
+    // Request::max_mismatches > 0 (an answered or an engine-refused pattern): the bits the
+    // information floor gated, Pattern::mismatch_information_bits(max_mismatches) (SPEC
+    // §21.5); unset without mismatches
+    std::optional<double> mismatch_information_bits;
+    // an information_below_floor refusal with Request::max_mismatches > 0: the largest
+    // m' < max_mismatches whose search the floor admits (m' = 0 under the rule without
+    // mismatches, its exemption included), unset when none does (JSON null)
+    std::optional<uint8_t> max_mismatches_within_floor;
+    // L > k with Request::max_mismatches > 0: the least over the searched orientations' anchor
+    // windows (as min_anchor_information_bits) of their mismatch_information_bits, the bits the
+    // information floor gated on
+    std::optional<double> min_anchor_mismatch_information_bits;
 
     // exactly one of the two is set on an answered pattern: contexts when L <= k, anchors
     // when L > k
@@ -1366,6 +1831,16 @@ struct Result {
     // L > k with extend_paths: the time spent in phase 2 (the listing of the anchors and the
     // DFS; §7.2 timing.extension_ms), part of elapsed_ms; 0 when it did not run
     double extension_ms = 0;
+    /**
+     * L > k with Request::segments: the windows and what the search did (its anchors above
+     * keep their meaning: each orientation's first window, Q[0, k); its paths UNKNOWN, EXACT 0
+     * when every first window has EXACT 0 anchors; extension NOT_REQUESTED). The time of the
+     * search (every window's discovery and both arms) and of its left arms, parts of elapsed_ms;
+     * extension_ms is then the right arms'.
+     */
+    std::optional<SegmentCounts> segments;
+    double segments_ms = 0;
+    double left_extension_ms = 0;
 };
 
 
@@ -1456,6 +1931,36 @@ struct Result {
  * orientation), then the DFS in symbol order A < C < G < T at every position, i.e. the
  * paths of one anchor by their spelled sequence. Deterministic on the same index.
  *
+ * Bounded mismatches (Request::max_mismatches m > 0; SPEC §21): the Hamming ball of the
+ * pattern is searched level by level on the same range DFS. Pass t (t = 0 .. m, each base
+ * search in the order of its estimated cost for that pass) keeps per range the substitutions
+ * its spelled prefix holds; at core position x a range tries the position's bases (its level
+ * kept) and the other bases of A, C, G, T (its level plus one), each only where the positions
+ * left that can hold a substitution can still bring it to exactly t, so that every string of
+ * the ball is spelled by one range and counted in the pass of its level. Pass 0 charges the
+ * same steps in the same order as the search without mismatches. Within a pass the matching
+ * child is explored first (the substitutions placed from the deepest position back); the W
+ * rule, the flank of any_offset (expanded for the ranges of level t only), the deferred scans
+ * and, without the mask, the check of few unchecked candidates (a pattern-wide allowance of
+ * Request::max_checked_entries) run per pass. Counts are kept per (offset, level); on an
+ * even-k wrapped PRIMARY graph a palindromic stored k-mer is possible at level t only where at
+ * most t mirrored pattern pairs admit no complementary bases. The answer order is
+ * (mismatches, node, offset, orientation): the closest instances first, so that PARTIAL keeps
+ * and releases the first max_contexts of the closest levels (its retention bound a (level,
+ * node) bound); ALL_OR_COUNT compares the total over the levels. stop_at_threshold compares
+ * the running total during discovery and again at the end of each pass but the last, once its
+ * scans and check have completed the pass's counts: when the levels 0 .. t alone exceed the
+ * threshold, no later pass starts (stop {DISCOVERY, MAX_CONTEXTS or MAX_ANCHORS} with
+ * mismatch_level t, level t complete).
+ * A peptide's level is counted per residue on its codon automaton: a range carries the bases
+ * it spelled in the current codon, and at each position tries the bases that continue one of
+ * the residue's own codons (its level kept), then the bases that continue only a substitute
+ * (Pattern::substitute_sets: its level plus one, once for the codon), and once the codon has
+ * left its own codons the substitutes' bases (its level kept); the reachability counts the
+ * residues left that can hold a substitution, the current one while it is still its own. A
+ * substitution there changes up to three bases, so on an even-k wrapped PRIMARY graph a
+ * palindromic stored k-mer is taken as possible at every offset of a level above 0.
+ *
  * Stateless between calls; one instance may serve concurrent requests, each with its own
  * Budget.
  */
@@ -1500,7 +2005,9 @@ class PatternSearch {
      * finds no path); both carry the note kNoteNoStopCodon. Never throws for a parsed
      * pattern, except
      * std::logic_error on a broken internal invariant (never expected: an answer that
-     * cannot be stated correctly is not stated at all).
+     * cannot be stated correctly is not stated at all), and std::invalid_argument for a
+     * Request::max_mismatches the engine does not serve (above kMaxMismatches, or a pattern
+     * longer than k with extend_paths), before anything is charged.
      * L > k with request.extend_paths: the anchors are retained (§5.2: kept through the
      * extension's admission, dropped once their count exceeds max_anchors) and, when
      * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is
@@ -1511,6 +2018,44 @@ class PatternSearch {
      * of AnchorCounts (walks, supported, branches_pruned).
      */
     Result count(const Pattern &pattern, const Request &request, Budget &budget) const;
+    /*
+     * Segments (Request::segments, L > k; the graph level). Each searched orientation's Q is
+     * covered by the windows of SegmentPlan::choice; the windows run window-major (the first of
+     * every orientation in plan order, then the second, ...), each:
+     *  - its anchored k bases below the information floor: BELOW_FLOOR, not discovered (the
+     *    pattern is refused with information_below_floor only when every window of every
+     *    searched orientation is);
+     *  - discovery of the k-mers instantiating Q[s, s + k) exactly as a long pattern's anchors
+     *    (a peptide's window read by its codon automaton at the phase s mod 3; on a wrapped
+     *    PRIMARY graph the window and its reverse complement), stopped once more than
+     *    max_anchors are counted (NOT_ADMITTED, AT_LEAST: not a stop of the pattern);
+     *  - admission (EXACT <= max_anchors; without the mask an upper bound <= max_anchors, then
+     *    listed with the source dummies dropped), the anchors listed in answer order;
+     *  - per anchor, the clock read first: an anchor whose k-mer an earlier window's right arm
+     *    of this orientation reached at s is owned (not extended: that arm went on until nothing
+     *    continued, so it found what the anchor would); every other is a root, extended left
+     *    along incoming edges (positions s - 1, s - 2, ... down to the horizon, the previous
+     *    extended window's start + 1, 0 for the first) and then right along outgoing edges
+     *    until no allowed k-mer follows or L. Both arms memoise each (k-mer, offset) state they
+     *    expand with its extent (the right arm's per orientation, the left arm's per window), so
+     *    that each state is expanded once: the arms cost the distinct states, not the walks;
+     *  - a root's extent [least start, greatest end) holding the window whole (end >= s + W')
+     *    goes to the sink; it can hold no earlier extended window (its left walks would have
+     *    met that window's anchors, whose right arms would have reached it).
+     * Steps: each window's discovery as an anchor window's; the right arm one per outgoing edge;
+     * the left arm one per incoming edge examined plus its first base's BOSS bwd steps (Work).
+     * The clock: before each window, before every anchor, before every kReleaseClockStride-th
+     * node either arm expands, and at every kClockStride steps. A stop ends the search: the
+     * window it touched STOPPED, the later ones NOT_REACHED; stop {DISCOVERY, reason} in a
+     * window's discovery, {EXTENSION, reason} in its listing or an arm, {EXTENSION, EXTERNAL}
+     * when the sink refused (its stop_reason()). The root extents handed over before a stop are
+     * the search's exactly (each was handed over once both its arms completed).
+     * Memory: one window's discovery at a time (as a long pattern's anchors), the arms' stacks,
+     * and the memoised states admitted through the sink (kSegmentStateBytes each), all released
+     * before count() returns. Throws std::invalid_argument for a plan the route must refuse
+     * first (window below k, step 0 with STEPS, no segment_sink, a tracker or a path sink set,
+     * max_mismatches above 0).
+     */
 
     /**
      * The label-free path (§4.3): discovery exactly as count() — the same steps charged, the
@@ -1518,7 +2063,9 @@ class PatternSearch {
      * or PARTIAL; COUNT throws std::invalid_argument), calling |callback| once per released
      * context, in answer order: node ascending, then offset ascending, then orientation
      * (FORWARD, REVERSE, PALINDROMIC) (§5.5, "BOSS edge order, then by offset"; the
-     * orientation separates the two contexts an IUPAC pattern can have at one offset).
+     * orientation separates the two contexts an IUPAC pattern can have at one offset). With
+     * Request::max_mismatches > 0 the level comes first (Context::mismatches ascending), and
+     * max_contexts and every threshold read the total over the levels.
      *  ALL_OR_COUNT  releases every context iff discovery completed with an EXACT total
      *                <= max_contexts; otherwise none (Extraction::withheld). The release is
      *                buffered (a released set that differs from the EXACT count throws
@@ -1616,6 +2163,9 @@ class PatternSearch {
     // every count EXACT 0, nothing charged
     void answer_no_instance(const Pattern &pattern, const Request &request, bool enumerating,
                             Result *result) const;
+
+    // count() of a pattern longer than k with Request::segments (see count(), "Segments")
+    Result segments(const Pattern &pattern, const Request &request, Budget &budget) const;
 };
 
 
@@ -1778,6 +2328,28 @@ inline const char* to_string(Extension extension) {
         case Extension::NOT_ADMITTED: return "not_admitted";
         case Extension::STOPPED: return "stopped";
         case Extension::COMPLETED: return "completed";
+    }
+    return "unknown";
+}
+
+// a segment window's `state` (once wired)
+inline const char* to_string(WindowState state) {
+    switch (state) {
+        case WindowState::NOT_REACHED: return "not_reached";
+        case WindowState::BELOW_FLOOR: return "below_floor";
+        case WindowState::NOT_ADMITTED: return "not_admitted";
+        case WindowState::EXTENDED: return "extended";
+        case WindowState::STOPPED: return "stopped";
+    }
+    return "unknown";
+}
+
+// the request's `segment_windows` (FIRST has no request value yet)
+inline const char* to_string(WindowChoice choice) {
+    switch (choice) {
+        case WindowChoice::STEPS: return "steps";
+        case WindowChoice::ENDS: return "ends";
+        case WindowChoice::FIRST: return "first";
     }
     return "unknown";
 }

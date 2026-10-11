@@ -103,6 +103,8 @@ class GeneticCode {
     CodonSet codons(char residue) const;
     // the stop codons ('*' in ncbieaa)
     CodonSet stops() const { return stops_; }
+    // the sense codons: every codon coding a residue (the codons of context_stops() included)
+    CodonSet sense() const { return ~stops_; }
     // the codons that code a residue and are also a terminator in context (see the class)
     CodonSet context_stops() const { return context_stops_; }
 
