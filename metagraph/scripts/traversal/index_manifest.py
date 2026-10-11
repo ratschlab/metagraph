@@ -13,13 +13,30 @@ server does not re-hash the bundle (hundreds of GB) at start-up: it checks that 
 loads is listed with its size and that the stated index_fp is the digest of the list.
 
     index_manifest.py -i GRAPH -a ANNOTATION [-o MANIFEST] [--name NAME] [--extra FILE ...]
-                      [--no-coord-mapping]
+                      [--no-coord-mapping] [--metagraph PATH] [--check-names | --no-check-names]
     index_manifest.py -i GRAPH -a ANNOTATION --inventory   # the files the server loads (JSON:
                                                  # files = the identity, derived = mask, Bloom)
-    index_manifest.py --verify MANIFEST          # re-hash every listed file and compare
+    index_manifest.py --verify MANIFEST [--metagraph PATH]  # re-hash every listed file and
+                                                 # compare; report (and re-check) the names
     index_manifest.py --server-csv GRAPHS.csv [--jobs N] [--digests FILE ...] [--digests-only]
                       [--match-base-names] [--out-dir DIR] [--write-csv OUT.csv] [--force]
-                      [--no-coord-mapping]
+                      [--no-coord-mapping] [--metagraph PATH] [--check-names | --no-check-names]
+
+The names an index carries (the owner's decision of 2026-10-11): with --metagraph PATH the tool
+runs `metagraph stats --check-names -a ANNOTATION` on the pair's annotation (and the .seqs the
+loader reads beside it) and records its JSON object under the manifest key "names":
+{labels, labels_invalid_utf8, headers, headers_invalid_utf8, duplicate_record_headers,
+first_invalid (at most 10 of {kind: label | header, column, record, hex, problem}), names_ok}.
+A label name that is not valid UTF-8 cannot be listed by the serving routes
+(unrepresentable_label_name), and a record header repeating an earlier record's of its column
+is found at its first record only (CoordToHeader::find_header). The check is on when a binary is
+given (--check-names without --metagraph is an error, --no-check-names skips it) and skipped with
+a note otherwise. "names" is metadata: the server ignores it, and index_fp is the digest of the
+file list only, so a manifest has the same index_fp with and without the check. A failed check
+(names_ok false) is recorded and warned about, not refused: the manifest documents the index as
+it is. --verify prints the recorded names (or that none are) and, with --metagraph, runs the
+check again on the annotation next to the manifest (or under --root) and reports a difference as
+a problem.
 
 Batch mode (--server-csv) writes one manifest per (graph, annotation) pair of a multi-graph
 server's list, read as the server reads it (name,graph_path,annotation_path[,manifest_path
@@ -75,6 +92,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -277,6 +295,72 @@ def canonical_lines(entries):
     return ''.join(f"{e['path']}\t{e['size']}\t{e['sha256']}\n" for e in entries)
 
 
+# ------------------------------------------------------------------ the names (--check-names)
+
+# the keys of `metagraph stats --check-names`, every one recorded
+NAMES_KEYS = ('labels', 'labels_invalid_utf8', 'headers', 'headers_invalid_utf8',
+              'duplicate_record_headers', 'first_invalid', 'names_ok')
+
+
+def check_names(metagraph, annotation):
+    """The JSON object `metagraph stats --check-names -a ANNOTATION` prints: the names the index
+    carries, as the serving routes need them. The binary exits 1 for a failed check (names_ok
+    false), which is a result; any other failure, or output that is not that object, is a
+    ManifestError."""
+    cmd = [metagraph, 'stats', '--check-names', '-a', annotation]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as e:
+        raise ManifestError('cannot run %s: %s' % (metagraph, e))
+    if res.returncode not in (0, 1):
+        raise ManifestError('%s exited %d: %s' % (' '.join(cmd), res.returncode,
+                                                  res.stderr.decode('utf-8', 'replace').strip()[-2000:]))
+    try:
+        names = json.loads(res.stdout.decode('utf-8'))
+    except ValueError as e:
+        raise ManifestError('%s: the output is not JSON (%s)' % (' '.join(cmd), e))
+    missing = [k for k in NAMES_KEYS if not isinstance(names, dict) or k not in names]
+    if missing:
+        raise ManifestError('%s: the output lacks %s' % (' '.join(cmd), ', '.join(missing)))
+    if bool(names['names_ok']) != (res.returncode == 0):
+        raise ManifestError('%s: exit code %d disagrees with names_ok %s'
+                            % (' '.join(cmd), res.returncode, names['names_ok']))
+    return names
+
+
+def names_summary(names):
+    return ('labels %s (not UTF-8: %s), record headers %s (not UTF-8: %s, repeats: %s), names_ok %s'
+            % (names['labels'], names['labels_invalid_utf8'], names['headers'],
+               names['headers_invalid_utf8'], names['duplicate_record_headers'],
+               'true' if names['names_ok'] else 'false'))
+
+
+def names_wanted(args):
+    """Whether the names check runs: --check-names yes (an error without --metagraph),
+    --no-check-names no, else when --metagraph names the binary."""
+    check = getattr(args, 'check_names', None)
+    metagraph = getattr(args, 'metagraph', None)
+    if check is None:
+        return bool(metagraph)
+    if check and not metagraph:
+        raise ManifestError('--check-names needs --metagraph PATH: the binary runs the check')
+    return bool(check)
+
+
+def record_names(manifest, args, annotation):
+    """Runs the check for |annotation| when wanted and records it under manifest["names"]
+    (outside the file list: index_fp is unchanged); says when it is skipped or failed."""
+    if not names_wanted(args):
+        print('names not checked (no --metagraph PATH): the manifest records no "names"',
+              file=sys.stderr)
+        return
+    names = check_names(args.metagraph, annotation)
+    manifest['names'] = names
+    if not names['names_ok']:
+        print('WARNING: %s: the names check failed and is recorded as such: %s'
+              % (annotation, names_summary(names)), file=sys.stderr)
+
+
 def write(args):
     out = args.output or annotation_base(args.annotation) + '.manifest.json'
     files = bundle_files(args.graph, args.annotation, args.extra,
@@ -309,10 +393,12 @@ def write(args):
     }
     if args.name:
         manifest['index_ns'] = args.name
+    record_names(manifest, args, args.annotation)
     with open(out, 'w') as f:
         json.dump(manifest, f, indent=1)
         f.write('\n')
-    print(f'{out}: index_fp {manifest["index_fp"]} ({time.time() - t0:.0f} s)')
+    print(f'{out}: index_fp {manifest["index_fp"]} ({time.time() - t0:.0f} s)'
+          + (f'; names: {names_summary(manifest["names"])}' if 'names' in manifest else ''))
 
 
 # ---------------------------------------------------------------- batch mode (--server-csv)
@@ -527,6 +613,7 @@ def batch(args, hasher=sha256_file):
         }
         if ns:
             manifest['index_ns'] = ns
+        record_names(manifest, args, pair[1])
         d = os.path.dirname(os.path.abspath(out))
         os.makedirs(d, exist_ok=True)
         tmp = out + '.tmp'
@@ -552,11 +639,30 @@ def batch(args, hasher=sha256_file):
     return written
 
 
-def verify(path, root=None):
+def verify(path, root=None, metagraph=None):
     with open(path) as f:
         manifest = json.load(f)
     root = root or os.path.dirname(os.path.abspath(path))
     problems = []
+    # the recorded names, and the check run again when the binary is given (reported after
+    # the verdict: a refusal prints its problems only)
+    names = manifest.get('names')
+    report = ['names: ' + (names_summary(names) if names else 'not recorded')]
+    if metagraph:
+        annotations = [e['path'] for e in manifest['files'] if e['path'].endswith('.annodbg')]
+        if len(annotations) != 1:
+            problems.append('names: %d annotations listed, cannot check the names of one'
+                            % len(annotations))
+        else:
+            try:
+                fresh = check_names(metagraph, os.path.join(root, annotations[0]))
+            except ManifestError as e:
+                problems.append('names: %s' % e)
+            else:
+                report.append('names now: ' + names_summary(fresh))
+                if names is not None and fresh != names:
+                    problems.append('names differ from the recorded ones (recorded: %s; now: %s)'
+                                    % (names_summary(names), names_summary(fresh)))
     # the server matches loaded files by base name: entries sharing one (a manifest written for
     # a directory of bundles) would lend one index_fp to every bundle, and it refuses them
     for name in duplicate_base_names([e['path'] for e in manifest['files']]):
@@ -586,6 +692,7 @@ def verify(path, root=None):
         print('\n'.join(problems))
         sys.exit(1)
     print(f'{path}: OK, index_fp {fp}')
+    print('\n'.join(report))
 
 
 def main():
@@ -616,9 +723,16 @@ def main():
                     help='with -i and -a: print the loader dependency inventory (JSON: the '
                          'identity files, and the derived mask and Bloom filter no manifest '
                          'lists) and exit')
+    ap.add_argument('--metagraph', metavar='PATH',
+                    help='the metagraph binary: `stats --check-names` on the annotation, '
+                         'recorded under "names" (write and batch; --verify re-runs it and '
+                         'compares)')
+    ap.add_argument('--check-names', action=argparse.BooleanOptionalAction, default=None,
+                    help='run the names check (default: when --metagraph is given; '
+                         '--no-check-names skips it)')
     args = ap.parse_args()
     if args.verify:
-        verify(args.verify, args.root)
+        verify(args.verify, args.root, args.metagraph)
     elif args.server_csv:
         try:
             batch(args)
@@ -635,7 +749,10 @@ def main():
                         for p, r, e, l in derived_files(args.graph)],
             'derived_rule': DERIVED_RULE}, indent=1))
     elif args.graph and args.annotation:
-        write(args)
+        try:
+            write(args)
+        except ManifestError as e:
+            sys.exit('index_manifest.py: %s' % e)
     else:
         ap.error('give -i and -a, --server-csv, or --verify')
 

@@ -120,6 +120,34 @@ class TestIndexNames(TestingBase):
                           'headers': 0, 'headers_invalid_utf8': 0, 'duplicate_record_headers': 0,
                           'first_invalid': [], 'names_ok': True}, names)
 
+    @unittest.skipUnless(_MINI_GUARD, "the mini index is not built (scripts/traversal/"
+                                      "build_mini_refseq.sh)")
+    def test_the_manifest_records_the_names_of_the_mini_index(self):
+        self.assertTrue(_MINI_PRESENT, f'the mini index is not in {MINI_DIR}')
+        graph, anno = os.path.join(MINI_DIR, MINI_GRAPH), os.path.join(MINI_DIR, MINI_ANNO)
+        plain, named = f'{self.d}/plain.json', f'{self.d}/named.json'
+        res = subprocess.run([sys.executable, MANIFEST_PY, '-i', graph, '-a', anno, '-o', plain],
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertIn('names not checked (no --metagraph PATH)', res.stderr.decode())
+        res = subprocess.run([sys.executable, MANIFEST_PY, '-i', graph, '-a', anno, '-o', named,
+                              '--metagraph', METAGRAPH], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertIn('names_ok true', res.stdout.decode())
+        with open(plain) as f:
+            p = json.load(f)
+        with open(named) as f:
+            n = json.load(f)
+        self.assertNotIn('names', p)
+        self.assertEqual(NAMES_OK, n['names'])
+        self.assertEqual(p['index_fp'], n['index_fp'])
+        self.assertEqual(p['files'], n['files'])
+        # --verify re-checks against the bundle (the manifest lives apart from it: --root)
+        res = subprocess.run([sys.executable, MANIFEST_PY, '--verify', named, '--root', MINI_DIR,
+                              '--metagraph', METAGRAPH], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(0, res.returncode, res.stdout.decode() + res.stderr.decode())
+        self.assertIn('names now: labels 9 (not UTF-8: 0), record headers 42 (not UTF-8: 0, '
+                      'repeats: 0), names_ok true', res.stdout.decode())
 
 
 if __name__ == '__main__':

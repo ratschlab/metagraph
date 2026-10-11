@@ -1,6 +1,8 @@
 """scripts/traversal/index_manifest.py, batch mode: one manifest per (graph, annotation)
 pair of a multi-graph server's list, each distinct file hashed once by parallel streams or
-taken from precomputed sha256 digests, equal to what single mode writes."""
+taken from precomputed sha256 digests, equal to what single mode writes; and the names check
+(--metagraph, --check-names: `metagraph stats --check-names` recorded under "names", outside
+the identity), driven here by a stand-in binary."""
 import argparse
 import contextlib
 import hashlib
@@ -30,17 +32,24 @@ def _args(**kw):
     # every option main() parses, at its default (--no-coord-mapping and --inventory too)
     a = dict(server_csv=None, jobs=1, digests=[], digests_only=False, match_base_names=False,
              out_dir=None, write_csv=None, force=False, graph=None, annotation=None, output=None,
-             name=None, extra=[], no_coord_mapping=False, inventory=False)
+             name=None, extra=[], no_coord_mapping=False, inventory=False, metagraph=None,
+             check_names=None)
     a.update(kw)
     return argparse.Namespace(**a)
+
+
+# what `metagraph stats --check-names` prints for an index whose names are all in order
+NAMES_OK = {'labels': 3, 'labels_invalid_utf8': 0, 'headers': 5, 'headers_invalid_utf8': 0,
+            'duplicate_record_headers': 0, 'first_invalid': [], 'names_ok': True}
 
 
 class TestIndexManifestBatch(unittest.TestCase):
     def setUp(self):
         # the script reports to stdout and stderr; the tests read what it writes
+        self.out, self.err = io.StringIO(), io.StringIO()
         self._quiet = contextlib.ExitStack()
-        self._quiet.enter_context(contextlib.redirect_stdout(io.StringIO()))
-        self._quiet.enter_context(contextlib.redirect_stderr(io.StringIO()))
+        self._quiet.enter_context(contextlib.redirect_stdout(self.out))
+        self._quiet.enter_context(contextlib.redirect_stderr(self.err))
         self.addCleanup(self._quiet.close)
         self.tmp = tempfile.TemporaryDirectory()
         d = self.root = self.tmp.name
@@ -80,10 +89,130 @@ class TestIndexManifestBatch(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _single(self, graph, annotation, out):
-        im.write(_args(graph=graph, annotation=annotation, output=out))
+    def _single(self, graph, annotation, out, **kw):
+        im.write(_args(graph=graph, annotation=annotation, output=out, **kw))
         with open(out) as f:
             return json.load(f)
+
+    def _fake_metagraph(self):
+        """A stand-in binary: `stats --check-names -a ANNOTATION` prints <ANNOTATION>.names.json
+        and exits 1 when its names_ok is false, as the real one does; anything else exits 2."""
+        path = os.path.join(self.root, 'metagraph')
+        with open(path, 'w') as f:
+            f.write('#!/bin/sh\n'
+                    'test "$1" = stats -a "$2" = --check-names -a "$3" = -a || exit 2\n'
+                    'cat "$4.names.json" || exit 2\n'
+                    'grep -q \'"names_ok": true\' "$4.names.json"\n')
+        os.chmod(path, 0o755)
+        return path
+
+    def _names(self, annotation, **kw):
+        names = dict(NAMES_OK, **kw)
+        with open(annotation + '.names.json', 'w') as f:
+            json.dump(names, f, indent=1)
+        return names
+
+    def test_names_are_recorded_outside_the_identity(self):
+        """--metagraph: the check's JSON is recorded under "names"; index_fp is the digest of
+        the file list, the same with and without it; a failed check is recorded, and warned
+        about, not refused."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        binary = self._fake_metagraph()
+        names = self._names(a)
+        plain = self._single(g, a, os.path.join(self.root, 'plain.json'))
+        self.assertNotIn('names', plain)
+        self.assertIn('names not checked (no --metagraph PATH)', self.err.getvalue())
+        got = self._single(g, a, os.path.join(self.root, 'named.json'), metagraph=binary)
+        self.assertEqual(names, got['names'])
+        self.assertEqual(plain['index_fp'], got['index_fp'])
+        self.assertEqual(plain['files'], got['files'])
+        self.assertIn('names_ok true', self.out.getvalue())
+        self.assertNotIn('WARNING', self.err.getvalue())
+        bad = self._names(a, labels_invalid_utf8=1, names_ok=False,
+                          first_invalid=[{'kind': 'label', 'column': 2, 'record': None,
+                                          'hex': '6c6162656cff', 'problem': 'invalid_utf8'}])
+        got = self._single(g, a, os.path.join(self.root, 'bad.json'), metagraph=binary)
+        self.assertEqual(bad, got['names'])
+        self.assertEqual(plain['index_fp'], got['index_fp'])
+        self.assertIn('WARNING', self.err.getvalue())
+        self.assertIn('names_ok false', self.err.getvalue())
+
+    def test_check_names_needs_the_binary_and_is_skipped_on_request(self):
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        out = os.path.join(self.root, 'm.json')
+        with self.assertRaises(im.ManifestError) as cm:
+            im.write(_args(graph=g, annotation=a, output=out, check_names=True))
+        self.assertIn('--metagraph', str(cm.exception))
+        self.assertFalse(os.path.exists(out))
+        binary = self._fake_metagraph()
+        self._names(a)
+        got = self._single(g, a, out, metagraph=binary, check_names=False)
+        self.assertNotIn('names', got)
+        # a binary that fails for another reason, or prints something else, is an error
+        os.remove(a + '.names.json')
+        with self.assertRaises(im.ManifestError):
+            im.write(_args(graph=g, annotation=a, output=out, metagraph=binary))
+        with open(a + '.names.json', 'w') as fh:
+            fh.write('{"labels": 1, "names_ok": true}\n')
+        with self.assertRaises(im.ManifestError) as cm:
+            im.write(_args(graph=g, annotation=a, output=out, metagraph=binary))
+        self.assertIn('headers', str(cm.exception))
+        with self.assertRaises(im.ManifestError):
+            im.write(_args(graph=g, annotation=a, output=out, metagraph=self.root + '/none'))
+
+    def test_batch_records_names_per_pair(self):
+        f = self.files
+        binary = self._fake_metagraph()
+        expected = {
+            f['a1.relaxed.row_diff_brwt_coord.annodbg']:
+                self._names(f['a1.relaxed.row_diff_brwt_coord.annodbg'], labels=1),
+            f['a2.column.annodbg']: self._names(f['a2.column.annodbg'], labels=2, headers=0),
+            f['a3.column.annodbg']: self._names(f['a3.column.annodbg'], labels=3,
+                                                duplicate_record_headers=2, names_ok=False),
+        }
+        written = im.batch(_args(server_csv=self.csv, out_dir=self.root + '/b',
+                                 metagraph=binary))
+        self.assertEqual(3, len(written))
+        for (g, a), out in written.items():
+            with open(out) as fh:
+                got = json.load(fh)
+            self.assertEqual(expected[a], got['names'], out)
+            ref = self._single(g, a, os.path.join(self.root, 'ref.json'))
+            self.assertEqual(ref['index_fp'], got['index_fp'], out)
+        self.assertIn('WARNING', self.err.getvalue())
+        # skipped: no names (--force: line 5 fixes its pair's manifest path)
+        written = im.batch(_args(server_csv=self.csv, out_dir=self.root + '/n', force=True))
+        for out in written.values():
+            with open(out) as fh:
+                self.assertNotIn('names', json.load(fh))
+
+    def test_verify_reports_and_compares_names(self):
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        binary = self._fake_metagraph()
+        self._names(a)
+        out = os.path.join(self.root, 'v.json')
+        self._single(g, a, out, metagraph=binary)
+        im.verify(out)
+        self.assertIn('names: labels 3 (not UTF-8: 0), record headers 5 (not UTF-8: 0, '
+                      'repeats: 0), names_ok true', self.out.getvalue())
+        self.assertNotIn('names now', self.out.getvalue())
+        im.verify(out, metagraph=binary)
+        self.assertIn('names now: labels 3', self.out.getvalue())
+        # the names changed since the manifest was written: a problem
+        self._names(a, headers_invalid_utf8=1, names_ok=False)
+        with self.assertRaises(SystemExit):
+            im.verify(out, metagraph=binary)
+        self.assertIn('names differ from the recorded ones', self.out.getvalue())
+        # a manifest without names: said so; the fresh check is reported, not a difference
+        plain = os.path.join(self.root, 'p.json')
+        self._single(g, a, plain)
+        im.verify(plain, metagraph=binary)
+        self.assertIn('names: not recorded', self.out.getvalue())
+        self.assertIn('names now: labels 3 (not UTF-8: 0), record headers 5 (not UTF-8: 1',
+                      self.out.getvalue())
 
     def test_batch_equals_single_mode_and_hashes_each_file_once(self):
         calls = []
