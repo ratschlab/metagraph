@@ -325,6 +325,50 @@ TEST(BOSS, MarkDummySinkEdgesTwoPaths) {
     }
 }
 
+TEST(BOSS, MarkDummySinkEdgesAllStates) {
+    const std::vector<std::vector<std::string>> records = {
+        {},
+        { "AAAAAAAAAA" },
+        { "ACGT" },
+        { "AAAACCCCGGGG", "AAAATTTTGGGG", "CCCCAAAATTTT" }
+    };
+    for (size_t k : { 1, 3, 7 }) {
+        for (const auto &sequences : records) {
+            BOSS graph(k);
+            for (const auto &sequence : sequences) {
+                graph.add_sequence(sequence);
+            }
+            for (auto state : { BOSS::DYN, BOSS::STAT, BOSS::SMALL, BOSS::FAST }) {
+                SCOPED_TRACE(testing::Message() << "k=" << k << ", state=" << state
+                                               << ", records=" << sequences.size());
+                graph.switch_state(state);
+                sdsl::bit_vector expected(graph.num_edges() + 1, false);
+                uint64_t count = 0;
+                for (BOSS::edge_index i = 2; i <= graph.num_edges(); ++i) {
+                    if (!graph.get_W(i)) {
+                        expected[i] = true;
+                        ++count;
+                    }
+                }
+                sdsl::bit_vector mask(expected.size(), false);
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges());
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+
+                // Preserve existing marks, including the two reserved positions.
+                for (size_t i = 0; i < mask.size(); ++i) {
+                    mask[i] = i < 2 || i % 2 == 0;
+                    expected[i] = expected[i] || mask[i];
+                }
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+            }
+        }
+    }
+}
+
 TEST(BOSS, MarkDummySourceEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
