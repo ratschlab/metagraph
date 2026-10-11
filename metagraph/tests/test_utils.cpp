@@ -1239,6 +1239,14 @@ TEST(AsyncActivity, RunBothParallel) {
     t2.join();
 }
 
+TEST(Misc, ToHex) {
+    EXPECT_EQ("", utils::to_hex(""));
+    EXPECT_EQ("6c6162656cff", utils::to_hex(std::string("label\xff", 6)));
+    EXPECT_EQ("00017f80", utils::to_hex(std::string("\x00\x01\x7f\x80", 4)));
+    EXPECT_FALSE(utils::valid_utf8(std::string("label\xff", 6)));
+    EXPECT_TRUE(utils::valid_utf8("label\xef\xbf\xbd"));
+}
+
 TEST(Misc, SplitString) {
     EXPECT_EQ(std::vector<std::string>(),
               utils::split_string("", ""));

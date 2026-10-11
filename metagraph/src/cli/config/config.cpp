@@ -190,6 +190,8 @@ Config::Config(int argc, char *argv[]) {
             coordinates = true;
         } else if (!strcmp(argv[i], "--index-header-coords")) {
             index_header_coords = true;
+        } else if (!strcmp(argv[i], "--allow-unchecked-headers")) {
+            allow_unchecked_headers = true;
         } else if (!strcmp(argv[i], "--no-coord-mapping")) {
             no_coord_mapping = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
@@ -1635,6 +1637,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t                 \t\t(a label must be valid UTF-8: otherwise the build is refused, naming the file, the record and the bytes)\n");
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
@@ -1643,6 +1646,10 @@ if (advanced) {
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\t   --index-header-coords \tgenerate a CoordToHeader mapping (.seqs file) from input FASTA files [off]\n");
+            fprintf(stderr, "\t                         \t(record headers must be valid UTF-8 and distinct within a file: otherwise the build is refused,\n"
+                            "\t                         \t naming the file, the records and the bytes; with --fwd-and-reverse a record's reverse\n"
+                            "\t                         \t complement counts to the same record)\n");
+            fprintf(stderr, "\t   --allow-unchecked-headers \tskip the checks of header names above, with a warning [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;

@@ -1,6 +1,7 @@
 #ifndef __COORD_TO_HEADER_HPP__
 #define __COORD_TO_HEADER_HPP__
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -116,6 +117,18 @@ class CoordToHeader {
     size_t build_header_index() const;
     // how many times this object built its reverse index (to test that it is built once)
     size_t num_header_index_builds() const;
+
+    /**
+     * The records of |headers| whose header repeats an earlier record's, in record order:
+     * |callback|(first, repeat) with the 0-based indices of the first occurrence and of the
+     * repeat, once per repeat, until the callback returns false. One pass with a hash set over
+     * the record indices (no header is copied), so a column of 33M headers is checked in O(n).
+     * find_header() answers a header with its first record only, so a column whose headers
+     * are not distinct hides every repeat from it: `annotate --index-header-coords` refuses
+     * such a column and `stats --check-names` reports it.
+     */
+    static void find_duplicate_headers(const std::vector<std::string> &headers,
+                                       const std::function<bool(size_t, size_t)> &callback);
 
     static constexpr auto kExtension = ".seqs";
 

@@ -1,6 +1,7 @@
 #include "annotation/coord_to_header.hpp"
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
 #include "common/serialization.hpp"
@@ -67,6 +68,38 @@ CoordToHeader::find_header(std::string_view header) const {
 size_t CoordToHeader::num_header_index_builds() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);
     return header_index_builds_;
+}
+
+namespace {
+
+// a record index hashed and compared by the header it names (two types: the set derives from
+// both)
+struct HeaderOfRecordHash {
+    const std::vector<std::string> *headers;
+    size_t operator()(size_t i) const {
+        return std::hash<std::string_view>()((*headers)[i]);
+    }
+};
+
+struct HeaderOfRecordEqual {
+    const std::vector<std::string> *headers;
+    bool operator()(size_t a, size_t b) const {
+        return (*headers)[a] == (*headers)[b];
+    }
+};
+
+} // namespace
+
+void CoordToHeader::find_duplicate_headers(const std::vector<std::string> &headers,
+                                           const std::function<bool(size_t, size_t)> &callback) {
+    tsl::hopscotch_set<size_t, HeaderOfRecordHash, HeaderOfRecordEqual>
+            first(std::max<size_t>(headers.size(), 1),
+                  HeaderOfRecordHash { &headers }, HeaderOfRecordEqual { &headers });
+    for (size_t i = 0; i < headers.size(); ++i) {
+        auto [it, inserted] = first.insert(i);
+        if (!inserted && !callback(*it, i))
+            return;
+    }
 }
 
 CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,

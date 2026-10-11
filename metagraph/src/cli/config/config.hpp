@@ -70,6 +70,7 @@ class Config {
     bool aggregate_columns = false;
     bool coordinates = false;
     bool index_header_coords = false;
+    bool allow_unchecked_headers = false;
     bool no_coord_mapping = false;
     // Opt-in: include the bulky VG-style `path.mapping[]` object in
     // `metagraph align --json` output. Off by default since nothing in-tree

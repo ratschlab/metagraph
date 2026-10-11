@@ -17,6 +17,10 @@ bool starts_with(const std::string &str, const std::string &prefix);
 // string may carry; a label name (a FASTA header, a file name) need not be one
 bool valid_utf8(std::string_view s);
 
+// the bytes of |s| as lowercase hex, two digits each: how a name that is not valid UTF-8 is
+// reported, since its raw bytes could not be shown as text
+std::string to_hex(std::string_view s);
+
 bool ends_with(const std::string &str, const std::string &suffix);
 
 std::optional<uint64_t> parse_abundance(const std::string &comment);

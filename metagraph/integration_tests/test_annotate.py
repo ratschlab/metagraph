@@ -421,5 +421,123 @@ class TestAnnotate(TestingBase):
                          res.stdout.decode())
 
 
+class TestAnnotateHeaderChecks(TestingBase):
+    """`metagraph annotate` refuses a header-derived name that is not valid UTF-8 (a
+    --anno-header label, a --index-header-coords record header) and, with
+    --index-header-coords, a record header repeating an earlier record's of the same file,
+    naming the file, the 1-based record(s) and the bytes in hex (never raw), with nothing
+    written; --allow-unchecked-headers skips both checks with a warning (the owner's decision
+    of 2026-10-11). A record's reverse complement under --fwd-and-reverse is the same record,
+    not a repeat."""
+    K = 11
+    SEQ_A = 'ACGTTGCAGGCTAGCTTACGGATCCAGTACGATGCCTTAGC'
+    SEQ_B = 'TTGACCGTAGGCATCGATTCAAGGCTTACGACTGGATACCA'
+    SEQ_C = 'GGATCCTTAAGCGCGTATACCAGTTGCAATGGCTCGATCAG'
+
+    def setUp(self):
+        self.tempdir = TemporaryDirectory()
+        self.d = self.tempdir.name
+
+    def _fasta(self, records, name='records.fa'):
+        # headers are bytes: some are not UTF-8 on purpose
+        path = os.path.join(self.d, name)
+        with open(path, 'wb') as f:
+            for header, seq in records:
+                f.write(b'>' + header + b'\n' + seq.encode() + b'\n')
+        return path
+
+    def _graph(self, fasta):
+        self._build_graph(fasta, os.path.join(self.d, 'graph'), self.K, 'succinct')
+        return os.path.join(self.d, 'graph.dbg')
+
+    def _annotate(self, graph, fasta, flags, out='anno'):
+        cmd = (f'{METAGRAPH} annotate -p {NUM_THREADS} -i {graph} {flags} '
+               f'-o {os.path.join(self.d, out)} {fasta}')
+        return subprocess.run([cmd], shell=True, stdout=PIPE, stderr=PIPE)
+
+    def _assert_refused(self, res, fasta, *fragments):
+        self.assertNotEqual(res.returncode, 0)
+        err = res.stderr.decode('utf-8', errors='replace')
+        self.assertIn(fasta, err)
+        for fragment in fragments:
+            self.assertIn(fragment, err)
+        # the offending bytes are named in hex only
+        self.assertNotIn(b'\xff', res.stderr)
+        self.assertEqual([], [f for f in os.listdir(self.d)
+                              if f.startswith('anno')], 'nothing is written')
+
+    def test_anno_header_refuses_a_label_that_is_not_utf8(self):
+        fasta = self._fasta([(b'ok', self.SEQ_A), (b'bad\xff', self.SEQ_B),
+                             (b'later', self.SEQ_C)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta, '--anno-header')
+        self._assert_refused(res, fasta, 'record 2', 'not valid UTF-8', '626164ff',
+                             '--allow-unchecked-headers')
+        # the label is the name token: a comment that is not UTF-8 is dropped with the
+        # comment, and refused once --header-comment-delim makes it part of the label
+        fasta = self._fasta([(b'ok', self.SEQ_A), (b'name meta\xff', self.SEQ_B)], 'comment.fa')
+        res = self._annotate(graph, fasta, '--anno-header', out='anno_name')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertTrue(os.path.exists(os.path.join(self.d, 'anno_name.column.annodbg')))
+        res = self._annotate(graph, fasta, '--anno-header --header-comment-delim _', out='x')
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('record 2', res.stderr.decode('utf-8', 'replace'))
+        self.assertIn('6e616d655f6d657461ff', res.stderr.decode('utf-8', 'replace'))
+        self.assertFalse(os.path.exists(os.path.join(self.d, 'x.column.annodbg')))
+
+    def test_index_header_coords_refuses_a_record_header_that_is_not_utf8(self):
+        fasta = self._fasta([(b'ok', self.SEQ_A), (b'bad\xff', self.SEQ_B)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords')
+        self._assert_refused(res, fasta, 'record 2', 'not valid UTF-8', '626164ff')
+
+    def test_index_header_coords_refuses_a_repeated_record_header(self):
+        fasta = self._fasta([(b'dup', self.SEQ_A), (b'other', self.SEQ_B), (b'dup', self.SEQ_C)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords')
+        self._assert_refused(res, fasta, 'record 3', 'repeats the header of record 1',
+                             '647570', '--allow-unchecked-headers')
+        # consecutive records too: a duplicate is a duplicate
+        fasta = self._fasta([(b'dup', self.SEQ_A), (b'dup', self.SEQ_B)], 'consecutive.fa')
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords')
+        self._assert_refused(res, fasta, 'record 2', 'repeats the header of record 1')
+        # a repeat only counts within a file: two files may share a header
+        other = self._fasta([(b'dup', self.SEQ_C)], 'other.fa')
+        first = self._fasta([(b'dup', self.SEQ_A)], 'first.fa')
+        res = self._annotate(graph, f'{first} {other}', '--anno-filename --index-header-coords')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertTrue(os.path.exists(os.path.join(self.d, 'anno.seqs')))
+
+    def test_fwd_and_reverse_counts_a_records_reverse_complement_to_the_record(self):
+        fasta = self._fasta([(b'a', self.SEQ_A), (b'b', self.SEQ_B)])
+        graph = self._graph(fasta)
+        kmers = 2 * (len(self.SEQ_A) - self.K + 1)
+        for flags, out, total in (('', 'fwd', kmers), ('--fwd-and-reverse', 'both', 2 * kmers)):
+            res = self._annotate(graph, fasta, f'--anno-filename --index-header-coords {flags}',
+                                 out=out)
+            self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+            stats = subprocess.run([f'{METAGRAPH} stats {os.path.join(self.d, out)}.seqs'],
+                                   shell=True, stdout=PIPE, stderr=PIPE).stdout.decode()
+            self.assertIn('total sequences: 2\n', stats, flags)
+            self.assertIn(f'total k-mers: {total}\n', stats, flags)
+
+    def test_allow_unchecked_headers_builds_with_a_warning(self):
+        fasta = self._fasta([(b'dup', self.SEQ_A), (b'bad\xff', self.SEQ_B), (b'dup', self.SEQ_C)])
+        graph = self._graph(fasta)
+        for flags, written in (('--anno-header', 'labels.column.annodbg'),
+                               ('--anno-filename --index-header-coords', 'records.seqs')):
+            out = written.split('.')[0]
+            res = self._annotate(graph, fasta, f'{flags} --allow-unchecked-headers', out=out)
+            self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+            self.assertTrue(os.path.exists(os.path.join(self.d, written)), written)
+            err = res.stderr.decode('utf-8', 'replace')
+            self.assertIn('[warning]', err)
+            self.assertIn('Header names are not checked (--allow-unchecked-headers)', err)
+        # unchecked, the mapping stores every record (a repeat is found at its first only)
+        stats = subprocess.run([f'{METAGRAPH} stats {os.path.join(self.d, "records")}.seqs'],
+                               shell=True, stdout=PIPE, stderr=PIPE).stdout.decode()
+        self.assertIn('total sequences: 3\n', stats)
+
+
 if __name__ == '__main__':
     unittest.main()

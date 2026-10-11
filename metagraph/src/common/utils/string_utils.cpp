@@ -50,6 +50,17 @@ bool valid_utf8(std::string_view s) {
     return true;
 }
 
+std::string to_hex(std::string_view s) {
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(s.size() * 2);
+    for (unsigned char c : s) {
+        out.push_back(digits[c >> 4]);
+        out.push_back(digits[c & 0xF]);
+    }
+    return out;
+}
+
 // Try to parse ka:f:[abundance] or km:f:[abundance] from header
 // https://github.com/IndexThePlanet/Logan/blob/main/Unitigs.md
 std::optional<uint64_t> parse_abundance(const std::string &comment) {

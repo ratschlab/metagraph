@@ -216,6 +216,41 @@ TEST(CoordToHeader, SerializeLoadRoundTrip) {
     }
 }
 
+TEST(CoordToHeader, FindDuplicateHeadersNamesEveryRepeatAgainstTheFirst) {
+    // a column with one header twice, one three times, a repeat that is not consecutive
+    // and a header holding a byte that is not UTF-8 (a name, not a duplicate)
+    const std::vector<std::string> headers
+            = { "a", "b", "a", "c", "b", "b", std::string("d\xff", 2), "e" };
+    std::vector<std::pair<size_t, size_t>> repeats;
+    CoordToHeader::find_duplicate_headers(headers, [&](size_t first, size_t repeat) {
+        repeats.emplace_back(first, repeat);
+        return true;
+    });
+    EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { 0, 2 }, { 1, 4 }, { 1, 5 } }), repeats);
+
+    // the callback stops the scan
+    repeats.clear();
+    CoordToHeader::find_duplicate_headers(headers, [&](size_t first, size_t repeat) {
+        repeats.emplace_back(first, repeat);
+        return false;
+    });
+    EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { 0, 2 } }), repeats);
+
+    // distinct headers, an empty column: no repeat
+    size_t calls = 0;
+    CoordToHeader::find_duplicate_headers({ "x", "y", "" }, [&](size_t, size_t) {
+        return ++calls, true;
+    });
+    CoordToHeader::find_duplicate_headers({}, [&](size_t, size_t) { return ++calls, true; });
+    EXPECT_EQ(0u, calls);
+
+    // find_header() answers a repeated header with its first record: what the scan reports
+    CoordToHeader cth({ headers }, { { 1, 1, 1, 1, 1, 1, 1, 1 } });
+    EXPECT_EQ(std::make_pair(CoordToHeader::Column(0), size_t(0)), *cth.find_header("a"));
+    EXPECT_EQ(std::make_pair(CoordToHeader::Column(0), size_t(1)), *cth.find_header("b"));
+    EXPECT_EQ(5u, cth.build_header_index());
+}
+
 TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
     // Verify map_single_coord gives same results as map_to_local_coords
     CoordToHeader cth(

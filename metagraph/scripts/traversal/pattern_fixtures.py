@@ -2102,10 +2102,11 @@ def build_indexes(binary, mini, work):
         with open(os.path.join(utf8, 'records.fa'), 'wb') as f:
             f.write(b'>' + UTF8_INVALID_HEADER + b'\n' + b'A' * 40 + b'\n'
                     + b'>' + UTF8_REPLACED_HEADER.encode('utf-8') + b'\n' + b'C' * 40 + b'\n')
+        # annotate refuses a label that is not UTF-8; this index carries one on purpose
         for cmd in ([binary, 'build', '-p', '1', '--graph', 'succinct', '-k', str(MINI_K),
                      '--mask-dummy', '--in-ram', '-o', 'graph', 'records.fa'],
                     [binary, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-header',
-                     '-o', 'anno', 'records.fa']):
+                     '--allow-unchecked-headers', '-o', 'anno', 'records.fa']):
             with open(log, 'ab') as f:
                 f.write(('$ (cd utf8) ' + ' '.join(cmd) + '\n').encode())
                 f.flush()

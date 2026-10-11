@@ -33,6 +33,38 @@ using mtg::common::logger;
 const size_t LOGGING_INTERVAL_SEQS = 100'000;
 
 
+// The labels a FASTA header yields, appended to |labels|: the name token, or name and comment
+// joined by |comment_delim| when set, split by |header_delim|. A label that is not valid UTF-8
+// refuses the build, naming the file, the 1-based record and the bytes in hex (never raw): the
+// serving routes cannot list such a label, since jsoncpp would replace its bytes by U+FFFD and
+// a valid name holding U+FFFD could be another label's. |unchecked| skips the check.
+void push_header_labels(const kseq_t *read_stream,
+                        const std::string &file,
+                        size_t record,
+                        const std::string &comment_delim,
+                        const std::string &header_delim,
+                        bool unchecked,
+                        std::vector<std::string> *labels) {
+    const std::string header = comment_delim != Config::UNINITIALIZED_STR
+            ? utils::join_strings({ read_stream->name.s,
+                                    read_stream->comment.s ? read_stream->comment.s : "" },
+                                  comment_delim, true)
+            : read_stream->name.s;
+    for (auto &label : utils::split_string(header, header_delim)) {
+        if (!unchecked && !utils::valid_utf8(label)) {
+            logger->error("Header of record {} in '{}' is not valid UTF-8 (label bytes in hex: {}):"
+                          " the label names of an index must be UTF-8 for the serving routes to"
+                          " list them (--allow-unchecked-headers skips this check)",
+                          record, file, utils::to_hex(label));
+            exit(1);
+        }
+        labels->push_back(std::move(label));
+    }
+}
+
+// |callback|(sequence, labels, abundance, record) for every sequence of |file|, the record its
+// 1-based number in the file (with |forward_and_reverse| a record's reverse complement is
+// passed under the same number)
 template <class Callback>
 void call_annotations(const std::string &file,
                       const std::string &ref_sequence_path,
@@ -45,6 +77,7 @@ void call_annotations(const std::string &file,
                       bool parse_counts_from_headers,
                       const std::string &fasta_anno_comment_delim,
                       const std::string &fasta_header_delimiter,
+                      bool unchecked_headers,
                       const std::vector<std::string> &anno_labels,
                       const Callback &callback) {
     size_t total_seqs = 0;
@@ -66,7 +99,7 @@ void call_annotations(const std::string &file,
                 labels.insert(labels.end(),
                               variant_labels.begin(), variant_labels.end());
 
-                callback(std::move(seq), labels, 1);
+                callback(std::move(seq), labels, 1, total_seqs + 1);
 
                 total_seqs += 1;
 
@@ -85,7 +118,7 @@ void call_annotations(const std::string &file,
         read_kmers(
             file,
             [&](std::string_view sequence) {
-                callback(std::string(sequence), labels, 1);
+                callback(std::string(sequence), labels, 1, total_seqs + 1);
 
                 total_seqs += 1;
 
@@ -102,21 +135,20 @@ void call_annotations(const std::string &file,
     } else if (file_format(file) == "FASTA"
                 || file_format(file) == "FASTQ") {
         bool parsed_first_header = false;
+        size_t calls = 0;
         read_fasta_file_critical(
             file,
             [&](kseq_t *read_stream) {
+                // two calls per record with |forward_and_reverse|, the second its reverse
+                // complement: the same record, its header checked on the first call
+                const size_t record = forward_and_reverse ? calls / 2 + 1 : calls + 1;
+                const bool reverse = forward_and_reverse && calls % 2 == 1;
+                ++calls;
                 // add sequence header to labels
                 if (annotate_sequence_headers) {
-                    for (const auto &label
-                            : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                                                    ? utils::join_strings(
-                                                        { read_stream->name.s, read_stream->comment.s },
-                                                        fasta_anno_comment_delim,
-                                                        true)
-                                                    : read_stream->name.s,
-                                                  fasta_header_delimiter)) {
-                        labels.push_back(label);
-                    }
+                    push_header_labels(read_stream, file, record,
+                                       fasta_anno_comment_delim, fasta_header_delimiter,
+                                       unchecked_headers || reverse, &labels);
                 }
 
                 uint64_t abundance = 1;
@@ -136,7 +168,7 @@ void call_annotations(const std::string &file,
                     }
                 }
 
-                callback(read_stream->seq.s, labels, abundance);
+                callback(read_stream->seq.s, labels, abundance, record);
 
                 total_seqs += 1;
 
@@ -167,6 +199,7 @@ void add_kmer_counts(const std::string &file,
                      bool annotate_sequence_headers,
                      const std::string &fasta_anno_comment_delim,
                      const std::string &fasta_header_delimiter,
+                     bool unchecked_headers,
                      const std::vector<std::string> &anno_labels,
                      const Callback &callback) {
     size_t total_seqs = 0;
@@ -185,6 +218,7 @@ void add_kmer_counts(const std::string &file,
 
     logger->trace("Parsing k-mer counts from '{}'", counts_fname);
 
+    size_t calls = 0;
     read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
         [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
             if (k != graph.get_k()) {
@@ -195,18 +229,15 @@ void add_kmer_counts(const std::string &file,
             }
             assert(read_stream->seq.l >= k && "sequences can't be shorter than k-mers");
 
+            // as in call_annotations: two calls per record with |forward_and_reverse|
+            const size_t record = forward_and_reverse ? calls / 2 + 1 : calls + 1;
+            const bool reverse = forward_and_reverse && calls % 2 == 1;
+            ++calls;
             // add sequence header to labels
             if (annotate_sequence_headers) {
-                for (const auto &label
-                        : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                                                ? utils::join_strings(
-                                                    { read_stream->name.s, read_stream->comment.s },
-                                                    fasta_anno_comment_delim,
-                                                    true)
-                                                : read_stream->name.s,
-                                              fasta_header_delimiter)) {
-                    labels.push_back(label);
-                }
+                push_header_labels(read_stream, file, record,
+                                   fasta_anno_comment_delim, fasta_header_delimiter,
+                                   unchecked_headers || reverse, &labels);
             }
 
             callback(read_stream->seq.s, labels,
@@ -248,8 +279,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         // Collect sequence headers and compute k-mer counts
         std::vector<std::vector<std::string>> headers(files.size());
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
+        // the 1-based FASTA record of each header, to name both records of a repeat
+        std::vector<std::vector<size_t>> records(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
+            size_t last_record = 0;
             call_annotations(
                 files[i],
                 config.refpath,
@@ -262,18 +296,43 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 false, // parse_counts_from_headers
                 config.fasta_anno_comment_delim,
                 config.fasta_header_delimiter,
+                config.allow_unchecked_headers,
                 {}, // config.anno_labels
-                [&](std::string sequence, auto labels, uint64_t) {
+                [&](std::string sequence, auto labels, uint64_t, size_t record) {
                     assert(labels.size() == 1 && "each sequence has a single label (header)");
-                    if (sequence.size() >= k) {
-                        if (headers[i].empty() || headers[i].back() != labels[0]) {
-                            headers[i].push_back(labels[0]);
-                            num_kmers[i].push_back(0);
-                        }
-                        num_kmers[i].back() += sequence.size() - k + 1;
+                    if (sequence.size() < k)
+                        return;
+                    // a record's reverse complement (--fwd-and-reverse) continues the record's
+                    // coordinates, as `annotate --coordinates` assigns them; with unchecked
+                    // headers, consecutive records under one header are merged into one as well
+                    const bool same_record = !headers[i].empty()
+                        && (record == last_record
+                            || (config.allow_unchecked_headers && headers[i].back() == labels[0]));
+                    if (!same_record) {
+                        headers[i].push_back(labels[0]);
+                        num_kmers[i].push_back(0);
+                        records[i].push_back(record);
                     }
+                    num_kmers[i].back() += sequence.size() - k + 1;
+                    last_record = record;
                 }
             );
+            if (!config.allow_unchecked_headers) {
+                // find_header() answers a header with its first record only
+                annot::CoordToHeader::find_duplicate_headers(headers[i],
+                    [&](size_t first, size_t repeat) {
+                        logger->error("Header of record {} in '{}' repeats the header of record {}"
+                                      " (bytes in hex: {}): the record headers of a column must be"
+                                      " distinct for the record mapping (.seqs) to find every"
+                                      " record (--allow-unchecked-headers skips this check)",
+                                      records[i][repeat], files[i], records[i][first],
+                                      utils::to_hex(headers[i][repeat]));
+                        exit(1);
+                        return false;
+                    }
+                );
+            }
+            records[i] = {};
         }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
         auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
@@ -321,8 +380,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 /*parse_counts_from_headers*/false,
                 config.fasta_anno_comment_delim,
                 config.fasta_header_delimiter,
+                config.allow_unchecked_headers,
                 config.anno_labels,
-                [&](std::string sequence, auto labels, uint64_t) {
+                [&](std::string sequence, auto labels, uint64_t, size_t) {
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
                         logger->error("All input sequences must have the same"
@@ -371,8 +431,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             /*parse_counts_from_headers*/false,
             config.fasta_anno_comment_delim,
             config.fasta_header_delimiter,
+            config.allow_unchecked_headers,
             config.anno_labels,
-            [&](std::string sequence, auto labels, uint64_t) {
+            [&](std::string sequence, auto labels, uint64_t, size_t) {
                 if (sequence.size() >= k) {
                     batcher.push_and_pay(sequence.size(),
                                          std::move(sequence), std::move(labels));
@@ -415,6 +476,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     config.annotate_sequence_headers,
                     config.fasta_anno_comment_delim,
                     config.fasta_header_delimiter,
+                    config.allow_unchecked_headers,
                     config.anno_labels,
                     [&](std::string sequence,
                                 std::vector<std::string> labels,
@@ -442,8 +504,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     /*parse_counts_from_headers*/true,
                     config.fasta_anno_comment_delim,
                     config.fasta_header_delimiter,
+                    config.allow_unchecked_headers,
                     config.anno_labels,
-                    [&](std::string sequence, auto labels, uint64_t kmer_count) {
+                    [&](std::string sequence, auto labels, uint64_t kmer_count, size_t) {
                         if (sequence.size() >= k) {
                             batcher.push_and_pay(sequence.size(),
                                                  std::move(sequence), std::move(labels),
@@ -465,6 +528,12 @@ int annotate_graph(Config *config) {
     const auto &files = config->fnames;
 
     assert(config->infbase_annotators.size() <= 1);
+
+    if (config->allow_unchecked_headers) {
+        logger->warn("Header names are not checked (--allow-unchecked-headers): a label or"
+                     " record header that is not valid UTF-8 cannot be listed by the serving"
+                     " routes, and a repeated record header is found at its first record only");
+    }
 
     if (config->index_header_coords) {
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
