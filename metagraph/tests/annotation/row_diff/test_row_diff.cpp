@@ -1,6 +1,5 @@
-#include <array>
-
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -37,7 +36,7 @@ class UnsortedRowMatrix : public BinaryMatrix {
     uint64_t num_columns() const override { return num_columns_; }
     uint64_t num_rows() const override { return rows_.size(); }
 
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override {
+    std::vector<SetBitPositions> get_rows(std::span<const Row> row_ids) const override {
         std::vector<SetBitPositions> result;
         result.reserve(row_ids.size());
         for (Row row_id : row_ids) {
@@ -46,7 +45,7 @@ class UnsortedRowMatrix : public BinaryMatrix {
         return result;
     }
 
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids,
+    std::vector<SetBitPositions> get_rows(std::span<const Row> row_ids,
                                           size_t) const override {
         return get_rows(row_ids);
     }
