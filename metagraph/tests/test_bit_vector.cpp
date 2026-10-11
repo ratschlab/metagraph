@@ -380,27 +380,29 @@ TEST(bit_vector_dyn, Serialization) {
     }
 }
 
-template <class bit_vector_type>
-uint64_t space_taken(const bit_vector_type &vec) {
+template <class T>
+uint64_t serialized_size_in_bits(const T &vec) {
     std::ofstream outstream(test_dump_basename, std::ios::binary);
     vec.serialize(outstream);
     outstream.close();
     std::ifstream instream(test_dump_basename, std::ios::binary | std::ifstream::ate);
-    uint64_t object_bytes = 0;
-    // Bit-vector predictions include object storage; the select-support formula
-    // below predicts only serialized storage.
-    if constexpr (std::is_base_of_v<bit_vector, bit_vector_type>) {
-        object_bytes = sizeof(bit_vector_type);
-        if constexpr (std::is_base_of_v<bit_vector_adaptive, bit_vector_type>) {
-            switch (vec.representation_tag()) {
-                case bit_vector_adaptive::SD_VECTOR: object_bytes += sizeof(bit_vector_sd); break;
-                case bit_vector_adaptive::RRR_VECTOR: object_bytes += sizeof(bit_vector_rrr<>); break;
-                case bit_vector_adaptive::STAT_VECTOR: object_bytes += sizeof(bit_vector_stat); break;
-                case bit_vector_adaptive::IL4096_VECTOR: object_bytes += sizeof(bit_vector_il<4096>); break;
-            }
+    return instream.tellg() * 8;
+}
+
+template <class T>
+uint64_t approximate_memory_in_bits(const T &vec) {
+    // Serialized storage approximates the allocated buffers, not the objects.
+    uint64_t object_bytes = sizeof(T);
+    if constexpr (std::is_base_of_v<bit_vector_adaptive, T>) {
+        // Adaptive vectors own a separately allocated concrete vector.
+        switch (vec.representation_tag()) {
+            case bit_vector_adaptive::SD_VECTOR: object_bytes += sizeof(bit_vector_sd); break;
+            case bit_vector_adaptive::RRR_VECTOR: object_bytes += sizeof(bit_vector_rrr<>); break;
+            case bit_vector_adaptive::STAT_VECTOR: object_bytes += sizeof(bit_vector_stat); break;
+            case bit_vector_adaptive::IL4096_VECTOR: object_bytes += sizeof(bit_vector_il<4096>); break;
         }
     }
-    return object_bytes * 8 + instream.tellg() * 8;
+    return object_bytes * 8 + serialized_size_in_bits(vec);
 }
 
 TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
@@ -417,7 +419,7 @@ TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
             const double TOLERANCE = size > 1'000'000 ? 0.01 : 0.012;
             for (double density : { .05, .2, .4, .5, .7, .9, .95 }) {
                 sdsl::bit_vector bv = gen.generate_random_column(size, density);
-                uint64_t footprint = space_taken(TypeParam(bv));
+                uint64_t footprint = approximate_memory_in_bits(TypeParam(bv));
                 EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
                         footprint * (1 - TOLERANCE)) << "Density: " << density;
                 EXPECT_LE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
@@ -436,7 +438,7 @@ TEST(select_support_mcl, PredictedMemoryFootprint) {
         for (double density : { .05, .2, .4, .5, .7, .9, .98 }) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
 
-            uint64_t footprint = space_taken(sdsl::select_support_mcl<1>(&bv));
+            uint64_t footprint = serialized_size_in_bits(sdsl::select_support_mcl<1>(&bv));
             EXPECT_GE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
                       footprint * (1 - TOLERANCE)) << "Size: " << size << "\tDensity: " << density;
             EXPECT_LE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),

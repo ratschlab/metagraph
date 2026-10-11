@@ -57,7 +57,6 @@ target_link_libraries(metagraph_common
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
-
     glog::glog
     spdlog::spdlog
     z

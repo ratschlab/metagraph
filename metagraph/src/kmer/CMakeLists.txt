@@ -30,7 +30,6 @@ target_include_directories(kmer
 target_link_libraries(kmer
   PUBLIC
     ${FOLLY_LIBRARIES}
-
     metagraph_common
 )
 

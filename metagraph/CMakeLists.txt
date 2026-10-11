@@ -157,8 +157,10 @@ if(APPLE)
 endif()
 
 # Check if 128 bit integers are supported
-include(CheckCXXSourceCompiles)
-check_cxx_source_compiles("int main() { unsigned __int128 value = 1; return value >> 64; }" METAGRAPH_HAS_UINT128)
+try_compile(METAGRAPH_HAS_UINT128
+  "${PROJECT_BINARY_DIR}"
+  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/MODETI.cpp"
+)
 if(METAGRAPH_HAS_UINT128)
   list(APPEND METAGRAPH_PUBLIC_DEFS MODE_TI)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")

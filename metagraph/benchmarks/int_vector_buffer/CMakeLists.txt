@@ -16,13 +16,6 @@ findOpenMP()
 enable_testing()
 findGTest()
 
-# Check if 128 bit integers are supported
-include(CheckCXXSourceCompiles)
-check_cxx_source_compiles("int main() { unsigned __int128 value = 1; return value >> 64; }" MODE_TI)
-if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
-endif()
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   file(STRINGS "/proc/cpuinfo" _cpuinfo)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")

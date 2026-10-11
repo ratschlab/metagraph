@@ -30,9 +30,7 @@ target_include_directories(metagraph_graph_base
 
 target_link_libraries(metagraph_graph_base
   PUBLIC
-
     ${mersenne_twister}
     progress_bar
     metagraph_common
 )
-
