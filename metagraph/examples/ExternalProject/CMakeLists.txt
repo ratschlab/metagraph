@@ -64,8 +64,20 @@ set(METAGRAPH_INSTALL_DIR ${INSTALL_DIR})
 add_executable(external_query ../src/basic_query.cpp)
 
 # Find required system dependencies for MetaGraph
-include(${CMAKE_CURRENT_LIST_DIR}/../../CMakeListsHelpers.txt)
-findOpenMP()
+# Keep this example usable outside the MetaGraph source tree.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    if(NOT OpenMP_ROOT)
+        set(OpenMP_ROOT "$ENV{OpenMP_ROOT}")
+    endif()
+    if(NOT OpenMP_ROOT)
+        execute_process(COMMAND brew --prefix libomp
+            OUTPUT_VARIABLE OpenMP_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
+    set(OpenMP_CXX_FLAGS "-Xclang -fopenmp -I${OpenMP_ROOT}/include")
+    set(OpenMP_CXX_LIB_NAMES libomp)
+    set(OpenMP_libomp_LIBRARY "${OpenMP_ROOT}/lib/libomp.dylib")
+endif()
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 find_library(JEMALLOC_LIBRARY NAMES jemalloc HINTS ENV LIBRARY_PATH
              PATHS /opt/homebrew/lib REQUIRED)

@@ -101,15 +101,20 @@ Before compiling MetaGraph, install the following dependencies:
             yum install cmake bzip2-devel jemalloc-devel boost-devel automake autoconf libdeflate
 
 
-    .. group-tab:: brew + GNU gcc
+    .. group-tab:: Homebrew on Linux (GNU GCC)
 
-        Install the current GCC formula and build dependencies::
+        On **Linux**, install the current GCC formula and build dependencies::
 
             brew install gcc libomp cmake make bzip2 boost jemalloc autoconf automake libtool libdeflate
 
         Set ``CC`` and ``CXX`` to the versioned compiler executables installed by
-        Homebrew when configuring CMake. Use a Boost build compatible with that
-        compiler. The former GCC 9 instructions do not meet the C++20 requirement.
+        Homebrew before configuring CMake.
+
+        On **macOS**, use the AppleClang instructions above. Homebrew's macOS Boost
+        packages use libc++, while GNU GCC uses libstdc++; choosing GCC therefore
+        requires building and installing Boost separately with that GCC toolchain.
+        See Homebrew's `C++ runtime compatibility guidance
+        <https://docs.brew.sh/C%2B%2B-Standard-Libraries>`_.
 
     .. group-tab:: brew + LLVM Clang
 
