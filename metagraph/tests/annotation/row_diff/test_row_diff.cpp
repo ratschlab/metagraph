@@ -1,3 +1,5 @@
+#include <array>
+
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -149,7 +151,8 @@ TEST(RowDiff, GetRows) {
     RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
 
-    auto rows = annot.get_rows({ 3, 3, 3, 3, 5, 5, 6, 7, 8, 9, 10, 11 });
+    const uint64_t row_ids[] = { 3, 3, 3, 3, 5, 5, 6, 7, 8, 9, 10, 11 };
+    auto rows = annot.get_rows(row_ids);
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(4)));
     ASSERT_THAT(rows[3], ElementsAre(0, 1));
 
@@ -203,7 +206,8 @@ TEST(RowDiff, GetRowsFromUnsortedBackingRows) {
     RowDiff<UnsortedRowMatrix> annot(&graph, UnsortedRowMatrix(std::move(diff_rows), 4));
     annot.load_anchor(anchor_temp.name());
 
-    auto rows = annot.get_rows({ first, second, first });
+    const uint64_t row_ids[] = { first, second, first };
+    auto rows = annot.get_rows(row_ids);
 
     ASSERT_THAT(rows[0], ElementsAre(0, 1, 2, 3));
     ASSERT_THAT(rows[1], ElementsAre(0, 2));
@@ -240,28 +244,28 @@ TEST(RowDiff, GetAnnotation) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(4)));
-    ASSERT_THAT(annot.get_rows({3})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{3})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(graph.select_node(6)));
-    ASSERT_THAT(annot.get_rows({5})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{5})[0], ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(graph.select_node(7)));
-    ASSERT_THAT(annot.get_rows({6})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{6})[0], ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(graph.select_node(8)));
-    ASSERT_THAT(annot.get_rows({7})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{7})[0], ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(graph.select_node(9)));
-    ASSERT_THAT(annot.get_rows({8})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{8})[0], ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(graph.select_node(10)));
-    ASSERT_THAT(annot.get_rows({9})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{9})[0], ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(graph.select_node(11)));
-    ASSERT_THAT(annot.get_rows({10})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{10})[0], ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(graph.select_node(12)));
-    ASSERT_THAT(annot.get_rows({11})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{11})[0], ElementsAre(0));
 }
 
 /**
@@ -307,35 +311,35 @@ TEST(RowDiff, GetAnnotationMasked) {
     RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(1)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(1))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(1))})[0],
                 ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(graph.select_node(2)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(2))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(2))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(graph.select_node(3)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(3))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(3))})[0],
                 ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(graph.select_node(4)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(4))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(4))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(graph.select_node(5)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(5))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(5))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(graph.select_node(6)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(6))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(6))})[0],
                 ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(graph.select_node(7)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(7))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(7))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(graph.select_node(8)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(8))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(8))})[0],
                 ElementsAre(0));
 }
 
@@ -370,34 +374,34 @@ TEST(RowDiff, GetAnnotationBifurcation) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(4)));
-    ASSERT_THAT(annot.get_rows({3})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{3})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("CTAT", graph.get_node_sequence(graph.select_node(5)));
-    ASSERT_THAT(annot.get_rows({4})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{4})[0], ElementsAre(1));
 
     EXPECT_EQ("TACT", graph.get_node_sequence(graph.select_node(6)));
-    ASSERT_THAT(annot.get_rows({5})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{5})[0], ElementsAre(0));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(graph.select_node(7)));
-    ASSERT_THAT(annot.get_rows({6})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{6})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(graph.select_node(8)));
-    ASSERT_THAT(annot.get_rows({7})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{7})[0], ElementsAre(1));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(graph.select_node(9)));
-    ASSERT_THAT(annot.get_rows({8})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{8})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(graph.select_node(12)));
-    ASSERT_THAT(annot.get_rows({11})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{11})[0], ElementsAre(0));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(graph.select_node(13)));
-    ASSERT_THAT(annot.get_rows({12})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{12})[0], ElementsAre(1));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(graph.select_node(14)));
-    ASSERT_THAT(annot.get_rows({13})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{13})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(graph.select_node(15)));
-    ASSERT_THAT(annot.get_rows({14})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows(std::array<uint64_t, 1>{14})[0], ElementsAre(1));
 }
 
 TEST(RowDiff, GetAnnotationBifurcationMasked) {
@@ -442,42 +446,42 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(1)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(1))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(1))})[0],
                 ElementsAre(0, 1));
     EXPECT_EQ("CTAT", graph.get_node_sequence(graph.select_node(2)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(2))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(2))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("TACT", graph.get_node_sequence(graph.select_node(3)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(3))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(3))})[0],
                 ElementsAre(0));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(graph.select_node(4)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(4))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(4))})[0],
                 ElementsAre(0, 1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(graph.select_node(5)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(5))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(5))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(graph.select_node(6)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(6))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(6))})[0],
                 ElementsAre(0, 1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(graph.select_node(7)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(7))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(7))})[0],
                 ElementsAre(0));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(graph.select_node(8)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(8))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(8))})[0],
                 ElementsAre(1));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(graph.select_node(9)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(9))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(9))})[0],
                 ElementsAre(0, 1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(graph.select_node(10)));
-    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(10))})[0],
+    ASSERT_THAT(annot.get_rows(std::array{graph_to_anno_index(graph.select_node(10))})[0],
                 ElementsAre(1));
 }
 

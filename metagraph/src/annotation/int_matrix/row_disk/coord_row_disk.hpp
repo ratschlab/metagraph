@@ -26,18 +26,18 @@ class CoordRowDisk : public BinaryMatrix, public MultiIntMatrix {
     uint64_t num_rows() const { return num_rows_; }
 
     using BinaryMatrix::get_rows;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const;
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
                                           size_t num_threads = 1) const;
 
     // return total number of attributes in all tuples
     uint64_t num_attributes() const { return num_attributes_; }
 
     // return entries of the matrix -- where each entry is a set of integers
-    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows,
+    std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
                                           size_t num_threads = 1) const;
 
     bool load(std::istream &f);
@@ -85,10 +85,10 @@ class CoordRowDisk : public BinaryMatrix, public MultiIntMatrix {
         std::vector<Row> get_column(Column j) const;
 
         RowValues get_row_values(Row i) const;
-        std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;
+        std::vector<RowValues> get_row_values(std::span<const Row> row_ids) const;
 
         RowTuples get_row_tuples(Row i) const;
-        std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const;
+        std::vector<RowTuples> get_row_tuples(std::span<const Row> rows) const;
 
       private:
         std::ifstream open_and_set_pos(const std::string filename, size_t offset) {

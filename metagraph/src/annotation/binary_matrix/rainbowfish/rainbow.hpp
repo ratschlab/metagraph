@@ -49,7 +49,7 @@ class Rainbow : public RainbowMatrix {
     MatrixType reduced_matrix_;
 
     uint64_t get_code(Row row) const override;
-    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const override {
+    std::vector<SetBitPositions> codes_to_rows(std::span<const Row> rows) const override {
         return reduced_matrix_.get_rows(rows);
     }
 };
