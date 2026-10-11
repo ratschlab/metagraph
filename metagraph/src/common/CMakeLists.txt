@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 cmake_minimum_required(VERSION 3.19)
 project(metagraph_common)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
@@ -19,25 +19,26 @@ file(GLOB src_files "*.cpp" "*/*.cpp")
 
 add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
+buildProgressBar(${EXTERNAL_LIB_DIR} PROGRESS_BAR_LIBRARY)
 
 # ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
 target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common
-  PRIVATE
-    ${PROJECT_PARENT_DIR}/src/
   PUBLIC
+    ${PROJECT_PARENT_DIR}/src/
     ${EXTERNAL_LIB_DIR}/asio/asio/include
+    ${EXTERNAL_LIB_DIR}/cpp_progress_bar
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/ips4o
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
-    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
     ${EXTERNAL_LIB_DIR}/zlib
     /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
 target_include_directories(metagraph_common SYSTEM PUBLIC
-    ${EXTERNAL_LIB_DIR}/folly
+    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
+    ${EXTERNAL_LIB_DIR}/simde-no-tests
 )
 
 # assume built-in pthreads on MacOS
@@ -53,7 +54,9 @@ add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
 target_link_libraries(metagraph_common
   PUBLIC
     folly
+    ${PROGRESS_BAR_LIBRARY}
     ${FILESYSTEM_LIBRARY}
+    OpenMP::OpenMP_CXX
     glog::glog
     spdlog::spdlog
     z
