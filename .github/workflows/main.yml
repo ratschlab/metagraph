@@ -70,6 +70,11 @@ jobs:
       cxx: ${{ matrix.cxx }}
       build_static: ${{ matrix.build_static }}
       with_avx: ${{ matrix.with_avx }}
+      # the mini-index tests (DNA, Release, g++-13) run on the published copy of the mini index,
+      # the one the pattern fixtures were answered on, so that every fixture body is compared
+      # byte for byte and a failure fails the workflow; a build from NCBI's records picks its
+      # row-diff anchors anew and could only compare the bodies without their decode work
+      mini_refseq: fetch
 
   # ========================================================================
   # macOS builds (all valid combinations)
