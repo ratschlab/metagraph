@@ -264,6 +264,16 @@ class Config {
     uint64_t pattern_max_predicate_work = 100'000'000;
     uint64_t pattern_max_predicate_labels = 10'000;
     static constexpr uint64_t kMaxPatternPredicateLabels = 1'000'000;
+    // bounded mismatches (SPEC-pattern-search.md §21): the most substitutions a request's
+    // max_mismatches may allow per instance of a dna or iupac pattern, at most the contract's
+    // kMaxPatternMismatches (a request above the cap is answered in the pattern's slot,
+    // mismatches_above_cap, never lowered), and per residue of a peptide, whose substituted
+    // residues cost far more work: at most the former, which it follows when not named.
+    // Stated in the capabilities' mismatches.max
+    uint64_t pattern_max_mismatches = 3;
+    uint64_t pattern_max_mismatches_protein = 3;
+    bool pattern_max_mismatches_protein_named = false;
+    static constexpr uint64_t kMaxPatternMismatches = 3;
     // server_query (-i / -a) and pattern: a succinct graph loaded without its .edgemask gets
     // the same dummy-edge mask built in memory before it is served (§4, mask: built_at_load),
     // for small indexes and tests; a large one is given the file once by transform --mask-dummy

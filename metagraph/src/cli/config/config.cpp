@@ -560,6 +560,14 @@ Config::Config(int argc, char *argv[]) {
             bounded(argv[i], get_value(i), kMaxPatternPredicateLabels,
                     &pattern_max_predicate_labels);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-max-mismatches")) {
+            bounded(argv[i], get_value(i), kMaxPatternMismatches, &pattern_max_mismatches);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-mismatches-protein")) {
+            bounded(argv[i], get_value(i), kMaxPatternMismatches,
+                    &pattern_max_mismatches_protein);
+            pattern_max_mismatches_protein_named = true;
+            i++;
         } else if (!strcmp(argv[i], "--pattern-build-mask")) {
             pattern_build_mask = true;
         } else if (!strcmp(argv[i], "--force")) {
@@ -868,7 +876,9 @@ Config::Config(int argc, char *argv[]) {
     // the max_anchors and max_labels of a request that names none are values a request may
     // name: at most their caps (an omitted field must never get more than a named one could).
     // A default the operator did not name follows a cap lowered under it (a cap alone keeps
-    // meaning what it did: the field's default too); a named one above its cap is refused
+    // meaning what it did: the field's default too); a named one above its cap is refused.
+    // The mismatch cap of peptides is bound to the general one the same way (SPEC §21.12: a
+    // peptide is never allowed more substitutions than a DNA pattern)
     if (identity == PATTERN || identity == SERVER_QUERY) {
         for (const auto &[flag, value, named, cap_flag, cap]
                  : { std::make_tuple("--pattern-default-max-anchors", &pattern_default_max_anchors,
@@ -876,7 +886,11 @@ Config::Config(int argc, char *argv[]) {
                                      pattern_max_anchors),
                      std::make_tuple("--pattern-default-max-labels", &pattern_default_max_labels,
                                      pattern_default_max_labels_named, "--pattern-max-labels",
-                                     pattern_max_labels) }) {
+                                     pattern_max_labels),
+                     std::make_tuple("--pattern-max-mismatches-protein",
+                                     &pattern_max_mismatches_protein,
+                                     pattern_max_mismatches_protein_named,
+                                     "--pattern-max-mismatches", pattern_max_mismatches) }) {
             if (*value <= cap)
                 continue;
             if (!named) {
@@ -1867,6 +1881,8 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-predicate-contexts [INT] \tdefault and maximum of max_predicate_contexts: the raw contexts a predicate's selection may test per pattern [100000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-work [INT] \tdefault and maximum of max_predicate_work per request (a predicate's selection: annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-labels [INT] \tthe names a predicate may list (a larger one is refused, predicate_too_large); at most 1000000 [10000]\n");
+            fprintf(stderr, "\t   --pattern-max-mismatches [INT] \tthe most substitutions max_mismatches may allow per instance of a dna or iupac pattern (a request above it is answered in the pattern's slot, mismatches_above_cap); at most 3 [3]\n");
+            fprintf(stderr, "\t   --pattern-max-mismatches-protein [INT] \tthe same for protein patterns (per residue), at most --pattern-max-mismatches (follows it when not given) [3]\n");
             fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with -p threads, for exact counts (without a mask: upper bounds with estimates; small graphs; else transform --mask-dummy once) [off]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
@@ -1939,6 +1955,8 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-predicate-contexts [INT] \tdefault and maximum of max_predicate_contexts: the raw contexts a predicate's selection may test per pattern [100000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-work [INT] \tdefault and maximum of max_predicate_work per request (a predicate's selection: annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-predicate-labels [INT] \tthe names a predicate may list (a larger one is refused, predicate_too_large); at most 1000000 [10000]\n");
+            fprintf(stderr, "\t   --pattern-max-mismatches [INT] \tthe most substitutions max_mismatches may allow per instance of a dna or iupac pattern (a request above it is answered in the pattern's slot, mismatches_above_cap); at most 3 [3]\n");
+            fprintf(stderr, "\t   --pattern-max-mismatches-protein [INT] \tthe same for protein patterns (per residue), at most --pattern-max-mismatches (follows it when not given) [3]\n");
             fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with --threads-each threads, for exact counts (without a mask: upper bounds with estimates; small graphs; else transform --mask-dummy once; a mask written later is read only after a restart) [off]\n");
         } break;
     }

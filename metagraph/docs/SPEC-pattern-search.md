@@ -95,6 +95,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | labels, placement, occurrences (§4.3) | read only with `output.labels: "all"` (or `"predicate_only"`, §19) in a retrieval mode (increment 3, §14): labels on every index, placement on BASIC indexes with coordinates; otherwise none read and their counts `unknown`. A predicate's selection reads the rows of the contexts it tests in every mode (§19), its own labels only |
 | per-label `support` for paths, `require_support` (§4.3) | served with `long_search: "paths"` (increment 4, §12.1) and `"supported_paths"` (increment 5s, §20.6): `label_intersection` or `record_verified` per label; a context of L ≤ k has `support: "kmer"` |
 | multi-graph servers (§8) | served as `/search` serves them (§24): `graphs` selects, each pair answered as on one graph, the answers concatenated and tagged |
+| bounded mismatches (design §12) | served for patterns of at most k bases (increment 5m-3, §21): `max_mismatches` 0–3 substitutions per instance, per base for `dna` and `iupac` (a base outside the position's set), per residue for `protein` (a sense codon of another residue), searched level by level; the counts per level, each result's level and substitutions. Patterns longer than k, and substitutions together with the labels, a predicate or the supported paths, are later increments (§21.16) |
 | the deadline with a finalisation reserve, 503 `deadline` (§5.3) | as designed; the annotation reads are work and stop at the work time (§14.4) |
 
 ## 2. Terms
@@ -117,6 +118,9 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | upper bound U | on a graph without its mask (`counting: "upper_bound"`, §7.4): the candidate entries of a count's ranges, k-mers and source dummies alike; the true count lies between the count's `lower` and U. |
 | dummy fraction f | the fraction of real k-mers among the graph's entries whose W is not `$` (the entries a pattern can count), sampled at load on a graph without its mask (`dummy_fraction`, §8.2). |
 | estimate | on a graph without its mask, beside a `bounds` count: round(U × f), kept inside [`lower`, U] (§7.4). Not a bound, never `exact`. |
+| substitution | with `max_mismatches` > 0 (§21.3): a position of the oriented pattern whose base in the instance lies outside the position's set (an N position never holds one); for a peptide a residue whose codon is a sense codon of another residue, counted once however many of its bases differ. Never an insertion or a deletion. |
+| level | the number of substitutions an instance holds, 0 … `max_mismatches` (§21.3); a function of the instance, so every context has exactly one. |
+| mismatch information bits | 2L − log2 \|B\|, B the strings over the pattern's L positions within `max_mismatches` substitutions (§21.5); the information bits when `max_mismatches` is 0. |
 
 ## 3. Transport
 
@@ -189,6 +193,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate |
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
 | `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. Needs a predicate (else 400 `invalid_request`) |
+| `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
 | `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, as `/search`'s (§24): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
 | `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
 
@@ -217,6 +222,9 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   as before increment 5b, byte for byte apart from `timing`; the three fields `max_predicate_contexts`,
   `max_predicate_work`, `predicate_strands` are then accepted, lowered to their caps (listed in `limits.clamped`)
   and echoed nowhere else.
+- `max_mismatches` (increment 5m-3, §21) is an opt-in too: a request without it, or with `0`, is answered byte
+  for byte as before apart from `timing` (§21.15); it is echoed in `limits` only when above 0, and never lowered
+  or listed in `limits.clamped` (it changes what is searched, not how much work is admitted).
 
 ### 4.2 A pattern
 
@@ -299,6 +307,8 @@ They are served now, §4.1–§4.3.)
 | `--pattern-max-predicate-contexts` | 100,000 | `max_predicate_contexts` (default = cap; increment 5b) | lowered, listed |
 | `--pattern-max-predicate-work` | 100,000,000 | `max_predicate_work` (default = cap; increment 5b) | lowered, listed; at least 1 (refused at start-up below) |
 | `--pattern-max-predicate-labels` | 10,000 | — (increment 5b: the names of a predicate's lists, a name in two lists counted twice; the server's policy, `caps.max_predicate_labels`) | 400 `predicate_too_large`; the flag is refused at start-up above 1,000,000 |
+| `--pattern-max-mismatches` | 3 | `max_mismatches` of `dna` and `iupac` patterns (increment 5m-3, §21.12): the most substitutions served per instance, `mismatches.max.dna` and `.iupac` of the capabilities; 0 serves none | the pattern's slot answers `mismatches_above_cap` (§21.8), never lowered; the flag is refused at start-up above 3 (or not an integer) |
+| `--pattern-max-mismatches-protein` | 3 (`--pattern-max-mismatches`) | `max_mismatches` of `protein` patterns, per residue (`mismatches.max.protein`); at most `--pattern-max-mismatches`: named above it, refused at start-up with both flags named; not named, it follows the former | likewise |
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
 
 **Every cap of the capabilities' `caps`, classified** (the capabilities' `caps_rule` refers here):
@@ -315,7 +325,9 @@ They are served now, §4.1–§4.3.)
 
 The rules they bound are §7.4 (the check of few unchecked candidates), §7.6 (the time kept back for the answer),
 §12.1 (the two admissions of `long_search: "paths"`), §19 (a predicate's admissions and budgets) and §20.3 (the
-row cache of a supported-path search).
+row cache of a supported-path search). The two mismatch caps (`mismatches.max`, §21.12) are neither: per-kind
+caps of `max_mismatches` that lower no request (a pattern above its kind's cap is answered in its slot, §21.8),
+stated in the capabilities' `mismatches` object rather than in `caps`.
 
 The capabilities state every value in force (`caps`, `default_time_budget_ms`, `default_max_anchors`,
 `default_max_labels`, `finalize_reserve_ms`; the two
@@ -365,9 +377,12 @@ A request is refused by the first check it fails, in this order:
    integer: 400 `invalid_request`; an integer that is no NCBI table: 400 `genetic_code_unknown`); the peptides are
    read in the genetic code after it (their alphabet, again, is no refusal); then increment 5b's `predicate` (its
    form, the path of the first fault named: 400 `invalid_request`; then its size: 400 `predicate_too_large`),
-   `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`, `predicate_scope` (§25), then
+   `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`, then increment 5m-3's `max_mismatches`
+   (§21.2: not an integer from 0 to 3, `null` included, 400 `invalid_request`), `predicate_scope` (§25), then
    `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"` and
-   `predicate_scope: "motif"` without a predicate (all 400 `invalid_request`);
+   `predicate_scope: "motif"` without a predicate (all 400 `invalid_request`), then `max_mismatches` above 0
+   with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (400
+   `later_increment`, §21.16);
 9. an unknown top-level field;
 10. increment 3: `output.labels: "all"` in a retrieval mode on an annotation without the budget-aware decode,
     without `allow_unbudgeted_annotation: true`: 400 `annotation_unbudgeted`; increment 5b: also a request
@@ -396,8 +411,8 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 
 | status | `code` | when | what a client does |
 |---|---|---|---|
-| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`; increment 5s: a `supported_paths_level` value not listed, `"label_intersection"` with `require_support: "record_verified"` under `long_search: "supported_paths"`; §25: a `predicate_scope` value not listed, `"motif"` without a predicate | fix the request |
-| 400 | `later_increment` | a field of §4.4 (`budget_split`) | wait for the increment the capabilities will announce |
+| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`; increment 5s: a `supported_paths_level` value not listed, `"label_intersection"` with `require_support: "record_verified"` under `long_search: "supported_paths"`; §25: a `predicate_scope` value not listed, `"motif"` without a predicate; §21: a `max_mismatches` that is not an integer from 0 to 3 (`null` included) | fix the request |
+| 400 | `later_increment` | a field of §4.4 (`budget_split`); §21.16: `max_mismatches` above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (the capabilities' `mismatches.later_increment`) | wait for the increment the capabilities will announce |
 | 400 | `predicate_too_large` | increment 5b: the predicate's lists name more than `caps.max_predicate_labels` names (10,000 by default; a name in two lists counted twice); the message names the count and the cap (§19.3) | send at most `caps.max_predicate_labels` names; split the cohort |
 | 400 | `support_unavailable` | increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a retrieval mode (increment 5s: with `long_search: "supported_paths"` in every mode), on an index that cannot verify a path in one record: not BASIC, no coordinates, or no record mapping (no `.seqs`, or `--no-coord-mapping`); capabilities `support` is then not `record_verified`. The message names the index's best support and placement | ask without `require_support`: each label of a path then states its support (`label_intersection` there) |
 | 400 | `genetic_code_unknown` | increment 5: `genetic_code` is an integer that is not an NCBI translation table id (1–6, 9–16, 21–33; 7 and 8 were merged into 4 and 1, 17–20 are unassigned); the message names the ids | send one of the capabilities' `genetic_codes`, or omit it (1, the standard code) |
@@ -435,7 +450,8 @@ with a larger budget on its own (the caller decides, §7.5); it passes an unknow
   context. Repeated copies of a k-mer in one record share one context.
 - A k-mer that contains the pattern twice (`ACGAC` holds `AC` at offsets 0 and 3) gives two contexts.
 - An IUPAC pattern and its reverse complement can both match one instance (`NA` and `TN` both match `TA`): two
-  contexts at one (k-mer, offset) that differ in orientation. An exact DNA pattern cannot.
+  contexts at one (k-mer, offset) that differ in orientation. An exact DNA pattern cannot without substitutions;
+  within them it can (§21.4: `AACGTT` is one substitution from `AACGTA` and from its reverse complement).
 - A context's k-mer is a valid seed for `/traverse` on the same graph (design §7.2).
 - Counts of contexts are not counts of occurrences; `counts.occurrences` is `unknown` unless `output.labels:
   "all"` placed them on a record-placement index (increment 3, §14.3).
@@ -504,6 +520,10 @@ Every count is `{value, relation, unit}` (design §3):
 - A count is never promoted by assumption: anchors say nothing about paths, contexts nothing about occurrences.
 - Units: `graph_contexts`, `anchors`, `paths`, `placed_occurrences`, `labels`. `labels` and `placed_occurrences`
   are `unknown` unless `output.labels: "all"` read them in a retrieval mode (§14.6).
+- With `max_mismatches` above 0 (§21.6) the contexts are also counted per level (`by_mismatches`): the total is
+  the levels' sum under this algebra, and since the levels are searched in turn a stop in the work of level t
+  leaves the levels below t as they completed (`exact` with the mask), level t `at_least` or `bounds`, the
+  levels above `unknown`.
 
 **A graph without its dummy-edge mask** (`counting: "upper_bound"` in the capabilities and in the answer's
 `index`; the owner's decision #16 of 2026-10-08, §18). The mask says which BOSS entries are dummies (§2). Without
@@ -779,6 +799,9 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   ranks.
 - A peptide's bits are exact (§2, §12.2), also for an anchor window that cuts a codon: the floor gates peptides
   as it gates DNA.
+- With `max_mismatches` above 0 the floor gates the information left within the substitutions
+  (`mismatch_information_bits`, §21.5), with no exemption (a ball of strings is not one range); the slot states
+  the largest smaller `max_mismatches` it admits (`max_mismatches_within_floor`, §21.8).
 - The floor is a planning heuristic, not a cost bound. A searched window is matched from its first position on
   the widest ranges, so the cost is set by where its N runs sit, whatever the pattern's bits: a run of N costs
   about min(4^run, edges / 4^a) ranges per level, a being the specified bases before it in that orientation's
@@ -812,7 +835,8 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 - `results`: node ascending, then offset ascending, then orientation (`forward`/`+`, `reverse`/`-`,
   `palindromic`/`=`) (design §5.5, "BOSS edge order, then by offset"; the orientation separates the two
   contexts an IUPAC pattern can have at one offset). Paths (§12.1): anchor node ascending, then orientation,
-  then the sequence (A < C < G < T).
+  then the sequence (A < C < G < T). With `max_mismatches` above 0 the level comes first (`mismatches`
+  ascending, then node, offset, orientation; §21.7): the closest instances first.
 - `strands` (entry): the orientations searched, forward before reverse; `["="]` or `["palindromic"]` for a
   palindrome. This is the order of the plan, not of the work: the base searches run cheapest first (§7.8), so
   after a budget stop the reverse orientation can be `exact` and the forward one `at_least`.
@@ -928,6 +952,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `max_predicate_labels` | integer | likewise: the server's (`caps.max_predicate_labels`) |
 | `predicate_strands` | string | likewise: as requested, default applied (`predicate.strands` states what was evaluated) |
 | `predicate_scope` | `"context"` \| `"motif"` | §25, answers with a predicate whose request named it only: as requested |
+| `max_mismatches` | integer | increment 5m-3 (§21.8), answers to `max_mismatches` above 0 only: as requested (never lowered) |
 | `clamped` | list of objects | one per request value lowered to its cap, in the order of §7.9; `[]` when none |
 
 <!-- schema: clamped -->
@@ -968,6 +993,11 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `information_bits` | number | answered, engine refusal | §2 |
 | `anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of the anchor window P[0, k), whatever the strands searched (§7.7); else `null` |
 | `min_anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of the least informative searched anchor window, the information floor's operand (§7.7, §7.8: P[0, k) for `forward` or a palindrome, rc(P)[0, k) — the bits of P[L − k, L) — for `reverse`, the lower of the two for `both`); else `null`. Added by the review of 2026-10-07 (§16) |
+| `max_mismatches` | integer | answered, engine refusal, with `max_mismatches` > 0 | increment 5m-3 (§21.8): the request's value |
+| `mismatch_information_bits` | number | likewise | §21.5: the information left within `max_mismatches` substitutions, the floor's operand for L ≤ k |
+| `min_anchor_mismatch_information_bits` | number \| null | likewise | L > k: the least over the searched anchor windows of their information within `max_mismatches` (§21.5); else `null` |
+| `max_mismatches_cap` | integer | the slot `mismatches_above_cap` | §21.8: the cap applied (the kind's, or 0 for a pattern longer than k) |
+| `max_mismatches_within_floor` | integer \| null | the slot `information_below_floor` with `max_mismatches` > 0 | §21.5: the largest smaller `max_mismatches` the floor admits (0 under the rule without substitutions, its exemption included); `null` when none does |
 | `error` | object (§8.9) | refusals only | `{code, message}` |
 | `mode` | string | answered | the request's mode |
 | `scope` | `"suffix"` \| `"any_offset"` \| `"long"` | answered | §7.2 |
@@ -1030,6 +1060,7 @@ A contexts count is a count with these fields besides (every one a count of unit
 | `by_offset` | object: offset (decimal string) → count | one key per offset of the scope (every p in [0, k − L] for `any_offset`, `k − L` for `suffix`), zeros included: a missing key never stands for zero |
 | `by_strand` | object: `"+"` \| `"-"` \| `"both"` → count | BASIC graphs: one key per orientation searched |
 | `by_orientation` | object: `"forward"` \| `"reverse"` \| `"palindromic"` → count | CANONICAL and PRIMARY graphs, instead of `by_strand` |
+| `by_mismatches` | object: level (decimal string) → count | increment 5m-3 (§21.6), with `max_mismatches` > 0: one key per level `"0"` to `"m"`, zeros included (a missing key never stands for zero); the total is their sum under §7.4's algebra |
 
 An anchors count is a count with `by_strand` or `by_orientation` besides (unit `anchors`), as above.
 
@@ -1087,12 +1118,14 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `predicate_units` | integer | likewise: the selection's work units (§19.9), refused and interrupted reads included; the request's `max_predicate_work` bounds their sum over the patterns |
 | `predicate_lookups` | integer | likewise: the reverse-complement lookups made (`"either"` on a BASIC graph; k units each), one per distinct row; for a pattern longer than k under `"supported_paths"` the mirror walks looked up (L units of `max_annotation_work` each), and `predicate_rows` is 0 (§20.9) |
 | `motif_units` | integer | §25, with `predicate_scope: "motif"`: the units of the motif's evaluation, part of `predicate_units` |
+| `steps_by_mismatches` | object: level → integer | increment 5m-3 (§21.6), with `max_mismatches` > 0: the steps each level's work charged (its discovery, scans and check; 0 for a level not reached), summing to `steps` |
 
 <!-- schema: stop -->
 | field | type | meaning |
 |---|---|---|
 | `phase` | `"discovery"` \| `"mask_scan"` \| `"extraction"`; increment 3: `"label_discovery"` \| `"placement"` \| `"output"`; increment 4: `"extension"`; increment 5b: `"selection"` | §7.6 |
 | `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"`; increment 4: `"max_paths"` (phase `extension` only); increment 5b: `"max_predicate_work"` (phase `selection` only), `"max_predicate_contexts"` (phase `discovery`); increment 5s: `"max_annotation_work"` and `"max_memory"` in the phases `extension` and `selection`, `"max_predicate_contexts"` in the phase `extension` (§20.5, §20.9) | §7.6 |
+| `mismatch_level` | integer | increment 5m-3 (§21.7), with `max_mismatches` > 0 and a stop of the search's own work (phase `discovery` or `mask_scan`, an earlier pattern's request-wide stop included): the level whose work the stop interrupted, or, at the clock reading that starts it, prevented; the levels below it are complete, the levels above `unknown`. Absent on a stop of a later phase |
 
 <!-- schema: reason -->
 | field | type | meaning |
@@ -1117,8 +1150,11 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `labels` | list \| null | likewise: the context's labels (§14.5); `null` unless the row was read and held. With `"predicate_only"` (increment 5b) the predicate's labels on its own row |
 | `selection_labels` | list of strings | increment 5b, a selected context of a predicate request whose projection reads labels (`"predicate_only"`, `"all"`): the predicate's labels in the set it was evaluated on (its row's, and with `"either"` on a BASIC graph its reverse complement's), in the label order of the returned results: why it was selected; the normal form holds on them (§19.10) |
 | `selection_strands` | list of strings | increment 5b, beside `selection_labels` (one per label, the same order): the orientation whose row carries the label (the owner's answer to P11). On a BASIC graph `"context"` (the row of the context's k-mer x, as `kmer` spells it), `"reverse_complement"` (the row of rc(x) only: `"either"`), `"both"` (both rows; a palindromic x, which is its own reverse complement, under `"either"`); `"either"` on CANONICAL and PRIMARY graphs (one row serves x and rc(x): no strand is known) (§19.10) |
+| `mismatches` | integer | increment 5m-3 (§21.8), with `max_mismatches` > 0: the level of its instance, the substitutions it holds against the oriented pattern of its orientation |
+| `substitutions` | list of `substitution` (§21.8; `residue_substitution` for a `protein` pattern) | likewise: one per substituted position (residue), ascending, in the coordinates of the submitted pattern P; `[]` at level 0 |
 
-With `output.labels: "none"` a result has the first seven fields only: nothing of the annotation is read. A
+With `output.labels: "none"` a result has the first seven fields only (with `max_mismatches` > 0 also
+`mismatches` and `substitutions`, §21.8): nothing of the annotation is read. A
 path (a result of a pattern longer than k under `long_search: "paths"` or `"supported_paths"`) has its own fields
 (`path_result`, §12.1): never `kmer`, `node` or `row`.
 
@@ -1136,8 +1172,9 @@ It costs no step.
 | `code` | when | the slot carries |
 |---|---|---|
 | `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position); for `protein`, a character that is not in `protein_residues` (the stop `*` is one, §12.2; the message, kept as `4596bb3b` wrote it, lists the 20 amino acids and X B Z J and does not name `*`) | `id`, `kind`, `error` |
-| `information_below_floor` | below the floor for its scope (§7.8) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error`; a peptide also `residues`, `genetic_code` |
-| `scope_unsupported` | `scope: "suffix"` on a wrapped PRIMARY graph, L ≤ k (§7.2) | as above |
+| `information_below_floor` | below the floor for its scope (§7.8); with `max_mismatches` > 0 on `mismatch_information_bits` (§21.5) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error`; a peptide also `residues`, `genetic_code`; with `max_mismatches` > 0 also `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits` and `max_mismatches_within_floor` (§21.8) |
+| `scope_unsupported` | `scope: "suffix"` on a wrapped PRIMARY graph, L ≤ k (§7.2) | as above (with `max_mismatches` > 0 the three fields of §21.8, not `max_mismatches_within_floor`) |
+| `mismatches_above_cap` | increment 5m-3 (§21.8): `max_mismatches` above the cap applied to the pattern: its kind's (`/pattern/capabilities` `mismatches.max`), or 0 for a pattern longer than k, whose search with substitutions is a later increment (§21.16). Checked before the floor, before anything is charged | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`, `max_mismatches_cap`, `error`; a peptide also `residues`, `genetic_code` |
 | `unrepresentable_label_name` | the owner's decision of 2026-10-10 (the rule of /traverse, SPEC-labeled-traversal-core.md §6.1 step 4, §7.0): a label the entry's lists (`labels`, `by_label`) would name has a name that is not valid UTF-8 (names come from FASTA headers and file names). No answer carries such a name verbatim, and a replaced one (U+FFFD, as jsoncpp would write it) can be another column's valid name, so a client that fed the returned name into a predicate would select the wrong column. The entry is refused **after its work**, the label named in the message by its column (never by its bytes), and nothing of the pattern is delivered (no `counts`, `work`, `results`, `selection`). Only an answer that would list a name can be refused so: `mode: "count"`, `output.labels: "none"`, and an entry whose lists hold no such label are unaffected, and the other entries of the request are answered as usual. A request name is valid UTF-8 (§19.3), so such a column is never named by a predicate and never selected (§19.4). The lever: ask without labels, or rename the label in the index | as above |
 
 ### 8.10 Notes
@@ -1193,6 +1230,11 @@ It costs no step.
   `predicate_scope: "motif"`): `retrieval_complete: true` says that every context of the
   pattern whose label set (at `predicate.strands`) satisfies the predicate is in `results`, `selected` `exact` 0
   that none does; the raw counts keep the licences above.
+- Increment 5m-3, `max_mismatches` above 0: the licences of §21.11 — `by_mismatches` `exact` 0 at every level
+  0 … t says that no k-mer of the index contains, in the scope and strands searched, an instance of the pattern
+  within t substitutions; `retrieval_complete: true` that every context within `max_mismatches` is in `results`,
+  each with its level and substitutions; nothing about insertions or deletions, nor about the levels above
+  `max_mismatches`.
 - Increment 3, `output.labels: "all"`, `retrieval_complete: true`: every graph context of the pattern in its scope
   and strands is in `results` with **all** the labels its row carries (`labels_status: "complete"` everywhere),
   each placed where `placement` is `record` or `global` — so a column absent from `by_label` carries no
@@ -1266,6 +1308,7 @@ It costs no step.
 | `caps_rule` | string | `"SPEC-pattern-search.md section 4.5"` | a reference to §4.5, where every cap of `caps` is classified: a request field's maximum (lowered and listed in `limits.clamped` above it) or the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`, `max_predicate_labels`, `row_cache_mb`), with the sections of the rules they bound. Printable ASCII; for people, not parsed |
 | `delivery_mbps` | object (`delivery_mbps` below) | | the owner's decision P9 (§18): the rates in force of the time kept back for the answer (§7.6) |
 | `predicate` | object (`capabilities_predicate` below) | | increment 5b (§19.12): the operators of a predicate served, the `predicate_strands` values and the access this index gives a selection |
+| `mismatches` | object (`capabilities_mismatches`, §21.12) | | increment 5m-3 (§21.12): the caps per kind, the default, the unit per kind, what substitutes a residue, the edits served, the answer order, the rule of the levels and what is not served with substitutions yet. In the full block only (§23); a host without it refuses `max_mismatches` (400 `invalid_request`, an unknown field) |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
 | `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
@@ -1365,6 +1408,11 @@ before increment 4).
   `predicate_strands` from `predicate.strands`, `max_predicate_contexts` and `max_predicate_work` within their
   caps; on `annotation: "unbudgeted"` it needs `allow_unbudgeted_annotation: true` in every mode. A host whose
   capabilities lack `"predicate_only"` refuses a predicate (400 `later_increment`, a build before increment 5b).
+- Bounded mismatches (increment 5m-3, §21): send `max_mismatches` above 0 only where the full block has
+  `mismatches`, within the pattern's kind's `mismatches.max` (a pattern above it is answered in its slot,
+  `mismatches_above_cap`), and with none of what `mismatches.later_increment` names (the patterns longer than k,
+  the labels, a predicate, the supported paths); a host without the object refuses the field (400
+  `invalid_request`, an unknown field).
 
 ## 11. Fixtures
 
@@ -1546,6 +1594,9 @@ a client may use it. (Milestone 1b, the edge mask, is in this build and its fixt
 | 5b: predicates, patterns of L ≤ k — **served in this build (§19)** | `predicate`, `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`, `output.labels: "predicate_only"` | the top-level `predicate` block (normal form, names, known, `unknown_labels`, `vacuous`, scope, strands); per entry `selection` (`pass`, `support`, `access`), `counts.tested` and `counts.selected` (relations §19.7), `absence_filter`, `work.predicate_rows`, `predicate_units`, `predicate_lookups`, `timing.selection_ms`, `rows_refused` with phase `selection`; results the selected contexts, with `selection_labels` under a projection that reads labels; `withheld` `predicate_above_threshold`, `selected_above_threshold`, `predicate_budget`; `cut` `max_predicate_contexts`, `max_predicate_work`; `stop` phase `selection`, reasons `max_predicate_work`, `max_predicate_contexts`; notes `predicate_constant`, `projection_not_read`; 400 `predicate_too_large` | `projections` gains `"predicate_only"` (`projections_later_increment` `[]`); `caps.max_predicate_contexts`, `max_predicate_work`, `max_predicate_labels`; `predicate` {operators, strands, access} |
 | 5s and 5b's L > k part: supported paths — **served in this build (§20)** | `long_search: "supported_paths"`, `supported_paths_level`; a predicate on supported paths | `counts.supported_paths` (`counts.paths` a plain count beside it); the selection of the supported walks (strand-consistent: a label supports a walk on one strand as a whole); `work.anchor_rows`, `row_cache_hits`, `row_cache_evictions`, `mirror_rows`, `timing.support_ms` | `long_search` gains `"supported_paths"` |
 | motif-level predicates, patterns of L ≤ k — **served in this build (§25)** | `predicate_scope: "motif"` | `predicate.motif_scope`; per entry `motif` (`selected`, `decided_by`, `untested`, `labels`, `labels_present`, `labels_absent`, `stop`), `work.motif_units` | `predicate.scopes` |
+| 5m-3: bounded mismatches, patterns of L ≤ k — **served in this build (§21)**; the owner's decisions of 2026-10-09 and 2026-10-11 | `max_mismatches` (0–3, default 0) | `limits.max_mismatches`; per entry `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`; `counts.contexts.by_mismatches`; `work.steps_by_mismatches`; `stop.mismatch_level`; each result's `mismatches` and `substitutions` (`substitution`, `residue_substitution`); the slot `mismatches_above_cap` with `max_mismatches_cap`; the floor slot's `max_mismatches_within_floor`; the answer order (level first) for such requests; 400 `later_increment` for the combinations of §21.16 | `mismatches` {`max`, `default`, `unit`, `protein_substitutes`, `edits`, `order`, `levels_rule`, `later_increment`}, in the full block only |
+| 5m-4: bounded mismatches, patterns longer than k (later; §21.16) | `max_mismatches` above 0 with L > k (answered in the slot with `mismatches_above_cap`, `max_mismatches_cap` 0, in this build) | `counts.anchors.by_mismatches`, `counts.paths.by_mismatches`, `work.extension_steps_by_mismatches`, path results with `mismatches` and `substitutions` | `mismatches.later_increment` loses `"long_patterns"` |
+| 5m-5: substitutions with labels, predicates and supported paths (later; §21.16) | `max_mismatches` above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (400 `later_increment` in this build) | `by_label[].min_mismatches`, `counts.selected.by_mismatches`, `counts.supported_paths.by_mismatches` | `mismatches.later_increment` loses `"labels"`, `"predicate"`, `"supported_paths"` |
 | 6: multi-graph — **`graphs` served (§24)**, as `/search` serves it: one answer per pair, tagged; the service merges | `graphs` (as `/search` names graphs and chunks); `budget_split` (not served) | each pair's answer carries `graph`, `graph_path`, `annotation_path`, `index_fp`; a merged view (`by_shard`, `per_shard`, the merged order of design §8) is the requester's | the block per pair (`?graph=`), `graph_summary` on `GET /capabilities` |
 
 - What stays: every field of §8 with its type and meaning; the relations and their algebra; the absence licences
@@ -3569,6 +3620,342 @@ fixtures regenerated. Tests: `SupportStep.ChainDiesAtItsRecordEndAtDepth` (both 
 `HomopolymerRunShrinksToOneChain` (the frames' bytes constant over 270 chains),
 `SurvivalBitsEqualTheRunBasedMerge` (random rows against the run-based merge, step by step).
 
+## 21. Bounded mismatches (`max_mismatches`), patterns of at most k bases
+
+Increment 5m-3, on the engine of the round G merge (`pattern_search.{hpp,cpp}`: the level passes, the residue
+substitutions, the ball's bits). The owner's decisions: of 2026-10-09, at most 3 substitutions per instance,
+combinable with IUPAC codes (a substitution is a base outside the position's set), per residue for peptides,
+taxonomy-free, multi-graph as `/search`; of 2026-10-11, M1 = A (a stop codon never substitutes a residue and a
+`*` position is never substituted: the substitutes of a residue are the sense codons of the other residues; the
+alternative stays a later opt-in, which is why the capabilities name the rule, `protein_substitutes`), M2 = A
+(one budget of substitutions over the whole pattern, the anchor window included, for the later increment that
+serves patterns longer than k), M6 (the contract's maximum is 3 for every kind; two server flags,
+`--pattern-max-mismatches` and `--pattern-max-mismatches-protein`; staging runs 3 for `dna` and `iupac` and 1 for
+`protein`). Every other choice is the recommended one of the plan of 2026-10-09.
+
+### 21.1 What is served
+
+A request may allow **at most 3 substitutions** per instance: every pattern of the request of at most k bases is
+then searched for the instances within that Hamming distance — per position for `dna` and `iupac` (a base
+outside the position's set), per **residue** for `protein` (a sense codon of another residue). Combinable with
+IUPAC codes, every scope, strand setting, mode, graph mode and both kinds of counting (§7.4: with the mask or
+without). Insertions and deletions are not served. A request that does not name `max_mismatches`, or names 0, is
+answered as before, byte for byte apart from `timing` (§21.15). The engine searches the levels 0, 1, … in turn
+(§21.4), so that an answer stopped by a budget states the lower levels completely.
+
+Not in this increment (§21.16): a pattern longer than k (answered in its slot, `mismatches_above_cap` with the
+cap 0), and substitutions together with `output.labels` `"all"` or `"predicate_only"`, a predicate or
+`long_search: "supported_paths"` (400 `later_increment`).
+
+### 21.2 Request
+
+| field | type | default | rule |
+|---|---|---|---|
+| `max_mismatches` | integer | `0` | 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type: 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's, `/pattern/capabilities` `mismatches.max`; 0 for a pattern longer than k): above it, the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. `0` is the field's absence |
+
+- **Order of the checks** (§5): step 8, after `predicate_strands` and before `predicate_scope`; the
+  later-increment combinations (§21.16) are the last check of step 8.
+- `max_mismatches` is not lowered to a cap and not listed in `limits.clamped`: it changes what is searched, not
+  how much work is admitted.
+- Accepted with `long_search: "paths"` and `"anchors"` (a pattern of at most k bases is answered alike under
+  both); with `"supported_paths"`, a predicate or a projection that reads labels it is 400 `later_increment`
+  above 0 (§21.16).
+
+### 21.3 What a substitution is
+
+| kind | a position (residue) of P holds a substitution when the instance has there | cannot hold one |
+|---|---|---|
+| `dna` | a base other than P's | — |
+| `iupac` | a base outside the code's set (R = {A, G}: C or T) | N |
+| `protein` | a sense codon of the table that codes another residue (**sense substitutes**: the owner's decision M1 of 2026-10-11) | X (every sense codon is its own), `*` (a stop stays a stop; a sense codon never matches `*`) |
+
+- A substitution is always one of A, C, G, T (per base) or a sense codon (per residue): never a graph's `$`
+  nor its N (DNA5 graphs stay refused, §6).
+- **Peptides** count one substitution per residue however many of its three bases differ. B, Z and J are
+  substituted by the sense codons outside their two residues. In tables 27, 28 and 31 the context stops code
+  their residue (decision #21) and substitute like any sense codon there; `*` admits no codon in those tables,
+  and a peptide holding it still has no instance (note `no_stop_codon`, `exact` 0, no search; §12.2), at every
+  `max_mismatches`.
+- **The level** of an instance is its number of substitutions, 0 … `max_mismatches`. It is a function of the
+  instance (its bases, or its codons), so every context has exactly one level.
+
+### 21.4 Levels and contexts
+
+- **Contexts** stay (orientation, k-mer, offset) (§7.1). Each has one level. A k-mer can hold the pattern at
+  several offsets, at different levels; each is a context. Under substitutions a DNA pattern and its reverse
+  complement can both match one instance (P = `AACGTA`, rc(P) = `TACGTT`, the instance `AACGTT` one substitution
+  from each): two contexts at one (k-mer, offset) that differ in orientation — as for IUPAC (§7.1); §7.1's "an
+  exact DNA pattern cannot" holds at `max_mismatches` 0.
+- **Scopes** keep their meaning (§7.2) with "instance within `max_mismatches`" for "instance". A pattern of k
+  bases has one offset: its contexts are the k-mers of the index within `max_mismatches` of it or of its reverse
+  complement (the k-mer neighbours of `NOTE-mismatch-search.md`).
+- **Strands** (§7.3): the reverse orientation is rc(P) with the same number of substitutions allowed (Hamming
+  distance is invariant under reverse complement); a palindromic P is searched once.
+- **The passes.** Level 0 is searched first (every orientation), then level 1, and so on: the work of level t
+  finds the instances with exactly t substitutions, on the same range search as a request without
+  substitutions, each range carrying the substitutions its spelled prefix holds; pass 0 charges the same steps
+  in the same order as the search without substitutions. A stop in the work of level t leaves every level below
+  t complete (§21.6). `stop.mismatch_level` names the level whose work the stop interrupted. This is the rule the
+  capabilities' `levels_rule` refers to.
+
+### 21.5 The information floor
+
+- **`mismatch_information_bits`** = 2L − log2 |B|, B the strings over the pattern's L positions within
+  `max_mismatches` substitutions (per position: |set| matching and 4 − |set| substituting bases; per residue:
+  its codons and the sense codons of the other residues). With 0 it equals `information_bits` (§2). Examples: an
+  exact 31-mer loses 6.55, 12.06 and 16.94 bits at 1, 2 and 3 (|B| = 94, 4,279, 125,644); an exact 20-mer 5.93,
+  10.79, 14.99; the decapeptide KDVKFGNDAR (table 1) about 7.8, 14.5 and 20.4.
+- **The floor** (`caps.min_information_bits`, §7.8) gates `mismatch_information_bits`, with **no exemption**
+  (§7.8's exact pattern in `suffix` scope is one range; a ball of strings is not). With the default floor of 24
+  the shortest exact DNA patterns served are 15, 18 and 20 bases at 1, 2 and 3 substitutions (12 at 0).
+- A pattern below it is answered in its slot with `information_below_floor` (§8.9), its slot carrying
+  `mismatch_information_bits` and **`max_mismatches_within_floor`**: the largest m' < `max_mismatches` whose
+  bits pass (0 under the rule without substitutions, its exemption included; `null` when none does), so that a
+  client can ask again without guessing.
+- The floor is a planning heuristic (§7.8): it bounds the expected number of contexts, not the work. A
+  peptide's substituted residues (about 58 codons each) and an internal N run multiply the ranges the search
+  visits before the floor's operand shows it (§21.10).
+
+### 21.6 Counts and relations
+
+- **`by_mismatches`** (every mode, `count` included; present exactly when `max_mismatches` > 0): on
+  `counts.contexts`, an object with one key per level, `"0"` … `"m"` (decimal strings, zeros included: a missing
+  key never stands for zero), each a count of unit `graph_contexts`. The total is the sum of its levels under
+  §7.4's algebra; `suffix`, `by_offset` and `by_strand` / `by_orientation` stay totals over the levels.
+- **Relations per level.** A level whose work completed is `exact` (with the mask; without it `exact` where
+  §7.4 can prove it, else `bounds` with its own `estimate`). A stop in the work of level t: the levels below t
+  keep their relations; level t is `at_least` (a stop in its discovery) or `bounds` (a stop in its deferred scans
+  or in its check of unchecked candidates); the levels above t are `unknown`. A stop at the clock reading that
+  starts level t's work leaves level t `unknown` too (§7.4: a phase the stop came before); a request-wide stop
+  before the pattern leaves every level `unknown` with `mismatch_level` 0. Every per-offset and per-orientation
+  count of the pattern is then `at_least` (§7.4: no per-offset tracking), the total `at_least`.
+- **The check of few unchecked candidates** (§7.4, decision #24) runs after each level's work with a
+  pattern-wide allowance: while the unchecked candidates of the levels done so far number at most
+  `caps.max_checked_entries`, the level's are tested and the level is `exact`; once a level pushes them over the
+  allowance, it and the later levels stay `bounds`.
+- **A release that enumerated every candidate** (graph without its mask, §7.4) makes each level it covered
+  `exact`; a cut one raises each level's `lower` to what it released at that level.
+- **`stop_at_threshold`** compares the running total over the levels (§7.5); a threshold stop in the work of
+  level t leaves the levels below t complete. The comparison is repeated at the end of each level's work but the
+  last, on the counts its deferred scans and check completed: when the levels 0 … t alone exceed the threshold,
+  the stop comes there (`stop` {`discovery`, `max_contexts`}, `mismatch_level` t), level t complete as well and
+  the later levels `unknown`; after the last level's work nothing is stopped (the counts are complete;
+  `all_or_count` withholds `count_above_threshold`, as without substitutions).
+- **`work.steps_by_mismatches`**: per level the steps its work charged (discovery, scans and check; 0 for a
+  level not reached); their sum is `work.steps`.
+
+### 21.7 Order, `withheld`, `cut`, `stop`
+
+- **Answer order** (§7.9) with `max_mismatches` > 0: contexts by (`mismatches` ascending, node, offset,
+  orientation). The closest instances come first, so `partial` returns the first `max_contexts` of the closest
+  levels. With 0: §7.9's order.
+- **`all_or_count`** releases every context of every level or none: `max_contexts` compares the total over the
+  levels; the `withheld` reasons are §7.5's. A client that wants the closest levels only asks again with a lower
+  `max_mismatches` (`by_mismatches` says which fits).
+- **`cut`** reasons are §7.5's; `max_contexts` cuts inside a level after the levels before it.
+- **`stop`** gains `mismatch_level` (integer, present when `max_mismatches` > 0 and the stop came from the
+  search's own work: phase `discovery` or `mask_scan`): the level whose work it interrupted. A stop of a later
+  phase (`extraction`) carries none.
+
+### 21.8 The answer
+
+**Top level.** `limits.max_mismatches` (the request's value; present when > 0).
+
+**Entry** (answered and engine-refused entries, when `max_mismatches` > 0):
+
+| field | type | meaning |
+|---|---|---|
+| `max_mismatches` | integer | the request's value, whatever the kind |
+| `mismatch_information_bits` | number | §21.5, of the whole pattern |
+| `min_anchor_mismatch_information_bits` | number \| null | L > k: the least over the searched anchor windows (§21.16); `null` for L ≤ k |
+
+**Counts**: `by_mismatches` (§21.6) on `contexts`.
+
+**Work**: `steps_by_mismatches` (object level → integer).
+
+**Result** (a context, §8.8), when `max_mismatches` > 0:
+
+| field | type | meaning |
+|---|---|---|
+| `mismatches` | integer | the level of its instance |
+| `substitutions` | list of `substitution` (or `residue_substitution` for `protein`) | one per substituted position (residue), ascending, in the coordinates of the submitted pattern P |
+
+<!-- schema: substitution -->
+| field | type | meaning |
+|---|---|---|
+| `position` | integer | 0-based position in P (for a `-` or `reverse` result, the instance's position L − 1 − `position`) |
+| `expected` | string | P's code at that position (a base, or an IUPAC code) |
+| `found` | string | the instance's base there, read in P's orientation (for `-` / `reverse` the complement of the instance's base) |
+
+<!-- schema: residue_substitution -->
+| field | type | meaning |
+|---|---|---|
+| `residue` | integer | 0-based residue of P |
+| `expected` | string | P's residue (an amino acid or B, Z, J) |
+| `found` | string | the residue the instance's codon codes in the request's table |
+| `codon` | string | that codon, in P's reading direction (for `-` / `reverse` the reverse complement of the instance's three bases) |
+
+A result has these two fields beside the label-free fields of §8.8. The answer's `instance` is unchanged: the
+matched bases as the graph spells them. The route recomputes the substitutions from the instance; a disagreement
+with the level the engine stated fails the request as a server bug (§6), never as a published answer.
+
+**Per-pattern errors** (§8.9):
+
+| `code` | when | the slot carries |
+|---|---|---|
+| `mismatches_above_cap` | `max_mismatches` above the cap applied to the pattern: its kind's (`/pattern/capabilities` `mismatches.max`), or 0 for a pattern longer than k (§21.16) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`, `max_mismatches_cap` (the cap applied), `error`; a peptide also `residues`, `genetic_code` |
+| `information_below_floor` | as §7.8, on `mismatch_information_bits` (§21.5) | as §8.9, and `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`, `max_mismatches_within_floor` |
+
+The cap is checked before the floor (a pattern above its cap is not gated), both before anything is charged
+(§8.9). A pattern refused for its alphabet (`bad_alphabet`) keeps its three-field slot.
+
+**Notes**: none new. (The low-complexity note of §8.10 is stated as before: an exact pattern, a completed
+search.)
+
+### 21.9 Interactions
+
+| with | rule |
+|---|---|
+| IUPAC | a substitution is a base outside the code's set; N never holds one; a leading N run is skipped on `$ACGT` as before (§7.8) |
+| peptides | per residue, sense substitutes (§21.3); a peptide without instances stays `exact` 0 without a search |
+| scopes | `suffix`: the k-mers whose last L symbols are within `max_mismatches`; `any_offset`: every offset |
+| PRIMARY | as §7.3; palindromic stored k-mers counted once per level (on an even-k wrapped PRIMARY graph a palindromic k-mer is possible at level t only where at most t mirrored pattern pairs admit no complementary bases; for a peptide, at every offset above level 0) |
+| graphs without the mask | per level, §21.6 |
+| `long_search: "paths"`, `"anchors"` | accepted; a pattern of at most k bases is answered alike; a pattern longer than k is answered in its slot (§21.16) |
+| labels, predicates, supported paths | 400 `later_increment` above 0 (§21.16) |
+| multi-graph (§24) | per graph, as `/search`: each pair's answer states its levels; a client sums them per level with §7.4's algebra |
+
+### 21.10 Budgets, memory, the deadline
+
+- **Steps.** One step per base tried at a range (a matching or a substituting base) and per W-rule symbol, as
+  before; per item of a deferred scan and k − 1 per checked candidate, as before. The work of level t
+  re-evaluates the ranges of the levels below t (3–11% of the work on the patterns measured by the planning
+  model); the flank of `any_offset` is expanded only for the instances of level t.
+- **Cost, stated.** The work of level t grows with the ball's strings that the graph holds as prefixes: on an
+  index of E edges every string of length d below about log4 E is present, so a pattern visits about Σ_d
+  Σ_{u ≤ t} C(d, u) 3^u ranges up to that depth — on refseq33m about 700, 14,000 and 200,000 steps at 1, 2 and 3
+  substitutions, whatever L ≥ 20 — plus a few steps per context for `any_offset`. A substituted residue of a
+  peptide admits about 58 codons: a decapeptide costs about 3 × 10^5, 2 × 10^7 and 6 × 10^8 steps at 1, 2 and 3
+  (the reason for the separate protein cap, §21.12). An internal N run costs §7.8's min(4^run, edges / 4^a) per
+  level times the strings within t of the bases before it.
+- **Clock readings** (§7.6), added: at the start of every level's work; the rest as before (every 4,096 steps,
+  every 64 contexts released, in every level's work).
+- **Memory.** The label-free path keeps its bounds (§7.6): the search's frontier, O(k × 4) per base search; per
+  (offset, level) counters; the retained descriptors as before (about `max_contexts`; the levels share the
+  bound, each descriptor keeping its level in two bits). The delivery estimate counts the substitutions' text.
+
+### 21.11 What an answer licenses
+
+- `by_mismatches` `exact` 0 at every level 0 … t: **no k-mer of the index contains, in the scope and strands
+  searched, an instance of the pattern with at most t substitutions** (over retained islands, §7.2). With
+  t = `max_mismatches`, a total `exact` 0 says the same. Per level, an `exact` count is the number of contexts
+  at exactly that level.
+- `retrieval_complete: true`: every context within `max_mismatches` is in `results`, each with its level and
+  substitutions.
+- Peptides: the claims are per residue with sense substitutes (§21.3): nothing about an instance through a
+  stop codon.
+- **Not licensed**: anything about insertions or deletions (an instance with one is not searched); about the
+  levels above `max_mismatches`; about a level that is `at_least`, `bounds` or `unknown` beyond what its
+  relation says; about a record's N (a DNA4 build splits records there).
+
+### 21.12 Capabilities (`GET /pattern/capabilities`)
+
+The full block (§10.2) gains the object below, on every route that serves the full block (phase 1 of §23:
+`/pattern/capabilities`, `/capabilities`, the `/traverse` block) and in the loading form; it is not a gate field
+(phase 2 drops it from the `/traverse` block), and nothing of it is in `caps`.
+
+<!-- schema: capabilities_mismatches -->
+| field | type | meaning |
+|---|---|---|
+| `max` | object kind → integer | the most substitutions served per kind on this server: `dna`, `iupac` (3 by default, `--pattern-max-mismatches`), `protein` (`--pattern-max-mismatches-protein`, by default the former, at most it; staging: 1). 0 for a kind: not served |
+| `default` | integer | `0`: an omitted `max_mismatches` |
+| `unit` | object kind → string | `"base"` for `dna` and `iupac`, `"residue"` for `protein` |
+| `protein_substitutes` | string | `"sense_codons"` (an extensible enumeration, §1): what substitutes a residue, §21.3 (the owner's decision M1 of 2026-10-11) |
+| `edits` | list | `["substitution"]`: indels are not served |
+| `order` | string | `"mismatches_first"`: §21.7's answer order |
+| `levels_rule` | string | `"SPEC-pattern-search.md section 21.4"`: a reference to the rule of the passes (a stop in the work of level t leaves the levels below it complete). Printable ASCII; for people, not parsed |
+| `later_increment` | list | what is not served with `max_mismatches` above 0 yet (§21.16): `"long_patterns"` (a pattern longer than k: its slot answers `mismatches_above_cap` with the cap 0), `"labels"` (`output.labels` `"all"` or `"predicate_only"`), `"predicate"`, `"supported_paths"` (400 `later_increment`). A later build drops what it serves |
+
+A client sends `max_mismatches` > 0 only where this object exists, within its kind's `max`, and with none of
+`later_increment`; a host without it refuses the field (400 `invalid_request`, an unknown field) — gate on the
+capabilities, never on a build.
+
+**Server flags**: `--pattern-max-mismatches` (default 3; refused at start-up above 3 or not an integer),
+`--pattern-max-mismatches-protein` (default: `--pattern-max-mismatches`; at most it: named above it, refused at
+start-up with both flags and both values named; not named, it follows the former). Not request fields (§4.5).
+
+### 21.13 Worked examples (fixtures on the mini index, §11)
+
+The mini's blaNDM-1 copies are identical, so NDM-F and the first 31 bases of blaNDM-1 have no neighbour above
+level 0 within 2 substitutions (levels 1 and 2 `exact` 0). The fixtures use a 31-mer of the Klebsiella record
+(573) whose neighbours the index holds — two k-mers at each level, one per strand: G for A at position 17, and G
+at 17 with T for C at 21 —, its 20-mer from position 9, and a 10-residue window of an E. coli record (562) whose
+neighbours within one substituted residue are E → A (codon GCG) and H → Y (TAT). Server `masked_protein_cap` is
+the masked copy with `--pattern-max-mismatches-protein 1` (the staging configuration).
+
+| fixture | request | what it shows |
+|---|---|---|
+| `mismatch_neighbours` | the 31-mer, 2, `all_or_count` | `by_mismatches` (2, 2, 2) and the total their sum; every result with `mismatches` and `substitutions` in P's coordinates on both strands, the closest first; `limits.max_mismatches`, `mismatch_information_bits` (49.9 of 62), `steps_by_mismatches` (62, 650, 5,593) |
+| `mismatch_primer` | the 20-mer, 2, `count` | `by_mismatches` (24, 24, 24) beside `by_offset` and `by_strand`, which stay totals |
+| `mismatch_iupac` | the 20-mer with R at 8 and N at 15, 1 | a substitution is a base outside the position's set (the R admits the former level-1 variants: level 0 is 48), never at N; the former level-2 variants are level 1 |
+| `mismatch_peptide` | the decapeptide, 1 | 10 exact contexts and 8 at level 1; `residue_substitution` with the residue found and its codon in P's reading direction, on both strands |
+| `mismatch_partial` | the 31-mer, 2, `partial`, `max_contexts` 3 | the first 3 in (`mismatches`, node, offset, orientation) order (levels 0, 0, 1), `cut` `max_contexts` |
+| `mismatch_stop_level` | the 31-mer, 2, `count`, `max_steps` 1,500 | levels 0 and 1 `exact`, level 2 `at_least` (1 of 2 found), the total `at_least`, `stop` {`discovery`, `max_steps`, `mismatch_level` 2}, `steps_by_mismatches` (62, 650, 788) |
+| `mismatch_stop_partial` | the same in `partial` | the lower levels released whole and the level-2 context found, `cut` `max_steps` |
+| `mismatch_stop_unknown` | the 31-mer, 2, `count`, `max_steps` 63 | a stop in the first step of level 1: level 0 `exact`, level 1 `at_least` 0, level 2 `unknown`, `mismatch_level` 1, `steps_by_mismatches` (62, 1, 0) |
+| `mismatch_unmasked` | the 31-mer, 2, on the mini as built | per level `exact` where provable or checked, else `bounds` with an `estimate` |
+| `mismatch_slots` | a 16-mer, blaNDM-1's first 40 bases, the 31-mer; 2 | the floor slot (21.9 bits within 2; `max_mismatches_within_floor` 1), the slot of a pattern longer than k (`mismatches_above_cap`, `max_mismatches_cap` 0, its anchor windows' bits), the third answered |
+| `mismatch_above_cap` | the decapeptide and the 31-mer, 2, on `masked_protein_cap` | the peptide's slot (`max_mismatches_cap` 1), the dna pattern answered |
+| `mismatch_zero` | the `count` fixture's request with `max_mismatches` 0 | the `count` fixture's answer, byte for byte apart from `timing` |
+| `mismatch_invalid` | `max_mismatches` 4 | 400 `invalid_request` |
+| `mismatch_later_increment` | 1 with `output.labels: "all"` | 400 `later_increment` |
+| `pattern_capabilities_protein_cap` | GET on `masked_protein_cap` | the `mismatches` object with `max.protein` 1 |
+
+### 21.14 Stated limitations
+
+- Substitutions only; no insertions or deletions.
+- At most 3 per instance (the owner's cap); per kind the server's cap may be lower (protein).
+- The floor does not bound the work of a peptide or of an internal N run (§21.10); the level passes make a
+  stopped answer exact at its lower levels.
+- A context's level counts substitutions against the oriented pattern of its orientation; a k-mer holding the
+  pattern at several offsets gives several contexts (as without substitutions).
+- `all_or_count` withholds every level when the total is above its threshold (no graded release).
+- Peptides: sense substitutes only (§21.3); a substituted residue is counted once whatever its codon.
+- Patterns longer than k, and substitutions with labels, predicates or supported paths: later increments
+  (§21.16).
+
+### 21.15 What changed
+
+**Additions only** (contract version 1): the request field `max_mismatches`; the answer fields of §21.8
+(`limits.max_mismatches`, the entry's three fields, `by_mismatches`, `steps_by_mismatches`, a result's
+`mismatches` and `substitutions`, `stop.mismatch_level`); the schemas `substitution` and `residue_substitution`;
+the slot code `mismatches_above_cap` with `max_mismatches_cap`, and `max_mismatches_within_floor` on the floor's
+slot; the answer order of §21.7 for the new requests; the capabilities object of §21.12; two server flags; 400
+`later_increment` for the combinations of §21.16. A request without `max_mismatches` (or with 0) is answered byte
+for byte as before apart from `timing` (every stored fixture body of §11 unchanged but the capabilities
+documents, which gain the object).
+
+### 21.16 Later increments
+
+- **Patterns longer than k** (increment 5m-4): the engine counts their anchors per level and gates the floor on
+  the least `mismatch_information_bits` of the searched anchor windows (M2 = A: one budget over the whole
+  pattern, so an anchor window may hold all `max_mismatches` substitutions, and the extension spends the rest);
+  the extension with substitutions is not built. Until it is, a pattern longer than k with `max_mismatches` > 0
+  is answered in its slot with `mismatches_above_cap`, `max_mismatches_cap` 0, its description stating
+  `min_anchor_mismatch_information_bits` (the least over the searched windows, P[0, k) and for the reverse
+  orientation the reverse complement of its last k positions). The increment adds `counts.anchors.by_mismatches`,
+  `counts.paths.by_mismatches`, `work.extension_steps_by_mismatches`, path results with `mismatches` and
+  `substitutions`, and drops `"long_patterns"` from `mismatches.later_increment`.
+- **Labels, predicates, supported paths** (increment 5m-5): `by_label[].min_mismatches` (the least level among
+  a label's returned contexts), `counts.selected.by_mismatches` (a predicate's selection per level, decided in
+  answer order so that the lower levels are decided first), the supported paths of every level. Until then
+  `max_mismatches` > 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search:
+  "supported_paths"` is 400 `later_increment`, whatever the mode (told what to wait for, rather than answered
+  without the fields those answers carry); the increment drops `"labels"`, `"predicate"` and
+  `"supported_paths"` from `mismatches.later_increment`.
+- **Stops as substitutes** (M1 = B as an opt-in, `protein_substitutes: "all_codons"`): a later addition the
+  capabilities would announce as a second value of the enumeration.
+
 ## 23. `GET /pattern/capabilities`, and the gate block of `GET /traverse/capabilities`
 
 The capabilities documents a service's MCP tool returns in one piece have a ceiling of 32 KiB
@@ -3692,6 +4079,15 @@ the defaults below the caps), the caps `max_annotation_work`, `max_labels`,
   unmasked server, 25,921 bytes under the budget of 31,744 (5,823 by the validator's measure). At the default (64)
   every answer to `POST /pattern` is byte-identical (the fixtures of this build: no stored answer changed); the
   capabilities bodies of every fixture server regenerated, the hand-made `pattern_capabilities_loading` with them.
+- **`mismatches`** (§21.12, increment 5m-3; the owner's decisions of 2026-10-09 and 2026-10-11): an object of the
+  full block, on every route that serves it (phase 1: `/pattern/capabilities`, `/capabilities`, the `/traverse`
+  block) and in the loading form; not a gate field (phase 2 drops it from the `/traverse` block), nothing of it
+  in `caps`. 338 bytes per document: `/traverse/capabilities` 5,846–6,014 bytes, `/capabilities` 5,278–5,761,
+  `/pattern/capabilities` 2,354–2,513 (the loading form 2,354); the largest, `/traverse/capabilities` of the
+  unmasked server, 25,730 bytes under the budget of 31,744 (6,161 by the validator's measure, 25,583 under).
+  Every answer to a request without `max_mismatches` (or with 0) is byte-identical (the fixtures of this build:
+  no stored answer changed but the capabilities documents, regenerated, the hand-made
+  `pattern_capabilities_loading` with them; `mismatch_zero` is the `count` fixture's answer).
 - Requests to `POST /pattern`, `/traverse` and `/resolve` are answered as before: no answer carries these texts.
 - Fixtures (§11): `pattern_capabilities`, `pattern_capabilities_unmasked`, `pattern_capabilities_built_at_load`,
   `pattern_capabilities_multi_graph`, `pattern_capabilities_graph_param` (400) and the hand-made
@@ -4131,3 +4527,38 @@ own-support evaluation beside the mirror's (fixture `supported_paths_predicate_m
 reads 64 rows as `"context"` does, no lookup, both exact 1,024 under `max_annotation_work: 4000`; a predicate
 the own support cannot decide still reads every mirror). Fixtures: the `supported_paths_predicate_*` bodies
 whose decisions the own support makes change in their `work` fields only.
+
+
+## 27. Bounded mismatches (the owner's decisions of 2026-10-09 and 2026-10-11)
+
+Increment 5m-3 of the mismatch plan of 2026-10-09 (§21): the route serves `max_mismatches` for patterns of at
+most k bases on the engine of the round G merge. Contract version 1 stays (additions only, §21.15).
+
+- **The owner's decisions.** 2026-10-09: at most 3 substitutions per instance; combinable with IUPAC codes (a
+  substitution is a base outside the position's set); peptides per residue; taxonomy-free; multi-graph as
+  `/search`. 2026-10-11: M1 = A (sense substitutes: a stop codon never substitutes a residue, a `*` is never
+  substituted; `protein_substitutes: "sense_codons"` names the rule so that the alternative can be a later
+  opt-in); M2 = A (one budget over the whole pattern, for the later increment of patterns longer than k); M6 (the
+  contract's maximum 3 for every kind; `--pattern-max-mismatches` and `--pattern-max-mismatches-protein`; staging
+  3 for `dna` and `iupac`, 1 for `protein`). Every other choice the plan's recommended one.
+- **Served**: the request field `max_mismatches` (§4.1, §5 step 8, §6); `limits.max_mismatches`; the entry's
+  `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`;
+  `counts.contexts.by_mismatches`; `work.steps_by_mismatches`; `stop.mismatch_level`; each result's `mismatches`
+  and `substitutions` (`substitution`, `residue_substitution`); the slot `mismatches_above_cap` with
+  `max_mismatches_cap` (the kind's cap, or 0 for a pattern longer than k); the floor slot's
+  `max_mismatches_within_floor`; the answer order with the level first; the capabilities' `mismatches` object
+  (§21.12, the full block only); two server flags (§4.5). Not served yet (§21.16): patterns longer than k
+  (their slot), and substitutions with the labels, a predicate or the supported paths (400 `later_increment`).
+- **Fixtures** (§21.13, §11): fifteen `mismatch_*` fixtures and `pattern_capabilities_protein_cap` (server
+  `masked_protein_cap`); the capabilities bodies of every fixture server regenerated; every other stored body
+  unchanged. The validator (`test_pattern_fixtures.py`) knows the new tables and rules — the counts per level and
+  their relations against the stop's level, each result's substitutions recomputed from its instance with its own
+  IUPAC table and genetic codes, the slot's cap against the capabilities, the floor slot's largest admitted
+  `max_mismatches`, the `mismatches` object — and refuses mutated answers
+  (`test_mismatch_rules_refuse_what_v1_never_answers`).
+- **Tests**: `PatternMismatchRoute.*` (`tests/cli/test_pattern_mismatch_route.cpp`: the field and its refusals,
+  the caps and the slot, levels and substitutions against a brute-force Hamming oracle on planted neighbours, a
+  peptide's residue substitutions, a stop's levels, the floor, the capabilities, the identity of 0 with the
+  field's absence); `integration_tests/test_pattern.py` (`TestPatternMini`: the mini's records scanned by a
+  pigeonhole Hamming oracle and a six-frame residue oracle, the stop's levels, the slots and refusals, the
+  capabilities; `TestPatternSynthetic.test_mismatch_caps_at_start_up`).

@@ -55,14 +55,16 @@
  *    (Count), the route adding the estimate U x f with f from sample_real_fraction(); the lists
  *    stay exact. A pattern with few unchecked candidates is checked entry by entry and counted
  *    exactly (Request::max_checked_entries; the route passes --pattern-max-checked-entries).
- *  - bounded mismatches (not served yet: no route sets Request::max_mismatches; SPEC §21 is
- *    the contract to come): the engine answers DNA, IUPAC and peptide patterns of L <= k with
- *    ContextCounts::by_mismatches, Work::steps_by_mismatches, Stop::mismatch_level,
- *    Context::mismatches (substitutions() gives the positions, residue_substitutions() a
- *    peptide's residues and codons), Result::mismatch_information_bits and, on a floor
- *    refusal, Result::max_mismatches_within_floor; patterns of L > k with their anchors per
- *    level (AnchorCounts::by_mismatches, Result::min_anchor_mismatch_information_bits), the
- *    extension not yet.
+ *  - bounded mismatches (SPEC §21; the route serves them for patterns of L <= k: the request
+ *    field max_mismatches sets Request::max_mismatches, checked against the server's caps per
+ *    kind, --pattern-max-mismatches and --pattern-max-mismatches-protein): the engine answers
+ *    DNA, IUPAC and peptide patterns of L <= k with ContextCounts::by_mismatches,
+ *    Work::steps_by_mismatches, Stop::mismatch_level, Context::mismatches (substitutions()
+ *    gives the positions, residue_substitutions() a peptide's residues and codons),
+ *    Result::mismatch_information_bits and, on a floor refusal,
+ *    Result::max_mismatches_within_floor; patterns of L > k with their anchors per level
+ *    (AnchorCounts::by_mismatches, Result::min_anchor_mismatch_information_bits), which the
+ *    route does not serve yet (it answers such a pattern in its slot), the extension not yet.
  *
  * For every type here nothing is weakened silently: every count carries its unit and its
  * relation, and a count is never promoted by assumption.
@@ -776,8 +778,9 @@ struct Request {
      * search, then that level's scans and check), so that a stop in pass t leaves every level
      * below t complete (ContextCounts::by_mismatches, Stop::mismatch_level). The information
      * floor gates Pattern::mismatch_information_bits (L > k: the least over the searched
-     * anchor windows), with no exemption (min_information_bits). Not a JSON field yet (the
-     * route does not set it). Served for every kind; for L > k the anchors are counted per
+     * anchor windows), with no exemption (min_information_bits). The JSON field
+     * max_mismatches, which the route checks against its caps per kind (SPEC §21.2, §21.8).
+     * Served for every kind; for L > k the anchors are counted per
      * level (AnchorCounts::by_mismatches; an anchor is the anchor window within the
      * substitutions, a window that cuts a codon counting it as substituted only when its
      * bases inside the window agree with none of its own codons) and released on

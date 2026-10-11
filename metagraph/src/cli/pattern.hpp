@@ -157,6 +157,14 @@ struct PatternLimits {
     uint64_t max_predicate_contexts = 100'000;
     uint64_t max_predicate_work = 100'000'000;
     uint64_t max_predicate_labels = 10'000;
+    // bounded mismatches (SPEC §21.12): the most substitutions max_mismatches may allow per
+    // instance of a dna or iupac pattern, and per residue of a peptide (at most the former),
+    // each at most graph::pattern::kMaxMismatches; a request above its kind's cap is answered
+    // in the pattern's slot (mismatches_above_cap), never lowered. The server's
+    // --pattern-max-mismatches and --pattern-max-mismatches-protein, stated in the
+    // capabilities' mismatches.max
+    uint64_t max_mismatches = graph::pattern::kMaxMismatches;
+    uint64_t max_mismatches_protein = graph::pattern::kMaxMismatches;
     // not a cap: the annotation reads under the deadline are decoded in chunks of about this
     // many ms (the server's --traverse-chunk-target-ms, as /traverse's reads); 0: one piece
     double chunk_target_ms = 50;

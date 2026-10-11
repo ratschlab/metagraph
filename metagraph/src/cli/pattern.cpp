@@ -79,6 +79,25 @@ constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
 constexpr const char kCapsRule[] = "SPEC-pattern-search.md section 4.5";
 constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 12.2";
 
+// Bounded mismatches (SPEC §21). The slot error of a pattern whose max_mismatches is above
+// the cap applied to it: its kind's (--pattern-max-mismatches, --pattern-max-mismatches-protein),
+// or 0 for a pattern longer than k, whose search with substitutions is a later increment. The
+// capabilities' mismatches object (§21.12): what substitutes a residue (§21.3: the sense codons
+// of the other residues; an extensible enumeration), the edits served, the answer order, the
+// rule of the levels (§21.4: a stop in the work of level t leaves the levels below it
+// complete) and what is not served with substitutions yet (the patterns longer than k, the
+// labels of the contexts found, a predicate's selection among them, the supported paths)
+constexpr const char kSlotMismatchesAboveCap[] = "mismatches_above_cap";
+constexpr const char kProteinSubstitutes[] = "sense_codons";
+constexpr const char kMismatchEdits[] = "substitution";
+constexpr const char kMismatchOrder[] = "mismatches_first";
+constexpr const char kLevelsRule[] = "SPEC-pattern-search.md section 21.4";
+const char *const kMismatchesLaterIncrement[] = {
+    "long_patterns", "labels", "predicate", "supported_paths",
+};
+static_assert(Config::kMaxPatternMismatches == kMaxMismatches,
+              "the server's flags range over the contract's maximum");
+
 // The route of the full pattern block, which the block of GET /traverse/capabilities names in
 // `details` (SPEC §23)
 constexpr const char kPatternDetails[] = "GET /pattern/capabilities";
@@ -260,9 +279,10 @@ uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
  * long_search, max_paths, require_support, supported_paths_level, genetic_code (then the
  * peptides are read in it: a slot error, never a refusal), the predicate (its form, then
  * predicate_too_large), max_predicate_contexts, max_predicate_work, predicate_strands,
- * predicate_scope, then "predicate_only" without a predicate, a predicate with long_search
- * "paths" and predicate_scope "motif" without a predicate — and a field nothing read is
- * refused last, as /traverse's Strict refuses it.
+ * max_mismatches (SPEC §21.2), predicate_scope, then "predicate_only" without a predicate, a
+ * predicate with long_search "paths", predicate_scope "motif" without a predicate and
+ * max_mismatches above 0 with the labels, a predicate or the supported paths (later_increment,
+ * §21.16) — and a field nothing read is refused last, as /traverse's Strict refuses it.
  */
 ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits) {
     if (!json.isObject())
@@ -547,6 +567,18 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         throw invalid(f.path("predicate_strands") + ": expected one of either|context");
     }
     req.selection.either = predicate_strands == kPredicateStrandsEither;
+    // bounded mismatches (SPEC §21.2): 0 to kMaxMismatches, 0 (the default) the field's
+    // absence; never lowered to a cap, since it changes what is searched: the caps are per
+    // kind and checked per pattern (its slot answers mismatches_above_cap)
+    if (f.has("max_mismatches")) {
+        const Json::Value &v = f.raw("max_mismatches");
+        if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0)
+                || v.asUInt64() > kMaxMismatches) {
+            throw invalid(f.path("max_mismatches") + ": expected an integer from 0 to "
+                          + std::to_string(kMaxMismatches) + " (substitutions per instance)");
+        }
+        req.request.max_mismatches = static_cast<uint8_t>(v.asUInt64());
+    }
     // what the predicate is asked of: each context ("context"), or also each pattern of at
     // most k bases as a whole ("motif", SPEC §25)
     req.predicate_scope_named = f.has("predicate_scope");
@@ -571,6 +603,18 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     if (req.motif && !req.predicate) {
         throw invalid("request.predicate_scope: \"motif\" asks the request's predicate of each "
                       "pattern: it needs a predicate (request.predicate)");
+    }
+    // what is not served with substitutions yet (SPEC §21.16; the capabilities'
+    // mismatches.later_increment): the labels of the contexts found within them, a predicate's
+    // selection among them and the supported paths of a pattern longer than k, told what to
+    // wait for rather than answered without the fields those answers carry
+    if (req.request.max_mismatches
+            && (req.labels_all || req.labels_predicate_only || req.predicate
+                || req.long_supported)) {
+        throw later("request.max_mismatches: substitutions with output.labels \"all\" or "
+                    "\"predicate_only\", a predicate or long_search \"supported_paths\" are "
+                    "not served by this build (the capabilities' mismatches.later_increment); "
+                    "ask without them, or with max_mismatches 0");
     }
 
     f.finish();
@@ -664,6 +708,9 @@ Json::Value stop_json(const std::optional<Stop> &stop) {
     Json::Value s;
     s["phase"] = to_string(stop->phase);
     s["reason"] = to_string(stop->reason);
+    // SPEC §21.7: the level whose work the stop interrupted (the levels below it complete)
+    if (stop->mismatch_level)
+        s["mismatch_level"] = uint_json(*stop->mismatch_level);
     return s;
 }
 
@@ -672,6 +719,105 @@ Json::Value error_json(const std::string &code, const std::string &message) {
     e["code"] = code;
     e["message"] = message;
     return e;
+}
+
+// The most substitutions a request may allow for |pattern| on this server (SPEC §21.8,
+// §21.12): its kind's cap, or 0 for a pattern longer than k, whose search with substitutions
+// is a later increment (the capabilities' mismatches.later_increment names long_patterns)
+uint64_t mismatch_cap(const Pattern &pattern, size_t k, const PatternLimits &limits) {
+    if (pattern.length() > k)
+        return 0;
+    return pattern.kind() == PatternKind::PROTEIN ? limits.max_mismatches_protein
+                                                  : limits.max_mismatches;
+}
+
+/**
+ * The answer of a pattern whose max_mismatches is above |cap| (SPEC §21.8, the slot error
+ * mismatches_above_cap): its description as the engine states it -- its bits, for a pattern
+ * longer than k those of its anchor windows (P[0, k) and, with the reverse orientation searched,
+ * the reverse complement of its last k positions; a palindrome one window) and the bits left
+ * within the substitutions asked -- and the refusal. Nothing is searched or charged.
+ */
+Result above_cap_result(const Pattern &pattern, size_t k, const Request &request, uint64_t cap) {
+    const size_t L = pattern.length();
+    const uint8_t m = request.max_mismatches;
+    Result r;
+    r.scope = L > k ? Scope::LONG : request.scope;
+    r.palindromic = pattern.is_palindromic();
+    r.information_bits = pattern.information_bits();
+    r.mismatch_information_bits = pattern.mismatch_information_bits(m);
+    if (L > k) {
+        const bool forward = r.palindromic || request.strands != Strands::REVERSE;
+        const bool reverse = !r.palindromic && request.strands != Strands::FORWARD;
+        double least = std::numeric_limits<double>::infinity();
+        double least_within = least;
+        if (forward) {
+            least = std::min(least, pattern.information_bits(0, k));
+            least_within = std::min(least_within, pattern.mismatch_information_bits(0, k, m));
+        }
+        if (reverse) {
+            least = std::min(least, pattern.information_bits(L - k, L));
+            least_within = std::min(least_within,
+                                    pattern.mismatch_information_bits(L - k, L, m));
+        }
+        r.anchor_information_bits = pattern.information_bits(0, k);
+        r.min_anchor_information_bits = least;
+        r.min_anchor_mismatch_information_bits = least_within;
+    }
+    const std::string kind = to_string(pattern.kind());
+    std::string message = "pattern: max_mismatches " + std::to_string(m);
+    if (L > k) {
+        message += " for a pattern of " + std::to_string(L) + " bases, longer than k ("
+                + std::to_string(k) + "): substitutions in patterns longer than k are not "
+                  "served by this build (the capabilities' mismatches.later_increment names "
+                  "long_patterns); ask with max_mismatches 0, or with windows of at most k bases";
+    } else if (cap == 0) {
+        message += ": substitutions are not served for " + kind + " patterns on this server "
+                   "(the capabilities' mismatches.max." + kind + " is 0); ask with "
+                   "max_mismatches 0";
+    } else {
+        message += " above this server's cap of " + std::to_string(cap) + " for " + kind
+                + " patterns (the capabilities' mismatches.max." + kind + "); ask with at most "
+                + std::to_string(cap);
+    }
+    r.refusal = Refusal { kSlotMismatchesAboveCap, message };
+    return r;
+}
+
+/**
+ * The substitutions of a released context's instance against the submitted pattern (SPEC
+ * §21.8: the schema substitution, or residue_substitution for a peptide), ascending, in the
+ * coordinates of the submitted pattern. Their number must be the level the engine stated
+ * (Context::mismatches): a disagreement is a server bug, never a published one (§6).
+ */
+Json::Value substitutions_json(const Pattern &pattern, const Context &c,
+                               const std::string &instance) {
+    Json::Value list(Json::arrayValue);
+    if (pattern.kind() == PatternKind::PROTEIN) {
+        for (const ResidueSubstitution &s : residue_substitutions(pattern, c.orientation,
+                                                                  instance)) {
+            Json::Value v;
+            v["residue"] = uint_json(s.residue);
+            v["expected"] = std::string(1, s.expected);
+            v["found"] = std::string(1, s.found);
+            v["codon"] = s.codon;
+            list.append(std::move(v));
+        }
+    } else {
+        for (const Substitution &s : substitutions(pattern, c.orientation, instance)) {
+            Json::Value v;
+            v["position"] = uint_json(s.position);
+            v["expected"] = std::string(1, s.expected);
+            v["found"] = std::string(1, s.found);
+            list.append(std::move(v));
+        }
+    }
+    if (list.size() != c.mismatches) {
+        throw std::logic_error("pattern: the engine released a context at level "
+                               + std::to_string(c.mismatches) + " whose instance holds "
+                               + std::to_string(list.size()) + " substitutions");
+    }
+    return list;
 }
 
 /**
@@ -720,11 +866,18 @@ Json::Value supported_paths_json(const AnchorCounts &a, const SupportedCounts &s
  * engine released: results.size(), or more with output.labels "all" when the memory account
  * admitted only the first of them (their objects not built; apply_labels states the cut).
  * |supported|: a pattern longer than k searched for its supported paths (the extension's work
- * and time stated as for long_search "paths").
+ * and time stated as for long_search "paths"). |mismatches|: the request's max_mismatches and,
+ * on the slot error mismatches_above_cap, the cap applied (SPEC §21.8).
  */
+struct MismatchEntry {
+    uint8_t max_mismatches = 0;
+    std::optional<uint64_t> cap;
+};
+
 Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
                        bool strand_stated, Json::Value results, uint64_t released,
                        bool long_paths, const DummyFraction *fraction,
+                       const MismatchEntry &mismatches,
                        const SupportedCounts *supported = nullptr) {
     Json::Value e;
     e["id"] = spec.id;
@@ -749,7 +902,26 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     // under contract version 1)
     e["min_anchor_information_bits"] = result->min_anchor_information_bits
             ? Json::Value(*result->min_anchor_information_bits) : Json::Value();
+    if (mismatches.max_mismatches) {
+        // SPEC §21.8: the request's value, the bits the floor gates within it (§21.5) and, for
+        // a pattern longer than k, the least over its searched anchor windows
+        e["max_mismatches"] = uint_json(mismatches.max_mismatches);
+        e["mismatch_information_bits"] = result->mismatch_information_bits
+                ? Json::Value(*result->mismatch_information_bits) : Json::Value();
+        e["min_anchor_mismatch_information_bits"]
+                = result->min_anchor_mismatch_information_bits
+                ? Json::Value(*result->min_anchor_mismatch_information_bits) : Json::Value();
+    }
     if (result->refusal) {
+        if (mismatches.cap) {
+            // the cap applied: the kind's, or 0 for a pattern longer than k (§21.8)
+            e["max_mismatches_cap"] = uint_json(*mismatches.cap);
+        }
+        if (mismatches.max_mismatches && result->refusal->code == "information_below_floor") {
+            // the largest smaller max_mismatches the floor admits; null when none does
+            e["max_mismatches_within_floor"] = result->max_mismatches_within_floor
+                    ? uint_json(*result->max_mismatches_within_floor) : Json::Value();
+        }
         e["error"] = error_json(result->refusal->code, result->refusal->message);
         return e;
     }
@@ -777,6 +949,16 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
         c["by_offset"] = std::move(by_offset);
         put_orientations(&c, result->contexts->by_orientation, strand_stated, fraction,
                          &estimated);
+        if (!result->contexts->by_mismatches.empty()) {
+            // SPEC §21.6: per level the contexts whose instance holds exactly that many
+            // substitutions, keys "0" to "m", zeros included
+            Json::Value by_level(Json::objectValue);
+            for (size_t t = 0; t < result->contexts->by_mismatches.size(); ++t) {
+                by_level[std::to_string(t)] = count_json(result->contexts->by_mismatches[t],
+                                                         fraction, &estimated);
+            }
+            c["by_mismatches"] = std::move(by_level);
+        }
         counts["contexts"] = std::move(c);
     } else if (result->anchors) {
         Json::Value a = count_json(result->anchors->total, fraction, &estimated);
@@ -810,6 +992,14 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     work["ranges_visited"] = uint_json(result->work.ranges_visited);
     work["mask_scans"] = uint_json(result->work.mask_scans);
     work["steps"] = uint_json(result->work.steps);
+    if (!result->work.steps_by_mismatches.empty()) {
+        // SPEC §21.6: the steps each level's work charged (0 for a level not reached)
+        Json::Value by_level(Json::objectValue);
+        for (size_t t = 0; t < result->work.steps_by_mismatches.size(); ++t) {
+            by_level[std::to_string(t)] = uint_json(result->work.steps_by_mismatches[t]);
+        }
+        work["steps_by_mismatches"] = std::move(by_level);
+    }
     const bool extended = long_paths || supported;
     if (extended && result->anchors) {
         // the outgoing edges the extension examined, one step each (part of steps)
@@ -1273,6 +1463,8 @@ PatternLimits pattern_limits(const Config &config) {
     limits.max_predicate_contexts = config.pattern_max_predicate_contexts;
     limits.max_predicate_work = config.pattern_max_predicate_work;
     limits.max_predicate_labels = config.pattern_max_predicate_labels;
+    limits.max_mismatches = config.pattern_max_mismatches;
+    limits.max_mismatches_protein = config.pattern_max_mismatches_protein;
     limits.chunk_target_ms = static_cast<double>(config.traverse_chunk_target_ms);
     limits.delivery_build_mbps = config.pattern_delivery_build_mbps;
     limits.delivery_compress_mbps = config.pattern_delivery_compress_mbps;
@@ -1473,8 +1665,9 @@ Json::Value process_pattern_request(
      * on a native CANONICAL graph the canonical k-mer's (the annotation key of every route,
      * LabelOracle::key_of), since the other orientation's row carries no labels.
      */
-    auto context_json = [&](const Context &c, size_t length,
+    auto context_json = [&](const Context &c, const Pattern &pattern,
                             RetrievalContext *collected = nullptr) {
+        const size_t length = pattern.length();
         Json::Value r;
         std::string kmer = graph.get_node_sequence(c.node);
         if (kmer.size() != k || c.offset + length > k) {
@@ -1510,6 +1703,12 @@ Json::Value process_pattern_request(
         r["row"] = key != DeBruijnGraph::npos
                         && AnnotatedDBG::graph_to_anno_index(key) < num_rows
                 ? uint_json(AnnotatedDBG::graph_to_anno_index(key)) : Json::Value();
+        if (req.request.max_mismatches) {
+            // SPEC §21.8: the level of its instance and the substitutions it holds, in the
+            // coordinates of the submitted pattern (recomputed from the instance)
+            r["mismatches"] = uint_json(c.mismatches);
+            r["substitutions"] = substitutions_json(pattern, c, r["instance"].asString());
+        }
         // in the answer from now on: the work time is read with it counted
         volume.add(compact_json_bytes(r));
         return r;
@@ -1603,6 +1802,8 @@ Json::Value process_pattern_request(
         bool constant = false;
         // a pattern longer than k searched for its supported paths (SPEC §20)
         std::optional<SupportedEntry> supported;
+        // the slot error mismatches_above_cap: the cap applied (SPEC §21.8)
+        std::optional<uint64_t> mismatch_cap;
     };
 
     /**
@@ -1618,7 +1819,7 @@ Json::Value process_pattern_request(
         } else if (!labels) {
             const size_t length = pattern.length();
             a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
-                a.results.append(paths ? path_json(c, length) : context_json(c, length));
+                a.results.append(paths ? path_json(c, length) : context_json(c, pattern));
             });
             a.released = a.results.size();
         } else if (paths) {
@@ -1652,7 +1853,7 @@ Json::Value process_pattern_request(
                 if (!retrieval->admit_context())
                     return;
                 collected.emplace_back();
-                a.results.append(context_json(c, length, &collected.back()));
+                a.results.append(context_json(c, pattern, &collected.back()));
             });
             // the labels of what was released (nothing when it was withheld), work
             // still: the reads end where the deadline's work time does (§5.3)
@@ -1861,7 +2062,7 @@ Json::Value process_pattern_request(
                 c.node = t.node;
                 c.base_node = t.base_node;
                 collected.emplace_back();
-                Json::Value r = context_json(c, length, &collected.back());
+                Json::Value r = context_json(c, pattern, &collected.back());
                 if (projection != Projection::NONE) {
                     // why it was selected: the predicate's labels in the set it was evaluated
                     // on, and per label the orientation whose row carries it, their bytes
@@ -2282,6 +2483,18 @@ Json::Value process_pattern_request(
     for (const PatternSpec &spec : req.patterns) {
         Answered a;
         a.results = Json::Value(Json::arrayValue);
+        if (spec.pattern && req.request.max_mismatches) {
+            // SPEC §21.8: the cap applied to the pattern -- its kind's, or 0 for a pattern
+            // longer than k, a later increment -- checked before the floor and before anything
+            // is charged; above it the pattern is answered in its slot, never lowered
+            const uint64_t cap = mismatch_cap(*spec.pattern, k, limits);
+            if (req.request.max_mismatches > cap) {
+                a.result = above_cap_result(*spec.pattern, k, req.request, cap);
+                a.mismatch_cap = cap;
+                answered.push_back(std::move(a));
+                continue;
+            }
+        }
         if (spec.pattern) {
             const bool longer = spec.pattern->length() > k;
             if (longer && req.long_supported) {
@@ -2342,6 +2555,8 @@ Json::Value process_pattern_request(
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
                                        strand_stated, std::move(a.results), a.released,
                                        req.long_paths, fraction ? &*fraction : nullptr,
+                                       MismatchEntry { req.request.max_mismatches,
+                                                       a.mismatch_cap },
                                        a.supported ? &a.supported->counts : nullptr);
         // the supported paths' release and stops, then the selection (both before the
         // projection's labels, whose withheld, cut and stop come after theirs)
@@ -2494,6 +2709,10 @@ Json::Value process_pattern_request(
     l["min_information_bits"] = number_json(limits.min_information_bits);
     l["max_patterns"] = uint_json(limits.max_patterns);
     l["stop_at_threshold"] = req.request.stop_at_threshold;
+    if (req.request.max_mismatches) {
+        // in the answers that ask for substitutions only (SPEC §21.8)
+        l["max_mismatches"] = uint_json(req.request.max_mismatches);
+    }
     if (read_labels || has_predicate || req.long_supported) {
         // the annotation limits, in the answers that read annotation only; with a predicate or
         // long_search "supported_paths" in every mode (the selection and the supported-path
@@ -2649,6 +2868,33 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     predicate["scopes"] = strings_json({ kPredicateScopeContext, kPredicateScopeMotif });
     predicate["access"] = Json::Value();
     p["predicate"] = std::move(predicate);
+    // bounded mismatches (SPEC §21.12), in the full block only: the most substitutions served
+    // per kind (0: none for the kind), the default, the unit per kind, what substitutes a
+    // residue, the edits served, the answer order, the rule of the levels, and what is not
+    // served with substitutions yet (a client sends max_mismatches above 0 only where this
+    // object exists, within its kind's max, and with none of the latter)
+    Json::Value mismatches;
+    Json::Value max_per_kind;
+    max_per_kind[to_string(PatternKind::DNA)] = uint_json(limits.max_mismatches);
+    max_per_kind[to_string(PatternKind::IUPAC)] = uint_json(limits.max_mismatches);
+    max_per_kind[to_string(PatternKind::PROTEIN)] = uint_json(limits.max_mismatches_protein);
+    mismatches["max"] = std::move(max_per_kind);
+    mismatches["default"] = 0;
+    Json::Value unit;
+    unit[to_string(PatternKind::DNA)] = "base";
+    unit[to_string(PatternKind::IUPAC)] = "base";
+    unit[to_string(PatternKind::PROTEIN)] = "residue";
+    mismatches["unit"] = std::move(unit);
+    mismatches["protein_substitutes"] = kProteinSubstitutes;
+    mismatches["edits"] = strings_json({ kMismatchEdits });
+    mismatches["order"] = kMismatchOrder;
+    mismatches["levels_rule"] = kLevelsRule;
+    Json::Value later_increment(Json::arrayValue);
+    for (const char *what : kMismatchesLaterIncrement) {
+        later_increment.append(what);
+    }
+    mismatches["later_increment"] = std::move(later_increment);
+    p["mismatches"] = std::move(mismatches);
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
     // the max_anchors and max_labels of a request that names none: at most caps.max_anchors
