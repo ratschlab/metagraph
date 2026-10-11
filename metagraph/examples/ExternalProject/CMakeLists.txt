@@ -37,6 +37,8 @@ endforeach()
 ExternalProject_Add(metagraph-external
     GIT_REPOSITORY https://github.com/ratschlab/metagraph.git
     GIT_TAG ${METAGRAPH_GIT_TAG}
+    # ExternalProject updates the selected revision's submodules explicitly.
+    GIT_CONFIG fetch.recurseSubmodules=false
     SOURCE_SUBDIR metagraph
     LIST_SEPARATOR |
     CMAKE_ARGS ${METAGRAPH_CMAKE_ARGS}
