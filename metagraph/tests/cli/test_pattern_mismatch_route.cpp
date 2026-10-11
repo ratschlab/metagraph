@@ -593,8 +593,9 @@ TEST(PatternMismatchRoute, AStopLeavesTheLowerLevelsComplete) {
             // the levels below the stop released whole, the closest first
             const std::set<Ctx> got = contexts_of(e);
             for (const Ctx &x : expected) {
-                if (std::get<3>(x) < 2)
+                if (std::get<3>(x) < 2) {
                     EXPECT_TRUE(got.count(x)) << std::get<1>(x);
+                }
             }
             EXPECT_EQ("max_steps", e["cut"]["reason"].asString());
         } else if (mode == "all_or_count") {
