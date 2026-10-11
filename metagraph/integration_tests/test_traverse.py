@@ -1294,8 +1294,10 @@ class TestTraverseGraphlet(TestTraverseBase):
                     f'--coordinates -o annotation x.fa',
                     f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord --coordinates '
                     f'-o annotation annotation.column.annodbg',
+                    # the record mapping is built from headers that are not UTF-8 on purpose:
+                    # the build's own check would refuse them
                     f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
-                    f'--index-header-coords -o annotation x.fa'):
+                    f'--index-header-coords --allow-unchecked-headers -o annotation x.fa'):
             res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             self.assertEqual(0, res.returncode, res.stderr.decode())
@@ -1347,8 +1349,10 @@ class TestTraverseGraphlet(TestTraverseBase):
                 f.write(b'>' + content[0] + b'\n' + content[1].encode() + b'\n')
         for cmd in (f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 15 -o graph '
                     f'one.fa two.fa',
+                    # the header 'bad\xff' is not UTF-8 on purpose: the build's own check
+                    # would refuse it
                     f'{METAGRAPH} annotate -p 1 --anno-header -i graph.dbg --anno-type column '
-                    f'-o annotation one.fa two.fa'):
+                    f'--allow-unchecked-headers -o annotation one.fa two.fa'):
             res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             self.assertEqual(0, res.returncode, res.stderr.decode())

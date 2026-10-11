@@ -3480,7 +3480,9 @@ class TestPatternLabelNames(PatternChecks, TestingBase):
                     + b'>' + cls.REPLACED.encode('utf-8') + b'\n' + b'C' * 40 + b'\n')
         graph = os.path.join(d, 'graph.dbg')
         cls._build_graph(fasta, graph, cls.K, 'succinct', extra_params='--mask-dummy --in-ram')
-        cls._annotate_graph(fasta, graph, os.path.join(d, 'anno'), 'column')
+        # the first header is not UTF-8 on purpose: the build's own check would refuse it
+        cls._annotate_graph(fasta, graph, os.path.join(d, 'anno'), 'column',
+                            extra_params='--allow-unchecked-headers')
         cls.server = Server(METAGRAPH, ['-i', graph, '-a', os.path.join(d, 'anno.column.annodbg')],
                             os.path.join(d, 'server.log'))
 
