@@ -5,6 +5,8 @@
 #include <cassert>
 #include <cstdlib>
 
+#include "common/utils/atomic.hpp"
+
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
 
@@ -35,10 +37,9 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width);
 
 /**
  * Atomic bit fetching, setting, and unsetting on packed vectors.
- * fetch_and_* return the old values. The default memory order __ATOMIC_SEQ_CST
+ * fetch_and_* return the old values. The default memory order std::memory_order_seq_cst
  * enforces the ordering of writes and reads across threads. See
- * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
- * for more details.
+ * https://en.cppreference.com/w/cpp/atomic/atomic_ref for more details.
  */
 
 // TODO: make bool atomic a template parameter instead
@@ -46,27 +47,27 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width);
 inline bool fetch_and_set_bit(uint64_t *v,
                               uint64_t i,
                               bool atomic = false,
-                              int mo = __ATOMIC_SEQ_CST);
+                              std::memory_order mo = std::memory_order_seq_cst);
 
 inline bool fetch_and_unset_bit(uint64_t *v,
                                 uint64_t i,
                                 bool atomic = false,
-                                int mo = __ATOMIC_SEQ_CST);
+                                std::memory_order mo = std::memory_order_seq_cst);
 
 inline bool fetch_bit(const uint64_t *v,
                       uint64_t i,
                       bool atomic = false,
-                      int mo = __ATOMIC_SEQ_CST);
+                      std::memory_order mo = std::memory_order_seq_cst);
 
 inline void set_bit(uint64_t *v,
                     uint64_t i,
                     bool atomic = false,
-                    int mo = __ATOMIC_SEQ_CST);
+                    std::memory_order mo = std::memory_order_seq_cst);
 
 inline void unset_bit(uint64_t *v,
                       uint64_t i,
                       bool atomic = false,
-                      int mo = __ATOMIC_SEQ_CST);
+                      std::memory_order mo = std::memory_order_seq_cst);
 
 template <class Bitmap, class Callback>
 inline void call_ones(const Bitmap &vector,
@@ -78,7 +79,7 @@ inline void call_ones(const sdsl::bit_vector &vector,
                       uint64_t begin, uint64_t end,
                       Callback callback,
                       bool atomic,
-                      int mo = __ATOMIC_SEQ_CST);
+                      std::memory_order mo = std::memory_order_seq_cst);
 
 template <class Bitmap, class Callback>
 inline void call_ones(const Bitmap &vector, Callback callback) {
@@ -89,7 +90,7 @@ template <class Callback>
 inline void call_ones(const sdsl::bit_vector &vector,
                       Callback callback,
                       bool atomic,
-                      int mo = __ATOMIC_SEQ_CST) {
+                      std::memory_order mo = std::memory_order_seq_cst) {
     call_ones(vector, 0, vector.size(), callback, atomic, mo);
 }
 
@@ -103,7 +104,7 @@ inline void call_zeros(const sdsl::bit_vector &vector,
                        uint64_t begin, uint64_t end,
                        Callback callback,
                        bool atomic,
-                       int mo = __ATOMIC_SEQ_CST);
+                       std::memory_order mo = std::memory_order_seq_cst);
 
 template <class Bitmap, class Callback>
 inline void call_zeros(const Bitmap &vector, Callback callback) {
@@ -114,7 +115,7 @@ template <class Callback>
 inline void call_zeros(const sdsl::bit_vector &vector,
                        Callback callback,
                        bool atomic,
-                       int mo = __ATOMIC_SEQ_CST) {
+                       std::memory_order mo = std::memory_order_seq_cst) {
     call_zeros(vector, 0, vector.size(), callback, atomic, mo);
 }
 
@@ -244,11 +245,11 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
 //                      IMPLEMENTATIONS                       //
 ////////////////////////////////////////////////////////////////
 
-inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
+inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic, std::memory_order mo) {
     const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_or(&v[i >> 6], mask, mo) & mask;
+        return std::atomic_ref<uint64_t>(v[i >> 6]).fetch_or(mask, mo) & mask;
     } else {
         uint64_t &word = v[i >> 6];
         if (word & mask) {
@@ -260,11 +261,11 @@ inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
     }
 }
 
-inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
+inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic, std::memory_order mo) {
     const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_and(&v[i >> 6], ~mask, mo) & mask;
+        return std::atomic_ref<uint64_t>(v[i >> 6]).fetch_and(~mask, mo) & mask;
     } else {
         uint64_t &word = v[i >> 6];
         if (word & mask) {
@@ -276,23 +277,23 @@ inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
     }
 }
 
-inline bool fetch_bit(const uint64_t *v, uint64_t i, bool atomic, int mo) {
+inline bool fetch_bit(const uint64_t *v, uint64_t i, bool atomic, std::memory_order mo) {
     return atomic
-        ? ((__atomic_load_n(&v[i >> 6], mo) >> (i & 0x3F)) & 1)
+        ? ((utils::atomic_load(v[i >> 6], mo) >> (i & 0x3F)) & 1)
         : ((v[i >> 6] >> (i & 0x3F)) & 1);
 }
 
-inline void set_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
+inline void set_bit(uint64_t *v, uint64_t i, bool atomic, std::memory_order mo) {
     if (atomic) {
-        __atomic_or_fetch(&v[i >> 6], 1llu << (i & 0x3F), mo);
+        std::atomic_ref<uint64_t>(v[i >> 6]).fetch_or(1llu << (i & 0x3F), mo);
     } else {
         v[i >> 6] |= (1llu << (i & 0x3F));
     }
 }
 
-inline void unset_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
+inline void unset_bit(uint64_t *v, uint64_t i, bool atomic, std::memory_order mo) {
     if (atomic) {
-        __atomic_and_fetch(&v[i >> 6], ~(1llu << (i & 0x3F)), mo);
+        std::atomic_ref<uint64_t>(v[i >> 6]).fetch_and(~(1llu << (i & 0x3F)), mo);
     } else {
         v[i >> 6] &= ~(1llu << (i & 0x3F));
     }
@@ -336,7 +337,7 @@ void call_ones(const sdsl::bit_vector &vector,
                uint64_t begin, uint64_t end,
                Callback callback,
                bool atomic,
-               int mo) {
+               std::memory_order mo) {
     if (!atomic) {
         call_ones(vector, begin, end, callback);
         return;
@@ -352,7 +353,7 @@ void call_ones(const sdsl::bit_vector &vector,
     }
     uint64_t word;
     for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = __atomic_load_n(&vector.data()[i >> 6], mo);
+        word = utils::atomic_load(vector.data()[i >> 6], mo);
         if (!word) {
             i += 64;
             continue;
@@ -409,7 +410,7 @@ void call_zeros(const sdsl::bit_vector &vector,
                 uint64_t begin, uint64_t end,
                 Callback callback,
                 bool atomic,
-                int mo) {
+                std::memory_order mo) {
     if (!atomic) {
         call_zeros(vector, begin, end, callback);
         return;
@@ -425,7 +426,7 @@ void call_zeros(const sdsl::bit_vector &vector,
     }
     uint64_t word;
     for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = ~__atomic_load_n(&vector.data()[i >> 6], mo);
+        word = ~utils::atomic_load(vector.data()[i >> 6], mo);
         if (!word) {
             i += 64;
             continue;

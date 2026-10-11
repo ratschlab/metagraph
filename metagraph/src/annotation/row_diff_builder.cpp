@@ -287,7 +287,7 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
             });
 
             if (last.second != graph::DeBruijnGraph::npos)
-                set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
+                set_bit(last_bv.data(), last.second, true, std::memory_order_relaxed);
         }, []() { return false; }, get_num_threads());
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
@@ -432,7 +432,7 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
             node_index v = start;
             std::vector<node_index> path;
             while (path.size() < max_length
-                    && !fetch_and_set_bit(visited.data(), v, true, __ATOMIC_ACQ_REL)) {
+                    && !fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
                 path.push_back(v);
                 if (!graph.has_no_outgoing(v))
                     v = row_diff_successor(graph, v, rd_succ);
@@ -442,11 +442,11 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
                 return;
 
             // Either a sink, or a cyclic dependency
-            if (!fetch_and_set_bit(finalised.data(), v, true, __ATOMIC_ACQ_REL))
-                set_bit(terminal->data(), v, true, __ATOMIC_RELAXED);
+            if (!fetch_and_set_bit(finalised.data(), v, true, std::memory_order_acq_rel))
+                set_bit(terminal->data(), v, true, std::memory_order_relaxed);
 
             for (node_index v : path) {
-                set_bit(finalised.data(), v, true, __ATOMIC_RELEASE);
+                set_bit(finalised.data(), v, true, std::memory_order_release);
             }
         }, []() { return false; }, num_threads);
 

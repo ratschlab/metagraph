@@ -312,12 +312,12 @@ sdsl::bit_vector bit_vector_sd::to_vector() const {
     if (inverted_) {
         #pragma omp parallel num_threads(get_num_threads())
         for (uint64_t i = 1; i <= max_rank; ++i) {
-            unset_bit(vector.data(), slct1_(i), true, __ATOMIC_RELAXED);
+            unset_bit(vector.data(), slct1_(i), true, std::memory_order_relaxed);
         }
     } else {
         #pragma omp parallel num_threads(get_num_threads())
         for (uint64_t i = 1; i <= max_rank; ++i) {
-            set_bit(vector.data(), slct1_(i), true, __ATOMIC_RELAXED);
+            set_bit(vector.data(), slct1_(i), true, std::memory_order_relaxed);
         }
     }
     std::atomic_thread_fence(std::memory_order_acquire);

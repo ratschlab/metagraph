@@ -1558,7 +1558,7 @@ void traverse_dummy_edges(const BOSS &graph,
 
             // TODO: remove this mask and use |call_edge| instead
             if (traversed_mask)
-                set_bit(traversed_mask->data(), edge, async, __ATOMIC_RELAXED);
+                set_bit(traversed_mask->data(), edge, async, std::memory_order_relaxed);
 
             if (redundant_path.back())
                 set_bit(redundant_mask->data(), edge, async);
