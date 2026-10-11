@@ -3050,11 +3050,28 @@ std::vector<std::string> pattern_gate_keys() {
     return keys;
 }
 
-Json::Value pattern_traverse_block(Json::Value full) {
-    // every key of the full block is kept until the search service reads the full block from
-    // GET /pattern/capabilities (SPEC §23); the gate keys keep their values after that too
-    full["details"] = kPatternDetails;
-    return full;
+Json::Value pattern_traverse_block(const Json::Value &full) {
+    // the projection of the full block onto the gate keys (SPEC §23.2): a client of this route
+    // alone gates on these, and reads every other field from the route `details` names; a key
+    // the full block does not state is not invented (jsoncpp writes members in key order, so
+    // the projection keeps the full block's order)
+    Json::Value block(Json::objectValue);
+    for (const char *key : kPatternGateKeys) {
+        if (!full.isMember(key))
+            continue;
+        if (std::string_view(key) == "caps") {
+            Json::Value caps(Json::objectValue);
+            for (const char *cap : kPatternGateCaps) {
+                if (full["caps"].isMember(cap))
+                    caps[cap] = full["caps"][cap];
+            }
+            block["caps"] = std::move(caps);
+        } else {
+            block[key] = full[key];
+        }
+    }
+    block["details"] = kPatternDetails;
+    return block;
 }
 
 bool write_pattern_answer(const std::string &content,

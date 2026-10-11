@@ -432,6 +432,17 @@ GATE_CAPS = ['max_patterns', 'max_contexts', 'max_anchors', 'max_paths', 'max_st
 SCHEMA['pattern_gate'] = GATE_KEYS + ['details']
 # the route of the full block, which the /traverse block names (SPEC §23)
 DETAILS = 'GET /pattern/capabilities'
+
+
+def gate_block(full):
+    """The gate block of the full block |full| (SPEC §23.2, the block of /traverse/capabilities):
+    the gate fields it states with their values, `caps` the gate caps, and `details`, the route
+    of the full block."""
+    b = {k: v for k, v in full.items() if k in GATE_KEYS}
+    if 'caps' in b:
+        b['caps'] = {c: v for c, v in full['caps'].items() if c in GATE_CAPS}
+    b['details'] = DETAILS
+    return b
 # what caps_rule refers to: the section that classifies every cap (SPEC §4.5)
 CAPS_RULE = 'SPEC-pattern-search.md section 4.5'
 # the full block's graph fields, null while the index loads (SPEC §10.2)
@@ -2968,16 +2979,11 @@ class Checker:
 
     # ------------------------------------------------------------- capabilities
 
-    def block(self, b, path, server_wide=False):
-        """The full block (SPEC §10.2). |server_wide|: GET /capabilities of a multi-graph
-        server (SPEC §24), the contract and the caps without a graph (its graph fields null,
-        as while a single index loads), available whether a pair is served"""
-        self.keys(b, SCHEMA['capabilities'], path)
-        if server_wide:
-            self.ok(b['available'] in (True, False), path + '.available', 'known')
-            for f in GRAPH_FIELDS:
-                self.ok(b[f] is None, f'{path}.{f}', 'per pair on a multi-graph server')
-            self.ok(b['predicate']['access'] is None, path + '.predicate.access')
+    def gate_fields(self, b, path, server_wide=False):
+        """The rules of the gate fields (SPEC §23.2: the fields of the full block a client of
+        the probe alone gates on or parses), the same on the full block and on the gate block.
+        |server_wide|: the block of a multi-graph server's GET /capabilities, whose graph fields
+        are the pairs' (its counting is not checked here)."""
         self.ok(b['pattern_contract_version'] == 1, path + '.pattern_contract_version')
         self.ok(b['available'] in (True, False, None), path + '.available')
         if b['available'] is False:
@@ -3001,9 +3007,59 @@ class Checker:
                 and all(c in GENETIC_CODES for c in b['genetic_codes']), path + '.genetic_codes',
                 'NCBI translation table ids')
         self.ok(b['default_genetic_code'] in b['genetic_codes'], path + '.default_genetic_code')
-        # SPEC §10.2: the two prose fields are references to the SPEC, in printable ASCII (the
-        # server escapes any other byte as \uXXXX), and the delivery rates of the time kept
-        # back for the answer (§7.6) are numbers
+        self.ok(('protein' in b['kinds']) is bool(b['protein_residues']), path + '.kinds',
+                'protein served exactly with its residues')
+        self.ok(b['modes'] == list(MODES), path + '.modes')
+        self.ok('none' in b['projections'], path + '.projections', '"none" is served everywhere')
+        self.keys(b['scopes_by_graph_mode'], GRAPH_MODES, path + '.scopes_by_graph_mode')
+        self.ok(all(is_num(v) for v in b['caps'].values()), path + '.caps')
+        self.ok(is_num(b['default_time_budget_ms'])
+                and b['finalize_reserve_ms'] < b['default_time_budget_ms']
+                <= b['caps']['time_budget_ms'], path + '.default_time_budget_ms')
+        self.ok(isinstance(b['default_occurrences'], bool), path + '.default_occurrences')
+        if server_wide:
+            return
+        # SPEC §10.2: how an available graph counts; null when the graph is not served (or
+        # loading)
+        if b['available'] is True:
+            self.one_of(b['counting'], COUNTINGS, path + '.counting')
+            self.ok(b['counting'] == ('upper_bound' if b['mask'] == 'absent' else 'exact'),
+                    path + '.counting', 'exact with a mask, upper_bound without one')
+        else:
+            self.ok(b['counting'] is None, path + '.counting', 'null on a graph not served')
+        if b['available'] is None:
+            for f in ('graph_mode', 'k', 'mask', 'scopes', 'placement', 'support', 'annotation'):
+                self.ok(b[f] is None, f'{path}.{f}', 'unknown while the index loads')
+
+    def gate_block(self, b, path):
+        """The block of GET /traverse/capabilities (SPEC §23.2): the gate fields, with the full
+        block's rules, `caps` the gate caps, `details` the route of the full block, and nothing
+        else (the other fields are read from the full block)."""
+        self.ok(isinstance(b, dict) and set(GATE_KEYS) <= set(b), path,
+                'every gate field of the block')
+        self.ok(set(b) == set(SCHEMA['pattern_gate']), path,
+                'the gate fields and details only, not '
+                + str(sorted(set(b) ^ set(SCHEMA['pattern_gate']))))
+        self.ok(b['details'] == DETAILS, path + '.details', DETAILS)
+        self.ok(isinstance(b['caps'], dict) and set(b['caps']) == set(GATE_CAPS), path + '.caps',
+                'the gate caps only, not ' + str(sorted(set(b['caps']) ^ set(GATE_CAPS))))
+        self.gate_fields(b, path)
+
+    def block(self, b, path, server_wide=False):
+        """The full block (SPEC §10.2). |server_wide|: GET /capabilities of a multi-graph
+        server (SPEC §24), the contract and the caps without a graph (its graph fields null,
+        as while a single index loads), available whether a pair is served"""
+        self.keys(b, SCHEMA['capabilities'], path)
+        if server_wide:
+            self.ok(b['available'] in (True, False), path + '.available', 'known')
+            for f in GRAPH_FIELDS:
+                self.ok(b[f] is None, f'{path}.{f}', 'per pair on a multi-graph server')
+            self.ok(b['predicate']['access'] is None, path + '.predicate.access')
+        self.gate_fields(b, path, server_wide)
+        # the fields of the full block only (SPEC §23.2), which a client reads from
+        # GET /pattern/capabilities. SPEC §10.2: the two prose fields are references to the
+        # SPEC, in printable ASCII (the server escapes any other byte as \uXXXX), and the
+        # delivery rates of the time kept back for the answer (§7.6) are numbers
         for f in ('protein_rule', 'caps_rule'):
             self.ok(isinstance(b[f], str) and 'SPEC-pattern-search.md section' in b[f]
                     and all(' ' <= c <= '~' for c in b[f]), f'{path}.{f}',
@@ -3011,10 +3067,6 @@ class Checker:
         self.keys(b['delivery_mbps'], SCHEMA['delivery_mbps'], path + '.delivery_mbps')
         self.ok(all(is_num(v) and v > 0 for v in b['delivery_mbps'].values()),
                 path + '.delivery_mbps', 'positive rates in MB/s')
-        self.ok(('protein' in b['kinds']) is bool(b['protein_residues']), path + '.kinds',
-                'protein served exactly with its residues')
-        self.ok(b['modes'] == list(MODES), path + '.modes')
-        self.ok('none' in b['projections'], path + '.projections', '"none" is served everywhere')
         self.ok(b['default_mode'] in b['modes'], path + '.default_mode')
         self.ok(b['default_projection'] in b['projections'], path + '.default_projection')
         # contract version 1: an omitted output.labels means "none" on every server stating
@@ -3030,9 +3082,7 @@ class Checker:
                 path + '.kinds_later_increment')
         self.ok(b['default_scope'] in ('suffix', 'any_offset'), path + '.default_scope')
         self.ok(b['default_strands'] in b['strands'], path + '.default_strands')
-        self.keys(b['scopes_by_graph_mode'], GRAPH_MODES, path + '.scopes_by_graph_mode')
         self.keys(b['caps'], CAPS, path + '.caps')
-        self.ok(all(is_num(v) for v in b['caps'].values()), path + '.caps')
         # SPEC §19.12: "predicate_only" served with the predicate object (the operators, the
         # strands, the access: null while the annotation is not described)
         self.keys(b['predicate'], SCHEMA['capabilities_predicate'], path + '.predicate')
@@ -3074,9 +3124,6 @@ class Checker:
                 path + '.mismatches.later_increment', f'a sublist of {MISMATCH_LATER}, in order')
         self.ok(1 <= b['caps']['max_predicate_work'] and b['caps']['max_predicate_labels']
                 <= 1_000_000, path + '.caps', 'the predicate caps in their ranges')
-        self.ok(is_num(b['default_time_budget_ms'])
-                and b['finalize_reserve_ms'] < b['default_time_budget_ms']
-                <= b['caps']['time_budget_ms'], path + '.default_time_budget_ms')
         # the defaults of max_anchors and max_labels (SPEC §4.5): integers at most their caps
         # (the server refuses a larger default at start-up), not among the caps
         for cap in ('max_anchors', 'max_labels'):
@@ -3091,23 +3138,16 @@ class Checker:
         if server_wide:
             # the graph fields are the pairs' (graph_summary, the pairs' own blocks)
             return
-        # SPEC §10.2: how an available graph counts, and the dummy fraction its estimates rest
-        # on; null when the graph is not served (or loading)
-        if b['available'] is True:
-            self.one_of(b['counting'], COUNTINGS, path + '.counting')
-            self.ok(b['counting'] == ('upper_bound' if b['mask'] == 'absent' else 'exact'),
-                    path + '.counting', 'exact with a mask, upper_bound without one')
-            if b['counting'] == 'upper_bound':
-                self.dummy_fraction(b['dummy_fraction'], path + '.dummy_fraction')
-            else:
-                self.ok(b['dummy_fraction'] is None, path + '.dummy_fraction',
-                        'null with the mask')
+        # SPEC §10.2: the dummy fraction an available graph's estimates rest on (counting
+        # upper_bound, checked with the gate fields); null with the mask, and when the graph is
+        # not served (or loading)
+        if b['available'] is True and b['counting'] == 'upper_bound':
+            self.dummy_fraction(b['dummy_fraction'], path + '.dummy_fraction')
         else:
-            for f in ('counting', 'dummy_fraction'):
-                self.ok(b[f] is None, f'{path}.{f}', 'null on a graph not served')
+            self.ok(b['dummy_fraction'] is None, path + '.dummy_fraction',
+                    'null with the mask' if b['available'] else 'null on a graph not served')
         if b['available'] is None:
-            for f in ('graph_mode', 'k', 'alphabet', 'strand_stated', 'mask', 'scopes',
-                      'placement', 'support', 'annotation'):
+            for f in ('alphabet', 'strand_stated'):
                 self.ok(b[f] is None, f'{path}.{f}', 'unknown while the index loads')
             self.ok(b['predicate']['access'] is None, path + '.predicate.access')
             return
@@ -3187,10 +3227,11 @@ class TestPatternFixtures(unittest.TestCase):
                 pair = {k: v for k, v in answered[0].items() if k not in SCHEMA['answer_pair']}
                 cls.bodies[name] = (request, pair)
 
-    def full_block(self, name):
-        """The full pattern block of GET fixture |name| (SPEC §23): the document of
-        /pattern/capabilities, the `pattern` member of /capabilities, that of
-        /traverse/capabilities without `details`; None for a refusal."""
+    def pattern_block(self, name):
+        """The pattern block GET fixture |name| serves (SPEC §23): the document of
+        /pattern/capabilities (without the pair's name), the `pattern` member of /capabilities
+        (the full block) and of /traverse/capabilities (the gate block, with `details`); None
+        for a refusal."""
         f = self.fixtures[name]
         doc = self.bodies[name][1]
         if f['status'] != 200:
@@ -3198,12 +3239,22 @@ class TestPatternFixtures(unittest.TestCase):
         if f['path'].split('?')[0] == '/pattern/capabilities':
             # a multi-graph server's names its pair (SPEC §24)
             return {k: v for k, v in doc.items() if k not in SCHEMA['capabilities_pair']}
-        return {k: v for k, v in doc['pattern'].items() if k != 'details'}
+        return doc['pattern']
+
+    def full_block(self, name):
+        """The full pattern block of GET fixture |name| (SPEC §23): pattern_block of a fixture
+        of /pattern/capabilities or /capabilities; None for a refusal, and for the probe, whose
+        block is the gate block (SPEC §23.2)."""
+        if self.fixtures[name]['path'].split('?')[0] == '/traverse/capabilities':
+            return None
+        return self.pattern_block(name)
 
     def capabilities_of(self, server):
         """The full pattern block of the graph a fixture's answers were computed on: the first
         GET fixture of its server that describes a graph (a multi-graph server's GET
-        /capabilities describes none: its pair's block is the probe's)."""
+        /capabilities describes none: its pair's block is /pattern/capabilities?graph='s; the
+        probe's block is the gate block, not the full one: every server with a probe fixture
+        has a /pattern/capabilities fixture, test_every_probed_server_has_its_full_block)."""
         for name, f in self.fixtures.items():
             if f['server'] == server and f['method'] == 'GET' and not f['hand_made']:
                 b = self.full_block(name)
@@ -3361,13 +3412,12 @@ class TestPatternFixtures(unittest.TestCase):
             return
         b = doc['pattern']
         if route == '/traverse/capabilities':
-            check.ok(b.get('details') == DETAILS, 'pattern.details', DETAILS)
-            check.ok(set(GATE_KEYS) <= set(b), 'pattern', 'every gate field of the block')
-            b = {k: v for k, v in b.items() if k != 'details'}
-        else:
-            check.ok(route == '/capabilities', 'path')
-            check.ok('details' not in b, 'pattern.details', 'only on /traverse/capabilities')
-        check.block(b, 'pattern', server_wide=multi and route == '/capabilities')
+            # the gate block (SPEC §23.2): the probe of a multi-graph server is one pair's
+            check.gate_block(b, 'pattern')
+            return
+        check.ok(route == '/capabilities', 'path')
+        check.ok('details' not in b, 'pattern.details', 'only on /traverse/capabilities')
+        check.block(b, 'pattern', server_wide=multi)
         if route == '/capabilities':
             check.ok(doc['mode'] == ('multi' if multi else 'single'), 'mode')
             check.ok('pattern' in doc['features'], 'features')
@@ -3421,8 +3471,9 @@ class TestPatternFixtures(unittest.TestCase):
 
     def test_the_block_is_the_same_on_both_routes(self):
         """SPEC §23: on every fixture server the full block is the same on /capabilities and
-        /pattern/capabilities, and the block of /traverse/capabilities is the full block with
-        `details` (phase 1), every gate field with the full block's value."""
+        /pattern/capabilities, and the block of /traverse/capabilities is the gate block of the
+        full block (§23.2): every gate field with the full block's value, the gate caps, `details`,
+        and no field of the full block only."""
         by_server = {}
         for name, f in self.fixtures.items():
             if f['method'] == 'GET' and f['status'] == 200 and not f['hand_made']:
@@ -3444,16 +3495,22 @@ class TestPatternFixtures(unittest.TestCase):
                         expected['predicate']['access'] = None
                         self.assertEqual(expected, self.full_block(name))
                         continue
-                    self.assertEqual(full, self.full_block(name))
                     if route != '/traverse/capabilities':
+                        self.assertEqual(full, self.full_block(name))
                         continue
-                    b = self.bodies[name][1]['pattern']
-                    self.assertEqual(dict(full, details=DETAILS), b)
+                    b = self.pattern_block(name)
+                    self.assertEqual(gate_block(full), b)
                     for key in GATE_KEYS:
-                        if key in full:
+                        if key != 'caps':
                             self.assertEqual(full[key], b[key], key)
-                    for cap in GATE_CAPS if 'caps' in full else ():
+                    for cap in GATE_CAPS:
                         self.assertEqual(full['caps'][cap], b['caps'][cap], cap)
+                    self.assertEqual(set(GATE_KEYS) | {'details'}, set(b))
+                    self.assertEqual(set(GATE_CAPS), set(b['caps']))
+                    for key in ('predicate', 'default_max_labels', 'dummy_fraction'):
+                        self.assertIn(key, full)
+                    for cap in ('max_labels', 'row_cache_mb', 'max_checked_entries'):
+                        self.assertIn(cap, full['caps'])
         self.assertEqual({'/capabilities', '/traverse/capabilities', '/pattern/capabilities'},
                          routes)
 
@@ -3472,6 +3529,21 @@ class TestPatternFixtures(unittest.TestCase):
             self.assertTrue(m, name)
             self.assertEqual(expected, re.findall(r'"([a-z_]+)"', m.group(1)), name)
         self.assertIn('"' + DETAILS + '"', source)
+        self.assertEqual(GATE_KEYS + ['details'], SCHEMA['pattern_gate'])
+
+    def test_every_probed_server_has_its_full_block(self):
+        """The probe's block is the gate block (SPEC §23.2), so the answers of a server are
+        checked against the full block of a /pattern/capabilities or /capabilities fixture of
+        it (capabilities_of): every server with a GET fixture has one that describes its graph
+        (the servers without a GET fixture are variants of a measured server by a flag,
+        test_capabilities_documents_keep_a_kibibyte)."""
+        probed = {f['server'] for f in self.fixtures.values() if f['method'] == 'GET'}
+        for server in sorted(probed):
+            with self.subTest(server=server):
+                full = self.capabilities_of(server)
+                self.assertIsNotNone(full)
+                self.assertIsNotNone(full['k'])
+                self.assertEqual(set(SCHEMA['capabilities']), set(full))
 
     def test_caps_rule_section_classifies_every_cap(self):
         """caps_rule refers to SPEC §4.5, and §4.5 classifies every cap of every fixture
@@ -3544,6 +3616,17 @@ class TestPatternFixtures(unittest.TestCase):
             ('traverse_capabilities_multi_graph', pop('pattern', 'details'), 'details'),
             ('traverse_capabilities', pop('pattern', 'counting'), 'gate field'),
             ('traverse_capabilities_mask_absent', pop('pattern', 'long_search'), 'gate field'),
+            # a field of the full block only, or one of its caps, in the gate block (SPEC §23.2)
+            ('traverse_capabilities', put({'access': 'rows'}, 'pattern', 'predicate'),
+             'gate fields and details only'),
+            ('traverse_capabilities', put(1000, 'pattern', 'default_max_labels'),
+             'gate fields and details only'),
+            ('traverse_capabilities', put(1000, 'pattern', 'caps', 'max_labels'),
+             'gate caps only'),
+            ('traverse_capabilities_multi_graph', put(64, 'pattern', 'caps', 'row_cache_mb'),
+             'gate caps only'),
+            ('traverse_capabilities_primary', pop('pattern', 'caps', 'max_anchors'),
+             'gate caps only'),
             ('pattern_capabilities', put(DETAILS, 'details'), 'fields'),
             ('capabilities', put(DETAILS, 'pattern', 'details'), 'details'),
             ('capabilities', pop('routes', 'pattern_capabilities'), 'pattern_capabilities'),
@@ -3917,7 +4000,8 @@ class TestPatternFixtures(unittest.TestCase):
                 continue
             route = 'probe' if f['path'].startswith('/traverse/') \
                 else 'pattern' if f['path'].startswith('/pattern/') else 'capabilities'
-            b = self.full_block(name)
+            # the probe's block is the gate block: the values read here are gate fields
+            b = self.pattern_block(name)
             if b['available'] is False:
                 seen['unavailable'].setdefault(b['unavailable_reason'], set()).add(route)
             if b.get('counting') is not None:

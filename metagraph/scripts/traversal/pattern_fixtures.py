@@ -651,6 +651,38 @@ def details(doc):
     check(doc['pattern']['details'] == 'GET /pattern/capabilities', doc['pattern'])
 
 
+def gate_block(available, reason=None, mask=None, counting=None):
+    """GET /traverse/capabilities: its `pattern` member is the gate block (SPEC §23.2), the gate
+    fields with the full block's values and `details`, and no field of the full block only
+    (the exact field list is test_pattern_fixtures.py's, compared with pattern.cpp's and the
+    SPEC's table): the fields read from GET /pattern/capabilities are absent here."""
+    def run(doc):
+        b = doc['pattern']
+        check(b['pattern_contract_version'] == 1, b)
+        check(b['available'] is available and b['unavailable_reason'] == reason, b)
+        if mask is not None:
+            check(b['mask'] == mask, b)
+        if counting is not None:
+            check(b['counting'] == counting, b)
+        for f in ('predicate', 'dummy_fraction', 'default_max_labels', 'default_max_anchors',
+                  'caps_rule', 'delivery_mbps', 'alphabet'):
+            check(f not in b, (f, sorted(b)))
+        for cap in ('max_labels', 'row_cache_mb', 'max_checked_entries', 'max_predicate_labels'):
+            check(cap not in b['caps'], (cap, sorted(b['caps'])))
+        check('max_anchors' in b['caps'] and 'time_budget_ms' in b['caps'], sorted(b['caps']))
+        details(doc)
+    return run
+
+
+def gate_only_k(doc):
+    """The gate block of a graph the engine does not recognise: graph_mode null, only k set, the
+    other graph fields of the gate block null (SPEC §10.2, §23.2)."""
+    b = doc['pattern']
+    check(b['graph_mode'] is None and isinstance(b['k'], int), b)
+    for f in ('mask', 'scopes', 'placement', 'support', 'annotation'):
+        check(b[f] is None, (f, b[f]))
+
+
 def loading_block(full):
     """The full block of a single-graph server while its index loads, from the block of the
     loaded server: what pattern_capabilities_json writes without the graph -- available,
@@ -719,8 +751,9 @@ FIXTURES = [
                    single_graph_selection)),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
-        'the same `pattern` block with `details`, the route of the full block (SPEC §23)',
-        expect_all(caps_block(True, mask='file', counting='exact'), details)),
+        'its `pattern` member the gate block (SPEC §23.2): the fields a client gates on, with '
+        'the full block\'s values, the gate caps, and `details`, the route of the full block',
+        gate_block(True, mask='file', counting='exact')),
     get('pattern_capabilities', 'masked', '/pattern/capabilities',
         'GET /pattern/capabilities on the same server: the full block, the document itself '
         '(SPEC §23)',
@@ -744,8 +777,9 @@ FIXTURES = [
         expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'),
                    single_graph_selection)),
     get('traverse_capabilities_mask_absent', 'unmasked', '/traverse/capabilities',
-        'the same unmasked server on the probe route',
-        expect_all(caps_block(True, mask='absent', counting='upper_bound'), details)),
+        'the same unmasked server on the probe route (the gate block: counting upper_bound, '
+        'the dummy_fraction in the full block only)',
+        gate_block(True, mask='absent', counting='upper_bound')),
     get('pattern_capabilities_unmasked', 'unmasked', '/pattern/capabilities',
         'the same unmasked server on the route of the full block',
         full_block(True, mask='absent', counting='upper_bound')),
@@ -756,8 +790,8 @@ FIXTURES = [
         expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'),
                    single_graph_selection)),
     get('traverse_capabilities_built_at_load', 'built_at_load', '/traverse/capabilities',
-        'the same server on the probe route',
-        expect_all(caps_block(True, mask='built_at_load', counting='exact'), details)),
+        'the same server on the probe route (the gate block)',
+        gate_block(True, mask='built_at_load', counting='exact')),
     get('pattern_capabilities_built_at_load', 'built_at_load', '/pattern/capabilities',
         'the same server on the route of the full block',
         full_block(True, mask='built_at_load', counting='exact')),
@@ -771,8 +805,8 @@ FIXTURES = [
         multi_capabilities),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
-        'the multi-graph server probed for one pair: that pair\'s full block, with `details`',
-        expect_all(caps_block(True, mask='file', counting='exact'), details)),
+        'the multi-graph server probed for one pair: that pair\'s gate block, with `details`',
+        gate_block(True, mask='file', counting='exact')),
     get('pattern_capabilities_multi_graph', 'multi',
         '/pattern/capabilities?graph=' + MULTI_GRAPH_NAME,
         'the multi-graph server on the route of the full block: the block of the pair '
@@ -786,11 +820,22 @@ FIXTURES = [
         'GET /traverse/capabilities of the utf8_labels server (a BASIC graph with its mask file, '
         'counting exact, an unbudgeted column annotation by header): the block of a server one '
         'of whose labels the answers can never name (SPEC §8.9), nothing of it in the document',
-        expect_all(caps_block(True, mask='file', counting='exact'), details)),
+        gate_block(True, mask='file', counting='exact')),
+    get('pattern_capabilities_utf8_labels', 'utf8_labels', '/pattern/capabilities',
+        'the same server on the route of the full block (the block the server\'s answers are '
+        'validated against)',
+        full_block(True, mask='file', counting='exact')),
     get('traverse_capabilities_primary', 'primary', '/traverse/capabilities',
-        'a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], '
-        'strand_stated false, placement none_canonical, annotation unbudgeted (column)',
-        expect_all(caps_block(True, mask='file'), details)),
+        'a PRIMARY index (wrapped in CanonicalDBG) on the probe route: graph_mode primary, scopes '
+        '[any_offset], placement none_canonical, annotation unbudgeted (column)',
+        gate_block(True, mask='file')),
+    get('pattern_capabilities_primary', 'primary', '/pattern/capabilities',
+        'the same PRIMARY server on the route of the full block: strand_stated false, the '
+        'predicate\'s access rows (the block the server\'s answers are validated against)',
+        expect_all(full_block(True, mask='file'),
+                   lambda doc: check(doc['graph_mode'] == 'primary'
+                                     and doc['strand_stated'] is False
+                                     and doc['scopes'] == ['any_offset'], doc))),
     get('capabilities_representation_unsupported', 'hash', '/capabilities',
         'a graph the engine does not recognise (a hash graph): the feature and route listed, '
         'the block available false, unavailable_reason representation_unsupported, graph_mode '
@@ -798,8 +843,8 @@ FIXTURES = [
         expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k,
                    single_graph_selection)),
     get('traverse_capabilities_representation_unsupported', 'hash', '/traverse/capabilities',
-        'the same hash-graph server on the probe route',
-        expect_all(caps_block(False, 'representation_unsupported'), only_k, details)),
+        'the same hash-graph server on the probe route (the gate block)',
+        expect_all(gate_block(False, 'representation_unsupported'), gate_only_k)),
 
     # ---------------------------------------------------------------- count
     post('count', 'masked',

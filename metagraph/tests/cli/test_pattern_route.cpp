@@ -1283,10 +1283,11 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("multi_graph_later_increment", caps["unavailable_reason"].asString());
 }
 
-// The block of GET /traverse/capabilities (SPEC §23): the full block with `details`, the route of
-// the full block, in the three forms of the full block (served, loading, multi-graph); every
-// gate key a key of the full block a served graph states, with its value
-TEST(PatternRoute, TraverseBlockIsTheFullBlockWithDetails) {
+// The block of GET /traverse/capabilities (SPEC §23.2): the gate projection of the full block
+// in its three forms (served, loading, multi-graph): every gate key the full block states, with
+// its value, `caps` reduced to the gate caps, `details` the route of the full block, and no
+// other key; a served graph's full block states every gate key
+TEST(PatternRoute, TraverseBlockIsTheGateProjection) {
     auto g = tiny();
     // the gate keys as the SPEC's §23 table lists them (top level, then the caps)
     const std::vector<std::string> spec_gate = {
@@ -1310,19 +1311,70 @@ TEST(PatternRoute, TraverseBlockIsTheFullBlockWithDetails) {
         ASSERT_FALSE(full.isMember("details"));
         const Json::Value block = pattern_traverse_block(full);
         EXPECT_EQ("GET /pattern/capabilities", block["details"].asString());
-        Json::Value rest = block;
-        rest.removeMember("details");
-        EXPECT_EQ(full, rest);
+        // the expected block, built from the gate key list: each key the full block states
+        Json::Value expected(Json::objectValue);
+        for (const std::string &key : pattern_gate_keys()) {
+            if (key.rfind("caps.", 0) == 0) {
+                if (full.isMember("caps") && full["caps"].isMember(key.substr(5)))
+                    expected["caps"][key.substr(5)] = full["caps"][key.substr(5)];
+            } else if (key == "caps") {
+                if (full.isMember("caps"))
+                    expected["caps"] = Json::Value(Json::objectValue);
+            } else if (full.isMember(key)) {
+                expected[key] = full[key];
+            }
+        }
+        expected["details"] = "GET /pattern/capabilities";
+        EXPECT_EQ(expected, block);
+        // every key kept has the full block's value
+        for (const std::string &key : block.getMemberNames()) {
+            if (key != "details" && key != "caps")
+                EXPECT_EQ(full[key], block[key]) << key;
+        }
+        for (const std::string &cap : block["caps"].getMemberNames()) {
+            EXPECT_EQ(full["caps"][cap], block["caps"][cap]) << cap;
+        }
     }
-    // a served graph's full block states every gate key; the multi-graph block the first three
+    // a served graph's full block states every gate key, and the block keeps nothing else:
+    // the fields a client reads from the full block only are absent (SPEC §23.2)
     const Json::Value &served = forms[0];
+    const Json::Value block = pattern_traverse_block(served);
     for (const std::string &key : pattern_gate_keys()) {
         const bool cap = key.rfind("caps.", 0) == 0;
         EXPECT_TRUE(cap ? served["caps"].isMember(key.substr(5)) : served.isMember(key)) << key;
+        EXPECT_TRUE(cap ? block["caps"].isMember(key.substr(5)) : block.isMember(key)) << key;
     }
+    // top-level keys: the 26 gate keys and details; caps: the nine gate caps
+    const size_t gate_caps = std::count_if(spec_gate.begin(), spec_gate.end(),
+                                           [](const std::string &key) {
+                                               return key.rfind("caps.", 0) == 0;
+                                           });
+    EXPECT_EQ(9u, gate_caps);
+    EXPECT_EQ(spec_gate.size() - gate_caps + 1, block.size());
+    EXPECT_EQ(27u, block.size());
+    EXPECT_EQ(gate_caps, block["caps"].size());
+    for (const char *absent : { "predicate", "default_max_labels", "default_max_anchors",
+                                "delivery_mbps", "caps_rule", "protein_rule", "dummy_fraction",
+                                "alphabet", "strand_stated", "default_mode",
+                                "default_projection" }) {
+        ASSERT_TRUE(served.isMember(absent)) << absent;
+        EXPECT_FALSE(block.isMember(absent)) << absent;
+    }
+    for (const char *absent : { "max_labels", "row_cache_mb", "max_checked_entries",
+                                "max_annotation_work", "max_predicate_labels" }) {
+        ASSERT_TRUE(served["caps"].isMember(absent)) << absent;
+        EXPECT_FALSE(block["caps"].isMember(absent)) << absent;
+    }
+    // the loading form keeps the gate keys with their null values, the multi-graph form its
+    // three fields; each with details
+    EXPECT_EQ(27u, pattern_traverse_block(forms[1]).size());
+    EXPECT_TRUE(pattern_traverse_block(forms[1])["k"].isNull());
     EXPECT_EQ((std::vector<std::string> { "available", "pattern_contract_version",
                                           "unavailable_reason" }),
               forms[2].getMemberNames());
+    EXPECT_EQ((std::vector<std::string> { "available", "details", "pattern_contract_version",
+                                          "unavailable_reason" }),
+              pattern_traverse_block(forms[2]).getMemberNames());
 }
 
 // SPEC §4.5: max_anchors and max_labels of a request that names neither are the server's

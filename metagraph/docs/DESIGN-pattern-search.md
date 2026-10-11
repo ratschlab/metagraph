@@ -998,9 +998,10 @@ an MCP tool returns whole keeps 1 KiB under its 32 KiB ceiling), the modes, the 
 `mask: file | built_at_load | absent` with `counting: exact | upper_bound` and the sampled `dummy_fraction` (§4.4), `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
 resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The full block also
 has a route of its own, `GET /pattern/capabilities` (the owner's decision of 2026-10-09, SPEC §23), and
-`GET /traverse/capabilities`, the document the search service's probe reads, carries the block with `details`
-naming that route: in two phases, first the full block, later only the fields a client gates on, so that the
-probe's document stays small while the block grows (SPEC §23.2). A client gates on the block (a contract version it implements, and `available: true`; SPEC
+`GET /traverse/capabilities`, the document the search service's probe reads, carries the gate block: only the
+fields a client gates on, with `details` naming that route (phase 2, the owner's decision of 2026-10-11; phase 1,
+the two builds before it, served the full block with `details` there), so that the probe's document stays small
+while the block grows (SPEC §23.2). A client gates on the block (a contract version it implements, and `available: true`; SPEC
 §1, §10.3: since the outside review of 2026-10-07 a higher version is refused, not read by presence), reads
 fields by presence within it, and offers the label projections exactly when the block's `projections` list has
 them (§9).

@@ -2602,7 +2602,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     coordinates: positions, the interval rule, the column numbering in which a record's last k − 1 bases share
     their numbers with the next record's first positions, `chains_ended`, `lower_bound`, the assumptions; only
     here: the per-request capabilities change only in their `feature_level`), `content_encodings` (`["gzip",
-    "deflate"]`), `pattern` (the pattern search's block with `details`, `SPEC-pattern-search.md` §23) and, from
+    "deflate"]`), `pattern` (the pattern search's gate block: the fields a client of this document gates on, with
+    `details`, the route of the full block, `SPEC-pattern-search.md` §23.2) and, from
     feature level 3,
     `algorithm_version`, `compression_level` (the zlib level of the traversal routes' compressed bodies) and
     `deadline_check` (below), from feature level 4 `decode_cache: {path_cache_mb, rule}` (the row-diff path cache

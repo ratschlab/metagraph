@@ -33,7 +33,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block with `details`, the route of the full block (SPEC §23)"
+   "shows": "GET /traverse/capabilities (the document the service probe reads) on the same server: its `pattern` member the gate block (SPEC §23.2): the fields a client gates on, with the full block's values, the gate caps, and `details`, the route of the full block"
   },
   "pattern_capabilities": {
    "server": "masked",
@@ -78,7 +78,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the same unmasked server on the probe route"
+   "shows": "the same unmasked server on the probe route (the gate block: counting upper_bound, the dummy_fraction in the full block only)"
   },
   "pattern_capabilities_unmasked": {
    "server": "unmasked",
@@ -105,7 +105,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the same server on the probe route"
+   "shows": "the same server on the probe route (the gate block)"
   },
   "pattern_capabilities_built_at_load": {
    "server": "built_at_load",
@@ -132,7 +132,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the multi-graph server probed for one pair: that pair's full block, with `details`"
+   "shows": "the multi-graph server probed for one pair: that pair's gate block, with `details`"
   },
   "pattern_capabilities_multi_graph": {
    "server": "multi",
@@ -161,6 +161,15 @@
    "headers": {},
    "shows": "GET /traverse/capabilities of the utf8_labels server (a BASIC graph with its mask file, counting exact, an unbudgeted column annotation by header): the block of a server one of whose labels the answers can never name (SPEC §8.9), nothing of it in the document"
   },
+  "pattern_capabilities_utf8_labels": {
+   "server": "utf8_labels",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same server on the route of the full block (the block the server's answers are validated against)"
+  },
   "traverse_capabilities_primary": {
    "server": "primary",
    "method": "GET",
@@ -168,7 +177,16 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], strand_stated false, placement none_canonical, annotation unbudgeted (column)"
+   "shows": "a PRIMARY index (wrapped in CanonicalDBG) on the probe route: graph_mode primary, scopes [any_offset], placement none_canonical, annotation unbudgeted (column)"
+  },
+  "pattern_capabilities_primary": {
+   "server": "primary",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same PRIMARY server on the route of the full block: strand_stated false, the predicate's access rows (the block the server's answers are validated against)"
   },
   "capabilities_representation_unsupported": {
    "server": "hash",
@@ -186,7 +204,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the same hash-graph server on the probe route"
+   "shows": "the same hash-graph server on the probe route (the gate block)"
   },
   "count": {
    "server": "masked",

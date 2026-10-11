@@ -1260,9 +1260,9 @@ It costs no step.
   multi-graph server without a graph, §24). The feature and the routes are listed whether or not this graph can be searched (as `align`
   is); `pattern.available` says whether it can. A client gates on both.
 - **`GET /traverse/capabilities`** (the document the service's probe reads): its `pattern` member is the gate
-  block (§23): every field a client gates on, with the full block's value, and `details: "GET
-  /pattern/capabilities"`, where the full block is. In this build it is the full block with `details` (§23,
-  phase 1), so one cached probe still serves both (design §7.3).
+  block (§23.2): every field a client gates on, with the full block's value, `caps` the gate caps, and `details:
+  "GET /pattern/capabilities"`, where the full block is; no other field (the owner's decision of 2026-10-11;
+  the builds of 2026-10-09 and 2026-10-10 served the full block with `details` there, §23.2).
 - While the single index loads, `/pattern/capabilities` answers 200 with the block's graph fields `null`
   (`available: null`), `/capabilities` with `ready: false` and the same block; `/traverse/capabilities` answers
   503.
@@ -4001,18 +4001,20 @@ fields a client gates on.
   `"pattern_capabilities": "GET /pattern/capabilities"` (on a multi-graph server
   `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`, §24) beside `routes.pattern`.
 - **`GET /traverse/capabilities`**: its `pattern` member is the **gate block**, `pattern_traverse_block` of the full
-  block: every field of the table below with the full block's value, and `details: "GET /pattern/capabilities"`,
-  where the full block is. 503 while the single index loads, as before.
+  block: every field of the table below with the full block's value (`caps` the caps the table names), and
+  `details: "GET /pattern/capabilities"`, where the full block is; no other field. 503 while the single index
+  loads, as before.
 
 ### 23.2 The gate block, in two phases
 
-- **Phase 1 (this build):** the `/traverse` block is the full block with `details`: nothing a client reads there
-  changes.
-- **Phase 2** (once the search service reads the full block from `GET /pattern/capabilities`, it is deployed, and
-  the owner says so): the `/traverse` block is reduced to the fields below. A client that still reads the
-  `/traverse` block alone keeps every field it gates on or parses, with its value; the others are absent there,
-  and a client reading by presence (§1) offers nothing that needs them (the predicate, the mismatches, the
-  segments' details).
+- **Phase 2 (this build, the owner's decision of 2026-10-11: "go ahead, no clients are working with this yet";
+  the search service reads the full block from `GET /pattern/capabilities`):** the `/traverse` block is the
+  fields below and nothing else. A client that still reads the `/traverse` block alone keeps every field it
+  gates on or parses, with its value; the others are absent there, and a client reading by presence (§1) offers
+  nothing that needs them (the predicate, the mismatches, the segments' details).
+- **Phase 1** (the builds of 2026-10-09 and 2026-10-10, between the route's addition and that decision): the
+  `/traverse` block was the full block with `details`, so that nothing a client read there changed before the
+  service read the new route.
 - Fields added by later increments go to the full block only; a new value of a gate list (`long_search`'s, say)
   is in both.
 
@@ -4108,10 +4110,24 @@ the defaults below the caps), the caps `max_annotation_work`, `max_labels`,
   Every answer to a request without `max_mismatches` (or with 0) is byte-identical (the fixtures of this build:
   no stored answer changed but the capabilities documents, regenerated, the hand-made
   `pattern_capabilities_loading` with them; `mismatch_zero` is the `count` fixture's answer).
+- **The `/traverse` block is the gate block** (§23.2, phase 2; the owner's decision of 2026-10-11: "go ahead, no
+  clients are working with this yet"; the search service reads the full block from `GET /pattern/capabilities`):
+  `pattern_traverse_block` is the projection of the full block onto the table's fields, `caps` onto its nine caps,
+  with `details`; the fields of the full block only (§23.2's list) are absent there. No field changes its name, type
+  or meaning (§1); `GET /pattern/capabilities` and `GET /capabilities` serve the full block as before, the loading
+  form is as before. 901–1,004 bytes less per probe document: `/traverse/capabilities` 4,607–4,720 bytes (the
+  multi-graph server's 4,720; the `pattern` member 1,176–1,210, before 2,077–2,213), `/capabilities` 5,278–5,761
+  and `/pattern/capabilities` 2,354–2,513 unchanged (the `mismatches` object stays in the full block only); the largest, `/traverse/capabilities` of the multi-graph
+  server, 26,907 bytes under the budget of 31,744 (4,837 by the validator's measure; the unmasked server's 4,789).
+  Every answer to `POST /pattern` is byte-identical (the fixtures of this build: only the seven
+  `traverse_capabilities_*` bodies changed); `pattern_capabilities_primary` and `pattern_capabilities_utf8_labels`
+  added (above). A client of the probe alone: §23.3.
 - Requests to `POST /pattern`, `/traverse` and `/resolve` are answered as before: no answer carries these texts.
 - Fixtures (§11): `pattern_capabilities`, `pattern_capabilities_unmasked`, `pattern_capabilities_built_at_load`,
   `pattern_capabilities_multi_graph`, `pattern_capabilities_graph_param` (400) and the hand-made
-  `pattern_capabilities_loading`; the capabilities bodies of every fixture server regenerated.
+  `pattern_capabilities_loading`; the capabilities bodies of every fixture server regenerated. With phase 2
+  (above) `pattern_capabilities_primary` and `pattern_capabilities_utf8_labels`: the full block of the two
+  servers whose only capabilities fixture was the probe's, which the validator checks their answers against.
 
 ## 24. Multi-graph servers and `in_ram`
 

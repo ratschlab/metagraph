@@ -326,19 +326,20 @@ Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);
 
 /**
- * The keys of the pattern block that GET /traverse/capabilities keeps with the full block's
- * values for a client that reads that document alone (SPEC-pattern-search.md §23, the gate
+ * The keys of the pattern block that GET /traverse/capabilities serves, with the full block's
+ * values, for a client that reads that document alone (SPEC-pattern-search.md §23, the gate
  * block): every key such a client gates on or parses, and counting; a cap as "caps.NAME". The
- * other keys are the full block's (GET /pattern/capabilities, GET /capabilities).
+ * other keys are the full block's only (GET /pattern/capabilities, GET /capabilities).
  */
 std::vector<std::string> pattern_gate_keys();
 
 /**
- * The pattern block of GET /traverse/capabilities from |full| (pattern_capabilities_json):
- * |full| with `details`, the route of the full block ("GET /pattern/capabilities"). Every key
- * of |full| is kept until the search service reads that route (SPEC §23).
+ * The pattern block of GET /traverse/capabilities from |full| (pattern_capabilities_json): the
+ * gate block (SPEC §23.2), the gate keys |full| states with their values, `caps` reduced to the
+ * gate caps, and `details`, the route of the full block ("GET /pattern/capabilities"); no other
+ * key.
  */
-Json::Value pattern_traverse_block(Json::Value full);
+Json::Value pattern_traverse_block(const Json::Value &full);
 
 /**
  * One request of `metagraph pattern` (the text of a request file, |name| in the log) as the

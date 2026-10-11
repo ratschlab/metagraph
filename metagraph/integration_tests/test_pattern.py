@@ -134,6 +134,35 @@ IUPAC = {'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'R': 'AG', 'Y': 'CT', 'S': 'CG'
 COMPLEMENT = str.maketrans('ACGTRYSWKMBDHVN', 'TGCAYRSWMKVHDBN')
 
 
+# The gate block of GET /traverse/capabilities (SPEC-pattern-search.md §23.2): the fields of
+# the full block a client of that document alone gates on or parses, with the full block's
+# values, `caps` the gate caps, and `details`, the route of the full block; the server's lists
+# are pattern.cpp's kPatternGateKeys and kPatternGateCaps (test_probe_block_is_the_gate_block
+# compares them), the SPEC's the table `pattern_gate`
+GATE_KEYS = ['pattern_contract_version', 'available', 'unavailable_reason',
+             'modes', 'projections', 'kinds', 'protein_residues', 'genetic_codes', 'strands',
+             'scopes', 'scopes_by_graph_mode', 'graph_mode', 'k',
+             'long_patterns', 'long_search', 'default_long_search',
+             'finalize_reserve_ms', 'default_time_budget_ms', 'default_genetic_code',
+             'default_occurrences',
+             'support', 'placement', 'annotation', 'mask', 'counting',
+             'caps']
+GATE_CAPS = ['max_patterns', 'max_contexts', 'max_anchors', 'max_paths', 'max_steps',
+             'time_budget_ms', 'min_information_bits', 'max_memory_mb', 'max_labels_per_anchor']
+DETAILS = 'GET /pattern/capabilities'
+PATTERN_CPP = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'cli',
+                           'pattern.cpp')
+
+
+def gate_block(full):
+    """The gate block of the full block |full|, as GET /traverse/capabilities serves it."""
+    b = {k: v for k, v in full.items() if k in GATE_KEYS}
+    if 'caps' in b:
+        b['caps'] = {c: v for c, v in full['caps'].items() if c in GATE_CAPS}
+    b['details'] = DETAILS
+    return b
+
+
 def revcomp(s):
     return s.upper().translate(COMPLEMENT)[::-1]
 
@@ -1025,10 +1054,10 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         # references to the sections that state the rules (§4.5 classifies every cap)
         self.assertEqual('SPEC-pattern-search.md section 4.5', p['caps_rule'])
         self.assertEqual('SPEC-pattern-search.md section 12.2', p['protein_rule'])
-        # the same block on the probe a service reads, with the route of the full block, and
-        # the full block on its own route (SPEC §23), compressed when asked for
+        # the gate block on the probe a service reads, with the route of the full block
+        # (SPEC §23.2), and the full block on its own route (SPEC §23), compressed when asked for
         probe = self.server.get('traverse/capabilities').json()
-        self.assertEqual(dict(p, details='GET /pattern/capabilities'), probe['pattern'])
+        self.assertEqual(gate_block(p), probe['pattern'])
         ret = requests.get(url=self.server.url('pattern/capabilities'),
                            headers={'Accept-Encoding': 'gzip'}, timeout=60)
         self.assertEqual((200, 'gzip'), (ret.status_code, ret.headers.get('Content-Encoding')))
@@ -1048,6 +1077,42 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertEqual(('record', 'record_verified', 'budgeted'),
                              (p['placement'], p['support'], p['annotation']))
 
+    def test_probe_block_is_the_gate_block(self):
+        """SPEC §23.2 (the owner's decision of 2026-10-11): the `pattern` member of GET
+        /traverse/capabilities is the gate block: exactly the gate keys (pattern.cpp's
+        kPatternGateKeys, the SPEC's table) and `details`, its `caps` exactly the gate caps,
+        every value the full block's; a field of the full block only (the predicate, the
+        defaults below the caps, caps.max_labels, caps.row_cache_mb) is absent there and present
+        on GET /pattern/capabilities and GET /capabilities, which keep the full block."""
+        full = self.server.get('pattern/capabilities').json()
+        probe = self.server.get('traverse/capabilities').json()['pattern']
+        self.assertEqual(set(GATE_KEYS) | {'details'}, set(probe))
+        self.assertEqual(set(GATE_CAPS), set(probe['caps']))
+        self.assertEqual(DETAILS, probe['details'])
+        for key in GATE_KEYS:
+            if key != 'caps':
+                self.assertEqual(full[key], probe[key], key)
+        for cap in GATE_CAPS:
+            self.assertEqual(full['caps'][cap], probe['caps'][cap], cap)
+        self.assertEqual(gate_block(full), probe)
+        for key in ('predicate', 'default_max_labels', 'default_max_anchors', 'dummy_fraction',
+                    'delivery_mbps', 'caps_rule', 'alphabet', 'strand_stated'):
+            self.assertIn(key, full)
+            self.assertNotIn(key, probe)
+        for cap in ('max_labels', 'row_cache_mb', 'max_checked_entries', 'max_predicate_labels'):
+            self.assertIn(cap, full['caps'])
+            self.assertNotIn(cap, probe['caps'])
+        self.assertEqual(full, self.server.get('capabilities').json()['pattern'])
+        self.assertNotIn('details', full)
+        # the lists above are the server's (pattern.cpp), when the sources are in the checkout
+        if os.path.isfile(PATTERN_CPP):
+            with open(PATTERN_CPP, encoding='utf-8') as f:
+                source = f.read()
+            for name, expected in (('kPatternGateKeys', GATE_KEYS), ('kPatternGateCaps', GATE_CAPS)):
+                m = re.search(r'const char \*const ' + name + r'\[\] = \{(.*?)\};', source, re.S)
+                self.assertTrue(m, name)
+                self.assertEqual(expected, re.findall(r'"([a-z_]+)"', m.group(1)), name)
+
     def test_defaults_below_the_caps(self):
         """SPEC §4.5: a host raises --pattern-max-labels and --pattern-max-anchors for the
         callers who ask while a request that names neither field keeps the defaults
@@ -1063,13 +1128,20 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                         os.path.join(self.tempdir.name, 'server_defaults.log'))
         try:
             full = server.get('pattern/capabilities').json()
-            for block in (full, server.get('capabilities').json()['pattern'],
-                          server.get('traverse/capabilities').json()['pattern']):
+            for block in (full, server.get('capabilities').json()['pattern']):
                 self.assertEqual((10000, 1000, 10000, 1000),
                                  (block['caps']['max_labels'], block['default_max_labels'],
                                   block['caps']['max_anchors'], block['default_max_anchors']))
             self.assertEqual(dict(DEFAULT_CAPS, max_labels=10000, max_anchors=10000),
                              full['caps'])
+            # the probe's gate block states the cap max_anchors, not the defaults nor
+            # max_labels (SPEC §23.2)
+            probe = server.get('traverse/capabilities').json()['pattern']
+            self.assertEqual(gate_block(full), probe)
+            self.assertEqual(10000, probe['caps']['max_anchors'])
+            for absent in ('default_max_labels', 'default_max_anchors'):
+                self.assertNotIn(absent, probe)
+            self.assertNotIn('max_labels', probe['caps'])
             # a request that names neither: the defaults, nothing clamped, at most 1,000
             # labels listed (the mini has far fewer: the list is whole)
             request = {'patterns': [{'dna': self.NDM_F}], 'mode': 'partial',
@@ -1143,9 +1215,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         that has its cache emptied and refilled (work.row_cache_evictions) where the default
         keeps every row, and the paths, their labels and the counts are the same."""
         for block in (self.server.get('pattern/capabilities').json(),
-                      self.server.get('capabilities').json()['pattern'],
-                      self.server.get('traverse/capabilities').json()['pattern']):
+                      self.server.get('capabilities').json()['pattern']):
             self.assertEqual(64, block['caps']['row_cache_mb'])
+        # not a gate cap: the probe's block leaves it to the full block (SPEC §23.2)
+        self.assertNotIn('row_cache_mb',
+                         self.server.get('traverse/capabilities').json()['pattern']['caps'])
         request = {'patterns': [{'iupac': self.ROW_CACHE_PATTERN}], 'mode': 'partial',
                    'strands': 'forward', 'long_search': 'supported_paths',
                    'output': {'labels': 'all'}}
@@ -1160,10 +1234,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                         os.path.join(self.tempdir.name, 'server_row_cache.log'))
         try:
             full = server.get('pattern/capabilities').json()
-            for block in (full, server.get('capabilities').json()['pattern'],
-                          server.get('traverse/capabilities').json()['pattern']):
+            for block in (full, server.get('capabilities').json()['pattern']):
                 self.assertEqual(1, block['caps']['row_cache_mb'])
             self.assertEqual(dict(DEFAULT_CAPS, row_cache_mb=1), full['caps'])
+            self.assertEqual(gate_block(full),
+                             server.get('traverse/capabilities').json()['pattern'])
             small = self.pattern(server, request)
             self.assertNotIn('row_cache_mb', small['limits'])
             self.assertEqual(base['limits'], small['limits'])
@@ -3108,8 +3183,17 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         --count-dummy); the rest of the block as on the masked graph, which counts exactly and
         has no fraction."""
         f = self.exact_dummy_fraction()
-        for route in ('capabilities', 'traverse/capabilities'):
-            p = self.unmasked_server.get(route).json()['pattern']
+        # the probe's gate block states the counting, not the fraction (SPEC §23.2)
+        probe = self.unmasked_server.get('traverse/capabilities').json()['pattern']
+        self.assertEqual(('absent', True, None, 'upper_bound'),
+                         (probe['mask'], probe['available'], probe['unavailable_reason'],
+                          probe['counting']))
+        self.assertNotIn('dummy_fraction', probe)
+        self.assertEqual(gate_block(self.unmasked_server.get('pattern/capabilities').json()),
+                         probe)
+        for route in ('capabilities', 'pattern/capabilities'):
+            p = self.unmasked_server.get(route).json()
+            p = p['pattern'] if route == 'capabilities' else p
             self.assertEqual(('absent', True, None, 'upper_bound'),
                              (p['mask'], p['available'], p['unavailable_reason'], p['counting']))
             frac = p['dummy_fraction']
@@ -3120,7 +3204,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertLessEqual(f, hi)
             self.assertLessEqual(lo, frac['value'])
             self.assertLessEqual(frac['value'], hi)
-            q = self.server.get(route).json()['pattern']
+            q = self.server.get(route).json()
+            q = q['pattern'] if route == 'capabilities' else q
             self.assertEqual(('file', 'exact', None), (q['mask'], q['counting'],
                                                        q['dummy_fraction']))
             self.assertEqual(dict(q, mask='absent', counting='upper_bound', dummy_fraction=frac),
@@ -3617,7 +3702,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(('G1', self.graph_basic), (block.pop('graph'), block.pop('graph_path')))
             self.assertEqual(single.get('pattern/capabilities').json(), block)
             probe = server.get('traverse/capabilities?graph=G1').json()
-            self.assertEqual(dict(block, details='GET /pattern/capabilities'), probe['pattern'])
+            self.assertEqual(gate_block(block), probe['pattern'])
             ret = server.get('pattern/capabilities')
             self.assertEqual(400, ret.status_code)
             self.assertIn('needs ?graph=<name>', ret.json()['error'])
@@ -4332,8 +4417,7 @@ class TestPatternRegression(TestingBase):
         b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
         b = without_poll_stride(b)
         new_caps = self.new.get('capabilities').json()
-        self.assertEqual(dict(new_caps['pattern'], details='GET /pattern/capabilities'),
-                         b.pop('pattern'))
+        self.assertEqual(gate_block(new_caps['pattern']), b.pop('pattern'))
         self.assertEqual(new_caps['resolve'], b.pop('resolve'))
         self.assertEqual(new_caps['in_ram'], b.pop('in_ram'))
         self.assertEqual(a, b)

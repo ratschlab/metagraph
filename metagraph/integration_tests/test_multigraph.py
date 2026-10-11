@@ -35,6 +35,7 @@ import unittest
 import requests
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH
+from test_pattern import gate_block
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
 FASTA = os.path.join(MINI_DIR, 'fasta')
@@ -399,7 +400,9 @@ class TestMultiGraphServer(TestingBase):
                          (picked.pop('graph'), picked.pop('graph_path')))
         self.assertEqual(kleb, picked)
         probe = self.server.get('traverse/capabilities?graph=kleb').json()
-        self.assertEqual(dict(kleb, details='GET /pattern/capabilities'), probe['pattern'])
+        # the pair's gate block (SPEC-pattern-search.md §23.2)
+        self.assertEqual(gate_block(kleb), probe['pattern'])
+        self.assertNotIn('predicate', probe['pattern'])
         for query, words in (('', 'needs ?graph=<name>'), ('?graph=kleb&x=1', "unknown parameter 'x'"),
                              ('?graph=nope', "unknown graph 'nope'")):
             ret = self.server.get('pattern/capabilities' + query)
