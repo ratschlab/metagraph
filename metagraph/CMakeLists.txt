@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16...3.30)
+cmake_minimum_required(VERSION 3.19...3.30)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
@@ -23,6 +23,7 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
+# Keep legacy dependency targets at C++17. Folly propagates C++20 to MetaGraph.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -157,11 +158,9 @@ if(APPLE)
 endif()
 
 # Check if 128 bit integers are supported
-try_compile(MODE_TI
-  "${PROJECT_BINARY_DIR}"
-  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
-)
-if(MODE_TI)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("int main() { unsigned __int128 value = 1; return value >> 64; }" METAGRAPH_HAS_UINT128)
+if(METAGRAPH_HAS_UINT128)
   list(APPEND METAGRAPH_PUBLIC_DEFS MODE_TI)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
       add_compile_options(-mcx16)
@@ -267,23 +266,6 @@ set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
-# Build sdsl-lite out-of-tree and install locally to avoid target clashes
-include(ExternalProject)
-set(SDSL_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/sdsl)
-ExternalProject_Add(SDSL
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/sdsl-lite
-  CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
-             -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
-             -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
-             -DCMAKE_POSITION_INDEPENDENT_CODE=${CMAKE_POSITION_INDEPENDENT_CODE}
-)
-# Delete gtest headers after install
-ExternalProject_Add_Step(SDSL remove_gtest
-  COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
-  DEPENDEES install
-)
-
-
 add_library(ips4o INTERFACE)
 target_include_directories(ips4o INTERFACE external-libraries/ips4o)
 
@@ -291,7 +273,7 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 add_library(eigen INTERFACE)
-target_include_directories(eigen INTERFACE external-libraries/eigen)
+target_include_directories(eigen SYSTEM INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
 # Allow MetaGraph's custom Find*.cmake modules to be picked up even when the
@@ -314,7 +296,7 @@ if(APPLE)
 endif()
 
 if(APPLE)
-  if(NOT DEFINED ICU_ROOT)
+  if(NOT DEFINED ICU_ROOT AND NOT DEFINED ENV{ICU_ROOT})
     if(EXISTS ${HOMEBREW_DIR}/opt/icu4c)
       set(ICU_ROOT "${HOMEBREW_DIR}/opt/icu4c")
     else()
@@ -330,8 +312,12 @@ if(APPLE)
   get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
 endif()
 
-set(Boost_USE_STATIC_LIBS ON)
+option(Boost_USE_STATIC_LIBS "Link Boost statically" ON)
+if(BUILD_STATIC)
+  set(Boost_USE_STATIC_LIBS ON)
+endif()
 find_package(Boost REQUIRED COMPONENTS iostreams)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate)
 
 # makes ASIO not depend on boost (used by Simple-Web-Server via CMake variable)
 set(USE_STANDALONE_ASIO ON)
@@ -362,13 +348,20 @@ target_compile_options(zlib
     -Wno-maybe-uninitialized
 )
 
+# Expose spdlog's bundled fmt under the include path required by Folly.
+file(COPY external-libraries/spdlog/include/spdlog/fmt/bundled/
+     DESTINATION ${PROJECT_BINARY_DIR}/gen/fmt)
+
 add_library(folly STATIC
+  external-libraries/folly/folly/lang/Exception.cpp
   external-libraries/folly/folly/lang/SafeAssert.cpp
   external-libraries/folly/folly/lang/ToAscii.cpp
 )
+target_compile_features(folly PUBLIC cxx_std_20)
 target_include_directories(folly PRIVATE
   external-libraries/folly
   ${PROJECT_BINARY_DIR}/external-libraries/folly/include
+  ${PROJECT_BINARY_DIR}/gen
 )
 
 add_library(progress_bar STATIC
@@ -410,6 +403,7 @@ else()
   set(HTSLIB_CC "${CMAKE_C_COMPILER}")
 endif()
 
+include(ExternalProject)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
@@ -464,7 +458,6 @@ add_library(metagraph-core STATIC ${metagraph_core_files})
 target_include_directories(metagraph-core PUBLIC
   ${PROJECT_SOURCE_DIR}/src
   external-libraries/KMC/kmc_api
-  ${SDSL_INSTALL}/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/cpp_progress_bar
@@ -474,7 +467,6 @@ target_include_directories(metagraph-core PUBLIC
   ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/jsoncpp/include
   external-libraries/DYNAMIC/include
 )
 
@@ -490,13 +482,7 @@ endif()
 target_link_directories(metagraph-core INTERFACE
   ${PROJECT_BINARY_DIR}/KMC
   ${HTSLIB_INSTALL}/lib
-  ${SDSL_INSTALL}/lib
 )
-
-if(APPLE)
-  target_link_directories(metagraph-core INTERFACE ${HOMEBREW_DIR}/lib)
-  target_include_directories(metagraph-core SYSTEM PUBLIC ${HOMEBREW_DIR}/include)
-endif()
 
 if(ICU_DATA_LIBRARY_PATH)
   target_link_directories(metagraph-core INTERFACE ${ICU_DATA_LIBRARY_PATH})
@@ -504,6 +490,8 @@ endif()
 
 # TODO: move ASIO out of here once it replaces sprintf with snprintf
 target_include_directories(metagraph-core SYSTEM PUBLIC
+  external-libraries/sdsl-lite/include
+  external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
 )
@@ -513,7 +501,8 @@ findFolly()
 if(FOLLY_FOUND)
   list(APPEND METAGRAPH_PUBLIC_DEFS _USE_FOLLY)
   if(Jemalloc_FOUND)
-    list(APPEND METAGRAPH_PUBLIC_DEFS USE_JEMALLOC)
+    # Keep the stable je_* aliases available before any jemalloc header inclusion.
+    list(APPEND METAGRAPH_PUBLIC_DEFS USE_JEMALLOC JEMALLOC_NO_DEMANGLE)
   else()
     message(WARNING "Jemalloc not found, some optimizations will be disabled.")
   endif()
@@ -557,16 +546,15 @@ target_include_directories(metagraph-core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/gen
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
-add_dependencies(metagraph-core HTSLIB SDSL)
+add_dependencies(metagraph-core HTSLIB)
 
 
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts
   zlib
-  deflate
+  ${LIBDEFLATE_LIBRARY}
   Boost::iostreams
-  -lsdsl
   jsoncpp_lib
   progress_bar
   mersenne_twister
@@ -644,6 +632,10 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(metagraph-core PUBLIC ${METALIBS})
+# Discover OpenSSL before Simple-Web-Server adds Homebrew-only search hints.
+if(NOT DEFINED USE_OPENSSL OR USE_OPENSSL)
+  find_package(OpenSSL QUIET)
+endif()
 add_subdirectory(external-libraries/Simple-Web-Server)
 target_link_libraries(metagraph-cli PUBLIC metagraph-core PRIVATE simple-web-server)
 
@@ -729,7 +721,6 @@ if(LINK_LIBS)
 endif()
 
 # Add external libraries built by ExternalProject (not CMake targets)
-string(APPEND BUNDLE_LIBS_LIST ";${SDSL_INSTALL}/lib/libsdsl.a")
 string(APPEND BUNDLE_LIBS_LIST ";${HTSLIB_INSTALL}/lib/libhts.a")
 string(APPEND BUNDLE_LIBS_LIST ";${PROJECT_BINARY_DIR}/KMC/libKMC.a")
 
@@ -738,7 +729,6 @@ string(APPEND BUNDLE_LIBS_LIST ";${PROJECT_BINARY_DIR}/KMC/libKMC.a")
 install(CODE "
   set(PROJECT_BINARY_DIR \"${PROJECT_BINARY_DIR}\")
   set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
-  set(SDSL_INSTALL \"${SDSL_INSTALL}\")
   set(HTSLIB_INSTALL \"${HTSLIB_INSTALL}\")
   set(CMAKE_AR \"${CMAKE_AR}\")
   set(BUNDLE_LIBS_LIST \"${BUNDLE_LIBS_LIST}\")
@@ -841,7 +831,7 @@ if(METAGRAPH_BUILD_EXECUTABLE)
 
   add_executable(benchmarks ${benchmark_files})
   target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-  target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
+  target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
 
   target_compile_options(benchmarks PRIVATE)
 

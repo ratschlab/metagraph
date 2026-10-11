@@ -151,7 +151,7 @@ bit_vector_sd
 }
 
 bit_vector_sd::bit_vector_sd(std::initializer_list<bool> init)
-      : bit_vector_sd(sdsl::bit_vector(init)) {}
+      : bit_vector_sd(sdsl::bit_vector(init.begin(), init.end())) {}
 
 bit_vector_sd& bit_vector_sd::operator=(const bit_vector_sd &other) {
     inverted_ = other.inverted_;
@@ -312,12 +312,12 @@ sdsl::bit_vector bit_vector_sd::to_vector() const {
     if (inverted_) {
         #pragma omp parallel num_threads(get_num_threads())
         for (uint64_t i = 1; i <= max_rank; ++i) {
-            unset_bit(vector.data(), slct1_(i), true, std::memory_order_relaxed);
+            unset_bit(vector.data(), slct1_(i), true, __ATOMIC_RELAXED);
         }
     } else {
         #pragma omp parallel num_threads(get_num_threads())
         for (uint64_t i = 1; i <= max_rank; ++i) {
-            set_bit(vector.data(), slct1_(i), true, std::memory_order_relaxed);
+            set_bit(vector.data(), slct1_(i), true, __ATOMIC_RELAXED);
         }
     }
     std::atomic_thread_fence(std::memory_order_acquire);

@@ -1,6 +1,6 @@
 [submodule "metagraph/external-libraries/sdsl-lite"]
 	path = metagraph/external-libraries/sdsl-lite
-	url = https://github.com/hmusta/sdsl-lite.git
+	url = https://github.com/ratschlab/sdsl-lite.git
 	ignore = untracked
 [submodule "metagraph/external-libraries/hopscotch-map"]
 	path = metagraph/external-libraries/hopscotch-map
@@ -13,7 +13,7 @@
 	url = https://github.com/karasikov/caches.git
 [submodule "metagraph/external-libraries/eigen"]
 	path = metagraph/external-libraries/eigen
-	url = https://github.com/eigenteam/eigen-git-mirror.git
+	url = https://gitlab.com/libeigen/eigen.git
 [submodule "metagraph/external-libraries/KMC"]
 	path = metagraph/external-libraries/KMC
 	url = https://github.com/karasikov/KMC.git
@@ -55,7 +55,7 @@
 	url = https://gitlab.com/eidheim/Simple-Web-Server.git
 [submodule "metagraph/external-libraries/folly"]
 	path = metagraph/external-libraries/folly
-	url = https://github.com/facebook/folly
+	url = https://github.com/ratschlab/folly
 [submodule "metagraph/external-libraries/Priority-Deque"]
 	path = metagraph/external-libraries/Priority-Deque
 	url = https://github.com/nmcclatchey/Priority-Deque

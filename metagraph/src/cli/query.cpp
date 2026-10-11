@@ -29,7 +29,7 @@ namespace mtg {
 namespace cli {
 
 const bool kPrefilterWithBloom = true;
-const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
+constexpr char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using namespace mtg::graph;
 using namespace mtg::annot::matrix;

@@ -40,7 +40,7 @@ BinRelWT
 
     delimiters_ = bit_vector_rrr<>(to_sdsl(std::move(delimiters_vec)));
 
-    decltype(wt_)(std::move(flat)).swap(wt_);
+    wt_ = decltype(wt_)(flat.begin(), flat.end());
 }
 
 uint64_t BinRelWT::num_columns() const {

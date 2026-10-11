@@ -405,7 +405,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             call_stack.back() = j;
             // Each lambda captures `rows` and `call_stack` by value, giving each
             // child its own copy to modify independently.
-            thread_pool.force_enqueue_front([=,&thread_pool]() {
+            thread_pool.force_enqueue_front([=,this,&thread_pool]() {
                 this->child_nodes_[j]->slice_rows<T>(*child_row_ids_ptr, std::move(rows), root,
                                                      std::move(call_stack), max_columns_cutoff,
                                                      thread_pool, std::move(call_slice));
