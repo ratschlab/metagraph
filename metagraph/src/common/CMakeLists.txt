@@ -61,6 +61,9 @@ target_link_libraries(metagraph_common
     spdlog::spdlog
     z
 )
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  target_link_libraries(metagraph_common PUBLIC atomic)
+endif()
 target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
 set(_USE_FOLLY 1)
 set(MODE_TI 1)

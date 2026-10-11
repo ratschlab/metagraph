@@ -196,7 +196,7 @@ endif()
 #-------------------
 set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
 if(NOT DEFINED BUILD_KMC)
-set(BUILD_KMC TRUE)
+set(BUILD_KMC ${METAGRAPH_BUILD_EXECUTABLE})
 endif()
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
@@ -336,7 +336,7 @@ list(APPEND METAGRAPH_PUBLIC_DEFS SPDLOG_FMT_EXTERNAL)
 set(SSHASH_BUILD_EXECUTABLES OFF)
 add_subdirectory(external-libraries/sshash SYSTEM)
 target_include_directories(sshash_static PRIVATE external-libraries/zlib)
-add_subdirectory(external-libraries/DYNAMIC)
+add_subdirectory(external-libraries/DYNAMIC EXCLUDE_FROM_ALL)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
   PRIVATE
@@ -349,13 +349,8 @@ target_compile_options(zlib
     -Wno-maybe-uninitialized
 )
 
-add_library(progress_bar STATIC
-  external-libraries/cpp_progress_bar/progress_bar.cpp
-)
-
-add_library(mersenne_twister STATIC
-  external-libraries/rollinghashcpp/mersennetwister.cpp
-)
+buildProgressBar(${PROJECT_SOURCE_DIR}/external-libraries PROGRESS_BAR_LIBRARY)
+buildMersenneTwister(${PROJECT_SOURCE_DIR}/external-libraries MERSENNE_TWISTER_LIBRARY)
 
 add_library(sdust STATIC
   external-libraries/sdust/sdust.c
@@ -545,8 +540,8 @@ set(METALIBS ${METALIBS}
   ${LIBDEFLATE_LIBRARY}
   Boost::iostreams
   jsoncpp_lib
-  progress_bar
-  mersenne_twister
+  ${PROGRESS_BAR_LIBRARY}
+  ${MERSENNE_TWISTER_LIBRARY}
   sdust
   spdlog::spdlog
   fmt::fmt
@@ -763,6 +758,7 @@ if(METAGRAPH_BUILD_EXECUTABLE)
   #-------------------
   # Benchmarks
   #-------------------
+  set(BENCHMARK_ENABLE_TESTING OFF)
   add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
 
   file(GLOB benchmark_files
