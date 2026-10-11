@@ -5,6 +5,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <span>
 #include <vector>
 
 #include <json/json.h>
@@ -73,7 +74,7 @@ class Seed {
 
     // Add more nodes to the Seed. This assumes that the original query has |next|
     // extra characters and that the updated path still spells the query view.
-    void expand(const std::vector<node_index> &next) {
+    void expand(std::span<const node_index> next) {
         query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
         end_clipping_ -= next.size();
         nodes_.insert(nodes_.end(), next.begin(), next.end());
