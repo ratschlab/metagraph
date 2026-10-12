@@ -90,6 +90,26 @@ class TestIndexNames(TestingBase):
                                              'column': 0, 'record': None, 'hex': '6c6162656cff'}],
                           'names_ok': False}, names)
 
+    def test_check_names_takes_one_annotation_and_nothing_else(self):
+        """Without an annotation, with two, or with a graph beside it, --check-names is refused
+        on stderr with exit 1 and nothing on stdout, which holds the report alone."""
+        fasta = self._fasta([(b'a', self.SEQ_A), (b'b', self.SEQ_B)])
+        graph = self._graph(fasta)
+        self._run(f'{METAGRAPH} annotate -p {NUM_THREADS} -i {graph} --anno-header '
+                  f'-o {self.d}/anno {fasta}')
+        anno = f'{self.d}/anno.column.annodbg'
+        for args in ('', f'-a {anno} -a {anno}', f'{graph} -a {anno}'):
+            res = subprocess.run([f'{METAGRAPH} stats --check-names {args}'], shell=True,
+                                 stdout=PIPE, stderr=PIPE)
+            self.assertEqual(1, res.returncode, args)
+            self.assertEqual(b'', res.stdout, args)
+            self.assertIn('--check-names takes exactly one annotation',
+                          res.stderr.decode('utf-8', 'replace'), args)
+        code, names, _ = check_names(anno)
+        self.assertEqual(0, code)
+        self.assertEqual(2, names['labels'])
+        self.assertTrue(names['names_ok'])
+
     def test_a_repeated_record_header_fails_the_check(self):
         fasta = self._fasta([(b'dup', self.SEQ_A), (b'other', self.SEQ_B), (b'dup', self.SEQ_C),
                              (b'bad\xff', self.SEQ_D)])

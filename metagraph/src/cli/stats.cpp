@@ -523,6 +523,14 @@ int print_stats(Config *config) {
 
     const auto &files = config->fnames;
 
+    // the report is the only thing written to stdout: one annotation, no graph or mapping
+    // beside it (whose statistics go to stdout too), refused before any output
+    if (config->check_names && (config->infbase_annotators.size() != 1 || files.size())) {
+        logger->error("--check-names takes exactly one annotation (-a ANNOTATION) and no"
+                      " other file: its JSON report is the only thing written to stdout");
+        return 1;
+    }
+
     bool names_ok = true;
     auto annotation_stats = [&](const std::string &file) {
         if (!config->check_names) {
