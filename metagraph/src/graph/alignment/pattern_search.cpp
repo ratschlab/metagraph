@@ -2467,11 +2467,13 @@ class PatternRun {
             if (stop_)
                 return;
             // discovery compared the pass's counts before its scans and check completed them:
-            // compared again before the next pass, so that stop_at_threshold stops once the
-            // levels 0 .. t alone exceed the threshold (level t then complete). After the last
-            // pass nothing is left to save and the counts are the answer
+            // both bounds are recomputed and compared again before the next pass, so that
+            // stop_at_threshold stops once the levels 0 .. t alone exceed the threshold (level
+            // t then complete) and no later pass compares what the check dropped. After the
+            // last pass nothing is left to save and the counts are the answer
             if (t + 1 < levels_) {
                 refresh_running_lower();
+                refresh_running_upper();
                 if (threshold_crossed())
                     return;
             }
@@ -2492,6 +2494,23 @@ class PatternRun {
             }
             assert(lower >= search.running_lower);
             search.running_lower = lower;
+        }
+    }
+
+    // every base search's running upper bound recomputed from its counts as they stand: the
+    // exact contexts and the unchecked candidates, from which the check moved the real
+    // candidates into the exact ones and dropped the source dummies. The ranges whose scan is
+    // deferred stay out, as add_item leaves them (a scan can only lower their share), so that
+    // the running bound never exceeds the final U and equals it where no scan is pending
+    void refresh_running_upper() {
+        for (BaseSearch &search : searches_) {
+            assert(search.unchecked.size() == search.exact.size());
+            uint64_t upper = 0;
+            for (size_t p = 0; p < search.exact.size(); ++p) {
+                upper += search.exact[p] + search.unchecked[p];
+            }
+            assert(upper <= search.running_upper);
+            search.running_upper = upper;
         }
     }
 

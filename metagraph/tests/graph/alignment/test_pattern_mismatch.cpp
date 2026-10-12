@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -1189,6 +1190,228 @@ TEST(PatternMismatch, UnmaskedReleasesPerLevel) {
         ++cases;
     }
     EXPECT_EQ(60u, cases);
+}
+
+// ---------------------------------------------------------------- the thresholds after the
+// check of few unchecked candidates
+
+// what a sweep of the thresholds after the check exercised
+struct ThresholdSweep {
+    // the allowances under which a checked level dropped source dummies before a later pass
+    size_t stale_windows = 0;
+    size_t releases = 0;
+    size_t stops = 0;
+};
+
+/**
+ * A graph without the mask: the check after each pass turns the real candidates of its level
+ * into exact contexts and drops the source dummies, and the passes after it compare the
+ * counts as the check left them (SPEC §7.4, §21.6). For |text| on |unmasked| under |base|
+ * (no threshold in the way), |expected| the masked list and |truth| its counts: every
+ * allowance (Request::max_checked_entries) at, below and above each level's cumulative
+ * unchecked candidates, and for each the caps at every decision boundary (the final upper
+ * bound U, what a bound still carrying the dropped dummies would state, and per pass the
+ * completed levels plus its candidates). ALL_OR_COUNT releases every context iff U is within
+ * max_contexts, never failing an admitted release (its ranges are retained);
+ * stop_at_threshold stops in the pass of level t iff the levels below t as completed plus
+ * level t's candidates exceed the cap, and only then, the levels below t as the check left
+ * them.
+ */
+void sweep_thresholds_after_the_check(const DeBruijnGraph &unmasked, const std::string &text,
+                                      const Request &base, const std::vector<MCtx> &expected,
+                                      const Truth &truth, ThresholdSweep *sweep) {
+    const uint8_t m = base.max_mismatches;
+    // per level: its candidates U_t with no check, and those of them unchecked
+    Request none = base;
+    none.max_checked_entries = 0;
+    const Result plain = count_of(unmasked, text, none);
+    ASSERT_FALSE(plain.stop);
+    std::vector<uint64_t> upper(m + 1, 0);
+    std::vector<uint64_t> unchecked(m + 1, 0);
+    for (uint8_t t = 0; t <= m; ++t) {
+        const Count &level = plain.contexts->by_mismatches.at(t);
+        EXPECT_TRUE(true_relation(level, truth.by_level[t])) << "level " << int(t);
+        upper[t] = level.relation == Relation::BOUNDS ? level.upper : level.value;
+        unchecked[t] = level.relation == Relation::BOUNDS ? level.upper - level.lower : 0;
+    }
+    std::set<uint64_t> limits { 0 };
+    uint64_t cumulative = 0;
+    for (uint64_t u : unchecked) {
+        cumulative += u;
+        limits.insert({ cumulative, cumulative + 1 });
+        if (cumulative)
+            limits.insert(cumulative - 1);
+    }
+    auto bound_of = [](const Count &count) {
+        return count.relation == Relation::EXACT ? count.value : count.upper;
+    };
+    for (uint64_t limit : limits) {
+        SCOPED_TRACE("allowance " + std::to_string(limit));
+        // the counts the check leaves: level t is exact iff it has no unchecked candidate or
+        // the levels up to t have at most |limit| in all; else U_t
+        std::vector<bool> exact(m + 1, false);
+        std::vector<uint64_t> completed(m + 1, 0);
+        uint64_t so_far = 0;
+        for (uint8_t t = 0; t <= m; ++t) {
+            so_far += unchecked[t];
+            exact[t] = !unchecked[t] || so_far <= limit;
+            completed[t] = exact[t] ? truth.by_level[t] : upper[t];
+        }
+        const uint64_t final_upper = std::accumulate(completed.begin(), completed.end(),
+                                                     uint64_t(0));
+        // the dummies the check dropped from a level before the last pass
+        uint64_t dropped = 0;
+        for (uint8_t t = 0; t < m; ++t) {
+            dropped += upper[t] - completed[t];
+        }
+        sweep->stale_windows += dropped > 0;
+
+        Request request = base;
+        request.max_checked_entries = limit;
+        const Result counted = count_of(unmasked, text, request);
+        ASSERT_FALSE(counted.stop);
+        EXPECT_EQ(final_upper, bound_of(counted.contexts->total));
+        for (uint8_t t = 0; t <= m; ++t) {
+            const Count &level = counted.contexts->by_mismatches.at(t);
+            EXPECT_EQ(exact[t] ? Relation::EXACT : Relation::BOUNDS, level.relation)
+                << "level " << int(t);
+            EXPECT_EQ(completed[t], bound_of(level)) << "level " << int(t);
+        }
+
+        std::set<uint64_t> caps { 0 };
+        auto around = [&](uint64_t cap) {
+            caps.insert({ cap, cap + 1 });
+            if (cap)
+                caps.insert(cap - 1);
+        };
+        around(final_upper);
+        around(final_upper + dropped);
+        uint64_t below = 0;
+        uint64_t stale = 0;
+        for (uint8_t t = 0; t <= m; ++t) {
+            around(below + upper[t]);
+            around(stale + upper[t]);
+            below += completed[t];
+            stale += upper[t];
+        }
+        for (uint64_t cap : caps) {
+            SCOPED_TRACE("cap " + std::to_string(cap));
+            request.max_contexts = cap;
+            request.stop_at_threshold = false;
+            Result r;
+            std::vector<MCtx> got;
+            ASSERT_NO_THROW(got = released_by(unmasked, text, request, &r));
+            ASSERT_TRUE(r.extraction);
+            EXPECT_FALSE(r.stop);
+            if (final_upper <= cap) {
+                ++sweep->releases;
+                EXPECT_EQ(expected, got);
+                EXPECT_TRUE(r.extraction->complete);
+                EXPECT_FALSE(r.extraction->withheld);
+                for (uint8_t t = 0; t <= m; ++t) {
+                    const Count &level = r.contexts->by_mismatches.at(t);
+                    EXPECT_EQ(Relation::EXACT, level.relation) << "level " << int(t);
+                    EXPECT_EQ(truth.by_level[t], level.value) << "level " << int(t);
+                }
+            } else {
+                EXPECT_TRUE(got.empty());
+                ASSERT_TRUE(r.extraction->withheld);
+                EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, *r.extraction->withheld);
+            }
+
+            // the stop's pass: the first level whose candidates on top of the completed
+            // levels exceed the cap
+            request.stop_at_threshold = true;
+            const Result s = count_of(unmasked, text, request);
+            std::optional<uint8_t> level;
+            uint64_t done = 0;
+            for (uint8_t t = 0; t <= m; ++t) {
+                if (done + upper[t] > cap) {
+                    level = t;
+                    break;
+                }
+                done += completed[t];
+            }
+            ASSERT_EQ(bool(level), bool(s.stop));
+            if (!level) {
+                EXPECT_EQ(final_upper, bound_of(s.contexts->total));
+                continue;
+            }
+            ++sweep->stops;
+            EXPECT_EQ(StopReason::MAX_CONTEXTS, s.stop->reason);
+            EXPECT_EQ(StopPhase::DISCOVERY, s.stop->phase);
+            EXPECT_EQ(*level, check_stopped(s, truth, false));
+            for (uint8_t u = 0; u < *level; ++u) {
+                const Count &c = s.contexts->by_mismatches.at(u);
+                EXPECT_EQ(exact[u] ? Relation::EXACT : Relation::BOUNDS, c.relation)
+                    << "level " << int(u);
+                EXPECT_EQ(completed[u], bound_of(c)) << "level " << int(u);
+            }
+            Result w;
+            EXPECT_TRUE(released_by(unmasked, text, request, &w).empty());
+            ASSERT_TRUE(w.extraction && w.extraction->withheld);
+            EXPECT_EQ(Withheld::THRESHOLD_CROSSED, *w.extraction->withheld);
+        }
+    }
+}
+
+TEST(PatternMismatch, UnmaskedThresholdsAfterTheCheck) {
+    // random cases without the mask (BASIC and CANONICAL, where the running upper bound is the
+    // final U): the thresholds after the check, every allowance and every boundary cap
+    ThresholdSweep sweep;
+    size_t cases = 0;
+    for (uint32_t seed = 8000; seed < 8080; ++seed) {
+        Case c = random_case(seed);
+        if (c.mode == DeBruijnGraph::PRIMARY)
+            continue;
+        auto unmasked = unmasked_copy(c);
+        SCOPED_TRACE(describe(c));
+        const std::vector<MCtx> expected = hamming_walk(*c.graph, c.text, c.request.scope,
+                                                        c.request.strands,
+                                                        c.request.max_mismatches);
+        const Truth truth = truth_of(expected, c.request.max_mismatches, c.text.size(), c.k,
+                                     c.request, c.text);
+        sweep_thresholds_after_the_check(*unmasked, c.text, c.request, expected, truth, &sweep);
+        ++cases;
+    }
+    EXPECT_LT(40u, cases);
+    EXPECT_LT(10u, sweep.stale_windows);
+    EXPECT_LT(50u, sweep.releases);
+    EXPECT_LT(50u, sweep.stops);
+}
+
+// The mini index (scripts/traversal/build_mini_refseq.sh) as the MiniRefSeq tests find it:
+// mini_refseq/ in the working directory (build/), built without its .edgemask
+TEST(PatternMismatch, UnmaskedMiniRefSeqThresholdsAfterTheCheck) {
+    // the first 16 bases of an E. coli record (NZ_CP021206.1) whose first k-mer no k-mer
+    // enters: the graph's source dummies hold them at offsets 1 to 15 (17 contexts with the
+    // mask, 32 candidates without, pattern_fixtures.py's START16), so that pass 0's check
+    // drops 15 dummies that no later pass's threshold may carry
+    const std::string path = "mini_refseq/graph_k31.dbg";
+    if (!std::ifstream(path).good()) {
+        GTEST_SKIP() << "mini_refseq index not found in the working directory (build it with "
+                        "scripts/traversal/build_mini_refseq.sh)";
+    }
+    auto graph = std::make_shared<DBGSuccinct>(2);
+    ASSERT_TRUE(graph->load(path));
+    graph->reset_mask();
+    const std::string text = "GATGCCGGTGAACAAC";
+    for (uint8_t m = 1; m <= 3; ++m) {
+        SCOPED_TRACE("m " + std::to_string(m));
+        const Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, m);
+        // the masked list: every candidate enumerated, the source dummies dropped
+        Result all;
+        const std::vector<MCtx> expected = released_by(*graph, text, request, &all);
+        ASSERT_FALSE(all.stop);
+        ASSERT_TRUE(all.extraction && all.extraction->complete);
+        const Truth truth = truth_of(expected, m, text.size(), graph->get_k(), request, text);
+        EXPECT_EQ(17u, truth.by_level[0]);
+        ThresholdSweep sweep;
+        sweep_thresholds_after_the_check(*graph, text, request, expected, truth, &sweep);
+        EXPECT_LT(0u, sweep.stale_windows);
+        EXPECT_LT(0u, sweep.releases);
+        EXPECT_LT(0u, sweep.stops);
+    }
 }
 
 // ---------------------------------------------------------------- order and retention
