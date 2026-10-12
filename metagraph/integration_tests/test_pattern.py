@@ -124,6 +124,10 @@ MISMATCHES_BLOCK = {'max': {'dna': 3, 'iupac': 3, 'protein': 3}, 'default': 0,
 NDM_40 = 'ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA'
 NDM_F = 'GGTTTGGCGATCTGGTTTTC'
 P515F = 'GTGYCAGCMGCCGCGGTAA'
+# a 31-mer of the Klebsiella record (573) whose neighbours within 2 substitutions the mini holds,
+# two k-mers at each level, one per strand (G for A at position 17; G at 17 with T for C at 21):
+# the mismatch fixtures' VAR31 (scripts/traversal/pattern_fixtures.py, SPEC §21.13)
+VAR31 = 'GTTATCGTTTTTCAGCAACCCCTTGTATCTG'
 
 IUPAC = {'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'R': 'AG', 'Y': 'CT', 'S': 'CG', 'W': 'AT',
          'K': 'GT', 'M': 'AC', 'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG', 'N': 'ACGT'}
@@ -2119,15 +2123,21 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
     def test_mismatches_against_the_fasta(self):
         """SPEC §21: patterns of at most k bases within 1 and 2 substitutions against a Hamming
         scan of the mini's records (the test's own IUPAC table): the first 31 bases of blaNDM-1
-        (one offset: the k-mer neighbours), its forward primer at every offset, the 515F primer
+        (one offset: the k-mer neighbours; the mini's copies are identical, so none above level
+        0, §21.13), the Klebsiella 31-mer whose neighbours the records hold at every level (two
+        per level, one per strand), blaNDM-1's forward primer at every offset, the 515F primer
         with its IUPAC codes and a 16-mer of the records; count and retrieval modes agree; the
         unmasked mini's per-level counts are exact or bounds holding the masked counts."""
         ndm31 = NDM_40[:31]
-        for text, kind, m in ((ndm31, 'dna', 1), (ndm31, 'dna', 2), (NDM_F, 'dna', 1),
-                              (NDM_F, 'dna', 2), (P515F, 'iupac', 1), (self.p16, 'dna', 1)):
+        # (pattern, kind, m, the levels of its contexts within m): what the records hold, so
+        # that the levels above 0 are known to be exercised (by VAR31 and by nothing else)
+        for text, kind, m, levels in ((ndm31, 'dna', 1, {0}), (ndm31, 'dna', 2, {0}),
+                                      (VAR31, 'dna', 1, {0, 1}), (VAR31, 'dna', 2, {0, 1, 2}),
+                                      (NDM_F, 'dna', 1, {0}), (NDM_F, 'dna', 2, {0}),
+                                      (P515F, 'iupac', 1, {0}), (self.p16, 'dna', 1, {0})):
             with self.subTest(pattern=text, m=m):
                 expected = self.records.hamming_contexts(text, self.k, m)
-                self.assertGreater(len(expected), 0)
+                self.assertEqual(levels, {level for _, _, _, level, _ in expected})
                 request = {'patterns': [{kind: text}], 'max_mismatches': m,
                            'output': {'labels': 'none'}}
                 out = self.pattern(self.server, request)
@@ -2149,10 +2159,6 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                         self.assertEqual('bounds', c['relation'], t)
                         self.assertLessEqual(c['lower'], masked, t)
                         self.assertLessEqual(masked, c['upper'], t)
-        # the 31-mer's neighbours: the records hold blaNDM-1 variants, so some context lies
-        # above level 0 within 2 substitutions
-        expected = self.records.hamming_contexts(ndm31, self.k, 2)
-        self.assertEqual(1, len({o for _, _, o, _, _ in expected}))
 
     def test_peptide_mismatches_against_the_six_frames(self):
         """SPEC §21.3: peptides within one substituted residue against the six-frame
