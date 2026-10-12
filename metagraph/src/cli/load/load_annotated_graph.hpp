@@ -75,7 +75,8 @@ async_load_critical_dbg(const std::string &path, const PatternPreparation &prep)
 // holds (AnnotatedDBG::share_coord_to_header); the new index is built with it instead of
 // loading the .seqs again, and so has its reverse header index as built. The caller passes
 // the mapping of the very pair it loads (the same annotation file: the same .seqs); null
-// loads the .seqs as every load does.
+// loads the .seqs as every load does, unless |config| says not to map (no_coord_mapping: the
+// caller's index has no mapping, so none is looked for).
 std::unique_ptr<graph::AnnotatedDBG>
 initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
                          std::shared_ptr<const annot::CoordToHeader> coord_to_header = nullptr);

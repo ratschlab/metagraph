@@ -732,6 +732,59 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(1, log.count(built), log[-3000:])
         self.assertGreaterEqual(log.count('loaded into RAM for it'), 4)
 
+    def test_in_ram_on_a_pair_without_its_record_mapping(self):
+        """A coordinate-annotated pair served without its .seqs (the ecoli chunk's files by
+        symlinks, none to the .seqs; a served configuration): the copy an `in_ram` load makes
+        has the mapping the resident has -- none --, so the operator's notice that the mapping
+        is missing is the start-up's, logged once, not once per request; the answers with
+        in_ram are the resident's, timing apart."""
+        d = os.path.join(self.tempdir.name, 'bare')
+        os.makedirs(d)
+        src = os.path.dirname(self.pairs['ecoli'][0])
+        for f in os.listdir(src):
+            if not f.endswith('.seqs'):
+                os.symlink(os.path.join(src, f), os.path.join(d, f))
+        graph, anno = (os.path.join(d, os.path.basename(p)) for p in self.pairs['ecoli'])
+        csv = os.path.join(d, 'graphs.csv')
+        with open(csv, 'w') as f:
+            f.write(f'bare,{graph},{anno}\n')
+        server = Server([csv, '--mmap', '--mem-cap-gb', '1'], os.path.join(d, 'server.log'))
+        try:
+            notice = 'No CoordToHeader mapping found'
+            self.assertEqual(1, server.text().count(notice), server.text()[-3000:])
+            pair = server.get('capabilities').json()['graph_summary']['pairs'][0]
+            self.assertEqual(('bare', True, False),
+                             (pair['graph'], pair['traversal']['has_coordinates'],
+                              pair['traversal']['has_coord_to_header']))
+            ecoli = self.records['ecoli'][0]
+            seed = ecoli[20000:20100]
+            bodies = [
+                ('resolve', {'graphs': ['bare'], 'sequence': seed,
+                             'discover': {'max_labels': 10}}),
+                ('pattern', {'patterns': [{'dna': ecoli[5000:5020]}], 'mode': 'count',
+                             'graphs': ['bare']}),
+                ('traverse', {'graphs': ['bare'], 'seeds': [{'sequence': seed}],
+                              'strategy': {'direction': 'right',
+                                           'bounds': {'max_extension_bp': 50},
+                                           'output': {'detail': 'full'}}}),
+            ]
+            for route, body in bodies:
+                for _ in range(2):
+                    ret = server.post(route, body)
+                    self.assertEqual(200, ret.status_code, ret.text[:2000])
+                    resident = ret.json()
+                    ret = server.post(route, dict(body, in_ram=True))
+                    self.assertEqual(200, ret.status_code, ret.text[:2000])
+                    loaded = ret.json()
+                    if route == 'traverse':
+                        resident, loaded = resident['results'], loaded['results']
+                    self.assertEqual(untimed(resident), untimed(loaded), route)
+            log = server.text()
+            self.assertEqual(6, log.count('loaded into RAM for it'), log[-3000:])
+            self.assertEqual(1, log.count(notice), log[-3000:])
+        finally:
+            server.stop()
+
     # -------------------------------------------------------------------- the fan-out of /traverse
 
     def test_traverse_fans_out_with_not_in_graph(self):

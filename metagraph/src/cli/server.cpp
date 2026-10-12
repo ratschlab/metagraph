@@ -1168,9 +1168,14 @@ int run_server(Config *config) {
             preparation.sample_fraction = for_pattern;
             preparation.progress = false;
             // the resident index of this very pair (graphs_cache's key is the pair, its
-            // annotation path the one loaded here), so its mapping is this annotation's .seqs
-            loaded = initialize_annotated_dbg(config_copy, preparation,
-                                              resident.share_coord_to_header());
+            // annotation path the one loaded here), so its mapping is this annotation's
+            // .seqs, and a resident without one (no .seqs beside the annotation, or
+            // --no-coord-mapping) has none for its copy either: the .seqs is not looked for
+            // again, so the operator's notice of a missing one is logged at start-up, not
+            // by every request
+            auto mapping = resident.share_coord_to_header();
+            config_copy.no_coord_mapping = !mapping;
+            loaded = initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
         } catch (...) {
             reservations.release(bytes);
             throw;
