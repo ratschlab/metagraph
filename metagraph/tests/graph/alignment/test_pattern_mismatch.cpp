@@ -879,6 +879,135 @@ TEST(PatternMismatch, StoppedAtEveryClockReading) {
     EXPECT_LT(20u, inside_stops);
 }
 
+// a clock that reads |start| plus |*now| milliseconds; the test moves |*now|
+struct VirtualClock {
+    Clock::time_point start = Clock::now();
+    std::shared_ptr<double> now = std::make_shared<double>(0);
+
+    Deadline deadline(double budget_ms, double reserve_ms) const {
+        auto s = start;
+        auto n = now;
+        return Deadline(start, budget_ms, reserve_ms, [s, n]() {
+            return s + std::chrono::duration_cast<Clock::duration>(
+                    std::chrono::duration<double, std::milli>(*n));
+        });
+    }
+};
+
+TEST(PatternMismatch, ExtractionStopCarriesNoLevel) {
+    // a stop of a later phase carries no level (SPEC §21.7): the deadline during the PARTIAL
+    // release of a request with mismatches (the caller's work per context clocked, as
+    // PatternSearchFixes.PartialReleaseReadsTheClockPerReleasedContexts without them) stops
+    // {EXTRACTION, TIME} with mismatch_level unset, the first kReleaseClockStride contexts in
+    // answer order released, cut TIME, the steps per level and every level's count as the
+    // count alone states them; without the mask a cut release raises each level's lower bound
+    // to what it released there (§21.6), nothing else. ALL_OR_COUNT's delivery under the
+    // clock withholds DEADLINE, again with no level, every level EXACT (the buffered release
+    // enumerated every candidate)
+    std::mt19937 rng(43);
+    const std::vector<std::string> records = random_records(rng, 6, 600, 600);
+    const std::string text = "ACGT";
+    const uint8_t m = 2;
+    const size_t k = 9;
+    const Pattern pattern = parse(text);
+    auto masked = build(k, records, DeBruijnGraph::BASIC);
+    const std::vector<MCtx> expected = hamming_walk(*masked, text, Scope::ANY_OFFSET,
+                                                    Strands::BOTH, m);
+    ASSERT_GT(expected.size(), 300u);
+    const Truth truth = truth_of(expected, m, text.size(), k,
+                                 make_request(Scope::ANY_OFFSET, Strands::BOTH, m), text);
+    for (bool unmasked : { false, true }) {
+        SCOPED_TRACE(unmasked ? "unmasked" : "masked");
+        std::shared_ptr<DeBruijnGraph> graph = masked;
+        if (unmasked) {
+            graph = build(k, records, DeBruijnGraph::BASIC);
+            const_cast<DBGSuccinct&>(stored_graph(*graph)).reset_mask();
+        }
+        auto as_mctx = [&](const Context &c) {
+            const std::string kmer = graph->get_node_sequence(c.node);
+            return MCtx { c.node, c.offset, c.orientation, c.mismatches,
+                          substituted_in(pattern, c.orientation,
+                                         kmer.substr(c.offset, text.size())) };
+        };
+        Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, m, Mode::PARTIAL);
+        const Result counted = count_of(*graph, text, request);
+        ASSERT_FALSE(counted.stop);
+
+        // the work time (10 ms) passes at the 10th context; the next reading is at the 64th
+        VirtualClock vc;
+        Budget budget(kManySteps, vc.deadline(260, 250));
+        std::vector<MCtx> received;
+        const Result r = PatternSearch(*graph).enumerate(pattern, request, budget,
+                                                         [&](const Context &c) {
+            received.push_back(as_mctx(c));
+            *vc.now += 1;
+        });
+        ASSERT_TRUE(r.stop);
+        EXPECT_EQ(StopPhase::EXTRACTION, r.stop->phase);
+        EXPECT_EQ(StopReason::TIME, r.stop->reason);
+        EXPECT_FALSE(r.stop->mismatch_level);
+        EXPECT_TRUE(r.time_limited);
+        ASSERT_TRUE(r.extraction);
+        EXPECT_EQ(StopReason::TIME, r.extraction->cut);
+        EXPECT_FALSE(r.extraction->complete);
+        EXPECT_FALSE(r.extraction->withheld);
+        EXPECT_EQ(Budget::kReleaseClockStride, received.size());
+        EXPECT_EQ(received.size(), r.extraction->returned);
+        EXPECT_EQ(std::vector<MCtx>(expected.begin(), expected.begin() + received.size()),
+                  received);
+        EXPECT_EQ(counted.work.steps_by_mismatches, r.work.steps_by_mismatches);
+        std::vector<uint64_t> released(m + 1, 0);
+        for (const MCtx &c : received) {
+            ++released[c.level];
+        }
+        for (uint8_t t = 0; t <= m; ++t) {
+            const Count &before = counted.contexts->by_mismatches.at(t);
+            const Count &after = r.contexts->by_mismatches.at(t);
+            EXPECT_EQ(before.relation, after.relation) << "level " << int(t);
+            EXPECT_TRUE(true_relation(after, truth.by_level[t])) << "level " << int(t);
+            if (before.relation == Relation::EXACT) {
+                EXPECT_EQ(before.value, after.value) << "level " << int(t);
+            } else {
+                EXPECT_EQ(Relation::BOUNDS, before.relation) << "level " << int(t);
+                EXPECT_EQ(before.upper, after.upper) << "level " << int(t);
+                EXPECT_LE(std::max(before.lower, released[t]), after.lower)
+                    << "level " << int(t);
+            }
+        }
+        EXPECT_EQ(counted.contexts->total.relation, r.contexts->total.relation);
+
+        // ALL_OR_COUNT: every context costs the caller 1 ms; the work time is 100 ms
+        request.mode = Mode::ALL_OR_COUNT;
+        VirtualClock slow;
+        Budget delivery(kManySteps, slow.deadline(350, 250));
+        received.clear();
+        const Result d = PatternSearch(*graph).enumerate(pattern, request, delivery,
+                                                         [&](const Context &c) {
+            received.push_back(as_mctx(c));
+            *slow.now += 1;
+        });
+        ASSERT_TRUE(d.stop);
+        EXPECT_EQ(StopPhase::EXTRACTION, d.stop->phase);
+        EXPECT_EQ(StopReason::TIME, d.stop->reason);
+        EXPECT_FALSE(d.stop->mismatch_level);
+        EXPECT_TRUE(d.time_limited);
+        ASSERT_TRUE(d.extraction);
+        ASSERT_TRUE(d.extraction->withheld);
+        EXPECT_EQ(Withheld::DEADLINE, *d.extraction->withheld);
+        EXPECT_FALSE(d.extraction->complete);
+        EXPECT_EQ(0u, d.extraction->returned);
+        EXPECT_GE(received.size(), 100u);
+        EXPECT_LT(received.size(), 100u + Budget::kReleaseClockStride);
+        EXPECT_EQ(std::vector<MCtx>(expected.begin(), expected.begin() + received.size()),
+                  received);
+        for (uint8_t t = 0; t <= m; ++t) {
+            const Count &level = d.contexts->by_mismatches.at(t);
+            EXPECT_EQ(Relation::EXACT, level.relation) << "level " << int(t);
+            EXPECT_EQ(truth.by_level[t], level.value) << "level " << int(t);
+        }
+    }
+}
+
 TEST(PatternMismatch, ThresholdStopsLeaveTheCloserLevelsComplete) {
     // stop_at_threshold compares the running total over the levels: a stop in the pass of
     // level t means the contexts of levels <= t exceed max_contexts, and the levels below t
