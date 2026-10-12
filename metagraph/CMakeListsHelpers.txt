@@ -147,6 +147,7 @@ endif()
 add_library(progress_bar STATIC
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar/progress_bar.cpp
 )
+target_include_directories(progress_bar PUBLIC ${EXTERNAL_LIB_DIR}/cpp_progress_bar)
 endfunction()
 
 
