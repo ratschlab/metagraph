@@ -1049,7 +1049,11 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
                     const auto &coords = hit->coords;
                     cl.total = coords.size();
                     const uint64_t first = listed ? std::min<uint64_t>(cap, cl.total) : 0;
-                    cl.occurrences.reserve(first);
+                    // room for no more than the account could still admit (each occurrence
+                    // is charged at least kGlobalOccurrenceBytes as it is pushed), so that
+                    // the list's capacity never runs ahead of the model
+                    cl.occurrences.reserve(std::min<uint64_t>(
+                            first, m.account.left() / kGlobalOccurrenceBytes));
                     auto hint = unions[id].begin();
                     Occurrence previous;
                     bool any = false;
