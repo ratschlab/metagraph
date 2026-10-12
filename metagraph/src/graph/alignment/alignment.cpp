@@ -17,6 +17,12 @@ namespace align {
 
 using mtg::common::logger;
 
+void Seed::expand(std::span<const node_index> next) {
+    query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
+    end_clipping_ -= next.size();
+    nodes_.insert(nodes_.end(), next.begin(), next.end());
+}
+
 std::string Alignment::format_coords(const annot::LabelEncoder<> &encoder) const {
     if (!label_coordinates.size())
         return "";
