@@ -22,6 +22,7 @@ file(GLOB src_files "*.cpp" "*/*.cpp")
 add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 buildProgressBar(${EXTERNAL_LIB_DIR} PROGRESS_BAR_LIBRARY)
+buildMersenneTwister(${EXTERNAL_LIB_DIR} MERSENNE_TWISTER_LIBRARY)
 
 target_compile_options(metagraph_common PRIVATE -Werror -Wall -Wextra)
 target_include_directories(metagraph_common PUBLIC ${PROJECT_PARENT_DIR}/src)
@@ -40,6 +41,7 @@ target_link_libraries(metagraph_common
     folly
     metagraph-common-dependencies
     ${PROGRESS_BAR_LIBRARY}
+    ${MERSENNE_TWISTER_LIBRARY}
     ${FILESYSTEM_LIBRARY}
     OpenMP::OpenMP_CXX
     glog::glog
