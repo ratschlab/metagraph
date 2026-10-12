@@ -192,7 +192,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `max_predicate_work` | integer ≥ 1 | `caps.max_predicate_work` (10⁸) | increment 5b, per **request**: the work of the selection (its row reads, reverse-complement lookups and decisions) in the oracle's units (§19.9), a budget of its own beside `max_annotation_work`; lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
 | `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate |
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
-| `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. Needs a predicate (else 400 `invalid_request`) |
+| `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. `"motif"` needs a predicate (else 400 `invalid_request`); `"context"` is accepted with any request and acts only with a predicate |
 | `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
 | `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, as `/search`'s (§24): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
 | `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
@@ -4341,8 +4341,9 @@ motif-level value is `false`.
 
 ### 25.2 Request
 
-`predicate_scope` (§4.1): `"context"` (the default: the answer of §19, byte for byte) or `"motif"`. It needs a
-predicate (else 400 `invalid_request`); another value is 400 `invalid_request`. Accepted with every mode, strands,
+`predicate_scope` (§4.1): `"context"` (the default: the answer of §19, byte for byte) or `"motif"`. `"motif"` needs
+a predicate (else 400 `invalid_request`); `"context"` is accepted with any request, a predicate or none, as its
+absence is; another value is 400 `invalid_request`. Accepted with every mode, strands,
 scope and projection; mode `count` is enough for a motif question (the pass runs in every mode). `stop_at_threshold`
 is allowed: it usually leaves the motif undecided (`untested: "selection"`), but the labels found may decide it
 (§25.4). `limits.predicate_scope` echoes it when the request names it (also `"context"`).
@@ -4562,3 +4563,6 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   field's absence); `integration_tests/test_pattern.py` (`TestPatternMini`: the mini's records scanned by a
   pigeonhole Hamming oracle and a six-frame residue oracle, the stop's levels, the slots and refusals, the
   capabilities; `TestPatternSynthetic.test_mismatch_caps_at_start_up`).
+- **Wording** (2026-10-12, the review of the branch): §4.1 and §25.2 state what the route does — only
+  `predicate_scope: "motif"` needs a predicate; `"context"`, the default, is accepted with any request (§5 step 8
+  and §6 said so already); the validator refuses `"motif"` alone and passes `"context"` alone.

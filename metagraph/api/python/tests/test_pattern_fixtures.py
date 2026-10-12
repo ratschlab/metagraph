@@ -3290,11 +3290,13 @@ class TestPatternFixtures(unittest.TestCase):
             check.predicate_form(request['predicate'], 'request.predicate')
             check.ok(request.get('long_search', 'anchors') != 'paths', 'request.long_search',
                      'a predicate with long_search "paths" is refused')
-        # SPEC §25.2: predicate_scope needs a predicate
+        # SPEC §25.2: predicate_scope "motif" needs a predicate ("context", the default, is
+        # accepted with any request)
         if 'predicate_scope' in request:
             check.one_of(request['predicate_scope'], PREDICATE_SCOPE_VALUES,
                          'request.predicate_scope')
-            check.ok('predicate' in request, 'request.predicate_scope', 'needs a predicate')
+            check.ok(request['predicate_scope'] != 'motif' or 'predicate' in request,
+                     'request.predicate_scope', '"motif" needs a predicate')
         check.ok(request.get('output', {}).get('labels') != 'predicate_only'
                  or 'predicate' in request, 'request.output.labels',
                  'predicate_only needs a predicate')
@@ -4595,6 +4597,8 @@ class TestPatternFixtures(unittest.TestCase):
             with self.subTest(change=change):
                 with self.assertRaisesRegex(AssertionError, says):
                     self.request_200(Checker(Raising(), 'request'), {**request, **change})
+        # "context" without a predicate is the default, answered 200 (SPEC §4.1, §25.2)
+        self.request_200(Checker(Raising(), 'request'), {**request, 'predicate_scope': 'context'})
 
     def test_motif_rules_refuse_what_v1_never_answers(self):
         """SPEC §25: the stored bodies pass, and each rule refuses an answer that breaks it -- a
