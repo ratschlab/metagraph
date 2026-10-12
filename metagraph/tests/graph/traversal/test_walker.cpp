@@ -3540,7 +3540,11 @@ std::unique_ptr<AnnotatedDBG> label_fork(size_t n, std::vector<std::string> *nam
 // labels on a fork every label takes (the review of 2026-10-10: 556 ms for the one head at
 // 16,000 labels). The fork under every label with unlimited branches and one base of
 // extension: at 50 labels the result is pinned by the digest taken before the change (every
-// label ends on both branches with one branch counted); 4,000 labels run within a sanity bound.
+// label ends on both branches with one branch counted). The pass's work is pinned through
+// ArmResult::branch_count_scans, not wall time (a Release build runs the quadratic scan at
+// 4,000 labels in 34 ms, under any clock bound a test can keep): the two successors' n
+// entries each are visited once, 2n at every size, where a scan per source would be n × 2n;
+// 4,000 labels run within a sanity bound beside it.
 TEST(Walker, AmbiguousBranchCountersAreLinearInTheLabels) {
     Strategy st = strategy(Strategy::kUnlimited, false);
     st.direction = Strategy::RIGHT;
@@ -3567,16 +3571,22 @@ TEST(Walker, AmbiguousBranchCountersAreLinearInTheLabels) {
         EXPECT_EQ(all, arm.branch_events[0].ambiguous);
         EXPECT_TRUE(arm.branch_events[0].dropped.empty());
         EXPECT_TRUE(arm.branch_events[0].refused.empty());
+        EXPECT_EQ(100u, arm.branch_count_scans);
         EXPECT_EQ(16296621859609334216ull, fnv1a(serialize(res))) << serialize(res);
     }
-    {
-        auto anno = label_fork(4000, &names);
+    for (size_t n : { 250, 500, 4000 }) {
+        auto anno = label_fork(n, &names);
         const auto start = std::chrono::steady_clock::now();
         auto res = run(*anno, "AAA", names, st);
         const double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - start).count();
-        EXPECT_EQ(2u, res.arms[kRight].paths.size());
-        EXPECT_LT(ms, 2000) << "4,000 labels";
+        const ArmResult &arm = res.arms[kRight];
+        EXPECT_EQ(2u, arm.paths.size()) << n;
+        EXPECT_EQ(2 * n, arm.branch_count_scans) << n;
+        EXPECT_LE(arm.branch_count_scans, 4 * n) << n;
+        if (n == 4000) {
+            EXPECT_LT(ms, 2000) << "4,000 labels";
+        }
     }
 }
 

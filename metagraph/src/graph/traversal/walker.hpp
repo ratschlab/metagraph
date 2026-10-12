@@ -806,6 +806,13 @@ struct ArmResult {
     // change cost — one per (source, successor) under a constant cost, one per target
     // under a table. Linear in |σ| + Σ|σ_v| per round under forbid and constant costs.
     uint64_t refusal_scans = 0;
+    // The work of setting the branch counters of a permitted ambiguity (a source with two
+    // or more continuations below the limit): per commit that has one, the successor state
+    // entries, visited once for all the ambiguous sources (one pass with a table over the
+    // sources; a scan of every successor per source would be Θ(|σ| × Σ|σ_v|) at a node
+    // where every source is ambiguous). Linear in Σ|σ_v| per such commit. A contract
+    // counter the tests pin; not served and not charged.
+    uint64_t branch_count_scans = 0;
     // Successor derivations (one per successor of a committed step) in which a TABLE
     // cost's source list was cut by max_switch_sources AND a cut source had a finite
     // pair cost into a target of that successor: the cases in which the cut may have

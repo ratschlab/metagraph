@@ -5132,6 +5132,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         for (Cand &c : cands_) {
             if (!c.admissible())
                 continue;
+            arm.result.branch_count_scans += c.state.size();
             for (Entry &e : c.state) {
                 if (sc.marked[e.pred])
                     e.branches = sc.branches_next[e.pred];
