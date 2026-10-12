@@ -50,8 +50,8 @@ class LabelCounts {
     }
 
   private:
-    std::variant<sdsl::int_vector<>, std::vector<uint8_t>, std::vector<uint16_t>,
-                 std::vector<uint32_t>, std::vector<uint64_t>> storage_;
+    std::variant<std::vector<uint8_t>, std::vector<uint16_t>, std::vector<uint32_t>,
+                 std::vector<uint64_t>, sdsl::int_vector<>> storage_;
 };
 
 template <class T>
