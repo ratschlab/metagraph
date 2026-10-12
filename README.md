@@ -201,6 +201,10 @@ DATA="../tests/data/transcripts_1000.fa"
 ```
 
 #### Build from k-mers filtered with KMC
+
+Configure with `cmake .. -DBUILD_KMC=ON` to build the standalone KMC executable
+used below. Reading existing KMC files is always supported.
+
 ```bash
 K=20
 ./KMC/kmc -ci5 -t4 -k$K -m5 -fm <FILE>.fasta.gz <FILE>.cutoff_5 ./KMC

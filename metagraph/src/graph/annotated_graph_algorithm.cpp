@@ -1,7 +1,6 @@
 #include "annotated_graph_algorithm.hpp"
 
 #include <atomic>
-#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -21,7 +20,9 @@ typedef AnnotatedDBG::Annotator::Label Label;
 
 typedef std::function<size_t()> LabelCountCallback;
 
-// Byte-width counters have real typed elements for atomic_ref; other widths stay packed.
+// Native-width counters need live typed elements for atomic_ref; other widths stay packed.
+// C++23 start_lifetime_as_array could reuse SDSL storage, but would require
+// restoring uint64_t lifetimes before SDSL's word-based access.
 class LabelCounts {
   public:
     LabelCounts(uint64_t size, uint8_t width) {
@@ -60,24 +61,57 @@ std::atomic_ref<T> counter_atomic(T &value) {
     return std::atomic_ref<T>(value);
 }
 
-template <class Vector>
-uint64_t atomic_fetch(Vector &vector, uint64_t i, std::mutex &backup_mutex) {
-    if constexpr (std::is_same_v<Vector, sdsl::int_vector<>>) {
-        std::lock_guard<std::mutex> lock(backup_mutex);
-        return vector[i];
-    } else {
-        return counter_atomic(vector[i]).load(std::memory_order_relaxed);
-    }
+void replace_field(uint64_t &value, uint64_t mask, uint64_t bits) {
+    auto word = counter_atomic(value);
+    uint64_t expected = word.load(std::memory_order_relaxed);
+    while (!word.compare_exchange_weak(expected, (expected & ~mask) | bits,
+                                       std::memory_order_relaxed)) {}
 }
 
-template <class Vector>
-void atomic_add(Vector &vector, uint64_t i, uint64_t value, std::mutex &backup_mutex) {
-    if constexpr (std::is_same_v<Vector, sdsl::int_vector<>>) {
-        std::lock_guard<std::mutex> lock(backup_mutex);
-        vector[i] += value;
-    } else {
-        counter_atomic(vector[i]).fetch_add(value, std::memory_order_relaxed);
+uint64_t atomic_fetch(sdsl::int_vector<> &vector, uint64_t i, std::mutex &mutex) {
+    const unsigned width = vector.width();
+    uint64_t bit = i * width, k = bit / 64;
+    unsigned shift = bit % 64;
+    uint64_t mask = sdsl::bits::lo_set[width];
+    if (shift + width <= 64)
+        return (counter_atomic(vector.data()[k]).load(std::memory_order_relaxed) >> shift) & mask;
+    std::lock_guard lock(mutex);
+    return ((counter_atomic(vector.data()[k]).load(std::memory_order_relaxed) >> shift)
+          | (counter_atomic(vector.data()[k + 1]).load(std::memory_order_relaxed) << (64 - shift))) & mask;
+}
+
+void atomic_add(sdsl::int_vector<> &vector, uint64_t i, uint64_t value, std::mutex &mutex) {
+    const unsigned width = vector.width();
+    uint64_t bit = i * width, k = bit / 64;
+    unsigned shift = bit % 64;
+    uint64_t mask = sdsl::bits::lo_set[width];
+    auto word = counter_atomic(vector.data()[k]);
+    if (shift + width <= 64) {
+        uint64_t expected = word.load(std::memory_order_relaxed);
+        for (;;) {
+            uint64_t desired = (expected & ~(mask << shift))
+                | ((((expected >> shift) + value) & mask) << shift);
+            if (word.compare_exchange_weak(expected, desired, std::memory_order_relaxed))
+                return;
+        }
     }
+    // Crossing fields share this lock; CAS still preserves unlocked neighboring fields.
+    std::lock_guard lock(mutex);
+    uint64_t next = (word.load(std::memory_order_relaxed) >> shift)
+          | (counter_atomic(vector.data()[k + 1]).load(std::memory_order_relaxed) << (64 - shift));
+    next = (next + value) & mask;
+    replace_field(vector.data()[k], mask << shift, next << shift);
+    replace_field(vector.data()[k + 1], mask >> (64 - shift), next >> (64 - shift));
+}
+
+template <class T>
+uint64_t atomic_fetch(std::vector<T> &vector, uint64_t i, std::mutex &) {
+    return counter_atomic(vector[i]).load(std::memory_order_relaxed);
+}
+
+template <class T>
+void atomic_add(std::vector<T> &vector, uint64_t i, uint64_t value, std::mutex &) {
+    counter_atomic(vector[i]).fetch_add(value, std::memory_order_relaxed);
 }
 
 
