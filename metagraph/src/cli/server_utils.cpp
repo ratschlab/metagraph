@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <streambuf>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include <netinet/in.h>
@@ -860,13 +861,22 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
         for (const Json::Value &name : graphs) {
             if (!name.isString())
                 throw std::invalid_argument(expected);
-            names.push_back(name.asString());
         }
-        for (const std::string &name : names) {
-            if (std::find(known.begin(), known.end(), name) == known.end()) {
-                throw std::invalid_argument("request.graphs: unknown graph '" + name
+        // each name checked once, in a set of the known names: the check runs on the HTTP
+        // thread before any pair is queued, and a list may repeat a name many times over
+        // (the body is unlimited by default). The refusal names the first unknown name in
+        // the list's order
+        const std::unordered_set<std::string> known_set(known.begin(), known.end());
+        std::unordered_set<std::string> seen;
+        for (const Json::Value &name : graphs) {
+            std::string value = name.asString();
+            if (!seen.insert(value).second)
+                continue;
+            if (!known_set.count(value)) {
+                throw std::invalid_argument("request.graphs: unknown graph '" + value
                                             + "' (GET /capabilities lists the graphs)");
             }
+            names.push_back(std::move(value));
         }
     } else {
         if (known.size() > max_without_graphs) {

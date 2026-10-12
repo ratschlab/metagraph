@@ -173,6 +173,35 @@ TEST(MultiGraphSelection, PatternGraphNames) {
     EXPECT_EQ(std::vector<std::string>({ "a", "b", "c" }), pattern_graph_names(parse("{}"), known));
     EXPECT_EQ("request.graphs: unknown graph 'd' (GET /capabilities lists the graphs)",
               refusal_of([&] { pattern_graph_names(parse(R"({"graphs": ["a", "d"]})"), known); }));
+    // the refusal names the first unknown name in the list's order (a repeated name is
+    // checked once); a value that is not a name is refused before any name is looked up
+    EXPECT_EQ("request.graphs: unknown graph 'z' (GET /capabilities lists the graphs)",
+              refusal_of([&] {
+                  pattern_graph_names(parse(R"({"graphs": ["a", "z", "d", "z", "a"]})"), known);
+              }));
+    EXPECT_EQ("request.graphs: expected a non-empty array of graph names (GET /capabilities "
+              "lists them)",
+              refusal_of([&] { pattern_graph_names(parse(R"({"graphs": ["z", 1]})"), known); }));
+    {
+        // a list repeating a few names many times over on a server of many names: the same
+        // selection, in a time linear in the list (each name looked up in a set, once; a
+        // scan of the server's names per listed name took seconds at this size)
+        std::vector<std::string> server_names;
+        for (int i = 0; i < 2000; ++i) {
+            server_names.push_back("g" + std::to_string(i));
+        }
+        Json::Value request(Json::objectValue);
+        request["graphs"] = Json::Value(Json::arrayValue);
+        for (int i = 0; i < 300000; ++i) {
+            request["graphs"].append(i % 3 ? "g1999" : "g7");
+        }
+        const auto start = std::chrono::steady_clock::now();
+        EXPECT_EQ(std::vector<std::string>({ "g1999", "g7" }),
+                  pattern_graph_names(request, server_names));
+        const double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start).count();
+        EXPECT_LT(ms, 1000) << "300,000 names against 2,000";
+    }
     for (const char *body : { R"({"graphs": []})", R"({"graphs": "a"})", R"({"graphs": [1]})",
                               R"({"graphs": null})" }) {
         EXPECT_EQ("request.graphs: expected a non-empty array of graph names (GET "
