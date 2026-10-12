@@ -974,8 +974,10 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     keeps, so that its state (`FIN_WAIT2`) read connected until the client closed its end *(review of
     2026-10-06, U13-02: only the peer's states were read)*.
   - **The attempt's bound**, enforced for a request with `attempt_id` (the server's operator bound, derived from
-    the per-seed budgets — not a request knob): `bound_ms = min(n_seeds × T + allowance_ms, 899 000)`, T the
-    effective per-seed `bounds.time_budget_ms` after the server's clamp (0 when not positive), `allowance_ms` the
+    the per-seed budgets — not a request knob): `bound_ms = min(load_ms + n_seeds × T + allowance_ms, 899 000)`,
+    `load_ms` the load of the pair for the request (`in_ram`, §10.3; 0 when nothing was loaded: the budgets start
+    after the load, the hard cap counts it), T the effective per-seed `bounds.time_budget_ms` after the server's
+    clamp (0 when not positive), `allowance_ms` the
     server's `--traverse-attempt-allowance-ms` (default 10 000) and 899 000 the content timeout less one second,
     on the attempt's clock, which starts when the server read the request's header (time queued before that,
     every server thread busy, is not in it: §10.3). The seeds stop being walked at
@@ -1950,8 +1952,9 @@ attempt) nor a 400 for a malformed id:
   server read the request's header (the attempt's clock), `stopped_at` when the walk stopped (the checkpoint
   that saw the stop, or the end of the last seed's walk), `elapsed_ms` when the block was built (just before
   the response was written; the attempt's state has the final value).
-- `bound_ms` is the bound the server enforces (§6.8) and `bound` its derivation: `seeds` × `time_budget_ms`
-  (the effective per-seed budget) + `allowance_ms`, `capped_by: "content_timeout"` when the HTTP server's cap
+- `bound_ms` is the bound the server enforces (§6.8) and `bound` its derivation: `load_ms` (with `in_ram`, the
+  load of the pair for the request, §10.3; absent without it) + `seeds` × `time_budget_ms` (the effective
+  per-seed budget) + `allowance_ms`, `capped_by: "content_timeout"` when the HTTP server's cap
   applied, `walk_until_ms` where the seeds stop being walked — `bound_ms − max(allowance_ms / 2, the delivery
   reserve)`, which moves with the reserve (pass 5, §6.8): when it stopped the walk, its value then (the walk
   stopped at its first poll that read the clock after it, `stopped_at`); otherwise the lowest walk-until seen:
