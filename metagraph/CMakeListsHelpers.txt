@@ -91,6 +91,29 @@ add_subdirectory(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/fmt fmt)
 add_subdirectory(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/spdlog spdlog)
 endfunction()
 
+# Share dependency targets between the full build and standalone common-library builds.
+function (buildCommonDependencies)
+if(TARGET metagraph-common-dependencies)
+  return()
+endif()
+set(EXTERNAL_LIB_DIR ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+add_subdirectory(${EXTERNAL_LIB_DIR}/hopscotch-map hopscotch-map EXCLUDE_FROM_ALL)
+add_subdirectory(${EXTERNAL_LIB_DIR}/ordered-map ordered-map EXCLUDE_FROM_ALL)
+add_subdirectory(${EXTERNAL_LIB_DIR}/DYNAMIC DYNAMIC EXCLUDE_FROM_ALL)
+add_subdirectory(${EXTERNAL_LIB_DIR}/sdsl-lite sdsl-lite EXCLUDE_FROM_ALL)
+
+# These dependencies do not provide CMake targets.
+add_library(ips4o INTERFACE)
+target_include_directories(ips4o INTERFACE ${EXTERNAL_LIB_DIR}/ips4o)
+add_library(simde INTERFACE)
+target_include_directories(simde SYSTEM INTERFACE ${EXTERNAL_LIB_DIR}/simde-no-tests)
+
+add_library(metagraph-common-dependencies INTERFACE)
+target_link_libraries(metagraph-common-dependencies INTERFACE
+  tsl::hopscotch_map tsl::ordered_map XXSDS_DYNAMIC sdsl-lite::sdsl-lite ips4o simde)
+endfunction()
+
 function (findFolly)
 set(FOLLY_SOURCE_DIR ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/folly)
 unset(FOLLY_FOUND PARENT_SCOPE)
@@ -159,6 +182,7 @@ endif()
 add_library(mersenne_twister STATIC
     ${EXTERNAL_LIB_DIR}/rollinghashcpp/mersennetwister.cpp
 )
+target_include_directories(mersenne_twister PUBLIC ${EXTERNAL_LIB_DIR}/rollinghashcpp)
 endfunction()
 
 
