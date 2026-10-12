@@ -767,6 +767,42 @@ TEST(PatternSegments, StepBeyondTheLastWindowIsEnds) {
     }
 }
 
+TEST(PatternSegments, CompleteForLengthNearTheStepMaximum) {
+    // W' + S - 1 is computed without wrapping: a step near the type's maximum (the windows are
+    // "ends"'s) states a length at least the window, saturated at the maximum; the step that
+    // reaches the maximum exactly states it
+    std::mt19937 rng(13);
+    const Gene g = gene_case(rng, 40);
+    const Pattern pattern = Pattern::parse(PatternKind::DNA, g.gene);
+    const uint32_t L = 40;
+    const uint32_t k = 11;
+    const uint32_t max = std::numeric_limits<uint32_t>::max();
+    const std::vector<std::pair<uint32_t, uint32_t>> cases {
+        { 15, 25 }, { L - k, L - 1 }, { max - 10, max }, { max - 9, max },
+        { 4294967290u, max }, { max, max } };
+    for (const auto &[step, stated] : cases) {
+        SCOPED_TRACE("step " + std::to_string(step));
+        const SegmentRunResult run = run_segments(
+                *g.graph, pattern, segment_request(plan_of(0, step), Strands::BOTH, 1000));
+        ASSERT_FALSE(run.result.refusal);
+        ASSERT_TRUE(run.result.segments);
+        const SegmentCounts &c = *run.result.segments;
+        EXPECT_EQ(k, c.window);
+        EXPECT_EQ(step, c.step);
+        ASSERT_TRUE(c.complete_for_length);
+        EXPECT_EQ(stated, *c.complete_for_length);
+        EXPECT_LE(c.window, *c.complete_for_length);
+        std::vector<uint32_t> offsets;
+        for (const WindowCount &w : c.windows.at(Orientation::FORWARD)) {
+            offsets.push_back(w.offset);
+        }
+        EXPECT_EQ(segment_window_offsets(L, k, step, WindowChoice::STEPS), offsets);
+        if (step >= L - k) {
+            EXPECT_EQ((std::vector<uint32_t> { 0, L - k }), offsets);
+        }
+    }
+}
+
 TEST(PatternSegments, WindowOfTheWholePatternIsFullLength) {
     // W = L: a segment is reported only when it is the whole pattern; W > L: clipped to L
     std::mt19937 rng(10);

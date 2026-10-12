@@ -1657,8 +1657,8 @@ struct SegmentCounts {
     uint32_t window = 0;
     uint32_t step = 0;
     WindowChoice choice = WindowChoice::STEPS;
-    // STEPS: W' + S - 1, the length from which every maximal match holding only admitted
-    // windows holds one whole; unset otherwise
+    // STEPS: W' + S - 1 (at most the type's maximum), the length from which every maximal
+    // match holding only admitted windows holds one whole; unset otherwise
     std::optional<uint32_t> complete_for_length;
     // per orientation searched, the windows in plan order (offsets ascending)
     std::map<Orientation, std::vector<WindowCount>> windows;

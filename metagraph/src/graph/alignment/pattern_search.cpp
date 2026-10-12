@@ -5193,7 +5193,10 @@ Result PatternSearch::segments(const Pattern &pattern, const Request &request,
     counts.choice = plan.choice;
     if (plan.choice == WindowChoice::STEPS) {
         counts.step = plan.step;
-        counts.complete_for_length = window + plan.step - 1;
+        // W' + S - 1 in 64 bits, saturated at the type's maximum: a step near it wraps
+        // 32-bit arithmetic below the window
+        counts.complete_for_length = static_cast<uint32_t>(std::min<uint64_t>(
+                uint64_t(window) + plan.step - 1, std::numeric_limits<uint32_t>::max()));
     }
 
     // per-pattern refusals, before anything is charged: more windows than the policy allows
