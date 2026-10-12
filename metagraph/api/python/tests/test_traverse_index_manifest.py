@@ -10,9 +10,11 @@ import io
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, '..', '..', '..', 'scripts', 'traversal', 'index_manifest.py')
@@ -213,6 +215,144 @@ class TestIndexManifestBatch(unittest.TestCase):
         self.assertIn('names: not recorded', self.out.getvalue())
         self.assertIn('names now: labels 3 (not UTF-8: 0), record headers 5 (not UTF-8: 1',
                       self.out.getvalue())
+
+    def _never(self, path, progress=None):
+        raise AssertionError('%s was hashed before the names check was settled' % path)
+
+    def test_names_refusals_come_before_any_hashing(self):
+        """--check-names without a binary, a binary that cannot run and the binary's own
+        failure are refused before a single file is hashed, in write and in batch mode (a
+        refusal after hours of hashing would cost a full rerun), with nothing written."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        out = os.path.join(self.root, 'm.json')
+        not_executable = os.path.join(self.root, 'plain.txt')
+        with open(not_executable, 'w') as fh:
+            fh.write('not a binary\n')
+        binary = self._fake_metagraph()     # no names.json beside the annotations: exits 2
+        refusals = ((dict(check_names=True), '--metagraph'),
+                    (dict(metagraph=self.root + '/none'), 'cannot run'),
+                    (dict(metagraph=not_executable), 'cannot run'),
+                    (dict(metagraph=binary), 'exited 2'))
+        for kw, fragment in refusals:
+            with self.assertRaises(im.ManifestError) as cm:
+                im.write(_args(graph=g, annotation=a, output=out, **kw), hasher=self._never)
+            self.assertIn(fragment, str(cm.exception))
+            self.assertFalse(os.path.exists(out))
+        csv_out = os.path.join(self.root, 'with.csv')
+        for kw, fragment in refusals:
+            with self.assertRaises(im.ManifestError) as cm:
+                im.batch(_args(server_csv=self.csv, out_dir=self.root + '/b', write_csv=csv_out,
+                               **kw), hasher=self._never)
+            self.assertIn(fragment, str(cm.exception))
+        self.assertFalse(os.path.exists(self.root + '/b'))
+        self.assertFalse(os.path.exists(csv_out))
+
+    def test_batch_refuses_one_pairs_failing_binary_before_hashing(self):
+        """The binary failing on one pair (here: exit 2) refuses the whole batch before the
+        hashing pool, naming the pair's line: no manifest of another pair is written and no
+        digest is lost, as with every other refusal of the plan."""
+        f = self.files
+        binary = self._fake_metagraph()
+        self._names(f['a1.relaxed.row_diff_brwt_coord.annodbg'])
+        self._names(f['a3.column.annodbg'])     # a2's pair (line 2) has no names.json
+        csv_out = os.path.join(self.root, 'with.csv')
+        with self.assertRaises(im.ManifestError) as cm:
+            im.batch(_args(server_csv=self.csv, out_dir=self.root + '/b', write_csv=csv_out,
+                           metagraph=binary), hasher=self._never)
+        self.assertIn('line 2', str(cm.exception))
+        self.assertIn('exited 2', str(cm.exception))
+        self.assertFalse(os.path.exists(self.root + '/b'))
+        self.assertFalse(os.path.exists(os.path.join(self.root, 'col4')))
+        self.assertFalse(os.path.exists(csv_out))
+        # with every pair's names in order the batch is written, each pair's names recorded
+        self._names(f['a2.column.annodbg'], labels=2)
+        written = im.batch(_args(server_csv=self.csv, out_dir=self.root + '/b', write_csv=csv_out,
+                                 metagraph=binary))
+        self.assertEqual(3, len(written))
+        for (g, a), out in written.items():
+            with open(out) as fh:
+                self.assertEqual(2 if a == f['a2.column.annodbg'] else 3,
+                                 json.load(fh)['names']['labels'])
+        self.assertTrue(os.path.exists(csv_out))
+
+    def test_the_binarys_own_failure_reports_its_stderr(self):
+        """`stats --check-names` exits 1 with nothing on stdout and the cause on stderr when it
+        cannot read the annotation or its .seqs: that cause is reported, not "not JSON"."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        out = os.path.join(self.root, 'm.json')
+        failing = os.path.join(self.root, 'failing')
+        with open(failing, 'w') as fh:
+            fh.write('#!/bin/sh\necho "[error] Cannot read the labels of $4: truncated" >&2\n'
+                     'exit 1\n')
+        os.chmod(failing, 0o755)
+        with self.assertRaises(im.ManifestError) as cm:
+            im.write(_args(graph=g, annotation=a, output=out, metagraph=failing))
+        self.assertIn('exited 1', str(cm.exception))
+        self.assertIn('Cannot read the labels of ' + a + ': truncated', str(cm.exception))
+        self.assertNotIn('not JSON', str(cm.exception))
+        # output that is not the object: its stderr is reported with the parse error
+        garbled = os.path.join(self.root, 'garbled')
+        with open(garbled, 'w') as fh:
+            fh.write('#!/bin/sh\necho "[info] loading"\necho "[warning] odd" >&2\nexit 0\n')
+        os.chmod(garbled, 0o755)
+        with self.assertRaises(im.ManifestError) as cm:
+            im.write(_args(graph=g, annotation=a, output=out, metagraph=garbled))
+        self.assertIn('not JSON', str(cm.exception))
+        self.assertIn('[warning] odd', str(cm.exception))
+
+    def test_the_skip_note_names_its_reason(self):
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        binary = self._fake_metagraph()
+        self._names(a)
+        self._single(g, a, os.path.join(self.root, 'p.json'))
+        self.assertIn('names not checked (no --metagraph PATH)', self.err.getvalue())
+        self.assertNotIn('--no-check-names', self.err.getvalue())
+        self.err.truncate(0)
+        self.err.seek(0)
+        got = self._single(g, a, os.path.join(self.root, 'n.json'), metagraph=binary,
+                           check_names=False)
+        self.assertNotIn('names', got)
+        self.assertIn('names not checked (--no-check-names)', self.err.getvalue())
+        self.assertNotIn('no --metagraph PATH', self.err.getvalue())
+        self.err.truncate(0)
+        self.err.seek(0)
+        im.batch(_args(server_csv=self.csv, out_dir=self.root + '/b', metagraph=binary,
+                       check_names=False))
+        self.assertIn('names not checked (--no-check-names)', self.err.getvalue())
+        self.assertNotIn('no --metagraph PATH', self.err.getvalue())
+
+    def test_verify_honours_the_check_names_flags(self):
+        """main(): --verify with --metagraph re-checks unless --no-check-names; --check-names
+        without a binary, and a binary that cannot run, are refused in verify mode too."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        binary = self._fake_metagraph()
+        self._names(a)
+        out = os.path.join(self.root, 'v.json')
+        self._single(g, a, out, metagraph=binary)
+        # the names changed since the manifest was written
+        self._names(a, headers_invalid_utf8=1, names_ok=False)
+
+        def run_main(*argv):
+            with mock.patch.object(sys, 'argv', ['index_manifest.py'] + list(argv)):
+                try:
+                    im.main()
+                except SystemExit as e:
+                    return e.code
+            return None
+
+        self.assertIsNone(run_main('--verify', out, '--metagraph', binary, '--no-check-names'))
+        self.assertIn('OK, index_fp', self.out.getvalue())
+        self.assertNotIn('names now', self.out.getvalue())
+        self.assertEqual(1, run_main('--verify', out, '--metagraph', binary))
+        self.assertIn('names differ from the recorded ones', self.out.getvalue())
+        code = run_main('--verify', out, '--check-names')
+        self.assertIn('--metagraph', str(code))
+        code = run_main('--verify', out, '--metagraph', self.root + '/none')
+        self.assertIn('cannot run', str(code))
 
     def test_batch_equals_single_mode_and_hashes_each_file_once(self):
         calls = []

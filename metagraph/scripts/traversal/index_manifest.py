@@ -30,13 +30,16 @@ first_invalid (at most 10 of {kind: label | header, column, record, hex, problem
 A label name that is not valid UTF-8 cannot be listed by the serving routes
 (unrepresentable_label_name), and a record header repeating an earlier record's of its column
 is found at its first record only (CoordToHeader::find_header). The check is on when a binary is
-given (--check-names without --metagraph is an error, --no-check-names skips it) and skipped with
-a note otherwise. "names" is metadata: the server ignores it, and index_fp is the digest of the
-file list only, so a manifest has the same index_fp with and without the check. A failed check
-(names_ok false) is recorded and warned about, not refused: the manifest documents the index as
-it is. --verify prints the recorded names (or that none are) and, with --metagraph, runs the
-check again on the annotation next to the manifest (or under --root) and reports a difference as
-a problem.
+given (--check-names without --metagraph is an error, --no-check-names skips it, in every mode)
+and skipped with a note naming the reason otherwise. Its refusals -- the missing binary, a binary
+that cannot run, the binary's own failure on an annotation -- come before any file is hashed (in
+batch mode every pair is checked before the hashing pool), so that a refusal costs no hashing and
+leaves no partial set of manifests. "names" is metadata: the server ignores it, and index_fp is
+the digest of the file list only, so a manifest has the same index_fp with and without the check.
+A failed check (names_ok false) is recorded and warned about, not refused: the manifest documents
+the index as it is. --verify prints the recorded names (or that none are) and, with --metagraph
+(unless --no-check-names), runs the check again on the annotation next to the manifest (or under
+--root) and reports a difference as a problem.
 
 Batch mode (--server-csv) writes one manifest per (graph, annotation) pair of a multi-graph
 server's list, read as the server reads it (name,graph_path,annotation_path[,manifest_path
@@ -92,6 +95,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -312,13 +316,16 @@ def check_names(metagraph, annotation):
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as e:
         raise ManifestError('cannot run %s: %s' % (metagraph, e))
-    if res.returncode not in (0, 1):
-        raise ManifestError('%s exited %d: %s' % (' '.join(cmd), res.returncode,
-                                                  res.stderr.decode('utf-8', 'replace').strip()[-2000:]))
+    err = res.stderr.decode('utf-8', 'replace').strip()[-2000:]
+    # the binary's own failure (an annotation or .seqs it cannot read, a refused command line)
+    # exits 1 with nothing on stdout and its message on stderr, which is the cause to report
+    if res.returncode not in (0, 1) or (res.returncode == 1 and not res.stdout.strip()):
+        raise ManifestError('%s exited %d: %s' % (' '.join(cmd), res.returncode, err))
     try:
         names = json.loads(res.stdout.decode('utf-8'))
     except ValueError as e:
-        raise ManifestError('%s: the output is not JSON (%s)' % (' '.join(cmd), e))
+        raise ManifestError('%s: the output is not JSON (%s)%s'
+                            % (' '.join(cmd), e, '; stderr: ' + err if err else ''))
     missing = [k for k in NAMES_KEYS if not isinstance(names, dict) or k not in names]
     if missing:
         raise ManifestError('%s: the output lacks %s' % (' '.join(cmd), ', '.join(missing)))
@@ -347,24 +354,46 @@ def names_wanted(args):
     return bool(check)
 
 
-def record_names(manifest, args, annotation):
-    """Runs the check for |annotation| when wanted and records it under manifest["names"]
-    (outside the file list: index_fp is unchanged); says when it is skipped or failed."""
+def names_skipped_note(args):
+    """The note for a run without the check, naming the reason: --no-check-names, else that
+    no binary was given."""
+    reason = ('--no-check-names' if getattr(args, 'check_names', None) is False
+              else 'no --metagraph PATH')
+    return 'names not checked (%s): the manifest records no "names"' % reason
+
+
+def names_binary(args):
+    """The binary that runs the names check, None when the check is not wanted (names_wanted).
+    Refuses --check-names without --metagraph and a binary that is not an executable file
+    (looked up as subprocess does: a path, or a name on PATH) -- before any file is hashed,
+    so that an argument mistake costs no hashing."""
     if not names_wanted(args):
-        print('names not checked (no --metagraph PATH): the manifest records no "names"',
-              file=sys.stderr)
-        return
-    names = check_names(args.metagraph, annotation)
+        return None
+    if shutil.which(args.metagraph) is None:
+        raise ManifestError('cannot run %s: not an executable file (--metagraph PATH)'
+                            % args.metagraph)
+    return args.metagraph
+
+
+def record_names(manifest, names, annotation):
+    """Records the check's object under manifest["names"] (outside the file list: index_fp is
+    unchanged) and warns about a failed check."""
     manifest['names'] = names
     if not names['names_ok']:
         print('WARNING: %s: the names check failed and is recorded as such: %s'
               % (annotation, names_summary(names)), file=sys.stderr)
 
 
-def write(args):
+def write(args, hasher=sha256_file):
+    binary = names_binary(args)
+    if binary is None:
+        print(names_skipped_note(args), file=sys.stderr)
     out = args.output or annotation_base(args.annotation) + '.manifest.json'
     files = bundle_files(args.graph, args.annotation, args.extra,
                          coord_mapping=not args.no_coord_mapping)
+    # the names before the hashing: the check reads the labels and the .seqs only, and its
+    # refusal (the binary's own failure) then costs no hashing
+    names = check_names(binary, args.annotation) if binary else None
     total = sum(os.path.getsize(f) for f in files)
     print(f'{len(files)} files, {total / 1e9:.2f} GB to hash', file=sys.stderr)
     entries, hashed, t0 = [], 0, time.time()
@@ -377,13 +406,14 @@ def write(args):
             print(f'\r  {os.path.basename(f)}: {done / max(size, 1) * 100:5.1f}%  ({rate:.0f} MB/s)',
                   end='', file=sys.stderr)
 
-        digest = sha256_file(f, progress)
+        digest = hasher(f, progress)
         hashed += size
         print(file=sys.stderr)
         entries.append({'path': os.path.basename(f), 'size': size, 'sha256': digest})
-    names = [e['path'] for e in entries]
-    if len(set(names)) != len(names):
-        sys.exit('two bundle files share a base name: ' + ', '.join(sorted(n for n in names if names.count(n) > 1)))
+    base_names = [e['path'] for e in entries]
+    if len(set(base_names)) != len(base_names):
+        sys.exit('two bundle files share a base name: '
+                 + ', '.join(sorted(n for n in base_names if base_names.count(n) > 1)))
     entries.sort(key=lambda e: e['path'].encode())
     manifest = {
         'format': 'metagraph-index-manifest',
@@ -393,7 +423,8 @@ def write(args):
     }
     if args.name:
         manifest['index_ns'] = args.name
-    record_names(manifest, args, args.annotation)
+    if names is not None:
+        record_names(manifest, names, args.annotation)
     with open(out, 'w') as f:
         json.dump(manifest, f, indent=1)
         f.write('\n')
@@ -502,6 +533,9 @@ class DigestIndex:
 
 
 def batch(args, hasher=sha256_file):
+    binary = names_binary(args)
+    if binary is None:
+        print(names_skipped_note(args), file=sys.stderr)
     lines = parse_server_csv(args.server_csv)
     if not lines:
         raise ManifestError('%s lists no graphs' % args.server_csv)
@@ -556,6 +590,16 @@ def batch(args, hasher=sha256_file):
         if len(set(names)) != len(names):
             raise ManifestError('line %d: two bundle files share a base name' % no)
         plan.append(((graph, annotation), no, entry['ns'], files, out))
+    # the names of every pair before the hashing: the check reads the labels and the .seqs
+    # only, and a refusal (the binary's own failure on one pair) then costs no hashing and
+    # leaves no partial set of manifests, like the refusals of the plan
+    names_of = {}
+    for pair, no, _, _, _ in plan:
+        if binary:
+            try:
+                names_of[pair] = check_names(binary, pair[1])
+            except ManifestError as e:
+                raise ManifestError('line %d: %s' % (no, e))
     # every distinct file once (by real path): a precomputed digest, else hashed
     distinct = {}
     for _, _, _, files, _ in plan:
@@ -613,7 +657,8 @@ def batch(args, hasher=sha256_file):
         }
         if ns:
             manifest['index_ns'] = ns
-        record_names(manifest, args, pair[1])
+        if pair in names_of:
+            record_names(manifest, names_of[pair], pair[1])
         d = os.path.dirname(os.path.abspath(out))
         os.makedirs(d, exist_ok=True)
         tmp = out + '.tmp'
@@ -726,35 +771,34 @@ def main():
     ap.add_argument('--metagraph', metavar='PATH',
                     help='the metagraph binary: `stats --check-names` on the annotation, '
                          'recorded under "names" (write and batch; --verify re-runs it and '
-                         'compares)')
+                         'compares); refused before any hashing when it cannot run')
     ap.add_argument('--check-names', action=argparse.BooleanOptionalAction, default=None,
                     help='run the names check (default: when --metagraph is given; '
-                         '--no-check-names skips it)')
+                         '--no-check-names skips it, in every mode)')
     args = ap.parse_args()
-    if args.verify:
-        verify(args.verify, args.root, args.metagraph)
-    elif args.server_csv:
-        try:
+    try:
+        # the names arguments are refused before any mode starts hashing
+        binary = names_binary(args)
+        if args.verify:
+            verify(args.verify, args.root, binary)
+        elif args.server_csv:
             batch(args)
-        except ManifestError as e:
-            sys.exit('index_manifest.py: %s' % e)
-    elif args.graph and args.annotation and args.inventory:
-        # as `metagraph traverse --index-inventory`: the identity files a manifest lists, and the
-        # graph's derived data the loader reads beside them, which no manifest lists
-        print(json.dumps({
-            'files': [{'path': p, 'role': r, 'required': q, 'exists': os.path.exists(p)}
-                      for p, r, q in load_inventory(args.graph, args.annotation,
-                                                    not args.no_coord_mapping)],
-            'derived': [{'path': p, 'role': r, 'exists': e, 'loaded': l}
-                        for p, r, e, l in derived_files(args.graph)],
-            'derived_rule': DERIVED_RULE}, indent=1))
-    elif args.graph and args.annotation:
-        try:
+        elif args.graph and args.annotation and args.inventory:
+            # as `metagraph traverse --index-inventory`: the identity files a manifest lists,
+            # and the graph's derived data the loader reads beside them, which no manifest lists
+            print(json.dumps({
+                'files': [{'path': p, 'role': r, 'required': q, 'exists': os.path.exists(p)}
+                          for p, r, q in load_inventory(args.graph, args.annotation,
+                                                        not args.no_coord_mapping)],
+                'derived': [{'path': p, 'role': r, 'exists': e, 'loaded': l}
+                            for p, r, e, l in derived_files(args.graph)],
+                'derived_rule': DERIVED_RULE}, indent=1))
+        elif args.graph and args.annotation:
             write(args)
-        except ManifestError as e:
-            sys.exit('index_manifest.py: %s' % e)
-    else:
-        ap.error('give -i and -a, --server-csv, or --verify')
+        else:
+            ap.error('give -i and -a, --server-csv, or --verify')
+    except ManifestError as e:
+        sys.exit('index_manifest.py: %s' % e)
 
 
 if __name__ == '__main__':
