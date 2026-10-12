@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -57,6 +58,15 @@ using namespace mtg::graph::traversal;
     do {                                                                                 \
         if (!(condition)) {                                                              \
             (state).SkipWithError("check failed: " #condition);                         \
+            return;                                                                      \
+        }                                                                                \
+    } while (false)
+
+// a gate cell that could not be measured ends the benchmark with its reason
+#define GATE_CHECK(state, cell)                                                            \
+    do {                                                                                 \
+        if (!(cell).ok) {                                                                \
+            (state).SkipWithError(("gate cell: " + (cell).why).c_str());                 \
             return;                                                                      \
         }                                                                                \
     } while (false)
@@ -308,6 +318,23 @@ uint64_t requested_depth(const SeedResult &r) {
 
 constexpr uint64_t kMiB = uint64_t(1) << 20;
 
+// A walk the benchmark measures is bounded by its memory budget alone: under the walker's
+// default time budget (30 s) a long walk ends in a TIME stop, which no memory budget cures
+// (a completion search would then never end), so every strategy built here has none.
+constexpr double kNoTimeBudgetMs = std::numeric_limits<double>::infinity();
+
+// what stopped a walk, for a cell's reason
+std::string stop_text(const SeedResult &r) {
+    if (!r.resource_stop)
+        return "complete";
+    const ResourceStop &s = *r.resource_stop;
+    const char *resource = s.resource == ResourceStop::MEMORY ? "memory"
+                         : s.resource == ResourceStop::WORK ? "work"
+                         : s.resource == ResourceStop::TIME ? "time" : "attempt";
+    return std::string(resource) + " stop in " + s.phase + " at " + std::to_string(s.at_bp)
+           + " bp";
+}
+
 // The smallest whole-MiB budget (bounds.max_memory_mb) whose admitted account holds an
 // unbudgeted walk whose account peaked at |peak|: a budget's caches' allotments are part of its
 // account (memory_allotments), so the budget is above the peak
@@ -332,6 +359,7 @@ uint64_t completion_budget(uint64_t peak) {
 // most 256 B a list over the projection)
 struct GateCell {
     bool ok = true;
+    std::string why;                         // when not ok: what could not be measured
     uint64_t peak_off = 0, peak_on = 0;      // unbudgeted account peaks, exact bytes
     uint64_t need_off = 0, need_on = 0;      // completion budgets, whole MiB in bytes
     uint64_t depth_free = 0;
@@ -350,6 +378,7 @@ GateCell gate_cell(const AnnotatedDBG &anno, const Seed &seed, const Strategy &b
         Strategy st = base;
         st.coordinates = coordinates;
         st.max_memory_bytes = budget;
+        st.time_budget_ms = kNoTimeBudgetMs;
         price(&st, cost, detail);
         if (coordinates && project) {
             const uint64_t occurrence = 2 * sizeof(Coord) + st.delivery.occurrence;
@@ -366,15 +395,23 @@ GateCell gate_cell(const AnnotatedDBG &anno, const Seed &seed, const Strategy &b
             return SeedResult();
         }
     };
+    // the cell cannot be measured: its reason, for the benchmark's error
+    auto fail = [&](const std::string &why) {
+        c.ok = false;
+        c.why = why;
+    };
+    // the unbudgeted walks must complete: a stop there is not a memory budget's
     bool failed = false;
     const SeedResult free_off = walk(false, 0, &failed);
-    if (failed) {
-        c.ok = false;
+    if (failed || free_off.resource_stop) {
+        fail("the unbudgeted walk without coordinates: "
+             + (failed ? std::string("failed at depth 0") : stop_text(free_off)));
         return c;
     }
     const SeedResult free_on = walk(true, 0, &failed);
-    if (failed) {
-        c.ok = false;
+    if (failed || free_on.resource_stop) {
+        fail("the unbudgeted walk with coordinates: "
+             + (failed ? std::string("failed at depth 0") : stop_text(free_on)));
         return c;
     }
     c.peak_off = free_off.account.memory_peak;
@@ -397,26 +434,59 @@ GateCell gate_cell(const AnnotatedDBG &anno, const Seed &seed, const Strategy &b
         const SeedResult on = walk(true, budget, &c.f_on[i]);
         c.d_off[i] = c.f_off[i] ? 0 : requested_depth(off);
         c.d_on[i] = c.f_on[i] ? 0 : requested_depth(on);
-        c.s_off[i] = !c.f_off[i] && off.resource_stop.has_value();
-        c.s_on[i] = !c.f_on[i] && on.resource_stop.has_value();
+        // a stop at the fraction's budget is the memory's (the only budget set)
+        c.s_off[i] = !c.f_off[i] && off.resource_stop
+                     && off.resource_stop->resource == ResourceStop::MEMORY;
+        c.s_on[i] = !c.f_on[i] && on.resource_stop
+                    && on.resource_stop->resource == ResourceStop::MEMORY;
     }
-    auto completes = [&](bool coordinates, uint64_t budget) {
+    // whether the walk completes at |budget|: a failure at depth 0 and a memory stop ask for
+    // a larger budget; any other stop is not the memory's to cure
+    enum Completion { COMPLETE, NEEDS_MORE, OTHER_STOP };
+    auto completes = [&](bool coordinates, uint64_t budget, std::string *why) {
         bool f = false;
         const SeedResult r = walk(coordinates, budget, &f);
-        return !f && !r.resource_stop.has_value();
+        if (f)
+            return NEEDS_MORE;
+        if (!r.resource_stop)
+            return COMPLETE;
+        if (r.resource_stop->resource == ResourceStop::MEMORY)
+            return NEEDS_MORE;
+        *why = stop_text(r);
+        return OTHER_STOP;
     };
-    auto need = [&](bool coordinates, uint64_t peak) {
+    // the completion budget: up from completion_budget(peak) a MiB at a time, at most to
+    // twice the peak plus 128 MiB (a walk that completes nowhere below that is not bounded
+    // by its memory: the cell reports it instead of searching on), then down while a MiB
+    // less completes it too
+    auto need = [&](bool coordinates, uint64_t peak, uint64_t *budget) {
+        const uint64_t ceiling = 2 * peak + 128 * kMiB;
+        const std::string what = coordinates ? "with coordinates" : "without coordinates";
         uint64_t b = completion_budget(peak);
-        while (!completes(coordinates, b)) {
+        std::string why;
+        for (;;) {
+            const Completion at_b = completes(coordinates, b, &why);
+            if (at_b == COMPLETE)
+                break;
+            if (at_b == OTHER_STOP) {
+                fail("the walk " + what + " at " + std::to_string(b >> 20) + " MiB: " + why);
+                return false;
+            }
+            if (b >= ceiling) {
+                fail("the walk " + what + " completes at no budget up to "
+                     + std::to_string(b >> 20) + " MiB (twice its peak plus 128 MiB)");
+                return false;
+            }
             b += kMiB;
         }
-        while (b > kMiB && completes(coordinates, b - kMiB)) {
+        while (b > kMiB && completes(coordinates, b - kMiB, &why) == COMPLETE) {
             b -= kMiB;
         }
-        return b;
+        *budget = b;
+        return true;
     };
-    c.need_off = need(false, c.peak_off);
-    c.need_on = need(true, c.peak_on);
+    if (!need(false, c.peak_off, &c.need_off) || !need(true, c.peak_on, &c.need_on))
+        return c;
     const SeedResult at = walk(true, c.need_off, &failed);
     c.at_need_off = failed ? 2 : at.resource_stop.has_value() ? 1 : 0;
     c.at_need_off_depth = failed ? 0 : requested_depth(at);
@@ -565,7 +635,7 @@ void coordinates_depth_at_the_stop(benchmark::State &state, const Mini &mini) {
                 Seed seed;
                 seed.sequence = sequence;
                 const GateCell c = gate_cell(*mini.anno, seed, base, cost, detail, false);
-                MEASURE_CHECK(state, c.ok);
+                GATE_CHECK(state, c);
                 if (std::string(detail) == "full") {
                     // lower bounds, unbudgeted
                     runs += c.chains.size();
@@ -584,7 +654,7 @@ void coordinates_depth_at_the_stop(benchmark::State &state, const Mini &mini) {
                 MEASURE_CHECK(state, c.need_on >= c.need_off);
                 if (kind.column) {
                     const GateCell p = gate_cell(*mini.anno, seed, base, cost, detail, true);
-                    MEASURE_CHECK(state, p.ok);
+                    GATE_CHECK(state, p);
                     add_gate(p, detail, " column, refseq33m projection", &projected,
                              &projected_needs);
                     add_gate(p, detail, " " + kind.name + ", refseq33m projection", &projected,
@@ -684,7 +754,7 @@ void coordinates_depth_by_regime(benchmark::State &state) {
                         const std::string name = fx.dir + " " + seed_name + " "
                                                + (column ? "column" : "header") + " b"
                                                + std::to_string(limit) + " " + detail;
-                        MEASURE_CHECK(state, c.ok);
+                        GATE_CHECK(state, c);
                         uint64_t max_chains = 0;
                         for (uint64_t x : c.chains) {
                             max_chains = std::max(max_chains, x);
@@ -772,6 +842,7 @@ void coordinate_reserve_on_the_wide_fixture(benchmark::State &state) {
                 st.max_seed_labels = 5000;
                 st.seed_label_kind = column ? LabelKind::COLUMN : LabelKind::HEADER;
                 st.max_coordinate_occurrences = cap;
+                st.time_budget_ms = kNoTimeBudgetMs;
                 const LabelChangeCost cost = LabelChangeCost::forbid();
                 Written w[2];
                 uint64_t account[2] = { 0, 0 }, coordinates[2] = { 0, 0 };
