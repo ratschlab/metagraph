@@ -413,6 +413,9 @@ jobs:
           # a missing input fails the guarded classes instead of skipping them
           export METAGRAPH_REQUIRE_GUARDS=1
           ./test_venv/bin/python ../integration_tests/main.py --test_filter '*Mini*' < /dev/null
+          # the multi-graph server on chunks of the mini's records (test_multigraph.py; its
+          # class is guarded like the mini classes, its name holds no 'Mini')
+          ./test_venv/bin/python ../integration_tests/main.py --test_filter '*(test_multigraph.*' < /dev/null
           # the pattern bodies are what this binary answers on the mini (pattern_fixtures.py;
           # on the published copy every byte, on a build of its own every byte but the decode
           # work of its row-diff anchors)

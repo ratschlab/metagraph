@@ -38,6 +38,8 @@ from base import PROTEIN_MODE, TestingBase, METAGRAPH
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
 FASTA = os.path.join(MINI_DIR, 'fasta')
+# $METAGRAPH_REQUIRE_GUARDS=1: a missing mini index fails the class instead of skipping it
+REQUIRE_GUARDS = os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') == '1'
 K = 31
 # the chunks: (name, the mini's FASTA files, masked, annotation)
 CHUNKS = [
@@ -147,9 +149,23 @@ class Server:
         self.log.close()
 
 
+def guard(condition, reason):
+    """unittest.skipUnless(condition, reason); with $METAGRAPH_REQUIRE_GUARDS=1 a class whose
+    input is missing fails instead (test_pattern.py's guard)."""
+    if condition or not REQUIRE_GUARDS:
+        return unittest.skipUnless(condition, reason)
+
+    def decorate(cls):
+        def fail(klass):
+            raise AssertionError(f'$METAGRAPH_REQUIRE_GUARDS=1: {cls.__name__} cannot run: '
+                                 f'{reason}')
+        cls.setUpClass = classmethod(fail)
+        return cls
+    return decorate
+
+
 @unittest.skipIf(PROTEIN_MODE, "the mini index is DNA")
-@unittest.skipUnless(os.path.isdir(FASTA),
-                     "the mini index is not built (scripts/traversal/build_mini_refseq.sh)")
+@guard(os.path.isdir(FASTA), "the mini index is not built (scripts/traversal/build_mini_refseq.sh)")
 class TestMultiGraphServer(TestingBase):
 
     @classmethod
