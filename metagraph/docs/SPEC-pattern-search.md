@@ -4201,8 +4201,10 @@ the other pairs.
   without `in_ram`. The HTTP
   server's content timeout (900 s, §3) counts both: a load that outlasts it leaves the request unanswered (the
   connection closed), as for `/search`.
-- A request is checked after its load, as `/search`'s is: a malformed body with `in_ram: true` is refused once its
-  pair is loaded.
+- A request is checked before any load: the body, `graphs`, `in_ram` and the request's fields once, before any
+  pair is leased or loaded (§24.1), so a malformed body with `in_ram: true` is refused without a load, nothing
+  reserved (SPEC-labeled-traversal-core.md §10.3). Unlike `/search`, whose request is parsed per graph after its
+  load.
 - The capabilities state it: the block's `in_ram: "accepted"` and `resident_only: false` (§10.2), and
   `GET /capabilities`' `in_ram` (which routes accept it, whether this server loads, `--mem-cap-gb`,
   `budgets_start: "after_load"`; SPEC-labeled-traversal-core.md §10.3).
@@ -4565,4 +4567,7 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   capabilities; `TestPatternSynthetic.test_mismatch_caps_at_start_up`).
 - **Wording** (2026-10-12, the review of the branch): §4.1 and §25.2 state what the route does — only
   `predicate_scope: "motif"` needs a predicate; `"context"`, the default, is accepted with any request (§5 step 8
-  and §6 said so already); the validator refuses `"motif"` alone and passes `"context"` alone.
+  and §6 said so already); the validator refuses `"motif"` alone and passes `"context"` alone. §24.2 states the
+  order the code implements: a multi-graph request is checked once before any pair is leased or loaded, so a
+  malformed body with `in_ram: true` is refused without a load (§24.1, SPEC-labeled-traversal-core.md §10.3),
+  unlike `/search`, whose request is parsed per graph after its load.
