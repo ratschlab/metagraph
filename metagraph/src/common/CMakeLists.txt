@@ -10,6 +10,7 @@ set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 find_package(Boost REQUIRED)
+find_package(ZLIB REQUIRED)
 buildLogging()
 findFolly()
 find_package(glog REQUIRED)
@@ -27,13 +28,11 @@ target_include_directories(metagraph_common
   PUBLIC
     ${PROJECT_PARENT_DIR}/src/
     ${EXTERNAL_LIB_DIR}/asio/asio/include
-    ${EXTERNAL_LIB_DIR}/cpp_progress_bar
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/ips4o
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
-    ${EXTERNAL_LIB_DIR}/zlib
     /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
 target_include_directories(metagraph_common SYSTEM PUBLIC
@@ -49,7 +48,6 @@ IF(APPLE)
     set(CMAKE_USE_PTHREADS_INIT 1)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
-add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
 
 target_link_libraries(metagraph_common
   PUBLIC
@@ -59,7 +57,7 @@ target_link_libraries(metagraph_common
     OpenMP::OpenMP_CXX
     glog::glog
     spdlog::spdlog
-    z
+    ZLIB::ZLIB
 )
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
   target_link_libraries(metagraph_common PUBLIC atomic)

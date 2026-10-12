@@ -195,6 +195,7 @@ endif()
 # KMC k-mer counter
 #-------------------
 set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
+# BUILD_KMC controls the standalone executable; the KMC library is always built.
 if(NOT DEFINED BUILD_KMC)
 set(BUILD_KMC ${METAGRAPH_BUILD_EXECUTABLE})
 endif()
