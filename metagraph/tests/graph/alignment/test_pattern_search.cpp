@@ -3004,6 +3004,127 @@ TEST(PatternSearch, ExtensionMaxPaths) {
     EXPECT_FALSE(first.extraction->complete);
 }
 
+// The request's memory account (Budget::set_memory): every walk the extension keeps for the
+// release is admitted before it is kept (retained_path_bytes), within half of what the account
+// had left when the extension began, and released as the release hands it over; a refusal
+// stops the extension with {EXTENSION, MAX_MEMORY}: PARTIAL releases the walks kept before it
+// (cut MAX_MEMORY), ALL_OR_COUNT withholds OUTPUT_BUDGET. The stop ends only its own pattern;
+// count() keeps no walk and charges nothing
+TEST(PatternSearch, ExtensionMemoryAccount) {
+    struct Account final : public MemoryAccount {
+        uint64_t max;
+        uint64_t held = 0;
+        uint64_t peak = 0;
+        uint64_t admissions = 0;
+        explicit Account(uint64_t max) : max(max) {}
+        bool admit(uint64_t bytes) override {
+            if (bytes > left())
+                return false;
+            held += bytes;
+            peak = std::max(peak, held);
+            ++admissions;
+            return true;
+        }
+        void release(uint64_t bytes) override {
+            EXPECT_LE(bytes, held);
+            held -= std::min(bytes, held);
+        }
+        uint64_t left() const override { return held < max ? max - held : 0; }
+    };
+    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
+    auto graph = build(5, records, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NNNNNNA");
+    const std::vector<PathCtx> expected = path_oracle(*graph, pattern, path_request()).paths;
+    const uint64_t total = expected.size();
+    ASSERT_LT(4u, total);
+    const uint64_t walk = retained_path_bytes(5, 7);
+    EXPECT_EQ(128u + 8 * 3 + 7, walk);
+
+    auto run = [&](Request request, Budget &budget, Account *account, Result *result) {
+        std::vector<PathCtx> paths;
+        *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
+            // the walks not yet handed over are still held while this one is built (braces:
+            // the gtest macro expands to an if/else)
+            if (account && account->admissions) {
+                EXPECT_EQ((account->admissions - paths.size()) * walk, account->held);
+            }
+            paths.push_back(PathCtx { c.node, c.orientation, c.sequence, c.path });
+        });
+        return paths;
+    };
+
+    // every walk fits its half: the answer of a request without an account, every charge
+    // released by the end, the peak the walks kept
+    Request partial = path_request();
+    partial.mode = Mode::PARTIAL;
+    {
+        Account account(2 * total * walk + 2);
+        Budget budget = unbounded_budget();
+        budget.set_memory(&account);
+        Result result;
+        auto paths = run(partial, budget, &account, &result);
+        EXPECT_EQ(expected, paths);
+        EXPECT_TRUE(result.extraction->complete);
+        EXPECT_FALSE(result.stop);
+        EXPECT_EQ(total, account.admissions);
+        EXPECT_EQ(total * walk, account.peak);
+        EXPECT_EQ(0u, account.held);
+    }
+
+    // the half holds two walks: the extension stops at the third
+    const uint64_t kept = 2;
+    {
+        Account account(2 * kept * walk + 1);
+        Budget budget = unbounded_budget();
+        budget.set_memory(&account);
+        Result result;
+        auto paths = run(partial, budget, &account, &result);
+        ASSERT_EQ(kept, paths.size());
+        EXPECT_TRUE(std::equal(paths.begin(), paths.end(), expected.begin()));
+        ASSERT_TRUE(result.stop);
+        EXPECT_EQ(StopPhase::EXTENSION, result.stop->phase);
+        EXPECT_EQ(StopReason::MAX_MEMORY, result.stop->reason);
+        EXPECT_FALSE(result.time_limited);
+        EXPECT_EQ(StopReason::MAX_MEMORY, result.extraction->cut);
+        EXPECT_FALSE(result.extraction->complete);
+        EXPECT_EQ(Extension::STOPPED, result.anchors->extension);
+        EXPECT_EQ(Relation::AT_LEAST, result.anchors->paths.relation);
+        EXPECT_EQ(kept + 1, result.anchors->paths.value);
+        EXPECT_EQ(kept * walk, account.peak);
+        EXPECT_EQ(0u, account.held);
+
+        // the stop is the pattern's, not the budget's: the next pattern searches
+        EXPECT_FALSE(budget.stopped());
+        Result next = engine.count(Pattern::parse(PatternKind::DNA, "GGGCCCAA"), path_request(),
+                                   budget);
+        EXPECT_FALSE(next.stop);
+        EXPECT_EQ(Relation::EXACT, next.anchors->paths.relation);
+
+        Request all = path_request();
+        all.mode = Mode::ALL_OR_COUNT;
+        Result withheld;
+        EXPECT_TRUE(run(all, budget, &account, &withheld).empty());
+        EXPECT_EQ(Withheld::OUTPUT_BUDGET, withheld.extraction->withheld);
+        ASSERT_TRUE(withheld.stop);
+        EXPECT_EQ(StopPhase::EXTENSION, withheld.stop->phase);
+        EXPECT_EQ(StopReason::MAX_MEMORY, withheld.stop->reason);
+        EXPECT_EQ(0u, account.held);
+    }
+
+    // count() keeps no walk: an account that holds nothing refuses nothing
+    {
+        Account account(1);
+        Budget budget = unbounded_budget();
+        budget.set_memory(&account);
+        Result counted = engine.count(pattern, path_request(), budget);
+        EXPECT_FALSE(counted.stop);
+        EXPECT_EQ(Relation::EXACT, counted.anchors->paths.relation);
+        EXPECT_EQ(total, counted.anchors->paths.value);
+        EXPECT_EQ(0u, account.admissions);
+    }
+}
+
 TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
     // every step budget: a stop in discovery leaves the anchors a true lower bound and the
     // paths unknown (nothing extended); a stop in the extension leaves the anchors exact and

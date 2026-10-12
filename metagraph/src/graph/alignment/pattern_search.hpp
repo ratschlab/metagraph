@@ -846,11 +846,14 @@ class Deadline {
 
 // Why a pattern's work stopped, or why PARTIAL's list was cut (JSON stop.reason, cut.reason):
 // the knob an agent can turn. MAX_PATHS: the stop_at_threshold threshold of the extension, and
-// PARTIAL's cap on the paths returned. EXTERNAL (internal): the extension's support tracker or
+// PARTIAL's cap on the paths returned. MAX_MEMORY: the request's memory account
+// (Budget::memory) could not hold a walk the extension keeps for the release (phase EXTENSION
+// only; never set without an account). EXTERNAL (internal): the extension's support tracker or
 // path sink (Request::support, Request::sink) answered STOPPED; the route, which owns them,
 // writes their own reason (SupportTracker::stop_reason, PathSink::stop_reason:
 // max_annotation_work, max_memory), never "external". Never set without a tracker or a sink
-enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS, EXTERNAL };
+enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS, MAX_MEMORY,
+                        EXTERNAL };
 
 /**
  * Where it stopped (JSON stop.phase):
@@ -881,6 +884,33 @@ struct Stop {
     // below it are complete, the levels above it UNKNOWN. Unset otherwise (an EXTRACTION stop)
     std::optional<uint8_t> mismatch_level = std::nullopt;
 };
+
+/**
+ * The request's memory account as the engine sees it (Budget::set_memory): a deterministic
+ * model in bytes, never a measurement (§5.3), owned by the route and shared with everything
+ * else the request holds. The engine charges it for what it keeps beyond its DFS frontier for
+ * a release: the complete walks of a long pattern's extension (retained_path_bytes each),
+ * admitted before they are kept and released as they are handed over or dropped. A refusal
+ * stops the pattern's search (stop {EXTENSION, MAX_MEMORY}); the account is never passed.
+ * Null (the default): nothing is charged, as for a request without an account.
+ */
+class MemoryAccount {
+  public:
+    virtual ~MemoryAccount() = default;
+
+    // false: |bytes| do not fit what is left; nothing is held
+    virtual bool admit(uint64_t bytes) = 0;
+    virtual void release(uint64_t bytes) = 0;
+    // what the account has left (what admit() would still take)
+    virtual uint64_t left() const = 0;
+};
+
+// The model's price of one complete walk of L bases the extension keeps for the release
+// (Context: its node path of n = L - k + 1 ids and its spelled sequence)
+inline uint64_t retained_path_bytes(size_t k, size_t length) {
+    const uint64_t n = length >= k ? length - k + 1 : 1;
+    return 128 + 8 * n + static_cast<uint64_t>(length);
+}
 
 /**
  * The request's work budget: max_steps and the deadline, shared by all patterns of the request
@@ -927,6 +957,15 @@ class Budget {
     void set_abort(std::function<bool()> aborted) { aborted_ = std::move(aborted); }
 
     /**
+     * The request's memory account (MemoryAccount), charged for the walks an extension keeps
+     * for the release; must outlive the budget's use. Unset (the default): nothing is
+     * charged. A memory stop ends only its own pattern: the next one starts with what the
+     * account has left (never recorded here, unlike a step or time stop).
+     */
+    void set_memory(MemoryAccount *account) { memory_ = account; }
+    MemoryAccount* memory() const { return memory_; }
+
+    /**
      * Admits |n| more steps: true when steps_used() + n <= max_steps and the deadline's
      * work time has not passed at the last clock reading (taken when the charge crosses a
      * multiple of kClockStride). False records the reason (unless a stop was recorded
@@ -950,6 +989,7 @@ class Budget {
     Deadline deadline_;
     std::optional<StopReason> stopped_;
     std::function<bool()> aborted_;
+    MemoryAccount *memory_ = nullptr;
 
     void poll_abort() const {
         if (aborted_ && aborted_())
@@ -1285,6 +1325,10 @@ enum class Withheld {
     // either mode, L > k with extend_paths: the anchors are EXACT and above max_anchors, so
     // the extension was not admitted (§4.2); counts.anchors is exact, the paths UNKNOWN
     ANCHORS_ABOVE_THRESHOLD,
+    // ALL_OR_COUNT, L > k with extend_paths: the request's memory account (Budget::memory)
+    // could not hold a walk the extension kept for the release (stop {EXTENSION, MAX_MEMORY});
+    // the route's name for an answer the account could not hold
+    OUTPUT_BUDGET,
     // ALL_OR_COUNT, L > k with a support tracker: the tracker stopped the extension
     // (StopReason::EXTERNAL); the route writes the tracker's reason (annotation_budget), never
     // "external"
@@ -2143,8 +2187,14 @@ class PatternSearch {
      * ranges that straddle T (O(k) per base search) plus the W-rule ranges whose masked edges
      * leave no context guaranteed, at most 4096 or twice that between compactions, whatever
      * the discovery's size; the release's own index over them (40 bytes each) is as large.
-     * The paths retained for the release are at most max_paths, each O(L); the contexts
-     * themselves are the caller's.
+     * The paths retained for the release are at most max_paths, each O(L), charged to the
+     * request's memory account when the budget has one (Budget::memory, retained_path_bytes
+     * each): they may take at most half of what the account has left when the extension
+     * begins, the other half being for the result objects the caller builds from them while
+     * they are held, and the first that does not fit stops the extension ({EXTENSION,
+     * MAX_MEMORY}: PARTIAL releases those kept before it, ALL_OR_COUNT withholds
+     * OUTPUT_BUDGET); each is freed and its charge released as the release hands it over.
+     * The contexts themselves are the caller's.
      */
     Result enumerate(const Pattern &pattern, const Request &request, Budget &budget,
                      const std::function<void(const Context&)> &callback) const;
@@ -2292,6 +2342,7 @@ inline const char* to_string(StopReason reason) {
         case StopReason::MAX_CONTEXTS: return "max_contexts";
         case StopReason::MAX_ANCHORS: return "max_anchors";
         case StopReason::MAX_PATHS: return "max_paths";
+        case StopReason::MAX_MEMORY: return "max_memory";
         // never written by the route, which names the tracker's or the sink's reason
         case StopReason::EXTERNAL: return "external";
     }
@@ -2316,6 +2367,7 @@ inline const char* to_string(Withheld withheld) {
         case Withheld::DEADLINE: return "deadline";
         case Withheld::PATHS_LATER_INCREMENT: return "paths_later_increment";
         case Withheld::ANCHORS_ABOVE_THRESHOLD: return "anchors_above_threshold";
+        case Withheld::OUTPUT_BUDGET: return "output_budget";
         // never written by the route (see Withheld::EXTERNAL)
         case Withheld::EXTERNAL: return "external";
     }

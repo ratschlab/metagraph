@@ -2021,8 +2021,10 @@ class Checker:
                     or stop['phase'] in ('extraction', 'extension', 'selection')
                     + ANNOTATION_PHASES,
                     path + '.stop', 'a stop in discovery leaves no exact count')
+            # (SPEC §12.1: a label-free path list ends in the phase output at a result object
+            # the account cannot hold)
             self.ok(stop['phase'] not in ANNOTATION_PHASES or labelled
-                    or ((predicate or supported) and stop['phase'] == 'output'),
+                    or ((predicate or supported or paths) and stop['phase'] == 'output'),
                     path + '.stop.phase', 'an annotation phase without labels "all"')
             # SPEC §19.8: the selection's phase and reasons with a predicate only
             self.ok(stop['phase'] != 'selection' or predicate, path + '.stop.phase',
@@ -2039,10 +2041,13 @@ class Checker:
             self.ok((stop['reason'] == 'max_paths') <= (stop['phase'] == 'extension'),
                     path + '.stop.reason', 'max_paths stops the extension only')
             # SPEC §20.5: the supported-path search's reads stop the extension (and a
-            # predicate's mirror reads its selection); the annotation budgets elsewhere are the
-            # labels' phases
+            # predicate's mirror reads its selection); SPEC §12.1: the memory account stops a
+            # path search's extension at a walk it cannot hold, with any projection; the
+            # annotation budgets elsewhere are the labels' phases
             self.ok(stop['reason'] not in ('max_annotation_work', 'max_memory')
                     or stop['phase'] not in ('extension', 'selection') or supported
+                    or (paths and stop['phase'] == 'extension'
+                        and stop['reason'] == 'max_memory')
                     or (predicate and stop['phase'] == 'selection'
                         and stop['reason'] == 'max_memory'),
                     path + '.stop', 'an annotation budget stopping a search that reads none')

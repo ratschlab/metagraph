@@ -1444,6 +1444,9 @@ std::optional<Extraction> supported_release(const Result &result, const Request 
                 return Withheld::DEADLINE;
             case StopReason::MAX_STEPS:
                 return Withheld::DISCOVERY_BUDGET;
+            case StopReason::MAX_MEMORY:
+                // (the engine keeps no walk when a sink receives them: never its stop here)
+                return Withheld::OUTPUT_BUDGET;
             case StopReason::EXTERNAL:
                 return Withheld::EXTERNAL;
         }

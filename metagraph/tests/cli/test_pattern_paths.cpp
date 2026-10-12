@@ -1110,12 +1110,15 @@ TEST(PatternPaths, TheMemoryAccountStopsPathRetention) {
         records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
     }
     Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
-    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const std::string spec = "{\"iupac\": \"ACGTNNNT\"}";
     const uint64_t descriptor = path_descriptor_bytes(5, 8);
     EXPECT_EQ(512u + 2 * 5 + 3 * 8 + 192 * 4, descriptor);
     Json::Value full = run(idx, body(spec, "\"mode\": \"partial\""));
     const uint64_t paths = full["patterns"][0]["returned"].asUInt64();
     ASSERT_GT(paths, 3u);
+    // few enough paths for the walks the engine keeps (retained_path_bytes each, within half
+    // of the account) to fit beside the descriptors below: this test is the descriptors'
+    ASSERT_LE(paths * pattern::retained_path_bytes(5, 8), 3 * descriptor);
 
     // room for the descriptors of six paths: partial's take at most half, three
     RetrievalHooks hooks;
@@ -1153,6 +1156,132 @@ TEST(PatternPaths, TheMemoryAccountStopsPathRetention) {
             EXPECT_TRUE(!w["withheld"].isNull() || !w["cut"].isNull() || !w["stop"].isNull()
                         || w["rows_refused"].size()) << max << " " << mode << " " << w;
         }
+    }
+}
+
+// The request's one memory account bounds a long pattern's label-free paths too (§5.3): the
+// walks the engine keeps for the release (retained_path_bytes each, within half of what the
+// account has left when the extension begins, each freed as it is handed over) and each path's
+// result object (path_descriptor_bytes, charged before it is built from what the account has
+// left). The engine's refusal: stop {extension, max_memory}, partial releases the walks kept
+// before it (cut max_memory), all_or_count withholds output_budget; the route's: the list ends
+// at the first object that does not fit (cut max_memory, stop {output, max_memory};
+// all_or_count output_budget). A request the account holds is answered as without one, and
+// work.memory_bytes stays absent without labels
+TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const uint64_t walk = pattern::retained_path_bytes(5, 8);
+    const uint64_t object = path_descriptor_bytes(5, 8);
+    EXPECT_EQ(128u + 8 * 4 + 8, walk);
+    ASSERT_LT(walk, object);
+    Json::Value full = run(idx, body(spec, "\"mode\": \"partial\"", "none"));
+    const Json::Value &f = full["patterns"][0];
+    const uint64_t paths = f["returned"].asUInt64();
+    ASSERT_GT(paths, 3u);
+    ASSERT_TRUE(f["retrieval_complete"].asBool());
+    EXPECT_FALSE(f["work"].isMember("memory_bytes"));
+
+    // the objects the route builds beside |held| walks within |max|: the j-th needs the walks
+    // not yet handed over (held - j), the objects before it and itself
+    auto admitted = [&](uint64_t max, uint64_t held) {
+        uint64_t j = 0;
+        while (j < held && (held - j) * walk + (j + 1) * object <= max) {
+            ++j;
+        }
+        return j;
+    };
+
+    // an account that holds every walk in its half and every object beside the walks still
+    // held: the answer of a request without one, byte for byte
+    RetrievalHooks hooks;
+    hooks.max_memory_bytes = 2 * paths * walk + paths * object;
+    ASSERT_EQ(paths, admitted(hooks.max_memory_bytes, paths));
+    EXPECT_EQ(untimed(full), untimed(run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks)));
+    Json::Value all = run(idx, body(spec, "", "none"));
+    EXPECT_EQ(untimed(all), untimed(run(idx, body(spec, "", "none"), hooks)));
+    EXPECT_TRUE(all["patterns"][0]["retrieval_complete"].asBool());
+
+    // the route's cut: every walk fits its half, the objects end where the next does not fit
+    hooks.max_memory_bytes = 2 * paths * walk + 2 * object;
+    const uint64_t built = admitted(hooks.max_memory_bytes, paths);
+    ASSERT_GT(built, 0u);
+    ASSERT_LT(built, paths);
+    Json::Value out = run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ(built, e["returned"].asUInt64());
+    EXPECT_EQ("max_memory", e["cut"]["reason"].asString());
+    EXPECT_EQ("output", e["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+    EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(paths, e["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ("completed", e["counts"]["paths"]["extension"].asString());
+    for (Json::ArrayIndex i = 0; i < built; ++i) {
+        EXPECT_EQ(f["results"][i], e["results"][i]);
+    }
+    out = run(idx, body(spec, "", "none"), hooks);
+    const Json::Value &w = out["patterns"][0];
+    EXPECT_EQ("output_budget", w["withheld"]["reason"].asString());
+    EXPECT_EQ(0u, w["returned"].asUInt64());
+    EXPECT_EQ(0u, w["results"].size());
+    EXPECT_TRUE(w["cut"].isNull());
+    EXPECT_EQ("output", w["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", w["stop"]["reason"].asString());
+    EXPECT_EQ("exact", w["counts"]["paths"]["relation"].asString());
+    EXPECT_FALSE(w["retrieval_complete"].asBool());
+
+    // the engine's stop: the half holds two walks, the third stops the extension; the
+    // objects built from the two kept are those that fit beside them
+    const uint64_t kept = 2;
+    hooks.max_memory_bytes = 2 * kept * walk + 1;
+    const uint64_t released = admitted(hooks.max_memory_bytes, kept);
+    out = run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks);
+    const Json::Value &s = out["patterns"][0];
+    EXPECT_EQ(released, s["returned"].asUInt64());
+    EXPECT_EQ("max_memory", s["cut"]["reason"].asString());
+    EXPECT_EQ("extension", s["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", s["stop"]["reason"].asString());
+    EXPECT_EQ("stopped", s["counts"]["paths"]["extension"].asString());
+    EXPECT_EQ("at_least", s["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(kept + 1, s["counts"]["paths"]["value"].asUInt64());
+    EXPECT_FALSE(s["retrieval_complete"].asBool());
+    EXPECT_EQ("full", s["determinism"].asString());
+    for (Json::ArrayIndex i = 0; i < released; ++i) {
+        EXPECT_EQ(f["results"][i], s["results"][i]);
+    }
+    out = run(idx, body(spec, "", "none"), hooks);
+    EXPECT_EQ("output_budget", out["patterns"][0]["withheld"]["reason"].asString());
+    EXPECT_EQ("extension", out["patterns"][0]["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", out["patterns"][0]["stop"]["reason"].asString());
+    EXPECT_EQ("at_least", out["patterns"][0]["counts"]["paths"]["relation"].asString());
+
+    // the same account, with labels: the engine's walks stop the extension before any read
+    out = run(idx, body(spec, "\"mode\": \"partial\""), hooks);
+    const Json::Value &l = out["patterns"][0];
+    EXPECT_EQ("extension", l["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", l["stop"]["reason"].asString());
+    EXPECT_EQ("max_memory", l["cut"]["reason"].asString());
+    EXPECT_LE(l["work"]["memory_bytes"].asUInt64(), hooks.max_memory_bytes);
+
+    // a memory stop ends only its own pattern: the next one starts with what the account has
+    // left (the walks of the first were freed with it)
+    out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), hooks);
+    for (Json::ArrayIndex i = 0; i < 2; ++i) {
+        const Json::Value &p = out["patterns"][i];
+        EXPECT_EQ("extension", p["stop"]["phase"].asString()) << i;
+        EXPECT_EQ("max_memory", p["stop"]["reason"].asString()) << i;
+        EXPECT_EQ("stopped", p["counts"]["paths"]["extension"].asString()) << i;
+        EXPECT_EQ(kept + 1, p["counts"]["paths"]["value"].asUInt64()) << i;
     }
 }
 

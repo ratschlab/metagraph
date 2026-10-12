@@ -1294,6 +1294,34 @@ std::string withheld_name(Withheld withheld, const std::string &external) {
     return "annotation_budget";
 }
 
+// The cut of a long pattern's label-free path list that the memory account ended (the first
+// path whose result object did not fit, none built after it; Answered::plain_cut), stated as
+// the labelled retrieval states its descriptors' cut: partial keeps the objects built, cut
+// max_memory; all_or_count returns all or nothing, withheld output_budget; stop {output,
+// max_memory} unless an earlier stop is stated, and the entry is never complete. An entry the
+// engine withheld keeps its withheld (nothing of it was built)
+void put_plain_cut(Json::Value *entry, Mode mode) {
+    Json::Value &e = *entry;
+    if (e.isMember("error") || e["withheld"].isObject()) {
+        return;
+    }
+    if (e["stop"].isNull()) {
+        Json::Value s;
+        s["phase"] = "output";
+        s["reason"] = "max_memory";
+        e["stop"] = std::move(s);
+    }
+    e["retrieval_complete"] = false;
+    if (mode == Mode::PARTIAL) {
+        e["cut"] = reason_json("max_memory");
+        return;
+    }
+    e["withheld"] = reason_json("output_budget");
+    e["returned"] = 0;
+    e["cut"] = Json::Value();
+    e["results"] = Json::Value(Json::arrayValue);
+}
+
 } // namespace
 
 
@@ -1578,6 +1606,14 @@ Json::Value process_pattern_request(
     // a caller that left is not answered: the work ends at its next clock reading
     if (delivery && delivery->abort())
         budget.set_abort(delivery->abort());
+    // the request's one memory account (§5.3; the tests' size, else max_memory_mb), over all
+    // its patterns: the walks the engine keeps for a long pattern's release, the result
+    // objects the route builds and the labelled retrieval's reads and labels
+    retrieval::Account account(hooks && hooks->max_memory_bytes ? hooks->max_memory_bytes
+                                                                 : req.retrieval.max_memory_bytes);
+    budget.set_memory(&account);
+    // the admission of a label-free path list's result objects (answer_plain)
+    retrieval::Admission plain(account);
     const PatternSearch search(graph);
 
     const size_t k = graph.get_k();
@@ -1603,7 +1639,8 @@ Json::Value process_pattern_request(
                                                             : Projection::NONE;
     std::optional<PatternRetrieval> retrieval;
     if (read_labels || has_predicate || req.long_supported) {
-        retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks, &volume);
+        retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks, &volume,
+                          &account);
         if (!retrieval->description().budgeted && !req.retrieval.allow_unbudgeted) {
             if (req.long_supported && !has_predicate) {
                 throw PatternRefusal(400, "annotation_unbudgeted",
@@ -1788,9 +1825,12 @@ Json::Value process_pattern_request(
         std::optional<Result> result;
         Json::Value results;
         // the contexts the engine released (results.size(), or more when the memory account
-        // of output.labels "all" admitted only the first of them; with a predicate's pass, the
-        // raw contexts released into it)
+        // admitted only the first of them: output.labels "all", or a long pattern's label-free
+        // paths; with a predicate's pass, the raw contexts released into it)
         uint64_t released = 0;
+        // a long pattern's label-free paths: the memory account ended the list before the
+        // engine's release did (put_plain_cut states it)
+        bool plain_cut = false;
         // output.labels "all" (or "predicate_only"): the pattern's labels, read in the work
         // phase
         std::optional<LabelsAnswer> labels;
@@ -1816,10 +1856,29 @@ Json::Value process_pattern_request(
         const bool paths = req.long_paths && pattern.length() > k;
         if (mode == Mode::COUNT) {
             a.result = search.count(pattern, req.request, budget);
-        } else if (!labels) {
+        } else if (!labels && paths) {
             const size_t length = pattern.length();
+            // each path's result object is charged to the memory account before it is built,
+            // as with labels (path_descriptor_bytes), from what the account has left (no reads
+            // to keep room for); after the first that does not fit none is built
+            plain.begin();
             a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
-                a.results.append(paths ? path_json(c, length) : context_json(c, pattern));
+                ++a.released;
+                if (!plain.admit(path_descriptor_bytes(k, length))) {
+                    return;
+                }
+                a.results.append(path_json(c, length));
+            });
+            a.plain_cut = a.results.size() < a.released;
+            // all or nothing: the objects of a withheld or cut list are discarded, their
+            // charge with them
+            if (mode != Mode::PARTIAL && a.result->extraction
+                    && (a.plain_cut || a.result->extraction->withheld)) {
+                account.release(plain.take());
+            }
+        } else if (!labels) {
+            a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
+                a.results.append(context_json(c, pattern));
             });
             a.released = a.results.size();
         } else if (paths) {
@@ -2558,6 +2617,10 @@ Json::Value process_pattern_request(
                                        MismatchEntry { req.request.max_mismatches,
                                                        a.mismatch_cap },
                                        a.supported ? &a.supported->counts : nullptr);
+        // a label-free path list the memory account ended
+        if (a.plain_cut) {
+            put_plain_cut(&entry, mode);
+        }
         // the supported paths' release and stops, then the selection (both before the
         // projection's labels, whose withheld, cut and stop come after theirs)
         if (a.supported)

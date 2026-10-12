@@ -184,39 +184,8 @@ inline uint8_t strand_rank(graph::pattern::Orientation o) {
     return 3;
 }
 
-// the account of §5.3: one per request, every item charged before it is held (what an
-// unbudgeted read returned excepted: force())
-class Account {
-  public:
-    explicit Account(uint64_t max) : max_(max) {}
-    // refused when it does not fit what is left; once an unbudgeted read's names were forced
-    // past the maximum nothing fits any more (left() is 0: no unsigned wrap of max_ - held_)
-    bool charge(uint64_t bytes) {
-        if (bytes > left())
-            return false;
-        held_ += bytes;
-        peak_ = std::max(peak_, held_);
-        return true;
-    }
-    // what an unbudgeted read returned, held whether or not it fits (the read is done); the
-    // answer states the unbudgeted access, and the peak shows any excess
-    void force(uint64_t bytes) {
-        held_ += bytes;
-        peak_ = std::max(peak_, held_);
-    }
-    void release(uint64_t bytes) {
-        assert(bytes <= held_);
-        held_ -= std::min(bytes, held_);
-    }
-    uint64_t left() const { return held_ < max_ ? max_ - held_ : 0; }
-    uint64_t held() const { return held_; }
-    uint64_t peak() const { return peak_; }
-
-  private:
-    uint64_t max_;
-    uint64_t held_ = 0;
-    uint64_t peak_ = 0;
-};
+// (the account of §5.3 is retrieval::Account of the public header: one per request, shared
+// with the engine and the route)
 
 // What the reads made of a row (the annotation key of one or more contexts)
 enum class RowStatus {
@@ -325,11 +294,16 @@ class PendingText {
 
 struct PatternRetrieval::Impl {
     Impl(const graph::AnnotatedDBG &anno_graph, const RetrievalLimits &limits,
-         graph::pattern::Budget &budget, const RetrievalHooks *hooks, AnswerVolume *volume)
+         graph::pattern::Budget &budget, const RetrievalHooks *hooks, AnswerVolume *volume,
+         retrieval::Account *shared)
           : oracle(anno_graph, hooks ? hooks->coord_to_header : nullptr),
             limits(limits), budget(budget),
-            account(hooks && hooks->max_memory_bytes ? hooks->max_memory_bytes
-                                                     : limits.max_memory_bytes),
+            own_account(shared ? std::nullopt
+                               : std::optional<retrieval::Account>(
+                                     hooks && hooks->max_memory_bytes
+                                         ? hooks->max_memory_bytes : limits.max_memory_bytes)),
+            account(shared ? *shared : *own_account),
+            admission(account),
             volume(volume) {
         if (hooks) {
             deny_decode = hooks->deny_decode;
@@ -351,7 +325,14 @@ struct PatternRetrieval::Impl {
     graph::traversal::LabelOracle oracle;
     const RetrievalLimits limits;
     graph::pattern::Budget &budget;
-    retrieval::Account account;
+    // the request's memory account: the route's, shared with the engine and the route's own
+    // result objects, or this object's own when none was given (declared before the
+    // reference it backs)
+    std::optional<retrieval::Account> own_account;
+    retrieval::Account &account;
+    // the pattern being released (admit_context, admit_path): its descriptors' allowance and
+    // what they hold (all_or_count: what the account had left; partial: half of it)
+    retrieval::Admission admission;
     std::unique_ptr<graph::traversal::LabelRecorder> recorder;
     bool budgeted = false;
     bool place = false;          // placement record or global, and requested
@@ -368,12 +349,6 @@ struct PatternRetrieval::Impl {
     std::function<void(size_t)> occurrences_hook;
     // the request's counters (RetrievalCounters)
     RetrievalCounters counters;
-    // the pattern being released (admit_context): its descriptors' bytes, held, and what they
-    // may hold (all_or_count: what the account had left; partial: half of it); false once a
-    // descriptor did not fit
-    uint64_t descriptors = 0;
-    uint64_t allowance = 0;
-    bool admitting = false;
 
     uint64_t statement() const { return retrieval::statement_bytes(oracle.get_k()); }
 

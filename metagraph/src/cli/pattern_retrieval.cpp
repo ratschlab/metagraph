@@ -797,8 +797,9 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
 
 PatternRetrieval::PatternRetrieval(const AnnotatedDBG &anno_graph, GraphMode mode,
                                    const RetrievalLimits &limits, Budget &budget,
-                                   const RetrievalHooks *hooks, AnswerVolume *volume)
-      : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks, volume)),
+                                   const RetrievalHooks *hooks, AnswerVolume *volume,
+                                   retrieval::Account *account)
+      : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks, volume, account)),
         limits_(limits) {
     description_ = describe_annotation(impl_->oracle, mode);
     impl_->mode = mode;
@@ -814,36 +815,46 @@ const char* PatternRetrieval::placement() const {
     return limits_.occurrences ? description_.placement : "not_requested";
 }
 
-void PatternRetrieval::begin_release(Mode mode) {
-    Impl &m = *impl_;
-    // a previous release whose descriptors no retrieve() took (none: the engine releases
-    // nothing to a refused pattern) is not held further
-    m.account.release(m.descriptors);
-    m.descriptors = 0;
-    // partial keeps half of what is left for the pattern's reads and labels, so that a memory
-    // cut of the list still returns labelled contexts; all_or_count needs all of them anyway
-    m.allowance = mode == Mode::PARTIAL ? m.account.left() / 2 : m.account.left();
-    m.admitting = true;
+void retrieval::Admission::begin(unsigned share) {
+    // a previous release whose charge nobody took over (none: the engine releases nothing to
+    // a refused pattern) is not held further
+    account_.release(held_);
+    held_ = 0;
+    allowance_ = account_.left() / std::max(1u, share);
+    open_ = true;
 }
 
-bool PatternRetrieval::admit(uint64_t bytes) {
-    Impl &m = *impl_;
-    if (!m.admitting)
-        return false;
-    if (m.descriptors + bytes > m.allowance || !m.account.charge(bytes)) {
-        m.admitting = false;
+bool retrieval::Admission::admit(uint64_t bytes) {
+    if (!open_) {
         return false;
     }
-    m.descriptors += bytes;
+    if (held_ + bytes > allowance_ || !account_.charge(bytes)) {
+        open_ = false;
+        return false;
+    }
+    held_ += bytes;
     return true;
 }
 
+uint64_t retrieval::Admission::take() {
+    open_ = false;
+    const uint64_t held = held_;
+    held_ = 0;
+    return held;
+}
+
+void PatternRetrieval::begin_release(Mode mode) {
+    // partial keeps half of what is left for the pattern's reads and labels, so that a memory
+    // cut of the list still returns labelled contexts; all_or_count needs all of them anyway
+    impl_->admission.begin(mode == Mode::PARTIAL ? 2 : 1);
+}
+
 bool PatternRetrieval::admit_context() {
-    return admit(context_bytes(impl_->oracle.get_k()));
+    return impl_->admission.admit(context_bytes(impl_->oracle.get_k()));
 }
 
 bool PatternRetrieval::admit_path(size_t length) {
-    return admit(path_descriptor_bytes(impl_->oracle.get_k(), length));
+    return impl_->admission.admit(path_descriptor_bytes(impl_->oracle.get_k(), length));
 }
 
 uint64_t PatternRetrieval::memory_peak() const { return impl_->account.peak(); }
@@ -861,9 +872,7 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
                                              Given *given) {
     Impl &m = *impl_;
     // the descriptors admit_context() charged for |contexts|, the pattern's from here on
-    const uint64_t descriptors = m.descriptors;
-    m.descriptors = 0;
-    m.admitting = false;
+    const uint64_t descriptors = m.admission.take();
     assert(contexts.size() <= released);
     assert(descriptors == contexts.size() * context_bytes(m.oracle.get_k()));
     m.stop.reset();
@@ -1279,9 +1288,7 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     Impl &m = *impl_;
     const size_t k = m.oracle.get_k();
     // the descriptors admit_path() charged for |paths|, the pattern's from here on
-    const uint64_t descriptors = m.descriptors;
-    m.descriptors = 0;
-    m.admitting = false;
+    const uint64_t descriptors = m.admission.take();
     if (length <= k)
         throw std::logic_error("pattern: paths of a pattern not longer than k");
     assert(paths.size() <= released);

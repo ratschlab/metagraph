@@ -1317,6 +1317,9 @@ class PatternRun {
         }
     }
 
+    // what the kept paths still hold of the memory account is released with them
+    ~PatternRun() { release_walk(walk_bytes_); }
+
     // the candidates counted so far (no mask: the source dummies among them unchecked), as the
     // thresholds compare them without the mask
     uint64_t candidates_counted() const { return running_upper(); }
@@ -1571,11 +1574,43 @@ class PatternRun {
             if (i && !(i % Budget::kReleaseClockStride) && late())
                 return false;
             emit(paths_[i]);
+            // a path handed over is not held further: freed, its charge released, so that
+            // the caller's result objects find the room the walks took
+            release_walk(retained_path_bytes(k_, paths_[i].sequence.size()));
+            std::vector<node_index>().swap(paths_[i].path);
+            std::string().swap(paths_[i].sequence);
         }
         return true;
     }
 
     uint64_t paths_retained() const { return paths_.size(); }
+
+    // the kept paths' charges (Budget::memory): |bytes| of one more admitted within the
+    // extension's allowance, one released as it is handed over, all released when they are
+    // dropped (ALL_OR_COUNT past max_paths) or the run ends
+    bool admit_walk(uint64_t bytes) {
+        MemoryAccount *account = budget_.memory();
+        if (!account) {
+            return true;
+        }
+        if (bytes > walk_allowance_ - walk_bytes_ || !account->admit(bytes)) {
+            return false;
+        }
+        walk_bytes_ += bytes;
+        return true;
+    }
+    void release_walk(uint64_t bytes) {
+        if (!budget_.memory()) {
+            return;
+        }
+        bytes = std::min(bytes, walk_bytes_);
+        walk_bytes_ -= bytes;
+        budget_.memory()->release(bytes);
+    }
+    void drop_walks() {
+        release_walk(walk_bytes_);
+        std::vector<Context>().swap(paths_);
+    }
 
   private:
     // the served graph: the DBGSuccinct itself, or the CanonicalDBG wrapping a PRIMARY one
@@ -1670,6 +1705,10 @@ class PatternRun {
     uint64_t expanded_ = 0;
     bool keep_paths_ = false;
     std::vector<Context> paths_;
+    // the kept paths in the request's memory account (Budget::memory): what they may take
+    // (half of what the account had left when the extension began) and what they hold now
+    uint64_t walk_allowance_ = std::numeric_limits<uint64_t>::max();
+    uint64_t walk_bytes_ = 0;
     // with a support tracker: the supported paths per orientation and in all, the DEAD
     // verdicts, and the orientations with one before L
     std::map<Orientation, uint64_t> supported_;
@@ -2796,12 +2835,19 @@ class PatternRun {
                 ? paths_.size() < request_.max_paths
                 : released <= request_.max_paths;
             if (keep) {
+                // the walk is admitted to the request's memory account before it is kept
+                // (§5.3); the first that does not fit stops the extension
+                const uint64_t bytes = retained_path_bytes(k_, spelled.size());
+                if (!admit_walk(bytes)) {
+                    record_stop(StopPhase::EXTENSION, StopReason::MAX_MEMORY);
+                    return false;
+                }
                 paths_.push_back(Context { anchor.orientation, 0, anchor.node, anchor.base_node,
                                            path, spelled });
             } else if (request_.mode != Mode::PARTIAL) {
                 // ALL_OR_COUNT releases all paths or none: none, once they are too many
                 keep_paths_ = false;
-                std::vector<Context>().swap(paths_);
+                drop_walks();
             }
         }
         if (request_.stop_at_threshold && released > request_.max_paths) {
@@ -3350,6 +3396,11 @@ bool PatternRun::list_anchors(std::vector<Context> *anchors) {
 bool PatternRun::extend_listed(bool keep, const std::vector<Context> &anchors) {
     assert(extending_ && listed_);
     keep_paths_ = keep;
+    // the kept paths may take half of what the account has left now: the other half is for
+    // the result objects the caller builds from them while they are held
+    if (keep && budget_.memory()) {
+        walk_allowance_ = budget_.memory()->left() / 2;
+    }
 
     bool done = true;
     for (const Context &anchor : anchors) {
@@ -3413,6 +3464,8 @@ Withheld withheld_for(StopReason reason) {
             return Withheld::DEADLINE;
         case StopReason::MAX_STEPS:
             return Withheld::DISCOVERY_BUDGET;
+        case StopReason::MAX_MEMORY:
+            return Withheld::OUTPUT_BUDGET;
         case StopReason::EXTERNAL:
             return Withheld::EXTERNAL;
     }

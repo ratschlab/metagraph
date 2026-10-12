@@ -51,6 +51,7 @@
  */
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -220,6 +221,79 @@ struct RetrievalPath {
  * model, as context_bytes: 512 + 2k + 3L + 192n.
  */
 uint64_t path_descriptor_bytes(size_t k, size_t length);
+
+namespace retrieval {
+
+/**
+ * The memory account of one request (§5.3): one per request, over all its patterns, a
+ * deterministic model in bytes, never a measurement, so that where a request stops does not
+ * depend on the allocator; every item charged before it is held (what an unbudgeted read
+ * returned excepted: force()). Shared by the engine (the walks it keeps for a release, through
+ * graph::pattern::Budget::set_memory), the route (the result objects it builds) and the
+ * labelled retrieval (its reads and labels). Used by one request's thread only.
+ */
+class Account final : public graph::pattern::MemoryAccount {
+  public:
+    explicit Account(uint64_t max) : max_(max) {}
+    // refused when it does not fit what is left; once an unbudgeted read's names were forced
+    // past the maximum nothing fits any more (left() is 0: no unsigned wrap of max_ - held_)
+    bool charge(uint64_t bytes) {
+        if (bytes > left()) {
+            return false;
+        }
+        held_ += bytes;
+        peak_ = std::max(peak_, held_);
+        return true;
+    }
+    // what an unbudgeted read returned, held whether or not it fits (the read is done); the
+    // answer states the unbudgeted access, and the peak shows any excess
+    void force(uint64_t bytes) {
+        held_ += bytes;
+        peak_ = std::max(peak_, held_);
+    }
+    void release(uint64_t bytes) override {
+        assert(bytes <= held_);
+        held_ -= std::min(bytes, held_);
+    }
+    bool admit(uint64_t bytes) override { return charge(bytes); }
+    uint64_t left() const override { return held_ < max_ ? max_ - held_ : 0; }
+    uint64_t held() const { return held_; }
+    uint64_t peak() const { return peak_; }
+
+  private:
+    uint64_t max_;
+    uint64_t held_ = 0;
+    uint64_t peak_ = 0;
+};
+
+/**
+ * The admission of one pattern's release (§5.3): each released context's or path's descriptor
+ * charged to the account before its result object is built, within an allowance opened when
+ * the release begins (what the account has left, or a share of it); the first that does not
+ * fit closes the admission, so that none of the pattern's later objects is built. What a
+ * release charged stays held until it is taken over (take(): the labelled retrieval's, with
+ * the pattern's answer) or the next release begins, which releases it.
+ */
+class Admission {
+  public:
+    explicit Admission(Account &account) : account_(account) {}
+
+    // opens a release whose allowance is what the account has left divided by |share|; what
+    // the previous release still held is released first
+    void begin(unsigned share = 1);
+    bool admit(uint64_t bytes);
+    // closes the admission: what it holds is the caller's from here on (to release)
+    uint64_t take();
+    uint64_t held() const { return held_; }
+
+  private:
+    Account &account_;
+    uint64_t held_ = 0;
+    uint64_t allowance_ = 0;
+    bool open_ = false;
+};
+
+} // namespace retrieval
 
 // Tests: a record mapping instead of the index's; a hook called before every annotation read
 // with its row count (to slow the reads down on a virtual clock); the memory account in bytes
@@ -530,13 +604,17 @@ SelectionAnswer selection_without_pass(SelectionPass pass, const graph::pattern:
  * |budget| too, so that the patterns after it answer as after any time stop. |volume| (may be
  * null) is the request's answer volume: the labels built for the answer are added to it, and
  * the work time is read before each context's labels are built (with |budget|'s deadline,
- * which reads the volume: a time stop there is stop {output, time}).
+ * which reads the volume: a time stop there is stop {output, time}). The memory account is
+ * the request's (|account|: the route's, shared with the engine and the route's own result
+ * objects; must outlive this object); without one this object holds its own, of the hooks'
+ * size or the limits'.
  */
 class PatternRetrieval {
   public:
     PatternRetrieval(const graph::AnnotatedDBG &anno_graph, graph::pattern::GraphMode mode,
                      const RetrievalLimits &limits, graph::pattern::Budget &budget,
-                     const RetrievalHooks *hooks = nullptr, AnswerVolume *volume = nullptr);
+                     const RetrievalHooks *hooks = nullptr, AnswerVolume *volume = nullptr,
+                     retrieval::Account *account = nullptr);
     ~PatternRetrieval();
 
     const AnnotationDescription& description() const { return description_; }
@@ -760,7 +838,6 @@ class PatternRetrieval {
     RetrievalLimits limits_;
     AnnotationDescription description_;
 
-    bool admit(uint64_t bytes);
     // retrieve() and retrieve_given(): |given| null reads the rows' labels (discovery)
     LabelsAnswer retrieve_rows(const std::vector<RetrievalContext> &contexts, uint64_t released,
                                size_t length, graph::pattern::Mode mode,
