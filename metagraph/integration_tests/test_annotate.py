@@ -491,6 +491,105 @@ class TestAnnotateHeaderChecks(TestingBase):
         res = self._annotate(graph, fasta, '--anno-filename --index-header-coords')
         self._assert_refused(res, fasta, 'record 2', 'not valid UTF-8', '626164ff')
 
+    def test_index_header_coords_refuses_a_record_without_a_header_name(self):
+        """A header of `>` alone (or a comment alone, without --header-comment-delim) yields
+        no label: the record is refused by name, since a record of the mapping needs one."""
+        fasta = self._fasta([(b'ok', self.SEQ_A), (b'', self.SEQ_B)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords')
+        self._assert_refused(res, fasta, 'record 2', 'is empty')
+        fasta = self._fasta([(b'ok', self.SEQ_A), (b' only-a-comment', self.SEQ_B)], 'comment.fa')
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords')
+        self._assert_refused(res, fasta, 'record 2', 'is empty')
+        # joined with the comment, the header is a name
+        res = self._annotate(graph, fasta,
+                             '--anno-filename --index-header-coords --header-comment-delim _',
+                             out='joined')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertIn('sequences: 2 (ok\tonly-a-comment)\n', self._seqs_stats('joined'))
+
+    def _seqs_stats(self, out):
+        res = subprocess.run([f'{METAGRAPH} stats -v {os.path.join(self.d, out)}.seqs'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        return res.stdout.decode()
+
+    def _column_names(self, out):
+        res = subprocess.run([f'{METAGRAPH} stats --print-col-names '
+                              f'-a {os.path.join(self.d, out)}.column.annodbg'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        lines = res.stdout.decode().splitlines()
+        # the logger's info lines go to stdout too, before the count
+        start = next(i for i, line in enumerate(lines) if line.startswith('Number of columns: '))
+        names = lines[start + 1:]
+        self.assertEqual('Number of columns: %d' % len(names), lines[start])
+        return names
+
+    def test_a_record_without_a_comment_is_named_without_one(self):
+        """kseq keeps the comment buffer of the last record that had one: under
+        --header-comment-delim a record without a comment is named by its name token alone,
+        for a --anno-header label and a --index-header-coords record header, so `>x meta`
+        followed by `>x` is two names, not a repeat."""
+        fasta = self._fasta([(b'r1 meta', self.SEQ_A), (b'r2', self.SEQ_B),
+                             (b'r3 other', self.SEQ_C)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta, '--anno-header --header-comment-delim _', out='labels')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertEqual(['r1_meta', 'r2', 'r3_other'], self._column_names('labels'))
+        res = self._annotate(graph, fasta,
+                             '--anno-filename --index-header-coords --header-comment-delim _',
+                             out='records')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertIn('sequences: 3 (r1_meta\tr2\tr3_other)\n', self._seqs_stats('records'))
+        fasta = self._fasta([(b'x meta', self.SEQ_A), (b'x', self.SEQ_B)], 'joined.fa')
+        res = self._annotate(graph, fasta,
+                             '--anno-filename --index-header-coords --header-comment-delim _',
+                             out='joined')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertIn('sequences: 2 (x_meta\tx)\n', self._seqs_stats('joined'))
+        # the same name token twice is a repeat, whatever the comments
+        fasta = self._fasta([(b'x meta', self.SEQ_A), (b'x', self.SEQ_B)], 'repeat.fa')
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords', out='repeat')
+        self._assert_refused(res, fasta, 'record 2', 'repeats the header of record 1')
+
+    def test_count_kmers_from_headers_refuses_a_record_without_a_count(self):
+        """--count-kmers without a .kmer_counts.gz file reads ka:f:N from each record's
+        comment: a record without a comment after one with a count is inconsistent, not the
+        previous record's count (kseq's comment buffer outlives its record)."""
+        fasta = self._fasta([(b'r1 ka:f:3', self.SEQ_A), (b'r2', self.SEQ_B)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta, '--anno-header --count-kmers', out='counts')
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('Inconsistent k-mer count headers',
+                      res.stderr.decode('utf-8', 'replace'))
+        fasta = self._fasta([(b'r1 ka:f:3', self.SEQ_A), (b'r2 ka:f:2', self.SEQ_B)],
+                            'counted.fa')
+        res = self._annotate(graph, fasta, '--anno-header --count-kmers', out='counted')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertEqual(['r1', 'r2'], self._column_names('counted'))
+
+    def test_separately_writes_nothing_when_a_later_file_is_refused(self):
+        """--separately annotates each file on its own and writes its annotation as soon as it
+        is done: the headers of every file are checked before the first annotation starts, so
+        a refused file leaves no annotation of another file behind (and no output
+        directory)."""
+        ok = self._fasta([(b'ok', self.SEQ_A), (b'fine', self.SEQ_C)], 'ok.fa')
+        bad = self._fasta([(b'bad\xff', self.SEQ_B)], 'bad.fa')
+        graph = self._graph(f'{ok} {bad}')
+        cmd = (f'{METAGRAPH} annotate -p 1 -i {graph} --separately --anno-header '
+               f'-o {os.path.join(self.d, "anno")} {ok} {bad}')
+        res = subprocess.run([cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self._assert_refused(res, bad, 'record 1', 'not valid UTF-8', '626164ff')
+        # the files in order pass, each annotated on its own
+        good = self._fasta([(b'good', self.SEQ_B)], 'good.fa')
+        cmd = (f'{METAGRAPH} annotate -p 1 -i {graph} --separately --anno-header '
+               f'-o {os.path.join(self.d, "anno")} {ok} {good}')
+        res = subprocess.run([cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertEqual(['good.fa.column.annodbg', 'ok.fa.column.annodbg'],
+                         sorted(os.listdir(os.path.join(self.d, 'anno'))))
+
     def test_index_header_coords_refuses_a_repeated_record_header(self):
         fasta = self._fasta([(b'dup', self.SEQ_A), (b'other', self.SEQ_B), (b'dup', self.SEQ_C)])
         graph = self._graph(fasta)

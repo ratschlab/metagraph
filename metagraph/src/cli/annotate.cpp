@@ -33,11 +33,6 @@ using mtg::common::logger;
 const size_t LOGGING_INTERVAL_SEQS = 100'000;
 
 
-// The labels a FASTA header yields, appended to |labels|: the name token, or name and comment
-// joined by |comment_delim| when set, split by |header_delim|. A label that is not valid UTF-8
-// refuses the build, naming the file, the 1-based record and the bytes in hex (never raw): the
-// serving routes cannot list such a label, since jsoncpp would replace its bytes by U+FFFD and
-// a valid name holding U+FFFD could be another label's. |unchecked| skips the check.
 void push_header_labels(const kseq_t *read_stream,
                         const std::string &file,
                         size_t record,
@@ -45,9 +40,12 @@ void push_header_labels(const kseq_t *read_stream,
                         const std::string &header_delim,
                         bool unchecked,
                         std::vector<std::string> *labels) {
+    // kseq resets comment.l for every record but writes comment.s only for a header that has
+    // a comment, so the buffer still spells the last comment read: the length tells whether
+    // this record has one
     const std::string header = comment_delim != Config::UNINITIALIZED_STR
             ? utils::join_strings({ read_stream->name.s,
-                                    read_stream->comment.s ? read_stream->comment.s : "" },
+                                    read_stream->comment.l ? read_stream->comment.s : "" },
                                   comment_delim, true)
             : read_stream->name.s;
     for (auto &label : utils::split_string(header, header_delim)) {
@@ -154,7 +152,9 @@ void call_annotations(const std::string &file,
                 uint64_t abundance = 1;
 
                 if (parse_counts_from_headers) {
-                    if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
+                    // the comment buffer outlives its record (see push_header_labels): only a
+                    // record with a comment carries a count
+                    if (auto count = read_stream->comment.l ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
                         abundance = *count;
                         parsed_first_header = true;
                     } else if (parsed_first_header) {
@@ -257,6 +257,35 @@ void add_kmer_counts(const std::string &file,
     );
 }
 
+// Runs the header check of push_header_labels over every FASTA/FASTQ file of |files| (other
+// formats carry no headers) before any annotation is written: with --separately each file's
+// annotation is serialized as soon as it is annotated, so a label refused during a later
+// file's annotation would leave the earlier files' annotations on disk, while a refusal
+// writes nothing
+void check_header_labels(const std::vector<std::string> &files,
+                         const Config &config,
+                         size_t num_threads) {
+    logger->trace("Checking the headers of {} files", files.size());
+    #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
+    for (size_t i = 0; i < files.size(); ++i) {
+        if (file_format(files[i]) != "FASTA" && file_format(files[i]) != "FASTQ") {
+            continue;
+        }
+        size_t record = 0;
+        std::vector<std::string> labels;
+        read_fasta_file_critical(files[i],
+            [&](kseq_t *read_stream) {
+                push_header_labels(read_stream, files[i], ++record,
+                                   config.fasta_anno_comment_delim,
+                                   config.fasta_header_delimiter,
+                                   false, &labels);
+                labels.clear();
+            },
+            false
+        );
+    }
+}
+
 void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const Config &config,
                    const std::vector<std::string> &files,
@@ -299,6 +328,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.allow_unchecked_headers,
                 {}, // config.anno_labels
                 [&](std::string sequence, auto labels, uint64_t, size_t record) {
+                    // a header of `>` alone yields no label (nothing to split)
+                    if (labels.empty()) {
+                        logger->error("Header of record {} in '{}' is empty: a record of the"
+                                      " record mapping (.seqs) needs a header name",
+                                      record, files[i]);
+                        exit(1);
+                    }
                     assert(labels.size() == 1 && "each sequence has a single label (header)");
                     if (sequence.size() < k)
                         return;
@@ -560,6 +596,12 @@ int annotate_graph(Config *config) {
         size_t num_threads = std::max<size_t>(1, get_num_threads());
         set_num_threads(std::max(1u, config->parallel_each));
         omp_set_max_active_levels(3);
+
+        // with one file nothing is written before its own check
+        if (config->annotate_sequence_headers && !config->allow_unchecked_headers
+                && files.size() > 1) {
+            check_header_labels(files, *config, num_threads);
+        }
 
         if (!config->outfbase.empty()) {
             try {

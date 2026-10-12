@@ -4,12 +4,52 @@
 #include <vector>
 
 #include "cli/stats.hpp"
+#include "cli/annotate.hpp"
+#include "cli/config/config.hpp"
 #include "annotation/coord_to_header.hpp"
 
 
 namespace {
 
 using namespace mtg;
+
+// kseq reads one record after another into one buffer set, resetting comment.l per record but
+// writing comment.s only for a header that has a comment: the labels of a record without a
+// comment are its name alone, not its name joined with the last comment read
+TEST(IndexNames, HeaderLabelsOfARecordWithoutACommentIgnoreTheBufferOfTheLast) {
+    std::string name("r2");
+    std::string stale("meta");
+    seq_io::kseq_t read_stream{};
+    read_stream.name = { name.size(), name.size() + 1, name.data() };
+    read_stream.comment = { 0, stale.size() + 1, stale.data() };
+
+    std::vector<std::string> labels;
+    cli::push_header_labels(&read_stream, "records.fa", 2, "_", "", false, &labels);
+    EXPECT_EQ(std::vector<std::string>{ "r2" }, labels);
+
+    // the record that has the comment is named with it
+    read_stream.comment.l = stale.size();
+    labels.clear();
+    cli::push_header_labels(&read_stream, "records.fa", 1, "_", "", false, &labels);
+    EXPECT_EQ(std::vector<std::string>{ "r2_meta" }, labels);
+
+    // without --header-comment-delim a comment never counts
+    labels.clear();
+    cli::push_header_labels(&read_stream, "records.fa", 1, cli::Config::UNINITIALIZED_STR, "",
+                            false, &labels);
+    EXPECT_EQ(std::vector<std::string>{ "r2" }, labels);
+
+    // a header of `>` alone yields no label
+    read_stream.name.l = 0;
+    name[0] = '\0';
+    labels.clear();
+    cli::push_header_labels(&read_stream, "records.fa", 3, "_", "", false, &labels);
+    EXPECT_EQ(std::vector<std::string>{ "meta" }, labels);
+    read_stream.comment.l = 0;
+    labels.clear();
+    cli::push_header_labels(&read_stream, "records.fa", 3, "_", "", false, &labels);
+    EXPECT_TRUE(labels.empty());
+}
 
 // the report of `stats --check-names` on the names given, without files
 TEST(IndexNames, ReportCountsAndNamesTheFirstProblems) {
