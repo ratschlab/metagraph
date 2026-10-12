@@ -12,6 +12,7 @@ findOpenMP()
 find_package(Boost REQUIRED)
 find_package(ZLIB REQUIRED)
 buildLogging()
+buildCommonDependencies()
 findFolly()
 find_package(glog REQUIRED)
 checkFileSystem() # check for std::filesystem::temp_directory_path
@@ -22,23 +23,8 @@ add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
 buildProgressBar(${EXTERNAL_LIB_DIR} PROGRESS_BAR_LIBRARY)
 
-# ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
-target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
-target_include_directories(metagraph_common
-  PUBLIC
-    ${PROJECT_PARENT_DIR}/src/
-    ${EXTERNAL_LIB_DIR}/asio/asio/include
-    ${EXTERNAL_LIB_DIR}/DYNAMIC/include
-    ${EXTERNAL_LIB_DIR}/hopscotch-map/include
-    ${EXTERNAL_LIB_DIR}/ips4o
-    ${EXTERNAL_LIB_DIR}/ordered-map/include
-    ${EXTERNAL_LIB_DIR}/rollinghashcpp
-    /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
-)
-target_include_directories(metagraph_common SYSTEM PUBLIC
-    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    ${EXTERNAL_LIB_DIR}/simde-no-tests
-)
+target_compile_options(metagraph_common PRIVATE -Werror -Wall -Wextra)
+target_include_directories(metagraph_common PUBLIC ${PROJECT_PARENT_DIR}/src)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -52,12 +38,15 @@ ENDIF()
 target_link_libraries(metagraph_common
   PUBLIC
     folly
+    metagraph-common-dependencies
     ${PROGRESS_BAR_LIBRARY}
     ${FILESYSTEM_LIBRARY}
     OpenMP::OpenMP_CXX
     glog::glog
     spdlog::spdlog
     ZLIB::ZLIB
+  PRIVATE
+    Boost::headers
 )
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
   target_link_libraries(metagraph_common PUBLIC atomic)

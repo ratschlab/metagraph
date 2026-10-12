@@ -114,6 +114,8 @@ list(APPEND METAGRAPH_PUBLIC_DEFS ${METAGRAPH_ALPHABET_DEF})
 
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(external-libraries/jsoncpp)
+set_property(TARGET jsoncpp_lib APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+  $<TARGET_PROPERTY:jsoncpp_lib,INTERFACE_INCLUDE_DIRECTORIES>)
 
 add_compile_options(
   -Wall -Wextra -Werror
@@ -196,9 +198,7 @@ endif()
 #-------------------
 set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
 # BUILD_KMC controls the standalone executable; the KMC library is always built.
-if(NOT DEFINED BUILD_KMC)
-set(BUILD_KMC ${METAGRAPH_BUILD_EXECUTABLE})
-endif()
+option(BUILD_KMC "Build the standalone KMC executable" OFF)
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
   -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
@@ -269,8 +269,7 @@ set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
-add_library(ips4o INTERFACE)
-target_include_directories(ips4o INTERFACE external-libraries/ips4o)
+buildCommonDependencies()
 
 add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
@@ -322,7 +321,9 @@ find_library(LIBDEFLATE_LIBRARY NAMES deflate HINTS ENV LIBRARY_PATH
 
 # makes ASIO not depend on boost (used by Simple-Web-Server via CMake variable)
 set(USE_STANDALONE_ASIO ON)
-set(ASIO_PATH external-libraries/asio/asio)
+add_library(asio INTERFACE)
+add_library(asio::asio ALIAS asio)
+target_include_directories(asio SYSTEM INTERFACE external-libraries/asio/asio/include)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -335,9 +336,10 @@ ENDIF()
 buildLogging()
 list(APPEND METAGRAPH_PUBLIC_DEFS SPDLOG_FMT_EXTERNAL)
 set(SSHASH_BUILD_EXECUTABLES OFF)
-add_subdirectory(external-libraries/sshash SYSTEM)
+add_subdirectory(external-libraries/sshash)
+set_property(TARGET sshash_static APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+  $<TARGET_PROPERTY:sshash_static,INTERFACE_INCLUDE_DIRECTORIES>)
 target_include_directories(sshash_static PRIVATE external-libraries/zlib)
-add_subdirectory(external-libraries/DYNAMIC EXCLUDE_FROM_ALL)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
   PRIVATE
@@ -439,17 +441,10 @@ add_library(metagraph-core STATIC ${metagraph_core_files})
 target_include_directories(metagraph-core PUBLIC
   ${PROJECT_SOURCE_DIR}/src
   external-libraries/KMC/kmc_api
-  external-libraries/hopscotch-map/include
-  external-libraries/ordered-map/include
-  external-libraries/cpp_progress_bar
   external-libraries/Priority-Deque
-  external-libraries/rollinghashcpp
-  external-libraries/spdlog/include
-  external-libraries/fmt/include
   ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/DYNAMIC/include
 )
 
 # Propagate OpenMP flags to consumers (compile and link)
@@ -474,14 +469,6 @@ if(ICU_DATA_LIBRARY_PATH)
   target_link_directories(metagraph-core INTERFACE ${ICU_DATA_LIBRARY_PATH})
 endif()
 
-# TODO: move ASIO out of here once it replaces sprintf with snprintf
-target_include_directories(metagraph-core SYSTEM PUBLIC
-  external-libraries/sdsl-lite/include
-  external-libraries/jsoncpp/include
-  external-libraries/asio/asio/include
-  external-libraries/simde-no-tests
-)
-
 # Configure Folly if available
 findFolly()
 if(FOLLY_FOUND)
@@ -492,10 +479,6 @@ if(FOLLY_FOUND)
   else()
     message(WARNING "Jemalloc not found, some optimizations will be disabled.")
   endif()
-  target_include_directories(metagraph-core SYSTEM PUBLIC
-    external-libraries/folly
-    ${PROJECT_BINARY_DIR}/external-libraries/folly/include
-  )
 endif()
 
 # Propagate public compile definitions to dependents during build
@@ -547,8 +530,7 @@ set(METALIBS ${METALIBS}
   spdlog::spdlog
   fmt::fmt
   sshash_static
-  XXSDS_DYNAMIC
-  ips4o
+  metagraph-common-dependencies
   caches
   eigen
   folly
@@ -597,18 +579,22 @@ endif()
 # install library
 #-------------------
 
-get_target_property(INCLUDE_DIRS metagraph-core INCLUDE_DIRECTORIES)
-
 # Run the header installation at install time (after ExternalProjects are built)
 install(CODE "
-  set(INCLUDE_DIRS \"${INCLUDE_DIRS}\")
+  set(INCLUDE_DIRS \"$<TARGET_PROPERTY:metagraph-core,INCLUDE_DIRECTORIES>;$<TARGET_PROPERTY:metagraph-cli,INCLUDE_DIRECTORIES>\")
   set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
   
+  list(REMOVE_DUPLICATES INCLUDE_DIRS)
   foreach(dir \${INCLUDE_DIRS})
-    if(\"\${dir}\" STREQUAL \"\${PROJECT_SOURCE_DIR}\")
+    # Do not package system headers or flatten SSHash's private dependency trees.
+    string(FIND \"\${dir}/\" \"${PROJECT_SOURCE_DIR}/\" source_prefix)
+    string(FIND \"\${dir}/\" \"${PROJECT_BINARY_DIR}/\" binary_prefix)
+    string(FIND \"\${dir}/\" \"${PROJECT_SOURCE_DIR}/external-libraries/sshash/\" sshash_prefix)
+    if((NOT source_prefix EQUAL 0 AND NOT binary_prefix EQUAL 0)
+       OR sshash_prefix EQUAL 0 OR \"\${dir}\" STREQUAL \"${PROJECT_SOURCE_DIR}\")
       continue()
     endif()
-    
+
     if(NOT EXISTS \"\${dir}\")
       continue()
     endif()
@@ -621,7 +607,13 @@ install(CODE "
         continue()
       endif()
       
-      file(GLOB headers \"\${subdir}/*.h\" \"\${subdir}/*.hpp\")
+      file(GLOB headers \"\${subdir}/*.h\" \"\${subdir}/*.hpp\"
+                        \"\${subdir}/*.ipp\" \"\${subdir}/*.inl\")
+      if(\"\${subdir}\" MATCHES \"/external-libraries/eigen/(Eigen|unsupported/Eigen)(/|$)\")
+        file(GLOB eigen_headers LIST_DIRECTORIES false \"\${subdir}/[A-Z]*\")
+        list(FILTER eigen_headers EXCLUDE REGEX \"[.][^/]*$\")
+        list(APPEND headers \${eigen_headers})
+      endif()
       if(headers)
         file(RELATIVE_PATH rel_path \"\${dir}\" \"\${subdir}\")
         file(INSTALL \${headers}
