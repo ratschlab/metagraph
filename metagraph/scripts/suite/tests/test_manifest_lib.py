@@ -164,7 +164,8 @@ class FrozenManifests(unittest.TestCase):
 
     def test_manifests(self):
         found = 0
-        for name in ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json"):
+        for name in ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json", "suite_v3.json",
+                     "suite_smoke_v3.json"):
             path = os.path.join(SUITE, "manifest", name)
             if not os.path.exists(path):
                 continue
@@ -177,6 +178,8 @@ class FrozenManifests(unittest.TestCase):
             for s in m["scenarios"]:
                 for e in s["expect"]:
                     self.assertIn(e["check"], checks.CHECKS, s["id"])
+                    if m.get("manifest_version", 1) >= 3:   # built against this checks.py: every argument known
+                        self.assertEqual(checks.validate_expectation(e), [], s["id"])
                 self.assertTrue("tool" in s["mcp"] or "not_implemented" in s["mcp"], s["id"])
             if "relations" in m:
                 self.assertEqual(ml.sha256_json(m["relations"]), m["relations_sha256"], name)

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Build the suite's frozen scenario manifests (DESIGN §8.1): the full catalogue and the smoke selection.
 
-    build_manifest.py --out manifest/suite_v2.json --smoke-out manifest/suite_smoke_v2.json [--seed N] [--no-fetch]
+    build_manifest.py --out manifest/suite_v3.json --smoke-out manifest/suite_smoke_v3.json [--seed N] [--no-fetch]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
 same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
 `relations_sha256` (of `relations`, the comparisons across scenarios); `created_utc` is outside them.
+
+The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v3` in the full manifest): few enough for a
+paired three-arm smoke run within 60 host requests, the MCP arm's included. The `smoke` tag keeps marking the
+scenarios a smoke validation exercised (the earlier selections).
 """
 
 from __future__ import annotations
@@ -25,7 +29,15 @@ import truth  # noqa: E402
 from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
+# The v3 smoke selection (lane S3): the checks lane S3 changed, live, within 60 host requests in a paired three-arm
+# run (each scenario MCP cold, direct-local, direct-remote, MCP warm; plus 9 capabilities GETs): the 503 past a
+# budget (R-budget-0001), exact junction runs, a walk to a record's end, a 1 ms walk budget (a stop at depth 1),
+# the telomeric seed's re-entry, an all_or_count hard region never withheld, a peptide, a count in suffix scope
+# (properties the MCP may not expose), a 31-mer of a real repeat, and the max_mismatches 0 relation pair.
+SMOKE_TAG = "smoke-v3"
+SMOKE_IDS = ("R-budget-0001", "R-junction-0001", "T-end-0001", "T-budget-0001", "N-hard-0022", "N-hard-0005",
+             "X-peptide10-0009", "P-exact-0001", "N-realrep-0007", "M-refusal-0012", "M-twin-0001")
 CONVENTIONS = {
     "truth.start": "0-based position of the window's first base on the record's forward strand (whole-record coordinates)",
     "truth.window": "the record's bases on its forward strand (for a '-' source the reverse complement of the pattern)",
@@ -148,7 +160,9 @@ def tag_scenarios(scenarios, recs) -> None:
         tags = set(sc["tags"])
         if last and "index-defect" not in tags:
             tags.add("last-record-verified")
-        if "smoke" not in tags and any(_exact_text(e) for e in sc["expect"]):
+        if sc.get("id") in SMOKE_IDS:
+            tags.add(SMOKE_TAG)
+        if not tags & {"smoke", SMOKE_TAG} and any(_exact_text(e) for e in sc["expect"]):
             tags.add("code-derived")
         sc["tags"] = sorted(tags)
 
@@ -165,7 +179,7 @@ def counts(scenarios, relations=()) -> dict:
             "mcp_not_implemented": sum(1 for s in scenarios if "not_implemented" in s["mcp"]),
             "relations": len(relations), "relations_by_type": dict(sorted(by_type.items())),
             "by_tag": {t: sum(1 for s in scenarios if t in s["tags"])
-                       for t in ("last-record-verified", "code-derived", "machine-dependent", "smoke")}}
+                       for t in ("last-record-verified", "code-derived", "machine-dependent", "smoke", SMOKE_TAG)}}
 
 
 def validate_relations(relations, scenarios) -> list:
@@ -235,7 +249,10 @@ def validate(scenarios) -> list:
 
 
 def smoke_of(manifest: dict) -> dict:
-    sel = [s for s in manifest["scenarios"] if "smoke" in s["tags"] and "needs-next-deploy" not in s["tags"]]
+    sel = [s for s in manifest["scenarios"] if SMOKE_TAG in s["tags"] and "needs-next-deploy" not in s["tags"]]
+    missing = sorted(set(SMOKE_IDS) - {s["id"] for s in sel})
+    if missing and not manifest.get("partial_build"):
+        raise SystemExit("smoke scenarios not in the manifest: %s" % ", ".join(missing))
     m = dict(manifest)
     m["scenarios"] = sel
     m["content_sha256"] = sha256_json(sel)
@@ -243,7 +260,8 @@ def smoke_of(manifest: dict) -> dict:
     m["relations"] = [r for r in manifest.get("relations", []) if r["a"] in ids and r["b"] in ids]
     m["relations_sha256"] = sha256_json(m["relations"])
     m["counts"] = counts(sel, m["relations"])
-    m["selection"] = "the full manifest's scenarios tagged smoke (full content_sha256 %s)" % manifest["content_sha256"]
+    m["selection"] = "the full manifest's scenarios tagged %s (full content_sha256 %s)" % (
+        SMOKE_TAG, manifest["content_sha256"])
     return m
 
 
@@ -268,14 +286,16 @@ def write(path: str, manifest: dict) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v2.json"))
-    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v2.json"))
+    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v3.json"))
+    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v3.json"))
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--no-fetch", action="store_true", help="use the record cache only")
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
     args = ap.parse_args(argv)
     only = set(args.areas.split(",")) if args.areas else None
     m = build(args.seed, fetch=not args.no_fetch, only_areas=only)
+    if only:
+        m["partial_build"] = True
     write(args.out, m)
     s = smoke_of(m)
     write(args.smoke_out, s)

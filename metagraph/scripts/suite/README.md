@@ -194,7 +194,7 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
    included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
    left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to
-   manifest/suite_smoke_v1.json (lane S1's); without `--manifest` a full run takes manifest/suite_v1.json.
+   manifest/suite_smoke_v3.json (lane S3's); without `--manifest` a full run takes manifest/suite_v3.json.
    The MCP runner paces its own requests.
 8. Samples (review M5): the mex samplers write ~/suite-dev/runs/<id>/samples/; every invocation pulls the
    whole directory on exit (also after Ctrl-C) and at its start, merge_run deduplicates.
@@ -308,8 +308,10 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   record).
 - `areas.py`: the scenario catalogue of DESIGN §3, one generator per area: R, T, P, L, X, M, Q, C, D and N (S is
   the async session's).
-- `build_manifest.py`: writes `manifest/suite_v2.json` (the full catalogue) and `manifest/suite_smoke_v2.json`
-  (the scenarios tagged `smoke`; `suite_v1.json` / `suite_smoke_v1.json` are lane S1's first manifests, kept), one scenario per line; `content_sha256` = sha256 of the canonical JSON of
+- `build_manifest.py`: writes `manifest/suite_v3.json` (the full catalogue) and `manifest/suite_smoke_v3.json`
+  (the scenarios of its SMOKE_IDS, tagged `smoke-v3`; the `smoke` tag marks the scenarios earlier smoke
+  validations exercised; `suite_v1.json` / `suite_smoke_v1.json` are lane S1's first manifests and
+  `suite_v2.json` / `suite_smoke_v2.json` lane S1b's, kept), one scenario per line; `content_sha256` = sha256 of the canonical JSON of
   `scenarios` (the same seed and records give the same digest); the cross-scenario `relations` (below) one per
   line, digested in `relations_sha256`; `skipped` (planned scenarios a generator could not build, with the
   reason: nothing drops silently) and `not_applicable` (areas the host's capabilities rule out); every expectation
@@ -324,7 +326,7 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 
 ### Commands
     python3 truth.py                                    # fetch the record sequences (cached)
-    python3 build_manifest.py                           # both v2 manifests (seed 20261013; ~2 min from the cache)
+    python3 build_manifest.py --no-fetch                # both v3 manifests (seed 20261013; 2-6 min from the cache)
     python3 -m unittest discover -s tests
 
 ### Decisions where the design is silent
@@ -608,3 +610,19 @@ missing cap, `work`, `timing`, a graphlet's limitations): then the statement is 
   100), a 300 ms discovery time stop of a 60,000 ms budget, a 500 bp walk "truncated by max_output_bp" under
   500,000 and one "by max_steps" under 1,000,000, a walk time stop 2 s into 15 s: each fails; the same statements
   where they can have happened stay inconclusive.
+
+### Manifests v3
+`suite_v3.json`: 679 scenarios, 719 executions per arm, 48 not implemented via MCP (content_sha256
+75af21ee3122a98055f1a7fc029d77bb19030fdaada099a54faa2b6d2f5eea46), the 22 relations of v2 (relations_sha256
+cfba509f111c1e1ed727035450ee983b69991e02d4933c40bb1a8da59f7c822f, unchanged); `suite_smoke_v3.json`: 11 scenarios,
+11 executions, 1 relation (content_sha256 64df233674404a5c5fbd2c5dd2501d45e70cd12959db06eec118743f571bc86c,
+relations_sha256 8d5fa169494d23960080e74682c99d4a6697ad8598f4f977b156546c0dafd1b4). Built twice from the cache
+(`--no-fetch`, seed 20261013): identical digests, every top-level key but created_utc equal. Against v2: the same
+679 ids in the same order; every budget_respected rule text is new (603 scenarios); beyond it only R-junction-0001..4
+(exact runs), N-hard-0002/0005/0008/0012/0014 (withheld null), N-hard-0022 (blocked_event) and D-R-junction-0003
+(the copy of R-junction-0003) changed; tags as v2's plus `smoke-v3`. The smoke selection (SMOKE_IDS): R-junction-0001,
+R-budget-0001 (a 503 past its budget), T-end-0001, T-budget-0001 (a 1 ms walk budget: a stop at depth 1),
+P-exact-0001 (the MCP's property exposure), X-peptide10-0009, M-refusal-0012 and M-twin-0001 (their same_answer
+relation), N-hard-0005, N-hard-0022, N-realrep-0007: in paired mode with all three arms at most 9 + 4 x 11 + 4 = 57
+host requests (the warm repeats of indices 0 and 10 included), fewer where the service refuses at submit
+(R-budget-0001's 10 kb query, T-end-0001's budget above the walk preset's row).
