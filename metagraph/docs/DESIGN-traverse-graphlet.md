@@ -1277,9 +1277,11 @@ section that states it).
 
 ## 15.2 The attempt bound
 
-The attempt bound = min(seeds × the effective per-seed `time_budget_ms` + allowance
+The attempt bound = min(`load_ms` + seeds × the effective per-seed `time_budget_ms` + allowance
 (`--traverse-attempt-allowance-ms`, 10 s by default), `hard_cap_ms`, derived from the HTTP server's content timeout,
-~899 s). The server enforces it itself:
+~899 s), `load_ms` the wait for memory and the load of the pair for an `in_ram` request
+(SPEC-labeled-traversal-core.md §6.8, §10.3; 0 when nothing was loaded: the budgets start after the load, the hard
+cap counts it). The server enforces it itself:
 
 - seeds stop being walked at the walk-until, `bound − max(allowance/2, delivery reserve)` (§17.3);
 - building, writing and compressing the response are checked against the bound (the delivery checks of §14.4);

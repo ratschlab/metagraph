@@ -724,11 +724,11 @@ static const char* external_cause(const ResourceStop &q) {
         ? "the attempt was cancelled (POST /traverse/cancel)"
         // the bound as enforced: capped at attempts.hard_cap_ms, the content timeout less one
         // second. An effect is priced at 640 bytes (DeliveryCosts), so the cap is named by its
-        // capabilities field rather than spelled out
+        // capabilities field rather than spelled out and the bound's terms are terse
         : "the attempt reached the time at which the server stops walking it (the duration "
-          "bound it enforces, the seeds' time budgets plus its allowance (at most hard_cap_ms), "
-          "less the larger of half the allowance and the delivery reserve, kept for the "
-          "delivery; see usage.bound.walk_until_ms)";
+          "bound it enforces, in_ram load + seeds' time budgets + allowance (at most "
+          "hard_cap_ms), less the larger of half the allowance and the delivery reserve, kept "
+          "for the delivery; see usage.bound.walk_until_ms)";
 }
 
 // The request field a resource stop answers to (§6.7) and its value; a beam's width is
@@ -4925,8 +4925,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             req.strategy.max_work_units = limits.max_work_units;
         }
     }
-    // the attempt's duration bound: n_seeds x the effective per-seed time budget (after the
-    // server's clamp) plus the server's allowance, under the HTTP server's cap
+    // the attempt's duration bound: the request's in_ram wait and load (0 without one) plus
+    // n_seeds x the effective per-seed time budget (after the server's clamp) plus the
+    // server's allowance, under the HTTP server's cap
     if (attempt) {
         attempt->set_bound(req.seeds.size(), req.strategy.time_budget_ms,
                            req.strategy.max_memory_bytes, limits.load_ms);

@@ -497,9 +497,9 @@ void Attempt::check_delivery() {
         // the bound as enforced: capped at the content timeout less one second
         throw AttemptAtBound(fmt::format(
                 "the attempt reached the duration bound the server enforces for it ({} ms: the "
-                "seeds' time budgets plus the server's allowance, at most hard_cap_ms, the "
-                "content timeout less one second; see usage.bound) while its response was built "
-                "or written: nothing of it is delivered",
+                "in_ram load (if any) plus the seeds' time budgets plus the server's allowance, "
+                "at most hard_cap_ms, the content timeout less one second; see usage.bound) "
+                "while its response was built or written: nothing of it is delivered",
                 static_cast<uint64_t>(std::ceil(bound_ms_))));
     }
 }

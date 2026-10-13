@@ -259,10 +259,10 @@ class Attempt {
     // ---- the attempt's clock: ms since the server read the request's header
     double elapsed_ms() const;
 
-    // ---- the bound: min(n_seeds x T + allowance, hard cap), T the effective per-seed time
-    // budget (0 when it is not positive). The seeds stop being walked at
-    // bound - max(allowance / 2, the delivery reserve), leaving the rest to deliver what was
-    // walked.
+    // ---- the bound: min(load + n_seeds x T + allowance, hard cap), T the effective per-seed
+    // time budget (0 when it is not positive), load the in_ram wait and load (0 without one).
+    // The seeds stop being walked at bound - max(allowance / 2, the delivery reserve), leaving
+    // the rest to deliver what was walked.
     // Set once the request is parsed; before that the hard cap alone bounds the attempt.
     // |memory_budget|: the request's bounds.max_memory_mb in bytes, 0 for none (the soft
     // excess is observed under one, and what was held is bounded by it). |load_ms|: the time
