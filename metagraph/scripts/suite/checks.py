@@ -2787,6 +2787,27 @@ def validate_expectation(exp: dict) -> List[str]:
     return probs
 
 
+# The host's refusal of an attempt that reached its duration bound (traverse_attempts.cpp's AttemptAtBound; the
+# MCP arm carries it as the seed result's error, since the service always walks inside an attempt): a stop the host
+# states and enforces itself, after which nothing of the walk is delivered, so no traversal property can be tested.
+_ATTEMPT_BOUND_TEXT = "the attempt reached the duration bound the server enforces for it"
+
+
+def _attempt_bound_stop(scenario: dict, answer: dict) -> Optional[str]:
+    """The host's attempt-bound text when a /traverse answer's seed result states it, else None."""
+    if not str(scenario.get("route", "")).endswith("/traverse") or answer.get("http") != 200:
+        return None
+    body = answer.get("body")
+    if not isinstance(body, dict):
+        return None
+    for r in body.get("results") or []:
+        err = r.get("error") if isinstance(r, dict) else None
+        text = err if isinstance(err, str) else (err or {}).get("text") if isinstance(err, dict) else None
+        if text and _ATTEMPT_BOUND_TEXT in text:
+            return text
+    return None
+
+
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[Any]] = None,
              client: Optional[dict] = None) -> List[dict]:
     """Every expectation of |scenario| against |answer| (DESIGN §8.2), each result {check, outcome, detail,
@@ -2825,6 +2846,12 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
                             "detail": "no answer to check: http %s (%s)" % (
                                 http, ((answer.get("error") or {}).get("text") or "")[:200]),
                             "property": is_property(name)})
+            continue
+        bound_text = _attempt_bound_stop(scenario, answer)
+        if bound_text and name not in ("status", "deterministic", "budget_respected"):
+            out.append({"check": name, "outcome": INCONCLUSIVE,
+                        "detail": "not testable: the attempt reached its duration bound (stated by the host: %s)" % bound_text[:160],
+                        "property": is_property(name)})
             continue
         try:
             if name == "deterministic":

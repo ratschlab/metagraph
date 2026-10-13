@@ -140,6 +140,15 @@ def match_direct(expectation, line, run_dir):
     return (True if compared else None), ("matches" if compared else "nothing stated to compare")
 
 
+def _field_matches(observed, case_field):
+    """A case's field may name a placeholder ("bounds.<knob>": any one path element there)."""
+    if "<" not in case_field:
+        return observed == case_field
+    import re
+    pattern = re.sub(r"<[^>]*>", "[^.]+", re.escape(case_field).replace("\\<", "<").replace("\\>", ">"))
+    return re.fullmatch(pattern, observed) is not None
+
+
 def match_service(service_answer, lines, run_dir):
     """(True / False / None, detail): do the MCP executions match a case's service_answer (None: the MCP
     execution states nothing to compare, and its runner marked it service_by_design)."""
@@ -160,7 +169,7 @@ def match_service(service_answer, lines, run_dir):
             tc = service_answer.get("text_contains")
             if tc and err.get("text") and tc not in err["text"]:
                 return False, "repeat %s: text %r lacks %r" % (line.get("repeat"), err["text"][:200], tc)
-            if service_answer.get("field") and err.get("field") and err["field"] != service_answer["field"]:
+            if service_answer.get("field") and err.get("field") and not _field_matches(err["field"], service_answer["field"]):
                 return False, "repeat %s: field %s, the case expects %s" % (
                     line.get("repeat"), err["field"], service_answer["field"])
         elif outcome in ("answered", "clamped"):
