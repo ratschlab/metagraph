@@ -427,13 +427,18 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(cmp.aggregate_outcome(["fail", "error"]), "error")
         self.assertEqual(cmp.aggregate_outcome(["pass", "service_by_design"]), "mixed")
         self.assertIsNone(cmp.aggregate_outcome([]))
-        d, u, n, ne = cmp.compare_checks([{"check": "a", "outcome": "pass"}, {"check": "b", "outcome": "pass"},
-                                          {"check": "e", "outcome": "not_exposed"}],
-                                         [{"check": "a", "outcome": "fail"}, {"check": "c", "outcome": "pass"},
-                                          {"check": "e", "outcome": "pass"}])
-        self.assertEqual(d, [{"check": "a", "a": "pass", "b": "fail"}])
+        d, u, n, ne, ni = cmp.compare_checks(
+            [{"check": "a", "outcome": "pass"}, {"check": "b", "outcome": "pass"},
+             {"check": "e", "outcome": "not_exposed"}, {"check": "f", "outcome": "inconclusive"},
+             {"check": "g", "outcome": "finding"}],
+            [{"check": "a", "outcome": "fail"}, {"check": "c", "outcome": "pass"},
+             {"check": "e", "outcome": "pass"}, {"check": "f", "outcome": "pass"}, {"check": "g", "outcome": "pass"}])
+        self.assertEqual(d, [{"check": "a", "a": "pass", "b": "fail"}, {"check": "g", "a": "finding", "b": "pass"}])
         self.assertEqual(u, ["b", "c"])
-        self.assertEqual((n, ne), (1, 1))
+        self.assertEqual((n, ne, ni), (2, 1, 1))
+        self.assertEqual(cmp.aggregate_outcome(["pass", "inconclusive"]), "inconclusive")
+        self.assertEqual(cmp.aggregate_outcome(["inconclusive", "finding"]), "finding")
+        self.assertEqual(cmp.aggregate_outcome(["finding", "fail"]), "fail")
 
     def test_main_writes_compare_json(self):
         self.assertEqual(cmp.main([self.dir, "--by-design", ""]), 0)
@@ -484,6 +489,34 @@ class ReportTest(unittest.TestCase):
         self.assertIn("| P | direct-remote | warm | 4 |", text)
         self.assertIn("warm pairs", text)
         self.assertIn("3 pair(s) verified", text)
+
+    def test_findings_and_inconclusive(self):
+        manifest = {"scenarios": [
+            {"id": "T-1", "title": "walk within its budget", "route": "POST /traverse",
+             "expect": [{"check": "status", "args": {"http": 200}},
+                        {"check": "budget_respected", "args": {"max_ms": 15000}}]},
+            {"id": "T-2", "route": "POST /traverse", "expect": [{"check": "status", "args": {"http": 200}},
+                                                                {"check": "walk_in_record", "args": {}}]}]}
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "arms", "direct-local"))
+            sc.write_json_atomic(os.path.join(d, "arms", "direct-local", "manifest.json"), manifest)
+            write_arm(d, "direct-local", [
+                line("T-1", "direct-local", 0, T0, 34000.0, outcome="finding", checks=[
+                    {"check": "status", "outcome": "pass", "detail": "http 200"},
+                    {"check": "budget_respected", "outcome": "finding", "detail": "34012 ms on a 15000 ms budget"}]),
+                line("T-2", "direct-local", 0, T0 + 40, 10.0, outcome="inconclusive", checks=[
+                    {"check": "status", "outcome": "pass", "detail": "http 200"},
+                    {"check": "walk_in_record", "outcome": "inconclusive", "detail": "stopped by max_memory"}])])
+            merge_run.merge(d)
+            comp = cmp.compare(d, ({}, None))
+            text = report.build_report(d)
+        counts = comp["summary"]["per_area"]["T"]["direct-local"]
+        self.assertEqual((counts["pass"], counts["finding"], counts["inconclusive"]), (0, 1, 1))
+        self.assertIn("**FINDINGS (1 execution(s)", text)
+        self.assertIn("1 inconclusive execution(s) (not counted as pass)", text)
+        self.assertIn("# Findings", text)
+        self.assertIn("check budget\\_respected: observed 34012 ms on a 15000 ms budget", text)
+        self.assertIn('expected: \\{"max\\_ms": 15000\\}', text)
 
     def test_unverified_verdict_and_commit(self):
         with tempfile.TemporaryDirectory() as d:

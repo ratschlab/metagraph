@@ -41,6 +41,15 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 - `timing_class` long is not run on direct-remote (the front proxy cuts at ~120 s): no execution line, the
   scenario is listed under `skipped` in the arm's run.json. Client timeouts: fast 120 s, slow 600 s, long
   1800 s; direct-remote at most 125 s.
+- Execution outcome (review of lane S1; the MCP runner applies the same rule): checks may report `pass`,
+  `fail`, `not_exposed`, `inconclusive` (the scenario could not test its property: an allowed 503, a withheld
+  answer hiding the source, a stated resource stop) or `finding` (the host broke a stated bound or SPEC
+  promise without failing the request, e.g. a walk past its time budget); any other outcome reads as a
+  failure. The execution is `fail` when a check failed, else `finding` when one is a finding, else
+  `inconclusive` when one is inconclusive or none could test anything (no check, or every one not_exposed),
+  else `pass` (suite_common.outcome_from_checks). Over a scenario's repeats: error > fail > finding >
+  inconclusive. Neither finding nor inconclusive ever counts as pass; the report lists every finding in its
+  own section and counts inconclusive apart, and agreement skips a check that is inconclusive on either side.
 - Execution lines carry the §8.3 fields plus `area`, `route`, `timing_class`, `ended_utc`, `error`
   ({code, text} of a refused or failed request) and `client` (connect_ms, ttfb_ms, bytes_wire, bytes_body,
   content_encoding, timeout_s). `outcome` is `error` when no HTTP status arrived (http 0, error.code
@@ -196,8 +205,9 @@ lists the environment overrides.
 - `report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf]`: report.md (ASCII-safe pipe tables: common
   signs spelled out, other non-ASCII as '?', sequences over 40 bp cut, markdown specials escaped), then
   `pandoc report.md -o report.pdf --pdf-engine=xelatex`. Verdict: INCOMPLETE when a direct arm did not
-  finish (state other than done) or the orchestrator's loop was cut, FAIL on any failed / errored execution or
-  any direct / MCP disagreement, UNVERIFIED when the checks stub ran (never PASS: review L2), else PASS. The
+  finish (state other than done) or the orchestrator's loop was cut, FAIL on any failed / errored execution,
+  any direct / MCP disagreement or failed relation, FINDINGS on any finding, UNVERIFIED when the checks stub
+  ran (never PASS: review L2), else PASS; inconclusive executions are counted after it. The
   scripts commit keeps its `+dirty` marker (L1); a failing check is shown with the expectation at the same
   position among the scenario's expectations of that name (L3); the resource columns are captioned as the
   container's figures during the run, not the request's own (L5). The load caveat appears when the sra_all CPU mean exceeds 400 % or the load1 mean exceeds 48 (half

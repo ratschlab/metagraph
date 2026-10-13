@@ -181,7 +181,7 @@ class Answers(unittest.TestCase):
     def test_outcome_from_checks(self):
         self.assertEqual(sc.outcome_from_checks([{"outcome": "pass"}, {"outcome": "not_exposed"}]), "pass")
         self.assertEqual(sc.outcome_from_checks([{"outcome": "pass"}, {"outcome": "fail"}]), "fail")
-        self.assertEqual(sc.outcome_from_checks([]), "pass")
+        self.assertEqual(sc.outcome_from_checks([]), "inconclusive")  # nothing could test anything
 
 
 class Statistics(unittest.TestCase):
@@ -345,6 +345,19 @@ class Lock(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             sc._main(["clock-offset", "100.0", "103.5", "101.0"])
         self.assertEqual(buf.getvalue().strip(), "3.000")
+
+
+class ExecutionOutcome(unittest.TestCase):
+    def test_rule(self):
+        o = lambda *outs: sc.outcome_from_checks([{"check": "c%d" % i, "outcome": x} for i, x in enumerate(outs)])  # noqa: E731
+        self.assertEqual(o("pass", "pass"), "pass")
+        self.assertEqual(o("pass", "not_exposed"), "pass")
+        self.assertEqual(o("pass", "fail", "finding"), "fail")
+        self.assertEqual(o("pass", "finding", "inconclusive"), "finding")
+        self.assertEqual(o("pass", "inconclusive"), "inconclusive")
+        self.assertEqual(o("not_exposed", "not_exposed"), "inconclusive")
+        self.assertEqual(o(), "inconclusive")
+        self.assertEqual(o("pass", "weird"), "fail")  # an unknown outcome reads as a failure
 
 
 class ChecksStub(unittest.TestCase):

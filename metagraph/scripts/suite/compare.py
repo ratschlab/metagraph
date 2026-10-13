@@ -38,7 +38,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_run  # noqa: E402
 import suite_common as sc  # noqa: E402
 
-OUTCOME_KEYS = ("pass", "fail", "error", "not_implemented_mcp", "service_by_design", "mixed")
+OUTCOME_KEYS = ("pass", "fail", "error", "finding", "inconclusive", "not_implemented_mcp", "service_by_design",
+                "mixed")
 SAMPLE_BEFORE_S = 1.0
 SAMPLE_AFTER_S = 2.0
 SAMPLE_NEAREST_S = 5.0
@@ -204,16 +205,16 @@ def by_design_class(case, direct_line, mcp_lines, run_dir):
 # per-scenario joins
 
 def aggregate_outcome(outcomes):
-    """The outcome of a scenario on one arm over its repeats: the common one, else error > fail > mixed."""
+    """The outcome of a scenario on one arm over its repeats: the common one, else error > fail > finding >
+    inconclusive > mixed (a repeat that could not test its property keeps the scenario from reading pass)."""
     vals = [o for o in outcomes if o]
     if not vals:
         return None
     if len(set(vals)) == 1:
         return vals[0]
-    if "error" in vals:
-        return "error"
-    if "fail" in vals:
-        return "fail"
+    for worst in ("error", "fail", "finding", "inconclusive"):
+        if worst in vals:
+            return worst
     return "mixed"
 
 
@@ -226,13 +227,13 @@ def check_outcomes(checks):
 
 
 def compare_checks(a, b):
-    """(differing, unmatched, compared, not_exposed) of two executions' checks: names whose outcomes differ
-    (pairing a name's occurrences in order), names only one side evaluated (`unmatched`, not a
-    disagreement), the number of check results both sides evaluated (pass / fail on both), and the number
-    skipped because either side read not_exposed."""
+    """(differing, unmatched, compared, not_exposed, inconclusive) of two executions' checks: names whose
+    outcomes differ (pairing a name's occurrences in order), names only one side evaluated (`unmatched`, not a
+    disagreement), the number of check results both sides evaluated (pass / fail / finding on both), and the
+    numbers skipped because either side read not_exposed, or inconclusive (could not test its property)."""
     ca, cb = check_outcomes(a), check_outcomes(b)
     differing, unmatched = [], []
-    compared = not_exposed = 0
+    compared = not_exposed = inconclusive = 0
     for name in sorted(set(ca) | set(cb), key=lambda n: str(n)):
         if name not in ca or name not in cb:
             unmatched.append(name)
@@ -242,11 +243,14 @@ def compare_checks(a, b):
             if "not_exposed" in (oa, ob):
                 not_exposed += 1
                 continue
+            if "inconclusive" in (oa, ob):
+                inconclusive += 1
+                continue
             compared += 1
             if oa != ob and not differs:
                 differing.append({"check": name, "a": oa, "b": ob})
                 differs = True
-    return differing, unmatched, compared, not_exposed
+    return differing, unmatched, compared, not_exposed, inconclusive
 
 
 def group_lines(rows):
@@ -329,7 +333,7 @@ def direct_agreement(local, remote):
     differing = []
     compared = 0
     for r in common:
-        d, _, n, _ = compare_checks(local[r].get("checks"), remote[r].get("checks"))
+        d, _, n, _, _ = compare_checks(local[r].get("checks"), remote[r].get("checks"))
         compared += n
         for x in d:
             x["repeat"] = r
@@ -397,11 +401,12 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     if ref is None:
         return {"class": "no_direct_reference", "mcp_outcome": aggregate_outcome(list(outcomes))}
     differing, unmatched = [], set()
-    compared = not_exposed = 0
+    compared = not_exposed = inconclusive = 0
     for r in reps:
-        d, u, n, ne = compare_checks(r.get("checks"), ref.get(r.get("repeat"), ref0).get("checks"))
+        d, u, n, ne, ni = compare_checks(r.get("checks"), ref.get(r.get("repeat"), ref0).get("checks"))
         compared += n
         not_exposed += ne
+        inconclusive += ni
         unmatched.update(str(x) for x in u)
         for x in d:
             x["repeat"] = r.get("repeat")
@@ -420,7 +425,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         cls = "agree"
     return {"class": cls, "reference": ref_arm, "differing_checks": differing, "mcp_outcome": mcp_out,
             "reference_outcome": ref_out, "checks_compared": compared, "checks_not_exposed": not_exposed,
-            "checks_unmatched": sorted(unmatched)}
+            "checks_inconclusive": inconclusive, "checks_unmatched": sorted(unmatched)}
 
 
 def _client_side(line):
@@ -450,7 +455,7 @@ def mcp_overhead(mcp, local, remote):
     MCP cold execution's wall time apart."""
     # Only executions that reached the host measure the MCP path; a refusal at submit or a request the MCP
     # cannot express says nothing about it.
-    mcp = dict((k, v) for k, v in (mcp or {}).items() if v.get("outcome") in ("pass", "fail"))
+    mcp = dict((k, v) for k, v in (mcp or {}).items() if sc.reached_host(v))
     if not mcp:
         return None
     m = first_with(mcp, "warm", prefer=1 if 1 in mcp else None)
@@ -603,7 +608,7 @@ def compare(run_dir, by_design=None):
     cold_vals = {}
     direct_summary = {"compared": 0, "identical": 0, "same_checks": 0, "not_comparable": 0, "disagree": 0,
                       "disagreeing": [], "checks_compared": 0}
-    mcp_summary = {"compared": 0, "checks_compared": 0, "checks_not_exposed": 0,
+    mcp_summary = {"compared": 0, "checks_compared": 0, "checks_not_exposed": 0, "checks_inconclusive": 0,
                    "by_design_verified": 0, "by_design_unverified": 0}
     lines_by_area_arm = {}
 
@@ -671,6 +676,7 @@ def compare(run_dir, by_design=None):
             mcp_summary[ma["class"]] = mcp_summary.get(ma["class"], 0) + 1
             mcp_summary["checks_compared"] += ma.get("checks_compared") or 0
             mcp_summary["checks_not_exposed"] += ma.get("checks_not_exposed") or 0
+            mcp_summary["checks_inconclusive"] += ma.get("checks_inconclusive") or 0
             if ma["class"] == "service_by_design" and "verified" in ma:
                 mcp_summary["by_design_verified" if ma["verified"] else "by_design_unverified"] += 1
             elif ma["class"] == "service_by_design":

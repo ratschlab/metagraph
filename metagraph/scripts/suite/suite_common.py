@@ -19,7 +19,12 @@ import zlib
 
 ARMS = ("direct-local", "direct-remote", "mcp")
 DIRECT_ARMS = ("direct-local", "direct-remote")
-OUTCOMES = ("pass", "fail", "not_implemented_mcp", "service_by_design", "error")
+OUTCOMES = ("pass", "fail", "finding", "inconclusive", "not_implemented_mcp", "service_by_design", "error")
+# The outcomes a check may report (DESIGN §8.2 plus the review of lane S1): `inconclusive` = the scenario could
+# not test its property (an allowed 503, a withheld answer hiding the source, a stated resource stop, ...);
+# `finding` = the host broke a stated bound or SPEC promise without failing the request. Anything else is read
+# as a failure.
+CHECK_OUTCOMES = ("pass", "fail", "not_exposed", "inconclusive", "finding")
 TIMING_CLASSES = ("fast", "slow", "long")
 
 # Keys left out of the answer digest. `timing` varies by run (DESIGN §8.3); `headers` is transport metadata
@@ -203,10 +208,11 @@ HOST_CACHE_VALUES = ("cold", "warm", "aged", "not_reached", "unknown")
 
 def reached_host(line):
     """Whether an execution reached the host, and so touched its row cache: a direct request that got an
-    answer or timed out (not a refused connection), an MCP execution the host answered (outcome pass / fail;
+    answer or timed out (not a refused connection), an MCP execution the host answered (outcome pass, fail,
+    finding or inconclusive;
     a refusal at submit or a request the MCP cannot express never reaches it)."""
     if line.get("arm") == "mcp":
-        return line.get("outcome") in ("pass", "fail")
+        return line.get("outcome") in ("pass", "fail", "finding", "inconclusive")
     err = line.get("error") or {}
     return not (not line.get("http") and err.get("code") == "transport")
 
@@ -458,10 +464,17 @@ def identity_from_capabilities(docs):
 
 
 def outcome_from_checks(checks):
-    """pass when no check failed (not_exposed checks do not count), fail otherwise."""
-    for c in checks:
-        if c.get("outcome") == "fail":
-            return "fail"
+    """An execution's outcome from its checks, the rule the MCP runner applies too: fail when a check failed (or
+    reported an outcome outside CHECK_OUTCOMES); finding when a check is a finding and none failed; inconclusive
+    when a check is inconclusive, or when no check could test anything (none evaluated, or every one
+    not_exposed); pass otherwise. Neither finding nor inconclusive ever counts as pass."""
+    outs = [c.get("outcome") for c in checks or []]
+    if any(o == "fail" or o not in CHECK_OUTCOMES for o in outs):
+        return "fail"
+    if "finding" in outs:
+        return "finding"
+    if "inconclusive" in outs or all(o == "not_exposed" for o in outs):
+        return "inconclusive"
     return "pass"
 
 

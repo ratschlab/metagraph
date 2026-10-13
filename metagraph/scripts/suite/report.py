@@ -159,6 +159,8 @@ def verdict_section(run, comp, rows, samples):
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
+    findings = sum(t["outcomes"].get("finding", 0) for t in totals.values())
+    inconclusive = sum(t["outcomes"].get("inconclusive", 0) for t in totals.values())
     states = dict((arm, (info or {}).get("state")) for arm, info in (run.get("arms") or {}).items())
     incomplete = ["%s (%s)" % (arm, st) for arm, st in sorted(states.items())
                   if st not in (None, "done") and arm != "mcp"]
@@ -167,28 +169,35 @@ def verdict_section(run, comp, rows, samples):
         incomplete.append("the %s loop (%s)" % (loop.get("mode", "paired"), loop.get("state")))
     dis_direct = s["direct_agreement"].get("disagree", 0)
     dis_mcp = s["mcp_agreement"].get("disagree", 0)
+    rel_failed = sum((v or {}).get("fail", 0) for v in ((s.get("relations") or {}).get("per_arm") or {}).values())
     modules = sorted(set((info or {}).get("checks_module") for info in (run.get("arms") or {}).values()
                          if (info or {}).get("checks_module")))
     stub = "stub" in modules
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
-    elif failing or dis_direct or dis_mcp:
-        verdict = "FAIL (%d failed or errored execution(s), %d direct and %d MCP disagreement(s))" % (
-            failing, dis_direct, dis_mcp)
+    elif failing or dis_direct or dis_mcp or rel_failed:
+        verdict = "FAIL (%d failed or errored execution(s), %d direct and %d MCP disagreement(s)%s)" % (
+            failing, dis_direct, dis_mcp, (", %d failed relation(s)" % rel_failed) if rel_failed else "")
+    elif findings:
+        verdict = ("FINDINGS (%d execution(s) where the host broke a stated bound without failing the request; no "
+                   "failure, no disagreement)" % findings)
     elif stub:
         # A stub run checked the HTTP status only: never PASS (review L2).
         verdict = "UNVERIFIED (stub checks: HTTP status only): no failed status, no disagreement between the arms"
     else:
-        verdict = "PASS (no failed execution, no disagreement between the arms)"
+        verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
+    if inconclusive and not incomplete:
+        verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
     lines.append("**%s**" % md(verdict))
     lines.append("")
     for arm in comp["arms"]:
         t = totals.get(arm, {})
         o = t.get("outcomes", {})
-        lines.append("- %s: %d execution(s): %d pass, %d fail, %d error, %d not implemented yet via MCP, "
-                     "%d service-side by design." % (md(arm), t.get("executions", 0), o.get("pass", 0),
-                                                      o.get("fail", 0), o.get("error", 0),
-                                                      o.get("not_implemented_mcp", 0), o.get("service_by_design", 0)))
+        lines.append("- %s: %d execution(s): %d pass, %d fail, %d error, %d finding, %d inconclusive, %d not "
+                     "implemented yet via MCP, %d service-side by design." % (
+                         md(arm), t.get("executions", 0), o.get("pass", 0), o.get("fail", 0), o.get("error", 0),
+                         o.get("finding", 0), o.get("inconclusive", 0), o.get("not_implemented_mcp", 0),
+                         o.get("service_by_design", 0)))
     ma = s["mcp_agreement"]
     if ma.get("compared"):
         lines.append("- MCP agreement: %d agree, %d not comparable (no check both arms evaluated), %d disagree; "
@@ -298,11 +307,63 @@ def outcomes_section(comp):
             c = s["per_area"][area].get(arm)
             if not c:
                 continue
-            rows.append([md(area), md(arm), c["pass"], c["fail"], c["error"], c["not_implemented_mcp"],
-                         c["service_by_design"], c["mixed"], c["total"]])
+            rows.append([md(area), md(arm), c["pass"], c["fail"], c["error"], c.get("finding", 0),
+                         c.get("inconclusive", 0), c["not_implemented_mcp"], c["service_by_design"], c["mixed"],
+                         c["total"]])
     out = ["# Outcomes per area", "",
-           "Scenario outcomes over their repeats (any error -> error, any failure -> fail).", "",
-           table(["area", "arm", "pass", "fail", "error", "not impl. MCP", "by design", "mixed", "total"], rows)]
+           "Scenario outcomes over their repeats (any error -> error, else any failure -> fail, else any finding "
+           "-> finding, else any inconclusive -> inconclusive). A finding: the host broke a stated bound or SPEC "
+           "promise without failing the request; inconclusive: the scenario could not test its property (an "
+           "allowed 503, a withheld answer, a stated resource stop, or no check exposed); neither counts as pass.",
+           "", table(["area", "arm", "pass", "fail", "error", "finding", "inconcl.", "not impl. MCP", "by design",
+                      "mixed", "total"], rows)]
+    return "\n".join(out)
+
+
+def expectation_pairs(scenario, checks):
+    """[(check result, its expectation args or None)]: the k-th result of a check name answers the k-th
+    expectation of that name (review L3): a scenario may list a check twice with other arguments, and the checks
+    may add an implicit one of another name."""
+    expects = {}
+    for e in (scenario or {}).get("expect") or []:
+        expects.setdefault(e.get("check"), []).append(e.get("args"))
+    seen, out = {}, []
+    for c in checks or []:
+        name = c.get("check")
+        k = seen.get(name, 0)
+        seen[name] = k + 1
+        exp = expects.get(name) or []
+        out.append((c, exp[k] if k < len(exp) else None))
+    return out
+
+
+def findings_section(rows, manifest, max_items):
+    """Every execution with a finding: the host broke a stated bound or SPEC promise without failing."""
+    scen = dict((s.get("id"), s) for s in (manifest or {}).get("scenarios", [])) if manifest else {}
+    found = [r for r in rows if r.get("outcome") == "finding"]
+    out = ["# Findings", ""]
+    if not found:
+        out.append("No finding (no check reported that the host broke a stated bound without failing).\n")
+        return "\n".join(out)
+    out.append("%d execution(s) with a finding: the request succeeded, but the host broke a bound or promise it "
+               "states (e.g. a walk past its time budget)%s." % (
+                   len(found), "" if len(found) <= max_items else "; the first %d are listed" % max_items))
+    out.append("")
+    for r in found[:max_items]:
+        s = scen.get(r.get("scenario")) or {}
+        out.append("## %s (%s, repeat %s)" % (md(r.get("scenario")), md(r.get("arm")), md(r.get("repeat"))))
+        out.append("")
+        if s.get("title"):
+            out.append("- title: %s" % md(s.get("title"), 300))
+        out.append("- route: %s; http %s; wall %s ms" % (md(r.get("route") or s.get("route") or "-"),
+                                                          md(r.get("http")), fmt_ms(r.get("wall_ms"))))
+        for c, exp in expectation_pairs(s, r.get("checks")):
+            if c.get("outcome") != "finding":
+                continue
+            out.append("- check %s: observed %s" % (md(c.get("check")), md(c.get("detail"), 500)))
+            if exp is not None:
+                out.append("    - expected: %s" % md(json.dumps(exp, sort_keys=True), 400))
+        out.append("")
     return "\n".join(out)
 
 
@@ -329,22 +390,13 @@ def failures_section(rows, manifest, max_failures):
         err = r.get("error") or {}
         if err.get("code") or err.get("text"):
             out.append("- observed error: %s: %s" % (md(err.get("code") or "-"), md(err.get("text") or "", 400)))
-        # The k-th result of a check name answers the k-th expectation of that name (review L3): a scenario may
-        # list a check twice with other arguments, and the checks may add an implicit one of another name.
-        expects = {}
-        for e in s.get("expect") or []:
-            expects.setdefault(e.get("check"), []).append(e.get("args"))
-        seen = {}
-        for c in r.get("checks") or []:
-            name = c.get("check")
-            k = seen.get(name, 0)
-            seen[name] = k + 1
-            if c.get("outcome") != "fail":
-                continue
-            exp = expects.get(name) or []
-            out.append("- check %s: observed %s" % (md(name), md(c.get("detail"), 500)))
-            if k < len(exp):
-                out.append("    - expected: %s" % md(json.dumps(exp[k], sort_keys=True), 400))
+        for c, exp in expectation_pairs(s, r.get("checks")):
+            if c.get("outcome") == "fail" or c.get("outcome") not in sc.CHECK_OUTCOMES:
+                out.append("- check %s: observed %s%s" % (
+                    md(c.get("check")), md(c.get("detail"), 500),
+                    "" if c.get("outcome") == "fail" else " (outcome %s, read as a failure)" % md(c.get("outcome"))))
+                if exp is not None:
+                    out.append("    - expected: %s" % md(json.dumps(exp, sort_keys=True), 400))
         out.append("")
     return "\n".join(out)
 
@@ -380,11 +432,13 @@ def agreement_section(comp):
     out.append("%d scenario(s): %s." % (ma["compared"], ", ".join("%d %s" % (ma[k], md(k)) for k in classes)))
     out.append("")
     out.append("Agreement is decided on the checks both arms evaluated: %d check result(s) compared, %d skipped "
-               "as not exposed via MCP. `agree` needs at least one compared check; a scenario with none is "
+               "as not exposed via MCP, %d as inconclusive on either side. `agree` needs at least one compared "
+               "check; a scenario with none is "
                "`not comparable`. Service-side by design: %d pair(s) verified (each side the table case has was "
                "checked and held), %d unverified (a side stated nothing to compare, or the MCP runner's own "
                "mark).\n" % (ma.get("checks_compared", 0), ma.get("checks_not_exposed", 0),
-                              ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0)))
+                              ma.get("checks_inconclusive", 0), ma.get("by_design_verified", 0),
+                              ma.get("by_design_unverified", 0)))
     rows = []
     for sid in comp["order"]:
         a = comp["scenarios"][sid].get("mcp_agreement") or {}
@@ -599,6 +653,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(environment_section(run, comp, rows, samples))
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))
+    parts.append(findings_section(rows, manifest, max_failures))
     parts.append(agreement_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))
