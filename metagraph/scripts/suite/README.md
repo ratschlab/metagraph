@@ -109,8 +109,12 @@ manifest/suite_smoke_v1.json (lane S1's); without `--manifest` a full run takes 
   runner marked it service_by_design; `answered` / `clamped`: no error). A pair that does not hold is
   `disagree` with the side (direct / mcp / table for an unknown case id). With a list of cases the first
   whose pair holds decides. The MCP arm's execution lines should carry `error` {code, text, field}.
-- Overheads (DESIGN §5): front = direct-remote minus direct-local wall time per scenario (cold: repeat 0;
-  warm: repeat 1), also the server elapsed difference. MCP: only executions that reached the host (outcome
+- Overheads (DESIGN §5): front = direct-remote minus direct-local per scenario (cold: repeat 0; warm: repeat
+  1). The arms run one after the other, so the later one finds the host's row cache warm (smoke run: resolve
+  345 ms server time on direct-local, 1.1 ms on direct-remote) and the raw wall difference mixes cache and
+  network, even going negative; the client-side difference, (wall - server elapsed) remote minus the same
+  locally, leaves the server's part out and is the front cost to read. Both are reported, with the server
+  elapsed difference; answers without `timing` (errors, capabilities) count in the raw rows only. MCP: only executions that reached the host (outcome
   pass / fail); the MCP warm line (repeat 1, else 0) minus each direct arm's line of the same repeat (else its
   repeat 0), with and without `mcp_phases.queue_ms`, and `backend_ms` minus each direct arm; the phases'
   distributions as given; the cold MCP wall time separately.

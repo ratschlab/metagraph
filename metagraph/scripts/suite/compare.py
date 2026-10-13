@@ -358,14 +358,26 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             "reference_outcome": ref_out}
 
 
+def _client_side(line):
+    """Wall time minus the server's own elapsed time: transfer, HTTP handling and (remotely) the front."""
+    return _diff(line.get("wall_ms"), _server_elapsed(line))
+
+
 def front_overhead(local, remote):
-    """direct-remote minus direct-local wall time (the laptop's network + the front proxy), cold and warm."""
+    """direct-remote minus direct-local (the laptop's network + the front proxy), cold and warm.
+
+    The arms run one after the other, so the later one finds the host's row cache warm and the raw wall
+    difference mixes cache and network (it can be negative); the `*_net_ms` differences compare wall minus
+    server elapsed instead, which leaves the server's part (cache state included) out.
+    """
     out = {}
     if 0 in local and 0 in remote:
         out["cold_ms"] = _diff(remote[0].get("wall_ms"), local[0].get("wall_ms"))
         out["server_cold_ms"] = _diff(_server_elapsed(remote[0]), _server_elapsed(local[0]))
+        out["cold_net_ms"] = _diff(_client_side(remote[0]), _client_side(local[0]))
     if 1 in local and 1 in remote:
         out["warm_ms"] = _diff(remote[1].get("wall_ms"), local[1].get("wall_ms"))
+        out["warm_net_ms"] = _diff(_client_side(remote[1]), _client_side(local[1]))
     return out or None
 
 
@@ -499,8 +511,9 @@ def compare(run_dir, by_design=None):
     scenarios = {}
     per_area = {}
     timing_vals = {}
-    front_vals = {"cold_ms": [], "warm_ms": [], "server_cold_ms": []}
+    front_vals = {"cold_ms": [], "warm_ms": [], "server_cold_ms": [], "cold_net_ms": [], "warm_net_ms": []}
     front_area = {}
+    front_area_net = {}
     mcp_vals = {}
     mcp_cold_walls = []
     mcp_phase_vals = {}
@@ -549,6 +562,8 @@ def compare(run_dir, by_design=None):
                         front_vals[k].append(fo[k])
                 if fo.get("cold_ms") is not None:
                     front_area.setdefault(area, []).append(fo["cold_ms"])
+                if fo.get("cold_net_ms") is not None:
+                    front_area_net.setdefault(area, []).append(fo["cold_net_ms"])
         if "mcp" in arms_present:
             ma = mcp_agreement(mcp, {"direct-local": local, "direct-remote": remote}, scen_by_id.get(sid), cases,
                                run_dir)
@@ -600,7 +615,8 @@ def compare(run_dir, by_design=None):
             "direct_agreement": direct_summary, "mcp_agreement": mcp_summary,
             "timing": timing,
             "front_overhead": {"all": dict((k, sc.summarise(v)) for k, v in front_vals.items()),
-                               "per_area": dict((a, sc.summarise(v)) for a, v in front_area.items())},
+                               "per_area": dict((a, sc.summarise(v)) for a, v in front_area.items()),
+                               "per_area_net": dict((a, sc.summarise(v)) for a, v in front_area_net.items())},
             "mcp_overhead": dict((k, sc.summarise(v)) for k, v in mcp_vals.items()),
             "mcp_cold_wall_ms": sc.summarise(mcp_cold_walls),
             "mcp_phases": dict((k, sc.summarise(v)) for k, v in mcp_phase_vals.items()),

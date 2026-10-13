@@ -59,12 +59,24 @@ def md(text, limit=None):
     return _MD_SPECIAL.sub(r"\\\1", t)
 
 
+_NUMERIC_CELL = re.compile(r"^(-|[-+]?[0-9][0-9.,]*%?|[0-9]+/[0-9]+)$")
+
+
 def table(header, rows, align=None):
-    """A pipe table; cells are already escaped strings."""
+    """A pipe table; cells are already escaped strings.
+
+    Numeric columns are right-aligned, others left (unless `align` says). The separator's dashes follow each
+    column's widest cell: pandoc sizes the columns of a wide table by them, so a short column (an area) stays
+    narrow and a long one (a detail) gets the room, instead of equal widths that wrap every cell.
+    """
     if not rows:
         return "(none)\n"
-    align = align or ["l"] + ["r"] * (len(header) - 1)
-    sep = ["---:" if a == "r" else ":---" for a in align]
+    cols = len(header)
+    if align is None:
+        align = ["r" if all(_NUMERIC_CELL.match(str(r[i]).strip()) for r in rows) else "l" for i in range(cols)]
+    widths = [max([len(str(header[i]))] + [len(str(r[i])) for r in rows]) for i in range(cols)]
+    sep = [("-" * max(3, min(w, 60)) + ":") if a == "r" else (":" + "-" * max(3, min(w, 60)))
+           for a, w in zip(align, widths)]
     out = ["| " + " | ".join(header) + " |", "|" + "|".join(sep) + "|"]
     for r in rows:
         out.append("| " + " | ".join(str(c) for c in r) + " |")
@@ -184,7 +196,7 @@ def environment_section(run, comp, rows, samples):
         ("run id", md(run.get("run_id"))),
         ("release", md(run.get("release"))),
         ("server_instance", md(instance) + (" (RESTARTED during the run)" if restarted else "")),
-        ("index_fp", md(run.get("index_fp") or "not stated by the host")),
+        ("index_fp", md(short(run.get("index_fp"), 16) + "..." if run.get("index_fp") else "not stated by the host")),
         ("manifest", "version %s, sha256 %s, %s scenario(s)%s" % (
             md(man.get("manifest_version")), md(short(man.get("computed_sha256") or man.get("content_sha256"), 16)),
             md(man.get("scenarios_total")), "" if man.get("sha_verified", True) else " (content_sha256 MISMATCH)")),
@@ -199,12 +211,12 @@ def environment_section(run, comp, rows, samples):
         info = info or {}
         load_s, load_e = info.get("host_load_start"), info.get("host_load_end")
         kv.append(("arm %s" % md(arm), "%s; state %s; %s execution(s); checks %s; %s to %s; runner %s; "
-                   "load at start %s, at end %s" % (
+                   "runner's load1 at start %s, at end %s" % (
                        md(info.get("base") or "-"), md(info.get("state") or "-"),
                        md(info.get("executions_recorded", "-")), md(info.get("checks_module") or "-"),
                        md(info.get("started_utc") or "-"), md(info.get("ended_utc") or "-"),
-                       md(info.get("runner_host") or "-"), md(load_s[0] if load_s else "-"),
-                       md(load_e[0] if load_e else "-"))))
+                       md(info.get("runner_host") or "-"), fmt_num(load_s[0] if load_s else None, 1),
+                       fmt_num(load_e[0] if load_e else None, 1))))
     lines.append(table(["", "value"], [[k, v] for k, v in kv], align=["l", "l"]))
     warnings = run.get("warnings") or []
     if warnings:
@@ -365,21 +377,32 @@ def timing_section(comp):
 def overhead_section(comp):
     s = comp["summary"]
     out = ["# Overheads", "", "## Front: direct-remote minus direct-local", "",
-           "The laptop's network and the front proxy on dnaloc-new (the same request, wall time difference).", ""]
+           "The laptop's network and the front proxy on dnaloc-new, for the same request. The arms run one after "
+           "the other, so the later arm finds the host's row cache warm: the raw wall difference mixes cache and "
+           "network (and can be negative). The client-side rows compare wall minus the server's own elapsed time "
+           "instead, which leaves the server's part out; they need the answer's timing, so error answers and "
+           "the capabilities documents only count in the raw rows.", ""]
     fo = s["front_overhead"]
     rows = []
-    labels = {"cold_ms": "wall, cold (repeat 0)", "warm_ms": "wall, warm (repeat 1)",
+    labels = {"cold_net_ms": "client side (wall - server), cold", "warm_net_ms": "client side (wall - server), warm",
+              "cold_ms": "raw wall, cold (repeat 0)", "warm_ms": "raw wall, warm (repeat 1)",
               "server_cold_ms": "server elapsed, cold"}
-    for k in ("cold_ms", "warm_ms", "server_cold_ms"):
+    for k in ("cold_net_ms", "warm_net_ms", "cold_ms", "warm_ms", "server_cold_ms"):
         v = fo["all"].get(k) or {}
         if v.get("n"):
             rows.append([md(labels[k]), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])])
     out.append(table(["difference (ms)", "n", "p50", "p90", "max"], rows))
-    rows = [[md(a), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])]
-            for a, v in sorted(fo["per_area"].items(), key=lambda kv: area_sort_key(kv[0])) if v["n"]]
+    net = fo.get("per_area_net") or {}
+    rows = []
+    for a, v in sorted(fo["per_area"].items(), key=lambda kv: area_sort_key(kv[0])):
+        if not v["n"]:
+            continue
+        n_ = net.get(a) or {}
+        rows.append([md(a), n_.get("n", 0), fmt_ms(n_.get("p50")), fmt_ms(n_.get("p90")), v["n"],
+                     fmt_ms(v["p50"]), fmt_ms(v["p90"])])
     if rows:
-        out.append("Per area (wall, cold):\n")
-        out.append(table(["area", "n", "p50", "p90", "max"], rows))
+        out.append("Per area, cold:\n")
+        out.append(table(["area", "client-side n", "p50", "p90", "raw n", "raw p50", "raw p90"], rows))
     out.append("## MCP")
     out.append("")
     if not s["mcp_phases"] and not s["mcp_overhead"]:

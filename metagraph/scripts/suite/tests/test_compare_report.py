@@ -314,6 +314,10 @@ class CompareTest(unittest.TestCase):
     def test_overheads(self):
         fo = self.comp["scenarios"]["P-001"]["front_overhead"]
         self.assertAlmostEqual(fo["cold_ms"], 101.0)
+        # client side: (110 - 55) - (9 - 4.5)
+        self.assertAlmostEqual(fo["cold_net_ms"], 50.5)
+        self.assertAlmostEqual(fo["warm_net_ms"], 47.0)
+        self.assertEqual(self.s["front_overhead"]["per_area_net"]["P"]["n"], 3)
         self.assertAlmostEqual(fo["warm_ms"], 94.0)
         self.assertEqual(self.s["front_overhead"]["all"]["cold_ms"]["n"], 4)
         mo = self.comp["scenarios"]["P-001"]["mcp_overhead"]
@@ -397,6 +401,9 @@ class ReportTest(unittest.TestCase):
         self.assertIn("(120 bp)", report.ascii_safe(long_seq))
         self.assertTrue(report.md("a" * 50, 10).endswith("..."))
         self.assertEqual(report.table(["a"], []), "(none)\n")
+        t = report.table(["area", "n", "detail"], [["P", "12", "a long detail text"], ["R", "-", "x"]])
+        sep = t.splitlines()[1]
+        self.assertEqual(sep, "|:----|---:|:------------------|")
 
     def test_report_sections(self):
         text = report.build_report(self.dir)
