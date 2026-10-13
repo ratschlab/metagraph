@@ -2920,7 +2920,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
       without `names`, and the server ignores the key. `--verify` prints the recorded names and, with `--metagraph`
       (unless `--no-check-names`), runs the check again and reports a difference as a problem. The check's
       refusals (`--check-names` without a binary, a binary that cannot run, the binary's own failure on an
-      annotation) come before any file is hashed, in every mode.
+      annotation) come before any file is hashed when a manifest is written (single and batch mode); under
+      `--verify`, whose hashing is the verification, the first two are refused before it and the binary's own
+      failure is reported with the verdict's problems; `--inventory` runs no check and probes nothing.
     - `index_meta_fp`: FNV-1a-64 (16 hex) over k, regime, alphabet, the annotation's row count and its ordered
       column names, and whether coordinates and a `CoordToHeader` exist — always present (computed per pair on
       first use in multi-graph mode), and only a **negative** check: a mismatch proves two indexes different,

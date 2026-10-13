@@ -16,7 +16,8 @@ loads is listed with its size and that the stated index_fp is the digest of the 
                       [--no-coord-mapping] [--metagraph PATH] [--check-names | --no-check-names]
     index_manifest.py -i GRAPH -a ANNOTATION --inventory   # the files the server loads (JSON:
                                                  # files = the identity, derived = mask, Bloom)
-    index_manifest.py --verify MANIFEST [--metagraph PATH]  # re-hash every listed file and
+    index_manifest.py --verify MANIFEST [--root DIR] [--metagraph PATH]
+                      [--check-names | --no-check-names]  # re-hash every listed file and
                                                  # compare; report (and re-check) the names
     index_manifest.py --server-csv GRAPHS.csv [--jobs N] [--digests FILE ...] [--digests-only]
                       [--match-base-names] [--out-dir DIR] [--write-csv OUT.csv] [--force]
@@ -32,10 +33,13 @@ A label name that is not valid UTF-8 cannot be listed by the serving routes
 is found at its first record only (CoordToHeader::find_header). The check is on when a binary is
 given (--check-names without --metagraph is an error, --no-check-names skips it, in every mode)
 and skipped with a note naming the reason otherwise. Its refusals -- the missing binary, a binary
-that cannot run, the binary's own failure on an annotation -- come before any file is hashed (in
-batch mode every pair is checked before the hashing pool), so that a refusal costs no hashing and
-leaves no partial set of manifests. "names" is metadata: the server ignores it, and index_fp is
-the digest of the file list only, so a manifest has the same index_fp with and without the check.
+that cannot run, the binary's own failure on an annotation -- come before any file is hashed when
+a manifest is written (in batch mode every pair is checked before the hashing pool), so that a
+refusal costs no hashing and leaves no partial set of manifests; under --verify, whose hashing is
+the verification, the first two are refused before it and the binary's own failure is reported
+with the verdict's problems; --inventory runs no check and probes nothing. "names" is metadata:
+the server ignores it, and index_fp is the digest of the file list only, so a manifest has the
+same index_fp with and without the check.
 A failed check (names_ok false) is recorded and warned about, not refused: the manifest documents
 the index as it is. --verify prints the recorded names (or that none are) and, with --metagraph
 (unless --no-check-names), runs the check again on the annotation next to the manifest (or under
@@ -777,10 +781,10 @@ def main():
                          '--no-check-names skips it, in every mode)')
     args = ap.parse_args()
     try:
-        # the names arguments are refused before any mode starts hashing
-        binary = names_binary(args)
         if args.verify:
-            verify(args.verify, args.root, binary)
+            # the names arguments are refused before any file is hashed (write and batch probe
+            # the binary themselves; the inventory runs no check and probes nothing)
+            verify(args.verify, args.root, names_binary(args))
         elif args.server_csv:
             batch(args)
         elif args.graph and args.annotation and args.inventory:

@@ -354,6 +354,33 @@ class TestIndexManifestBatch(unittest.TestCase):
         code = run_main('--verify', out, '--metagraph', self.root + '/none')
         self.assertIn('cannot run', str(code))
 
+    def test_inventory_runs_no_names_check_and_probes_no_binary(self):
+        """main(): --inventory prints the loader inventory and runs no check, so the names
+        arguments are not probed there (a binary that cannot run, --check-names without one),
+        while a write with the same arguments is refused before any file is hashed."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a2.column.annodbg']
+
+        def run_main(*argv):
+            with mock.patch.object(sys, 'argv', ['index_manifest.py'] + list(argv)):
+                try:
+                    im.main()
+                except SystemExit as e:
+                    return e.code
+            return None
+
+        for extra in (('--metagraph', self.root + '/none'), ('--check-names',)):
+            self.out.seek(0)
+            self.out.truncate(0)
+            self.assertIsNone(run_main('-i', g, '-a', a, '--inventory', *extra), extra)
+            inventory = json.loads(self.out.getvalue())
+            self.assertEqual([g, a], [e['path'] for e in inventory['files']], extra)
+            self.assertIn('derived', inventory, extra)
+        out = os.path.join(self.root, 'inv.json')
+        code = run_main('-i', g, '-a', a, '-o', out, '--metagraph', self.root + '/none')
+        self.assertIn('cannot run', str(code))
+        self.assertFalse(os.path.exists(out))
+
     def test_batch_equals_single_mode_and_hashes_each_file_once(self):
         calls = []
         lock = threading.Lock()
