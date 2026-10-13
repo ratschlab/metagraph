@@ -102,7 +102,8 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 [--by-design PATH] [--pause S] [--max-requests N] [--warm-every N] [--allow-stub] [--no-pdf]`; `--help`
 lists the environment overrides.
 1. A new run directory `runs/<UTC>_<release-short>/` (the release from one GET /capabilities of the public
-   URL, logged), or the one named by `--resume` (then the run's mode and manifest copy unless given).
+   URL, logged, sent only once the lock of item 3 is held and no other runner is on mex: review N4), or the
+   one named by `--resume` (then the run's mode and manifest copy unless given).
    `orchestrator.json` records every invocation: options, mode, the scripts' commit (`+dirty` when the suite
    directory has uncommitted changes), the checks module, the mex clock offset, the MCP command TEMPLATE (never
    an expanded command or an environment value), and the loop's state (`loop`: running / done / capped /
@@ -112,8 +113,9 @@ lists the environment overrides.
    `--allow-stub`. The whole suite directory (minus runs/, tests/, __pycache__) is rsynced (with --delete) to
    mex:~/suite-dev/scripts/, so checks.py's sibling modules and data reach mex; the manifest to
    ~/suite-dev/manifest/<run id>.json.
-3. Exclusion (review M4): every invocation takes `~/suite-dev/LOCK` on mex before any arm (an atomic
-   noclobber create holding pid, host, start time, run id, a token); a lock of a process of this host that is
+3. Exclusion (review M4): every invocation takes `~/suite-dev/LOCK` on mex before any request to the host
+   (an atomic noclobber create holding pid, host, start time, a token; the run id is written in once a new
+   run is named); a lock of a process of this host that is
    gone, or whose pid now belongs to a younger process, is removed; a live one or another host's is refused.
    The lock is released on exit (only if it is still this invocation's). Then any `run_direct.py` under
    ~/suite-dev (pgrep on mex) is waited for (SUITE_WAIT_RUNNER_S, 150 s) and refused if it stays, except a

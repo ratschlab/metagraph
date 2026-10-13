@@ -195,6 +195,9 @@ class RunSuiteOffline(SuiteCase):
             p = self.run_suite(host, "--manifest", self.mpath)
             self.assertEqual(p.returncode, 2, p.stderr)
             self.assertIn("on elsewhere", p.stderr)
+            # review N4: the lock comes before any request, the release GET included
+            self.assertEqual(host.log, [])
+            self.assertEqual(os.listdir(self.runs) if os.path.exists(self.runs) else [], [])
             dead = subprocess.Popen([sys.executable, "-c", "pass"])
             dead.wait()
             with open(self.lock_path(), "w") as fh:
@@ -212,7 +215,7 @@ class RunSuiteOffline(SuiteCase):
                 p = self.run_suite(host, "--manifest", self.mpath)
                 self.assertEqual(p.returncode, 2, p.stderr)
                 self.assertIn("run_direct.py runs under", p.stderr)
-                self.assertEqual(len(host.log), 1)  # the release GET only
+                self.assertEqual(host.log, [])  # review N4: not even the release GET
         finally:
             other.kill()
             other.wait()
@@ -394,7 +397,9 @@ class RunSuiteOverSsh(SuiteCase):
         with FakeHost() as host:
             holder = self.start_suite(host, "--manifest", self.mpath, "--warm-every", "0")
             self.wait_for(lambda: ("POST", "/slow") in host.log)      # the holder's direct-local step runs
+            n = len(host.log)
             p = self.run_suite(host, "--manifest", self.mpath, "--warm-every", "0")
+            host_log_refused = host.log[n:]
             self.assertEqual(p.returncode, 2, p.stderr)
             self.assertIn("held by pid %d" % holder.pid, p.stderr)
             out, err = holder.communicate(timeout=120)
@@ -409,6 +414,8 @@ class RunSuiteOverSsh(SuiteCase):
         self.assertEqual(len(paths), 2, paths)                         # one per invocation
         self.assertEqual(sorted(c["control_path"] for c in exits), sorted(paths))
         run_dir = out.strip().splitlines()[-1]
+        self.assertIn("(run %s)" % os.path.basename(run_dir), p.stderr)  # the lock names the holder's run
+        self.assertEqual(host_log_refused, [])                  # review N4: the refused one sent nothing
         rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
         self.assertEqual(sorted((r["arm"], r["outcome"]) for r in rows),
                          [("direct-local", "pass"), ("direct-remote", "pass")])

@@ -32,7 +32,8 @@
 # leaves the run resumable.
 #
 # Every invocation first takes the lock ~/suite-dev/LOCK on mex (pid, host, start time; a lock whose process
-# is gone is removed) and refuses to start while any run_direct.py runs under ~/suite-dev. --max-requests N
+# is gone is removed) and refuses to start while any run_direct.py runs under ~/suite-dev, both before any
+# request to the host (a new run's release GET comes after them). --max-requests N
 # caps the direct arms' requests of this invocation in total (closing capabilities GETs included);
 # --smoke defaults it to 40 and the manifest to manifest/suite_smoke_v1.json. checks.py next to this script is
 # used when present (--checks checks); without it the stub runs only for manifests that expect nothing but
@@ -142,6 +143,7 @@ if [[ -n "$RESUME" ]]; then
   [[ -d "$RESUME" ]] || die "--resume $RESUME is not a directory"
   RUN_DIR="$(cd "$RESUME" && pwd)"
   RUN_ID="$(basename "$RUN_DIR")"
+  ARM_REL="runs/$RUN_ID/arms/direct-local"
   if [[ -z "$MANIFEST" ]]; then
     for cand in "$RUN_DIR/manifest.json" "$RUN_DIR/arms/direct-local/manifest.json" \
                 "$RUN_DIR/arms/direct-remote/manifest.json"; do
@@ -169,16 +171,8 @@ else
     if [[ $SMOKE == 1 ]]; then MANIFEST="$HERE/manifest/suite_smoke_v1.json"; else MANIFEST="$HERE/manifest/suite_v1.json"; fi
   fi
   [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || die "no manifest (${MANIFEST:-none}); pass --manifest"
-  log "release: one GET /capabilities on $REMOTE_BASE (names the run directory)"
-  RELEASE="$("$PY" - "$REMOTE_BASE" <<'PYEOF' 2>/dev/null || true
-import json, sys, urllib.request
-with urllib.request.urlopen(sys.argv[1].rstrip("/") + "/capabilities", timeout=30) as r:
-    print(json.loads(r.read().decode("utf-8")).get("release") or "")
-PYEOF
-)"
-  RUN_ID="$("$PY" "$HERE/suite_common.py" stamp)_$("$PY" "$HERE/suite_common.py" release-short "${RELEASE:-}")"
-  RUN_DIR="$RUNS/$RUN_ID"
-  [[ ! -e "$RUN_DIR" ]] || die "$RUN_DIR exists already"
+  # A new run is named after the lock is taken (the release GET below): review N4.
+  RUN_ID=""; RUN_DIR=""
 fi
 MODE="${MODE:-paired}"
 [[ "$MODE" == paired || "$MODE" == sequential ]] || die "unknown mode $MODE"
@@ -206,29 +200,10 @@ if [[ $CHECKS == stub && $ALLOW_STUB == 0 ]]; then
   [[ -z "$BEYOND" ]] || die "no checks.py next to this script, and the selected scenarios expect checks the stub cannot evaluate (${BEYOND:0:200}); add lane S1's checks.py, or pass --allow-stub for a run that checks the HTTP status only"
 fi
 
-mkdir -p "$RUN_DIR/arms"
-# The run's manifest from the start, so a --resume finds it even when no arm's copy reached this side (merge_run
-# keeps an existing one).
-[[ -f "$RUN_DIR/manifest.json" ]] || cp "$MANIFEST" "$RUN_DIR/manifest.json"
-COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
-DIRTY="$(git -C "$HERE" status --porcelain -- . 2>/dev/null | grep -v '^?? runs/' | head -1 || true)"
-[[ -z "$DIRTY" ]] || COMMIT="$COMMIT+dirty"
-log "run directory $RUN_DIR ($MODE)"
-log "manifest $MANIFEST; scripts $COMMIT; checks $CHECKS"
-
-ARGS=(--manifest "$MANIFEST" --pause "$PAUSE" --scripts-commit "$COMMIT" --run-id "$RUN_ID" --checks "$CHECKS"
-      --warm-every "$WARM_EVERY")
-[[ -z "$AREAS" ]] || ARGS+=(--areas "$AREAS")
-[[ -z "$LIMIT" ]] || ARGS+=(--limit "$LIMIT")
-[[ $ALLOW_STUB == 0 ]] || ARGS+=(--allow-stub)
-ARM_REL="runs/$RUN_ID/arms/direct-local"
-LOCAL_ARGS=("${ARGS[@]}")
-LOCAL_ARGS[1]="manifest/$RUN_ID.json"
-
 # --- state for the traps --------------------------------------------------------------------------------------
-LOCK_HELD=0; LOCK_TOKEN=""; SAMPLER_PID=""; HB_REL=""; REMOTE_PID=""; LOOP_STARTED=0; CLEANED=0
-NEW_RUN=1; [[ -z "$RESUME" ]] || NEW_RUN=0
-ARMS_STARTED=0
+LOCK_HELD=0; LOCK_TOKEN=""; LOCK_HOST=""; LOCK_STARTED_UTC=""; LOCK_STARTED_EPOCH=""
+SAMPLER_PID=""; HB_REL=""; REMOTE_PID=""; LOOP_STARTED=0; CLEANED=0; ARMS_STARTED=0
+CREATED_RUN_DIR=0; CREATED_MEX_RUN=0; ARM_REL="${ARM_REL:-}"
 
 stop_sampler() {
   [[ -n "$SAMPLER_PID" ]] || return 0
@@ -272,12 +247,14 @@ cleanup() {
   [[ $CLEANED == 0 ]] || return 0
   CLEANED=1
   stop_sampler
-  pull_samples
-  if [[ $NEW_RUN == 1 && $ARMS_STARTED == 0 ]]; then
-    # Refused before any arm ran (lock, runner, options): leave no empty run directory behind.
-    mex "rmdir $MEX_DIR/runs/$RUN_ID/arms $MEX_DIR/runs/$RUN_ID" || true
-    rm -f "$RUN_DIR/manifest.json"
-    rmdir "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
+  [[ -z "$RUN_ID" ]] || pull_samples
+  if [[ $ARMS_STARTED == 0 ]]; then
+    # Refused before any arm ran: leave no empty run directory behind that this invocation created.
+    [[ $CREATED_MEX_RUN == 0 ]] || mex "rmdir $MEX_DIR/runs/$RUN_ID/arms $MEX_DIR/runs/$RUN_ID" || true
+    if [[ $CREATED_RUN_DIR == 1 ]]; then
+      rm -f "$RUN_DIR/manifest.json"
+      rmdir "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
+    fi
   fi
   release_lock
   close_master
@@ -334,7 +311,7 @@ wait_no_runner() {
 interrupted() {
   trap - INT TERM
   log "interrupted"
-  if [[ $LOCK_HELD == 1 ]]; then
+  if [[ $LOCK_HELD == 1 && -n "$RUN_ID" ]]; then
     # The runner of the step in flight (paired) or of the arm (sequential) stops after its request.
     mex "pkill -INT -u \$(id -u) -f '$RUNNER_PATTERN .*--run-id $RUN_ID'" || true
     local wrc=0
@@ -347,28 +324,27 @@ interrupted() {
   fi
   [[ $LOOP_STARTED == 0 ]] || orch_set loop "{\"mode\": \"$MODE\", \"state\": \"interrupted\", \"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}}"
   cleanup
-  log "resume with: $0 --resume $RUN_DIR"
+  [[ -z "$RUN_DIR" || ! -d "$RUN_DIR" ]] || log "resume with: $0 --resume $RUN_DIR"
   exit 130
 }
 trap interrupted INT TERM
 trap cleanup EXIT
 
-# --- mex: reachable, clock, lock, no other runner, scripts -----------------------------------------------------
-mex "mkdir -p $MEX_DIR/scripts $MEX_DIR/manifest $MEX_DIR/runs/$RUN_ID/arms" || die "ssh $MEX failed"
-T_A="$("$PY" -c 'import time; print("%.3f" % time.time())')"
-T_MEX="$(mex "$MEX_PY -c 'import time; print(\"%.3f\" % time.time())'" || true)"
-T_B="$("$PY" -c 'import time; print("%.3f" % time.time())')"
-CLOCK_OFFSET="$("$PY" "$HERE/suite_common.py" clock-offset "$T_A" "$T_MEX" "$T_B")"
-log "mex clock offset ${CLOCK_OFFSET:-unknown} s"
+# --- mex: reachable, the lock, no other runner (before any request to the host: review N4) ----------------------
+mex "mkdir -p $MEX_DIR" || die "ssh $MEX failed"
 
+# The lock document of this invocation (its run id once the run is named).
+lock_json() {
+  printf '{"pid": %d, "host": "%s", "hostname": "%s", "started_utc": "%s", "started_epoch": %s, "run_id": "%s", "mode": "%s", "token": "%s"}' \
+    "$$" "$LOCK_HOST" "$(hostname)" "$LOCK_STARTED_UTC" "$LOCK_STARTED_EPOCH" "$RUN_ID" "$MODE" "$LOCK_TOKEN"
+}
 take_lock() {
-  local host now_utc now_epoch json held verdict attempt
-  host="$(hostname)"
+  local json held verdict attempt
+  LOCK_HOST="$(hostname)"
   LOCK_TOKEN="$("$PY" -c 'import uuid; print(uuid.uuid4().hex)')"
-  now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  now_epoch="$("$PY" -c 'import time; print("%.3f" % time.time())')"
-  json="$(printf '{"pid": %d, "host": "%s", "started_utc": "%s", "started_epoch": %s, "run_id": "%s", "mode": "%s", "token": "%s"}' \
-    "$$" "$host" "$now_utc" "$now_epoch" "$RUN_ID" "$MODE" "$LOCK_TOKEN")"
+  LOCK_STARTED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  LOCK_STARTED_EPOCH="$("$PY" -c 'import time; print("%.3f" % time.time())')"
+  json="$(lock_json)"
   for attempt in 1 2 3; do
     if mex "(set -o noclobber; printf '%s\n' $(quote "$json") > $MEX_DIR/LOCK)"; then
       LOCK_HELD=1
@@ -377,13 +353,20 @@ take_lock() {
     fi
     held="$(mex "cat $MEX_DIR/LOCK" || true)"
     [[ -n "$held" ]] || continue
-    verdict="$("$PY" "$HERE/suite_common.py" lock-check "$held" "$host")"
+    verdict="$("$PY" "$HERE/suite_common.py" lock-check "$held" "$LOCK_HOST")"
     case "$verdict" in
       stale*) log "removing a stale lock (${verdict#stale })"; mex "rm -f $MEX_DIR/LOCK" || true ;;
       *) die "the suite lock ~/$MEX_DIR/LOCK on $MEX is ${verdict#* }; another invocation drives the host (remove the file only if that process is gone)" ;;
     esac
   done
   die "could not take the lock ~/$MEX_DIR/LOCK on $MEX"
+}
+# Puts the run id into this invocation's lock once the run is named (only while the lock is still its own).
+lock_update() {
+  local json
+  json="$(lock_json)"
+  mex "grep -q $LOCK_TOKEN $MEX_DIR/LOCK && printf '%s\n' $(quote "$json") > $MEX_DIR/LOCK.$LOCK_TOKEN && mv -f $MEX_DIR/LOCK.$LOCK_TOKEN $MEX_DIR/LOCK" \
+    || log "the run id could not be written into the lock (it stays held)"
 }
 take_lock
 
@@ -410,6 +393,49 @@ if [[ -z "$ATTACH_PID" ]]; then
     *) die "no answer from $MEX while checking for a running run_direct.py: refusing to start (an ssh failure never reads as no runner)" ;;
   esac
 fi
+
+# --- a new run: named from the host's release, now that the lock is held (review N4) -------------------------
+if [[ -z "$RESUME" ]]; then
+  log "release: one GET /capabilities on $REMOTE_BASE (names the run directory)"
+  RELEASE="$("$PY" - "$REMOTE_BASE" <<'PYEOF' 2>/dev/null || true
+import json, sys, urllib.request
+with urllib.request.urlopen(sys.argv[1].rstrip("/") + "/capabilities", timeout=30) as r:
+    print(json.loads(r.read().decode("utf-8")).get("release") or "")
+PYEOF
+)"
+  RUN_ID="$("$PY" "$HERE/suite_common.py" stamp)_$("$PY" "$HERE/suite_common.py" release-short "${RELEASE:-}")"
+  RUN_DIR="$RUNS/$RUN_ID"
+  [[ ! -e "$RUN_DIR" ]] || die "$RUN_DIR exists already"
+  ARM_REL="runs/$RUN_ID/arms/direct-local"
+  lock_update
+fi
+
+if [[ ! -d "$RUN_DIR" ]]; then mkdir -p "$RUN_DIR/arms"; CREATED_RUN_DIR=1; else mkdir -p "$RUN_DIR/arms"; fi
+# The run's manifest from the start, so a --resume finds it even when no arm's copy reached this side (merge_run
+# keeps an existing one).
+[[ -f "$RUN_DIR/manifest.json" ]] || cp "$MANIFEST" "$RUN_DIR/manifest.json"
+COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
+DIRTY="$(git -C "$HERE" status --porcelain -- . 2>/dev/null | grep -v '^?? runs/' | head -1 || true)"
+[[ -z "$DIRTY" ]] || COMMIT="$COMMIT+dirty"
+log "run directory $RUN_DIR ($MODE)"
+log "manifest $MANIFEST; scripts $COMMIT; checks $CHECKS"
+
+ARGS=(--manifest "$MANIFEST" --pause "$PAUSE" --scripts-commit "$COMMIT" --run-id "$RUN_ID" --checks "$CHECKS"
+      --warm-every "$WARM_EVERY")
+[[ -z "$AREAS" ]] || ARGS+=(--areas "$AREAS")
+[[ -z "$LIMIT" ]] || ARGS+=(--limit "$LIMIT")
+[[ $ALLOW_STUB == 0 ]] || ARGS+=(--allow-stub)
+LOCAL_ARGS=("${ARGS[@]}")
+LOCAL_ARGS[1]="manifest/$RUN_ID.json"
+
+# --- mex: the run's directories, the clock ---------------------------------------------------------------------
+[[ -n "$RESUME" ]] || mex "test -e $MEX_DIR/runs/$RUN_ID" || CREATED_MEX_RUN=1
+mex "mkdir -p $MEX_DIR/scripts $MEX_DIR/manifest $MEX_DIR/runs/$RUN_ID/arms" || die "ssh $MEX failed"
+T_A="$("$PY" -c 'import time; print("%.3f" % time.time())')"
+T_MEX="$(mex "$MEX_PY -c 'import time; print(\"%.3f\" % time.time())'" || true)"
+T_B="$("$PY" -c 'import time; print("%.3f" % time.time())')"
+CLOCK_OFFSET="$("$PY" "$HERE/suite_common.py" clock-offset "$T_A" "$T_MEX" "$T_B")"
+log "mex clock offset ${CLOCK_OFFSET:-unknown} s"
 
 mex_rsync --delete --exclude 'runs/' --exclude 'tests/' --exclude '__pycache__/' --exclude '*.pyc' \
   "$HERE/" "$(mex_path "$MEX_DIR/scripts/")" || die "rsync of the scripts to $MEX failed"
