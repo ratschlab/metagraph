@@ -28,6 +28,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
+#include "graph/traversal/support_step.hpp"
 
 
 // The supported-path search (long_search "supported_paths", SPEC §20): the label and trace
@@ -1766,23 +1767,29 @@ TEST(PatternSupport, RefusedRowsStopTheSearch) {
 
 // Every memory stop of a budgeted search after the anchors are admitted states its row in
 // rows_refused (SPEC §20.5, §20.7: the room for a row's statement is reserved before its
-// read, and a refused decode or a runs bound the account cannot hold after an admitted decode
-// is stated with it): one column of fifty records, each a distinct random 5-mer and the
-// 11-mer S they all end in (S not periodic, so that no k-mer inside it anchors the pattern),
-// the pattern NNNNN and S: fifty cheap anchor rows, the walks' rows of one or two
-// coordinates, and S's row with fifty coordinates, the graph's terminal node and so an anchor
-// row of the row-diff, refused over a band of accounts. A stop before any row is read is the
-// anchors' 64 bytes each, not a row; the kept paths' allowance cuts the list without a stop
-// at these sizes. (A budget-aware decode is admitted against a demand that covers its runs,
-// so the stops here are refused decodes; the statement of a runs bound refused after an
-// admitted decode shares their code and was not reached by any shape tried.)
+// read), a refused decode and a row whose decode was admitted but whose runs the account
+// cannot hold beside its hits alike. A budget-aware decode is admitted against a demand that
+// covers the row's decode and its hits (for an anchor row of the row-diff about 24 bytes per
+// coordinate of one label beside a fixed 2 KB) but not its runs (32 bytes per coordinate, a
+// run modelled twice), so such a row of more than about 160 coordinates of one label is
+// refused as runs under a band of accounts.
+// One column of 320 records, each a distinct random 6-mer and the 11-mer S they all end in
+// (S not periodic, so that no k-mer inside it anchors the pattern), the pattern NNNNNN and S:
+// 320 cheap anchor rows, the walks' rows of a few coordinates, and S's row with 320
+// coordinates, the graph's terminal node and so an anchor row of the row-diff, refused as a
+// decode and as runs over bands of accounts; a row refused as runs is told by its statement,
+// which needs its hits and its runs together (the runs' model and the cache entry's 64
+// bytes). A stop before any row is read is the anchors' 64 bytes each, not a row; the kept
+// paths' allowance cuts the list without a stop at these sizes. Mutation tried: the row
+// refused as runs not stated (stop max_memory, rows_refused empty): fails.
 TEST(PatternSupport, MemoryStopsAfterTheAnchorsStateTheirRow) {
     const std::string shared = "ACCTGAGTCAG";
+    const size_t n = 320;
     std::mt19937 rng(7);
     std::set<std::string> prefixes;
-    while (prefixes.size() < 50) {
+    while (prefixes.size() < n) {
         std::string p;
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < 6; ++i) {
             p += "ACGT"[rng() % 4];
         }
         prefixes.insert(p);
@@ -1792,14 +1799,20 @@ TEST(PatternSupport, MemoryStopsAfterTheAnchorsStateTheirRow) {
         records.push_back({ "a", "a" + std::to_string(records.size()), p + shared });
     }
     const Index idx = build_rd(11, records);
-    const std::string text = "NNNNN" + shared;
+    const std::string text = "NNNNNN" + shared;
     Ask ask;
     const Outcome full = run_support(idx, text, false, ask);
     ASSERT_FALSE(full.result.stop) << full.stop;
-    ASSERT_EQ(50u, full.paths.size());
-    ASSERT_EQ(50u, full.work.anchor_rows);
-    uint64_t before_rows = 0, stops = 0, at_shared = 0, unstopped = 0;
-    for (uint64_t mem = 2048; mem < 32768; mem += 16) {
+    ASSERT_EQ(n, full.paths.size());
+    ASSERT_EQ(n, full.work.anchor_rows);
+    // what S's row refused as runs needs: its hits (one label, n coordinates) and the bound of
+    // its runs (the cache entry and the runs' model, one run a coordinate)
+    graph::traversal::LabelQuery::NodeHits hits(1);
+    hits[0].coords.resize(n);
+    const uint64_t runs_need = graph::traversal::LabelQuery::held_bytes(hits) + 64
+            + graph::traversal::support_step::RowRuns::model_bytes(true, 1, n);
+    uint64_t before_rows = 0, stops = 0, at_shared = 0, as_runs = 0, unstopped = 0;
+    for (uint64_t mem = 8192; mem < 98304; mem += 64) {
         SCOPED_TRACE(mem);
         Ask a = ask;
         a.max_memory = mem;
@@ -1823,10 +1836,15 @@ TEST(PatternSupport, MemoryStopsAfterTheAnchorsStateTheirRow) {
         EXPECT_EQ(idx.k, r["kmer"].asString().size());
         EXPECT_GT(r["needed_bytes"].asUInt64(), r["available_bytes"].asUInt64());
         EXPECT_GE(r["available_bytes"].asUInt64(), 0u);
-        at_shared += r["kmer"].asString() == shared;
+        if (r["kmer"].asString() == shared) {
+            ++at_shared;
+            as_runs += r["needed_bytes"].asUInt64() == runs_need;
+        }
     }
     EXPECT_LT(0u, before_rows);
-    EXPECT_LT(0u, at_shared);
+    // S's row refused as runs and as a decode, and rows before it refused
+    EXPECT_LT(0u, as_runs);
+    EXPECT_LT(as_runs, at_shared);
     EXPECT_LT(at_shared, stops);
     EXPECT_LT(0u, unstopped);
 }

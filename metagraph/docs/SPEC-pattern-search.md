@@ -4728,9 +4728,11 @@ them, the answer stays `selected_above_threshold` with exact counts instead of `
 **A row refused as runs is stated (§20.5, §20.7).** A budgeted row of the supported-path search that the account
 admits and then cannot hold as runs is stated in `rows_refused` as a refused decode is, with what its hits and
 runs need together against what the account had for it (before: `stop {extension, max_memory}` with
-`rows_refused: []`). A budget-aware decode is admitted against a demand that covers its runs, so no shape tried
-reached that refusal; `PatternSupport.MemoryStopsAfterTheAnchorsStateTheirRow` requires every memory stop after
-the anchors to state its row.
+`rows_refused: []`). A budget-aware decode is admitted against a demand that covers the row's decode and its hits
+(for an anchor row of the row-diff about 24 bytes per coordinate of one label beside a fixed 2 KB) but not its runs
+(32 bytes per coordinate), so such a row of more than about 160 coordinates of one label reaches that refusal under
+a band of accounts; `PatternSupport.MemoryStopsAfterTheAnchorsStateTheirRow` reaches it on a row of 320
+coordinates and requires every memory stop after the anchors to state its row.
 
 **A per-request load that fails is the pair's refusal, not the end of the process (§24.1, §24.2;
 SPEC-labeled-traversal-core.md §10.3).** Before, the load of a pair for an `in_ram` request went through the
