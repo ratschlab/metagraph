@@ -1328,8 +1328,9 @@ TEST(PatternRoute, TraverseBlockIsTheGateProjection) {
         EXPECT_EQ(expected, block);
         // every key kept has the full block's value
         for (const std::string &key : block.getMemberNames()) {
-            if (key != "details" && key != "caps")
+            if (key != "details" && key != "caps") {
                 EXPECT_EQ(full[key], block[key]) << key;
+            }
         }
         for (const std::string &cap : block["caps"].getMemberNames()) {
             EXPECT_EQ(full["caps"][cap], block["caps"][cap]) << cap;
