@@ -2143,7 +2143,14 @@ class Checker:
         # (a predicate answer never says annotation_not_read: its selection read rows; it says
         # projection_not_read for a projection named and not built, SPEC §19.10; so does a
         # pattern searched for its supported paths, whose search read rows, SPEC §20.6)
-        self.ok(('annotation_not_read' in e['notes']) is (named and not labelled
+        # max_memory_mb acts on the kept walks and result objects of a long_search "paths" entry
+        # outside mode count (SPEC §8.10, §12.1): named alone, it leaves no note there
+        memory_acts = paths and mode != 'count'
+        named_unread = (named if not memory_acts else
+                        (request.get('output', {}).get('labels') == 'all'
+                         or any(f in request for f in [f for f in LIMITS_LABELS if f != 'max_memory_mb']
+                                + ['allow_unbudgeted_annotation', 'require_support'])))
+        self.ok(('annotation_not_read' in e['notes']) is (named_unread and not labelled
                                                           and not predicate and not supported),
                 path + '.notes', 'annotation_not_read exactly where labels were named, not read')
         if supported:

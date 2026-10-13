@@ -4656,7 +4656,7 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
 The critical review of 2026-10-12 (branch gr/labeled-traversal at 1814fb5b) found the memory of a path search
 unbounded where the stated limitation of increment 4 said so. The fixes below change answers as stated; contract
 version 1 stays (additions only). The same review's wording fixes (`predicate_scope` needs a predicate as
-`"motif"` only; §24.2's order of checks) are the **Wording** bullet of 2026-10-12 at the end of §27.
+`"motif"` only; §24.2's order of checks) are the **Wording** bullet of 2026-10-12 in §27.
 
 **A path search is in the memory account, with or without labels (the owner's decision: bound it by the
 request's memory budget, not by a cap on L; §4.1, §4.2, §7.5, §7.6, §8.7, §8.10, §12.1, §17's stated limits).**
