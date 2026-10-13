@@ -201,6 +201,85 @@ def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=(
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# after an MCP step of the paired loop (async's answers to the verification of lane S2b)
+
+# How long a request of a timing class may take (the direct runner's client timeouts).
+TIMING_CLASS_TIMEOUT_S = {"fast": 120.0, "slow": 600.0, "long": 1800.0}
+# The host's time budget of a /pattern request that states none (SPEC-pattern-search: default_time_budget_ms).
+PATTERN_DEFAULT_BUDGET_S = 60.0
+# Added to a cancelled job's bound: the answer's transfer and the clocks.
+CANCEL_MARGIN_S = 2.0
+# jobs.jsonl events of async's runner after which the job may still run on the host.
+CANCEL_EVENTS = ("canceled", "cancel_failed")
+
+
+def _budget_values(obj):
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "time_budget_ms" and _is_number(value):
+                yield value
+            else:
+                for v in _budget_values(value):
+                    yield v
+    elif isinstance(obj, list):
+        for item in obj:
+            for v in _budget_values(item):
+                yield v
+
+
+def request_bound_s(scenario):
+    """How long the host may work on the scenario's request: its time_budget_ms (the largest stated in the MCP
+    arguments, else in the direct request), else the /pattern default budget, else the timing class's
+    timeout (a traversal without a budget has no deadline of its own)."""
+    stated = list(_budget_values((scenario.get("mcp") or {}).get("arguments"))) or \
+        list(_budget_values(scenario.get("request")))
+    if stated:
+        return max(stated) / 1000.0
+    if "/pattern" in str(scenario.get("route") or ""):
+        return PATTERN_DEFAULT_BUDGET_S
+    return TIMING_CLASS_TIMEOUT_S.get(scenario.get("timing_class") or "fast", TIMING_CLASS_TIMEOUT_S["fast"])
+
+
+def mcp_step_result(out_dir, manifest, ids, repeat, now):
+    """What an MCP step (one runner invocation for `ids` and `repeat`) left: (outcomes, wait_s). outcomes: the
+    recorded outcome per id, `missing` when the runner wrote none (a runner failure). wait_s: how long to wait
+    before the next step, because an execution ended `error` with its job cancelled rather than seen terminal
+    (async's runner cancels at its poll deadline; the cancelled call may still run on the host): until the
+    cancellation plus the scenario's request bound (request_bound_s) and a margin, unless jobs.jsonl shows the
+    job terminal (or the cancel found it already terminal)."""
+    rows, _ = read_jsonl(os.path.join(out_dir, "executions.jsonl"))
+    jobs, _ = read_jsonl(os.path.join(out_dir, "jobs.jsonl"))
+    scen = dict((s_.get("id"), s_) for s_ in (manifest.get("scenarios") or []))
+    events = {}
+    for j in jobs:
+        if j.get("id") is not None and j.get("event"):
+            events.setdefault(str(j["id"]), []).append(j)
+    outcomes, wait = [], 0.0
+    for sid in ids:
+        mine = [r for r in rows if r.get("arm") == "mcp" and r.get("scenario") == sid and r.get("repeat") == repeat]
+        if not mine:
+            outcomes.append("missing")
+            continue
+        line = mine[-1]
+        outcomes.append(str(line.get("outcome")))
+        if line.get("outcome") != "error":
+            continue
+        job = line.get("job") if isinstance(line.get("job"), dict) else {}
+        evs = [e for key in (job.get("search_id"), job.get("job_id")) if key is not None
+               for e in events.get(str(key), [])]
+        if any(e.get("event") == "terminal" for e in evs):
+            continue
+        cancels = [e for e in evs if e.get("event") in CANCEL_EVENTS and e.get("detail") != "already_terminal"]
+        if not cancels:
+            continue
+        at = max([parse_utc(e.get("at")) for e in cancels if parse_utc(e.get("at")) is not None] or
+                 [parse_utc(line.get("ended_utc")) or now])
+        until = at + request_bound_s(scen.get(sid) or {}) + CANCEL_MARGIN_S
+        wait = max(wait, until - now)
+    return outcomes, max(0.0, wait)
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # the host's cache state per execution (review H1)
 
 HOST_CACHE_WARM_S = 60.0
@@ -697,6 +776,9 @@ def _main(argv):
     lock-check LOCK_JSON HOST_ID
                                  print 'stale|live|foreign REASON' for another invocation's lock
     host-id                      print this machine's stable id for the lock (host_id())
+    mcp-step OUT_DIR MANIFEST IDS REPEAT
+                                 print 'OUTCOMES WAIT_S' after an MCP step (mcp_step_result: outcomes comma-
+                                 separated, the whole seconds to wait for a cancelled job)
     lock-break-cmd MEX_DIR HELD  print the shell command removing the lock only if it still holds HELD
     clock-offset T0 REMOTE T1    print REMOTE - (T0 + T1) / 2 (how far mex's clock is ahead)
     """
@@ -738,6 +820,11 @@ def _main(argv):
             lock = None
         verdict, reason = lock_verdict(lock, argv[2], time.time(), _pid_alive, _pid_age_s)
         print("%s %s" % (verdict, reason))
+        return 0
+    if len(argv) >= 5 and argv[0] == "mcp-step":
+        ids = [i for i in argv[3].split(",") if i]
+        outcomes, wait = mcp_step_result(argv[1], read_json(argv[2]), ids, int(argv[4]), time.time())
+        print("%s %d" % (",".join(outcomes) or "-", int(math.ceil(wait))))
         return 0
     if argv and argv[0] == "host-id":
         print(host_id())

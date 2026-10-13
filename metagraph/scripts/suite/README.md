@@ -137,7 +137,16 @@ lists the environment overrides.
    every other arm); a scenario the manifest marks not implemented via MCP gets the MCP repeat 0 only (the
    runner records the mark). One sampler on mex covers the loop (`samples/paired-<stamp>.jsonl`), stopped at
    the end, after 24 h (30 min for --smoke), or when the orchestrator stops touching its heartbeat file for an
-   hour. Three failing steps of one arm in a row stop the loop (exit 1 after the report). An ssh failure on a
+   hour. Three failing steps of one direct arm in a row stop the loop (exit 1 after the report). The MCP
+   arm follows async's exit codes: the loop stops on the runner's exit 2 / 3 (a start refusal: key file,
+   queue wait ran out) or 130 (interrupted), or after three MCP executions in a row that ended `error` (a
+   runner-level failure) or were not recorded (`loop.reason` mcp_exit_N / mcp_interrupted / mcp_errors);
+   never on `fail` (exit 1 also means a failing scenario, a result). After an execution that ended `error`
+   with its job cancelled (jobs.jsonl `canceled` / `cancel_failed`, no `terminal`), the next step waits
+   until the cancellation plus the scenario's time budget (`time_budget_ms` of the MCP arguments, else the
+   direct request; else 60 s for /pattern, else the timing class's timeout) and 2 s, since the cancelled
+   call may still run on the host (suite_common.py mcp-step); the sequential mode waits the same way
+   between its cold and warm MCP passes. An ssh failure on a
    direct-local step waits until that step's runner is gone before the next arm starts (review N3): the
    check on mex answers with an explicit marker, so a failing ssh never reads as "no runner"; it is retried
    every 5 s for SUITE_WAIT_RUNNER_S. A runner still there after that, or a mex that stays silent, stops

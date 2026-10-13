@@ -48,7 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import suite_common as sc  # noqa: E402
 
-DEFAULT_TIMEOUTS = {"fast": 120.0, "slow": 600.0, "long": 1800.0}
+DEFAULT_TIMEOUTS = dict(sc.TIMING_CLASS_TIMEOUT_S)
 # Exit codes: 0 done, 130 stopped by a signal, EXIT_REQUEST_CAP stopped at --max-requests (a planned stop: the
 # orchestrator goes on to the report), 1 failed.
 EXIT_REQUEST_CAP = 3

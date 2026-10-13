@@ -383,6 +383,53 @@ class Lock(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "3.000")
 
 
+class McpStep(unittest.TestCase):
+    def test_request_bound(self):
+        self.assertEqual(sc.request_bound_s({"mcp": {"arguments": {"time_budget_ms": 1500}},
+                                             "request": {"time_budget_ms": 9000}}), 1.5)
+        self.assertEqual(sc.request_bound_s({"request": {"strategy": {"bounds": {"time_budget_ms": 5000}}}}), 5.0)
+        self.assertEqual(sc.request_bound_s({"route": "POST /pattern", "request": {}}), 60.0)
+        self.assertEqual(sc.request_bound_s({"route": "POST /traverse", "timing_class": "slow"}), 600.0)
+        self.assertEqual(sc.request_bound_s({"route": "POST /traverse"}), 120.0)
+
+    def test_outcomes_and_the_wait_after_a_cancelled_job(self):
+        manifest = {"scenarios": [{"id": "A", "route": "POST /traverse",
+                                   "mcp": {"arguments": {"strategy": {"bounds": {"time_budget_ms": 4000}}}}},
+                                  {"id": "B", "route": "POST /pattern", "mcp": {"arguments": {}}},
+                                  {"id": "C", "route": "POST /pattern", "mcp": {"arguments": {}}}]}
+
+        def ex(sid, outcome, job=None):
+            return {"scenario": sid, "arm": "mcp", "repeat": 0, "outcome": outcome, "job": job,
+                    "ended_utc": sc.iso_utc(T0)}
+        with tempfile.TemporaryDirectory() as d:
+            ej = os.path.join(d, "executions.jsonl")
+            jj = os.path.join(d, "jobs.jsonl")
+            sc.append_jsonl(ej, ex("A", "error", {"search_id": None, "job_id": "j1"}))
+            sc.append_jsonl(ej, ex("B", "fail", {"search_id": "s2", "job_id": None}))
+            sc.append_jsonl(jj, {"event": "created", "id": "j1", "at": sc.iso_utc(T0 - 300)})
+            sc.append_jsonl(jj, {"event": "canceled", "id": "j1", "detail": "ok", "at": sc.iso_utc(T0)})
+            outcomes, wait = sc.mcp_step_result(d, manifest, ["A", "B", "C"], 0, T0 + 1.0)
+            self.assertEqual(outcomes, ["error", "fail", "missing"])
+            self.assertAlmostEqual(wait, 4.0 + sc.CANCEL_MARGIN_S - 1.0)      # the cancel + A's budget + margin
+            self.assertEqual(sc.mcp_step_result(d, manifest, ["A"], 0, T0 + 60.0)[1], 0.0)   # long past
+            # a cancel that found the job terminal already, or a terminal event: no wait
+            sc.append_jsonl(ej, ex("C", "error", {"search_id": "s3", "job_id": None}))
+            sc.append_jsonl(jj, {"event": "canceled", "id": "s3", "detail": "already_terminal",
+                                 "at": sc.iso_utc(T0)})
+            self.assertEqual(sc.mcp_step_result(d, manifest, ["C"], 0, T0 + 1.0), (["error"], 0.0))
+            sc.append_jsonl(jj, {"event": "terminal", "id": "j1", "detail": "stopped", "at": sc.iso_utc(T0 + 0.5)})
+            self.assertEqual(sc.mcp_step_result(d, manifest, ["A"], 0, T0 + 1.0), (["error"], 0.0))
+            # an error without a job (a transport failure at submit) has nothing to wait for
+            sc.append_jsonl(ej, dict(ex("B", "error"), repeat=1))
+            self.assertEqual(sc.mcp_step_result(d, manifest, ["B"], 1, T0 + 1.0), (["error"], 0.0))
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                mpath = os.path.join(d, "m.json")
+                with open(mpath, "w") as fh:
+                    json.dump(manifest, fh)
+                sc._main(["mcp-step", d, mpath, "B,C", "0"])
+            self.assertEqual(buf.getvalue().strip(), "fail,error 0")
+
+
 class LockIdentity(unittest.TestCase):
     def test_host_id(self):
         # review N6: the lock names this machine by a stable id, not its DHCP network name

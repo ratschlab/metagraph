@@ -4,7 +4,11 @@ the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M. I
 per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
 scenario so) to DIR/executions.jsonl and its job to DIR/jobs.jsonl, skips what is recorded (resumable), and
 logs each call to DIR/calls.log with whether the environment variable SUITE_TEST_SECRET reached it (the value
-itself is never written). No request is made."""
+itself is never written). No request is made.
+
+FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails its checks (exit 1);
+`error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
+`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal)."""
 
 import argparse
 import json
@@ -23,12 +27,16 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--manifest", required=True)
     args = ap.parse_args(argv)
+    mode = os.environ.get("FAKE_MCP_MODE", "")
+    if mode == "exit3":
+        return 3
     os.makedirs(args.out, exist_ok=True)
     scen = dict((s.get("id"), s) for s in sc.read_json(args.manifest).get("scenarios", []))
     path = os.path.join(args.out, "executions.jsonl")
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])
     with open(os.path.join(args.out, "calls.log"), "a") as fh:
         fh.write("%s %d env=%s\n" % (args.ids, args.repeat, "yes" if os.environ.get("SUITE_TEST_SECRET") else "no"))
+    bad = 0
     for sid in [i for i in args.ids.split(",") if i]:
         if (sid, "mcp", args.repeat) in done:
             continue
@@ -45,10 +53,27 @@ def main(argv=None):
                 "mcp_phases": None if nim else {"submit_ms": 1.0, "queue_ms": 2.0, "backend_ms": 3.0,
                                                 "terminal_lag_ms": 1.0, "paging_ms": 1.0},
                 "job": None if nim else {"search_id": "s-%s-%d" % (sid, args.repeat), "job_id": None}}
+        if nim:
+            pass
+        elif mode == "fail":
+            line.update(outcome="fail", checks=[{"check": "status", "outcome": "fail", "detail": "fake: http 500"}],
+                        http=500)
+        elif mode == "error_cancel":
+            line.update(outcome="error", checks=[], http=0, server=None,
+                        error={"code": "runner_error", "text": "fake: not terminal within the deadline"},
+                        mcp_phases={"submit_ms": 1.0, "queue_ms": None, "backend_ms": None,
+                                    "terminal_lag_ms": None, "paging_ms": None})
+            jid = line["job"]["search_id"]
+            sc.append_jsonl(os.path.join(args.out, "jobs.jsonl"), {"event": "created", "kind": "search", "id": jid,
+                                                                   "scenario": sid, "repeat": args.repeat,
+                                                                   "at": sc.iso_utc(t0)})
+            sc.append_jsonl(os.path.join(args.out, "jobs.jsonl"), {"event": "canceled", "kind": "search", "id": jid,
+                                                                   "detail": "ok", "at": sc.iso_utc(time.time())})
+        bad += line["outcome"] in ("fail", "error")
         sc.append_jsonl(path, line)
-        if line["job"]:
+        if line["job"] and mode != "error_cancel":
             sc.append_jsonl(os.path.join(args.out, "jobs.jsonl"), line["job"])
-    return 0
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":

@@ -150,6 +150,56 @@ class RunSuiteOffline(SuiteCase):
         self.assertIn("paired: per scenario MCP cold", report)
         self.assertIn("| P | mcp | warm |", report)
 
+    def test_mcp_fail_is_a_result_not_a_stop(self):
+        # async: the runner's exit 1 also means a failing scenario; three of them in a row do not stop the loop
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), FAKE_MCP_MODE="fail")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+        self.assertEqual((sess["loop"]["state"], sess["loop"]["completed"]), ("done", 6))
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(sum(1 for r in rows if r["arm"] == "mcp" and r["outcome"] == "fail"), 11)
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            self.assertIn("**FAIL (", fh.read())
+
+    def test_mcp_errors_and_refusals_stop_the_loop(self):
+        # async: three executions in a row that ended `error` stop the loop; after each (its job cancelled) the
+        # next step waits for the scenario's time budget since the cancellation; exit 3 stops at once
+        scen = mcp_scenarios()
+        for s_ in scen:
+            if "mcp" in s_ and "arguments" in s_["mcp"]:
+                s_["mcp"]["arguments"]["time_budget_ms"] = 1000
+        make_manifest(self.mpath, scen)
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(),
+                               FAKE_MCP_MODE="error_cancel")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertIn("3 MCP executions in a row ended in error", p.stderr)
+            self.assertIn("a cancelled job of C-1 may still run on the host", p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+            self.assertEqual((sess["loop"]["state"], sess["loop"]["reason"]), ("failed", "mcp_errors"))
+            rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+            key = dict((sc.execution_key(r), r) for r in rows)
+            # C-1 r0, C-1 r1, P-1 r0 ended in error: the loop stopped before P-1's direct steps
+            self.assertEqual(sorted(k for k in key if k[1] == "mcp"), [("C-1", "mcp", 0), ("C-1", "mcp", 1),
+                                                                      ("P-1", "mcp", 0)])
+            self.assertNotIn(("P-1", "direct-local", 0), key)
+            # the next step began at least the budget (1 s) after the cancellation
+            gap = sc.parse_utc(key[("C-1", "direct-local", 0)]["started_utc"]) - \
+                sc.parse_utc(key[("C-1", "mcp", 0)]["ended_utc"])
+            self.assertGreaterEqual(gap, 1.0)
+            time.sleep(1.1)
+            n = len(host.log)
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), FAKE_MCP_MODE="exit3")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertIn("refused to run (exit 3)", p.stderr)
+            self.assertFalse([x for x in host.log[n:] if x[0] == "POST"])   # no scenario went to the host
+        sess = sc.read_json(os.path.join(p.stdout.strip().splitlines()[-1], "orchestrator.json"))["sessions"][-1]
+        self.assertEqual((sess["loop"]["reason"], sess["loop"]["completed"]), ("mcp_exit_3", 0))
+
     def test_cap_then_resume(self):
         make_manifest(self.mpath, basic_scenarios())
         with FakeHost() as host:

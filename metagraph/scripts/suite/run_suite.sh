@@ -523,6 +523,40 @@ PYEOF
   return $rc
 }
 
+MCP_ERRORS=0    # MCP executions in a row that ended in error (or that the runner never recorded)
+# After an MCP step of the paired loop (async's rules): stop on the runner's exit 2 / 3 (a start refusal: key
+# file, the queue wait ran out) or 130 (interrupted), or on three executions in a row that ended `error` (a
+# runner-level failure: transport, poll deadline, busy past the retries) or were not recorded; never on `fail`
+# (exit 1 also means a failing scenario, which is a result). An execution that ended `error` with its job
+# cancelled may still run on the host briefly: wait until jobs.jsonl shows it terminal or its time budget has
+# passed since the cancellation, so one request is in flight at a time. Returns 1 to stop the loop.
+mcp_after() {  # mcp_after IDS REPEAT RC
+  local rc="$3" res outcomes wait_s o said=0
+  case "$rc" in
+    2|3) LOOP_REASON="mcp_exit_$rc"; log "error: the MCP runner refused to run (exit $rc): stopping the loop"; return 1 ;;
+    130) LOOP_REASON=mcp_interrupted; log "the MCP runner was interrupted (exit 130): stopping the loop"; return 1 ;;
+  esac
+  while true; do
+    res="$("$PY" "$HERE/suite_common.py" mcp-step "$RUN_DIR/arms/mcp" "$MANIFEST" "$1" "$2" 2>/dev/null || echo "missing 0")"
+    outcomes="${res% *}"; wait_s="${res##* }"
+    [[ "$wait_s" =~ ^[0-9]+$ && "$wait_s" != 0 ]] || break
+    if [[ $said == 0 ]]; then
+      log "mcp: a cancelled job of ${1:0:80} may still run on the host: waiting up to $wait_s s before the next step"
+      said=1
+    fi
+    sleep $(( wait_s < 10 ? wait_s : 10 ))
+  done
+  for o in ${outcomes//,/ }; do
+    if [[ $o == error || $o == missing ]]; then MCP_ERRORS=$((MCP_ERRORS + 1)); else MCP_ERRORS=0; fi
+  done
+  if (( MCP_ERRORS >= 3 )); then
+    LOOP_REASON=mcp_errors
+    log "error: $MCP_ERRORS MCP executions in a row ended in error or were not recorded: stopping the loop"
+    return 1
+  fi
+  return 0
+}
+
 USED=0          # the direct arms' requests in this invocation
 RESERVE=0       # requests kept back for the closing GETs (paired mode: one per direct arm)
 # One run_direct.py invocation; its progress goes to the log, its request count into USED.
@@ -552,7 +586,7 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
 FINAL_RC=0
 # --- paired mode ----------------------------------------------------------------------------------------------
 run_paired() {
-  local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 fails_mcp=0 since_pull=0 runner_live=0
+  local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 since_pull=0 runner_live=0 stop=0
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -575,7 +609,8 @@ run_paired() {
     heartbeat
     if [[ $mc == 1 ]]; then
       rc=0; mcp_step "$sid" 0 || rc=$?
-      if [[ $rc != 0 ]]; then fails_mcp=$((fails_mcp + 1)); log "mcp: exit $rc on $sid"; else fails_mcp=0; fi
+      [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
+      mcp_after "$sid" 0 "$rc" || { LOOP_STATE=failed; break; }
     fi
     if [[ $l == 1 ]]; then
       log "direct-local: $sid"
@@ -609,10 +644,12 @@ run_paired() {
     if [[ "$mw" != "-" ]]; then
       for rep in ${mw//,/ }; do
         rc=0; mcp_step "$sid" "$rep" || rc=$?
-        if [[ $rc != 0 ]]; then fails_mcp=$((fails_mcp + 1)); log "mcp: exit $rc on $sid"; else fails_mcp=0; fi
+        [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
+        mcp_after "$sid" "$rep" "$rc" || { stop=1; break; }
       done
+      if [[ $stop == 1 ]]; then LOOP_STATE=failed; break; fi
     fi
-    if (( fails_local >= 3 || fails_remote >= 3 || fails_mcp >= 3 )); then
+    if (( fails_local >= 3 || fails_remote >= 3 )); then
       log "three failing steps of one arm in a row: stopping the loop"
       LOOP_STATE=failed; LOOP_REASON=failing_steps
       break
@@ -724,8 +761,17 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
       [[ $mc != 1 ]] || cold+="$sid,"
       [[ ",$mw," != *",1,"* ]] || warm1+="$sid,"
     done < <("$PY" "$HERE/suite_common.py" paired-plan "$MANIFEST" "$RUN_DIR" "$AREAS" "$LIMIT" "$WARM_EVERY" "$arms")
-    [[ -z "$cold" ]] || mcp_step "${cold%,}" 0 || log "mcp: the cold pass failed"
-    [[ -z "$warm1" ]] || mcp_step "${warm1%,}" 1 || log "mcp: the warm pass failed"
+    local go=1
+    if [[ -n "$cold" ]]; then
+      rc=0; mcp_step "${cold%,}" 0 || rc=$?
+      [[ $rc == 0 ]] || log "mcp: the cold pass exited $rc"
+      # the paired loop's rules between the passes: a cancelled job's wait, the stop on a refusal or errors
+      mcp_after "${cold%,}" 0 "$rc" || { go=0; log "mcp: no warm pass"; }
+    fi
+    if [[ -n "$warm1" && $go == 1 ]]; then
+      rc=0; mcp_step "${warm1%,}" 1 || rc=$?
+      [[ $rc == 0 ]] || log "mcp: the warm pass exited $rc"
+    fi
   fi
   if [[ -n "$MCP_RUN" ]]; then
     log "mcp: copying $MCP_RUN"
