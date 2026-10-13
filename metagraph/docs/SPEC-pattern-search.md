@@ -4171,7 +4171,8 @@ how the search service uses it; the route serves any number.
   would have been refused -- its graph's support (`mask_invalid`, `representation_unsupported`,
   `primary_unwrapped`, `alphabet_untested`, `alphabet_unsupported`), its annotation (`annotation_unbudgeted`,
   `support_unavailable`), its 503 `deadline` (its answer not written by its own `time_budget_ms`), a failure
-  while it is processed (§6's 400 or 500 without a code) -- is that pair's entry with `outcome: "refused"` and
+  while it is processed (§6's 400 or 500 without a code; a load of the pair for the request that fails, §24.2,
+  is one) -- is that pair's entry with `outcome: "refused"` and
   `refusal` (`pair_refusal`: the body of §6 the pair alone would have been answered, with its `http_status`),
   while the other pairs run on and are answered. The request answers 200 whenever its own checks passed and the
   envelope is written, every pair refused included (`answered: 0`). The refusals that no pair decides stay the
@@ -4245,6 +4246,21 @@ the other pairs.
   pair is leased or loaded (§24.1), so a malformed body with `in_ram: true` is refused without a load, nothing
   reserved (SPEC-labeled-traversal-core.md §10.3). Unlike `/search`, whose request is parsed per graph after its
   load.
+- A load for the request that fails -- a file of the pair that cannot be read or that its loader refuses (truncated
+  or corrupted, as far as the loader checks), a `.seqs` that cannot be read when the copy must load one, a
+  `row_diff` annotation's anchors or fork successors (files beside the graph) that cannot be loaded, a graph and
+  annotation that are not compatible -- is a failure of that pair while it is processed (§24.1): its entry
+  `refused` with `http_status` 400 and `error` the loader's message, which names the file and the step (`Cannot
+  load annotation from '<annotation_path>': <cause>`, `Cannot load graph from '<graph_path>': <cause>`, `Cannot
+  load the record mapping from '<path>': <cause>`, `Cannot load anchor from '<path>': <cause>`, `Cannot load fork
+  successor bitmap from '<path>': <cause>`, `Graph '<graph_path>' and annotation '<annotation_path>' are not
+  compatible`; `<cause>` the file's failure as the server sees it, such as `Permission denied (missing read
+  permission on this file)`, `No such file or directory` or `could not read contents (possibly corrupted or
+  incompatible)`; no `code`), the other pairs answered and the request 200. The memory reserved for the load is
+  released, nothing of the copy is kept, and the server runs on with its resident indexes (a pair whose files are
+  unreadable now is still answered without `in_ram` from the index it loaded at start-up). On `/traverse` and
+  `/resolve` the same failure is the route's 400 with that `error` (SPEC-labeled-traversal-core.md §10.3). A load
+  at start-up that fails exits the process: the server has nothing to serve without its indexes.
 - The capabilities state it: the block's `in_ram: "accepted"` and `resident_only: false` (§10.2), and
   `GET /capabilities`' `in_ram` (which routes accept it, whether this server loads, `--mem-cap-gb`,
   `budgets_start: "after_load"`; SPEC-labeled-traversal-core.md §10.3).
@@ -4668,3 +4684,29 @@ runs need together against what the account had for it (before: `stop {extension
 `rows_refused: []`). A budget-aware decode is admitted against a demand that covers its runs, so no shape tried
 reached that refusal; `PatternSupport.MemoryStopsAfterTheAnchorsStateTheirRow` requires every memory stop after
 the anchors to state its row.
+
+**A per-request load that fails is the pair's refusal, not the end of the process (§24.1, §24.2;
+SPEC-labeled-traversal-core.md §10.3).** Before, the load of a pair for an `in_ram` request went through the
+start-up loader, which exits the process when a file cannot be read, when the `.seqs` it must load cannot be, or
+when graph and annotation are not compatible: one file made unreadable after start-up plus one `in_ram` request on
+`/pattern`, `/traverse` or `/resolve` ended the server, every in-flight request with it, nothing written to anyone.
+Now the per-request loader reports a failed load by throwing the loader's message, which the routes answer as they
+answer any failure while a pair is processed: on `/pattern` the pair's entry `refused` with `http_status` 400 and
+the message as `error` (no `code`; the other pairs answered, the request 200), on `/traverse` and `/resolve` the
+route's 400 with it (`usage` beside it on a managed attempt); the load's reservation is released and the resident
+index keeps answering. The start-up loads exit as before, with the same messages. The texts a client can receive
+that it could not before: `Cannot load annotation from '<annotation_path>': <cause>`, `Cannot load graph from
+'<graph_path>': <cause>`, `Cannot load the record mapping from '<path>': <cause>`, `Graph '<graph_path>' and
+annotation '<annotation_path>' are not compatible`, and for a `row_diff` annotation's side files `Cannot load
+anchor from '<path>': <cause>` and `Cannot load fork successor bitmap from '<path>': <cause>`, `<cause>` the
+server's file-failure detail (such as `Permission denied (missing read permission on this file)`, `No such file or
+directory`, `could not read contents (possibly corrupted or incompatible)`). No answer of a load that succeeds
+changes. Tests: `MultiGraphInRam.AFailedLoadThrowsForTheRequest` (the per-request loader throws each failure with
+its message: an annotation, a graph and a `.seqs` that cannot be read, the `.seqs` not read when the resident's
+mapping is shared, an annotation cut inside its label encoder, a graph and annotation that are not compatible, a
+`row_diff` annotation without its anchors and without its fork successors; the start-up loader exits with the
+loader's line for each), integration
+`TestMultiGraphServer.test_a_failed_in_ram_load_is_answered_and_the_server_lives` (a server on copies, one
+annotation made unreadable after start-up: `/pattern`'s refused entry, `/traverse`'s and `/resolve`'s 400, a
+malformed body with `in_ram` refused with no load attempted, the server answering afterwards, the released memory
+loading the pair once readable again).
