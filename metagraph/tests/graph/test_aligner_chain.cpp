@@ -14,6 +14,20 @@ using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
+TEST(Seed, expand_from_borrowed_tail) {
+    const std::string query = "ACGTAC";
+    Seed seed(std::string_view(query).substr(0, 3), { 1 }, false, 0, 0, 3);
+    std::vector<Seed::node_index> continuation = { 99, 2, 3, 4 };
+    seed.expand(std::span(continuation).last(3));
+    continuation.clear();
+    EXPECT_EQ((std::vector<Seed::node_index>{ 1, 2, 3, 4 }), seed.get_nodes());
+    EXPECT_EQ(query, seed.get_query_view());
+    EXPECT_EQ(0u, seed.get_end_clipping());
+    seed.expand({});
+    EXPECT_EQ(4u, seed.size());
+    EXPECT_EQ(query, seed.get_query_view());
+}
+
 template <typename Graph>
 class DBGAlignerPostChainTest : public DeBruijnGraphTest<Graph> {};
 

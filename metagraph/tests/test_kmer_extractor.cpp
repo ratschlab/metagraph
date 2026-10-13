@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
 #include <numeric>
+#include <array>
+#include <type_traits>
 
 #include "kmer/kmer_extractor.hpp"
 #include "common/utils/string_utils.hpp"
@@ -26,6 +28,21 @@ TYPED_TEST_SUITE(ExtractKmers2Bit, KmerTypes);
 
 const KmerExtractor2Bit kmer_extractor;
 
+
+static_assert(std::is_constructible_v<KmerExtractor2Bit, const char*, std::array<uint8_t, 128>&>);
+static_assert(!std::is_constructible_v<KmerExtractor2Bit, const char*, std::array<uint8_t, 127>&>);
+
+TEST(KmerExtractor2Bit, borrows_fixed_size_lookup_table) {
+    KmerExtractor2Bit default_encoder;
+    std::array<uint8_t, 128> table;
+    for (size_t i = 0; i < table.size(); ++i)
+        table[i] = default_encoder.encode(i);
+    KmerExtractor2Bit encoder(default_encoder.alphabet.c_str(), table);
+    table['A'] = default_encoder.encode('T');
+    EXPECT_EQ(default_encoder.encode('T'), encoder.encode('A'));
+    EXPECT_EQ(default_encoder.encode('C'), encoder.encode('C'));
+    EXPECT_EQ(table[0], encoder.encode(char(-1)));
+}
 
 TEST(KmerExtractor2Bit, encode_decode) {
     KmerExtractor2Bit encoder;

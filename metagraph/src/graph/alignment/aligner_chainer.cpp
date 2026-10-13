@@ -255,8 +255,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                                 + cur_seed.get_query_view().size() - prev_end;
 
                 if (dist == coord_dist && cur_seed.get_nodes().size() >= dist) {
-                    prev_seed.expand({ cur_seed.get_nodes().end() - dist,
-                                       cur_seed.get_nodes().end() });
+                    prev_seed.expand(std::span(cur_seed.get_nodes()).last(dist));
                     cur_seed = Seed();
                 }
             }
