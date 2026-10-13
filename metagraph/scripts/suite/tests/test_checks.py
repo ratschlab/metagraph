@@ -429,6 +429,95 @@ class BudgetChecks(unittest.TestCase):
         self.assertEqual(checks.scenario_outcome(res[:1]), "pass")
 
 
+class Relations(unittest.TestCase):
+    """The reference semantics of the manifest's relations (README, "Relations"): each passes on a consistent pair
+    and fails on a plausible wrong one."""
+
+    def rel(self, rtype, **args):
+        return {"id": "REL-x", "type": rtype, "a": "A", "b": "B", "args": args}
+
+    def ev(self, rel, a, b, sa=None, sb=None, arm="direct-local"):
+        sa = sa or {"route": "POST /pattern", "request": {}, "truth": {}}
+        sb = sb or {"route": "POST /pattern", "request": {}, "truth": {}}
+        r = checks.evaluate_relation(rel, sa, a, sb, b, arm)
+        return r["outcome"], r["detail"]
+
+    def resolve(self, num, graph, runs, stop=None):
+        b = {"num_kmers": num, "graph_runs": graph, "labels": [{"label": "562", "runs": runs,
+                                                                  "kmers_supported": sum(y - x for x, y in runs)}],
+             "timing": {"elapsed_ms": 5}}
+        if stop:
+            b["stop"] = {"resolved_kmers": num}
+        return ok_answer(b)
+
+    def test_same_answer(self):
+        a = ok_answer({"patterns": [{"id": "w", "counts": {"contexts": {"value": 7}}}], "timing": {"elapsed_ms": 1}})
+        b = ok_answer({"patterns": [{"id": "w", "counts": {"contexts": {"value": 7}}}], "timing": {"elapsed_ms": 9}})
+        self.assertEqual(self.ev(self.rel("same_answer"), a, b)[0], "pass")
+        c = copy.deepcopy(b)
+        c["body"]["patterns"][0]["counts"]["contexts"]["value"] = 8
+        o, d = self.ev(self.rel("same_answer"), a, c)
+        self.assertEqual(o, "fail")
+        self.assertIn("patterns.0.counts.contexts.value", d)
+        self.assertEqual(self.ev(self.rel("same_answer", ignore=["patterns"]), a, c)[0], "pass")
+        caps = ok_answer({"release": "r1", "attempts": {"server_instance": "s"}, "pattern": {"k": 31}})
+        tcaps = ok_answer({"release": "r1", "attempts": {"server_instance": "s"}, "pattern": {"k": 31, "details": "x"}})
+        rel = self.rel("same_answer", paths=[["release", "release"], ["attempts.server_instance", "attempts.server_instance"],
+                                             ["pattern.k", "pattern.k"]])
+        self.assertEqual(self.ev(rel, caps, tcaps)[0], "pass")
+        tcaps["body"]["release"] = "r2"
+        self.assertEqual(self.ev(rel, caps, tcaps)[0], "fail")
+        self.assertEqual(self.ev(self.rel("same_answer", paths=[["", "pattern"]]), ok_answer({"k": 31}), caps)[0], "pass")
+        self.assertEqual(self.ev(self.rel("same_answer", paths=[["", "pattern"]]), ok_answer({"k": 21}), caps)[0], "fail")
+        self.assertEqual(self.ev(rel, caps, ok_answer({"release": "r1"}))[0], "fail")              # a path missing
+        self.assertEqual(self.ev(rel, caps, ok_answer({"release": "r1"}), arm="mcp")[0], "not_exposed")
+
+    def test_prefix_equals(self):
+        full = self.resolve(100, [[0, 100]], [[0, 40], [60, 100]])
+        stopped = self.resolve(50, [[0, 50]], [[0, 40]], stop=True)
+        rel = self.rel("prefix_equals", labels=["562"], a_from_kmer=0, b_from_kmer=0)
+        self.assertEqual(self.ev(rel, stopped, full)[0], "pass")
+        wrong = self.resolve(50, [[0, 50]], [[0, 41]], stop=True)       # a k-mer the full profile does not support
+        self.assertEqual(self.ev(rel, wrong, full)[0], "fail")
+        cont = self.resolve(50, [[0, 50]], [[10, 50]])                 # the resolve from k-mer 50
+        rel = self.rel("prefix_equals", labels=["562"], a_from_kmer=50, b_from_kmer=0)
+        self.assertEqual(self.ev(rel, cont, full)[0], "pass")
+        self.assertEqual(self.ev(rel, self.resolve(50, [[0, 50]], [[0, 50]]), full)[0], "fail")
+        self.assertEqual(self.ev(rel, self.resolve(0, [], [], stop=True), full)[0], "inconclusive")   # nothing common
+        self.assertEqual(self.ev(rel, checks.normalise_direct(503, b'{"code": "deadline"}'), full)[0], "inconclusive")
+
+    def test_zero_equals_absent(self):
+        q = "ACGT" * 7 + "ACG"
+        sa = {"route": "POST /pattern", "request": {"patterns": [{"dna": q}], "strands": "forward"}, "truth": {}}
+        sb = {"route": "POST /resolve", "request": {"sequence": q}, "truth": {}}
+        rel = self.rel("zero_equals_absent", pattern=0, count="contexts")
+        zero = ok_answer({"patterns": [{"counts": {"contexts": {"value": 0, "relation": "exact"}}}]})
+        one = ok_answer({"patterns": [{"counts": {"contexts": {"value": 1, "relation": "exact"}}}]})
+        absent, present = ok_answer({"num_kmers": 1, "graph_runs": []}), ok_answer({"num_kmers": 1, "graph_runs": [[0, 1]]})
+        self.assertEqual(self.ev(rel, zero, absent, sa, sb)[0], "pass")
+        self.assertEqual(self.ev(rel, one, present, sa, sb)[0], "pass")
+        self.assertEqual(self.ev(rel, zero, present, sa, sb)[0], "fail")
+        self.assertEqual(self.ev(rel, one, absent, sa, sb)[0], "fail")
+        unk = ok_answer({"patterns": [{"counts": {"contexts": {"value": 3, "relation": "at_least"}}}]})
+        self.assertEqual(self.ev(rel, unk, absent, sa, sb)[0], "inconclusive")
+
+    def test_subset(self):
+        def ent(results, value, complete=True, rel_="exact"):
+            return ok_answer({"patterns": [{"results": results, "retrieval_complete": complete,
+                                            "counts": {"contexts": {"value": value, "relation": rel_}}}]})
+        x = {"kmer": "A" * 31, "offset": 2, "strand": "+"}
+        y = {"kmer": "C" * 31, "offset": 2, "strand": "+"}
+        z = {"kmer": "G" * 31, "offset": 2, "strand": "-", "mismatches": 1}
+        rel = self.rel("subset", a_pattern=0, b_pattern=0, key="context")
+        self.assertEqual(self.ev(rel, ent([x], 1), ent([x, y], 2))[0], "pass")
+        self.assertEqual(self.ev(rel, ent([x, y], 2), ent([x], 1))[0], "fail")              # b complete, y missing
+        self.assertEqual(self.ev(rel, ent([x, y], 2), ent([x], 9, complete=False, rel_="at_least"))[0], "inconclusive")
+        self.assertEqual(self.ev(rel, ent([x], 3), ent([x, y], 2))[0], "fail")             # exact counts out of order
+        rel = self.rel("subset", a_pattern=0, b_pattern=0, key="context", b_level=0)
+        self.assertEqual(self.ev(rel, ent([x, y], 2), ent([x, y, z], 3))[0], "pass")
+        self.assertEqual(self.ev(rel, ent([z], 1), ent([x, y, z], 3))[0], "fail")          # z is level 1 in b
+
+
 class ResolveChecks(unittest.TestCase):
     def body(self, runs, num=70, graph=None, stop=None):
         b = {"k": 31, "num_kmers": num, "graph_runs": graph if graph is not None else [[0, num]],

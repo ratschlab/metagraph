@@ -10,12 +10,13 @@ code-derived.
 
 from __future__ import annotations
 
+import copy
 import os
 from typing import Dict, List, Optional, Tuple
 
 import seqtools as st
 from manifest_lib import (Ctx, DB, K, PATTERN_MAX_CONTEXTS, PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS,
-                          WALK_PRESET, pattern_request, resolve_request, scenario, source_contexts,
+                          WALK_PRESET, pattern_request, relation, resolve_request, scenario, source_contexts,
                           traverse_request)
 from truth import TRUTH_DIR
 
@@ -1413,6 +1414,7 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     for area, n in want.items():
         cands = [s for s in pool if s["area"] == area and s["timing_class"] == "fast" and "refusal" not in s["tags"]
                  and "machine-dependent" not in s["tags"] and "needs-unique-id" not in s["tags"]
+                 and "relation" not in s["tags"]
                  and not s.get("body_raw") and not s.get("headers")]
         step = max(1, len(cands) // n)
         picks += cands[::step][:n]
@@ -1692,4 +1694,186 @@ def gen_N(ctx: Ctx) -> List[dict]:
                         "POST /resolve", resolve_request(t["window"], labels=[athc.accession]), t,
                         [OK, INV, ex("resolve_graph_runs", runs=[[0, 1]]), ex("resolve_runs", label=athc.accession, kmers=0)],
                         tags=["index-defect", "documented"]))
+    return out
+
+
+# ================================================================================================= relations
+def _by_title(scenarios: List[dict], area: str, title: str) -> dict:
+    hits = [x for x in scenarios if x["area"] == area and x["title"] == title]
+    if len(hits) != 1:
+        raise ValueError("%d %s scenarios titled %r" % (len(hits), area, title))
+    return hits[0]
+
+
+def _add_tag(sc: dict, tag: str) -> None:
+    sc["tags"] = sorted(set(sc["tags"]) | {tag})
+
+
+def _by_id(scenarios: List[dict], sid: str) -> dict:
+    return next(x for x in scenarios if x["id"] == sid)
+
+
+def _twin(src: dict, sid: str, title: str, request, expect: List[dict], truth: Optional[dict] = None,
+          tags=(), timing_class: Optional[str] = None) -> dict:
+    """A scenario that differs from |src| only in what the relation compares (tagged relation)."""
+    return scenario(sid, src["area"], title, src["route"], request, src["truth"] if truth is None else truth, expect,
+                    timing_class=timing_class or src["timing_class"],
+                    tags=sorted(set(tags) | {"relation"}))
+
+
+def gen_REL(ctx: Ctx, scenarios: List[dict], caps: Dict[str, dict]) -> List[dict]:
+    """The manifest's relations (DESIGN §3: R-budget's prefix re-resolve and its continuation, suffix within
+    any_offset, an IUPAC pattern's contexts holding the exact window's, max_mismatches 0 answered as without the
+    field, the three capabilities documents consistent) and the twin scenarios they need. Runs after every other
+    area but D (whose picks leave relation twins out), on random streams of its own, so that the windows of the
+    other scenarios stay as built. Relations are recorded on ctx.relations; the twins are returned."""
+    out: List[dict] = []
+    # same_answer: max_mismatches 0 is answered as the request without the field (SPEC §21.2)
+    m0 = _by_title(scenarios, "M", "max_mismatches 0: the answer without the field")
+    req = copy.deepcopy(m0["request"])
+    del req["max_mismatches"]
+    tw = _twin(m0, "M-twin-0001", "the m=0 window without max_mismatches", req,
+               [OK, INV, CC, ex("contains_source_context", strand="+", require="all")], tags=["mismatch", "smoke"])
+    _add_tag(m0, "smoke")
+    out.append(tw)
+    relation(ctx, "same_answer", m0["id"], tw["id"], "max_mismatches 0 answers byte for byte as the request without it")
+    # subset: the exact answer's contexts are the m=1 answer's level-0 contexts
+    req = copy.deepcopy(m0["request"])
+    req["max_mismatches"] = 1
+    tw1 = _twin(m0, "M-twin-0002", "the m=0 window at max_mismatches 1: its level 0 holds the exact answer", req,
+                [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=0, substitutions=[])],
+                tags=["mismatch"])
+    out.append(tw1)
+    relation(ctx, "subset", tw["id"], tw1["id"], "the exact contexts are among the level-0 contexts at max_mismatches 1",
+             a_pattern=0, b_pattern=0, key="context", b_level=0)
+    # same_answer: lower case is upper-cased (pattern and resolve)
+    lc = _by_title(scenarios, "P", "lower case: upper-cased, the record found")
+    req = copy.deepcopy(lc["request"])
+    for p in req["patterns"]:
+        p["dna"] = p["dna"].upper()
+    tw = _twin(lc, "P-twin-0001", "the lower-case window in upper case", req,
+               [OK, INV, ex("contains_source_context", strand="+", require="all")])
+    out.append(tw)
+    relation(ctx, "same_answer", lc["id"], tw["id"], "a lower-case pattern answers as its upper case")
+    lc = _by_title(scenarios, "R", "lower case: resolved as upper case")
+    req = copy.deepcopy(lc["request"])
+    req["sequence"] = req["sequence"].upper()
+    lab = req["labels"][0]
+    tw = _twin(lc, "R-twin-0001", "the lower-case resolve in upper case", req,
+               [OK, INV, ex("resolve_runs", label=lab, full=True)])
+    out.append(tw)
+    relation(ctx, "same_answer", lc["id"], tw["id"], "a lower-case resolve answers as its upper case")
+    # prefix_equals: a budget stop answers the resolve of a prefix; the continuation from a k-mer completes it
+    for i, sid in enumerate(("R-budget-0001", "R-budget-0002")):
+        rb = _by_id(scenarios, sid)
+        seq = rb["request"]["sequence"]
+        lab = rb["request"]["labels"][0]
+        full = _twin(rb, "R-twin-%04d" % (2 + 2 * i), "the same 10 kb under the 20,000 ms budget: the profile the stop "
+                     "must be a prefix of", resolve_request(seq, labels=[lab]),
+                     [ex("status", http=[200, 503]), INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
+                     tags=["budget"], timing_class="slow")
+        cont_from = 5000
+        cont = _twin(rb, "R-twin-%04d" % (3 + 2 * i), "the same 10 kb from base %d: the continuation" % cont_from,
+                     resolve_request(seq[cont_from:], labels=[lab]),
+                     [ex("status", http=[200, 503]), INV,
+                      ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
+                     tags=["budget"], timing_class="slow")
+        out += [full, cont]
+        relation(ctx, "prefix_equals", rb["id"], full["id"], "the stopped resolve equals the full resolve on its prefix",
+                 labels=[lab], a_from_kmer=0, b_from_kmer=0)
+        relation(ctx, "prefix_equals", cont["id"], full["id"],
+                 "the resolve from base %d equals the full resolve on those k-mers" % cont_from,
+                 labels=[lab], a_from_kmer=cont_from, b_from_kmer=0)
+    # zero_equals_absent: an exact count of a forward pattern of L >= k is 0 exactly when /resolve finds a k-mer of
+    # it missing from the graph
+    eco = ctx.rec("eco")
+    pairs = []
+    q = st.random_dna(ctx.rng("REL", "zero31"), 31)
+    pairs.append(("a random 31-mer", q, {"random": q}, "contexts", [ex("absent")], [ex("resolve_absent")], eco.column))
+    q = st.random_dna(ctx.rng("REL", "zero60"), 60)
+    pairs.append(("a random 60 bp", q, {"random": q}, "paths", [ex("absent", count="paths")], [ex("resolve_absent")],
+                  eco.column))
+    src = _by_id(scenarios, "P-exact-0020")
+    t = src["truth"]
+    pairs.append(("a 31-mer of %s" % t["genome"], t["window"], t, "contexts",
+                  [ex("contains_source_context", strand="+", require="all")],
+                  [ex("resolve_runs", label=t["taxid"], full=True)], t["taxid"]))
+    src = _by_id(scenarios, "L-paths-0007")
+    t = src["truth"]
+    pairs.append(("60 bp of %s" % t["genome"], t["window"], t, "paths", [ex("path_spells", strand="+")],
+                  [ex("resolve_runs", label=t["taxid"], full=True)], t["taxid"]))
+    src = _by_id(scenarios, "P-exact-0022")
+    t = dict(src["truth"])
+    r2 = ctx.rng("REL", "zero-variant")
+    variant, edits = st.substitute_bases(t["window"], [15], r2)
+    t["edits"], t["variant"] = edits, variant
+    pairs.append(("a 31-mer of %s with one substitution at 15 (present or not: the routes agree)" % t["genome"],
+                  variant, t, "contexts", [], [], t["taxid"]))
+    nid = _ids("N-zero")
+    out_zero: List[dict] = []
+    for title, q, truth, count, pexp, rexp, lab in pairs:
+        long = len(q) > K
+        preq = pattern_request([_p(q, "z")], strands="forward", long_search="paths" if long else None)
+        tags = ["relation", "negative" if "random" in truth else "positive"] + (["smoke"] if not out_zero else [])
+        a = scenario(nid(), "N", "%s searched forward: its count" % title, "POST /pattern", preq, truth,
+                     [OK, INV, CC] + pexp, tags=tags)
+        b = scenario(nid(), "N", "%s resolved: its k-mers in the graph" % title, "POST /resolve",
+                     resolve_request(q, labels=[lab]), truth, [OK, INV] + rexp, tags=tags)
+        out_zero.append(a)
+        out += [a, b]
+        relation(ctx, "zero_equals_absent", a["id"], b["id"], "%s: exact 0 on /pattern iff a k-mer is absent on /resolve"
+                 % title, pattern=0, count=count)
+    # subset: suffix scope within any_offset (the records' first 20 bases)
+    for key in ("lam", "t4"):
+        any_ = _by_title(scenarios, "P", "the first 20 bases of %s in any_offset scope" % key)
+        suf = _by_title(scenarios, "P", "the first 20 bases of %s in suffix scope" % key)
+        if key == "lam":
+            _add_tag(any_, "smoke")
+            _add_tag(suf, "smoke")
+        relation(ctx, "subset", suf["id"], any_["id"], "suffix scope's contexts are among any_offset's (%s)" % key,
+                 a_pattern=0, b_pattern=0, key="context")
+    # subset: an IUPAC pattern's contexts hold the exact window's
+    for sid in ("P-iupac-0001", "P-iupac-0003", "P-iupac-0005"):
+        iu = _by_id(scenarios, sid)
+        t = iu["truth"]
+        tw = _twin(iu, "P-twin-%04d" % (1 + len([x for x in out if x["id"].startswith("P-twin")])),
+                   "the exact window of %s" % sid, pattern_request([_p(t["window"])]),
+                   [OK, INV, CC, ex("contains_source_context", strand="+", require="all")])
+        out.append(tw)
+        relation(ctx, "subset", tw["id"], iu["id"], "the exact window's contexts are among its IUPAC pattern's",
+                 a_pattern=0, b_pattern=0, key="context")
+    # subset: a partial list cut at 2 within the complete list of the same pattern
+    relation(ctx, "subset", _by_title(scenarios, "P", "partial with max_contexts 2: cut max_contexts")["id"],
+             _by_title(scenarios, "P", "max_contexts above the cap: lowered and stated")["id"],
+             "the partial list cut at 2 is within the complete list", a_pattern=0, b_pattern=0, key="context")
+    # same_answer on chosen fields: the three capabilities documents agree
+    cid = {x["route"]: x["id"] for x in scenarios if x["area"] == "C" and x["route"].startswith("GET /")
+           and x["route"].endswith("capabilities")}
+    capability_relations(ctx, cid, caps)
+    return out
+
+
+def capability_relations(ctx: Ctx, cid: Dict[str, str], caps: Dict[str, dict]) -> List[dict]:
+    """same_answer relations among the three capabilities documents (DESIGN §3 C: release, index identity and
+    server instance consistent; the gate block a projection of /pattern/capabilities). |cid| maps a route to its
+    scenario id; the gate block's fields are read from the capabilities snapshot."""
+    out = []
+    out.append(relation(ctx, "same_answer", cid["GET /capabilities"], cid["GET /traverse/capabilities"],
+                        "/capabilities and /traverse/capabilities name the same server",
+                        paths=[["release", "release"], ["server_instance", "attempts.server_instance"],
+                               ["attempts.server_instance", "attempts.server_instance"],
+                               ["algorithm_version", "algorithm_version"],
+                               ["feature_level", "feature_level"], ["resolve", "resolve"], ["in_ram", "in_ram"],
+                               ["content_encodings", "content_encodings"], ["compression_level", "compression_level"],
+                               ["deadline_check.chunk_target_ms", "deadline_check.chunk_target_ms"],
+                               ["deadline_check.max_uninterruptible_ms", "deadline_check.max_uninterruptible_ms"],
+                               ["deadline_check.poll_stride", "deadline_check.poll_stride"]]))
+    out.append(relation(ctx, "same_answer", cid["GET /pattern/capabilities"], cid["GET /capabilities"],
+                        "/capabilities' pattern block is the /pattern/capabilities document", paths=[["", "pattern"]]))
+    gate = caps["traverse_capabilities"]["pattern"]
+    full = caps["pattern_capabilities"]
+    paths = [[k, "pattern." + k] for k in sorted(gate) if k in full and k != "caps"]
+    paths += [["caps." + k, "pattern.caps." + k] for k in sorted(gate.get("caps", {}))]
+    out.append(relation(ctx, "same_answer", cid["GET /pattern/capabilities"], cid["GET /traverse/capabilities"],
+                        "the gate block of /traverse/capabilities projects /pattern/capabilities", paths=paths))
     return out

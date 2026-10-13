@@ -119,7 +119,7 @@ class FrozenManifests(unittest.TestCase):
 
     def test_manifests(self):
         found = 0
-        for name in ("suite_v1.json", "suite_smoke_v1.json"):
+        for name in ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json"):
             path = os.path.join(SUITE, "manifest", name)
             if not os.path.exists(path):
                 continue
@@ -133,8 +133,47 @@ class FrozenManifests(unittest.TestCase):
                 for e in s["expect"]:
                     self.assertIn(e["check"], checks.CHECKS, s["id"])
                 self.assertTrue("tool" in s["mcp"] or "not_implemented" in s["mcp"], s["id"])
+            if "relations" in m:
+                self.assertEqual(ml.sha256_json(m["relations"]), m["relations_sha256"], name)
+                for r in m["relations"]:
+                    self.assertIn(r["type"], checks.RELATIONS, r["id"])
+                    self.assertIn(r["a"], ids, r["id"])
+                    self.assertIn(r["b"], ids, r["id"])
         if found == 0:
             self.skipTest("no manifest built yet")
+
+
+class CapabilityRelations(unittest.TestCase):
+    """The three capabilities documents of the snapshot satisfy the manifest's same_answer relations between them."""
+
+    def test_snapshot(self):
+        import areas
+        caps = {}
+        for n in ("capabilities", "pattern_capabilities", "traverse_capabilities"):
+            with open(os.path.join(SUITE, "truth", "staging_capabilities", n + ".json")) as f:
+                caps[n] = json.load(f)
+        ctx = ml.Ctx([], 1)
+        scen = [{"id": "c1", "area": "C", "route": "GET /traverse/capabilities"},
+                {"id": "c2", "area": "C", "route": "GET /pattern/capabilities"},
+                {"id": "c3", "area": "C", "route": "GET /capabilities"}]
+        docs = {"c1": caps["traverse_capabilities"], "c2": caps["pattern_capabilities"], "c3": caps["capabilities"]}
+        # only the capabilities part of gen_REL: its relations need nothing else
+        rels = []
+        cid = {x["route"]: x["id"] for x in scen}
+        for r in areas.capability_relations(ctx, cid, caps):
+            rels.append(r)
+        self.assertEqual(len(rels), 3)
+        for r in rels:
+            a = checks.normalise_direct(200, docs[r["a"]])
+            b = checks.normalise_direct(200, docs[r["b"]])
+            res = checks.evaluate_relation(r, scen[0], a, scen[0], b, "direct-local")
+            self.assertEqual(res["outcome"], "pass", res)
+        bad = json.loads(json.dumps(docs["c1"]))
+        bad["pattern"]["caps"]["max_contexts"] = 1
+        r = rels[2]
+        res = checks.evaluate_relation(r, scen[0], checks.normalise_direct(200, docs["c2"]), scen[0],
+                                       checks.normalise_direct(200, bad), "direct-local")
+        self.assertEqual(res["outcome"], "fail")
 
 
 if __name__ == "__main__":

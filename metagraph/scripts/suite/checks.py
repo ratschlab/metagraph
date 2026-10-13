@@ -1530,6 +1530,195 @@ CHECKS: Dict[str, Callable] = {
 }
 
 
+# ---------------------------------------------------------------------------------------------- relations
+# The manifest's `relations` (README.md, "Relations"): comparisons of two scenarios' answers on the same arm. The
+# comparator (lane S2b's compare.py) evaluates them; this is the reference implementation of their semantics.
+INCONCLUSIVE = "inconclusive"
+
+
+def _drop(o: Any, ignore: Sequence[str], prefix: str = "") -> Any:
+    """|o| without every `timing` key and without the dotted paths in |ignore|."""
+    if isinstance(o, dict):
+        out = {}
+        for k, v in o.items():
+            p = prefix + k
+            if k == "timing" or p in ignore:
+                continue
+            out[k] = _drop(v, ignore, p + ".")
+        return out
+    if isinstance(o, list):
+        return [_drop(x, ignore, prefix) for x in o]
+    return o
+
+
+def _first_difference(a: Any, b: Any, path: str = "") -> str:
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
+            if k not in a or k not in b:
+                return "%s%s only in %s" % (path, k, "a" if k in a else "b")
+            d = _first_difference(a[k], b[k], path + k + ".")
+            if d:
+                return d
+        return ""
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return "%s: %d vs %d items" % (path.rstrip(".") or "<root>", len(a), len(b))
+        for i, (x, y) in enumerate(zip(a, b)):
+            d = _first_difference(x, y, "%s%d." % (path, i))
+            if d:
+                return d
+        return ""
+    return "" if a == b else "%s: %s vs %s" % (path.rstrip(".") or "<root>", json.dumps(a)[:80], json.dumps(b)[:80])
+
+
+def _relation_same_answer(rel, a_sc, A, b_sc, B):
+    args = rel.get("args") or {}
+    if A.get("http") != B.get("http"):
+        return FAIL, "http %s vs %s" % (A.get("http"), B.get("http"))
+    if A.get("http") != 200:
+        ea, eb = A.get("error") or {}, B.get("error") or {}
+        if (ea.get("code"), ea.get("text")) != (eb.get("code"), eb.get("text")):
+            return FAIL, "errors differ: %r vs %r" % (ea, eb)
+        return PASS, "the same refusal (http %s)" % A.get("http")
+    ba, bb = _body(A), _body(B)
+    if args.get("paths"):
+        for pa, pb in args["paths"]:
+            va = ba if pa == "" else _get(ba, pa)
+            vb = bb if pb == "" else _get(bb, pb)
+            d = _first_difference(_drop(va, ()), _drop(vb, ()))
+            if d:
+                return FAIL, "a.%s differs from b.%s: %s" % (pa or "<root>", pb or "<root>", d)
+        return PASS, "%d field(s) equal" % len(args["paths"])
+    ignore = args.get("ignore") or []
+    d = _first_difference(_drop(ba, ignore), _drop(bb, ignore))
+    if d:
+        return FAIL, "answers differ: %s" % d
+    return PASS, "equal answers (timing%s aside)" % ((", " + ", ".join(ignore)) if ignore else "")
+
+
+def _kmer_set(runs: Any, offset: int, lo: int, hi: int) -> set:
+    out = set()
+    for r in runs or []:
+        for x in range(max(r[0] + offset, lo), min(r[1] + offset, hi)):
+            out.add(x)
+    return out
+
+
+def _relation_prefix_equals(rel, a_sc, A, b_sc, B):
+    if A.get("http") != 200 or B.get("http") != 200:
+        return INCONCLUSIVE, "http %s / %s: no two profiles to compare" % (A.get("http"), B.get("http"))
+    args = rel.get("args") or {}
+    ba, bb = _body(A), _body(B)
+    fa, fb = int(args.get("a_from_kmer", 0)), int(args.get("b_from_kmer", 0))
+    na, nb = _get(ba, "num_kmers"), _get(bb, "num_kmers")
+    lo, hi = max(fa, fb), min(fa + na, fb + nb)
+    if hi <= lo:
+        return INCONCLUSIVE, "no common k-mer (a [%d, %d), b [%d, %d))" % (fa, fa + na, fb, fb + nb)
+    ga, gb = _kmer_set(_get(ba, "graph_runs"), fa, lo, hi), _kmer_set(_get(bb, "graph_runs"), fb, lo, hi)
+    if ga != gb:
+        return FAIL, "graph runs differ on k-mers [%d, %d): %d vs %d in the graph (first difference %s)" % (
+            lo, hi, len(ga), len(gb), min(ga ^ gb))
+    for name in args.get("labels") or []:
+        la, lb = _resolve_label(ba, name), _resolve_label(bb, name)
+        sa, sb = _kmer_set(la.get("runs"), fa, lo, hi), _kmer_set(lb.get("runs"), fb, lo, hi)
+        if sa != sb:
+            return FAIL, "label %s differs on k-mers [%d, %d): %d vs %d supported (first difference %s)" % (
+                name, lo, hi, len(sa), len(sb), min(sa ^ sb))
+    stops = ["%s stopped at %s" % (n, x["stop"].get("resolved_kmers")) for n, x in (("a", ba), ("b", bb)) if x.get("stop")]
+    return PASS, "agree on k-mers [%d, %d)%s" % (lo, hi, (" (" + ", ".join(stops) + ")") if stops else "")
+
+
+def _relation_zero_equals_absent(rel, a_sc, A, b_sc, B):
+    if A.get("http") != 200 or B.get("http") != 200:
+        return INCONCLUSIVE, "http %s / %s" % (A.get("http"), B.get("http"))
+    args = rel.get("args") or {}
+    i = int(args.get("pattern", 0))
+    e = _entry(A, i)
+    if "error" in e:
+        return INCONCLUSIVE, "pattern %d refused (%s)" % (i, e["error"].get("code"))
+    value, relation_ = _count(_get(e, "counts." + args.get("count", "contexts")))
+    if relation_ != "exact":
+        return INCONCLUSIVE, "count %s %s: not an absence claim either way" % (relation_, value)
+    _, pat = _request_pattern(a_sc, i)
+    n = len(pat) - K + 1
+    full = _get(_body(B), "graph_runs") == [[0, n]]
+    if (value == 0) == (not full):
+        return PASS, "count exact %d and %s" % (value, "every k-mer in the graph" if full else "a k-mer absent")
+    return FAIL, "count exact %d but graph_runs %s (of %d k-mers)" % (value, _get(_body(B), "graph_runs")[:4], n)
+
+
+def _result_keys(e: dict, key: str, level: Optional[int]) -> List[tuple]:
+    res = e.get("results")
+    if res is None:
+        raise Missing("results")
+    out = []
+    for r in res:
+        if level is not None and r.get("mismatches", 0) != level:
+            continue
+        st = r.get("strand", r.get("orientation"))
+        out.append((r.get("sequence"), st) if key == "path" else (r.get("kmer"), r.get("offset"), st))
+    return out
+
+
+def _level_count(e: dict, level: Optional[int]) -> Optional[Tuple[Optional[int], str]]:
+    c = (e.get("counts") or {}).get("contexts") or (e.get("counts") or {}).get("paths")
+    if not isinstance(c, dict):
+        return None
+    if level is not None:
+        c = (c.get("by_mismatches") or {}).get(str(level))
+        if not isinstance(c, dict):
+            return None
+    return c.get("value"), c.get("relation")
+
+
+def _relation_subset(rel, a_sc, A, b_sc, B):
+    if A.get("http") != 200 or B.get("http") != 200:
+        return INCONCLUSIVE, "http %s / %s" % (A.get("http"), B.get("http"))
+    args = rel.get("args") or {}
+    ea, eb = _entry(A, int(args.get("a_pattern", 0))), _entry(B, int(args.get("b_pattern", 0)))
+    if "error" in ea or "error" in eb:
+        return INCONCLUSIVE, "a refused slot (%s / %s)" % ((ea.get("error") or {}).get("code"), (eb.get("error") or {}).get("code"))
+    key = args.get("key", "context")
+    ka = _result_keys(ea, key, args.get("a_level"))
+    kb = set(_result_keys(eb, key, args.get("b_level")))
+    missing = [x for x in ka if x not in kb]
+    if missing:
+        if eb.get("retrieval_complete") is True:
+            return FAIL, "%d of a's %d results not in b's complete list (first %s)" % (len(missing), len(ka), missing[0])
+        return INCONCLUSIVE, "%d of a's %d results not in b's list, which is not complete (withheld %r, cut %r)" % (
+            len(missing), len(ka), eb.get("withheld"), eb.get("cut"))
+    ca, cb = _level_count(ea, args.get("a_level")), _level_count(eb, args.get("b_level"))
+    if ca and cb and ca[1] == "exact" and cb[1] == "exact" and ca[0] > cb[0]:
+        return FAIL, "a's exact count %d above b's exact count %d" % (ca[0], cb[0])
+    return PASS, "a's %d results within b's %d" % (len(ka), len(kb))
+
+
+RELATIONS: Dict[str, Callable] = {
+    "same_answer": _relation_same_answer,
+    "prefix_equals": _relation_prefix_equals,
+    "zero_equals_absent": _relation_zero_equals_absent,
+    "subset": _relation_subset,
+}
+
+
+def evaluate_relation(rel: dict, a_scenario: dict, a_answer: dict, b_scenario: dict, b_answer: dict, arm: str) -> dict:
+    """A relation of the manifest on one arm: {"relation", "type", "a", "b", "outcome": pass | fail | inconclusive
+    | not_exposed, "detail"}, from the two normalised answers (the first repeat of each, by convention)."""
+    fn = RELATIONS.get(rel.get("type"))
+    out = {"relation": rel.get("id"), "type": rel.get("type"), "a": rel.get("a"), "b": rel.get("b")}
+    if fn is None:
+        out.update(outcome=FAIL, detail="unknown relation type %r" % rel.get("type"))
+        return out
+    try:
+        outcome, detail = fn(rel, a_scenario, a_answer, b_scenario, b_answer)
+    except Missing as m:
+        outcome, detail = (NOT_EXPOSED if arm == "mcp" else FAIL), "field not in the answer: %s" % m
+    except Exception as ex:   # never take the comparison down
+        outcome, detail = FAIL, "relation raised %s: %s" % (type(ex).__name__, ex)
+    out.update(outcome=outcome, detail=detail)
+    return out
+
+
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[str]] = None) -> List[dict]:
     """Every expectation of |scenario| against |answer| (DESIGN §8.2). A check whose field is missing answers
     not_exposed on the MCP arm and fail on a direct arm; an unknown check name or a check that raises is a fail

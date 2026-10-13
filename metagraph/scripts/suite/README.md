@@ -19,10 +19,12 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   the async session's).
 - `build_manifest.py`: writes `manifest/suite_v1.json` (the full catalogue) and `manifest/suite_smoke_v1.json`
   (the scenarios tagged `smoke`), one scenario per line; `content_sha256` = sha256 of the canonical JSON of
-  `scenarios` (the same seed and records give the same digest). `--no-fetch` uses the cache only.
+  `scenarios` (the same seed and records give the same digest); the cross-scenario `relations` (below) one per
+  line, digested in `relations_sha256`. `--no-fetch` uses the cache only.
 - `checks.py`: the checks of DESIGN §8.2, pure and stdlib (it uses `suite_common.py` when present, for the
   runner's normaliser and answer digest, and falls back to the same algorithm): `evaluate(scenario, answer, arm,
-  previous=None)`.
+  previous=None)`, `scenario_outcome(results)`, and the reference semantics of the relations,
+  `evaluate_relation(rel, a_scenario, a_answer, b_scenario, b_answer, arm)`.
 - `tests/test_seqtools.py`, `tests/test_checks.py`: offline (`python3 -m unittest discover -s tests`); every check
   on stored fixture answers of the mini index and on hand-made answers, passing and failing.
 
@@ -89,3 +91,46 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   `finding` (checks.scenario_outcome): the report lists findings in their own section, never as passes.
 - Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
   implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...).
+
+### Relations (comparisons across scenarios; lane S1b, the integrator's decision 8)
+The manifest's top-level `relations` list (outside `content_sha256`, digested in `relations_sha256`; the smoke
+manifest keeps the relations whose two scenarios it holds). Each relation is
+`{"id": "REL-<type>-nnnn", "type", "a": scenario id, "b": scenario id, "title", "args"}`. The comparator evaluates
+each relation per arm on the normalised answers of a and b on that arm (the first repeat of each), with the outcome
+`pass`, `fail`, `inconclusive` (the pair cannot test the claim: a non-200 answer where the type needs two answers,
+no common k-mer, a count that is not exact, b's list incomplete where a result of a is missing from it) or
+`not_exposed` (the MCP arm lacks a field the type reads). `checks.evaluate_relation(rel, a_scenario, a_answer,
+b_scenario, b_answer, arm)` is the reference implementation (tests/test_checks.py `Relations`). Paths are dotted
+(`patterns.0.counts.contexts`), `""` is the whole body; "without timing" removes every key named `timing` at any
+depth.
+
+- `same_answer` — the two requests must be answered alike. Both answers must have the same HTTP status; if it is
+  not 200, the same error `code` and `text`. With `args.paths` (a list of `[path_in_a, path_in_b]`), each pair
+  of values must be equal (without timing); a missing path fails. Without `paths`, the two bodies must be equal
+  without timing and without the dotted paths in `args.ignore` (default none). Used for: max_mismatches 0 versus
+  the same request without the field (SPEC-pattern-search §21.2), lower case versus upper case (pattern and
+  resolve), and the three capabilities documents (release, server instance, deadline-check and resolve blocks of
+  /capabilities and /traverse/capabilities; /capabilities' `pattern` block equal to /pattern/capabilities; the gate
+  block of /traverse/capabilities a projection of /pattern/capabilities, its fields listed from the snapshot).
+- `prefix_equals` — two /resolve answers of pieces of one sequence S agree on their common k-mers: a's query is
+  S from k-mer `args.a_from_kmer`, b's from `args.b_from_kmer` (k-mer i starts at base i). An answer covers the
+  k-mers [from, from + num_kmers) of S (num_kmers is the resolved prefix when the answer states a stop). On the
+  overlap [max(fa, fb), min(fa + na, fb + nb)), the k-mers inside `graph_runs` and, for each label in
+  `args.labels`, the k-mers inside its `runs` (all shifted into S's k-mer coordinates) must be the same sets.
+  Inconclusive when either answer is not a 200 or the overlap is empty. Used for: a budget-stopped resolve versus
+  the same sequence under the 20,000 ms budget (the stop answers the resolve of a prefix, SPEC-labeled-traversal
+  §4.5), and the resolve from base 5,000 versus the whole (a continuation completes it).
+- `zero_equals_absent` — a /pattern entry's exact count of an exact DNA pattern of L >= k bases searched
+  `strands: "forward"` (a) and the /resolve of the same sequence (b) agree on absence: `counts.<args.count>` of
+  entry `args.pattern` (contexts for L = k, paths for L > k with long_search paths) is exact 0 exactly when b's
+  `graph_runs` is not `[[0, L - k + 1]]` (some k-mer of the pattern is not in the graph), and exact >= 1 exactly
+  when it is (on a node-centric de Bruijn graph consecutive k-mers present spell the path). Inconclusive when the
+  count is not exact, the entry is refused or either answer is not a 200. Used for random and record sequences of
+  31 and 60 bp and a record 31-mer with one substitution (whatever the graph holds, the routes agree).
+- `subset` — every result of a's entry `args.a_pattern` (contexts keyed by kmer, offset and strand or
+  orientation; paths, `args.key: "path"`, by sequence and strand), restricted to `mismatches == args.a_level` when
+  given, is among the results of b's entry `args.b_pattern` (restricted to `args.b_level` when given); and when
+  both counts (`counts.contexts`, else `counts.paths`; the level's `by_mismatches` count when a level is given)
+  are exact, a's is at most b's. A result of a missing from b fails when b's `retrieval_complete` is true, else
+  is inconclusive. Used for: suffix scope within any_offset, an exact window within its IUPAC pattern, a partial
+  list cut at 2 within the complete list, the exact answer within the level 0 of max_mismatches 1.

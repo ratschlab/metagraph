@@ -88,6 +88,7 @@ class Ctx:
         self.seed = seed
         self.positives = [r for r in records if r.usable_for_positives and r.key != "athc"]
         self._used: Dict[str, set] = {}
+        self.relations: List[dict] = []   # the manifest's cross-scenario comparisons (relation())
 
     def rng(self, *parts: Any) -> random.Random:
         h = hashlib.sha256(("%d:" % self.seed + ":".join(str(p) for p in parts)).encode()).hexdigest()
@@ -660,6 +661,22 @@ def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dic
         return None
     ms, source = BUDGET_ALLOWANCE[route]
     return {"check": "budget_respected", "args": {"allowance_ms": ms, "allowance_source": source}}
+
+
+# ---------------------------------------------------------------------------------------------- relations
+# Comparisons across two scenarios' answers, evaluated per arm by the comparator (lane S2b's compare.py); their
+# semantics are stated in README.md, "Relations"
+RELATION_TYPES = ("prefix_equals", "zero_equals_absent", "subset", "same_answer")
+
+
+def relation(ctx: "Ctx", rtype: str, a: str, b: str, title: str, **args: Any) -> dict:
+    """Record a relation between scenarios |a| and |b| (ids) on the context; the id is REL-<type>-nnnn."""
+    if rtype not in RELATION_TYPES:
+        raise ValueError("relation type %r" % rtype)
+    n = sum(1 for r in ctx.relations if r["type"] == rtype) + 1
+    rel = {"id": "REL-%s-%04d" % (rtype, n), "type": rtype, "a": a, "b": b, "title": title, "args": args}
+    ctx.relations.append(rel)
+    return rel
 
 
 # ---------------------------------------------------------------------------------------------- scenarios

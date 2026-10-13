@@ -4,8 +4,8 @@
     build_manifest.py --out manifest/suite_v1.json --smoke-out manifest/suite_smoke_v1.json [--seed N] [--no-fetch]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
-same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`); `created_utc` is
-outside it.
+same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
+`relations_sha256` (of `relations`, the comparisons across scenarios); `created_utc` is outside them.
 """
 
 from __future__ import annotations
@@ -59,9 +59,12 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
         scenarios += gen(ctx)
     if not only_areas or "C" in only_areas:
         scenarios += areas.gen_C(ctx, caps)
+    if not only_areas:
+        scenarios += areas.gen_REL(ctx, scenarios, caps)   # the relations' twins (needs every area)
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
-    problems = validate(scenarios)
+    relations = ctx.relations
+    problems = validate(scenarios) + validate_relations(relations, scenarios)
     if problems:
         raise SystemExit("manifest invalid:\n  " + "\n  ".join(problems[:30]))
     tc = caps["traverse_capabilities"]
@@ -82,19 +85,62 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
             "records_not_fetched": missing,
         },
         "conventions": CONVENTIONS,
-        "counts": counts(scenarios),
+        "counts": counts(scenarios, relations),
+        "relations_sha256": sha256_json(relations),
+        "relations": relations,
         "scenarios": scenarios,
     }
     return manifest
 
 
-def counts(scenarios) -> dict:
+def counts(scenarios, relations=()) -> dict:
     by_area = {}
     for s in scenarios:
         by_area[s["area"]] = by_area.get(s["area"], 0) + 1
+    by_type = {}
+    for r in relations:
+        by_type[r["type"]] = by_type.get(r["type"], 0) + 1
     return {"scenarios": len(scenarios), "executions_per_arm": sum(s["repeat"] for s in scenarios),
             "by_area": dict(sorted(by_area.items())),
-            "mcp_not_implemented": sum(1 for s in scenarios if "not_implemented" in s["mcp"])}
+            "mcp_not_implemented": sum(1 for s in scenarios if "not_implemented" in s["mcp"]),
+            "relations": len(relations), "relations_by_type": dict(sorted(by_type.items()))}
+
+
+def validate_relations(relations, scenarios) -> list:
+    """Unique ids, a known type, both ends scenarios of the manifest and distinct, the args each type reads."""
+    problems = []
+    ids = {s["id"]: s for s in scenarios}
+    seen = set()
+    need = {"prefix_equals": ("labels", "a_from_kmer", "b_from_kmer"), "zero_equals_absent": ("pattern", "count"),
+            "subset": ("a_pattern", "b_pattern", "key"), "same_answer": ()}
+    for r in relations:
+        if r["id"] in seen:
+            problems.append("duplicate relation id %s" % r["id"])
+        seen.add(r["id"])
+        if r["type"] not in need:
+            problems.append("%s: type %s" % (r["id"], r["type"]))
+            continue
+        for end in ("a", "b"):
+            if r[end] not in ids:
+                problems.append("%s: %s %s is not a scenario" % (r["id"], end, r[end]))
+        if r["a"] == r["b"]:
+            problems.append("%s: a and b are one scenario" % r["id"])
+        for f in need[r["type"]]:
+            if f not in r["args"]:
+                problems.append("%s: no args.%s" % (r["id"], f))
+        if r["type"] == "zero_equals_absent" and r["a"] in ids and r["b"] in ids:
+            a, b = ids[r["a"]], ids[r["b"]]
+            if a["route"] != "POST /pattern" or b["route"] != "POST /resolve" or a["request"].get("strands") != "forward":
+                problems.append("%s: needs a forward /pattern a and a /resolve b" % r["id"])
+        if r["type"] == "prefix_equals" and r["a"] in ids and r["b"] in ids:
+            a, b = ids[r["a"]], ids[r["b"]]
+            sa, sb = a["request"]["sequence"], b["request"]["sequence"]
+            fa, fb = r["args"]["a_from_kmer"], r["args"]["b_from_kmer"]
+            # both queries are pieces of one sequence S: S[fa:] starts with a's, S[fb:] with b's
+            lo = max(fa, fb)
+            if sa[lo - fa:][:100] != sb[lo - fb:][:100]:
+                problems.append("%s: the two queries are not pieces of one sequence" % r["id"])
+    return problems
 
 
 def validate(scenarios) -> list:
@@ -132,7 +178,10 @@ def smoke_of(manifest: dict) -> dict:
     m = dict(manifest)
     m["scenarios"] = sel
     m["content_sha256"] = sha256_json(sel)
-    m["counts"] = counts(sel)
+    ids = {s["id"] for s in sel}
+    m["relations"] = [r for r in manifest.get("relations", []) if r["a"] in ids and r["b"] in ids]
+    m["relations_sha256"] = sha256_json(m["relations"])
+    m["counts"] = counts(sel, m["relations"])
     m["selection"] = "the full manifest's scenarios tagged smoke (full content_sha256 %s)" % manifest["content_sha256"]
     return m
 
@@ -141,10 +190,15 @@ def write(path: str, manifest: dict) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w") as f:
         # one scenario per line keeps the frozen file reviewable in a diff
-        head = {k: v for k, v in manifest.items() if k != "scenarios"}
+        head = {k: v for k, v in manifest.items() if k not in ("scenarios", "relations")}
         f.write("{\n")
         for k, v in head.items():
             f.write("%s: %s,\n" % (json.dumps(k), canonical_json(v)))
+        rels = manifest.get("relations", [])
+        f.write('"relations": [\n')
+        for i, r in enumerate(rels):
+            f.write(canonical_json(r) + (",\n" if i + 1 < len(rels) else "\n"))
+        f.write("],\n")
         f.write('"scenarios": [\n')
         for i, s in enumerate(manifest["scenarios"]):
             f.write(canonical_json(s) + (",\n" if i + 1 < len(manifest["scenarios"]) else "\n"))
