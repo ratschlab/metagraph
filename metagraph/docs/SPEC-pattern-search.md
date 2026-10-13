@@ -3486,8 +3486,9 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   §20.7 reads (n rows, the first twice at `record_verified`; under `max_annotation_work`, the account and the
   deadline; `work.mirror_rows`, part of `work.annotation_rows`); the search's row cache is given back to the
   account before, so the mirrors' allotment replaces it. A walk whose mirror is not known (the search stopped
-  before it, `partial` held the first walks only, or the mirror reads stopped on `max_annotation_work` or the
-  account: no mirror is read after such a stop, and every later walk is decided on its own support alone) is
+  before it, `partial` held the first walks only, the mirror reads stopped on `max_annotation_work` or the
+  account: no mirror is read after such a stop, and every later walk is decided on its own support alone, or the
+  account refused the held walks' index by sequence: no mirror is then found among them nor read) is
   decided only when no mirror support can change the value (Kleene, as §19.7's undecided labels; a walk evaluated
   so before its read stopped keeps that evaluation, its units charged once), else left undecided; after a time stop
   nothing more is decided. A decided walk the release lists is charged its `selection_labels` and
@@ -4711,9 +4712,13 @@ and the counts were right; `PatternSupportedRoute.SelectionLabelNamesAreCharged`
 mirror read stops on `max_annotation_work` or the account, the later held walks are decided on their own support
 alone instead of left undecided, and no mirror is read after the stop (`counts.tested`, `counts.selected`,
 `work.predicate_units` and `partial`'s list change in that case, each walk evaluated once on its own support;
-`DecidableWalksAreDecidedAfterTheMirrorReadsStop`); the walks held and the paths kept for them are given back to
-the account as soon as `all_or_count` or `count` cannot admit them (`HeldPathsAreReleasedWithTheHeldWalks`); a
-held walk's model is 192 + 2L + 8 per predicate label (64 before: below its descriptor), and a listed walk's
+`DecidableWalksAreDecidedAfterTheMirrorReadsStop`); the account refusing the held walks' index by sequence (8
+bytes a walk, after the search) no longer leaves every walk undecided: each is decided on its own support alone,
+as after a mirror read stopped on the account (`counts.tested`, `counts.selected` and `partial`'s list change in
+that case; `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`); the walks held and the paths kept for them
+are given back to the account as soon as `all_or_count` or `count` cannot admit them
+(`HeldPathsAreReleasedWithTheHeldWalks`); a held walk's model is 192 + 2L + 8 per predicate label (64 before:
+below its descriptor), and a listed walk's
 label evidence is admitted before it is copied, as it is decided (`HeldWalksAndTheirListedLabelsAreCharged`).
 `work.memory_bytes`, the account's peak, grows with the held walks in every answer that holds walks: by 128 per
 walk where the peak falls while they are held (the fixtures `supported_paths_predicate_label` and

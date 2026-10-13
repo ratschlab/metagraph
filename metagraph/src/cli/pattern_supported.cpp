@@ -628,7 +628,9 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     // step reads, gives its allotment back first, so that the mirrors' replaces it
     if (!options_.mirrors_searched)
         tracker_.release_rows();
-    // the held walks by sequence: their mirrors are found among them
+    // the held walks by sequence: their mirrors are found among them (when the account refuses
+    // the index, no mirror is found among them nor read: every walk is decided on its own
+    // support alone, as after a mirror read stopped on the account)
     std::vector<uint32_t> by_sequence;
     const uint64_t index_bytes = kSequenceIndexBytes * held_.size();
     const bool indexed = account.charge(index_bytes);
@@ -648,7 +650,6 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         }
     } else {
         set_stop("selection", "max_memory");
-        ended = true;
     }
     auto held_with = [&](const std::string &s) -> const Held* {
         auto it = std::lower_bound(by_sequence.begin(), by_sequence.end(), s,
@@ -715,10 +716,10 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         std::vector<std::vector<LabelId>>().swap(labels);
         std::vector<std::vector<uint8_t>>().swap(rows);
     };
-    // the mirrors are read until a read stops on a budget (the work, the account): the walks
-    // from there on are decided on their own support alone, as walks whose mirror is not
-    // known; a time stop ends the decisions
-    bool reads = true;
+    // the mirrors are read (none without the index) until a read stops on a budget (the work,
+    // the account): the walks from there on are decided on their own support alone, as walks
+    // whose mirror is not known; a time stop ends the decisions
+    bool reads = indexed;
     for (size_t i = 0; i < held_.size() && !ended; ++i) {
         if (!(i % Budget::kReleaseClockStride) && !budget.check_time()) {
             set_stop("selection", "time");
@@ -738,7 +739,7 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             mirror = m->support;
         } else if (options_.mirrors_searched) {
             mirror.clear();
-            known = complete_set;
+            known = complete_set && indexed;
         } else {
             // the mirror is read only when its support can change the decision or would be
             // listed: the walk's own support is evaluated first (its labels sure, every other
@@ -770,8 +771,9 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             value = bound_.eval(present.data(), present.size(), &units);
         } else if (!evaluated) {
             // the mirror's support is not known (the search stopped before it, partial held
-            // the first walks only, or the reads stopped): decided only when no mirror
-            // support can change it (a walk evaluated so before its read keeps that value)
+            // the first walks only, the reads stopped, or the account refused the index):
+            // decided only when no mirror support can change it (a walk evaluated so before
+            // its read keeps that value)
             value = bound_.eval3(h.support.data(), h.support.size(), all_labels.data(),
                                  all_labels.size(), &units);
         }

@@ -1858,6 +1858,109 @@ TEST(PatternSupportedRoute, AllOrCountGivesBackItsListOnceItCannotList) {
     EXPECT_LT(0u, decided);
 }
 
+// When the account refuses the index of the held walks by sequence after the search, no mirror
+// is found among the held walks nor read, and every walk is decided on its own support alone,
+// as after a mirror read stopped on the account (SPEC §20.9), instead of none. The graph of all
+// 64 3-mers with the label shared and TTTTTTTT with the label other, ANNNNN on both strands
+// under "either" (the mirrors searched, so the search's row cache stays in the account): 2,048
+// short walks held, whose index (8 bytes a walk) is larger than what the search needs beyond
+// the walks it holds at its end, so a band of accounts holds every walk and refuses the index.
+// In count mode, from below the smallest account that completes: a selection stopped on the
+// account after the search counted every supported walk either refused a held walk (none
+// decided) or the index; then any(shared), a definite true on every walk's own support,
+// decides every walk (selected bounds [2048, 2048]), and any(other) decides the palindromes
+// (their own support is their mirror's) and the walks carrying other only, its bounds holding
+// the complete answer's count (a walk whose mirror carries other is not decided as if its
+// mirror had no support). Mutation tried: the decisions ended at the refused index (tested
+// 0): fails.
+TEST(PatternSupportedRoute, WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const Index idx = build_rd(3, { { "shared", "h0", record }, { "other", "o0", "TTTTTTTT" } });
+    for (const char *predicate : { "{\"any\": [\"shared\"]}", "{\"any\": [\"other\"]}" }) {
+        SCOPED_TRACE(predicate);
+        const bool own = std::string(predicate).find("shared") != std::string::npos;
+        Ask r;
+        r.patterns = { "ANNNNN" };
+        r.kind = "iupac";
+        r.mode = "count";
+        r.strands = "both";
+        r.level = "label_intersection";
+        r.predicate = predicate;
+        r.predicate_strands = "either";
+        const Json::Value full = answer_of(idx, r)["patterns"][0];
+        ASSERT_FALSE(full.isMember("error")) << compact(full["error"]);
+        ASSERT_EQ("completed", full["selection"]["pass"].asString()) << compact(full["stop"]);
+        const uint64_t walks = full["counts"]["supported_paths"]["value"].asUInt64();
+        ASSERT_EQ(2048u, walks);
+        const uint64_t selected = full["counts"]["selected"]["value"].asUInt64();
+        EXPECT_EQ(own ? walks : 2u, selected);
+        auto at = [&](const std::string &mode, uint64_t bytes) {
+            Ask q = r;
+            q.mode = mode;
+            q.max_memory_bytes = bytes;
+            return answer_of(idx, q)["patterns"][0];
+        };
+        uint64_t completes = 0;
+        for (uint64_t bytes = 1 << 14; bytes <= (1 << 23) && !completes; bytes += 4096) {
+            if (at("count", bytes)["selection"]["pass"] == "completed") {
+                completes = bytes;
+            }
+        }
+        ASSERT_LT(32768u, completes);
+        uint64_t held_refused = 0, index_refused = 0, withheld = 0;
+        for (uint64_t bytes = completes - 32768; bytes < completes; bytes += 256) {
+            SCOPED_TRACE(bytes);
+            const Json::Value e = at("count", bytes);
+            ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+            if (e["stop"]["phase"] != "selection" || e["stop"]["reason"] != "max_memory"
+                    || e["counts"]["supported_paths"]["relation"] != "exact") {
+                continue;
+            }
+            ASSERT_EQ(walks, e["counts"]["supported_paths"]["value"].asUInt64());
+            EXPECT_EQ("stopped", e["selection"]["pass"].asString());
+            ASSERT_EQ("bounds", e["counts"]["selected"]["relation"].asString());
+            const uint64_t tested = e["counts"]["tested"]["value"].asUInt64();
+            const uint64_t lower = e["counts"]["selected"]["lower"].asUInt64();
+            const uint64_t upper = e["counts"]["selected"]["upper"].asUInt64();
+            EXPECT_LE(lower, selected);
+            EXPECT_GE(upper, selected);
+            if (tested == 0) {
+                ++held_refused;
+                continue;
+            }
+            ++index_refused;
+            if (own) {
+                EXPECT_EQ(walks, tested);
+                EXPECT_EQ(walks, lower);
+            } else {
+                EXPECT_GT(walks, tested);
+            }
+            // all_or_count, where it refuses the index too, withholds it as before
+            // (predicate_budget)
+            const Json::Value f = at("all_or_count", bytes);
+            if (f["stop"] == e["stop"] && f["counts"]["tested"] == e["counts"]["tested"]) {
+                EXPECT_EQ("predicate_budget", f["withheld"]["reason"].asString());
+                EXPECT_EQ(compact(e["counts"]["selected"]), compact(f["counts"]["selected"]));
+                ++withheld;
+            }
+        }
+        EXPECT_LT(0u, index_refused);
+        EXPECT_LT(0u, withheld);
+        if (own) {
+            EXPECT_LT(0u, held_refused);
+        }
+    }
+}
+
 // A constant normal form selects without deciding: true is the request without the predicate,
 // false lists nothing (complete); an unbound or spent selection does not start
 TEST(PatternSupportedRoute, ConstantPredicates) {
