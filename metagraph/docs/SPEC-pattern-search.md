@@ -4618,7 +4618,7 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   `max_mismatches_within_floor`; the answer order with the level first; the capabilities' `mismatches` object
   (§21.12, the full block only); two server flags (§4.5). Not served yet (§21.16): patterns longer than k
   (their slot), and substitutions with the labels, a predicate or the supported paths (400 `later_increment`).
-- **Fixtures** (§21.13, §11): fifteen `mismatch_*` fixtures and `pattern_capabilities_protein_cap` (server
+- **Fixtures** (§21.13, §11): fourteen `mismatch_*` fixtures and `pattern_capabilities_protein_cap` (server
   `masked_protein_cap`); the capabilities bodies of every fixture server regenerated; every other stored body
   unchanged. The validator (`test_pattern_fixtures.py`) knows the new tables and rules — the counts per level and
   their relations against the stop's level, each result's substitutions recomputed from its instance with its own
