@@ -57,54 +57,68 @@ class Missing(Exception):
 
 # ---------------------------------------------------------------------------------------------- answers
 def normalise_direct(http_status: int, body: Any, headers: Optional[Dict[str, str]] = None) -> dict:
-    """The normalised answer of a direct HTTP call. |body| is the raw bytes (gzip or deflate already undone, or
-    gzip bytes, detected by their magic), a str, or an already parsed object."""
-    parsed: Any = None
-    raw_text = None
+    """The normalised answer of a direct HTTP call, as lane S2's runner makes it (suite_common.normalise_direct:
+    {http, body, error, headers}). |body| is the body bytes (gzip bytes are recognised by their magic and
+    undone), a str, or an already parsed object."""
     if isinstance(body, (bytes, bytearray)):
-        b = bytes(body)
-        if b[:2] == b"\x1f\x8b":
-            b = gzip.decompress(b)
-        raw_text = b.decode("utf-8", errors="replace")
+        raw = bytes(body)
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
     elif isinstance(body, str):
-        raw_text = body
+        raw = body.encode("utf-8")
     else:
-        parsed = body
-    if raw_text is not None:
+        raw = json.dumps(body).encode("utf-8") if body is not None else b""
+    if _suite_common is not None:
+        return _suite_common.normalise_direct(int(http_status), raw, headers)
+    text = raw.decode("utf-8", "replace")
+    parsed: Any = None
+    if text.strip():
         try:
-            parsed = json.loads(raw_text) if raw_text.strip() else None
+            parsed = json.loads(text)
         except ValueError:
-            parsed = None
+            parsed = text
     error = None
-    if http_status != 200:
-        if isinstance(parsed, dict) and "error" in parsed:
-            error = {"code": parsed.get("code"), "text": parsed.get("error")}
+    if not 200 <= int(http_status) < 300:
+        if isinstance(parsed, dict):
+            msg = parsed.get("error")
+            if msg is not None and not isinstance(msg, str):
+                msg = json.dumps(msg, sort_keys=True)
+            error = {"code": parsed.get("code"), "text": msg}
         else:
-            error = {"code": None, "text": (raw_text or "")[:2000]}
-    out = {"http": int(http_status), "body": parsed, "error": error}
-    if headers is not None:
-        out["headers"] = {k.lower(): v for k, v in headers.items()}
-    return out
+            error = {"code": None, "text": text[:4000] if text else None}
+    keep = {k.lower(): v for k, v in (headers or {}).items() if k.lower() in ("content-type", "content-encoding")}
+    return {"http": int(http_status), "body": parsed, "error": error, "headers": keep}
 
 
-_DIGEST_DROP = {"timing", "server_instance", "elapsed_ms", "serialize_ms", "load_ms", "label_discovery_ms",
-                "placement_ms", "extension_ms", "selection_ms", "support_ms", "verification_ms",
-                "label_intersection_ms"}
+try:   # lane S2's shared helpers: the runner digests with them, so the determinism check must too
+    import suite_common as _suite_common
+except ImportError:   # pragma: no cover - the vendored copy without it falls back to the same algorithm
+    _suite_common = None
+
+_CAPABILITY_VOLATILE = ("measured_", "observed_")
 
 
-def _strip_timing(o: Any) -> Any:
+def _strip(o: Any, prefixes: tuple) -> Any:
     if isinstance(o, dict):
-        return {k: _strip_timing(v) for k, v in o.items() if k not in _DIGEST_DROP}
+        return {k: _strip(v, prefixes) for k, v in o.items()
+                if k != "timing" and not (prefixes and isinstance(k, str) and k.startswith(prefixes))}
     if isinstance(o, list):
-        return [_strip_timing(x) for x in o]
+        return [_strip(x, prefixes) for x in o]
     return o
 
 
-def answer_digest(answer: dict) -> str:
-    """sha256 of the normalised answer without its timing fields (DESIGN §8.3 answer_digest)."""
-    core = {"http": answer.get("http"), "body": _strip_timing(answer.get("body")), "error": answer.get("error")}
-    text = json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def answer_digest(answer: dict, route: Optional[str] = None) -> str:
+    """The answer digest of DESIGN §8.3, suite_common.answer_digest's: sha256 of the canonical JSON of the
+    normalised answer without `headers` and every `timing` key (on a capabilities route also without the
+    measured_* / observed_* keys)."""
+    if _suite_common is not None:
+        return _suite_common.answer_digest(answer, route)
+    prefixes = ()
+    if route and route.split(None, 1)[-1].split("?", 1)[0].rstrip("/").endswith("capabilities"):
+        prefixes = _CAPABILITY_VOLATILE
+    view = _strip({k: v for k, v in answer.items() if k != "headers"}, prefixes)
+    text = json.dumps(view, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(text).hexdigest()
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -296,7 +310,7 @@ def check_entry_fields(sc, ans, a, arm):
 
 
 def check_deterministic(sc, ans, a, arm, previous=None):
-    d = answer_digest(ans)
+    d = answer_digest(ans, sc.get("route"))
     if not previous:
         return PASS, "first repeat (digest %s)" % d[:16]
     diff = [p for p in previous if p != d]

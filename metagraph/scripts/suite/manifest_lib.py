@@ -615,7 +615,7 @@ def scenario(sid: str, area: str, title: str, route: str, request: Any, truth: O
                    "by_design": ["capabilities.pattern_capabilities_document"]}
         else:
             mcp = {"not_implemented": "route %s" % route, "by_design": ["capabilities.not_expressible.protocol"]}
-    if "raw_body" in extra or "headers" in extra or "http_method" in extra:
+    if "body_raw" in extra or "headers" in extra or route.split(" ")[0] not in ("POST", "GET"):
         mcp = {"not_implemented": "protocol (raw body, headers or method)",
                "by_design": ["capabilities.not_expressible.protocol"]}
     # an exact scenario's source contexts are at level 0 (the MCP runner reads the level and substitutions)

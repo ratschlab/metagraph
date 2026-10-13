@@ -1,0 +1,1658 @@
+"""The scenario catalogue of DESIGN §3, one generator per area (R, T, P, L, X, M, Q, C, D, N; S is the async
+session's). Each scenario names its ground truth, the exact host body, the MCP mapping (manifest_lib), its
+expectations (check names of checks.py with their arguments), a timing class and tags.
+
+Expectations are what the CURRENT deployed code answers per the SPECs and the C++ source (texts quoted from
+metagraph/src and the stored fixtures); a scenario that depends on the next deploy is tagged needs-next-deploy, one
+whose expectation the smoke run has not confirmed yet and that rests on reading the code is tagged
+code-derived.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Dict, List, Optional, Tuple
+
+import seqtools as st
+from manifest_lib import (Ctx, DB, K, PATTERN_MAX_CONTEXTS, PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS,
+                          WALK_PRESET, pattern_request, resolve_request, scenario, source_contexts,
+                          traverse_request)
+from truth import TRUTH_DIR
+
+OK = {"check": "status", "args": {"http": 200}}
+INV = {"check": "invariants", "args": {}}
+CC = {"check": "counts_consistent", "args": {}}
+
+# genomes with few relatives in RefSeq 97 (their windows carry few columns: labels "all" and discovery stay small)
+LOW_CARRIER = ["buc", "mge", "mpn", "ser", "mja", "sso", "tth", "pfa", "cal", "hvo"]
+SMALL_WHOLE = ["lam", "t4", "hsv1", "hiv1", "hsam", "drem", "dmem", "scem"]
+
+
+def ex(check: str, **args) -> dict:
+    return {"check": check, "args": args}
+
+
+def err400(text: Optional[str] = None, code: Optional[str] = None, prefix: Optional[str] = None,
+           contains: Optional[List[str]] = None, http: int = 400) -> dict:
+    a: Dict = {"http": http}
+    if code is not None:
+        a["code"] = code
+    if text is not None:
+        a["text"] = text
+    if prefix is not None:
+        a["text_prefix"] = prefix
+    if contains:
+        a["text_contains"] = contains
+    return {"check": "status", "args": a}
+
+
+def _ids(prefix: str):
+    n = [0]
+
+    def nxt() -> str:
+        n[0] += 1
+        return "%s-%04d" % (prefix, n[0])
+    return nxt
+
+
+def _distant(ctx: Ctx, rec, i: int):
+    others = [r for r in ctx.positives if r.kingdom != rec.kingdom]
+    return others[i % len(others)]
+
+
+def _columns_sample() -> List[str]:
+    with open(os.path.join(TRUTH_DIR, "index", "columns_first1200.txt")) as f:
+        return [l.strip() for l in f if l.strip() and not l.startswith("#")]
+
+
+# ================================================================================================= R: /resolve
+def gen_R(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("R")
+    recs = ctx.positives
+    nid = _ids("R-pos")
+    for li, L in enumerate([31, 32, 50, 100, 200, 1000, 2000]):
+        for j in range(2):
+            rec = recs[(li * 2 + j * 7) % len(recs)]
+            t = ctx.window(rng, rec, L)
+            for kind in ("column", "header"):
+                lab = rec.column if kind == "column" else rec.accession
+                req = resolve_request(t["window"], labels=[lab])
+                exp = [OK, INV, ex("resolve_runs", label=lab, full=True),
+                       ex("resolve_graph_runs", runs=[[0, L - K + 1]])]
+                out.append(scenario(nid(), "R", "%d bp of %s against its %s label %s" % (L, rec.key, kind, lab),
+                                    "POST /resolve", req, t, exp, tags=["positive", kind + "-label"]
+                                    + (["smoke"] if (L == 100 and j == 0 and kind == "column") else [])))
+    nid = _ids("R-multi")
+    for i in range(6):
+        rec = recs[(i * 5 + 3) % len(recs)]
+        other = _distant(ctx, rec, i)
+        t = ctx.window(rng, rec, 100)
+        labels = [rec.column, other.column, rec.accession]
+        req = resolve_request(t["window"], labels=labels)
+        exp = [OK, INV, ex("resolve_runs", label=rec.column, full=True),
+               ex("resolve_runs", label=rec.accession, full=True), ex("label_not_full", label=other.column)]
+        out.append(scenario(nid(), "R", "%s window against its taxid, its header and the unrelated %s" % (rec.key, other.key),
+                            "POST /resolve", req, t, exp, tags=["positive", "multi-label"]))
+    nid = _ids("R-junction")
+    for i in range(4):
+        ra = recs[(i * 3 + 1) % len(recs)]
+        rb = _distant(ctx, ra, i + 2)
+        ta = ctx.window(rng, ra, 100)
+        tb = ctx.window(rng, rb, 100)
+        q = ta["window"] + tb["window"]
+        req = resolve_request(q, labels=[ra.column, rb.column])
+        exp = [OK, INV, ex("resolve_runs", label=ra.column, run_end_in=[70, 100]),
+               ex("resolve_runs", label=rb.column, run_start_in=[70, 100])]
+        out.append(scenario(nid(), "R", "junction of %s and %s: two runs split at the junction (+/- k-1)" % (ra.key, rb.key),
+                            "POST /resolve", req, {"a": ta, "b": tb, "junction_bp": 100}, exp,
+                            tags=["positive", "junction"]))
+    nid = _ids("R-discover")
+    for i, key in enumerate(["buc", "mge", "mpn", "ser", "mja", "sso"]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 100)
+        kind = "column" if i % 2 == 0 else "header"
+        limit = [1, 20, 100][i % 3]
+        req = resolve_request(t["window"], discover={"max_labels": limit, "kind": kind})
+        lab = rec.column if kind == "column" else rec.accession
+        exp = [OK, INV, ex("resolve_discover_contains", label=lab)]
+        out.append(scenario(nid(), "R", "discover %s labels (limit %d) on a %s window: the source present unless truncated" % (kind, limit, key),
+                            "POST /resolve", req, t, exp, timing_class="slow",
+                            tags=["discover"] + (["smoke"] if i == 0 else [])))
+    nid = _ids("R-trace")
+    for i, key in enumerate(["eco", "sau", "lam"]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 200)
+        req = resolve_request(t["window"], labels=[rec.accession], support="trace")
+        exp = [OK, INV, ex("resolve_runs", label=rec.accession, full=True)]
+        out.append(scenario(nid(), "R", "trace support of %s's header on its own 200 bp: one contiguous run" % key,
+                            "POST /resolve", req, t, exp, tags=["trace", "header-label"]))
+    nid = _ids("R-budget")
+    for i, key in enumerate(["eco", "pae"]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 10000, unique=False, max_dust=5.0)
+        req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=251 + i * 249)
+        t2 = dict(t)
+        t2["flank"] = ""
+        exp = [ex("status", http=[200, 503]), INV, ex("resolve_runs", label=rec.column, full=True, unless_stopped=True)]
+        out.append(scenario(nid(), "R", "10 kb of %s under a %d ms budget: a stated stop answers the prefix" % (key, 251 + i * 249),
+                            "POST /resolve", req, t2, exp, timing_class="slow", tags=["budget", "machine-dependent"]))
+    # R-edge
+    nid = _ids("R-edge")
+    eco = ctx.rec("eco")
+    t = ctx.window(rng, eco, 31)
+    out.append(scenario(nid(), "R", "exactly k bases: one k-mer, supported", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column]), t,
+                        [OK, INV, ex("resolve_runs", label=eco.column, full=True), ex("resolve_graph_runs", runs=[[0, 1]])],
+                        tags=["edge"]))
+    t = ctx.window(rng, eco, 30, unique=False)
+    out.append(scenario(nid(), "R", "k-1 bases: refused", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column]), t,
+                        [err400("Query shorter than k")], tags=["edge", "refusal", "smoke"]))
+    t = ctx.window(rng, eco, 10001, unique=False, max_dust=5.0)
+    t["flank"] = ""
+    out.append(scenario(nid(), "R", "10,001 bp: above the server's max_query_bp (10,000 on staging)", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column]), t,
+                        [err400("request.sequence: longer than the server limit of 10000 bp")], tags=["edge", "refusal"]))
+    t = ctx.window(rng, eco, 200)
+    out.append(scenario(nid(), "R", "200 bp above the request's bounds.max_query_bp 100", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column], max_query_bp=0,
+                                        bounds={"max_query_bp": 100, "time_budget_ms": RESOLVE_TIME_BUDGET_MS}), t,
+                        [err400("request.sequence: longer than bounds.max_query_bp")], tags=["edge", "refusal"]))
+    for code, label in (("N", "N"), ("R", "IUPAC R")):
+        t = ctx.window(rng, eco, 100)
+        q = t["window"][:50] + code + t["window"][51:]
+        out.append(scenario(nid(), "R", "an %s at position 50: the k-mers holding it are not in the graph" % label,
+                            "POST /resolve", resolve_request(q, labels=[eco.column]), t,
+                            [OK, INV, ex("resolve_graph_runs", runs=[[0, 20], [51, 70]]),
+                             ex("resolve_runs", label=eco.column, kmers=39)],
+                            tags=["edge", "code-derived"]))
+    t = ctx.window(rng, eco, 100)
+    out.append(scenario(nid(), "R", "lower case: resolved as upper case", "POST /resolve",
+                        resolve_request(t["window"].lower(), labels=[eco.column]), t,
+                        [OK, INV, ex("resolve_runs", label=eco.column, full=True)], tags=["edge", "code-derived"]))
+    t = ctx.window(rng, eco, 100)
+    out.append(scenario(nid(), "R", "an unknown label: refused naming it", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column, "NOPE_0000.1"]), t,
+                        [err400("Label not found in the annotation: 'NOPE_0000.1'")], tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "a duplicate label: refused (LabelQuery), not merged", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column, eco.column]), t,
+                        [err400("Duplicate label '%s'" % eco.column)], tags=["edge", "refusal"]))
+    cols = [c for c in _columns_sample() if c != eco.column][:1000] + [eco.column]
+    out.append(scenario(nid(), "R", "1,001 explicit labels: the host has no cap (the service's is 1,000)", "POST /resolve",
+                        resolve_request(t["window"], labels=cols), t,
+                        [OK, INV, ex("resolve_runs", label=eco.column, full=True)], timing_class="slow", tags=["edge"]))
+    out.append(scenario(nid(), "R", "an empty sequence: refused", "POST /resolve",
+                        resolve_request("", labels=[eco.column]), None, [err400("request.sequence is required")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "discover together with labels: refused", "POST /resolve",
+                        {"sequence": t["window"], "labels": [eco.column], "discover": {"max_labels": 5}}, t,
+                        [err400("request: specify exactly one of 'labels' or 'discover'")], tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "neither labels nor discover: refused", "POST /resolve",
+                        {"sequence": t["window"], "bounds": {"time_budget_ms": RESOLVE_TIME_BUDGET_MS}}, t,
+                        [err400("request: specify exactly one of 'labels' or 'discover'")], tags=["edge", "refusal"]))
+    q = st.random_dna(ctx.rng("R", "absent"), 200)
+    out.append(scenario(nid(), "R", "a random 200 bp: no k-mer in the graph", "POST /resolve",
+                        resolve_request(q, labels=[eco.column]), {"random": True},
+                        [OK, INV, ex("resolve_absent")], tags=["negative"]))
+    out.append(scenario(nid(), "R", "an unknown field: refused naming it", "POST /resolve",
+                        dict(resolve_request(t["window"], labels=[eco.column]), bogus=1), t,
+                        [err400("request: unknown field 'bogus'")], tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "graph on a single-graph server: refused", "POST /resolve",
+                        dict(resolve_request(t["window"], labels=[eco.column]), graph="x"), t,
+                        [err400("Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path' field")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "graphs on a single-graph server: refused", "POST /resolve",
+                        dict(resolve_request(t["window"], labels=[eco.column]), graphs=["x"]), t,
+                        [err400("Bad request: this server hosts a single graph; remove the 'graphs' field")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "a body that is not an object: refused", "POST /resolve", [t["window"]], None,
+                        [err400("request: expected an object")], tags=["edge", "refusal", "protocol"]))
+    out.append(scenario(nid(), "R", "a body that is not JSON: refused", "POST /resolve", None, None,
+                        [err400(prefix="Bad json received: ")], tags=["edge", "refusal", "protocol"],
+                        body_raw='{"sequence": "%s", "labels": ["%s"],}' % (t["window"], eco.column)))
+    out.append(scenario(nid(), "R", "time_budget_ms not above the finalisation reserve: refused", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column], time_budget_ms=250), t,
+                        [err400(prefix="request.bounds.time_budget_ms: expected more than the finalisation reserve of 250")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "R", "time_budget_ms above the server cap: lowered and stated", "POST /resolve",
+                        resolve_request(t["window"], labels=[eco.column], time_budget_ms=70000), t,
+                        [OK, INV, ex("clamped", field="bounds.time_budget_ms", requested=70000, effective=60000),
+                         ex("resolve_runs", label=eco.column, full=True)], tags=["edge", "clamp"]))
+    out.append(scenario(nid(), "R", "discover.max_labels 0: refused naming the field", "POST /resolve",
+                        resolve_request(t["window"][:60], discover={"max_labels": 0, "kind": "column"}), t,
+                        [err400(prefix="request.discover.max_labels: out of range [1, ")], tags=["edge", "refusal"]))
+    return out
+
+
+# ================================================================================================= T: /traverse
+def _tseed(seq: str, labels: Optional[List[str]] = None) -> dict:
+    s = {"sequence": seq}
+    if labels is not None:
+        s["labels"] = labels
+    return s
+
+
+def gen_T(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("T")
+    recs = [r for r in ctx.positives]
+    nid = _ids("T-walk")
+    for i in range(36):
+        L = [31, 50, 100, 200][i % 4]
+        direction = ["right", "left", "both"][i % 3]
+        ext = 10000 if i % 6 == 5 else [100, 1000][i % 2]
+        kind = "column" if i % 3 == 2 else "header"
+        rec = recs[(i * 7 + 2) % len(recs)]
+        margin = ext + 200
+        if len(rec.seq) < 2 * margin + L:
+            rec = ctx.rec("eco")
+        t = ctx.window(rng, rec, L, margin=margin)
+        t = ctx.flank_for(rec, t, ext + 50)
+        lab = rec.accession if kind == "header" else rec.column
+        req = traverse_request([_tseed(t["window"], [lab])],
+                               {"direction": direction, "bounds": {"max_extension_bp": ext}})
+        exp = [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
+               ex("walk_in_record", label_scope="record" if kind == "header" else "column")]
+        out.append(scenario(nid(), "T", "%d bp seed of %s, %s arm(s), %d bp, constrained to its %s label" % (L, rec.key, direction, ext, kind),
+                            "POST /traverse", req, t, exp, timing_class="slow" if ext >= 10000 else "fast",
+                            tags=["walk", kind + "-label"] + (["smoke"] if i == 1 else [])))
+    nid = _ids("T-derived")
+    for i, key in enumerate(LOW_CARRIER[:6]):
+        rec = ctx.rec(key)
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=1300), 1050)
+        req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 1000}})
+        exp = [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
+               ex("walk_in_record", label_scope="derived")]
+        out.append(scenario(nid(), "T", "%s seed with its derived carrier set (permit per_hit)" % key, "POST /traverse",
+                            req, t, exp, tags=["walk", "derived-labels"]))
+    nid = _ids("T-end")
+    # records without terminal repeats (HSV-1's and HIV-1's ends are repeated inside them)
+    for i, key in enumerate(["lam", "t4", "hsam", "drem", "dmem", "scem"]):
+        rec = ctx.rec(key)
+        side = "right" if i % 2 == 0 else "left"
+        n = len(rec.seq)
+        where = (n - 400 - 100, n - 300 - 100) if side == "right" else (300, 400)
+        try:
+            t = ctx.window(rng, rec, 100, margin=0, where=where, unique=True)
+        except ValueError:
+            continue
+        t = ctx.flank_for(rec, t, 1100)
+        req = traverse_request([_tseed(t["window"], [rec.accession])],
+                               {"direction": side, "bounds": {"max_extension_bp": 1000}})
+        exp = [OK, INV, ex("walk_end", arm=side, reasons_in=["label_lost", "dead_end"]),
+               ex("walk_in_record", label_scope="record")]
+        out.append(scenario(nid(), "T", "seed near the %s end of %s: the walk stops at the record's end" % (side, key),
+                            "POST /traverse", req, t, exp, tags=["walk", "record-end"] + (["smoke"] if i == 0 else [])))
+    nid = _ids("T-repeat")
+    for i, (key, t, copies) in enumerate(_repeat_windows(ctx, rng, n=4)):
+        rec = ctx.rec(key)
+        t = ctx.flank_for(rec, t, 1050)
+        t["copies"] = [{"start": c, "flank": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), 1050)["flank"],
+                        "flank_start": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), 1050)["flank_start"]}
+                       for c in copies if c != t["start"]]
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 1000}})
+        exp = [OK, INV, ex("walk_in_record", label_scope="record", any_copy=True, expect_branching=True)]
+        out.append(scenario(nid(), "T", "seed in a %d-copy repeat of %s: branching stated, a branch follows a copy" % (len(copies), key),
+                            "POST /traverse", req, t, exp, tags=["walk", "repeat"]))
+    nid = _ids("T-labels")
+    eco = ctx.rec("eco")
+    for i in range(2):
+        rec = ctx.rec(LOW_CARRIER[i])
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
+        req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200}},
+                               extra={"labels": {"mode": "annotate"}, "branching": {"max_label_branches": "unlimited"}})
+        out.append(scenario(nid(), "T", "annotate mode on %s: every structural successor, a path follows the record" % rec.key,
+                            "POST /traverse", req, t,
+                            [OK, INV, ex("walk_in_record", label_scope="annotate")], tags=["labels", "annotate"]))
+    for i, kind in enumerate(["column", "header"]):
+        rec = ctx.rec(LOW_CARRIER[2 + i])
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
+        req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200},
+                                                       "labels": {"seed_label_kind": kind}})
+        out.append(scenario(nid(), "T", "derived %s labels on %s" % (kind, rec.key), "POST /traverse", req, t,
+                            [OK, INV, ex("walk_in_record", label_scope="derived")], tags=["labels", "derived-labels"]))
+    rec = ctx.rec(LOW_CARRIER[4])
+    t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
+    req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 200},
+                                                                   "labels": {"max_labels_per_node": 1}})
+    out.append(scenario(nid(), "T", "max_labels_per_node 1: lists cut, walk unchanged", "POST /traverse", req, t,
+                        [OK, INV, ex("walk_in_record", label_scope="record")], tags=["labels"]))
+    nid = _ids("T-exhaustive")
+    for i, key in enumerate(["buc", "mja", "lam"]):
+        rec = ctx.rec(key)
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 60, margin=400), 150)
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 100}}, preset="trie")
+        out.append(scenario(nid(), "T", "trie (exhaustive) of %s, radius 100: a leaf follows the record" % key,
+                            "POST /traverse", req, t,
+                            [OK, INV, ex("walk_in_record", label_scope="record")], tags=["exhaustive"]
+                           ))
+    nid = _ids("T-coords")
+    for i, key in enumerate(["eco", "bsu", "lam"]):
+        rec = ctx.rec(key)
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=700), 550)
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 500}},
+                               extra={"support": "trace", "output": {"coordinates": True}})
+        out.append(scenario(nid(), "T", "trace + coordinates on %s: positions equal the record's" % key, "POST /traverse",
+                            req, t, [OK, INV, ex("trace_coordinates"), ex("walk_in_record", label_scope="record")],
+                            tags=["coordinates", "trace"]))
+    nid = _ids("T-budget")
+    for i, (knob, val) in enumerate([("time_budget_ms", 1), ("max_memory_mb", 1), ("max_work_units", 10), ("max_steps", 5)]):
+        rec = recs[(i * 11 + 5) % len(recs)]
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=1300), 1050)
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 1000, knob: val}})
+        out.append(scenario(nid(), "T", "bounds.%s %s: a stated stop" % (knob, val), "POST /traverse", req, t,
+                            [OK, INV, ex("traverse_seed_outcome", walks=["partial", "failed", "complete"])],
+                            tags=["budget"]))
+    nid = _ids("T-attempts")
+    t = ctx.flank_for(eco, ctx.window(rng, eco, 100, margin=400), 250)
+    req = traverse_request([_tseed(t["window"], [eco.accession])], {"bounds": {"max_extension_bp": 200}})
+    req["not_after_ms"] = 0
+    out.append(scenario(nid(), "T", "not_after_ms in the past: 409 expired, nothing run", "POST /traverse", req, t,
+                        [ex("status", http=409), ex("answer_fields", equals={"state": "expired"}, any_status=True)],
+                        tags=["attempts", "refusal"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession])], {"bounds": {"max_extension_bp": 200}})
+    # an id runs once per server process while it is retained (retention_s 3600): a repeat or the second
+    # direct arm within the hour meets the duplicate's 409, which states the attempt
+    req["attempt_id"] = "suite-s1-%s" % t["window"][:16]
+    out.append(scenario(nid(), "T", "an attempt: the response states its usage (409 duplicate when retained)",
+                        "POST /traverse", req, t,
+                        [ex("status", http=[200, 409]), INV, ex("answer_fields", present=["usage"])],
+                        tags=["attempts", "retention-dependent"]))
+    # T-edge
+    nid = _ids("T-edge")
+    t = ctx.window(rng, eco, 100, margin=400)
+    base_over = {"bounds": {"max_extension_bp": 100}}
+    s30 = t["window"][:30]
+    out.append(scenario(nid(), "T", "seed shorter than k: refused", "POST /traverse",
+                        traverse_request([_tseed(s30, [eco.accession])], base_over), t,
+                        [err400("seed '%s': Seed shorter than k" % s30)], tags=["edge", "refusal", "smoke"]))
+    sn = t["window"][:50] + "N" + t["window"][51:]
+    out.append(scenario(nid(), "T", "seed with N: refused naming the position", "POST /traverse",
+                        traverse_request([_tseed(sn, [eco.accession])], base_over), t,
+                        [err400("seed '%s': Invalid character 'N' at position 50 of the seed" % sn[:32])],
+                        tags=["edge", "refusal"]))
+    q = st.random_dna(ctx.rng("T", "absent"), 100)
+    out.append(scenario(nid(), "T", "seed absent from the graph: the request's 400 on a single-graph server", "POST /traverse",
+                        traverse_request([_tseed(q, [eco.column])], base_over), {"random": True},
+                        [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q[:32])],
+                        tags=["edge", "negative", "refusal"]))
+    for f, txt in (("graph", "Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path' field"),
+                   ("graphs", "Bad request: this server hosts a single graph; remove the 'graphs' field")):
+        req = traverse_request([_tseed(t["window"], [eco.accession])], base_over)
+        req[f] = ["x"] if f == "graphs" else "x"
+        out.append(scenario(nid(), "T", "%s on a single-graph server: refused" % f, "POST /traverse", req, t,
+                            [err400(txt)], tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "T", "a body that is not an object: refused", "POST /traverse", [t["window"]], None,
+                        [err400(contains=["expected an object"])], tags=["edge", "refusal", "protocol"]))
+    out.append(scenario(nid(), "T", "max_seeds + 1 (5 on staging): refused", "POST /traverse",
+                        traverse_request([_tseed(ctx.window(rng, eco, 60)["window"], [eco.accession]) for _ in range(5)], base_over),
+                        None, [err400("request.seeds: at most 4 seeds per request")], tags=["edge", "refusal"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession]), _tseed(t["window"], [eco.accession])], base_over)
+    out.append(scenario(nid(), "T", "duplicate seeds: traversed again, marked duplicate", "POST /traverse", req, t,
+                        [OK, INV, ex("answer_fields", equals={"results.1.duplicate": True})], tags=["edge"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession])], base_over, extra={"bogus": 1})
+    out.append(scenario(nid(), "T", "an unknown strategy key: refused naming it", "POST /traverse", req, t,
+                        [err400("strategy: unknown field 'bogus'")], tags=["edge", "refusal"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession])], {"bounds": {"max_extension_bp": 100, "bogus": 1}})
+    out.append(scenario(nid(), "T", "an unknown bounds key: refused naming it", "POST /traverse", req, t,
+                        [err400("strategy.bounds: unknown field 'bogus'")], tags=["edge", "refusal"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession])], base_over, extra={"branching": {"max_label_branches": 65}})
+    out.append(scenario(nid(), "T", "max_label_branches above its maximum: refused with the range", "POST /traverse", req, t,
+                        [err400("strategy.branching.max_label_branches: out of range [0, 64]")], tags=["edge", "refusal"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession])], {"bounds": {"max_extension_bp": 100, "time_budget_ms": 70000}})
+    out.append(scenario(nid(), "T", "time_budget_ms above the server's max_time_ms: lowered and stated", "POST /traverse", req, t,
+                        [OK, INV, ex("clamped", where="strategy", field="bounds.time_budget_ms", requested=70000, effective=60000)],
+                        tags=["edge", "clamp", "code-derived"]))
+    req = traverse_request([{"sequence": t["window"], "labels": []}], base_over)
+    out.append(scenario(nid(), "T", "an empty seed label list: refused", "POST /traverse", req, t,
+                        [err400("request.seeds[0].labels: expected a non-empty array of labels; omit the field to derive the permitted set from the seed")],
+                        tags=["edge", "refusal"]))
+    req = traverse_request([_tseed(t["window"], ["NOPE_0000.1"])], base_over)
+    out.append(scenario(nid(), "T", "an unknown seed label: refused naming it", "POST /traverse", req, t,
+                        [err400(contains=["Label not found in the annotation: 'NOPE_0000.1'"])], tags=["edge", "refusal"]))
+    req = traverse_request([_tseed(t["window"], [eco.accession])], base_over,
+                           extra={"branching": {"tip_window_bp": 5}})
+    out.append(scenario(nid(), "T", "tip_window_bp (not implemented): refused", "POST /traverse", req, t,
+                        [err400("strategy.branching.tip_window_bp: not implemented (tip and bubble windows are not supported yet); set it to 0 or omit it")],
+                        tags=["edge", "refusal"]))
+    req = {"seeds": [], "strategy": traverse_request([], base_over)["strategy"]}
+    out.append(scenario(nid(), "T", "no seed: refused", "POST /traverse", req, None,
+                        [err400("request.seeds: expected a non-empty array")], tags=["edge", "refusal"]))
+    return out
+
+
+def _repeat_windows(ctx: Ctx, rng, n: int) -> List[Tuple[str, dict, List[int]]]:
+    """Windows of 100 bp that occur at least twice (exactly) on the forward strand of a bacterial record
+    (rRNA operons, IS elements): found by sampling 31-mers and keeping those with several copies."""
+    found = []
+    for key in ["eco", "bsu", "sau", "pae", "mtb", "sco"]:
+        rec = ctx.rec(key)
+        seq = rec.seq
+        r = ctx.rng("T", "repeat", key)
+        for _ in range(4000):
+            s = r.randrange(2000, len(seq) - 2200)
+            w = seq[s:s + 100]
+            if not st.is_acgt(w) or st.revcomp(w) in seq:
+                continue
+            copies = st.find_all(seq, w)
+            if 2 <= len(copies) <= 8:
+                t = ctx.truth_at(rec, s, 100)
+                found.append((key, t, [rec.offset + c for c in copies]))
+                break
+        if len(found) >= n:
+            break
+    return found
+
+
+# ================================================================================================= P: /pattern
+def _p(seq: str, pid: str = "w", kind: str = "dna") -> dict:
+    return {"id": pid, kind: seq}
+
+
+def gen_P(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("P")
+    recs = ctx.positives
+    nid = _ids("P-exact")
+    i = 0
+    for L, n in ((12, 4), (16, 4)):
+        for j in range(n):
+            rec = recs[(i * 5 + 1) % len(recs)]
+            i += 1
+            t = ctx.window(rng, rec, L)
+            req = pattern_request([_p(t["window"])], mode="count")
+            nsrc = len(source_contexts(t))
+            out.append(scenario(nid(), "P", "%d-mer of %s, count: at least its %d record contexts" % (L, rec.key, nsrc),
+                                "POST /pattern", req, t,
+                                [OK, INV, ex("count_relation", relation="exact", min=nsrc)], tags=["positive", "count"]))
+    for L, n in ((20, 5), (25, 5), (31, 5)):
+        for j in range(n):
+            rec = recs[(i * 5 + 1) % len(recs)]
+            i += 1
+            t = ctx.window(rng, rec, L)
+            req = pattern_request([_p(t["window"])])
+            out.append(scenario(nid(), "P", "%d-mer of %s, all_or_count: the record's contexts at their offsets" % (L, rec.key),
+                                "POST /pattern", req, t,
+                                [OK, INV, CC, ex("contains_source_context", strand="+", require="all"),
+                                 ex("retrieval_complete", value=True)],
+                                tags=["positive"] + (["smoke"] if (L == 25 and j == 0) else [])))
+    nid = _ids("P-placed")
+    for L in (20, 25, 31):
+        for j in range(3):
+            rec = recs[(i * 5 + 1) % len(recs)]
+            i += 1
+            t = ctx.window(rng, rec, L)
+            req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"},
+                                  predicate={"any": [rec.column]}, predicate_strands="context")
+            out.append(scenario(nid(), "P", "%d-mer of %s with any(%s), predicate_only: the record placed at the window" % (L, rec.key, rec.column),
+                                "POST /pattern", req, t,
+                                [OK, INV, ex("predicate_selected", selected=True, strand="+"),
+                                 ex("source_placement", strand="+")],
+                                tags=["positive", "placement", "predicate"] + (["smoke"] if (L == 31 and j == 0) else [])))
+    for j, key in enumerate(LOW_CARRIER[:4]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 25 if j % 2 else 31)
+        req = pattern_request([_p(t["window"])], output={"labels": "all"})
+        out.append(scenario(nid(), "P", "%d-mer of %s, labels all: its taxid among the labels, the record placed" % (t["length"], key),
+                            "POST /pattern", req, t,
+                            [OK, INV, CC, ex("source_label", strand="+"), ex("source_placement", strand="+")],
+                            tags=["positive", "placement", "labels-all"]))
+    # P-scope
+    nid = _ids("P-scope")
+    for j in range(2):
+        rec = recs[(j * 9 + 4) % len(recs)]
+        t = ctx.window(rng, rec, 20)
+        req = pattern_request([_p(t["window"])], scope="suffix")
+        out.append(scenario(nid(), "P", "suffix scope: the record's context at offset k-L", "POST /pattern", req, t,
+                            [OK, INV, CC, ex("contains_source_context", strand="+", require="all"),
+                             ex("entry_fields", equals={"absence_scope": "suffix_only", "scope": "suffix"})],
+                            tags=["scope"]))
+    for j, key in enumerate(["lam", "t4"]):
+        rec = ctx.rec(key)
+        t = ctx.truth_at(rec, 0, 20)
+        for scope in ("any_offset", "suffix"):
+            req = pattern_request([_p(t["window"])], scope=scope)
+            exp = [OK, INV, CC, ex("entry_fields", equals={"absence_scope": "any_offset" if scope == "any_offset" else "suffix_only"})]
+            if scope == "any_offset":
+                exp.append(ex("contains_source_context", strand="+", require="all"))
+            out.append(scenario(nid(), "P", "the first 20 bases of %s in %s scope" % (key, scope), "POST /pattern",
+                                req, t, exp, tags=["scope", "record-start"]))
+    for j in range(2):
+        rec = recs[(j * 9 + 6) % len(recs)]
+        t = ctx.window(rng, rec, 25)
+        req = pattern_request([_p(t["window"])], strands="forward")
+        out.append(scenario(nid(), "P", "strands forward: the + contexts only", "POST /pattern", req, t,
+                            [OK, INV, CC, ex("contains_source_context", strand="+", require="all"),
+                             ex("entry_fields", equals={"strands": ["+"]})], tags=["strands"]))
+        t2 = ctx.window(rng, rec, 25)
+        t2["strand"] = "-"
+        req = pattern_request([_p(st.revcomp(t2["window"]))], strands="reverse")
+        out.append(scenario(nid(), "P", "strands reverse with the reverse complement: the record as a - context", "POST /pattern",
+                            req, t2, [OK, INV, CC, ex("contains_source_context", strand="-", require="all"),
+                                      ex("entry_fields", equals={"strands": ["-"]})], tags=["strands"]))
+    for j, (key, t) in enumerate(_palindromes(ctx, n=2)):
+        t["strand"] = "="
+        req = pattern_request([_p(t["window"])])
+        out.append(scenario(nid(), "P", "a %d bp palindrome of %s: searched once, strand =" % (t["length"], key),
+                            "POST /pattern", req, t,
+                            [OK, INV, CC, ex("entry_fields", equals={"palindromic": True, "strands": ["="]}),
+                             ex("contains_source_context", strand="=", require="all")], tags=["palindrome"]))
+    # P-iupac
+    nid = _ids("P-iupac")
+    for j in range(6):
+        rec = recs[(j * 7 + 3) % len(recs)]
+        t = ctx.window(rng, rec, 25)
+        r2 = ctx.rng("P", "iupac", j)
+        w = list(t["window"])
+        npos = 2 + j % 3
+        positions = sorted(r2.sample(range(25), npos))
+        for p in positions:
+            w[p] = st.iupac_code_holding(w[p], 2 + (p % 2), r2)
+        pat = "".join(w)
+        t["iupac_positions"] = positions
+        req = pattern_request([_p(pat, kind="iupac")])
+        out.append(scenario(nid(), "P", "25-mer with %d IUPAC codes holding the record's bases" % npos, "POST /pattern",
+                            req, t, [OK, INV, CC, ex("contains_source_context", strand="+", require="all")],
+                            tags=["iupac"]))
+    rec = ctx.rec("bsu")
+    t = ctx.window(rng, rec, 25)
+    req = pattern_request([_p("NNNN" + t["window"][4:], kind="iupac")])
+    out.append(scenario(nid(), "P", "a leading N run (skipped): the record still found", "POST /pattern", req, t,
+                        [OK, INV, CC, ex("contains_source_context", strand="+", require="all")], tags=["iupac", "n-run"]))
+    t = ctx.window(rng, rec, 25)
+    req = pattern_request([_p(t["window"][:10] + "NNN" + t["window"][13:], kind="iupac")])
+    out.append(scenario(nid(), "P", "an internal N run: the record still found", "POST /pattern", req, t,
+                        [OK, INV, CC, ex("contains_source_context", strand="+", require="all")], tags=["iupac", "n-run"]))
+    # P-modes
+    nid = _ids("P-modes")
+    rec = ctx.rec("sau")
+    t = ctx.window(rng, rec, 25)
+    out.append(scenario(nid(), "P", "count mode: no list, the count at least the record's 7 contexts", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="count"), t,
+                        [OK, INV, ex("count_relation", relation="exact", min=7), ex("retrieval_complete", value=False)],
+                        tags=["modes"]))
+    out.append(scenario(nid(), "P", "partial with max_contexts 2: cut max_contexts", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="partial", max_contexts=2), t,
+                        [OK, INV, CC, ex("cut", reason="max_contexts"), ex("entry_fields", equals={"returned": 2})],
+                        tags=["modes"]))
+    out.append(scenario(nid(), "P", "all_or_count with max_contexts 3: withheld count_above_threshold", "POST /pattern",
+                        pattern_request([_p(t["window"])], max_contexts=3), t,
+                        [OK, INV, CC, ex("withheld", reason="count_above_threshold"),
+                         ex("count_relation", relation="exact", min=7)], tags=["modes"]))
+    out.append(scenario(nid(), "P", "max_contexts above the cap: lowered and stated", "POST /pattern",
+                        pattern_request([_p(t["window"])], max_contexts=10001), t,
+                        [OK, INV, ex("clamped", field="max_contexts", requested=10001, effective=10000),
+                         ex("contains_source_context", strand="+", require="all")], tags=["modes", "clamp"]))
+    out.append(scenario(nid(), "P", "stop_at_threshold with max_contexts 3: threshold_crossed or count_above_threshold", "POST /pattern",
+                        pattern_request([_p(t["window"])], max_contexts=3, stop_at_threshold=True), t,
+                        [OK, INV, CC, ex("withheld", reason=["threshold_crossed", "count_above_threshold"])],
+                        tags=["modes"]))
+    out.append(scenario(nid(), "P", "partial with max_contexts 0: nothing returned, cut max_contexts", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="partial", max_contexts=0), t,
+                        [OK, INV, CC, ex("cut", reason="max_contexts"), ex("entry_fields", equals={"returned": 0})],
+                        tags=["modes"]))
+    # P-negative
+    nid = _ids("P-negative")
+    for j in range(4):
+        q = st.random_dna(ctx.rng("P", "neg", j), 31)
+        out.append(scenario(nid(), "P", "a random 31-mer: exact 0, complete", "POST /pattern",
+                            pattern_request([_p(q)]), {"random": q},
+                            [OK, INV, CC, ex("absent")], tags=["negative"]))
+    for j in range(2):
+        rec = recs[(j * 13 + 2) % len(recs)]
+        t = ctx.window(rng, rec, 40)
+        q = st.shuffled(ctx.rng("P", "shuf", j), t["window"])
+        out.append(scenario(nid(), "P", "a shuffled 40-mer (paths): exact 0", "POST /pattern",
+                            pattern_request([_p(q)], long_search="paths"), {"shuffled_from": t},
+                            [OK, INV, CC, ex("absent", count="paths")], tags=["negative"]))
+    # P-floor
+    nid = _ids("P-floor")
+    rec = ctx.rec("mtb")
+    t = ctx.window(rng, rec, 12)
+    out.append(scenario(nid(), "P", "a 12-mer: exactly at the floor (24 bits), answered", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="count"), t,
+                        [OK, INV, ex("entry_fields", equals={"information_bits": 24.0}),
+                         ex("count_relation", relation="exact", min=len(source_contexts(t)))], tags=["floor"]))
+    t = ctx.window(rng, rec, 11, unique=False)
+    out.append(scenario(nid(), "P", "an 11-mer in any_offset scope: below the floor", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="count"), t,
+                        [OK, ex("pattern_slot_error", pattern=0, code="information_below_floor",
+                                text="pattern: 22.0 information bits, below the floor of 24.0 for scope any_offset")],
+                        tags=["floor", "smoke"]))
+    out.append(scenario(nid(), "P", "an 11-mer in suffix scope: exempt, answered", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="count", scope="suffix"), t,
+                        [OK, INV, ex("entry_fields", equals={"scope": "suffix"}, absent=["error"])], tags=["floor"]))
+    t = ctx.window(rng, rec, 18)
+    q = "NNNNNNNN" + t["window"][8:]
+    out.append(scenario(nid(), "P", "N-heavy 18-mer (20 bits): below the floor", "POST /pattern",
+                        pattern_request([_p(q, kind="iupac")], mode="count"), t,
+                        [OK, ex("pattern_slot_error", pattern=0, code="information_below_floor",
+                                text="pattern: 20.0 information bits, below the floor of 24.0 for scope any_offset")],
+                        tags=["floor"]))
+    t = ctx.window(rng, rec, 20)
+    q = "N" * 20 + t["window"]
+    out.append(scenario(nid(), "P", "N^20 + 20 bases: its forward anchor window below the floor", "POST /pattern",
+                        pattern_request([_p(q, kind="iupac")], mode="count", long_search="paths"), t,
+                        [OK, ex("pattern_slot_error", pattern=0, code="information_below_floor",
+                                text="pattern: 22.0 information bits in the anchor window, below the floor of 24.0 for scope long")],
+                        tags=["floor", "long"]))
+    # P-caps
+    nid = _ids("P-caps")
+    rec = ctx.rec("pae")
+    t = ctx.window(rng, rec, 40)
+    out.append(scenario(nid(), "P", "max_anchors 0: the extension not admitted", "POST /pattern",
+                        pattern_request([_p(t["window"])], long_search="paths", max_anchors=0), t,
+                        [OK, INV, CC, ex("withheld", reason="anchors_above_threshold"),
+                         ex("entry_fields", equals={"counts.paths.extension": "not_admitted",
+                                                    "counts.paths.relation": "unknown"})], tags=["caps"]))
+    t1, t2 = ctx.window(rng, rec, 25), ctx.window(rng, rec, 25)
+    out.append(scenario(nid(), "P", "max_steps 1: a discovery stop, sticky for the next pattern", "POST /pattern",
+                        pattern_request([_p(t1["window"], "a"), _p(t2["window"], "b")], max_steps=1), t1,
+                        [OK, INV, CC, ex("stop", pattern=0, phase="discovery", reason="max_steps"),
+                         ex("stop", pattern=1, reason="max_steps"), ex("withheld", pattern=0, reason="discovery_budget"),
+                         ex("count_relation", pattern=0, relation=["at_least", "unknown"])],
+                        tags=["caps", "smoke"]))
+    out.append(scenario(nid(), "P", "max_steps 50 in partial: cut max_steps", "POST /pattern",
+                        pattern_request([_p(t1["window"])], mode="partial", max_steps=50), t1,
+                        [OK, INV, CC, ex("stop", phase="discovery", reason="max_steps"), ex("cut", reason="max_steps")],
+                        tags=["caps"]))
+    pats = [_p(ctx.window(rng, recs[j % len(recs)], 20)["window"], "p%d" % j) for j in range(16)]
+    out.append(scenario(nid(), "P", "16 patterns under a 300 ms budget: answered within it or 503 deadline", "POST /pattern",
+                        pattern_request(pats, time_budget_ms=300), None,
+                        [ex("status", http=[200, 503]), INV, CC], tags=["caps", "machine-dependent"]))
+    # P-edge
+    nid = _ids("P-edge")
+    t = ctx.window(rng, ctx.rec("cje"), 25)
+    out.append(scenario(nid(), "P", "an empty pattern list: refused", "POST /pattern",
+                        pattern_request([]), None,
+                        [err400("request.patterns: expected a list of 1 to 16 pattern objects", code="invalid_request")],
+                        tags=["edge", "refusal"]))
+    pats = [_p(ctx.window(rng, recs[j % len(recs)], 20)["window"], "p%d" % j) for j in range(17)]
+    out.append(scenario(nid(), "P", "17 patterns: refused, never cut", "POST /pattern", pattern_request(pats, mode="count"), None,
+                        [err400("request.patterns: expected a list of 1 to 16 pattern objects (got 17; the server's --pattern-max-patterns)",
+                                code="invalid_request")], tags=["edge", "refusal"]))
+    w = t["window"]
+    bad = [{"dna": w[:3] + "U" + w[4:], "id": "u"}, {"dna": w[:3] + "R" + w[4:], "id": "r"},
+           {"iupac": w[:4] + "X" + w[5:], "id": "x"}, {"dna": "", "id": "empty"}, {"dna": w, "id": "ok"}]
+    out.append(scenario(nid(), "P", "bad alphabet slots beside an answered pattern", "POST /pattern",
+                        pattern_request(bad, mode="count"), t,
+                        [OK, INV,
+                         ex("pattern_slot_error", pattern=0, code="bad_alphabet", text="pattern: character 'U' at position 3 is not in the dna alphabet (A, C, G, T)"),
+                         ex("pattern_slot_error", pattern=1, code="bad_alphabet", text="pattern: character 'R' at position 3 is not in the dna alphabet (A, C, G, T)"),
+                         ex("pattern_slot_error", pattern=2, code="bad_alphabet", text="pattern: character 'X' at position 4 is not in the iupac alphabet (A C G T R Y S W K M B D H V N)"),
+                         ex("pattern_slot_error", pattern=3, code="bad_alphabet", text="pattern: empty"),
+                         ex("count_relation", pattern=4, relation="exact", min=7)],
+                        tags=["edge", "slots"]))
+    out.append(scenario(nid(), "P", "lower case: upper-cased, the record found", "POST /pattern",
+                        pattern_request([_p(w.lower())]), t,
+                        [OK, INV, ex("entry_fields", equals={"pattern": w}),
+                         ex("contains_source_context", strand="+", require="all")], tags=["edge"]))
+    out.append(scenario(nid(), "P", "an unknown field: refused", "POST /pattern", dict(pattern_request([_p(w)]), bogus=1), t,
+                        [err400("request: unknown field 'bogus'", code="invalid_request")], tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "P", "duplicate ids: both answered, ids echoed", "POST /pattern",
+                        pattern_request([_p(w, "same"), _p(w, "same")], mode="count"), t,
+                        [OK, INV, ex("count_relation", pattern=1, relation="exact", min=7)], tags=["edge"]))
+    out.append(scenario(nid(), "P", "budget_split: a later increment", "POST /pattern",
+                        dict(pattern_request([_p(w)]), budget_split="even"), t,
+                        [err400("request.budget_split: 'budget_split' is not served by this build", code="later_increment")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "P", "graphs on a single-graph server: refused", "POST /pattern",
+                        dict(pattern_request([_p(w)]), graphs=["x"]), t,
+                        [err400("request.graphs: this server hosts a single graph; remove the 'graphs' field", code="invalid_request")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "P", "in_ram on a single-graph server: accepted, nothing loaded", "POST /pattern",
+                        dict(pattern_request([_p(w)]), in_ram=True), t,
+                        [OK, INV, ex("answer_fields", equals={"timing.load_ms": 0}),
+                         ex("contains_source_context", strand="+", require="all")], tags=["edge"]))
+    out.append(scenario(nid(), "P", "output.occurrences true without labels: refused", "POST /pattern",
+                        pattern_request([_p(w)], output={"labels": "none", "occurrences": True}), t,
+                        [err400("request.output.occurrences: true needs output.labels \"all\" (occurrences are placed per label)",
+                                code="invalid_request")], tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "P", "a pattern naming two kinds: refused", "POST /pattern",
+                        pattern_request([{"id": "two", "dna": w, "iupac": w}]), t,
+                        [err400("request.patterns[0]: expected exactly one of 'dna', 'iupac'", code="invalid_request")],
+                        tags=["edge", "refusal"]))
+    out.append(scenario(nid(), "P", "a body that is not JSON: refused", "POST /pattern", None, None,
+                        [err400(code="invalid_request")], tags=["edge", "refusal", "protocol"],
+                        body_raw='{"patterns": [{"dna": "%s"}],}' % w))
+    return out
+
+
+def _palindromes(ctx: Ctx, n: int) -> List[Tuple[str, dict]]:
+    out = []
+    for key in ["lam", "t4", "eco", "bsu"]:
+        rec = ctx.rec(key)
+        seq = rec.seq
+        for L in (16, 14):
+            r = ctx.rng("P", "pal", key, L)
+            starts = list(range(100, len(seq) - 200))
+            r.shuffle(starts)
+            for s in starts[:200000]:
+                w = seq[s:s + L]
+                if w == st.revcomp(w) and st.is_acgt(w) and st.low_complexity_dust_score(w) < 1.5:
+                    out.append((key, ctx.truth_at(rec, s, L)))
+                    break
+            if out and out[-1][0] == key:
+                break
+        if len(out) >= n:
+            break
+    return out
+
+
+# ================================================================================================= L: long patterns
+def gen_L(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("L")
+    recs = ctx.positives
+    nid = _ids("L-paths")
+    i = 0
+    for L in (32, 40, 60, 100, 200):
+        for j in range(3):
+            rec = recs[(i * 7 + 5) % len(recs)]
+            i += 1
+            t = ctx.window(rng, rec, L)
+            req = pattern_request([_p(t["window"])], long_search="paths")
+            out.append(scenario(nid(), "L", "%d bp of %s with long_search paths: a path spells it" % (L, rec.key),
+                                "POST /pattern", req, t,
+                                [OK, INV, CC, ex("path_spells", strand="+"), ex("count_relation", count="paths", relation="exact", min=1),
+                                 ex("entry_fields", equals={"counts.paths.extension": "completed", "scope": "long"})],
+                                tags=["paths"] + (["smoke"] if (L == 60 and j == 0) else [])))
+    nid = _ids("L-verified")
+    for j, key in enumerate(LOW_CARRIER[:6]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, [40, 60, 100][j % 3])
+        req = pattern_request([_p(t["window"])], long_search="paths", output={"labels": "all"},
+                              require_support="record_verified")
+        out.append(scenario(nid(), "L", "%d bp of %s, paths with labels, require_support record_verified" % (t["length"], key),
+                            "POST /pattern", req, t,
+                            [OK, INV, CC, ex("path_record_verified", strand="+")], tags=["paths", "labels-all", "record-verified"]))
+    nid = _ids("L-supported")
+    for j in range(8):
+        rec = recs[(j * 5 + 2) % len(recs)]
+        t = ctx.window(rng, rec, [40, 60, 100, 200][j % 4])
+        req = pattern_request([_p(t["window"])], long_search="supported_paths", output={"labels": "predicate_only"},
+                              predicate={"any": [rec.column]}, predicate_strands="context", max_paths=1024)
+        out.append(scenario(nid(), "L", "%d bp of %s: supported paths selected by any(%s), the record verified" % (t["length"], rec.key, rec.column),
+                            "POST /pattern", req, t,
+                            [OK, INV, ex("path_record_verified", strand="+"),
+                             ex("count_relation", count="supported_paths", min=1)],
+                            tags=["supported-paths", "predicate"] + (["smoke"] if j == 0 else [])))
+    for j in range(2):
+        rec = recs[(j * 5 + 9) % len(recs)]
+        t = ctx.window(rng, rec, 60)
+        req = pattern_request([_p(t["window"])], long_search="supported_paths", supported_paths_level="label_intersection",
+                              max_paths=1024)
+        out.append(scenario(nid(), "L", "supported paths at the label_intersection level", "POST /pattern", req, t,
+                            [OK, INV, ex("path_spells", strand="+"),
+                             ex("entry_fields", equals={"counts.supported_paths.level": "label_intersection"})],
+                            tags=["supported-paths"]))
+    nid = _ids("L-anchors")
+    for j in range(3):
+        rec = recs[(j * 11 + 1) % len(recs)]
+        t = ctx.window(rng, rec, 45)
+        req = pattern_request([_p(t["window"])])
+        out.append(scenario(nid(), "L", "45 bp without long_search: anchors counted, paths withheld", "POST /pattern", req, t,
+                            [OK, INV, ex("withheld", reason="paths_later_increment"), ex("notes", has=["paths_later_increment"]),
+                             ex("count_relation", count="anchors", relation="exact", min=1),
+                             ex("entry_fields", equals={"counts.paths.relation": "unknown"})], tags=["anchors"]))
+    nid = _ids("L-caps")
+    rec = ctx.rec("hvo")
+    t = ctx.window(rng, rec, 50)
+    out.append(scenario(nid(), "L", "partial with max_paths 0: cut max_paths", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="partial", long_search="paths", max_paths=0), t,
+                        [OK, INV, ex("cut", reason="max_paths"), ex("entry_fields", equals={"returned": 0})], tags=["paths", "caps"]))
+    out.append(scenario(nid(), "L", "all_or_count with max_paths 0: withheld count_above_threshold", "POST /pattern",
+                        pattern_request([_p(t["window"])], long_search="paths", max_paths=0), t,
+                        [OK, INV, ex("withheld", reason="count_above_threshold")], tags=["paths", "caps"]))
+    out.append(scenario(nid(), "L", "supported paths with max_annotation_work 10: a stated stop of the search", "POST /pattern",
+                        pattern_request([_p(t["window"])], long_search="supported_paths", max_annotation_work=10), t,
+                        [OK, INV, ex("withheld", reason="annotation_budget"),
+                         ex("stop", phase="extension", reason="max_annotation_work")], tags=["supported-paths", "caps"]))
+    out.append(scenario(nid(), "L", "supported paths with max_annotation_work 10 in partial: cut", "POST /pattern",
+                        pattern_request([_p(t["window"])], mode="partial", long_search="supported_paths", max_annotation_work=10), t,
+                        [OK, INV, ex("cut", reason="max_annotation_work")], tags=["supported-paths", "caps"]))
+    nid = _ids("L-memory")
+    out.append(scenario(nid(), "L", "A^100000 on a self-loop, paths, max_memory_mb 1: stop {extension, max_memory}", "POST /pattern",
+                        pattern_request([_p("A" * 100000, "polyA")], mode="partial", long_search="paths", max_memory_mb=1), None,
+                        [OK, INV, ex("stop", phase=["extension", "output"], reason="max_memory"), ex("cut", reason="max_memory"),
+                         ex("notes", lacks=["low_complexity_pattern"])],
+                        timing_class="slow", tags=["paths", "memory", "low-complexity"]))
+    nid = _ids("L-repeat")
+    for j, q in enumerate(["A" * 60, "T" * 100]):
+        out.append(scenario(nid(), "L", "homopolymer of %d with paths: low_complexity_pattern noted" % len(q), "POST /pattern",
+                            pattern_request([_p(q, "homo")], long_search="paths"), None,
+                            [OK, INV, CC, ex("notes", has=["low_complexity_pattern"]),
+                             ex("count_relation", count="paths", relation="exact", min=1)], tags=["paths", "low-complexity"]))
+    return out
+
+
+# ================================================================================================= X: peptides
+def _peptide_truth(ctx: Ctx, prot: dict, win: dict, dna_override: Optional[str] = None) -> Optional[dict]:
+    rec = ctx.rec(prot["genome"])
+    if not rec.usable_for_positives:
+        return None
+    blocks = win["genomic_blocks"]
+    if len(blocks) != 1:
+        return None
+    a, b = blocks[0]                      # 1-based inclusive on the record's forward strand
+    s = a - 1 - rec.offset
+    if s < 0 or b - rec.offset > len(rec.seq):
+        return None
+    L = b - a + 1
+    t = ctx.truth_at(rec, s, L)
+    strand = "+" if prot["strand"] == 1 else "-"
+    dna = win["dna"]
+    if (strand == "+" and t["window"] != dna) or (strand == "-" and t["window"] != st.revcomp(dna)):
+        return None                       # not the record's bases: never used
+    t["strand"] = strand
+    t["peptide"] = win["peptide"]
+    t["coding_dna"] = dna
+    t["protein"] = prot["key"]
+    t["transl_table"] = prot["transl_table"]
+    t["window_id"] = win["id"]
+    return t
+
+
+def gen_X(ctx: Ctx) -> List[dict]:
+    from truth import load_proteins
+    out: List[dict] = []
+    prots = [p for p in load_proteins() if p["genome"] in ctx.by_key]
+    nid10 = _ids("X-peptide10")
+    nidl = _ids("X-peptide-long")
+    n10 = nl = 0
+    for pi, prot in enumerate(prots):
+        for win in prot["windows"]:
+            t = _peptide_truth(ctx, prot, win)
+            if t is None:
+                continue
+            table = prot["transl_table"]
+            if win["length_aa"] == 10 and n10 < 40:
+                n10 += 1
+                req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=table)
+                out.append(scenario(nid10(), "X", "decapeptide %s of %s (table %d): the coding DNA's contexts" % (win["id"], prot["key"], table),
+                                    "POST /pattern", req, t,
+                                    [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")],
+                                    tags=["peptide", "table-%d" % table] + (["smoke"] if n10 == 1 else [])))
+            elif win["length_aa"] in (20, 30) and nl < 30 and pi % 2 == 0:
+                nl += 1
+                req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=table,
+                                      long_search="supported_paths", output={"labels": "predicate_only"},
+                                      predicate={"any": [t["taxid"]]}, predicate_strands="context", max_paths=1024)
+                out.append(scenario(nidl(), "X", "%d-residue %s of %s: a supported path of its taxid, record verified" % (win["length_aa"], win["id"], prot["key"]),
+                                    "POST /pattern", req, t,
+                                    [OK, INV, ex("path_record_verified", strand=t["strand"])],
+                                    timing_class="slow", tags=["peptide", "supported-paths", "table-%d" % table]))
+    # the table-1 arm of non-standard codes: where a reassigned codon lies in the window the source is out of reach
+    nid = _ids("X-table1")
+    n = 0
+    for prot in prots:
+        if prot["transl_table"] in (1, 11):
+            continue
+        for win in prot["windows"]:
+            if win["length_aa"] != 10:
+                continue
+            t = _peptide_truth(ctx, prot, win)
+            if t is None:
+                continue
+            t1 = st.translate(t["coding_dna"], 1)
+            if t1 == win["peptide"]:
+                continue   # no reassigned codon: table 1 reads it alike
+            req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=1)
+            out.append(scenario(nid(), "X", "decapeptide of %s (table %d) read in table 1: the record's codons are out of reach" % (prot["genome"], prot["transl_table"]),
+                                "POST /pattern", req, t,
+                                [OK, INV, CC, ex("source_absent", strand=t["strand"])], tags=["peptide", "wrong-code", "expected-miss"]))
+            n += 1
+            break
+        if n >= 6:
+            break
+    # X-stop: the last 9 residues and the stop codon
+    nid = _ids("X-stop")
+    n = 0
+    for prot in prots:
+        if prot["transl_table"] not in (1, 11) or prot["n_exons"] != 1 or not ctx.rec(prot["genome"]).usable_for_positives:
+            continue
+        rec = ctx.rec(prot["genome"])
+        cds = prot["cds_seq"]
+        tail = cds[-30:]
+        pep = prot["protein_seq"][-9:] + "*"
+        if st.translate(tail, prot["transl_table"]) != pep:
+            continue
+        a, b = prot["spans"][0]
+        if prot["strand"] == 1:
+            s = b - 30 - rec.offset
+        else:
+            s = a - 1 - rec.offset
+        if s < 0 or s + 30 > len(rec.seq):
+            continue
+        t = ctx.truth_at(rec, s, 30)
+        exp_bases = tail if prot["strand"] == 1 else st.revcomp(tail)
+        if t["window"] != exp_bases:
+            continue
+        t["strand"] = "+" if prot["strand"] == 1 else "-"
+        t["peptide"] = pep
+        req = pattern_request([{"id": "stop", "protein": pep}], genetic_code=prot["transl_table"])
+        out.append(scenario(nid(), "X", "%s's last 9 residues and its stop (table %d): found at the stop codon" % (prot["key"], prot["transl_table"]),
+                            "POST /pattern", req, t,
+                            [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")], tags=["peptide", "stop"]))
+        n += 1
+        if n >= 4:
+            break
+    for table in (27, 28, 31):
+        req = pattern_request([{"id": "nostop", "protein": "MKV*LLAAGR"}], genetic_code=table)
+        out.append(scenario(nid(), "X", "a stop in table %d (no stop codon): exact 0 without a search" % table, "POST /pattern",
+                            req, None,
+                            [OK, INV, ex("notes", has=["no_stop_codon"]), ex("absent"), ex("stop", null=True),
+                             ex("entry_fields", equals={"work.steps": 0, "determinism": "full"})],
+                            tags=["peptide", "stop"] + (["smoke"] if table == 27 else [])))
+    # X-junction: expected 0 paths spelling the spliced coding DNA in its record
+    nid = _ids("X-junction")
+    n = 0
+    for prot in prots:
+        for jw in prot.get("junction_windows") or []:
+            rec = ctx.rec(prot["genome"])
+            if not rec.usable_for_positives or "dna" not in jw:
+                continue
+            seq = jw["dna"]
+            t = {"record": rec.accession, "taxid": rec.column, "spliced_dna": seq if prot["strand"] == 1 else st.revcomp(seq),
+                 "peptide": jw["peptide"], "protein": prot["key"], "window_id": jw.get("id")}
+            req = pattern_request([{"id": jw.get("id", "junction"), "protein": jw["peptide"]}], genetic_code=prot["transl_table"],
+                                  mode="partial", long_search="paths", max_paths=1024)
+            out.append(scenario(nid(), "X", "window across one exon junction of %s: no path spells the spliced DNA" % prot["key"],
+                                "POST /pattern", req, t, [OK, INV, ex("path_absent")],
+                                timing_class="slow", tags=["peptide", "junction", "expected-miss"]))
+            n += 1
+            break
+        if n >= 4:
+            break
+    # X-edge
+    nid = _ids("X-edge")
+    p0 = next(p for p in prots if p["transl_table"] == 11 and ctx.rec(p["genome"]).usable_for_positives)
+    w0 = next(w for w in p0["windows"] if w["length_aa"] == 10)
+    t = _peptide_truth(ctx, p0, w0)
+    pep = w0["peptide"]
+    variants = []
+    for j, (code, members) in enumerate((("B", "DN"), ("Z", "EQ"), ("J", "IL"))):
+        pos = [k for k, aa in enumerate(pep) if aa in members]
+        if pos:
+            variants.append((code, pep[:pos[0]] + code + pep[pos[0] + 1:]))
+    variants.append(("X", pep[:4] + "X" + pep[5:]))
+    for code, v in variants:
+        req = pattern_request([{"id": code, "protein": v}], genetic_code=11)
+        out.append(scenario(nid(), "X", "the decapeptide with %s for a member residue: still found" % code, "POST /pattern",
+                            req, t, [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")],
+                            tags=["peptide", "ambiguity"]))
+    req = pattern_request([{"id": "gc7", "protein": pep}], genetic_code=7)
+    out.append(scenario(nid(), "X", "genetic_code 7: refused", "POST /pattern", req, t,
+                        [err400("request.genetic_code: 7 is not an NCBI translation table id; the tables served are 1-6, 9-16, 21-33 (capabilities genetic_codes), 1, the standard code, the default",
+                                code="genetic_code_unknown")], tags=["peptide", "refusal"]))
+    w11 = next(w for w in p0["windows"] if w["length_aa"] == 20)["peptide"][:11]
+    req = pattern_request([{"id": "p11", "protein": w11}], genetic_code=11)
+    out.append(scenario(nid(), "X", "11 residues (33 bases > k) without long_search: anchors only", "POST /pattern", req, None,
+                        [OK, INV, ex("withheld", reason="paths_later_increment"),
+                         ex("entry_fields", equals={"length": 33, "residues": 11, "scope": "long"})], tags=["peptide", "long"]))
+    req = pattern_request([{"id": "u", "protein": pep[:4] + "U" + pep[5:]}, {"id": "ok", "protein": pep}], genetic_code=11)
+    out.append(scenario(nid(), "X", "selenocysteine U: bad_alphabet slot, the other answered", "POST /pattern", req, t,
+                        [OK, INV, ex("pattern_slot_error", pattern=0, code="bad_alphabet",
+                                     text="pattern: character 'U' at position 4 is not in the protein alphabet (A C D E F G H I K L M N P Q R S T V W Y, and X B Z J)"),
+                         ex("contains_source_context", pattern=1, strand=t["strand"], require="all")], tags=["peptide", "slots"]))
+    return out
+
+
+# ================================================================================================= M: mismatches
+def _mm_window(ctx: Ctx, rng, rec, L: int) -> dict:
+    return ctx.window(rng, rec, L)
+
+
+def _subs_plus(variant: str, record_bases: str, positions: List[int]) -> List[dict]:
+    return [{"position": p, "expected": variant[p], "found": record_bases[p]} for p in sorted(positions)]
+
+
+def _subs_minus(pattern: str, record_bases: str) -> List[dict]:
+    """P on the reverse orientation: instance = record bases; positions in P's coordinates (SPEC §21.8)."""
+    L = len(pattern)
+    read = st.revcomp(record_bases)
+    return [{"position": i, "expected": pattern[i], "found": read[i]} for i in range(L) if read[i] != pattern[i]]
+
+
+def gen_M(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("M")
+    recs = ctx.positives
+    nid = _ids("M-planted")
+    i = 0
+    for t_sub in (1, 2, 3):
+        for m in range(t_sub, 4):
+            for j in range(3):
+                L = [20, 25, 31][(i + j) % 3]
+                rec = recs[(i * 7 + j * 3 + 1) % len(recs)]
+                i += 1
+                tr = _mm_window(ctx, rng, rec, L)
+                r2 = ctx.rng("M", "plant", i)
+                positions = st.spread_positions(r2, L, t_sub)
+                variant, edits = st.substitute_bases(tr["window"], positions, r2)
+                tr["edits"] = edits
+                tr["variant"] = variant
+                bits = st.mismatch_information_bits_iupac(variant, m)
+                if bits < 24:
+                    continue
+                req = pattern_request([_p(variant, "v")], max_mismatches=m)
+                subs = _subs_plus(variant, tr["window"], positions)
+                out.append(scenario(nid(), "M", "%d-mer of %s with %d planted substitution(s), max_mismatches %d: the source at level %d" % (L, rec.key, t_sub, m, t_sub),
+                                    "POST /pattern", req, tr,
+                                    [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=t_sub, substitutions=subs),
+                                     ex("count_relation", count="contexts", level=t_sub, relation="exact", min=len(source_contexts(tr)))],
+                                    tags=["mismatch", "planted"] + (["smoke"] if (t_sub == 2 and m == 2 and j == 0) else [])))
+    # the reverse orientation: P = rc(variant), the source a - context with substitutions in P's coordinates
+    for j in range(4):
+        rec = recs[(j * 5 + 4) % len(recs)]
+        tr = _mm_window(ctx, rng, rec, 25)
+        r2 = ctx.rng("M", "rc", j)
+        positions = st.spread_positions(r2, 25, 2)
+        variant, edits = st.substitute_bases(tr["window"], positions, r2)
+        P = st.revcomp(variant)
+        tr["edits"] = edits
+        tr["strand"] = "-"
+        req = pattern_request([_p(P, "rc")], max_mismatches=2)
+        out.append(scenario(nid(), "M", "reverse orientation: the source a - context at level 2, substitutions mirrored", "POST /pattern",
+                            req, tr, [OK, INV, CC, ex("contains_source_context", strand="-", require="all", level=2,
+                                                      substitutions=_subs_minus(P, tr["window"]))],
+                            tags=["mismatch", "planted", "reverse"]))
+    # m < t: the source is out of reach (its level is t)
+    nid = _ids("M-below")
+    for j in range(6):
+        rec = recs[(j * 9 + 2) % len(recs)]
+        tr = _mm_window(ctx, rng, rec, 31)
+        r2 = ctx.rng("M", "below", j)
+        t_sub = 2 + j % 2
+        positions = st.spread_positions(r2, 31, t_sub)
+        variant, edits = st.substitute_bases(tr["window"], positions, r2)
+        tr["edits"] = edits
+        req = pattern_request([_p(variant, "v")], mode="partial", max_mismatches=t_sub - 1)
+        out.append(scenario(nid(), "M", "%d planted substitutions, max_mismatches %d: the source not at any level" % (t_sub, t_sub - 1),
+                            "POST /pattern", req, tr, [OK, INV, CC, ex("source_absent", strand="+")],
+                            tags=["mismatch", "near-miss"]))
+    # IUPAC + substitutions
+    nid = _ids("M-iupac")
+    for j in range(4):
+        rec = recs[(j * 7 + 6) % len(recs)]
+        tr = _mm_window(ctx, rng, rec, 25)
+        r2 = ctx.rng("M", "iupac", j)
+        w = list(tr["window"])
+        ipos = sorted(r2.sample(range(25), 3))
+        for p in ipos:
+            w[p] = st.iupac_code_holding(w[p], 2, r2) if p != ipos[-1] else "N"
+        free = [p for p in range(25) if p not in ipos]
+        spos = sorted(r2.sample(free, 1))
+        for p in spos:
+            w[p] = r2.choice([b for b in "ACGT" if b != tr["window"][p]])
+        pat = "".join(w)
+        if st.mismatch_information_bits_iupac(pat, 1) < 24:
+            continue
+        tr["iupac_positions"] = ipos
+        tr["edits"] = [{"pos": p, "from": tr["window"][p], "to": pat[p]} for p in spos]
+        subs = [{"position": p, "expected": pat[p], "found": tr["window"][p]} for p in spos]
+        req = pattern_request([_p(pat, "iu", kind="iupac")], max_mismatches=1)
+        out.append(scenario(nid(), "M", "IUPAC codes + one substitution: level 1, never at N, a base inside a set no substitution",
+                            "POST /pattern", req, tr,
+                            [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=1, substitutions=subs)],
+                            tags=["mismatch", "iupac"]))
+    # protein: one substituted residue (a sense codon of another residue), m = 1
+    from truth import load_proteins
+    nid = _ids("M-protein")
+    prots = [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (1, 11)]
+    n = 0
+    for prot in prots[::7]:
+        win = next((w for w in prot["windows"] if w["length_aa"] == 10), None)
+        if win is None:
+            continue
+        tr = _peptide_truth(ctx, prot, win)
+        if tr is None:
+            continue
+        r2 = ctx.rng("M", "prot", prot["key"])
+        res_i = r2.randrange(1, 9)
+        orig = win["peptide"][res_i]
+        new = r2.choice([a for a in st.AMINO if a != orig])
+        pv = win["peptide"][:res_i] + new + win["peptide"][res_i + 1:]
+        codon = win["dna"][3 * res_i:3 * res_i + 3]
+        tr["residue_edit"] = {"residue": res_i, "from": orig, "to": new, "record_codon": codon}
+        subs = [{"residue": res_i, "expected": new, "found": orig, "codon": codon}]
+        req = pattern_request([{"id": "pv", "protein": pv}], genetic_code=prot["transl_table"], max_mismatches=1)
+        out.append(scenario(nid(), "M", "decapeptide of %s with residue %d %s->%s, max_mismatches 1: the source at level 1" % (prot["key"], res_i, orig, new),
+                            "POST /pattern", req, tr,
+                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1, substitutions=subs)],
+                            timing_class="slow", tags=["mismatch", "protein"]))
+        n += 1
+        if n >= 6:
+            break
+    # the staging protein cap after the next restart (1): m = 2 for a peptide -> its slot
+    if prots:
+        prot = prots[0]
+        win = next(w for w in prot["windows"] if w["length_aa"] == 10)
+        tr = _peptide_truth(ctx, prot, win)
+        req = pattern_request([{"id": "cap", "protein": win["peptide"]}], genetic_code=prot["transl_table"], max_mismatches=2,
+                              max_contexts=PATTERN_MAX_CONTEXTS, time_budget_ms=30000)
+        out.append(scenario(nid(), "M", "a peptide with max_mismatches 2 above the protein cap of 1", "POST /pattern", req, tr,
+                            [OK, ex("pattern_slot_error", pattern=0, code="mismatches_above_cap",
+                                    text="pattern: max_mismatches 2 above this server's cap of 1 for protein patterns (the capabilities' mismatches.max.protein); ask with at most 1",
+                                    fields={"max_mismatches_cap": 1})],
+                            timing_class="slow", tags=["mismatch", "protein", "needs-next-deploy"]))
+    # order and stops
+    nid = _ids("M-order")
+    rec = ctx.rec("eco")
+    tr = _mm_window(ctx, rng, rec, 16)
+    req = pattern_request([_p(tr["window"])], mode="partial", max_contexts=5, max_mismatches=1)
+    out.append(scenario(nid(), "M", "a 16-mer, max_mismatches 1, partial max_contexts 5: the closest first, the order level-first",
+                        "POST /pattern", req, tr, [OK, INV, CC], tags=["mismatch", "order"]))
+    tr = _mm_window(ctx, rng, rec, 31)
+    req = pattern_request([_p(tr["window"])], mode="count", max_mismatches=2, max_steps=1500)
+    out.append(scenario(nid(), "M", "max_steps 1500 at max_mismatches 2: stop in a level, lower levels exact", "POST /pattern",
+                        req, tr, [OK, INV, CC, ex("stop", phase="discovery", reason="max_steps", mismatch_level_in=[1, 2]),
+                                  ex("count_relation", level=0, relation="exact", min=1)], tags=["mismatch", "stop"]))
+    req = pattern_request([_p(tr["window"])], mode="partial", max_mismatches=2, max_steps=1500)
+    out.append(scenario(nid(), "M", "the same stop in partial: the lower levels released, cut max_steps", "POST /pattern",
+                        req, tr, [OK, INV, CC, ex("cut", reason="max_steps"),
+                                  ex("contains_source_context", strand="+", require="all", level=0, substitutions=[])],
+                        tags=["mismatch", "stop"]))
+    # the floor at m
+    nid = _ids("M-floor")
+    for L, m in ((17, 2), (14, 1), (19, 3)):
+        tr = _mm_window(ctx, rng, rec, L)
+        bits = st.mismatch_information_bits_iupac(tr["window"], m)
+        within = None
+        for mm in range(m - 1, -1, -1):
+            ok = (st.mismatch_information_bits_iupac(tr["window"], mm) >= 24) if mm else (2 * L >= 24)
+            if ok:
+                within = mm
+                break
+        text = "pattern: %.1f information bits within %d substitution%s, below the floor of 24.0 for scope any_offset" % (
+            bits, m, "" if m == 1 else "s")
+        req = pattern_request([_p(tr["window"])], mode="count", max_mismatches=m)
+        out.append(scenario(nid(), "M", "exact %d-mer at max_mismatches %d: below the floor, %s within it" % (L, m, within),
+                            "POST /pattern", req, tr,
+                            [OK, ex("pattern_slot_error", pattern=0, code="information_below_floor", text=text,
+                                    fields={"max_mismatches_within_floor": within})],
+                            tags=["mismatch", "floor"] + (["smoke"] if L == 17 else [])))
+    # refusals: the host's 400 text; the MCP coerces or refuses these values (async: not comparable through it)
+    nid = _ids("M-refusal")
+    tr = _mm_window(ctx, rng, rec, 25)
+    txt = "request.max_mismatches: expected an integer from 0 to 3 (substitutions per instance)"
+    for v in (4, -1, 1.5, "1", None, True):
+        req = pattern_request([_p(tr["window"])], max_mismatches=None)
+        req["max_mismatches"] = v
+        out.append(scenario(nid(), "M", "max_mismatches %s: refused" % repr(v), "POST /pattern", req, tr,
+                            [err400(txt, code="invalid_request")], tags=["mismatch", "refusal"]))
+    later = ("request.max_mismatches: substitutions with output.labels \"all\" or \"predicate_only\", a predicate or "
+             "long_search \"supported_paths\" are not served by this build (the capabilities' mismatches.later_increment); "
+             "ask without them, or with max_mismatches 0")
+    for extra, title in (({"output": {"labels": "all"}}, "labels all"),
+                         ({"predicate": {"any": [rec.column]}}, "a predicate"),
+                         ({"long_search": "supported_paths"}, "supported paths")):
+        req = pattern_request([_p(tr["window"])], max_mismatches=1, **extra)
+        out.append(scenario(nid(), "M", "max_mismatches 1 with %s: later_increment" % title, "POST /pattern", req, tr,
+                            [err400(later, code="later_increment")], tags=["mismatch", "refusal"]))
+    t40 = _mm_window(ctx, rng, rec, 40)
+    for ls in (None, "paths"):
+        req = pattern_request([_p(t40["window"], "long"), _p(tr["window"], "short")], mode="count", max_mismatches=2,
+                              long_search=ls)
+        out.append(scenario(nid(), "M", "a 40-mer at max_mismatches 2 (long_search %s): its slot, cap 0" % ls, "POST /pattern",
+                            req, t40,
+                            [OK, ex("pattern_slot_error", pattern=0, code="mismatches_above_cap",
+                                    text="pattern: max_mismatches 2 for a pattern of 40 bases, longer than k (31): substitutions in patterns longer than k are not served by this build (the capabilities' mismatches.later_increment names long_patterns); ask with max_mismatches 0, or with windows of at most k bases",
+                                    fields={"max_mismatches_cap": 0}),
+                             ex("count_relation", pattern=1, level=0, relation="exact", min=7)],
+                            tags=["mismatch", "slots"]))
+    req = pattern_request([_p(tr["window"])], max_mismatches=0)
+    out.append(scenario(nid(), "M", "max_mismatches 0: the answer without the field", "POST /pattern", req, tr,
+                        [OK, INV, CC, ex("contains_source_context", strand="+", require="all"),
+                         ex("answer_fields", absent=["limits.max_mismatches"]),
+                         ex("entry_fields", absent=["counts.contexts.by_mismatches", "max_mismatches"])],
+                        tags=["mismatch"]))
+    return out
+
+
+# ================================================================================================= Q: predicates
+def gen_Q(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("Q")
+    nid = _ids("Q-pred")
+    human = ctx.rec("hsa").column
+    for j, key in enumerate(LOW_CARRIER[:6]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 25)
+        A = rec.column
+        cases = [
+            ({"any": [A]}, True, "any(A) selects the record's contexts"),
+            ({"none": [A]}, False, "none(A) deselects them"),
+            ({"all": [A, human]}, False, "all(A, human) on a window human lacks"),
+            ({"at_least": {"n": 1, "labels": [A, human]}}, True, "at_least 1 of (A, human)"),
+            ({"at_least": {"n": 2, "labels": [A, human]}}, False, "at_least 2 of (A, human)"),
+            ({"and": [{"any": [A]}, {"not": {"any": [human]}}]}, True, "and(any A, not any human)"),
+            ({"or": [{"any": [human]}, {"any": [A]}]}, True, "or(any human, any A)"),
+        ]
+        pred, sel, title = cases[j % len(cases)]
+        req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"}, predicate=pred,
+                              predicate_strands="context")
+        exp = [OK, INV, ex("predicate_selected", strand="+", selected=sel)]
+        if sel:
+            exp.append(ex("predicate_selected", strand="+", selected=True, selection_strand_in=["context", "both"], label=A))
+        out.append(scenario(nid(), "Q", "%s on %s" % (title, key), "POST /pattern", req, t, exp,
+                            tags=["predicate"] + (["smoke"] if j == 1 else [])))
+    for j, key in enumerate(LOW_CARRIER[6:10]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 25)
+        A = rec.column
+        pred, sel, title = [({"any": [A]}, True, "any(A)"), ({"none": [A]}, False, "none(A)"),
+                            ({"not": {"any": [A]}}, False, "not(any A)"), ({"all": [A]}, True, "all(A)")][j]
+        req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"}, predicate=pred,
+                              predicate_strands="either")
+        out.append(scenario(nid(), "Q", "%s under predicate_strands either on %s" % (title, key), "POST /pattern", req, t,
+                            [OK, INV, ex("predicate_selected", strand="+", selected=sel)], tags=["predicate"]))
+    rec = ctx.rec("buc")
+    t = ctx.window(rng, rec, 25)
+    req = pattern_request([_p(t["window"])], predicate={"any": ["999999999"]})
+    out.append(scenario(nid(), "Q", "an unknown label: listed, any() folds to false, nothing read", "POST /pattern", req, t,
+                        [OK, INV, ex("answer_fields", equals={"predicate.unknown_labels": ["999999999"], "predicate.normal_form": False}),
+                         ex("entry_fields", equals={"selection.pass": "constant", "counts.selected.value": 0}),
+                         ex("notes", has=["predicate_constant"])], tags=["predicate", "unknown-label"]))
+    req = pattern_request([_p(t["window"])], predicate={"none": ["999999999"]})
+    out.append(scenario(nid(), "Q", "none(unknown) folds to true: every context selected", "POST /pattern", req, t,
+                        [OK, INV, ex("answer_fields", equals={"predicate.normal_form": True}),
+                         ex("predicate_selected", strand="+", selected=True)], tags=["predicate", "unknown-label"]))
+    req = pattern_request([_p(t["window"])], predicate={"any": [562]})
+    out.append(scenario(nid(), "Q", "a number as a name: refused with the fix", "POST /pattern", req, t,
+                        [err400("request.predicate.any[0]: expected a string (a column label; write a taxid as \"562\")",
+                                code="invalid_request")], tags=["predicate", "refusal"]))
+    req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"})
+    out.append(scenario(nid(), "Q", "predicate_only without a predicate: refused", "POST /pattern", req, t,
+                        [err400("request.output.labels: \"predicate_only\" returns the labels a predicate names: it needs a predicate (request.predicate)",
+                                code="invalid_request")], tags=["predicate", "refusal"]))
+    # Q-strands: the mirror under "either"
+    nid = _ids("Q-strands")
+    for j, key in enumerate(["eco", "sau", "pae"]):
+        rec = ctx.rec(key)
+        t = ctx.window(rng, rec, 20)
+        req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"}, predicate={"any": [rec.column]},
+                              predicate_strands="either")
+        out.append(scenario(nid(), "Q", "either on %s: the record's + contexts by their own row, mirrors by their reverse complement" % key,
+                            "POST /pattern", req, t,
+                            [OK, INV, ex("predicate_selected", strand="+", selected=True, selection_strand_in=["context", "both"], label=rec.column),
+                             ex("predicate_either_mirror", label=rec.column)], tags=["predicate", "strands"]))
+    # Q-motif
+    nid = _ids("Q-motif")
+    rec = ctx.rec("mge")
+    t = ctx.window(rng, rec, 25)
+    req = pattern_request([_p(t["window"])], mode="count", predicate={"any": [rec.column]}, predicate_scope="motif")
+    out.append(scenario(nid(), "Q", "motif any(A) on a window of A: selected, every_context", "POST /pattern", req, t,
+                        [OK, INV, ex("motif", selected=True, decided_by_in=["every_context"], label_present=rec.column)],
+                        tags=["predicate", "motif", "smoke"]))
+    q = st.random_dna(ctx.rng("Q", "motif-absent"), 31)
+    req = pattern_request([_p(q)], mode="count", predicate={"any": [rec.column]}, predicate_scope="motif")
+    out.append(scenario(nid(), "Q", "motif on an absent pattern: no_instance", "POST /pattern", req, {"random": q},
+                        [OK, INV, ex("motif", selected=False, decided_by_in=["no_instance"])], tags=["predicate", "motif", "negative"]))
+    req = pattern_request([_p(t["window"])], mode="count", predicate={"none": [rec.column]}, predicate_scope="motif")
+    out.append(scenario(nid(), "Q", "motif none(A) on a window of A: false, every_context", "POST /pattern", req, t,
+                        [OK, INV, ex("motif", selected=False, decided_by_in=["every_context"])], tags=["predicate", "motif"]))
+    req = pattern_request([_p(t["window"])], mode="count", predicate_scope="motif")
+    out.append(scenario(nid(), "Q", "predicate_scope motif without a predicate: refused", "POST /pattern", req, t,
+                        [err400(code="invalid_request", contains=["predicate_scope"])], tags=["predicate", "refusal"]))
+    # Q-budget
+    nid = _ids("Q-budget")
+    rec = ctx.rec("cje")
+    t = ctx.window(rng, rec, 25)
+    req = pattern_request([_p(t["window"])], predicate={"any": [rec.column]}, max_predicate_contexts=1)
+    out.append(scenario(nid(), "Q", "max_predicate_contexts 1: not admitted", "POST /pattern", req, t,
+                        [OK, INV, ex("withheld", reason="predicate_above_threshold")], tags=["predicate", "budget"]))
+    req = pattern_request([_p(t["window"])], mode="partial", predicate={"any": [rec.column]}, max_predicate_contexts=1)
+    out.append(scenario(nid(), "Q", "max_predicate_contexts 1 in partial: the first tested, cut", "POST /pattern", req, t,
+                        [OK, INV, ex("cut", reason="max_predicate_contexts")], tags=["predicate", "budget"]))
+    req = pattern_request([_p(t["window"])], predicate={"any": [rec.column]}, max_predicate_work=1, predicate_strands="context")
+    out.append(scenario(nid(), "Q", "max_predicate_work 1: the selection stops", "POST /pattern", req, t,
+                        [OK, INV, ex("withheld", reason="predicate_budget"),
+                         ex("stop", phase="selection", reason="max_predicate_work")], tags=["predicate", "budget"]))
+    return out
+
+
+# ================================================================================================= C: capabilities
+def gen_C(ctx: Ctx, caps: Dict[str, dict]) -> List[dict]:
+    out: List[dict] = []
+    nid = _ids("C-caps")
+    tc = caps["traverse_capabilities"]
+    pc = caps["pattern_capabilities"]
+    out.append(scenario(nid(), "C", "GET /traverse/capabilities: identity, limits, the gate block within 32 KiB",
+                        "GET /traverse/capabilities", None, None,
+                        [OK, ex("capabilities_doc", required=["release", "index_fp", "k", "max_query_bp", "max_seeds",
+                                                              "pattern.pattern_contract_version", "pattern.details",
+                                                              "attempts.server_instance"],
+                                equals={"index_fp": tc["index_fp"], "k": 31, "regime": "basic",
+                                        "pattern.pattern_contract_version": 1, "pattern.available": True,
+                                        "pattern.details": "GET /pattern/capabilities"},
+                                max_bytes=32768)], tags=["capabilities", "smoke"]))
+    out.append(scenario(nid(), "C", "GET /pattern/capabilities: the full block", "GET /pattern/capabilities", None, None,
+                        [OK, ex("capabilities_doc", required=["caps", "mismatches", "predicate", "genetic_codes", "default_max_anchors"],
+                                equals={"pattern_contract_version": 1, "available": True, "graph_mode": "basic", "k": 31,
+                                        "mask": "file", "counting": "exact", "placement": "record",
+                                        "support": "record_verified", "default_projection": "none"})],
+                        tags=["capabilities", "smoke"]))
+    out.append(scenario(nid(), "C", "GET /capabilities: features, routes, the pattern block, ready", "GET /capabilities", None, None,
+                        [OK, ex("capabilities_doc", required=["features", "routes", "pattern", "release", "server_instance", "resolve"],
+                                equals={"ready": True, "mode": "single", "routes.pattern": "POST /pattern",
+                                        "routes.pattern_capabilities": "GET /pattern/capabilities"})],
+                        tags=["capabilities"]))
+    nid = _ids("C-protocol")
+    eco = ctx.rec("eco")
+    t = ctx.window(ctx.rng("C"), eco, 25)
+    body = pattern_request([_p(t["window"])])
+    out.append(scenario(nid(), "C", "Accept-Encoding gzip: a gzip answer", "POST /pattern", body, t,
+                        [OK, ex("content_encoding", value="gzip"), ex("contains_source_context", strand="+", require="all")],
+                        tags=["protocol"], headers={"Accept-Encoding": "gzip"}))
+    out.append(scenario(nid(), "C", "Accept-Encoding deflate: a deflate answer", "POST /pattern", body, t,
+                        [OK, ex("content_encoding", value="deflate")], tags=["protocol"], headers={"Accept-Encoding": "deflate"}))
+    out.append(scenario(nid(), "C", "an error body is never compressed", "POST /pattern", dict(body, bogus=1), t,
+                        [err400("request: unknown field 'bogus'", code="invalid_request"),
+                         ex("content_encoding", value=None, any_status=True)],
+                        tags=["protocol"], headers={"Accept-Encoding": "gzip"}))
+    out.append(scenario(nid(), "C", "a JSON text with a comment: refused", "POST /pattern", None, None,
+                        [err400(code="invalid_request")], tags=["protocol", "refusal"],
+                        body_raw='{"patterns": [{"dna": "%s"}] /* x */}' % t["window"]))
+    out.append(scenario(nid(), "C", "a duplicated member name: refused", "POST /pattern", None, None,
+                        [err400(code="invalid_request")], tags=["protocol", "refusal"],
+                        body_raw='{"patterns": [{"dna": "%s"}], "mode": "count", "mode": "count"}' % t["window"]))
+    out.append(scenario(nid(), "C", "a body that is not an object: refused", "POST /pattern", [1, 2], None,
+                        [err400(code="invalid_request")], tags=["protocol", "refusal"]))
+    out.append(scenario(nid(), "C", "a wrong content type: the JSON body is still read", "POST /pattern", body, t,
+                        [OK, ex("contains_source_context", strand="+", require="all")], tags=["protocol", "code-derived"],
+                        headers={"Content-Type": "text/plain"}))
+    out.append(scenario(nid(), "C", "GET on POST /pattern: not served", "GET /pattern", None, None,
+                        [ex("status", http=[400, 404, 405])], tags=["protocol"]))
+    return out
+
+
+# ================================================================================================= D: determinism
+def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
+    """Twenty fast scenarios of other areas, repeated three times: identical answers apart from timing."""
+    import copy as _copy
+    out: List[dict] = []
+    picks = []
+    want = {"P": 6, "R": 4, "L": 3, "M": 3, "T": 2, "Q": 2}
+    for area, n in want.items():
+        cands = [s for s in pool if s["area"] == area and s["timing_class"] == "fast" and "refusal" not in s["tags"]
+                 and "machine-dependent" not in s["tags"] and "needs-unique-id" not in s["tags"]
+                 and not s.get("body_raw") and not s.get("headers")]
+        step = max(1, len(cands) // n)
+        picks += cands[::step][:n]
+    for j, s in enumerate(picks):
+        d = _copy.deepcopy(s)
+        d["id"] = "D-%s" % s["id"]
+        d["area"] = "D"
+        d["title"] = "determinism: %s" % s["title"]
+        d["repeat"] = 3
+        d["expect"] = [OK, ex("deterministic")] + [e for e in s["expect"] if e["check"] != "status"]
+        d["tags"] = sorted(set(s["tags"]) - {"smoke"} | {"determinism"} | ({"smoke"} if j in (0, 6) else set()))
+        d["derived_from"] = s["id"]
+        out.append(d)
+    return out
+
+
+# ================================================================================================= N: negatives, near misses, hard regions, use cases
+PRIMERS = {   # universal 16S primers (IUPAC), the classic agent use case
+    "27F": "AGAGTTTGATCMTGGCTCAG", "1492R": "GGTTACCTTGTTACGACTT",
+    "515F": "GTGYCAGCMGCCGCGGTAA", "806R": "GGACTACNVGGGTWTCTAAT",
+}
+
+
+def _iupac_sites(seq: str, pat: str) -> List[Tuple[int, str]]:
+    """Every (start, strand) of the IUPAC pattern on both strands of |seq| (brute force over a few Mb)."""
+    L = len(pat)
+    out = []
+    rc = st.revcomp(pat)
+    anchor = pat[:6] if all(c in "ACGT" for c in pat[:6]) else None
+    for s in range(0, len(seq) - L + 1):
+        w = seq[s:s + L]
+        if st.iupac_match(pat, w):
+            out.append((s, "+"))
+        if st.iupac_match(rc, w):
+            out.append((s, "-"))
+    return out
+
+
+def gen_N(ctx: Ctx) -> List[dict]:
+    out: List[dict] = []
+    rng = ctx.rng("N")
+    recs = ctx.positives
+    eco = ctx.rec("eco")
+    # negatives on every route
+    nid = _ids("N-negative")
+    for j, L in enumerate((31, 40, 60, 100, 200)):
+        q = st.random_dna(ctx.rng("N", "rand", L), L)
+        if L <= K:
+            req = pattern_request([_p(q)])
+            exp = [OK, INV, CC, ex("absent")]
+        else:
+            req = pattern_request([_p(q)], long_search="paths")
+            exp = [OK, INV, CC, ex("absent", count="paths")]
+        out.append(scenario(nid(), "N", "random %d bp on /pattern: exact 0, complete" % L, "POST /pattern", req, {"random": q},
+                            exp, tags=["negative"]))
+    for j in range(4):
+        rec = recs[(j * 7 + 3) % len(recs)]
+        t = ctx.window(rng, rec, 60)
+        q = st.shuffled(ctx.rng("N", "shuf", j), t["window"])
+        out.append(scenario(nid(), "N", "shuffled 60 bp of %s on /pattern: exact 0 paths" % rec.key, "POST /pattern",
+                            pattern_request([_p(q)], long_search="paths"), {"shuffled_from": t},
+                            [OK, INV, CC, ex("absent", count="paths")], tags=["negative", "shuffled"] + (["smoke"] if j == 0 else [])))
+        out.append(scenario(nid(), "N", "shuffled 60 bp of %s on /resolve: no k-mer in the graph" % rec.key, "POST /resolve",
+                            resolve_request(q, labels=[rec.column]), {"shuffled_from": t},
+                            [OK, INV, ex("resolve_runs", label=rec.column, kmers=0)], tags=["negative", "shuffled"]))
+    for j, L in enumerate((100, 200)):
+        q = st.random_dna(ctx.rng("N", "rres", L), L)
+        out.append(scenario(nid(), "N", "random %d bp on /resolve, discovery: nothing to discover" % L, "POST /resolve",
+                            resolve_request(q, discover={"max_labels": 20, "kind": "column"}), {"random": q},
+                            [OK, INV, ex("resolve_absent")], tags=["negative", "discover"]))
+        out.append(scenario(nid(), "N", "random %d bp seed on /traverse: the seed's 400, never a walk" % L, "POST /traverse",
+                            traverse_request([_tseed(q)], {"bounds": {"max_extension_bp": 100}}), {"random": q},
+                            [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q[:32])],
+                            tags=["negative", "refusal"]))
+    for j, n_aa in enumerate((10, 20, 30)):
+        r2 = ctx.rng("N", "pep", n_aa)
+        pep = "".join(r2.choice("MWCFYHQNKDE") for _ in range(n_aa))
+        if n_aa <= 10:
+            req = pattern_request([{"id": "rp", "protein": pep}], genetic_code=1)
+            exp = [OK, INV, CC, ex("absent")]
+        else:
+            req = pattern_request([{"id": "rp", "protein": pep}], genetic_code=1, long_search="paths")
+            exp = [OK, INV, CC, ex("absent", count="paths")]
+        out.append(scenario(nid(), "N", "a random %d-residue peptide of low-degeneracy residues: exact 0" % n_aa, "POST /pattern",
+                            req, {"random_peptide": pep}, exp, tags=["negative", "peptide"]))
+    # near misses: t = m+1 .. m+5 substitutions, spread or clustered; pairs reached / out of reach
+    nid = _ids("N-nearmiss")
+    for j in range(16):
+        rec = recs[(j * 5 + 1) % len(recs)]
+        t = ctx.window(rng, rec, 31)
+        r2 = ctx.rng("N", "near", j)
+        m = j % 4
+        t_sub = m + 1 + (j // 4) % 5
+        t_sub = max(4, min(t_sub, 8)) if j % 2 == 0 else m + 1 + (j % 5)
+        t_sub = min(t_sub, 8)
+        clustered = j % 3 == 0
+        positions = st.clustered_positions(r2, 31, t_sub) if clustered else st.spread_positions(r2, 31, t_sub)
+        variant, edits = st.substitute_bases(t["window"], positions, r2)
+        t["edits"] = edits
+        t["variant"] = variant
+        mm = {} if m == 0 else {"max_mismatches": m}
+        req = pattern_request([_p(variant, "near")], mode="partial", **mm)
+        out.append(scenario(nid(), "N", "%d %s substitutions in a 31-mer of %s, max_mismatches %d: the source out of reach" % (
+            t_sub, "clustered" if clustered else "spread", rec.key, m), "POST /pattern", req, t,
+            [OK, INV, CC, ex("source_absent", strand="+")], tags=["near-miss"] + (["smoke"] if j == 5 else [])))
+        if m and t_sub > m:
+            # its pair within reach: the same window with m of the substitutions
+            keep = sorted(positions[:m])
+            v2, e2 = st.substitute_bases(t["window"], [], r2)
+            v2 = list(t["window"])
+            for e in edits:
+                if e["pos"] in keep:
+                    v2[e["pos"]] = e["to"]
+            v2 = "".join(v2)
+            t2 = dict(t)
+            t2["edits"] = [e for e in edits if e["pos"] in keep]
+            t2["variant"] = v2
+            subs = _subs_plus(v2, t["window"], keep)
+            req = pattern_request([_p(v2, "reach")], mode="partial", max_mismatches=m)
+            out.append(scenario(nid(), "N", "its pair with %d substitution(s): the source back at level %d" % (m, m), "POST /pattern",
+                                req, t2, [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=m, substitutions=subs)],
+                                tags=["near-miss", "pair"]))
+    # peptides with 2-4 substituted residues under the protein cap (1 after the next restart; 3 today)
+    from truth import load_proteins
+    prots = [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (1, 11)]
+    for j, prot in enumerate(prots[3::17][:4]):
+        win = next((w for w in prot["windows"] if w["length_aa"] == 10), None)
+        tr = _peptide_truth(ctx, prot, win) if win else None
+        if tr is None:
+            continue
+        r2 = ctx.rng("N", "pepnear", j)
+        k_sub = 2 + j % 3
+        res = sorted(r2.sample(range(10), k_sub))
+        pv = list(win["peptide"])
+        for r in res:
+            pv[r] = r2.choice([a for a in st.AMINO if a != pv[r]])
+        pv = "".join(pv)
+        tr["residue_edits"] = res
+        req = pattern_request([{"id": "pn", "protein": pv}], genetic_code=prot["transl_table"], mode="partial", max_mismatches=1)
+        out.append(scenario(nid(), "N", "decapeptide with %d substituted residues at max_mismatches 1: the source out of reach" % k_sub,
+                            "POST /pattern", req, tr, [OK, INV, CC, ex("source_absent", strand=tr["strand"])],
+                            timing_class="slow", tags=["near-miss", "peptide"]))
+    # partly mutated seeds for /resolve and /traverse: a substitution every ~k/2 bases
+    for j in range(3):
+        rec = recs[(j * 11 + 4) % len(recs)]
+        t = ctx.window(rng, rec, 200)
+        w = list(t["window"])
+        sub_pos = list(range(15, 200, 15))
+        for p in sub_pos:
+            w[p] = "A" if w[p] != "A" else "C"
+        q = "".join(w)
+        t["edits"] = [{"pos": p} for p in sub_pos]
+        out.append(scenario(nid(), "N", "200 bp of %s with a substitution every 15 bases: no k-mer of the record survives" % rec.key,
+                            "POST /resolve", resolve_request(q, labels=[rec.column]), t,
+                            [OK, INV, ex("resolve_runs", label=rec.column, max_kmers=0)], tags=["near-miss", "mutated-seed"]))
+        q2 = t["window"][:100] + ("A" if t["window"][100] != "A" else "C") + t["window"][101:]
+        out.append(scenario(nid(), "N", "200 bp with one substitution at 100: the runs break there, both sides supported",
+                            "POST /resolve", resolve_request(q2, labels=[rec.column]), t,
+                            [OK, INV, ex("resolve_runs", label=rec.column, covers=[0, 70]),
+                             ex("resolve_runs", label=rec.column, covers=[101, 170]),
+                             ex("resolve_runs", label=rec.column, max_kmers=139)], tags=["near-miss", "mutated-seed"]))
+        out.append(scenario(nid(), "N", "a traverse seed with a substitution in its middle: refused (not in the graph)",
+                            "POST /traverse", traverse_request([_tseed(q2, [rec.accession])], {"bounds": {"max_extension_bp": 100}}), t,
+                            [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q2[:32])],
+                            tags=["near-miss", "mutated-seed", "refusal"]))
+    # hard regions: homopolymers, dinucleotide and short tandem repeats, microsatellites, multi-copy, telomeres
+    nid = _ids("N-hard")
+    hard = [("A" * 31, "A^31"), ("A" * 40, "A^40"), ("AT" * 16, "(AT)^16"), ("CAG" * 10, "(CAG)^10"),
+            ("CA" * 12 + "CAC", "(CA)^12C"), ("TTAGGG" * 5, "(TTAGGG)^5 telomeric"), ("CCCTAA" * 5, "(CCCTAA)^5 telomeric")]
+    for q, title in hard:
+        pat = q[:31]
+        req = pattern_request([_p(pat, "hard")], mode="partial", max_contexts=100)
+        out.append(scenario(nid(), "N", "%s (%d bp) in partial: answered, list cut or complete, counts exact or stated" % (title, len(pat)),
+                            "POST /pattern", req, {"low_complexity": title},
+                            [OK, INV, CC, ex("count_relation", relation=["exact", "at_least", "bounds"], min=0)],
+                            tags=["hard-region", "low-complexity"] + (["smoke"] if title == "(AT)^16" else [])))
+        req = pattern_request([_p(pat, "hard")], max_contexts=100)
+        out.append(scenario(nid(), "N", "%s in all_or_count with max_contexts 100: withheld or complete" % title, "POST /pattern",
+                            req, {"low_complexity": title},
+                            [OK, INV, CC, ex("withheld", reason=[None, "count_above_threshold", "threshold_crossed"])],
+                            tags=["hard-region", "low-complexity"]))
+    for q, title in (("A" * 80, "A^80"), ("TTAGGG" * 15, "(TTAGGG)^15"), ("CAG" * 30, "(CAG)^30")):
+        req = pattern_request([_p(q, "hardlong")], mode="partial", long_search="paths", max_paths=100, max_anchors=1000)
+        exp = [OK, INV, CC]
+        if q == "A" * 80:
+            exp.append(ex("notes", has=["low_complexity_pattern"]))
+        out.append(scenario(nid(), "N", "%s with paths: stated stops or cut, the note on homopolymers" % title, "POST /pattern",
+                            req, {"low_complexity": title}, exp, tags=["hard-region", "low-complexity", "paths"]))
+    for j, (key, t, copies) in enumerate(_repeat_windows(ctx, ctx.rng("N", "rep"), n=2)):
+        rec = ctx.rec(key)
+        w31 = t["window"][:31]
+        tt = ctx.truth_at(rec, t["start"] - rec.offset, 31)
+        req = pattern_request([_p(w31, "rep")], mode="count")
+        out.append(scenario(nid(), "N", "a 31-mer of a %d-copy repeat of %s: counted" % (len(copies), key), "POST /pattern", req, tt,
+                            [OK, INV, ex("count_relation", relation="exact", min=1)], tags=["hard-region", "repeat"]))
+        out.append(scenario(nid(), "N", "resolve a %d-copy repeat of %s: every k-mer carried" % (len(copies), key), "POST /resolve",
+                            resolve_request(t["window"], labels=[rec.column]), t,
+                            [OK, INV, ex("resolve_runs", label=rec.column, full=True)], tags=["hard-region", "repeat"]))
+    q = "TTAGGG" * 10
+    out.append(scenario(nid(), "N", "a telomeric seed (TTAGGG)^10 traversed: stated branching or stops", "POST /traverse",
+                        traverse_request([_tseed(q, [ctx.rec("hsa").column])], {"bounds": {"max_extension_bp": 200, "time_budget_ms": 5000}}),
+                        {"low_complexity": "telomeric"},
+                        [ex("status", http=[200, 400]), INV], tags=["hard-region", "telomeric", "traverse"]))
+    # every normal use case of an agent, with its failure modes
+    nid = _ids("N-usecase")
+    sites = {}
+    for name, primer in PRIMERS.items():
+        sites[name] = _iupac_sites(eco.seq, primer)
+    for name, primer in PRIMERS.items():
+        ss = sites[name]
+        if not ss:
+            continue
+        s, strand = ss[0]
+        tt = ctx.truth_at(eco, s, len(primer))
+        tt["strand"] = strand
+        n_src = len({(km, p) for (s2, strand2) in ss for (km, p) in source_contexts(ctx.truth_at(eco, s2, len(primer)))})
+        req = pattern_request([_p(primer, name, kind="iupac")], mode="count")
+        out.append(scenario(nid(), "N", "primer %s (IUPAC) on both strands: counted, at least E. coli K-12's %d site contexts" % (name, n_src),
+                            "POST /pattern", req, tt,
+                            [OK, INV, ex("count_relation", relation="exact", min=n_src)],
+                            tags=["use-case", "primer"] + (["smoke"] if name == "515F" else [])))
+    req = pattern_request([_p(PRIMERS["515F"], "515F", kind="iupac"), _p(PRIMERS["806R"], "806R", kind="iupac")],
+                          mode="count", strands="forward")
+    out.append(scenario(nid(), "N", "a primer pair on the forward strand only (one primer is reverse): both counted", "POST /pattern",
+                        req, None, [OK, INV, ex("entry_fields", pattern=0, equals={"strands": ["+"]})], tags=["use-case", "primer", "wrong-strand"]))
+    t = ctx.window(rng, eco, 25)
+    req = pattern_request([_p(st.revcomp(t["window"]), "rc")], strands="forward")
+    out.append(scenario(nid(), "N", "the wrong strand: the reverse complement of a window searched forward only: the record's k-mers not found",
+                        "POST /pattern", req, dict(t, strand="+"),
+                        [OK, INV, CC, ex("source_absent", strand="+")], tags=["use-case", "wrong-strand"]))
+    req = pattern_request([_p(t["window"][:10], "short")], mode="count")
+    out.append(scenario(nid(), "N", "too short (10 bp, 20 bits): below the floor", "POST /pattern", req, t,
+                        [OK, ex("pattern_slot_error", pattern=0, code="information_below_floor",
+                                text="pattern: 20.0 information bits, below the floor of 24.0 for scope any_offset")],
+                        tags=["use-case", "too-short"]))
+    req = pattern_request([_p("N" * 12 + t["window"][12:25], "degenerate", kind="iupac")], mode="count")
+    out.append(scenario(nid(), "N", "too degenerate (12 N + 13 bases, 26 bits... answered as stated)", "POST /pattern", req, t,
+                        [OK, INV], tags=["use-case", "degenerate"]))
+    req = pattern_request([_p("NNNNNNNNNNNNNNNNNNNN" + t["window"][:11], "degenerate2", kind="iupac")], mode="count")
+    out.append(scenario(nid(), "N", "too degenerate (20 N + 11 bases, 22 bits): below the floor", "POST /pattern", req, t,
+                        [OK, ex("pattern_slot_error", pattern=0, code="information_below_floor",
+                                text="pattern: 22.0 information bits, below the floor of 24.0 for scope any_offset")],
+                        tags=["use-case", "degenerate"]))
+    # identify an unknown read: resolve + pattern of the same window
+    for j in range(2):
+        rec = recs[(j * 13 + 8) % len(recs)]
+        t = ctx.window(rng, rec, 150)
+        out.append(scenario(nid(), "N", "identify a read of %s: discovery names its taxid" % rec.key, "POST /resolve",
+                            resolve_request(t["window"], discover={"max_labels": 100, "kind": "column"}), t,
+                            [OK, INV, ex("resolve_discover_contains", label=rec.column)], timing_class="slow", tags=["use-case", "identify"]))
+        t31 = ctx.truth_at(rec, t["start"] - rec.offset, 31)
+        out.append(scenario(nid(), "N", "identify a read of %s: its first 31 bp placed in its record" % rec.key, "POST /pattern",
+                            pattern_request([_p(t31["window"])], output={"labels": "predicate_only"},
+                                            predicate={"any": [rec.column]}, predicate_strands="context"), t31,
+                            [OK, INV, ex("source_placement", strand="+")], tags=["use-case", "identify"]))
+    # a peptide in the wrong genetic code (mitochondrial table 2 vs table 1)
+    from truth import load_proteins as _lp
+    mito = [p for p in _lp() if p["transl_table"] in (2, 3, 4, 5) and p["genome"] in ctx.by_key]
+    for prot in mito[:2]:
+        win = next((w for w in prot["windows"] if w["length_aa"] == 10 and st.translate(w["dna"], 1) != w["peptide"]), None)
+        tr = _peptide_truth(ctx, prot, win) if win else None
+        if tr is None:
+            continue
+        out.append(scenario(nid(), "N", "a %s peptide in its own table %d: found" % (prot["genome"], prot["transl_table"]), "POST /pattern",
+                            pattern_request([{"id": "own", "protein": win["peptide"]}], genetic_code=prot["transl_table"]), tr,
+                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all")], tags=["use-case", "genetic-code"]))
+        out.append(scenario(nid(), "N", "the same peptide in table 1: its record codons out of reach", "POST /pattern",
+                            pattern_request([{"id": "wrong", "protein": win["peptide"]}], genetic_code=1), tr,
+                            [OK, INV, CC, ex("source_absent", strand=tr["strand"])], tags=["use-case", "genetic-code", "wrong-code"]))
+    # extend a seed to its neighbourhood (both arms) and a long marker as supported paths: in T and L
+    # the index defect, stated: the A. thaliana chloroplast (last record of column 3702) is not annotated
+    athc = ctx.rec("athc")
+    t = ctx.truth_at(athc, 54989, 31)
+    out.append(scenario(nid(), "N", "the 2026-10-09 defect: rbcL 31-mer of NC_000932.1 is in the graph but its header carries none",
+                        "POST /resolve", resolve_request(t["window"], labels=[athc.accession]), t,
+                        [OK, INV, ex("resolve_graph_runs", runs=[[0, 1]]), ex("resolve_runs", label=athc.accession, kmers=0)],
+                        tags=["index-defect", "documented"]))
+    return out

@@ -51,8 +51,8 @@ class Normalise(unittest.TestCase):
         a = checks.normalise_direct(400, b'{"error": "x", "code": "invalid_request"}')
         self.assertEqual(a["error"], {"code": "invalid_request", "text": "x"})
         a = checks.normalise_direct(502, b"<html>bad gateway</html>")
-        self.assertIsNone(a["body"])
-        self.assertEqual(a["error"]["code"], None)
+        self.assertEqual(a["body"], "<html>bad gateway</html>")     # suite_common keeps a non-JSON body as text
+        self.assertEqual(a["error"], {"code": None, "text": "<html>bad gateway</html>"})
         import gzip as gz
         a = checks.normalise_direct(200, gz.compress(b'{"a": 1}'), {"Content-Encoding": "gzip"})
         self.assertEqual(a["body"], {"a": 1})
@@ -64,6 +64,26 @@ class Normalise(unittest.TestCase):
         c = ok_answer({"x": 2, "timing": {"elapsed_ms": 9}})
         self.assertEqual(checks.answer_digest(a), checks.answer_digest(b))
         self.assertNotEqual(checks.answer_digest(a), checks.answer_digest(c))
+
+    def test_digest_is_the_runners(self):
+        """The fallback digest (a vendored checks.py without suite_common) equals suite_common.answer_digest."""
+        import suite_common
+        caps = ok_answer({"a": 1, "measured_build_mbps": 3.0, "timing": {"x": 1},
+                          "deadline_check": {"observed_max_uninterruptible_ms": 7}})
+        caps["headers"] = {"content-encoding": "gzip"}
+        saved = checks._suite_common
+        try:
+            for route in ("GET /traverse/capabilities", "POST /pattern", None):
+                want = suite_common.answer_digest(caps, route)
+                checks._suite_common = None
+                got = checks.answer_digest(caps, route)
+                checks._suite_common = saved
+                self.assertEqual(got, want, route)
+            checks._suite_common = None
+            self.assertEqual(checks.normalise_direct(400, b'{"error": "x", "code": "c"}', {"Content-Type": "a/b", "X": "y"}),
+                             suite_common.normalise_direct(400, b'{"error": "x", "code": "c"}', {"Content-Type": "a/b", "X": "y"}))
+        finally:
+            checks._suite_common = saved
 
 
 class Generic(unittest.TestCase):
