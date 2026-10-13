@@ -13,6 +13,8 @@
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 #include <json/json.h>
 #include <sdsl/int_vector.hpp>
 
@@ -27,6 +29,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -38,9 +41,10 @@
 // traversal request selects (graph, graphs), the names a /pattern request selects, the
 // reservations and the plan of `in_ram`, the columns' overlap; the sampled check of a mask at
 // load (load_annotated_graph.hpp); a seed a graph does not hold as a per-seed result
-// (process_traverse_request); an attempt's bound after a load (traverse_attempts.hpp); and
-// the record mapping an `in_ram` load's copy shares with the resident pair
-// (initialize_annotated_dbg with AnnotatedDBG::share_coord_to_header)
+// (process_traverse_request); an attempt's bound after a load (traverse_attempts.hpp); the
+// record mapping an `in_ram` load's copy shares with the resident pair
+// (initialize_annotated_dbg with AnnotatedDBG::share_coord_to_header); and an `in_ram` load
+// that fails, thrown for the request where a start-up load exits
 
 namespace {
 
@@ -1014,4 +1018,124 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     ASSERT_TRUE(refused->get_coord_to_header());
     EXPECT_NE(other.get(), refused->get_coord_to_header());
     EXPECT_EQ(2u, refused->get_coord_to_header()->build_header_index());
+}
+
+// A load for one request (`in_ram`: the overload with a PatternPreparation) that fails throws
+// the loader's message, naming the file and the step, where the start-up's load of the same
+// files exits with the loader's own line: an annotation or a graph that cannot be read, a
+// truncated annotation, a .seqs that cannot be read when the copy loads it (not when it shares
+// the resident's mapping), a graph and an annotation that are not compatible, and a row_diff
+// annotation whose anchors or fork successors beside the graph cannot be loaded. Each file
+// loadable again, the same call loads the index.
+TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
+    const PairOnDisk pair = write_pair("failed");
+    auto config = config_of(pair);
+    PatternPreparation none;
+    none.progress = false;
+    // the message of the std::runtime_error the per-request load throws, "" when it loads
+    auto failure = [&](const Config &c,
+                       std::shared_ptr<const annot::CoordToHeader> mapping = nullptr) {
+        try {
+            initialize_annotated_dbg(c, none, std::move(mapping));
+        } catch (const std::runtime_error &e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const std::string unreadable = "Permission denied (missing read permission on this file)";
+    const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
+    const fs::perms readable = fs::perms::owner_read | fs::perms::owner_write;
+    ASSERT_EQ("", failure(*config));
+
+    // (root reads a file without permissions)
+    if (::geteuid() != 0) {
+        fs::permissions(pair.annotation, fs::perms::none);
+        EXPECT_EQ("Cannot load annotation from '" + pair.annotation + "': " + unreadable,
+                  failure(*config));
+        EXPECT_EXIT(initialize_annotated_dbg(*config), ::testing::ExitedWithCode(1),
+                    "Cannot open annotation file");
+        fs::permissions(pair.annotation, readable);
+
+        fs::permissions(pair.graph, fs::perms::none);
+        EXPECT_EQ("Cannot load graph from '" + pair.graph + "': " + unreadable,
+                  failure(*config));
+        EXPECT_EXIT(initialize_annotated_dbg(*config), ::testing::ExitedWithCode(1),
+                    "Cannot load graph from");
+        fs::permissions(pair.graph, readable);
+
+        auto resident = initialize_annotated_dbg(*config, none);
+        ASSERT_TRUE(resident->get_coord_to_header());
+        fs::permissions(seqs, fs::perms::none);
+        EXPECT_EQ("Cannot load the record mapping from '" + seqs + "': " + unreadable,
+                  failure(*config));
+        EXPECT_EQ("", failure(*config, resident->share_coord_to_header()));
+        EXPECT_EXIT(initialize_annotated_dbg(*config), ::testing::ExitedWithCode(1),
+                    "Cannot open CoordToHeader file");
+        fs::permissions(seqs, readable);
+    }
+
+    // a truncated annotation, cut inside its label encoder (after its version tag), which the
+    // loader checks (a cut inside the matrix is not noticed by every matrix loader)
+    const std::string kept = pair.dir + "/anno.kept";
+    fs::copy_file(pair.annotation, kept, fs::copy_options::overwrite_existing);
+    fs::resize_file(pair.annotation, 12);
+    EXPECT_EQ("Cannot load annotation from '" + pair.annotation + "': could not read contents "
+              "(possibly corrupted or incompatible)", failure(*config));
+    EXPECT_EXIT(initialize_annotated_dbg(*config), ::testing::ExitedWithCode(1),
+                "Cannot load annotation");
+    fs::copy_file(kept, pair.annotation, fs::copy_options::overwrite_existing);
+
+    // a graph of other records beside the annotation
+    std::mt19937 rng(29);
+    auto other_index = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            11, { random_seq(150, &rng) }, { "F" }, DeBruijnGraph::BASIC);
+    PairOnDisk other = pair;
+    other.graph = pair.dir + "/other" + DBGSuccinct::kExtension;
+    dynamic_cast<const DBGSuccinct&>(other_index->get_graph()).serialize(other.graph);
+    auto other_config = config_of(other);
+    EXPECT_EQ("Graph '" + other.graph + "' and annotation '" + pair.annotation + "' are not "
+              "compatible", failure(*other_config));
+    EXPECT_EXIT(initialize_annotated_dbg(*other_config), ::testing::ExitedWithCode(1),
+                "Graph and annotation are not compatible");
+
+    // a row_diff annotation: its anchors and fork successors are files beside the graph
+    PairOnDisk row_diff;
+    row_diff.dir = test_dump_dir() + "/multigraph_in_ram_row_diff";
+    fs::remove_all(row_diff.dir);
+    fs::create_directories(row_diff.dir);
+    auto rd_index = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, { random_seq(120, &rng), random_seq(90, &rng) }, { "A", "B" },
+            DeBruijnGraph::BASIC);
+    row_diff.graph = row_diff.dir + "/graph" + DBGSuccinct::kExtension;
+    dynamic_cast<const DBGSuccinct&>(rd_index->get_graph()).serialize(row_diff.graph);
+    rd_index->get_annotator().serialize(row_diff.dir + "/anno");
+    row_diff.annotation = row_diff.dir + "/anno" + annot::RowDiffColumnAnnotator::kExtension;
+    ASSERT_TRUE(fs::exists(row_diff.annotation));
+    const auto &rd = dynamic_cast<const annot::matrix::IRowDiff&>(
+            rd_index->get_annotator().get_matrix());
+    const std::string anchor = row_diff.graph + annot::matrix::kRowDiffAnchorExt;
+    const std::string fork_succ = row_diff.graph + annot::matrix::kRowDiffForkSuccExt;
+    auto rd_config = config_of(row_diff);
+    EXPECT_EQ("Cannot load anchor from '" + anchor + "': No such file or directory",
+              failure(*rd_config));
+    EXPECT_EXIT(initialize_annotated_dbg(*rd_config), ::testing::ExitedWithCode(1),
+                "Cannot open anchor file");
+    {
+        std::ofstream out(anchor, std::ios::binary);
+        rd.anchor().serialize(out);
+    }
+    EXPECT_EQ("Cannot load fork successor bitmap from '" + fork_succ + "': No such file or "
+              "directory", failure(*rd_config));
+    EXPECT_EXIT(initialize_annotated_dbg(*rd_config), ::testing::ExitedWithCode(1),
+                "Cannot open fork successor file");
+    {
+        std::ofstream out(fork_succ, std::ios::binary);
+        rd.fork_succ().serialize(out);
+    }
+    EXPECT_EQ("", failure(*rd_config));
+
+    // every file loadable again: the index loads, with its record mapping
+    auto loaded = initialize_annotated_dbg(*config, none);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->get_coord_to_header());
 }

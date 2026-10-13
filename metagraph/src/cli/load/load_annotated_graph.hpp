@@ -77,6 +77,13 @@ async_load_critical_dbg(const std::string &path, const PatternPreparation &prep)
 // the mapping of the very pair it loads (the same annotation file: the same .seqs); null
 // loads the .seqs as every load does, unless |config| says not to map (no_coord_mapping: the
 // caller's index has no mapping, so none is looked for).
+// A load that fails throws (LoadFailure::THROW), where the other overloads exit: a
+// std::runtime_error naming the file and the step -- "Cannot load graph from '<file>': <cause>",
+// "Cannot load annotation from '<file>': <cause>", "Cannot load the record mapping from
+// '<file>': <cause>", "Cannot load anchor from '<file>': <cause>", "Cannot load fork successor
+// bitmap from '<file>': <cause>", "Graph '<file>' and annotation '<file>' are not compatible"
+// (<cause>: utils::file_read_failure_detail) --, nothing of the index kept. The loaders log
+// their own lines as at start-up.
 std::unique_ptr<graph::AnnotatedDBG>
 initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
                          std::shared_ptr<const annot::CoordToHeader> coord_to_header = nullptr);

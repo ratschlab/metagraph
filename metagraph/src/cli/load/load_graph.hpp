@@ -1,6 +1,7 @@
 #ifndef __LOAD_GRAPH_HPP__
 #define __LOAD_GRAPH_HPP__
 
+#include <stdexcept>
 #include <string>
 
 #include "common/logger.hpp"
@@ -17,21 +18,39 @@ class DBGSuccinct;
 
 namespace cli {
 
+/**
+ * What a loader does with a file of the index it cannot load:
+ *   EXIT   logs the failure and exits with status 1: a command's or a server's start-up load,
+ *          with nothing to serve without the index (and the server's start-up loads run inside
+ *          OpenMP regions, which an exception must not leave)
+ *   THROW  throws it as a std::runtime_error whose message names the file and the step: a
+ *          server's load of an index for one request (`in_ram`), which that request is
+ *          answered with while the server runs on with its resident indexes
+ */
+enum class LoadFailure { EXIT, THROW };
+
 /** Loads |filename| with the graph type's extension (|.dbg|, |.orhashdbg|, etc.). On failure,
- *  logs the resolved path and likely causes (permissions, etc.); implementations may also log. */
+ *  logs the resolved path and likely causes (permissions, etc.) and exits, or throws that
+ *  message (|on_failure|); implementations may also log. */
 template <class Graph>
-std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
+std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename,
+                                                     LoadFailure on_failure = LoadFailure::EXIT) {
     auto graph = std::make_shared<Graph>(2);
     if (!graph->load(filename)) {
         const std::string on_disk = utils::make_suffix(filename, Graph::kExtension);
-        common::logger->error("Cannot load graph from '{}': {}", on_disk,
-                              utils::file_read_failure_detail(on_disk));
+        const std::string message = fmt::format("Cannot load graph from '{}': {}", on_disk,
+                                                utils::file_read_failure_detail(on_disk));
+        if (on_failure == LoadFailure::THROW) {
+            throw std::runtime_error(message);
+        }
+        common::logger->error("{}", message);
         exit(1);
     }
     return graph;
 }
 
-std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filename);
+std::shared_ptr<graph::DeBruijnGraph>
+load_critical_dbg(const std::string &filename, LoadFailure on_failure = LoadFailure::EXIT);
 
 // What mask_dummy_edges masked (the figures of `metagraph stats --count-dummy`) and its time
 struct DummyMaskCounts {

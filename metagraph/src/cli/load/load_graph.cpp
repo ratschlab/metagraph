@@ -20,11 +20,11 @@ namespace cli {
 using namespace mtg::graph;
 using mtg::common::logger;
 
-using GraphLoader = std::shared_ptr<DeBruijnGraph> (*)(const std::string&);
+using GraphLoader = std::shared_ptr<DeBruijnGraph> (*)(const std::string&, LoadFailure);
 
 template <class Graph>
-std::shared_ptr<DeBruijnGraph> load_as(const std::string &filename) {
-    return load_critical_graph_from_file<Graph>(filename);
+std::shared_ptr<DeBruijnGraph> load_as(const std::string &filename, LoadFailure on_failure) {
+    return load_critical_graph_from_file<Graph>(filename, on_failure);
 }
 
 #define GRAPH_LOADER_ENTRY(GRAPH) { GRAPH::kExtension, &load_as<GRAPH> }
@@ -59,14 +59,20 @@ DummyMaskCounts mask_dummy_edges(DBGSuccinct *graph, size_t num_threads) {
     return counts;
 }
 
-std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
+std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename,
+                                                 LoadFailure on_failure) {
     for (const auto &[extension, load] : kGraphLoaders) {
         if (utils::ends_with(filename, extension))
-            return load(filename);
+            return load(filename, on_failure);
     }
     auto exts = utils::get_firsts<std::vector<std::string>>(kGraphLoaders);
-    logger->error("Cannot load graph from '{}': unrecognized file extension (expected one of {})",
-                  filename, fmt::join(exts, "/"));
+    const std::string message = fmt::format("Cannot load graph from '{}': unrecognized file "
+                                            "extension (expected one of {})",
+                                            filename, fmt::join(exts, "/"));
+    if (on_failure == LoadFailure::THROW) {
+        throw std::runtime_error(message);
+    }
+    logger->error("{}", message);
     exit(1);
 }
 

@@ -82,8 +82,13 @@ class IRowDiff {
     const graph::DeBruijnGraph* graph() const { return graph_; }
     void set_graph(const graph::DeBruijnGraph *graph) { graph_ = graph; }
 
+    // Load the fork successors / the anchors from |filename|; exit the process when the file
+    // cannot be opened or loaded (the failure logged)
     void load_fork_succ(const std::string &filename);
     void load_anchor(const std::string &filename);
+    // The same, the failure logged and returned (false) instead of exiting
+    bool try_load_fork_succ(const std::string &filename);
+    bool try_load_anchor(const std::string &filename);
 
     const anchor_bv_type& anchor() const { return anchor_; }
 

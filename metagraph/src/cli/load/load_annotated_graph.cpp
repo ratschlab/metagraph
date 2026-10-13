@@ -4,6 +4,9 @@
 #include <filesystem>
 #include <mutex>
 #include <random>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
@@ -239,15 +242,27 @@ void prepare_pattern_graph(const std::shared_ptr<DeBruijnGraph> &graph, const st
     }
 }
 
+namespace {
+
+// async_load_critical_dbg, a graph that cannot be loaded handled as |on_failure| says (thrown:
+// stored in the future, which rethrows it from get())
 std::shared_future<std::shared_ptr<DeBruijnGraph>>
-async_load_critical_dbg(const std::string &path, const PatternPreparation &prep) {
-    return std::async(std::launch::async, [path, prep]() -> std::shared_ptr<DeBruijnGraph> {
-        auto graph = load_critical_dbg(path);
+load_dbg_async(const std::string &path, const PatternPreparation &prep, LoadFailure on_failure) {
+    return std::async(std::launch::async,
+                      [path, prep, on_failure]() -> std::shared_ptr<DeBruijnGraph> {
+        auto graph = load_critical_dbg(path, on_failure);
         // here, in the loading thread: while the annotation loads, and before the graph is
         // shared with anyone, so that nothing ever sees it without the mask
         prepare_pattern_graph(graph, path, prep);
         return graph;
     }).share();
+}
+
+} // namespace
+
+std::shared_future<std::shared_ptr<DeBruijnGraph>>
+async_load_critical_dbg(const std::string &path, const PatternPreparation &prep) {
+    return load_dbg_async(path, prep, LoadFailure::EXIT);
 }
 
 std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
@@ -258,7 +273,7 @@ namespace {
 
 std::unique_ptr<annot::CoordToHeader>
 load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
-                     const Config &config) {
+                     const Config &config, LoadFailure on_failure) {
     std::unique_ptr<annot::CoordToHeader> coord_to_header;
 
     if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(&annotation.get_matrix())
@@ -270,6 +285,11 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
         if (std::filesystem::exists(cth_fname)) {
             coord_to_header = std::make_unique<annot::CoordToHeader>();
             if (!coord_to_header->load(cth_fname)) {
+                if (on_failure == LoadFailure::THROW) {
+                    throw std::runtime_error(fmt::format(
+                            "Cannot load the record mapping from '{}': {}", cth_fname,
+                            utils::file_read_failure_detail(cth_fname)));
+                }
                 exit(1);
             }
             logger->trace("CoordToHeader mapping loaded successfully from {}. "
@@ -295,16 +315,36 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
     return coord_to_header;
 }
 
+// The message of an annotation that could not be loaded from |files| (with |extension|): the
+// file on disk and the likely cause; several files are named together (the load's own log
+// names the one that failed)
+std::string annotation_load_failure(const std::vector<std::string> &files,
+                                    const std::string &extension) {
+    std::vector<std::string> on_disk;
+    for (const std::string &file : files) {
+        on_disk.push_back(utils::make_suffix(file, extension));
+    }
+    if (on_disk.size() == 1) {
+        return fmt::format("Cannot load annotation from '{}': {}", on_disk[0],
+                           utils::file_read_failure_detail(on_disk[0]));
+    }
+    return fmt::format("Cannot load annotations from '{}'", fmt::join(on_disk, "', '"));
+}
+
 // Build the AnnotatedDBG from a graph future. Annotation and CTH loads run
 // in parallel with the graph load; the graph is awaited only when needed
 // (for row_diff set_graph and for the final PRIMARY wrap).
 // |shared_coord_to_header|: the mapping of this annotation that another index holds, used
 // instead of loading the .seqs (initialize_annotated_dbg); null loads it.
+// |on_failure|: what a file that cannot be loaded does (LoadFailure). Thrown, the graph future
+// is released on the way out, and the last reference to it waits for the loading thread: the
+// graph, loaded or not, is freed before the exception leaves the loader.
 std::unique_ptr<AnnotatedDBG>
 build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
                     const Config &config,
                     size_t max_chunks_open,
-                    std::shared_ptr<const annot::CoordToHeader> shared_coord_to_header = nullptr) {
+                    std::shared_ptr<const annot::CoordToHeader> shared_coord_to_header = nullptr,
+                    LoadFailure on_failure = LoadFailure::EXIT) {
     // Construct the annotation. The bulk load is graph-independent and runs
     // in parallel with the graph load.
     std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation;
@@ -328,8 +368,13 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
             }
             loaded = annotation->load(config.infbase_annotators.at(0));
         }
-        if (!loaded)
+        if (!loaded) {
+            if (on_failure == LoadFailure::THROW) {
+                throw std::runtime_error(annotation_load_failure(config.infbase_annotators,
+                                                                 annotation->file_extension()));
+            }
             exit(1);
+        }
 
         // The mapping another index of this annotation holds is shared (a column per label,
         // as the .seqs of this annotation has: a mapping of another annotation is not, and the
@@ -346,7 +391,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         if (shared_coord_to_header) {
             coord_to_header = std::move(shared_coord_to_header);
         } else {
-            coord_to_header = load_coord_to_header(*annotation, config);
+            coord_to_header = load_coord_to_header(*annotation, config, on_failure);
         }
 
         using namespace annot::matrix;
@@ -354,8 +399,20 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
             // row_diff side files (no graph needed).
             if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+                const std::string anchor = config.infbase + kRowDiffAnchorExt;
+                const std::string fork_succ = config.infbase + kRowDiffForkSuccExt;
+                if (on_failure == LoadFailure::EXIT) {
+                    row_diff_column->load_anchor(anchor);
+                    row_diff_column->load_fork_succ(fork_succ);
+                } else if (!row_diff_column->try_load_anchor(anchor)) {
+                    throw std::runtime_error(fmt::format(
+                            "Cannot load anchor from '{}': {}", anchor,
+                            utils::file_read_failure_detail(anchor)));
+                } else if (!row_diff_column->try_load_fork_succ(fork_succ)) {
+                    throw std::runtime_error(fmt::format(
+                            "Cannot load fork successor bitmap from '{}': {}", fork_succ,
+                            utils::file_read_failure_detail(fork_succ)));
+                }
             }
             // Attach the graph (the only annotation step that needs it).
             auto graph = graph_future.get();
@@ -375,6 +432,11 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation),
                                                      false, std::move(coord_to_header));
     if (!anno_graph->check_compatibility()) {
+        if (on_failure == LoadFailure::THROW) {
+            throw std::runtime_error(fmt::format(
+                    "Graph '{}' and annotation '{}' are not compatible", config.infbase,
+                    fmt::join(config.infbase_annotators, "', '")));
+        }
         logger->error("Graph and annotation are not compatible");
         exit(1);
     }
@@ -398,8 +460,9 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
 std::unique_ptr<AnnotatedDBG>
 initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
                          std::shared_ptr<const annot::CoordToHeader> coord_to_header) {
-    return build_annotated_dbg(async_load_critical_dbg(config.infbase, prep), config,
-                               kDefaultMaxChunksOpen, std::move(coord_to_header));
+    return build_annotated_dbg(load_dbg_async(config.infbase, prep, LoadFailure::THROW), config,
+                               kDefaultMaxChunksOpen, std::move(coord_to_header),
+                               LoadFailure::THROW);
 }
 
 std::pair<std::shared_future<std::shared_ptr<DeBruijnGraph>>,
