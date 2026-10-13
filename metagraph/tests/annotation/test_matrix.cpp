@@ -1,4 +1,5 @@
 #include <random>
+#include <sstream>
 
 #include "gtest/gtest.h"
 
@@ -9,6 +10,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 
 
 namespace {
@@ -303,6 +305,49 @@ TYPED_TEST(BinaryMatrixTest, AllMixed6) {
     }
 
     test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
+}
+
+struct MoveOnlyColumnValues : sdsl::int_vector<> {
+    using sdsl::int_vector<>::int_vector;
+    MoveOnlyColumnValues() = default;
+    MoveOnlyColumnValues(MoveOnlyColumnValues&&) = default;
+};
+
+TEST(CSCMatrix, MoveColumnValues) {
+    BitVectorPtrArray columns;
+    columns.emplace_back(new bit_vector_stat(sdsl::bit_vector { 1, 0, 1, 0 }));
+    columns.emplace_back(new bit_vector_stat(sdsl::bit_vector { 0, 1, 1, 0 }));
+    columns.emplace_back(new bit_vector_stat(4, false));
+    ColumnMajor index(std::move(columns));
+
+    std::vector<MoveOnlyColumnValues> column_values;
+    column_values.emplace_back(std::initializer_list<uint64_t> { 5, 7 });
+    column_values.emplace_back(std::initializer_list<uint64_t> { 11, 13 });
+    column_values.emplace_back();
+
+    std::stringstream expected_serialization;
+    index.serialize(expected_serialization);
+    for (const auto &values : column_values) {
+        values.serialize(expected_serialization);
+    }
+
+    CSCMatrix<ColumnMajor, MoveOnlyColumnValues> matrix(std::move(index),
+                                                      std::move(column_values));
+    const std::vector<BinaryMatrix::Row> rows { 2, 0, 2, 3, 1 };
+    const std::vector<IntMatrix::RowValues> expected {
+        { { 0, 7 }, { 1, 13 } }, { { 0, 5 } },
+        { { 0, 7 }, { 1, 13 } }, {}, { { 1, 11 } }
+    };
+    EXPECT_EQ(matrix.get_row_values(rows), expected);
+    EXPECT_TRUE(matrix.get_row_values({}).empty());
+
+    std::stringstream serialized;
+    matrix.serialize(serialized);
+    EXPECT_EQ(serialized.str(), expected_serialization.str());
+
+    CSCMatrix<ColumnMajor, MoveOnlyColumnValues> loaded;
+    ASSERT_TRUE(loaded.load(serialized));
+    EXPECT_EQ(loaded.get_row_values(rows), expected);
 }
 
 } // namespace

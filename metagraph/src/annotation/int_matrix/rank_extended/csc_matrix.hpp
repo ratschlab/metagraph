@@ -1,6 +1,7 @@
 #ifndef __CSC_MATRIX_HPP__
 #define __CSC_MATRIX_HPP__
 
+#include <utility>
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -26,7 +27,7 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
     CSCMatrix(BaseMatrix&& index_matrix,
               std::vector<ColumnValues>&& column_values)
       : binary_matrix_(std::move(index_matrix)),
-        column_values_(column_values) {}
+        column_values_(std::move(column_values)) {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
     std::vector<RowValues> get_row_values(std::span<const Row> rows,
