@@ -356,15 +356,19 @@ class PatternChecks(unittest.TestCase):
 
 
 class BudgetChecks(unittest.TestCase):
-    """budget_respected: the server's elapsed time within the effective budget plus the stated allowance, an
-    overrun a finding (the smoke run's lambda walk: 34,202 ms under a 15,000 ms budget)."""
+    """budget_respected by each route's SPEC rule; on /traverse the seed phase is outside the seed's budget (the
+    smoke run's lambda walk: 34,201 ms under 15,000, of which the seed phase 33,803: within the rule)."""
 
-    def traverse(self, elapsed, budget=15000, echoed=True, timing=True):
-        r = {"outcome": {"walks": "partial"}, "arms": {}}
+    def traverse(self, elapsed, seed_phase, piece=100.0, budget=15000, echoed=True, timing=True, kind="read",
+                 complete_to_bp=1):
+        r = {"outcome": {"walks": "partial"},
+             "arms": {"right": {"status": "truncated", "complete_to_bp": complete_to_bp,
+                                "cap_trigger": {"reason": "time_budget", "at_bp": complete_to_bp}}}}
         if timing:
-            r["timing"] = {"elapsed_ms": elapsed, "seed_phase_ms": elapsed - 400,
-                           "deadline": {"longest_piece": {"kind": "read", "ms": 20556.4, "rows": 1},
-                                        "stopped_by": "time_budget", "stop_after_deadline_ms": elapsed - budget}}
+            r["timing"] = {"elapsed_ms": elapsed, "seed_phase_ms": seed_phase,
+                           "deadline": {"longest_piece": {"kind": kind, "ms": piece, "rows": 1},
+                                        "stopped_by": "time_budget",
+                                        "stop_after_deadline_ms": max(0, elapsed - budget)}}
         body = {"results": [r], "timing": {"elapsed_ms": elapsed + 1}}
         if echoed:
             body["strategy"] = {"bounds": {"time_budget_ms": budget}}
@@ -375,18 +379,34 @@ class BudgetChecks(unittest.TestCase):
 
     def test_traverse(self):
         sc = self.sc("POST /traverse", {"seeds": [{"sequence": "A" * 40}],
-                                        "strategy": {"bounds": {"time_budget_ms": 15000}}})
-        o, d = outcome(sc, self.traverse(34201.3), "budget_respected", allowance_ms=1000)
+                                        "strategy": {"direction": "right", "bounds": {"time_budget_ms": 15000}}})
+        # the smoke run's walk: the seed phase outlasted the budget, the walk then stopped 398 ms later
+        o, d = outcome(sc, self.traverse(34201.3, 33803.4, piece=20556.4), "budget_respected", allowance_ms=1000)
+        self.assertEqual(o, "pass")
+        self.assertIn("seed phase (33803 ms) outlasted the budget", d)
+        # the walk itself overran: 2,500 ms past the deadline with a 100 ms longest piece
+        o, d = outcome(sc, self.traverse(17500, 2000), "budget_respected", allowance_ms=1000)
         self.assertEqual(o, "finding")
-        self.assertIn("longest piece read 20556 ms", d)
-        self.assertEqual(outcome(sc, self.traverse(15900), "budget_respected", allowance_ms=1000)[0], "pass")
-        self.assertEqual(outcome(sc, self.traverse(16001), "budget_respected", allowance_ms=1000)[0], "finding")
+        self.assertIn("2500 ms after max(budget 15000, seed phase 2000)", d)
+        self.assertEqual(outcome(sc, self.traverse(15900, 2000), "budget_respected", allowance_ms=1000)[0], "pass")
+        # one uninterruptible piece in the walk is waited out (SPEC §6.8): 4,000 ms late with a 3,500 ms piece
+        self.assertEqual(outcome(sc, self.traverse(19000, 2000, piece=3500), "budget_respected", allowance_ms=1000)[0],
+                         "pass")
+        # a piece longer than the walk phase lay in the seed phase and grants the walk nothing
+        self.assertEqual(outcome(sc, self.traverse(17500, 2000, piece=16000), "budget_respected", allowance_ms=1000)[0],
+                         "finding")
+        # a budget that passed in the seed phase leaves one level
+        o, d = outcome(sc, self.traverse(20400, 20000, complete_to_bp=7), "budget_respected", allowance_ms=1000)
+        self.assertEqual(o, "finding")
+        self.assertIn("one level expected", d)
         # the effective budget is the echoed strategy's (a clamp lowers it), else the request's
-        self.assertEqual(outcome(sc, self.traverse(16500, budget=60000), "budget_respected", allowance_ms=1000)[0], "pass")
-        self.assertEqual(outcome(sc, self.traverse(16500, echoed=False), "budget_respected", allowance_ms=1000)[0], "finding")
+        self.assertEqual(outcome(sc, self.traverse(16500, 100, budget=60000), "budget_respected", allowance_ms=1000)[0],
+                         "pass")
+        self.assertEqual(outcome(sc, self.traverse(16500, 100, echoed=False), "budget_respected", allowance_ms=1000)[0],
+                         "finding")
         # a walked seed without timing: a direct arm fails, the MCP arm does not expose it
-        self.assertEqual(outcome(sc, self.traverse(1, timing=False), "budget_respected", allowance_ms=1000)[0], "fail")
-        self.assertEqual(outcome(sc, self.traverse(1, timing=False), "budget_respected", "mcp", allowance_ms=1000)[0],
+        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected", allowance_ms=1000)[0], "fail")
+        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected", "mcp", allowance_ms=1000)[0],
                          "not_exposed")
 
     def test_pattern_and_resolve(self):

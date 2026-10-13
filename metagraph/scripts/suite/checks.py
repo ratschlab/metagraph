@@ -766,14 +766,15 @@ def _number(v: Any) -> Optional[float]:
 
 
 def check_budget_respected(sc, ans, a, arm):
-    """The server's elapsed time within the request's effective time budget plus the stated allowance
-    (args.allowance_ms, from the SPEC and the capabilities snapshot, never fitted to an answer). /pattern and
-    /resolve: the top-level timing.elapsed_ms against limits.time_budget_ms (allowance 0: past the budget the
-    SPEC answers 503, so a 200 was written within it); /traverse: each walked seed's timing.elapsed_ms against
-    the effective per-seed bounds.time_budget_ms (the strategy echo, else the request's) plus the allowance for
-    the time from a stop to the walk's end. An overrun is a FINDING (the request still answered), stating the
-    evidence: the seed's longest uninterruptible piece, how long after the deadline the walk saw it, its seed
-    phase."""
+    """The server's elapsed time against the request's effective time budget, by each route's SPEC rule, with the
+    allowance args.allowance_ms taken from the SPEC and the capabilities snapshot (never fitted to an answer).
+    /pattern and /resolve: the top-level timing.elapsed_ms within limits.time_budget_ms (allowance 0: past the
+    budget their SPECs answer 503, so a 200 was written within it). /traverse (SPEC-labeled-traversal-core §6.8):
+    each walked seed's deadline is its budget on the seed's clock, which never stops the seed phase (validation or
+    derivation, depth 0); so the walk must end within the allowance (the walk-stop time from a deadline to the
+    walk's end) plus the walk's longest uninterruptible piece after max(budget, seed_phase_ms), and a seed phase
+    that outlasted the budget leaves one level (complete_to_bp <= 1). A breach is a FINDING (the request still
+    answered); a seed phase longer than the budget is a timing fact stated in the detail, not a finding."""
     allowance = _number(a.get("allowance_ms")) or 0.0
     body = _body(ans)
     route = sc.get("route", "")
@@ -786,29 +787,45 @@ def check_budget_respected(sc, ans, a, arm):
         if budget is None:
             raise Missing("strategy.bounds.time_budget_ms")
         res = _get(body, "results")
-        over, worst, seen = [], 0.0, 0
+        over, facts, seen = [], [], 0
         for i, r in enumerate(res):
             t = r.get("timing")
             if not isinstance(t, dict) or _number(t.get("elapsed_ms")) is None:
                 if "arms" in r:
                     raise Missing("results[%d].timing.elapsed_ms" % i)
                 continue   # a failed seed without its timing: nothing to compare
-            el = _number(t["elapsed_ms"])
+            if "arms" not in r:
+                continue   # no walk: the seed phase alone, which the budget does not govern
             seen += 1
-            worst = max(worst, el)
-            if el > budget + allowance:
-                dl = t.get("deadline") or {}
-                lp = dl.get("longest_piece") or {}
-                over.append("seed %d: %.0f ms (longest piece %s %.0f ms, %s rows; stopped_by %s %.0f ms after the "
-                            "deadline; seed phase %.0f ms)" % (
-                                i, el, lp.get("kind"), _number(lp.get("ms")) or 0, lp.get("rows"),
-                                dl.get("stopped_by"), _number(dl.get("stop_after_deadline_ms")) or 0,
-                                _number(t.get("seed_phase_ms")) or 0))
+            el = _number(t["elapsed_ms"])
+            sp = _number(t.get("seed_phase_ms"))
+            if sp is None:
+                raise Missing("results[%d].timing.seed_phase_ms" % i)
+            dl = t.get("deadline") or {}
+            lp = dl.get("longest_piece") or {}
+            lp_ms = _number(lp.get("ms")) or 0.0
+            # a longest piece longer than the walk phase lay in the seed phase: it grants the walk nothing
+            piece = lp_ms if lp_ms <= el - sp else 0.0
+            late = el - max(budget, sp)
+            evidence = "elapsed %.0f ms, seed phase %.0f ms, longest piece %s %.0f ms (%s rows), stopped_by %s" % (
+                el, sp, lp.get("kind"), lp_ms, lp.get("rows"), dl.get("stopped_by"))
+            if late > allowance + piece:
+                over.append("seed %d: the walk ended %.0f ms after max(budget %.0f, seed phase %.0f), above the "
+                            "allowance %.0f + its longest piece %.0f (%s)" % (i, late, budget, sp, allowance, piece, evidence))
+            if sp >= budget:
+                facts.append("seed %d: the seed phase (%.0f ms) outlasted the budget, which does not govern it" % (i, sp))
+                for side in _arms_of(sc, i):
+                    armo = (r.get("arms") or {}).get(side) or {}
+                    if (armo.get("cap_trigger") or {}).get("reason") == "time_budget" and \
+                            (armo.get("complete_to_bp") or 0) > 1:
+                        over.append("seed %d %s: the budget passed in the seed phase, yet the walk went on to "
+                                    "complete_to_bp %s (one level expected)" % (i, side, armo.get("complete_to_bp")))
         if over:
-            return FINDING, "time budget %.0f ms + allowance %.0f ms overrun: %s" % (budget, allowance, "; ".join(over[:4]))
+            return FINDING, "; ".join(over[:4])
         if not seen:
-            raise Missing("results[].timing.elapsed_ms")
-        return PASS, "%d seed(s) within %.0f + %.0f ms (longest %.0f ms)" % (seen, budget, allowance, worst)
+            return INCONCLUSIVE, "no walked seed: nothing the budget governs"
+        return PASS, "%d walked seed(s) ended within the allowance %.0f ms of max(budget %.0f, seed phase)%s" % (
+            seen, allowance, budget, ("; " + "; ".join(facts)) if facts else "")
     budget = _number((body.get("limits") or {}).get("time_budget_ms"))
     if budget is None:
         named = req.get("time_budget_ms") if route == "POST /pattern" else (req.get("bounds") or {}).get("time_budget_ms")

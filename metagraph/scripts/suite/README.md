@@ -78,17 +78,21 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   shortest length whose ball meets fewer than ~1,000 random contexts (a 20-mer at max_mismatches 2 had 21,563
   level-2 contexts and was rightly withheld); `walk_end` passes an arm a resource stopped before the record's end
   (status truncated, a resource path reason: a stated stop) and says so, the walk so far being `walk_in_record`'s.
-- `budget_respected` (lane S1b, the integrator's decision 2; the smoke run's lambda walk took 34,202 ms under a
-  15,000 ms budget, one coordinate-tuple read of 20,556 ms in its seed phase): every scenario that names a time
-  budget and allows a 200 checks the server's elapsed time against the effective budget (the answer's
-  `limits.time_budget_ms` or, on /traverse, the echoed `strategy.bounds.time_budget_ms`, per seed) plus an
-  allowance stated in the check's args with its source: /traverse 1,000 ms (`attempts.delivery_reserve.stop_ms`
-  of the capabilities snapshot = `chunk_target_ms` + 950, the SPEC's time from a stop's deadline to the walk's
-  end; one row's read has no stated bound, `max_uninterruptible_ms` null, so nothing more), /pattern and
-  /resolve 0 (past the budget their SPECs answer 503, so a 200 was written within it). An overrun is the check
-  outcome `finding` (the request answered; the detail names the longest uninterruptible piece, how long after the
-  deadline the walk saw it and the seed phase), and an execution with a finding and no failure has the outcome
-  `finding` (checks.scenario_outcome): the report lists findings in their own section, never as passes.
+- `budget_respected` (lane S1b, the integrator's decision 2, derived per route from the SPECs after the
+  verification of 2026-10-13): every scenario that names a time budget and allows a 200 checks the server's elapsed
+  time against the effective budget (the answer's `limits.time_budget_ms`, on /traverse the echoed
+  `strategy.bounds.time_budget_ms`), with an allowance stated in the check's args with its source. /pattern and
+  /resolve: allowance 0 (past the budget their SPECs answer 503; the deployed /resolve sets `timing.elapsed_ms`
+  before its last deadline check). /traverse, per walked seed: the seed's deadline is its budget on the seed's clock
+  (walker.cpp `time_exceeded`), which never stops the seed phase (validation or derivation, depth 0, paced against
+  no deadline); so the walk must end within 1,000 ms (`attempts.delivery_reserve.stop_ms` of the capabilities
+  snapshot = `chunk_target_ms` + 950, the SPEC's time from a deadline to the walk's end) plus its longest
+  uninterruptible piece (`timing.deadline.longest_piece`, when not longer than the walk phase) after
+  max(budget, `seed_phase_ms`), and a seed phase that outlasted the budget leaves one level (`complete_to_bp` <= 1).
+  A breach is the check outcome `finding` (the request answered), and an execution with a finding and no failure
+  has the outcome `finding`: the report lists findings in their own section. A seed phase longer than the budget
+  is a timing fact stated in the detail, not a finding: the smoke run's lambda walk (34,201 ms under 15,000; seed
+  phase 33,803 ms with one cold 20,556 ms coordinate-tuple read; the walk stopped 398 ms later) passes.
 - Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
   implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...).
 
