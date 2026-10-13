@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <sstream>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -8,6 +10,10 @@
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
+#include "annotation/int_matrix/row_diff/int_row_diff.hpp"
+#include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "common/utils/file_utils.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -211,6 +217,70 @@ TEST(RowDiff, GetRowsFromUnsortedBackingRows) {
     ASSERT_THAT(rows[0], ElementsAre(0, 1, 2, 3));
     ASSERT_THAT(rows[1], ElementsAre(0, 2));
     ASSERT_THAT(rows[2], ElementsAre(0, 1, 2, 3));
+
+    ASSERT_THAT(annot.get_column(0), ElementsAre(first, second));
+    ASSERT_THAT(annot.get_column(1), ElementsAre(first));
+    ASSERT_THAT(annot.get_column(2), ElementsAre(first, second));
+    ASSERT_THAT(annot.get_column(3), ElementsAre(first));
+}
+
+TEST(RowDiff, GetColumnsAcrossValueTypes) {
+    using namespace mtg::annot::matrix;
+    graph::DBGSuccinct graph(3);
+    graph.add_sequence("AAAT");
+    graph.mask_dummy_kmers(1, false);
+
+    std::vector<BinaryMatrix::Row> rows;
+    graph.call_nodes([&](auto node) { rows.push_back(graph_to_anno_index(node)); });
+    ASSERT_EQ(2u, rows.size());
+
+    utils::TempFile anchors;
+    anchor_bv_type(sdsl::bit_vector(graph.max_index(), true)).serialize(anchors.ofstream());
+    anchors.ofstream().flush();
+
+    auto make_columns = [&] {
+        std::vector<std::unique_ptr<bit_vector>> columns;
+        for (size_t count : { rows.size(), size_t(1), size_t(0) }) {
+            sdsl::bit_vector bits(graph.max_index(), false);
+            for (size_t i = 0; i < count; ++i)
+                bits[rows[i]] = true;
+            columns.push_back(std::make_unique<bit_vector_sd>(bits));
+        }
+        return ColumnMajor(std::move(columns));
+    };
+
+    auto check_columns = [&](auto &&matrix) {
+        matrix.load_anchor(anchors.name());
+        EXPECT_EQ(rows, matrix.get_column(0));
+        EXPECT_THAT(matrix.get_column(1), ElementsAre(rows.front()));
+        EXPECT_TRUE(matrix.get_column(2).empty());
+
+        std::stringstream serialized;
+        matrix.serialize(serialized);
+        std::decay_t<decltype(matrix)> loaded(&graph);
+        ASSERT_TRUE(loaded.load(serialized));
+        loaded.load_anchor(anchors.name());
+        for (size_t column = 0; column < 3; ++column)
+            EXPECT_EQ(matrix.get_column(column), loaded.get_column(column));
+        std::stringstream roundtrip;
+        loaded.serialize(roundtrip);
+        EXPECT_EQ(serialized.str(), roundtrip.str());
+    };
+
+    check_columns(RowDiff<ColumnMajor>(&graph, make_columns()));
+    std::vector<sdsl::int_vector<>> values;
+    std::vector<bit_vector_smart> delimiters;
+    for (size_t count : { rows.size(), size_t(1), size_t(0) }) {
+        values.emplace_back(count, 2);
+        sdsl::bit_vector bits(2 * count + 1, true);
+        for (size_t i = 0; i < count; ++i)
+            bits[2 * i + 1] = false;
+        delimiters.emplace_back(bits);
+    }
+    check_columns(IntRowDiff<CSCMatrix<ColumnMajor>>(
+        &graph, make_columns(), std::vector(values)));
+    check_columns(TupleRowDiff<TupleCSCMatrix<ColumnMajor>>(
+        &graph, make_columns(), std::move(delimiters), std::move(values)));
 }
 
 /**
