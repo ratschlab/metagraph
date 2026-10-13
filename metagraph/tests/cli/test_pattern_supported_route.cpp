@@ -1425,8 +1425,10 @@ TEST(PatternSupportedRoute, HeldAboveMaxPredicateContexts) {
 // are not in the graph (looked up, L units each, no row). With max_annotation_work one above
 // the search's units the first mirror's lookup spends the budget and the second stops the
 // reads: the first walk is decided on its lookup (false), the walk the record of d holds on
-// its own support (true), the two others stay undecided. Mutation tried: the loop left at the
-// stop (tested 1, nothing listed): fails.
+// its own support (true), the two others stay undecided. Each walk is evaluated once on its
+// own support, also the walk whose read stops and the walk after the stop (work.predicate_units).
+// Mutations tried: the loop left at the stop (tested 1, nothing listed); a walk not decided on
+// its own support before its read evaluated so again after the read stops (13 units): fail.
 TEST(PatternSupportedRoute, DecidableWalksAreDecidedAfterTheMirrorReadsStop) {
     const std::vector<Record> records = {
         { "a", "a0", "TTACGTAACGGAT" }, { "b", "b0", "TTACGTCACGGAT" },
@@ -1448,6 +1450,10 @@ TEST(PatternSupportedRoute, DecidableWalksAreDecidedAfterTheMirrorReadsStop) {
     ASSERT_EQ(1u, full["counts"]["selected"]["value"].asUInt64());
     ASSERT_EQ(1u, full["results"].size());
     EXPECT_EQ("ACGTTACGG", full["results"][0]["sequence"].asString());
+    // the decisions' units: each walk's own support evaluated once (1, and 1 for the leaf of d,
+    // every label of the predicate marked sure or maybe), each walk whose mirror was looked up
+    // decided once more on the union (1: no label present)
+    EXPECT_EQ(4u * 2 + 3 * 1, full["work"]["predicate_units"].asUInt64());
     // the search's units: the three lookups cost L each, their rows nothing (none read)
     const uint64_t search_units = full["work"]["annotation_units"].asUInt64() - 3 * 9;
     r.max_annotation_work = search_units + 1;
@@ -1464,6 +1470,8 @@ TEST(PatternSupportedRoute, DecidableWalksAreDecidedAfterTheMirrorReadsStop) {
         EXPECT_EQ("bounds", e["counts"]["selected"]["relation"].asString());
         EXPECT_EQ(1u, e["counts"]["selected"]["lower"].asUInt64());
         EXPECT_EQ(3u, e["counts"]["selected"]["upper"].asUInt64());
+        // one lookup decided on the union; every walk evaluated once on its own support
+        EXPECT_EQ(4u * 2 + 1, e["work"]["predicate_units"].asUInt64());
         if (std::string(mode) == "partial") {
             ASSERT_EQ(1u, e["results"].size()) << compact(e);
             EXPECT_EQ("ACGTTACGG", e["results"][0]["sequence"].asString());

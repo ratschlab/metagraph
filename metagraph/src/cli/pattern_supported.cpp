@@ -717,6 +717,8 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         std::optional<bool> value;
         // the mirror's support is known (|mirror|)
         bool known = true;
+        // the walk was evaluated on its own support (|value|), its units charged
+        bool evaluated = false;
         if (rc == h.sequence) {
             mirror = h.support;
         } else if (const Held *m = held_with(rc)) {
@@ -735,6 +737,7 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             // (an evaluation's units are its own: charged here, the decision's below)
             a.units += units;
             units = 0;
+            evaluated = true;
             known = false;
             const bool own = value && (!*value || !options_.selection_labels);
             if (!own && reads) {
@@ -752,10 +755,10 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             std::set_union(h.support.begin(), h.support.end(), mirror.begin(), mirror.end(),
                            std::back_inserter(present));
             value = bound_.eval(present.data(), present.size(), &units);
-        } else if (!value) {
+        } else if (!evaluated) {
             // the mirror's support is not known (the search stopped before it, partial held
             // the first walks only, or the reads stopped): decided only when no mirror
-            // support can change it
+            // support can change it (a walk evaluated so before its read keeps that value)
             value = bound_.eval3(h.support.data(), h.support.size(), all_labels.data(),
                                  all_labels.size(), &units);
         }

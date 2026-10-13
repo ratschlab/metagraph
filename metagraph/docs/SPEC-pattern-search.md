@@ -3488,9 +3488,10 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   account before, so the mirrors' allotment replaces it. A walk whose mirror is not known (the search stopped
   before it, `partial` held the first walks only, or the mirror reads stopped on `max_annotation_work` or the
   account: no mirror is read after such a stop, and every later walk is decided on its own support alone) is
-  decided only when no mirror support can change the value (Kleene, as §19.7's undecided labels), else left
-  undecided; after a time stop nothing more is decided. A decided walk the release lists is charged its
-  `selection_labels` and `selection_strands` as a path decided at completion is (above), when it is listed.
+  decided only when no mirror support can change the value (Kleene, as §19.7's undecided labels; a walk evaluated
+  so before its read stopped keeps that evaluation, its units charged once), else left undecided; after a time stop
+  nothing more is decided. A decided walk the release lists is charged its `selection_labels` and
+  `selection_strands` as a path decided at completion is (above), when it is listed.
 - **More held walks than `max_predicate_contexts`**: `all_or_count` and `count`: not admitted
   (`selection.pass: "not_admitted"`, `withheld: predicate_above_threshold`; with `stop_at_threshold` the search
   stops there, `stop {extension, max_predicate_contexts}`, `pass: "not_started"`, `withheld: threshold_crossed`);
@@ -4706,7 +4707,7 @@ where it stated `cut: max_memory` and `stop {output, max_memory}` when that char
 and the counts were right; `PatternSupportedRoute.SelectionLabelNamesAreCharged`). Under `"either"`, after a
 mirror read stops on `max_annotation_work` or the account, the later held walks are decided on their own support
 alone instead of left undecided, and no mirror is read after the stop (`counts.tested`, `counts.selected`,
-`work.predicate_units` and `partial`'s list change in that case;
+`work.predicate_units` and `partial`'s list change in that case, each walk evaluated once on its own support;
 `DecidableWalksAreDecidedAfterTheMirrorReadsStop`); the walks held and the paths kept for them are given back to
 the account as soon as `all_or_count` or `count` cannot admit them (`HeldPathsAreReleasedWithTheHeldWalks`); a
 held walk's model is 192 + 2L + 8 per predicate label (64 before: below its descriptor), and a listed walk's
