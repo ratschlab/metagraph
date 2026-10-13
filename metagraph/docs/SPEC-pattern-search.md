@@ -4714,8 +4714,8 @@ alone instead of left undecided, and no mirror is read after the stop (`counts.t
 `work.predicate_units` and `partial`'s list change in that case, each walk evaluated once on its own support;
 `DecidableWalksAreDecidedAfterTheMirrorReadsStop`); the account refusing the held walks' index by sequence (8
 bytes a walk, after the search) no longer leaves every walk undecided: each is decided on its own support alone,
-as after a mirror read stopped on the account (`counts.tested`, `counts.selected` and `partial`'s list change in
-that case; `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`); the walks held and the paths kept for them
+as after a mirror read stopped on the account (`counts.tested`, `counts.selected`, `work.predicate_units` and
+`partial`'s list change in that case; `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`); the walks held and the paths kept for them
 are given back to the account as soon as `all_or_count` or `count` cannot admit them
 (`HeldPathsAreReleasedWithTheHeldWalks`); a held walk's model is 192 + 2L + 8 per predicate label (64 before:
 below its descriptor), and a listed walk's
