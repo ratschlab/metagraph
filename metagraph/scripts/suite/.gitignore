@@ -1,3 +1,4 @@
 runs/
 __pycache__/
 *.pyc
+truth/cache/
