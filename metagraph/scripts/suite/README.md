@@ -15,7 +15,10 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   does (http, code, text, text_prefix, text_contains) and reports every other check `not_exposed`. The runner
   uses `checks.py` whenever it imports; it refuses the stub for a selection that expects any other check unless
   `--allow-stub`, and `run.json` names the module that ran (and the import error when auto fell back).
-- `manifest/runner_smoke5.json`: the runner's own 5-scenario smoke manifest (status checks only).
+- `manifest/runner_smoke5.json`: the runner's own 5-scenario smoke manifest (status checks only, with the
+  error code and text of the refusal; never for an MCP comparison: every scenario is marked not implemented).
+- `tests/fake_host.py`, `tests/fake_mcp.py`: a local stand-in for the host (HTTP/1.1 keep-alive) and for
+  async's MCP runner, for the offline tests.
 
 ### Run directory
 `runs/<UTC>_<release-short>/` (git-ignored):
@@ -23,8 +26,10 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
     run.json  executions.jsonl  samples.jsonl  jobs.jsonl      merged over the arms (merge_run.py)
     compare.json  report.md  report.pdf
     arms/direct-local/   run.json executions.jsonl samples.jsonl raw/ state.json manifest.json runner.log
-    arms/direct-remote/  the same (its samples come from a sampler on mex during the remote phase)
-    arms/mcp/            a copy of the MCP runner's run directory (--mcp-run)
+    arms/direct-remote/  the same, without samples (the mex samplers cover it)
+    arms/mcp/            the MCP runner's executions.jsonl / jobs.jsonl (--mcp-cmd) or a copy (--mcp-run)
+    samples/             the orchestrator's samplers on mex (paired-*.jsonl, direct-remote-*.jsonl)
+    orchestrator.json    every invocation of run_suite.sh
 
 Each arm writes only its own sub-directory, so it resumes on its own and a pull from mex never overwrites
 another arm's lines. `run_direct.py --out X` on its own writes X/executions.jsonl in the §8.3 schema.
@@ -79,27 +84,63 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   reason}` for the orchestrator.
 
 ### Orchestrator
-`run_suite.sh [--manifest M | --smoke] [--areas ...] [--limit N] [--skip-local] [--skip-remote]
-[--mcp-run DIR] [--compare RUN_DIR] [--resume RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
-[--no-pdf]`; `--help` lists the environment overrides.
-1. A new run directory `runs/<UTC>_<release-short>/` (the release from GET /capabilities of the public URL),
-   or the one named by `--resume` (then the run's own manifest copy unless `--manifest` is given).
-   `orchestrator.json` records every invocation's options and the scripts' commit (`+dirty` when the suite
-   directory has uncommitted changes).
-2. direct-local: rsync of the suite's `*.py` / `*.json` to mex:~/suite-dev/scripts/ and of the manifest to
-   ~/suite-dev/manifest/<run id>.json; `run_direct.py --sample-docker` started there with nohup (the run
-   outlives the ssh session) into ~/suite-dev/runs/<run id>/arms/direct-local; polled every 15 s through
-   state.json (an ssh that answers neither alive nor dead is retried, never read as finished, so the remote
-   arm cannot start while direct-local still runs); then pulled back. A runner of an earlier invocation still
-   alive on mex is attached to, not started twice. Ctrl-C sends SIGINT to the mex runner, waits for its clean
-   stop, pulls, and prints the --resume command.
-3. direct-remote: run_direct.py from here against the public URL, while a sampler on mex records the phase
-   (stopped afterwards, at most 30 min for --smoke / 12 h otherwise if this script dies; its samples are
-   appended to arms/direct-remote/samples.jsonl). `SUITE_REMOTE_SAMPLER=0` runs it without any mex contact.
-4. `--mcp-run DIR`: the MCP runner's run directory (same schema) is copied to arms/mcp.
-5. merge_run.py, compare.py, report.py (report.pdf unless --no-pdf).
-`--smoke` defaults `--max-requests` to 40 per arm (the smoke load rule) and the manifest to
-manifest/suite_smoke_v1.json (lane S1's); without `--manifest` a full run takes manifest/suite_v1.json.
+`run_suite.sh [--manifest M | --smoke] [--paired | --sequential] [--mcp-cmd TEMPLATE | --mcp-run DIR]
+[--areas ...] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR] [--compare RUN_DIR]
+[--by-design PATH] [--pause S] [--max-requests N] [--warm-every N] [--allow-stub] [--no-pdf]`; `--help`
+lists the environment overrides.
+1. A new run directory `runs/<UTC>_<release-short>/` (the release from one GET /capabilities of the public
+   URL, logged), or the one named by `--resume` (then the run's mode and manifest copy unless given).
+   `orchestrator.json` records every invocation: options, mode, the scripts' commit (`+dirty` when the suite
+   directory has uncommitted changes), the checks module, the mex clock offset, the MCP command TEMPLATE (never
+   an expanded command or an environment value), and the loop's state (`loop`: running / done / capped /
+   failed / interrupted, scenarios, completed, direct requests).
+2. Checks (review M3): `--checks checks` when checks.py is next to the script; otherwise the stub, which is
+   refused before anything runs when the selected scenarios expect any check but `status`, unless
+   `--allow-stub`. The whole suite directory (minus runs/, tests/, __pycache__) is rsynced (with --delete) to
+   mex:~/suite-dev/scripts/, so checks.py's sibling modules and data reach mex; the manifest to
+   ~/suite-dev/manifest/<run id>.json.
+3. Exclusion (review M4): every invocation takes `~/suite-dev/LOCK` on mex before any arm (an atomic
+   noclobber create holding pid, host, start time, run id, a token); a lock of a process of this host that is
+   gone, or whose pid now belongs to a younger process, is removed; a live one or another host's is refused.
+   The lock is released on exit (only if it is still this invocation's). Then any `run_direct.py` under
+   ~/suite-dev (pgrep on mex) is waited for (SUITE_WAIT_RUNNER_S, 150 s) and refused if it stays, except a
+   sequential --resume attaching to its own direct-local runner. An invocation refused before any arm ran
+   leaves no run directory behind. All ssh and rsync calls share one ControlMaster connection
+   (ControlPersist, closed on exit).
+4. `--paired` (the default; review H1): per scenario in manifest order, MCP cold (`--mcp-cmd`, repeat 0) ->
+   direct-local (one `run_direct.py --only ID` step on mex over the shared ssh connection, its stderr into
+   arms/direct-local/runner.log there) -> direct-remote (a `--only ID` step from here) -> MCP warm (each
+   further repeat), one at a time; then a `--finish` step per direct arm (closing GET /capabilities, the
+   arm's state over the selection). The plan (`suite_common.py paired-plan`) skips what each arm recorded,
+   so --resume continues where the loop stopped; the long class runs on direct-local only (the front cuts
+   every other arm); a scenario the manifest marks not implemented via MCP gets the MCP repeat 0 only (the
+   runner records the mark). One sampler on mex covers the loop (`samples/paired-<stamp>.jsonl`), stopped at
+   the end, after 24 h (30 min for --smoke), or when the orchestrator stops touching its heartbeat file for an
+   hour. Three failing steps of one arm in a row stop the loop (exit 1 after the report). An ssh failure on a
+   direct-local step waits until that step's runner is gone before the next arm starts.
+5. `--sequential`: direct-local on mex with nohup and its own sampler (`--sample-docker`), polled through
+   state.json (an ssh answering neither alive nor dead is retried, never read as finished); then
+   direct-remote from here with a sampler on mex (`samples/direct-remote-<stamp>.jsonl`, at most 30 min for
+   --smoke / 12 h); then the MCP arm (`--mcp-cmd`: repeat 0 of every scenario, then repeat 1) or the copy of
+   a finished MCP run directory (`--mcp-run DIR` -> arms/mcp; sequential only).
+6. `--mcp-cmd TEMPLATE`: async's runner (`--ids A,B --repeat N --out DIR --manifest M`; appends
+   DIR/executions.jsonl and jobs.jsonl, resumable, exit 0 / 1 / 130). Placeholders `{ids}`, `{repeat}` (the
+   repeat index to run), `{repeats}` (`{repeat}` + 1, should a runner take a count), `{out}`
+   (RUN_DIR/arms/mcp), `{manifest}`, replaced with shell-quoted values; run with `bash -c` in this
+   environment, unchanged (the runner reads its admin key from there); its output goes to the terminal only.
+7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
+   included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
+   left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to
+   manifest/suite_smoke_v1.json (lane S1's); without `--manifest` a full run takes manifest/suite_v1.json.
+   The MCP runner paces its own requests.
+8. Samples (review M5): the mex samplers write ~/suite-dev/runs/<id>/samples/; every invocation pulls the
+   whole directory on exit (also after Ctrl-C) and at its start, merge_run deduplicates.
+9. Ctrl-C: the step in flight stops after its request (`pkill -INT` of this run's runner on mex; a local
+   step gets the terminal's SIGINT), the orchestrator waits up to 120 s for the mex runner (a long request may
+   take 30 min: then it says so, pulls what was recorded and leaves the rest to --resume), pulls, releases the
+   lock and prints the --resume command (exit 130).
+10. merge_run.py, compare.py, report.py (report.pdf unless --no-pdf). The last stdout line is the run
+    directory.
 
 ### Comparator and report
 - `merge_run.py RUN_DIR`: writes the top-level run.json / executions.jsonl / samples.jsonl / jobs.jsonl /

@@ -4,7 +4,9 @@
 Every --interval seconds (start to start) one READ-ONLY `docker stats --no-stream` call reads the staging
 container (CPU, memory, net and block IO) and the sra_all container (CPU only: the Logan load), and
 /proc/loadavg the host load; one JSON line per sample goes to --out. Stops on SIGTERM / SIGINT / SIGHUP, when
---stop-file exists, or after --max-seconds. Stdlib only (python3.12 on mex).
+--stop-file exists, after --max-seconds, when the --parent-pid process is gone, or when the --heartbeat file
+was not touched for --heartbeat-max-age seconds (the orchestrator on the laptop touches it per scenario, so a
+sampler outlives a dead orchestrator by at most that long). Stdlib only (python3.12 on mex).
 
     sampler.py --out RUN_DIR/samples.jsonl [--interval 2] [--label direct-local]
 """
@@ -133,6 +135,15 @@ def process_alive(pid):
     return True
 
 
+def heartbeat_stale(path, max_age_s, now=None):
+    """Whether the heartbeat file is missing or was last touched more than max_age_s ago."""
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return True
+    return ((now if now is not None else time.time()) - mtime) > max_age_s
+
+
 _stop = {"flag": False}
 
 
@@ -152,6 +163,8 @@ def main(argv=None):
     ap.add_argument("--pid-file", default=None, help="write the sampler's pid here")
     ap.add_argument("--parent-pid", type=int, default=0,
                     help="stop when this process is gone (the runner that started the sampler)")
+    ap.add_argument("--heartbeat", default=None, help="stop when this file is older than --heartbeat-max-age")
+    ap.add_argument("--heartbeat-max-age", type=float, default=3600.0)
     ap.add_argument("--once", action="store_true", help="take one sample and exit")
     args = ap.parse_args(argv)
 
@@ -182,6 +195,8 @@ def main(argv=None):
         if args.stop_file and os.path.exists(args.stop_file):
             break
         if args.parent_pid and not process_alive(args.parent_pid):
+            break
+        if args.heartbeat and heartbeat_stale(args.heartbeat, args.heartbeat_max_age):
             break
         while not _stop["flag"] and time.time() < t0 + args.interval:
             time.sleep(min(0.2, max(0.0, t0 + args.interval - time.time())))

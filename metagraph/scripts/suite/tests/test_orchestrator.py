@@ -1,9 +1,15 @@
-"""Offline tests of run_suite.sh (the remote arm against the local fake host; no mex contact) and of the
-runner's refusal of a run directory another live runner holds."""
+"""Offline tests of run_suite.sh: the mex side runs in a local directory (SUITE_MEX=local:DIR), both direct arms
+against the local fake host, the MCP arm through tests/fake_mcp.py. Covered: the paired order and host_cache,
+the MCP command template (environment passed through, never recorded), the request cap and --resume, the lock
+(held, stale, foreign), the refusal next to a running run_direct.py, the stub refusal, the samplers' files,
+Ctrl-C and --resume, the sequential mode, and the runner's refusal of a directory another live runner holds."""
 
 import json
 import os
 import platform
+import shlex
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,7 +24,19 @@ sys.path.insert(0, HERE)
 import run_direct  # noqa: E402
 import suite_common as sc  # noqa: E402
 from fake_host import FakeHost  # noqa: E402
-from test_runner import basic_scenarios, make_manifest  # noqa: E402
+from test_runner import basic_scenarios, make_manifest, scenario  # noqa: E402
+
+SECRET = "s3cr3t-value-never-recorded"
+
+
+def mcp_scenarios():
+    """basic_scenarios with an MCP mapping, except P-2 (not implemented via MCP)."""
+    out = []
+    for s in basic_scenarios():
+        if s["id"] != "P-2":
+            s["mcp"] = {"tool": "pattern_search", "arguments": {}}
+        out.append(s)
+    return out
 
 
 class LiveRunnerGuard(unittest.TestCase):
@@ -43,58 +61,259 @@ class LiveRunnerGuard(unittest.TestCase):
 
 
 class RunSuiteOffline(unittest.TestCase):
-    def run_suite(self, runs, host, *args):
-        env = dict(os.environ)
-        env.update({"SUITE_RUNS": runs, "SUITE_REMOTE_BASE": host.base, "SUITE_REMOTE_SAMPLER": "0",
-                    "SUITE_MEX": "nobody@invalid.invalid", "PYTHON": sys.executable})
-        cmd = [os.path.join(SUITE, "run_suite.sh"), "--skip-local", "--no-pdf", "--pause", "0"] + list(args)
-        proc = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              universal_newlines=True, timeout=120)
-        return proc
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        self.mex = os.path.join(self.d, "mex")
+        os.makedirs(self.mex)
+        self.runs = os.path.join(self.d, "runs")
+        self.mpath = os.path.join(self.d, "m.json")
 
-    def test_remote_arm_new_and_resume(self):
-        with tempfile.TemporaryDirectory() as d:
-            mpath = os.path.join(d, "m.json")
-            make_manifest(mpath, basic_scenarios())
-            runs = os.path.join(d, "runs")
-            with FakeHost() as host:
-                p1 = self.run_suite(runs, host, "--manifest", mpath)
-                self.assertEqual(p1.returncode, 0, p1.stderr)
-                run_dir = p1.stdout.strip().splitlines()[-1]
-                self.assertTrue(os.path.basename(run_dir).endswith("_refseq97-b7214d29"), run_dir)
-                for name in ("run.json", "executions.jsonl", "compare.json", "report.md", "orchestrator.json",
-                             "manifest.json"):
-                    self.assertTrue(os.path.exists(os.path.join(run_dir, name)), name)
-                rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
-                self.assertEqual(len(rows), 9)
-                self.assertTrue(all(r["arm"] == "direct-remote" for r in rows))
-                self.assertTrue(rows[0]["raw"].startswith("arms/direct-remote/raw/"))
-                n_requests = len(host.log)
-                # --resume: nothing new runs (only the capabilities GETs), the same directory is rewritten
-                p2 = self.run_suite(runs, host, "--resume", run_dir)
-                self.assertEqual(p2.returncode, 0, p2.stderr)
-                self.assertEqual(p2.stdout.strip().splitlines()[-1], run_dir)
-                self.assertEqual(len(host.log) - n_requests, 4)
-                self.assertEqual(len(sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))[0]), 9)
-                orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
-                self.assertEqual(len(orch["sessions"]), 2)
-                # a new invocation is a new run directory
-                time.sleep(1.1)
-                p3 = self.run_suite(runs, host, "--manifest", mpath, "--limit", "1", "--max-requests", "3")
-                self.assertEqual(p3.returncode, 0, p3.stderr)
-                self.assertNotEqual(p3.stdout.strip().splitlines()[-1], run_dir)
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def env(self, host, **extra):
+        env = dict(os.environ)
+        env.update({"SUITE_RUNS": self.runs, "SUITE_REMOTE_BASE": host.base, "SUITE_LOCAL_BASE": host.base,
+                    "SUITE_MEX": "local:" + self.mex, "SUITE_MEX_PY": sys.executable, "PYTHON": sys.executable,
+                    "SUITE_SAMPLER": "0", "SUITE_WAIT_RUNNER_S": "4", "SUITE_POLL_S": "1",
+                    "SUITE_TEST_SECRET": SECRET})
+        env.update(extra)
+        return env
+
+    def run_suite(self, host, *args, **env_extra):
+        cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0"] + list(args)
+        return subprocess.run(cmd, env=self.env(host, **env_extra), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              universal_newlines=True, timeout=300, stdin=subprocess.DEVNULL)
+
+    def mcp_cmd(self):
+        return "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest}" % (
+            shlex.quote(sys.executable), shlex.quote(os.path.join(HERE, "fake_mcp.py")))
+
+    def lock_path(self):
+        return os.path.join(self.mex, "suite-dev", "LOCK")
+
+    def test_paired_order_host_cache_and_mcp_template(self):
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd())
+            self.assertEqual(p.returncode, 0, p.stderr)
+            # the release GET; per direct arm 3 capabilities + 9 executions + 1 closing GET
+            self.assertEqual(len(host.log), 1 + 2 * 13)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        by_arm = {}
+        for r in rows:
+            by_arm.setdefault(r["arm"], []).append(r)
+        self.assertEqual(dict((a, len(v)) for a, v in by_arm.items()),
+                         {"direct-local": 9, "direct-remote": 9, "mcp": 12})
+        key = dict((sc.execution_key(r), r) for r in rows)
+        start = lambda k: sc.parse_utc(key[k]["started_utc"])  # noqa: E731
+        for sid in ("C-1", "P-1", "R-1", "T-1", "D-1"):
+            seq = [(sid, "mcp", 0), (sid, "direct-local", 0), (sid, "direct-remote", 0), (sid, "mcp", 1)]
+            self.assertEqual(sorted(seq, key=start), seq, sid)
+            self.assertEqual([key[k]["host_cache"] for k in seq], ["cold", "warm", "warm", "warm"])
+        # one scenario after the other: D-1's MCP cold starts after T-1's MCP warm
+        self.assertLess(start(("T-1", "mcp", 1)), start(("D-1", "mcp", 0)))
+        self.assertEqual(key[("D-1", "mcp", 2)]["host_cache"], "warm")
+        # P-2 is not implemented via MCP: the fake marks it, the host never saw it, direct-local was cold
+        self.assertEqual(key[("P-2", "mcp", 0)]["host_cache"], "not_reached")
+        self.assertEqual(key[("P-2", "direct-local", 0)]["host_cache"], "cold")
+        self.assertNotIn(("P-2", "mcp", 1), key)
+        orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
+        sess = orch["sessions"][-1]
+        self.assertEqual((sess["mode"], sess["mcp_cmd"], sess["checks"]), ("paired", self.mcp_cmd(), "stub"))
+        self.assertEqual(sess["loop"]["state"], "done")
+        self.assertEqual(sess["loop"]["completed"], 6)
+        self.assertEqual(sess["loop"]["direct_requests"], 26)
+        self.assertIsNotNone(sess["mex_clock_offset_s"])
+        run = sc.read_json(os.path.join(run_dir, "run.json"))
+        self.assertEqual(run["arms"]["direct-local"]["state"], "done")
+        self.assertEqual(run["arms"]["direct-remote"]["state"], "done")
+        self.assertFalse(os.path.exists(self.lock_path()))
+        with open(os.path.join(run_dir, "arms", "mcp", "calls.log")) as fh:
+            calls = fh.read().splitlines()
+        self.assertEqual(calls[:3], ["C-1 0 env=yes", "C-1 1 env=yes", "P-1 0 env=yes"])
+        for name in ("orchestrator.json", "run.json", "compare.json", "report.md"):
+            with open(os.path.join(run_dir, name)) as fh:
+                self.assertNotIn(SECRET, fh.read(), name)
+        self.assertNotIn(SECRET, p.stderr)
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            report = fh.read()
+        self.assertIn("paired: per scenario MCP cold", report)
+        self.assertIn("| P | mcp | warm |", report)
+
+    def test_cap_then_resume(self):
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p1 = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "12")
+            self.assertEqual(p1.returncode, 0, p1.stderr)
+            # the release GET plus at most 12 runner requests, the two closing GETs included
+            self.assertLessEqual(len(host.log), 1 + 12)
+            run_dir = p1.stdout.strip().splitlines()[-1]
+            sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+            self.assertEqual(sess["loop"]["state"], "capped")
+            self.assertLessEqual(sess["loop"]["direct_requests"], 12)
             with open(os.path.join(run_dir, "report.md")) as fh:
-                report = fh.read()
-            self.assertIn("# Verdict", report)
-            self.assertIn("the stub ran", report)
+                self.assertIn("INCOMPLETE", fh.read())
+            p2 = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p2.returncode, 0, p2.stderr)
+        self.assertEqual(p2.stdout.strip().splitlines()[-1], run_dir)
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(len(rows), 18)
+        self.assertEqual(len(set(sc.execution_key(r) for r in rows)), 18)
+        run = sc.read_json(os.path.join(run_dir, "run.json"))
+        self.assertEqual((run["arms"]["direct-local"]["state"], run["arms"]["direct-remote"]["state"]),
+                         ("done", "done"))
+        orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
+        self.assertEqual([s["loop"]["state"] for s in orch["sessions"]], ["capped", "done"])
+
+    def test_lock_held_stale_and_foreign(self):
+        make_manifest(self.mpath, basic_scenarios()[:1])
+        os.makedirs(os.path.join(self.mex, "suite-dev"))
+        host_name = socket.gethostname()
+        with FakeHost() as host:
+            held = {"pid": os.getpid(), "host": host_name, "started_utc": "t", "started_epoch": time.time(),
+                    "run_id": "other", "token": "x"}
+            with open(self.lock_path(), "w") as fh:
+                json.dump(held, fh)
+            p = self.run_suite(host, "--manifest", self.mpath)
+            self.assertEqual(p.returncode, 2, p.stderr)
+            self.assertIn("held by pid %d" % os.getpid(), p.stderr)
+            with open(self.lock_path()) as fh:
+                self.assertEqual(json.load(fh)["token"], "x")  # untouched
+            with open(self.lock_path(), "w") as fh:
+                json.dump(dict(held, host="elsewhere"), fh)
+            p = self.run_suite(host, "--manifest", self.mpath)
+            self.assertEqual(p.returncode, 2, p.stderr)
+            self.assertIn("on elsewhere", p.stderr)
+            dead = subprocess.Popen([sys.executable, "-c", "pass"])
+            dead.wait()
+            with open(self.lock_path(), "w") as fh:
+                json.dump(dict(held, pid=dead.pid), fh)
+            p = self.run_suite(host, "--manifest", self.mpath)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("removing a stale lock", p.stderr)
+        self.assertFalse(os.path.exists(self.lock_path()))
+
+    def test_refuses_next_to_a_running_runner(self):
+        make_manifest(self.mpath, basic_scenarios()[:1])
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "scripts/run_direct.py"])
+        try:
+            with FakeHost() as host:
+                p = self.run_suite(host, "--manifest", self.mpath)
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn("run_direct.py runs under", p.stderr)
+                self.assertEqual(len(host.log), 1)  # the release GET only
+        finally:
+            other.kill()
+            other.wait()
+        self.assertFalse(os.path.exists(self.lock_path()))
+
+    def test_stub_refused_beyond_status(self):
+        scen = basic_scenarios()[:2]
+        scen[1]["expect"].append({"check": "contains_source_context", "args": {"level": 0}})
+        make_manifest(self.mpath, scen)
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath)
+            self.assertEqual(p.returncode, 2, p.stderr)
+            self.assertIn("contains_source_context", p.stderr)
+            self.assertIn("--allow-stub", p.stderr)
+            p = self.run_suite(host, "--manifest", self.mpath, "--allow-stub", "--skip-local")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        with open(os.path.join(p.stdout.strip().splitlines()[-1], "report.md")) as fh:
+            self.assertIn("UNVERIFIED", fh.read())
+
+    def test_samples_pulled_and_merged(self):
+        make_manifest(self.mpath, basic_scenarios()[:2])
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, SUITE_SAMPLER="1")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        files = os.listdir(os.path.join(run_dir, "samples"))
+        self.assertTrue(any(f.startswith("paired-") and f.endswith(".jsonl") for f in files), files)
+        samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
+        self.assertTrue(samples)
+        self.assertEqual(set(s["phase"] for s in samples), {"paired"})
+        # the sampler was stopped
+        pids = subprocess.run(["pgrep", "-f", os.path.join(self.mex, "suite-dev")], stdout=subprocess.PIPE,
+                              universal_newlines=True).stdout.split()
+        self.assertEqual(pids, [])
+
+    def test_sigint_then_resume(self):
+        scen = [scenario("S-%02d" % i, "S", "POST /slow", {"sleep_s": 0.3}) for i in range(12)]
+        make_manifest(self.mpath, scen)
+        with FakeHost() as host:
+            cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                   "--warm-every", "0"]
+            proc = subprocess.Popen(cmd, env=self.env(host), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True, start_new_session=True, stdin=subprocess.DEVNULL)
+            deadline = time.time() + 60
+            while time.time() < deadline and sum(1 for m, p in host.log if p == "/slow") < 5:
+                time.sleep(0.05)
+            os.killpg(proc.pid, signal.SIGINT)  # a terminal's Ctrl-C reaches the whole group
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 130, err)
+            self.assertIn("resume with:", err)
+            self.assertFalse(os.path.exists(self.lock_path()))
+            run_dir = [os.path.join(self.runs, x) for x in os.listdir(self.runs)][0]
+            sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+            self.assertEqual(sess["loop"]["state"], "interrupted")
+            p = self.run_suite(host, "--resume", run_dir, "--warm-every", "0")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        rows, bad = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(bad, 0)
+        self.assertEqual(len(rows), 24)
+        self.assertEqual(len(set(sc.execution_key(r) for r in rows)), 24)
+
+    def test_sequential_remote_new_and_resume(self):
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p1 = self.run_suite(host, "--sequential", "--skip-local", "--manifest", self.mpath)
+            self.assertEqual(p1.returncode, 0, p1.stderr)
+            run_dir = p1.stdout.strip().splitlines()[-1]
+            self.assertTrue(os.path.basename(run_dir).endswith("_refseq97-b7214d29"), run_dir)
+            for name in ("run.json", "executions.jsonl", "compare.json", "report.md", "orchestrator.json",
+                         "manifest.json"):
+                self.assertTrue(os.path.exists(os.path.join(run_dir, name)), name)
+            rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+            self.assertEqual(len(rows), 9)
+            self.assertTrue(all(r["arm"] == "direct-remote" for r in rows))
+            self.assertTrue(rows[0]["raw"].startswith("arms/direct-remote/raw/"))
+            n_requests = len(host.log)
+            # --resume keeps the run's mode: nothing new runs (only the capabilities GETs)
+            p2 = self.run_suite(host, "--resume", run_dir, "--skip-local")
+            self.assertEqual(p2.returncode, 0, p2.stderr)
+            self.assertEqual(p2.stdout.strip().splitlines()[-1], run_dir)
+            self.assertEqual(len(host.log) - n_requests, 4)
+            orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
+            self.assertEqual([s["mode"] for s in orch["sessions"]], ["sequential", "sequential"])
+            # sequential with the local arm on the (local) mex and a small cap over both arms
+            time.sleep(1.1)
+            p3 = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--max-requests", "10",
+                                "--warm-every", "0")
+            self.assertEqual(p3.returncode, 0, p3.stderr)
+            self.assertNotEqual(p3.stdout.strip().splitlines()[-1], run_dir)
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            report = fh.read()
+        self.assertIn("# Verdict", report)
+        self.assertIn("the stub ran", report)
 
     def test_bad_options(self):
-        with tempfile.TemporaryDirectory() as d, FakeHost() as host:
-            p = self.run_suite(d, host, "--bogus")
+        with FakeHost() as host:
+            p = self.run_suite(host, "--bogus")
             self.assertEqual(p.returncode, 2)
-            p = self.run_suite(d, host, "--manifest", os.path.join(d, "missing.json"))
+            p = self.run_suite(host, "--manifest", os.path.join(self.d, "missing.json"))
             self.assertEqual(p.returncode, 2)
             self.assertIn("no manifest", p.stderr)
+            p = self.run_suite(host, "--mcp-cmd", "x {ids}", "--mcp-run", self.d)
+            self.assertIn("exclude each other", p.stderr)
+            p = self.run_suite(host, "--mcp-cmd", "runner --ids {ids}")
+            self.assertIn("{ids} and {out}", p.stderr)
+            make_manifest(self.mpath, basic_scenarios()[:1])
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-run", self.d)
+            self.assertIn("--sequential", p.stderr)
+            self.assertEqual(p.returncode, 2)
 
 
 if __name__ == "__main__":
