@@ -11,8 +11,10 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   laptop); writes `executions.jsonl`, `raw/`, `run.json`, `state.json`; resumable; stops cleanly on SIGINT.
 - `sampler.py`: `docker stats --no-stream` of the staging container and of sra_all (CPU) plus the host load,
   every 2 s, into `samples.jsonl` (started by `run_direct.py --sample-docker`, or on its own).
-- `checks_stub.py`: stand-in for lane S1's `checks.py` with the same API (HTTP status only); the runner uses
-  `checks.py` whenever it exists, and `run.json` names the module that ran.
+- `checks_stub.py`: stand-in for lane S1's `checks.py` with the same API: it evaluates `status` as S1's check
+  does (http, code, text, text_prefix, text_contains) and reports every other check `not_exposed`. The runner
+  uses `checks.py` whenever it imports; it refuses the stub for a selection that expects any other check unless
+  `--allow-stub`, and `run.json` names the module that ran (and the import error when auto fell back).
 - `manifest/runner_smoke5.json`: the runner's own 5-scenario smoke manifest (status checks only).
 
 ### Run directory
@@ -49,7 +51,14 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   `memory_bytes` and `max_*` as peaks.
 - Optional scenario fields for protocol cases: `headers` (overrides the defaults; null removes one) and
   `body_raw` (a string sent verbatim instead of the JSON of `request`). Defaults: `Content-Type:
-  application/json`, `Accept-Encoding: gzip, deflate`, `Connection: close`, one connection per request.
+  application/json`, `Accept-Encoding: gzip, deflate`, HTTP/1.1 keep-alive.
+- Connection (review M1): one keep-alive connection per runner invocation, reused while the server keeps it
+  open; `wall_ms` runs from sending the request to the last body byte on an established connection, and the
+  set-up of a fresh connection (TCP, and TLS on the public URL) is `client.connect_ms` (null when reused;
+  `client.reused`, `client.attempts`). A request on a reused connection the server had closed meanwhile is
+  sent once more on a fresh one (the first attempt never reached the application). Reusing across paired steps
+  would not keep the TCP window either (Linux restarts slow start after an idle second), so a fresh connection
+  per paired step with the connect left out measures the same front cost.
 - run.json keeps the three capabilities documents of the run's start, release / server_instance / index_fp
   (the first non-null value in /capabilities, /traverse/capabilities, /pattern/capabilities), the host load
   at start and end, every session (a resume adds one) and `server_instance_changed` (from a closing GET
@@ -60,7 +69,14 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 - `checks.evaluate(scenario, answer, arm, previous=...)`: `previous` is the list of answer digests
   (`suite_common.answer_digest`) of the scenario's earlier repeats on this arm, in repeat order, also across a
   resume (lane S1's determinism check compares against them, so it must digest with the same function).
-- Exit codes of run_direct.py: 0 done, 130 stopped by a signal, 3 stopped at `--max-requests`, 1 failed.
+- Exit codes of run_direct.py: 0 done (or partial: a paired step), 130 stopped by a signal, 3 stopped at
+  `--max-requests`, 1 failed. `--max-requests` counts every request of the invocation, the closing GET
+  /capabilities included (review L4).
+- Paired steps (review H1): `--only IDS` executes just these scenarios of the selection (the three capabilities
+  documents only when the arm has none yet, no closing GET); `--finish` executes nothing and takes the closing
+  GET; run.json `planned` / `state` always cover the whole selection (`done` when every planned execution is
+  recorded, else `partial`). `--status-line` prints a last line `RUN_DIRECT_STATUS {state, executed, requests,
+  reason}` for the orchestrator.
 
 ### Orchestrator
 `run_suite.sh [--manifest M | --smoke] [--areas ...] [--limit N] [--skip-local] [--skip-remote]

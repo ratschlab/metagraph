@@ -2,7 +2,9 @@
 
 It serves the routes the runner touches under an optional path prefix (like the public URL's
 /api/refseq33m-experimental): the three capabilities documents, POST /pattern (gzip when asked; 400 for an
-unknown field), /resolve, /traverse, and /slow, which sleeps for the `sleep_s` of its body.
+unknown field), /resolve, /traverse, and /slow, which sleeps for the `sleep_s` of its body. It speaks HTTP/1.1
+with keep-alive (`conns` records the client port of every request, so a test sees connection reuse);
+`drop=True` closes every connection silently after its answer, like a server dropping idle connections.
 """
 
 import gzip
@@ -26,8 +28,11 @@ def pattern_capabilities():
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     prefix = ""
     log = None
+    conns = None
+    drop = False
 
     def log_message(self, fmt, *args):  # quiet
         pass
@@ -48,11 +53,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        if self.drop:
+            self.close_connection = True
 
     def do_GET(self):
         path = self._path()
         if self.log is not None:
             self.log.append(("GET", path))
+            self.conns.append(self.client_address[1])
         if path == "/capabilities":
             self._send(200, capabilities())
         elif path == "/pattern/capabilities":
@@ -68,6 +76,7 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b""
         if self.log is not None:
             self.log.append(("POST", path))
+            self.conns.append(self.client_address[1])
         try:
             body = json.loads(raw.decode("utf-8")) if raw else None
         except ValueError:
@@ -99,14 +108,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class FakeHost(object):
-    def __init__(self, prefix="/api/refseq33m-experimental"):
-        log = []
+    def __init__(self, prefix="/api/refseq33m-experimental", drop=False):
+        log, conns = [], []
 
         class H(Handler):
             pass
         H.prefix = prefix
         H.log = log
+        H.conns = conns
+        H.drop = drop
         self.log = log
+        self.conns = conns
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.server.daemon_threads = True
         self.port = self.server.server_address[1]

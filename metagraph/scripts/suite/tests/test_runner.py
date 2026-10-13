@@ -158,9 +158,11 @@ class RunnerTest(unittest.TestCase):
         out = os.path.join(self.dir, "run")
         with FakeHost() as host:
             rc = self.run_direct(host.base, out, "--max-requests", "5")
+            # the closing GET /capabilities is inside the cap: 3 capabilities + 1 execution + 1 closing GET
+            self.assertEqual(len(host.log), 5)
         self.assertEqual(rc, run_direct.EXIT_REQUEST_CAP)
         rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
-        self.assertEqual(len(rows), 2)  # 3 capabilities + 2 executions
+        self.assertEqual(len(rows), 1)
         run = sc.read_json(os.path.join(out, "run.json"))
         self.assertEqual(run["state"], "interrupted")
         self.assertIn("max_requests", run["sessions"][0]["reason"])
@@ -272,11 +274,104 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(seen, [("D-1", []), ("D-1", [d[0]]), ("D-1", [d[0], d[1]])])
 
     def test_load_checks_fallback(self):
-        mod, name = run_direct.load_checks("stub")
-        self.assertEqual(name, "stub")
-        mod, name = run_direct.load_checks("auto")
+        mod, name, err = run_direct.load_checks("stub")
+        self.assertEqual((name, err), ("stub", None))
+        mod, name, err = run_direct.load_checks("auto")
         self.assertIn(name, ("stub", "checks"))
         self.assertTrue(hasattr(mod, "evaluate"))
+
+    def test_stub_refused_beyond_status(self):
+        scen = basic_scenarios()[:2]
+        scen[1]["expect"].append({"check": "contains_source_context", "args": {"level": 0}})
+        make_manifest(self.manifest_path, scen)
+        out = os.path.join(self.dir, "run")
+        with FakeHost() as host:
+            with self.assertRaises(SystemExit) as ctx:
+                self.run_direct(host.base, out)
+            self.assertIn("contains_source_context", str(ctx.exception))
+            self.assertEqual(host.log, [])
+            # a selection without the other check runs; --allow-stub runs everything
+            self.assertEqual(self.run_direct(host.base, out, "--ids", "C-1", "--warm-every", "0"), 0)
+            self.assertEqual(self.run_direct(host.base, out, "--allow-stub", "--warm-every", "0"), 0)
+        rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+        self.assertEqual([r["scenario"] for r in rows], ["C-1", "P-1"])
+        p1 = rows[1]["checks"]
+        self.assertEqual([c["outcome"] for c in p1], ["pass", "not_exposed"])
+
+    def test_stub_status_code_and_text(self):
+        import checks_stub
+        answer = {"http": 400, "body": None, "error": {"code": "invalid_request", "text": "request: unknown field 'x'"}}
+        ok = checks_stub.evaluate({"expect": [{"check": "status", "args": {
+            "http": [400, 422], "code": "invalid_request", "text_prefix": "request:",
+            "text_contains": ["unknown field"]}}]}, answer, "direct-local")
+        self.assertEqual(ok[0]["outcome"], "pass")
+        bad = checks_stub.evaluate({"expect": [{"check": "status", "args": {
+            "http": 400, "code": "pattern_invalid"}}]}, answer, "direct-local")
+        self.assertEqual(bad[0]["outcome"], "fail")
+        self.assertIn("pattern_invalid", bad[0]["detail"])
+        bad = checks_stub.evaluate({"expect": [{"check": "status", "args": {
+            "http": 400, "text": "request: unknown field 'y'"}}]}, answer, "direct-local")
+        self.assertEqual(bad[0]["outcome"], "fail")
+
+    def test_keep_alive_connection(self):
+        make_manifest(self.manifest_path, basic_scenarios())
+        out = os.path.join(self.dir, "run")
+        with FakeHost() as host:
+            self.assertEqual(self.run_direct(host.base, out), 0)
+            conns = list(host.conns)
+        # one connection for the whole invocation
+        self.assertEqual(len(set(conns)), 1, conns)
+        rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+        # the capabilities GETs opened it: every execution reused it and has no connect time
+        self.assertTrue(all(r["client"]["reused"] for r in rows))
+        self.assertTrue(all(r["client"]["connect_ms"] is None for r in rows))
+        self.assertTrue(all(r["client"]["attempts"] == 1 for r in rows))
+
+    def test_dropped_connection_resent_once(self):
+        make_manifest(self.manifest_path, basic_scenarios()[:3])
+        out = os.path.join(self.dir, "run")
+        with FakeHost(drop=True) as host:
+            self.assertEqual(self.run_direct(host.base, out, "--warm-every", "0"), 0)
+            n = len(host.log)
+        rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+        self.assertEqual([r["outcome"] for r in rows], ["pass"] * 3)
+        for r in rows:
+            # either the client saw the close in time and connected afresh, or it resent on a fresh connection
+            self.assertIsNotNone(r["client"]["connect_ms"])
+            self.assertLessEqual(r["client"]["attempts"], 2)
+        self.assertEqual(n, 3 + 3 + 1)  # a resend never reaches the server twice: the first attempt died unsent
+
+    def test_paired_steps_only_and_finish(self):
+        make_manifest(self.manifest_path, basic_scenarios())
+        out = os.path.join(self.dir, "run")
+        import io
+        import contextlib
+        with FakeHost() as host:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run_direct.main(["--manifest", self.manifest_path, "--arm", "direct-local", "--base",
+                                      host.base, "--out", out, "--pause", "0", "--quiet", "--checks", "stub",
+                                      "--only", "C-1", "--status-line"])
+            self.assertEqual(rc, 0)
+            status = json.loads(buf.getvalue().strip().splitlines()[-1][len(run_direct.STATUS_PREFIX):])
+            self.assertEqual(status, {"state": "partial", "executed": 2, "requests": 5, "reason": None})
+            self.assertEqual(len(host.log), 5)  # 3 capabilities, C-1 cold and warm, no closing GET
+            self.assertEqual(self.run_direct(host.base, out, "--only", "P-1,R-1"), 0)
+            self.assertEqual(len(host.log), 7)  # the capabilities are not fetched again
+            run = sc.read_json(os.path.join(out, "run.json"))
+            self.assertEqual((run["state"], run["planned"]), ("partial", 9))
+            state = sc.read_json(os.path.join(out, "state.json"))
+            self.assertEqual((state["done"], state["planned"]), (4, 9))
+            for sid in ("T-1", "P-2", "D-1"):
+                self.assertEqual(self.run_direct(host.base, out, "--only", sid), 0)
+            n = len(host.log)
+            self.assertEqual(self.run_direct(host.base, out, "--finish"), 0)
+            self.assertEqual(host.log[n:], [("GET", "/capabilities")])
+        run = sc.read_json(os.path.join(out, "run.json"))
+        self.assertEqual(run["state"], "done")
+        self.assertEqual(run["server_instance_end"], SERVER_INSTANCE)
+        self.assertFalse(run["server_instance_changed"])
+        self.assertEqual(len(sc.read_jsonl(os.path.join(out, "executions.jsonl"))[0]), 9)
 
     def test_sigint_stops_cleanly(self):
         scen = [scenario("S-%d" % i, "S", "POST /slow", {"sleep_s": 0.3}) for i in range(20)]

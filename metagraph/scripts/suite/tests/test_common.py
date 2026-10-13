@@ -239,9 +239,13 @@ class ChecksStub(unittest.TestCase):
     def test_status_pass_fail(self):
         scen = {"expect": [{"check": "status", "args": {"http": 400, "code": "invalid_request"}},
                            {"check": "contains_source_context", "args": {}}]}
-        res = checks_stub.evaluate(scen, {"http": 400}, "direct-local")
+        res = checks_stub.evaluate(scen, {"http": 400, "error": {"code": "invalid_request", "text": "x"}},
+                                   "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["pass", "not_exposed"])
         res = checks_stub.evaluate(scen, {"http": 200}, "direct-local")
+        self.assertEqual(res[0]["outcome"], "fail")
+        # the code is compared, as lane S1's status check does
+        res = checks_stub.evaluate(scen, {"http": 400, "error": {"code": "other", "text": "x"}}, "direct-local")
         self.assertEqual(res[0]["outcome"], "fail")
 
     def test_implicit_status(self):
