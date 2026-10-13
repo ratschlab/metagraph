@@ -58,9 +58,6 @@ FINDING = "finding"
 # the check could not test its property on this answer (an allowed refusal, a withheld or cut list that hides
 # the source, an arm a stated resource limit stopped before the property): counted apart, never as a pass
 INCONCLUSIVE = "inconclusive"
-# checks that guard an answer rather than state a scenario's property: an execution whose other checks were all
-# inconclusive or not exposed is inconclusive, whatever these say (scenario_outcome)
-GUARD_CHECKS = ("status", "invariants", "counts_consistent", "budget_respected")
 
 
 class Missing(Exception):
@@ -321,11 +318,42 @@ def check_entry_fields(sc, ans, a, arm):
     return PASS, "entry fields as expected"
 
 
+def _time_limited(ans: dict) -> str:
+    """What makes an answer time-limited (SPEC-labeled-traversal-core §6.8: determinism holds provided no time
+    budget tripped; SPEC-pattern-search §7.9: determinism "time_limited"); '' when nothing did."""
+    body = ans.get("body")
+    if not isinstance(body, dict):
+        return ""
+    for i, e in enumerate(body.get("patterns") or []):
+        if isinstance(e, dict) and (e.get("determinism") == "time_limited" or (e.get("stop") or {}).get("reason") == "time"
+                                    or (e.get("cut") or {}).get("reason") == "time"):
+            return "pattern %d time-limited" % i
+    if (body.get("stop") or {}).get("reason") == "time":
+        return "resolve stopped by time"
+    for i, r in enumerate(body.get("results") or []):
+        if not isinstance(r, dict):
+            continue
+        if (r.get("resource_stop") or {}).get("resource") == "time":
+            return "seed %d stopped by its time budget" % i
+        for side, armo in (r.get("arms") or {}).items():
+            if (armo.get("cap_trigger") or {}).get("reason") == "time_budget":
+                return "seed %d %s arm stopped by time_budget" % (i, side)
+    return ""
+
+
 def check_deterministic(sc, ans, a, arm, previous=None):
+    """The answer's digest equals the earlier repeats' (`previous`: their digests, or {"digest", "time_limited"}
+    objects). An answer a time budget limited, this one or an earlier one, need not repeat: inconclusive."""
     d = answer_digest(ans, sc.get("route"))
     if not previous:
         return INCONCLUSIVE, "first repeat: nothing to compare yet (digest %s)" % d[:16]
+    tl = _time_limited(ans) or next((p.get("time_limited") for p in previous
+                                     if isinstance(p, dict) and p.get("time_limited")), "")
+    previous = [p.get("digest") if isinstance(p, dict) else p for p in previous]
     diff = [p for p in previous if p != d]
+    if diff and tl:
+        return INCONCLUSIVE, "digest %s differs from %d earlier repeat(s), but a time budget limited it (%s)" % (
+            d[:16], len(diff), tl)
     if diff:
         return FAIL, "digest %s differs from %d earlier repeat(s) (%s)" % (d[:16], len(diff), diff[0][:16])
     return PASS, "digest %s equal to %d earlier repeat(s)" % (d[:16], len(previous))
@@ -805,16 +833,16 @@ def _number(v: Any) -> Optional[float]:
 
 
 def check_budget_respected(sc, ans, a, arm):
-    """The server's elapsed time against the request's effective time budget, by each route's SPEC rule, with the
-    allowance args.allowance_ms taken from the SPEC and the capabilities snapshot (never fitted to an answer).
-    /pattern and /resolve: the top-level timing.elapsed_ms within limits.time_budget_ms (allowance 0: past the
-    budget their SPECs answer 503, so a 200 was written within it). /traverse (SPEC-labeled-traversal-core §6.8):
-    each walked seed's deadline is its budget on the seed's clock, which never stops the seed phase (validation or
-    derivation, depth 0); so the walk must end within the allowance (the walk-stop time from a deadline to the
-    walk's end) plus the walk's longest uninterruptible piece after max(budget, seed_phase_ms), and a seed phase
-    that outlasted the budget leaves one level (complete_to_bp <= 1). A breach is a FINDING (the request still
-    answered); a seed phase longer than the budget is a timing fact stated in the detail, not a finding."""
-    allowance = _number(a.get("allowance_ms")) or 0.0
+    """The server's time against the request's effective time budget, each route by its SPEC's rule and the
+    answer's own deadline record; no fixed allowance (the capabilities state no bound on one uninterruptible
+    piece: deadline_check.max_uninterruptible_ms is null). /pattern and /resolve: a 200 whose timing.elapsed_ms
+    exceeds limits.time_budget_ms broke the SPEC (past the budget they answer 503). /traverse
+    (SPEC-labeled-traversal-core §6.8), per walked seed: the deadline is the budget on the seed's clock and never
+    stops the seed phase (validation or derivation, depth 0), so a time stop must come within the seed's own
+    longest uninterruptible piece (timing.deadline.longest_piece) after max(budget, seed_phase_ms), and a seed
+    phase that outlasted the budget leaves one level (complete_to_bp <= 1). A breach is a FINDING (the request
+    still answered). A stop late within a stated piece, or a seed phase longer than the budget, is a performance
+    fact stated in the detail (the report's timing section), not a finding."""
     body = _body(ans)
     route = sc.get("route", "")
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
@@ -828,13 +856,11 @@ def check_budget_respected(sc, ans, a, arm):
         res = _get(body, "results")
         over, facts, seen = [], [], 0
         for i, r in enumerate(res):
-            t = r.get("timing")
-            if not isinstance(t, dict) or _number(t.get("elapsed_ms")) is None:
-                if "arms" in r:
-                    raise Missing("results[%d].timing.elapsed_ms" % i)
-                continue   # a failed seed without its timing: nothing to compare
             if "arms" not in r:
                 continue   # no walk: the seed phase alone, which the budget does not govern
+            t = r.get("timing")
+            if not isinstance(t, dict) or _number(t.get("elapsed_ms")) is None:
+                raise Missing("results[%d].timing.elapsed_ms" % i)
             seen += 1
             el = _number(t["elapsed_ms"])
             sp = _number(t.get("seed_phase_ms"))
@@ -843,14 +869,7 @@ def check_budget_respected(sc, ans, a, arm):
             dl = t.get("deadline") or {}
             lp = dl.get("longest_piece") or {}
             lp_ms = _number(lp.get("ms")) or 0.0
-            # a longest piece longer than the walk phase lay in the seed phase: it grants the walk nothing
-            piece = lp_ms if lp_ms <= el - sp else 0.0
-            late = el - max(budget, sp)
-            evidence = "elapsed %.0f ms, seed phase %.0f ms, longest piece %s %.0f ms (%s rows), stopped_by %s" % (
-                el, sp, lp.get("kind"), lp_ms, lp.get("rows"), dl.get("stopped_by"))
-            if late > allowance + piece:
-                over.append("seed %d: the walk ended %.0f ms after max(budget %.0f, seed phase %.0f), above the "
-                            "allowance %.0f + its longest piece %.0f (%s)" % (i, late, budget, sp, allowance, piece, evidence))
+            piece = "%s of %.0f ms (%s rows)" % (lp.get("kind"), lp_ms, lp.get("rows"))
             if sp >= budget:
                 facts.append("seed %d: the seed phase (%.0f ms) outlasted the budget, which does not govern it" % (i, sp))
                 for side in _arms_of(sc, i):
@@ -859,12 +878,28 @@ def check_budget_respected(sc, ans, a, arm):
                             (armo.get("complete_to_bp") or 0) > 1:
                         over.append("seed %d %s: the budget passed in the seed phase, yet the walk went on to "
                                     "complete_to_bp %s (one level expected)" % (i, side, armo.get("complete_to_bp")))
+            if dl.get("stopped_by") == "time_budget":
+                sad = _number(dl.get("stop_after_deadline_ms"))
+                if sad is None:
+                    raise Missing("results[%d].timing.deadline.stop_after_deadline_ms" % i)
+                late = budget + sad - max(budget, sp)
+                if late > lp_ms:
+                    over.append("seed %d: the walk saw its deadline %.0f ms after max(budget %.0f, seed phase %.0f), "
+                                "beyond its longest uninterruptible piece, a %s" % (i, late, budget, sp, piece))
+                elif sad > 0:
+                    facts.append("seed %d: stopped %.0f ms after the deadline, within its longest piece, a %s "
+                                 "(elapsed %.0f ms)" % (i, sad, piece, el))
+            elif el > max(budget, sp):
+                facts.append("seed %d: elapsed %.0f ms past the budget without a time stop (%s)" % (
+                    i, el, "a level at the radius is never stopped" if all(
+                        ((r.get("arms") or {}).get(x) or {}).get("status") == "complete" for x in _arms_of(sc, i))
+                    else "arms stopped otherwise"))
         if over:
             return FINDING, "; ".join(over[:4])
         if not seen:
             return INCONCLUSIVE, "no walked seed: nothing the budget governs"
-        return PASS, "%d walked seed(s) ended within the allowance %.0f ms of max(budget %.0f, seed phase)%s" % (
-            seen, allowance, budget, ("; " + "; ".join(facts)) if facts else "")
+        return PASS, "%d walked seed(s) kept the budget %.0f ms by the deadline record%s" % (
+            seen, budget, ("; performance: " + "; ".join(facts)) if facts else "")
     budget = _number((body.get("limits") or {}).get("time_budget_ms"))
     if budget is None:
         named = req.get("time_budget_ms") if route == "POST /pattern" else (req.get("bounds") or {}).get("time_budget_ms")
@@ -874,16 +909,16 @@ def check_budget_respected(sc, ans, a, arm):
     el = _number(_get(body, "timing.elapsed_ms"))
     if el is None:
         raise Missing("timing.elapsed_ms")
-    if el > budget + allowance:
+    if el > budget:
         stops = []
         for i, e in enumerate(body.get("patterns") or []):
             if isinstance(e, dict) and e.get("stop"):
                 stops.append("p%d stop %s/%s" % (i, e["stop"].get("phase"), e["stop"].get("reason")))
         if body.get("stop"):
             stops.append("stop %s/%s" % (body["stop"].get("phase"), body["stop"].get("reason")))
-        return FINDING, "elapsed %.0f ms above the time budget %.0f ms + allowance %.0f ms (%s)" % (
-            el, budget, allowance, ", ".join(stops) or "no stop stated")
-    return PASS, "elapsed %.0f ms within %.0f + %.0f ms" % (el, budget, allowance)
+        return FINDING, "a 200 after %.0f ms, past the time budget %.0f ms (%s)" % (
+            el, budget, ", ".join(stops) or "no stop stated")
+    return PASS, "elapsed %.0f ms within the budget %.0f ms" % (el, budget)
 
 
 # ---------------------------------------------------------------------------------------------- pattern invariants
@@ -1353,82 +1388,211 @@ def _arms_of(sc: dict, i: int) -> List[str]:
     return ["left", "right"] if d == "both" else [d]
 
 
+# path ends that may legitimately stop a walk along its record short of the radius and the record's end: a stated
+# branch (a split the strategy does not follow further) or the walk meeting its own edges again (a repeat)
+_STATED_STRUCTURAL_ENDS = {"branch", "edge_reuse", "edge_reuse_rc", "rejoined_seed", "minority", "below_min_labels",
+                           "split_limit"}
+# a stated resource limit: the walk stopped before it could show the property (inconclusive, never a pass)
+_RESOURCE_ENDS = {"max_steps", "max_live_paths", "max_paths", "max_output_bp", "time_budget", "resource_limit",
+                  "beam_pruned"}
+
+
+def _seed_frame(t: dict, c: dict, side: str, L: int) -> Tuple[Callable[[int], str], int, int]:
+    """For one copy |c| of the truth window: (continuation(n), room in the flank, distance to the record's end) of
+    the arm |side| of a seed that is the window ('+') or its reverse complement ('-')."""
+    s0 = c["start"] - c["flank_start"]
+    fl = c["flank"]
+    rec_len, start = t["record_length"], c["start"]
+    minus = t.get("strand", "+") == "-"
+    walks_right_on_record = (side == "right") != minus
+    # a '-' seed's right arm reads the record leftwards on the reverse strand: rc(w + Y) = rc(Y) + rc(w)
+    if walks_right_on_record:
+        def cont(n: int) -> str:
+            x = fl[s0 + L:s0 + L + n]
+            return revcomp(x) if minus else x
+        room, end = len(fl) - (s0 + L), rec_len - (start + L)
+    else:
+        def cont(n: int) -> str:
+            x = fl[max(0, s0 - n):s0]
+            return revcomp(x) if minus else x
+        room, end = s0, start
+    return cont, room, end
+
+
 def check_walk_in_record(sc, ans, a, arm):
-    """The walk follows the record: per requested arm, some path's flank is the record's own continuation from
-    the seed (for its whole length; with any_copy, the continuation of any copy of a repeated seed), and the root
-    segment, which every path shares, agrees with it. With the record's header as the only label (label_scope
-    "record") no flank may run past the record's end. expect_branching: some arm states a split or a branch
-    event."""
+    """The walk follows the record: per requested arm, some path's flank is the record's own continuation from the
+    seed (for its whole length; with any_copy, the continuation of any copy of a repeated seed; a '-' truth: the
+    seed is the reverse complement of the record's window), the root segment agrees with it, and the longest such
+    path reaches its minimum. The minimum is truth.walk[side].min_bp where the builder computed it exactly from
+    the record (header-label walks on whole records: the first base where the record offers a second successor on
+    either strand, the first reused edge, the record's end, max_extension_bp), and a shorter path fails unless a
+    stated resource limit stopped the arm (inconclusive). Otherwise it is min(max_extension_bp, the record's end,
+    the truth's flank), and a shorter path may also end at a stated branch or re-entry (_STATED_STRUCTURAL_ENDS:
+    other records of a column or taxa can branch where this record does not). With the record's header as the only
+    label (label_scope "record") no flank may run past the record's end. expect_branching: some arm states a
+    split or a branch event, at or before truth.walk[side].branch_by_bp where the builder stated it (a copy's
+    divergence or a second successor on the record's forward strand). prefix_only: no minimum (a walk a budget
+    cut); if_walked: a seed that was not walked (an allowed failed outcome) is inconclusive here."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     if "arms" not in r:
+        if a.get("if_walked"):
+            return INCONCLUSIVE, "seed %d not walked (outcome %r): nothing to follow" % (i, (r.get("outcome") or {}).get("walks"))
         return FAIL, "seed %d not walked (outcome %r, error %r)" % (i, r.get("outcome"), r.get("error"))
     t = sc["truth"] if "truths" not in sc else sc["truths"][i]
     L = t["length"]
     copies = [{"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]}]
     if a.get("any_copy"):
         copies += t.get("copies", [])
-
-    def continuation(c: dict, side: str, n: int) -> str:
-        s0 = c["start"] - c["flank_start"]
-        return c["flank"][s0 + L:s0 + L + n] if side == "right" else c["flank"][max(0, s0 - n):s0]
-
-    def room(c: dict, side: str) -> int:
-        s0 = c["start"] - c["flank_start"]
-        return len(c["flank"]) - (s0 + L) if side == "right" else s0
-
-    rec_end_dist = t["record_length"] - (t["start"] + L)
-    probs, notes = [], []
+    maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
+    probs, notes, stopped = [], [], []
     branching = False
     for side in a.get("arms") or _arms_of(sc, i):
         armo = r["arms"].get(side)
         if armo is None:
             probs.append("arm %s absent" % side)
             continue
-        if armo.get("splits") or armo.get("branch_events"):
+        first_branch = _first_branch_bp(armo)
+        if first_branch is not None:
             branching = True
+            by = ((t.get("walk") or {}).get(side) or {}).get("branch_by_bp")
+            if a.get("expect_branching") and by is not None and first_branch > by:
+                probs.append("%s: the first split or branch event at %d bp, the record branches by %d bp" % (
+                    side, first_branch, by))
+        frames = [_seed_frame(t, c, side, L) for c in copies]
+        own_end = frames[0][2]
+        exact = (t.get("walk") or {}).get(side)
+        if exact is not None and "min_bp" in exact:
+            expected = exact["min_bp"]
+        else:
+            exact = None
+            expected = min(x for x in (maxbp, own_end, frames[0][1]) if x is not None)
+        if a.get("prefix_only"):
+            expected = 0
+        trig = (armo.get("cap_trigger") or {}).get("reason")
         fl = _arm_flanks(armo, side)
         if not fl:
-            notes.append("%s: no path" % side)
+            if armo.get("status") == "truncated" and trig in _RESOURCE_ENDS:
+                stopped.append("%s: no path, stopped by %s" % (side, trig))
+            else:
+                probs.append("%s: no path (status %s)" % (side, armo.get("status")))
             continue
-        follows, best, beyond = 0, 0, 0
+        following, beyond = [], 0
         for p, f in fl:
-            if a.get("label_scope") == "record" and len(f) > (rec_end_dist if side == "right" else t["start"]):
-                probs.append("%s path %s runs %d bp, past the record's end" % (side, p.get("id"), len(f)))
+            if a.get("label_scope") == "record" and len(f) > own_end:
+                probs.append("%s path %s runs %d bp, past the record's end (%d bp)" % (side, p.get("id"), len(f), own_end))
                 continue
             ok = False
-            for c in copies:
-                if room(c, side) < len(f):
+            for cont, room, _ in frames:
+                if room < len(f):
                     beyond += 1
                     continue
-                if f == continuation(c, side, len(f)):
+                if f == cont(len(f)):
                     ok = True
                     break
             if ok:
-                follows += 1
-                best = max(best, len(f))
-        if follows == 0:
+                following.append((p, f))
+        if not following:
             lens = [len(f) for _, f in fl]
             probs.append("%s: none of %d paths follows the record (lengths %s%s)" % (
                 side, len(fl), lens[:6], "; %d beyond the truth flank" % beyond if beyond else ""))
             continue
-        for s in [s for s in armo.get("segments", []) if not s.get("parents")]:
-            rs = s.get("sequence", "")
-            if not any(room(c, side) >= len(rs) and rs == continuation(c, side, len(rs)) for c in copies):
+        for sg in [x for x in armo.get("segments", []) if not x.get("parents")]:
+            rs = sg.get("sequence", "")
+            if not any(room >= len(rs) and rs == cont(len(rs)) for cont, room, _ in frames):
                 probs.append("%s: the root segment disagrees with the record" % side)
-        notes.append("%s: %d of %d paths follow the record (longest %d bp)" % (side, follows, len(fl), best))
+        best = max(len(f) for _, f in following)
+        if best >= expected:
+            notes.append("%s: %d of %d paths follow the record (longest %d bp of %d expected)" % (
+                side, len(following), len(fl), best, expected))
+            continue
+        ends = set()
+        for p, f in following:
+            if len(f) == best:
+                ends |= {p.get("path_reason")} | set(p.get("end_reasons") or {})
+        ends.discard(None)
+        if ends & _STATED_STRUCTURAL_ENDS and exact is None:
+            notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
+                side, best, sorted(ends & _STATED_STRUCTURAL_ENDS)[0], expected))
+        elif ends & _RESOURCE_ENDS or (armo.get("status") == "truncated" and trig in _RESOURCE_ENDS):
+            stopped.append("%s: the record followed for %d of %d bp, stopped by %s" % (
+                side, best, expected, sorted(ends & _RESOURCE_ENDS)[0] if ends & _RESOURCE_ENDS else trig))
+        else:
+            probs.append("%s: the record followed for only %d of %d bp, the path ended by %s" % (
+                side, best, expected, sorted(ends) or "nothing stated"))
     if a.get("expect_branching") and not branching:
-        probs.append("no split or branch event stated on a repeated seed")
+        bys = [((t.get("walk") or {}).get(x) or {}).get("branch_by_bp") for x in a.get("arms") or _arms_of(sc, i)]
+        if stopped:
+            stopped.append("no split or branch event before the stop (the record branches by %s bp)" % bys)
+        else:
+            probs.append("no split or branch event stated on a repeated seed (the record branches by %s bp)" % bys)
     if probs:
         return FAIL, "; ".join(probs[:6])
+    if stopped:
+        return INCONCLUSIVE, "; ".join(stopped + notes)
     return PASS, "; ".join(notes)
+
+
+def _first_branch_bp(armo: dict) -> Optional[int]:
+    """The depth of an arm's first split or branch event (a split's at_bp, or its segment's end in a graphlet
+    arm; an event's at_bp), None without one."""
+    segs = {x.get("id"): x for x in armo.get("segments") or []}
+    at = []
+    for sp in armo.get("splits") or []:
+        if isinstance(sp.get("at_bp"), int):
+            at.append(sp["at_bp"])
+        elif sp.get("segment") in segs:
+            sg = segs[sp["segment"]]
+            at.append(sg.get("from_bp", 0) + sg.get("length_bp", 0))
+    at += [e["at_bp"] for e in armo.get("branch_events") or [] if isinstance(e.get("at_bp"), int)]
+    return min(at) if at else None
+
+
+def check_labels_per_node(sc, ans, a, arm):
+    """labels.max_labels_per_node echoed on every requested arm (labels_per_node.cap == args.cap), and a cut list
+    (nodes_truncated > 0) stated by a limitation naming the knob (SPEC-labeled-traversal-core §7.0)."""
+    i = a.get("seed", 0)
+    r = _result(ans, i)
+    if "arms" not in r:
+        return FAIL, "seed %d not walked (%r)" % (i, r.get("error"))
+    notes = []
+    for side in _arms_of(sc, i):
+        armo = r["arms"].get(side) or {}
+        lpn = armo.get("labels_per_node")
+        if not isinstance(lpn, dict):
+            raise Missing("arms.%s.labels_per_node" % side)
+        if lpn.get("cap") != a["cap"]:
+            return FAIL, "%s: labels_per_node.cap %r, the request's max_labels_per_node %r" % (side, lpn.get("cap"), a["cap"])
+        if (lpn.get("nodes_truncated") or 0) > 0 and not [x for x in armo.get("limitations") or []
+                                                         if x.get("knob") == "labels.max_labels_per_node"]:
+            return FAIL, "%s: %s node lists cut, no limitation names labels.max_labels_per_node" % (
+                side, lpn.get("nodes_truncated"))
+        notes.append("%s cap %s, max_seen %s, %s cut" % (side, lpn.get("cap"), lpn.get("max_seen"), lpn.get("nodes_truncated")))
+    return PASS, "; ".join(notes)
+
+
+def check_label_dict_contains(sc, ans, a, arm):
+    """The seed's label dictionary names args.name (with args.kind when given): a derived permitted set of the
+    kind asked (labels.seed_label_kind) holds the record's own label."""
+    i = a.get("seed", 0)
+    r = _result(ans, i)
+    ld = r.get("label_dict")
+    if ld is None:
+        raise Missing("results[%d].label_dict" % i)
+    hits = [x for x in ld if x.get("name") == a["name"] and ("kind" not in a or x.get("kind") == a["kind"])]
+    if not hits:
+        return FAIL, "%s (%s) not in the label dictionary of %d label(s) (%s)" % (
+            a["name"], a.get("kind", "any kind"), len(ld), [(x.get("name"), x.get("kind")) for x in ld[:4]])
+    others = sorted({x.get("kind") for x in ld} - ({a["kind"]} if "kind" in a else set()))
+    if "kind" in a and a.get("only_kind") and others:
+        return FAIL, "labels of kind %s beside %s" % (others, a["kind"])
+    return PASS, "%s (%s) among %d label(s)" % (a["name"], hits[0].get("kind"), len(ld))
 
 
 def check_walk_end(sc, ans, a, arm):
     """Near the record's end the arm stops exactly at the record's end (header label), with a structural or
-    label end reason. An arm a resource stopped before it (a stated stop: status truncated, every path ended by
-    a resource reason short of the end) cannot show the end: the check passes saying so, the walk so far being
-    walk_in_record's to check."""
+    label end reason. An arm a stated resource limit stopped before it (status truncated, every path ended by a
+    resource reason short of the end) cannot show the end: inconclusive, naming the stop."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     if "arms" not in r:
@@ -1440,12 +1604,11 @@ def check_walk_end(sc, ans, a, arm):
     fl = _arm_flanks(armo, side)
     lens = sorted({len(f) for _, f in fl})
     if want not in lens:
-        resource = {"max_steps", "time_budget", "resource_limit", "max_live_paths", "max_paths", "max_output_bp"}
         if fl and armo.get("status") == "truncated" and all(
-                len(f) < want and (p.get("path_reason") in resource or set(p.get("end_reasons") or {}) & resource)
+                len(f) < want and (p.get("path_reason") in _RESOURCE_ENDS or set(p.get("end_reasons") or {}) & _RESOURCE_ENDS)
                 for p, f in fl):
             trig = armo.get("cap_trigger") or {}
-            return PASS, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
+            return INCONCLUSIVE, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
                 side, trig.get("reason"), trig.get("at_bp"), want)
         return FAIL, "%s arm path lengths %s, the record ends %d bp from the seed" % (side, lens[:8], want)
     for p, f in fl:
@@ -1463,6 +1626,50 @@ def check_traverse_seed_outcome(sc, ans, a, arm):
     if walks not in wants:
         return FAIL, "outcome.walks %r, expected %r (error %r)" % (walks, wants, r.get("error"))
     return PASS, "outcome.walks %r" % walks
+
+
+def _limitations_naming(r: dict, knob: str) -> List[dict]:
+    out = [x for x in r.get("limitations") or [] if x.get("knob") == knob]
+    for armo in (r.get("arms") or {}).values():
+        out += [x for x in armo.get("limitations") or [] if x.get("knob") == knob]
+    return out
+
+
+def check_traverse_stop(sc, ans, a, arm):
+    """A stated stop of the knob that was set (SPEC-labeled-traversal-core §7.0): outcome.walks among args.walks;
+    with args.resource (time, memory, work: a request budget) a resource_stop of that resource whose `requested` is
+    the request's knob value; with args.cap_reason, every requested arm of a walked seed truncated with that
+    cap_trigger reason; and a limitation naming args.knob (a walk_domain on the arm, or on a failed seed)."""
+    i = a.get("seed", 0)
+    r = _result(ans, i)
+    walks = (r.get("outcome") or {}).get("walks")
+    wants = a.get("walks") or ["partial"]
+    if walks not in wants:
+        return FAIL, "outcome.walks %r, expected %r (error %r)" % (walks, wants, r.get("error"))
+    knob = a["knob"]
+    bounds = ((sc["request"].get("strategy") or {}).get("bounds") or {})
+    if a.get("resource"):
+        rs = r.get("resource_stop")
+        if not isinstance(rs, dict):
+            return FAIL, "no resource_stop for a %s budget (outcome %s)" % (a["resource"], walks)
+        if rs.get("resource") != a["resource"]:
+            return FAIL, "resource_stop.resource %r, expected %r" % (rs.get("resource"), a["resource"])
+        want = _number(bounds.get(knob.split(".", 1)[1]))
+        if want is not None and _number(rs.get("requested")) != want:
+            return FAIL, "resource_stop.requested %r, the request's %s is %r" % (rs.get("requested"), knob, want)
+    if a.get("cap_reason") and "arms" in r:
+        for side in _arms_of(sc, i):
+            armo = r["arms"].get(side) or {}
+            trig = (armo.get("cap_trigger") or {}).get("reason")
+            if armo.get("status") == "complete" or trig != a["cap_reason"]:
+                return FAIL, "%s arm status %r, cap_trigger %r, expected truncated by %s" % (
+                    side, armo.get("status"), trig, a["cap_reason"])
+    lims = _limitations_naming(r, knob)
+    if not lims:
+        return FAIL, "no limitation names %s" % knob
+    return PASS, "walks %s, stopped by %s%s (%s)" % (
+        walks, knob, (" (resource %s)" % a["resource"]) if a.get("resource") else "",
+        ", ".join(sorted({str(x.get("kind")) for x in lims})))
 
 
 def check_trace_coordinates(sc, ans, a, arm):
@@ -1504,6 +1711,8 @@ def _traverse_invariants(sc, ans, a, arm):
     if len(res) != len(seeds):
         probs.append("%d results for %d seeds" % (len(res), len(seeds)))
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
+    echoed = ((body.get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
+    radius = echoed if isinstance(echoed, int) else maxbp
     for i in range(len(res)):
         r = _result(ans, i)
         if "outcome" not in r:
@@ -1511,6 +1720,7 @@ def _traverse_invariants(sc, ans, a, arm):
             continue
         if "arms" not in r:
             continue
+        walks = (r.get("outcome") or {}).get("walks")
         for side in _arms_of(sc, i):
             armo = r["arms"].get(side)
             if armo is None:
@@ -1518,6 +1728,14 @@ def _traverse_invariants(sc, ans, a, arm):
                 continue
             if armo.get("status") not in ("complete", "truncated", "pruned"):
                 probs.append("result %d %s: status %r" % (i, side, armo.get("status")))
+            # SPEC §7.0: complete_to_bp equals max_extension_bp exactly when the arm is complete, and walks
+            # "complete" only when every requested arm is
+            if isinstance(radius, int) and "complete_to_bp" in armo:
+                if (armo.get("status") == "complete") != (armo.get("complete_to_bp") == radius):
+                    probs.append("result %d %s: status %s with complete_to_bp %s of max_extension_bp %s" % (
+                        i, side, armo.get("status"), armo.get("complete_to_bp"), radius))
+            if walks == "complete" and armo.get("status") != "complete":
+                probs.append("result %d: walks complete but the %s arm is %s" % (i, side, armo.get("status")))
             segs = {s["id"]: s for s in armo.get("segments", [])}
             for p in armo.get("paths", []):
                 chain = p.get("segments", [])
@@ -1582,6 +1800,9 @@ CHECKS: Dict[str, Callable] = {
     "walk_in_record": check_walk_in_record,
     "walk_end": check_walk_end,
     "traverse_seed_outcome": check_traverse_seed_outcome,
+    "traverse_stop": check_traverse_stop,
+    "labels_per_node": check_labels_per_node,
+    "label_dict_contains": check_label_dict_contains,
     "trace_coordinates": check_trace_coordinates,
 }
 
@@ -1777,7 +1998,7 @@ def evaluate_relation(rel: dict, a_scenario: dict, a_answer: dict, b_scenario: d
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[str]] = None) -> List[dict]:
     """Every expectation of |scenario| against |answer| (DESIGN §8.2). A check whose field is missing answers
     not_exposed on the MCP arm and fail on a direct arm; an unknown check name or a check that raises is a fail
-    stating why (never a silent pass)."""
+    stating why (never a silent pass). `deterministic` is left out of the first repeat (nothing to compare)."""
     out = []
     http = answer.get("http")
     allowed = [200]
@@ -1788,6 +2009,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
     for exp in scenario.get("expect", []):
         name = exp.get("check")
         args = exp.get("args", {})
+        if name == "deterministic" and not previous:
+            continue   # the first repeat has nothing to compare: no result, so that it neither passes nor holds up
         fn = CHECKS.get(name)
         if fn is None:
             out.append({"check": name, "outcome": FAIL, "detail": "unknown check %r" % name})
@@ -1817,16 +2040,17 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
 
 
 def scenario_outcome(results: List[dict]) -> str:
-    """The execution's outcome from its checks: `fail` when a check failed; else `finding` when a check is a
-    finding (the host broke a stated bound without failing the request); else `pass` when a check that states the
-    scenario's property passed, `inconclusive` when none could test it (an allowed 503, a withheld answer that
-    hides the source, a stated resource stop before the property, an MCP execution whose checks are not exposed).
-    The property checks are the checks outside GUARD_CHECKS; a scenario with none has its guards beyond status as
-    its property (an invariants-only scenario), and a refusal scenario its status."""
+    """The execution's outcome from its checks, by precedence fail > finding > inconclusive > pass (the rule lane
+    S2's comparator and report and the async session's MCP runner apply): `fail` when a check failed; else `finding`
+    when a check is a finding (the host broke a stated bound without failing the request); else `inconclusive` when
+    a check could not test its property (an allowed 503, a list that hides the source, a stated resource stop
+    before the property), or when there is no check or every check is not exposed; else `pass`."""
     if any(r["outcome"] == FAIL for r in results):
         return FAIL
     if any(r["outcome"] == FINDING for r in results):
         return FINDING
-    prop = [r for r in results if r["check"] not in GUARD_CHECKS] \
-        or [r for r in results if r["check"] != "status"] or list(results)
-    return PASS if any(r["outcome"] == PASS for r in prop) else INCONCLUSIVE
+    if any(r["outcome"] == INCONCLUSIVE for r in results):
+        return INCONCLUSIVE
+    if not any(r["outcome"] != NOT_EXPOSED for r in results):
+        return INCONCLUSIVE
+    return PASS

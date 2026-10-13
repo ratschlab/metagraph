@@ -615,23 +615,16 @@ def mcp_traverse(req: Any) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------- the time budget
-def _traverse_stop_ms() -> float:
-    with open(os.path.join(TRUTH_DIR, "staging_capabilities", "traverse_capabilities.json")) as f:
-        return json.load(f)["attempts"]["delivery_reserve"]["stop_ms"]
-
-
-# The allowance budget_respected grants above the effective time budget, per route, with its source: taken from the
-# SPECs and the capabilities snapshot, never fitted to an answer
-BUDGET_ALLOWANCE = {
-    "POST /traverse": (_traverse_stop_ms(),
-                       "SPEC-labeled-traversal-core.md §6.8, the delivery reserve's calibration: stop_ms = "
-                       "chunk_target_ms + 950, the time from a stop's deadline to the walk's end (capabilities "
-                       "attempts.delivery_reserve.stop_ms, snapshot 2026-10-13); one row's read has no stated bound "
-                       "(deadline_check.max_uninterruptible_ms null), so nothing more is granted"),
-    "POST /pattern": (0, "SPEC-pattern-search.md §7.6: an answer that cannot be written by time_budget_ms is a 503 "
-                         "deadline, so a 200's timing.elapsed_ms (to the end of the search) is within the budget"),
-    "POST /resolve": (0, "SPEC-labeled-traversal-core.md §4.5: past the budget the answer is a 503, never a partial "
-                         "answer, so a 200's timing.elapsed_ms is within the budget"),
+# The rule budget_respected applies per route (stated in the check's args): no fixed allowance, since the
+# capabilities state no bound on one uninterruptible piece (deadline_check.max_uninterruptible_ms null)
+BUDGET_RULE = {
+    "POST /traverse": "SPEC-labeled-traversal-core.md §6.8: the seed's budget runs on its clock and never stops the "
+                      "seed phase; a time stop within the seed's longest uninterruptible piece after max(budget, "
+                      "seed_phase_ms); a budget that passed in the seed phase leaves one level",
+    "POST /pattern": "SPEC-pattern-search.md §7.6: an answer that cannot be written by time_budget_ms is a 503 "
+                     "deadline, so a 200's timing.elapsed_ms (to the end of the search) is within the budget",
+    "POST /resolve": "SPEC-labeled-traversal-core.md §4.5: past the budget the answer is a 503, never a partial "
+                     "answer, so a 200's timing.elapsed_ms is within the budget",
 }
 
 
@@ -650,7 +643,7 @@ def time_budget_of(route: str, req: Any) -> Optional[Any]:
 
 def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dict]:
     """budget_respected for a scenario that names a time budget and allows a 200 answer."""
-    if time_budget_of(route, req) is None or route not in BUDGET_ALLOWANCE:
+    if time_budget_of(route, req) is None or route not in BUDGET_RULE:
         return None
     allowed = [200]
     for e in expect:
@@ -659,8 +652,7 @@ def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dic
             allowed = w if isinstance(w, list) else [w]
     if 200 not in allowed:
         return None
-    ms, source = BUDGET_ALLOWANCE[route]
-    return {"check": "budget_respected", "args": {"allowance_ms": ms, "allowance_source": source}}
+    return {"check": "budget_respected", "args": {"rule": BUDGET_RULE[route]}}
 
 
 # ---------------------------------------------------------------------------------------------- relations

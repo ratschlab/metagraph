@@ -96,11 +96,11 @@ class McpMapping(unittest.TestCase):
         ok = {"check": "status", "args": {"http": 200}}
         s = ml.scenario("P-1", "P", "t", "POST /pattern", ml.pattern_request([{"dna": "A" * 25}]), {}, [ok])
         b = [e for e in s["expect"] if e["check"] == "budget_respected"]
-        self.assertEqual(b[0]["args"]["allowance_ms"], 0)
+        self.assertIn("§7.6", b[0]["args"]["rule"])
         s = ml.scenario("T-1", "T", "t", "POST /traverse", ml.traverse_request([{"sequence": "A" * 40}]), {},
                         [{"check": "status", "args": {"http": [200, 503]}}])
         b = [e for e in s["expect"] if e["check"] == "budget_respected"]
-        self.assertEqual(b[0]["args"]["allowance_ms"], 1000)    # the capabilities' delivery_reserve.stop_ms
+        self.assertIn("seed_phase_ms", b[0]["args"]["rule"])     # no fixed allowance: the deadline record
         s = ml.scenario("R-1", "R", "t", "POST /resolve", ml.resolve_request("A" * 40, labels=["1"], time_budget_ms=250),
                         {}, [{"check": "status", "args": {"http": 400}}])
         self.assertFalse(any(e["check"] == "budget_respected" for e in s["expect"]))   # a refusal: no answer to time

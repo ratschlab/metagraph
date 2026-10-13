@@ -83,29 +83,33 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   answer: an HTTP status the scenario allows that is not a 200, such as a 503 `deadline`; a withheld, cut or
   stopped list that does not show the source, in contains_source_context, source_label, source_placement,
   path_spells, path_record_verified, and the absence checks source_absent, path_absent and predicate_selected;
-  a walk a stated resource limit stopped before its property; the first repeat of `deterministic`) or `finding`
-  (budget_respected). `checks.scenario_outcome(results)` gives the execution's outcome: `fail` when a check
-  failed, else `finding` when one is a finding, else `pass` when a check stating the scenario's property passed,
-  else `inconclusive`. The property checks are those outside `GUARD_CHECKS` (status, invariants,
-  counts_consistent, budget_respected); a scenario without any has its non-status guards as its property (an
-  invariants-only scenario), a refusal scenario its status. So an allowed 503, a withheld answer that hides the
-  source, and an MCP execution whose checks are all not exposed are inconclusive, never a pass. The runners and the
-  comparator take the outcome from `scenario_outcome` (lane S2b).
-- `budget_respected` (lane S1b, the integrator's decision 2, derived per route from the SPECs after the
-  verification of 2026-10-13): every scenario that names a time budget and allows a 200 checks the server's elapsed
-  time against the effective budget (the answer's `limits.time_budget_ms`, on /traverse the echoed
-  `strategy.bounds.time_budget_ms`), with an allowance stated in the check's args with its source. /pattern and
-  /resolve: allowance 0 (past the budget their SPECs answer 503; the deployed /resolve sets `timing.elapsed_ms`
-  before its last deadline check). /traverse, per walked seed: the seed's deadline is its budget on the seed's clock
-  (walker.cpp `time_exceeded`), which never stops the seed phase (validation or derivation, depth 0, paced against
-  no deadline); so the walk must end within 1,000 ms (`attempts.delivery_reserve.stop_ms` of the capabilities
-  snapshot = `chunk_target_ms` + 950, the SPEC's time from a deadline to the walk's end) plus its longest
-  uninterruptible piece (`timing.deadline.longest_piece`, when not longer than the walk phase) after
-  max(budget, `seed_phase_ms`), and a seed phase that outlasted the budget leaves one level (`complete_to_bp` <= 1).
-  A breach is the check outcome `finding` (the request answered), and an execution with a finding and no failure
-  has the outcome `finding`: the report lists findings in their own section. A seed phase longer than the budget
-  is a timing fact stated in the detail, not a finding: the smoke run's lambda walk (34,201 ms under 15,000; seed
-  phase 33,803 ms with one cold 20,556 ms coordinate-tuple read; the walk stopped 398 ms later) passes.
+  a walk a stated resource limit stopped before its property) or `finding` (budget_respected).
+  `checks.scenario_outcome(results)` gives the execution's outcome by the precedence fail > finding >
+  inconclusive > pass, and `inconclusive` when there is no check or every check is not exposed (the rule lane
+  S2's comparator and report and the async MCP runner share). So an allowed 503, a withheld answer that hides the
+  source, a walk stopped by a stated resource limit before its property and an MCP execution whose checks are all
+  not exposed are inconclusive, never a pass. `deterministic` is left out of a scenario's first repeat (nothing to
+  compare yet), so that repeat's outcome rests on the other checks.
+- `budget_respected` (lane S1b, the integrator's decision 2, derived per route from the SPECs and each answer's
+  own deadline record after the two verifications of 2026-10-13; no fixed allowance anywhere, since the
+  capabilities state no bound on one uninterruptible piece, `deadline_check.max_uninterruptible_ms` null): every
+  scenario that names a time budget and allows a 200 carries it, its args stating the rule. /pattern and /resolve:
+  a 200 whose `timing.elapsed_ms` exceeds the effective `limits.time_budget_ms` broke the SPEC (past the budget
+  they answer 503; the deployed /resolve sets `timing.elapsed_ms` before its last deadline check). /traverse, per
+  walked seed: the deadline is the budget on the seed's clock (walker.cpp `time_exceeded`) and never stops the
+  seed phase (validation or derivation, depth 0, paced against no deadline); so a time stop must come within the
+  seed's own longest uninterruptible piece (`timing.deadline.longest_piece`) after max(budget, `seed_phase_ms`)
+  (`stop_after_deadline_ms` is measured from the budget), and a seed phase that outlasted the budget leaves one
+  level (`complete_to_bp` <= 1). A breach is the check outcome `finding`; a stop late within its stated piece, a
+  seed phase longer than the budget, or a walk past the budget without a time stop (a level at the radius is never
+  stopped) is a performance fact stated in the detail, for the report's timing section. The smoke run's lambda
+  walk (34,201 ms under 15,000: seed phase 33,803 ms with one cold 20,556 ms coordinate-tuple read; stopped
+  19,201 ms after the deadline, 398 ms after the seed phase) passes with those facts stated.
+- `deterministic` is inconclusive when this answer or an earlier repeat was limited by a time budget
+  (SPEC-labeled-traversal-core §6.8: determinism provided no time budget tripped; SPEC-pattern-search §7.9:
+  `determinism: time_limited`); `previous` may give each earlier repeat as a digest or as
+  `{"digest", "time_limited"}` (lane S2's runner passes digests today: an earlier time-limited repeat is then seen
+  only through the digest difference, which this answer's own time stop explains when it has one).
 - Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
   implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...).
 

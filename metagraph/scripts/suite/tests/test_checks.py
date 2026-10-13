@@ -124,9 +124,19 @@ class Generic(unittest.TestCase):
         a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})
         d = checks.answer_digest(a)
         sc = {"route": "POST /pattern", "request": {}, "truth": {}}
-        self.assertEqual(outcome(sc, a, "deterministic", previous=None)[0], "inconclusive")   # nothing to compare
+        # the first repeat has nothing to compare: evaluate leaves the check out
+        sc1 = dict(sc, expect=[{"check": "status", "args": {"http": 200}}, {"check": "deterministic", "args": {}}])
+        self.assertEqual([r["check"] for r in checks.evaluate(sc1, a, "direct-local", previous=None)], ["status"])
         self.assertEqual(outcome(sc, a, "deterministic", previous=[d, d])[0], "pass")
         self.assertEqual(outcome(sc, a, "deterministic", previous=[d, "0" * 64])[0], "fail")
+        # a time-limited answer (this one or an earlier repeat) need not repeat (SPEC §6.8 / §7.9)
+        tl = ok_answer({"x": 2, "patterns": [{"stop": {"phase": "discovery", "reason": "time"}}]})
+        self.assertEqual(outcome(sc, tl, "deterministic", previous=[d])[0], "inconclusive")
+        self.assertEqual(outcome(sc, a, "deterministic", previous=[{"digest": "0" * 64, "time_limited": "seed 0"}])[0],
+                         "inconclusive")
+        self.assertEqual(outcome(sc, a, "deterministic", previous=[{"digest": d, "time_limited": ""}])[0], "pass")
+        walk = ok_answer({"results": [{"arms": {"right": {"cap_trigger": {"reason": "time_budget"}}}}]})
+        self.assertEqual(outcome(sc, walk, "deterministic", previous=["0" * 64])[0], "inconclusive")
 
     def test_fields_encoding_capabilities_clamped(self):
         req, ans = fixture("clamped")
@@ -367,19 +377,21 @@ class PatternChecks(unittest.TestCase):
 
 
 class BudgetChecks(unittest.TestCase):
-    """budget_respected by each route's SPEC rule; on /traverse the seed phase is outside the seed's budget (the
-    smoke run's lambda walk: 34,201 ms under 15,000, of which the seed phase 33,803: within the rule)."""
+    """budget_respected by each route's SPEC rule and the answer's own deadline record, no fixed allowance; on
+    /traverse the seed phase is outside the seed's budget (the smoke run's lambda walk: 34,201 ms under 15,000, a
+    seed phase of 33,803 ms with a 20,556 ms read, stopped 19,201 ms after the deadline: within the rule)."""
 
-    def traverse(self, elapsed, seed_phase, piece=100.0, budget=15000, echoed=True, timing=True, kind="read",
-                 complete_to_bp=1):
+    def traverse(self, elapsed, seed_phase, sad=None, piece=100.0, budget=15000, echoed=True, timing=True,
+                 complete_to_bp=1, stopped=True):
         r = {"outcome": {"walks": "partial"},
              "arms": {"right": {"status": "truncated", "complete_to_bp": complete_to_bp,
                                 "cap_trigger": {"reason": "time_budget", "at_bp": complete_to_bp}}}}
         if timing:
-            r["timing"] = {"elapsed_ms": elapsed, "seed_phase_ms": seed_phase,
-                           "deadline": {"longest_piece": {"kind": kind, "ms": piece, "rows": 1},
-                                        "stopped_by": "time_budget",
-                                        "stop_after_deadline_ms": max(0, elapsed - budget)}}
+            dl = {"longest_piece": {"kind": "read", "ms": piece, "rows": 1}}
+            if stopped:
+                dl.update(stopped_by="time_budget", stop_after_deadline_ms=sad if sad is not None else
+                          max(0.0, elapsed - budget))
+            r["timing"] = {"elapsed_ms": elapsed, "seed_phase_ms": seed_phase, "deadline": dl}
         body = {"results": [r], "timing": {"elapsed_ms": elapsed + 1}}
         if echoed:
             body["strategy"] = {"bounds": {"time_budget_ms": budget}}
@@ -391,49 +403,42 @@ class BudgetChecks(unittest.TestCase):
     def test_traverse(self):
         sc = self.sc("POST /traverse", {"seeds": [{"sequence": "A" * 40}],
                                         "strategy": {"direction": "right", "bounds": {"time_budget_ms": 15000}}})
-        # the smoke run's walk: the seed phase outlasted the budget, the walk then stopped 398 ms later
-        o, d = outcome(sc, self.traverse(34201.3, 33803.4, piece=20556.4), "budget_respected", allowance_ms=1000)
+        o, d = outcome(sc, self.traverse(34201.3, 33803.4, sad=19201.0, piece=20556.4), "budget_respected")
         self.assertEqual(o, "pass")
         self.assertIn("seed phase (33803 ms) outlasted the budget", d)
-        # the walk itself overran: 2,500 ms past the deadline with a 100 ms longest piece
-        o, d = outcome(sc, self.traverse(17500, 2000), "budget_respected", allowance_ms=1000)
+        self.assertIn("within its longest piece", d)
+        # the walk saw its deadline 2,500 ms late with a longest piece of 100 ms
+        o, d = outcome(sc, self.traverse(17600, 2000, sad=2500), "budget_respected")
         self.assertEqual(o, "finding")
         self.assertIn("2500 ms after max(budget 15000, seed phase 2000)", d)
-        self.assertEqual(outcome(sc, self.traverse(15900, 2000), "budget_respected", allowance_ms=1000)[0], "pass")
-        # one uninterruptible piece in the walk is waited out (SPEC §6.8): 4,000 ms late with a 3,500 ms piece
-        self.assertEqual(outcome(sc, self.traverse(19000, 2000, piece=3500), "budget_respected", allowance_ms=1000)[0],
-                         "pass")
-        # a piece longer than the walk phase lay in the seed phase and grants the walk nothing
-        self.assertEqual(outcome(sc, self.traverse(17500, 2000, piece=16000), "budget_respected", allowance_ms=1000)[0],
-                         "finding")
+        self.assertEqual(outcome(sc, self.traverse(15200, 2000, sad=90), "budget_respected")[0], "pass")
         # a budget that passed in the seed phase leaves one level
-        o, d = outcome(sc, self.traverse(20400, 20000, complete_to_bp=7), "budget_respected", allowance_ms=1000)
+        o, d = outcome(sc, self.traverse(20500, 20000, sad=5400, piece=6000, complete_to_bp=7), "budget_respected")
         self.assertEqual(o, "finding")
         self.assertIn("one level expected", d)
         # the effective budget is the echoed strategy's (a clamp lowers it), else the request's
-        self.assertEqual(outcome(sc, self.traverse(16500, 100, budget=60000), "budget_respected", allowance_ms=1000)[0],
+        self.assertEqual(outcome(sc, self.traverse(16500, 100, budget=60000, stopped=False), "budget_respected")[0],
                          "pass")
-        self.assertEqual(outcome(sc, self.traverse(16500, 100, echoed=False), "budget_respected", allowance_ms=1000)[0],
+        self.assertEqual(outcome(sc, self.traverse(16600, 100, sad=1500, echoed=False), "budget_respected")[0],
                          "finding")
-        # a walked seed without timing: a direct arm fails, the MCP arm does not expose it
-        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected", allowance_ms=1000)[0], "fail")
-        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected", "mcp", allowance_ms=1000)[0],
-                         "not_exposed")
+        # a walked seed without timing or seed phase: a direct arm fails, the MCP arm does not expose it
+        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected")[0], "fail")
+        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected", "mcp")[0], "not_exposed")
 
     def test_pattern_and_resolve(self):
         sc = self.sc("POST /pattern", {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 300})
         over = ok_answer({"patterns": [{"stop": {"phase": "discovery", "reason": "time"}}],
                           "limits": {"time_budget_ms": 300}, "timing": {"elapsed_ms": 412.5}})
-        o, d = outcome(sc, over, "budget_respected", allowance_ms=0)
+        o, d = outcome(sc, over, "budget_respected")
         self.assertEqual(o, "finding")
         self.assertIn("p0 stop discovery/time", d)
         within = ok_answer({"patterns": [{}], "limits": {"time_budget_ms": 300}, "timing": {"elapsed_ms": 299.0}})
-        self.assertEqual(outcome(sc, within, "budget_respected", allowance_ms=0)[0], "pass")
+        self.assertEqual(outcome(sc, within, "budget_respected")[0], "pass")
         sc = self.sc("POST /resolve", {"sequence": "A" * 40, "labels": ["562"], "bounds": {"time_budget_ms": 70000}})
         clamped = ok_answer({"num_kmers": 10, "limits": {"time_budget_ms": 60000}, "timing": {"elapsed_ms": 61000}})
-        self.assertEqual(outcome(sc, clamped, "budget_respected", allowance_ms=0)[0], "finding")
+        self.assertEqual(outcome(sc, clamped, "budget_respected")[0], "finding")
         clamped["body"]["timing"]["elapsed_ms"] = 59000
-        self.assertEqual(outcome(sc, clamped, "budget_respected", allowance_ms=0)[0], "pass")
+        self.assertEqual(outcome(sc, clamped, "budget_respected")[0], "pass")
 
     def test_every_stored_pattern_answer_within_its_budget(self):
         n = 0
@@ -448,7 +453,7 @@ class BudgetChecks(unittest.TestCase):
             if not isinstance(ans, dict) or "limits" not in ans or "timing" not in ans or not isinstance(req, dict):
                 continue
             o, d = outcome({"route": "POST /pattern", "request": req, "truth": {}}, ok_answer(ans),
-                           "budget_respected", allowance_ms=0)
+                           "budget_respected")
             self.assertEqual(o, "pass", "%s: %s" % (name, d))
             n += 1
         self.assertGreater(n, 100)
@@ -456,19 +461,18 @@ class BudgetChecks(unittest.TestCase):
     def test_outcome_of_an_execution(self):
         def o(*pairs):
             return checks.scenario_outcome([{"check": c, "outcome": x} for c, x in pairs])
+        # precedence fail > finding > inconclusive > pass
         self.assertEqual(o(("status", "pass"), ("budget_respected", "finding")), "finding")
         self.assertEqual(o(("status", "pass"), ("budget_respected", "finding"), ("absent", "fail")), "fail")
+        self.assertEqual(o(("status", "pass"), ("budget_respected", "finding"), ("absent", "inconclusive")), "finding")
         self.assertEqual(o(("status", "pass")), "pass")                                  # a refusal scenario
-        self.assertEqual(o(("status", "pass"), ("invariants", "pass")), "pass")           # an invariants-only one
-        self.assertEqual(o(("status", "pass"), ("invariants", "inconclusive")), "inconclusive")
-        # the guards cannot carry a scenario whose property was not tested
+        self.assertEqual(o(("status", "pass"), ("invariants", "pass")), "pass")
         self.assertEqual(o(("status", "pass"), ("invariants", "pass"), ("counts_consistent", "pass"),
                            ("budget_respected", "pass"), ("contains_source_context", "inconclusive")), "inconclusive")
         self.assertEqual(o(("status", "pass"), ("contains_source_context", "pass"), ("source_label", "not_exposed")),
                          "pass")
-        self.assertEqual(o(("status", "pass"), ("invariants", "not_exposed"), ("source_label", "not_exposed")),
-                         "inconclusive")                                                 # an MCP arm exposing nothing
-        self.assertEqual(o(("status", "pass"), ("deterministic", "inconclusive"), ("absent", "pass")), "pass")
+        self.assertEqual(o(("invariants", "not_exposed"), ("source_label", "not_exposed")), "inconclusive")
+        self.assertEqual(o(), "inconclusive")                                             # no check at all
 
 
 class Relations(unittest.TestCase):
@@ -651,6 +655,154 @@ class TraverseChecks(unittest.TestCase):
         wrong = dict(t, flank=mutated) if record[t["start"] + len(seed_seq)] != "A" else dict(t, flank=record.replace(rf, "C" * len(rf)))
         self.assertEqual(outcome(dict(sc, truth=wrong), ok_answer(full), "walk_in_record", label_scope="column")[0], "fail")
         self.assertEqual(outcome(sc, ok_answer(full), "walk_in_record", label_scope="column", expect_branching=True)[0], "pass")
+
+    def walk(self, flanks, status="complete", trig=None, reason="max_extension_bp", split_at=None, extra=None):
+        """A detail-full result: per side one path whose single segment spells |flanks[side]| (natural
+        orientation: a left flank ends at the seed)."""
+        arms = {}
+        for side, f in flanks.items():
+            a = {"status": status, "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": len(f), "sequence": f}],
+                 "paths": [{"id": 0, "segments": [0], "length_bp": len(f), "path_reason": reason,
+                            "end_reasons": {reason: 1}}]}
+            if trig:
+                a["cap_trigger"] = {"reason": trig, "at_bp": len(f)}
+            if split_at is not None:
+                a["splits"] = [{"at_bp": split_at, "segment": 0}]
+            a["complete_to_bp"] = 100 if status == "complete" else len(f)
+            a.update(extra or {})
+            arms[side] = a
+        return ok_answer({"results": [{"outcome": {"walks": "complete" if status == "complete" else "partial"},
+                                       "arms": arms, "label_dict": [{"name": "NC_1.1", "kind": "header"},
+                                                                     {"name": "562", "kind": "column"}]}],
+                          "strategy": {"bounds": {"max_extension_bp": 100}}})
+
+    def test_walk_in_record_needs_its_minimum(self):
+        import random
+        rnd = random.Random(7)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}], "strategy": {"direction": "both", "bounds": {"max_extension_bp": 100}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+        right, left = record[start + L:start + L + 100], record[start - 100:start]
+        self.assertEqual(outcome(sc, self.walk({"right": right, "left": left}), "walk_in_record")[0], "pass")
+        # a walk that did not walk: 0 bp, or 1 bp ended without a stated reason, fails
+        self.assertEqual(outcome(sc, self.walk({"right": "", "left": left}), "walk_in_record")[0], "fail")
+        self.assertEqual(outcome(sc, self.walk({"right": right[:1], "left": left[-1:]}, reason="dead_end"),
+                                 "walk_in_record")[0], "fail")
+        # the same 1 bp stopped by the time budget: inconclusive, never a pass
+        o, d = outcome(sc, self.walk({"right": right[:1], "left": left[-1:]}, status="truncated", trig="time_budget",
+                                     reason="time_budget"), "walk_in_record")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("time_budget", d)
+        # a stated branch end short of the radius passes; prefix_only asks for no minimum
+        self.assertEqual(outcome(sc, self.walk({"right": right[:30], "left": left[-30:]}, reason="branch"),
+                                 "walk_in_record")[0], "pass")
+        self.assertEqual(outcome(sc, self.walk({"right": right[:5], "left": left[-5:]}, status="truncated",
+                                               trig="max_steps", reason="max_steps"), "walk_in_record",
+                                 prefix_only=True)[0], "pass")
+        # a wrong base fails whatever the length
+        bad = right[:50] + ("A" if right[50] != "A" else "C") + right[51:]
+        self.assertEqual(outcome(sc, self.walk({"right": bad, "left": left}), "walk_in_record")[0], "fail")
+        # the record's end bounds the minimum: a seed 30 bp before the end needs 30 bp on the right
+        t2 = dict(t, start=930, window=record[930:970])
+        sc2 = dict(sc, truth=t2, request={"seeds": [{"sequence": t2["window"]}],
+                                          "strategy": {"direction": "right", "bounds": {"max_extension_bp": 100}}})
+        self.assertEqual(outcome(sc2, self.walk({"right": record[970:]}, reason="dead_end"), "walk_in_record",
+                                 label_scope="record")[0], "pass")
+        self.assertEqual(outcome(sc2, self.walk({"right": record[970:] + "A"}, reason="dead_end"), "walk_in_record",
+                                 label_scope="record")[0], "fail")                     # past the record's end
+        # a seed on the reverse strand: its right arm is the reverse complement of the record's left flank
+        tm = dict(t, strand="-")
+        scm = dict(sc, truth=tm, request={"seeds": [{"sequence": checks.revcomp(t["window"])}],
+                                          "strategy": {"direction": "both", "bounds": {"max_extension_bp": 100}}})
+        self.assertEqual(outcome(scm, self.walk({"right": checks.revcomp(left), "left": checks.revcomp(right)}),
+                                 "walk_in_record")[0], "pass")
+        self.assertEqual(outcome(scm, self.walk({"right": right, "left": left}), "walk_in_record")[0], "fail")
+        # walk_end: the end reached passes, a resource stop before it is inconclusive, a short walk without one fails
+        sce = dict(sc2)
+        self.assertEqual(outcome(sce, self.walk({"right": record[970:]}, reason="label_lost"), "walk_end", arm="right",
+                                 reasons_in=["label_lost", "dead_end"])[0], "pass")
+        self.assertEqual(outcome(sce, self.walk({"right": record[970:971]}, status="truncated", trig="time_budget",
+                                                reason="time_budget"), "walk_end", arm="right")[0], "inconclusive")
+        self.assertEqual(outcome(sce, self.walk({"right": record[970:980]}, reason="dead_end"), "walk_end",
+                                 arm="right")[0], "fail")
+        # an exact minimum from the record: a stated branch short of it fails, beyond it passes
+        tx = dict(t, walk={"right": {"min_bp": 60, "first": "ambiguous"}, "left": {"min_bp": 100, "first": "max_extension"}})
+        scx = dict(sc, truth=tx)
+        self.assertEqual(outcome(scx, self.walk({"right": right[:30], "left": left}, reason="branch"),
+                                 "walk_in_record")[0], "fail")
+        self.assertEqual(outcome(scx, self.walk({"right": right[:60], "left": left}, reason="branch"),
+                                 "walk_in_record")[0], "pass")
+        self.assertEqual(outcome(scx, self.walk({"right": right[:30], "left": left[-30:]}, status="truncated",
+                                                trig="max_steps", reason="max_steps"), "walk_in_record")[0],
+                         "inconclusive")
+        # expect_branching: a split at or before the depth where the record branches
+        tb = dict(t, walk={"right": {"min_bp": 40, "branch_by_bp": 40}, "left": {"min_bp": 100}})
+        scb = dict(sc, truth=tb)
+        self.assertEqual(outcome(scb, self.walk({"right": right, "left": left}, split_at=40), "walk_in_record",
+                                 expect_branching=True)[0], "pass")
+        self.assertEqual(outcome(scb, self.walk({"right": right, "left": left}, split_at=41), "walk_in_record",
+                                 expect_branching=True)[0], "fail")
+        self.assertEqual(outcome(scb, self.walk({"right": right, "left": left}), "walk_in_record",
+                                 expect_branching=True)[0], "fail")
+        # the SPEC §7.0 invariant: complete exactly when complete_to_bp is the radius; walks complete only so
+        self.assertEqual(outcome(sc, self.walk({"right": right, "left": left}), "invariants")[0], "pass")
+        bad = self.walk({"right": right, "left": left})
+        bad["body"]["results"][0]["arms"]["right"]["complete_to_bp"] = 1
+        self.assertEqual(outcome(sc, bad, "invariants")[0], "fail")
+        bad = self.walk({"right": right[:5], "left": left[-5:]}, status="truncated", trig="max_steps", reason="max_steps")
+        bad["body"]["results"][0]["outcome"]["walks"] = "complete"
+        self.assertEqual(outcome(sc, bad, "invariants")[0], "fail")
+        # labels_per_node and the label dictionary
+        lp = self.walk({"right": right, "left": left},
+                       extra={"labels_per_node": {"cap": 1, "max_seen": 1, "nodes_truncated": 0}})
+        self.assertEqual(outcome(sc, lp, "labels_per_node", cap=1)[0], "pass")
+        self.assertEqual(outcome(sc, lp, "labels_per_node", cap=64)[0], "fail")
+        cut = self.walk({"right": right, "left": left},
+                        extra={"labels_per_node": {"cap": 1, "max_seen": 3, "nodes_truncated": 4}, "limitations": []})
+        self.assertEqual(outcome(sc, cut, "labels_per_node", cap=1)[0], "fail")
+        self.assertEqual(outcome(sc, lp, "label_dict_contains", name="NC_1.1", kind="header")[0], "pass")
+        self.assertEqual(outcome(sc, lp, "label_dict_contains", name="562", kind="header")[0], "fail")
+        self.assertEqual(outcome(sc, lp, "label_dict_contains", name="NC_1.1", kind="header", only_kind=True)[0], "fail")
+
+        # a seed the scenario allows to fail (a budget that does not hold it)
+        failed = ok_answer({"results": [{"outcome": {"walks": "failed"}, "error": "x"}]})
+        self.assertEqual(outcome(sc, failed, "walk_in_record")[0], "fail")
+        self.assertEqual(outcome(sc, failed, "walk_in_record", if_walked=True)[0], "inconclusive")
+
+    def test_traverse_stop(self):
+        sc = {"route": "POST /traverse", "truth": {},
+              "request": {"seeds": [{"sequence": "A" * 40}],
+                          "strategy": {"direction": "right", "bounds": {"max_extension_bp": 1000, "max_steps": 5,
+                                                                         "max_memory_mb": 1}}}}
+        def res(walks, rs=None, trig=None, lims=(), arms=True):
+            r = {"outcome": {"walks": walks}, "limitations": [], "resource_stop": rs}
+            if arms:
+                r["arms"] = {"right": {"status": "truncated" if trig else "complete", "complete_to_bp": 5,
+                                       "cap_trigger": {"reason": trig} if trig else None,
+                                       "limitations": [{"kind": "walk_domain", "knob": k} for k in lims]}}
+            else:
+                r["limitations"] = [{"kind": "walk_domain", "knob": k} for k in lims]
+            return ok_answer({"results": [r]})
+        steps = res("partial", trig="max_steps", lims=["bounds.max_steps"])
+        self.assertEqual(outcome(sc, steps, "traverse_stop", knob="bounds.max_steps", cap_reason="max_steps")[0], "pass")
+        # a host that ignored the knob and walked on
+        self.assertEqual(outcome(sc, res("complete"), "traverse_stop", knob="bounds.max_steps", cap_reason="max_steps",
+                                 walks=["partial"])[0], "fail")
+        self.assertEqual(outcome(sc, res("partial", trig="max_steps"), "traverse_stop", knob="bounds.max_steps",
+                                 cap_reason="max_steps")[0], "fail")                     # no limitation names it
+        mem = res("failed", rs={"resource": "memory", "requested": 1}, lims=["bounds.max_memory_mb"], arms=False)
+        self.assertEqual(outcome(sc, mem, "traverse_stop", knob="bounds.max_memory_mb", resource="memory",
+                                 cap_reason="resource_limit", walks=["partial", "failed"])[0], "pass")
+        wrong = res("failed", rs={"resource": "work", "requested": 1}, lims=["bounds.max_memory_mb"], arms=False)
+        self.assertEqual(outcome(sc, wrong, "traverse_stop", knob="bounds.max_memory_mb", resource="memory",
+                                 walks=["partial", "failed"])[0], "fail")
+        unset = res("failed", rs={"resource": "memory", "requested": 2}, lims=["bounds.max_memory_mb"], arms=False)
+        self.assertEqual(outcome(sc, unset, "traverse_stop", knob="bounds.max_memory_mb", resource="memory",
+                                 walks=["partial", "failed"])[0], "fail")
+
 
     def test_walk_end_and_outcome(self):
         req = self.load("mini_rep_00__trace_coords", "request")
