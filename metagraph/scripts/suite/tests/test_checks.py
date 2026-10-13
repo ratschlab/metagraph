@@ -376,6 +376,85 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, ok_answer(bad), "predicate_either_mirror", label="546")[0], "fail")
 
 
+class MoreChecks(unittest.TestCase):
+    """The checks the reviews' verification asked to make falsifiable: each fails on a plausible wrong answer."""
+
+    def entry(self, **e):
+        return ok_answer({"patterns": [e]})
+
+    def sc(self, req=None):
+        return {"route": "POST /pattern", "request": req or {"patterns": [{"dna": "A" * 31}]}, "truth": {}}
+
+    def test_low_complexity_note(self):
+        sc = self.sc()
+        noted = self.entry(notes=["low_complexity_pattern"], stop=None, counts={})
+        plain = self.entry(notes=[], stop=None, counts={})
+        self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "pass")
+        self.assertEqual(outcome(sc, plain, "low_complexity_note", expected=True)[0], "fail")
+        self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=False)[0], "fail")
+        self.assertEqual(outcome(sc, plain, "low_complexity_note", expected=False)[0], "pass")
+        budget = self.entry(notes=[], stop={"phase": "discovery", "reason": "max_steps"}, counts={})
+        self.assertEqual(outcome(sc, budget, "low_complexity_note", expected=True)[0], "inconclusive")
+        both = self.entry(notes=["low_complexity_pattern"], stop={"phase": "discovery", "reason": "time"}, counts={})
+        self.assertEqual(outcome(sc, both, "low_complexity_note", expected=True)[0], "fail")   # never beside it
+        thr = self.entry(notes=["low_complexity_pattern"], stop={"phase": "discovery", "reason": "max_contexts"}, counts={})
+        self.assertEqual(outcome(sc, thr, "low_complexity_note", expected=True)[0], "pass")    # a threshold stop
+
+    def test_stops_stated_and_levels(self):
+        sc = self.sc({"patterns": [{"dna": "A" * 20}, {"dna": "C" * 20}]})
+        ok = ok_answer({"patterns": [{"stop": None, "counts": {"contexts": {"value": 3, "relation": "exact"}}},
+                                     {"stop": {"phase": "discovery", "reason": "time"},
+                                      "counts": {"contexts": {"value": None, "relation": "unknown"}}}]})
+        self.assertEqual(outcome(sc, ok, "stops_stated", reasons=["time"])[0], "pass")
+        bad = copy.deepcopy(ok)
+        bad["body"]["patterns"][1]["counts"]["contexts"] = {"value": 5, "relation": "exact"}
+        self.assertEqual(outcome(sc, bad, "stops_stated", reasons=["time"])[0], "fail")      # exact after a discovery stop
+        bad = copy.deepcopy(ok)
+        bad["body"]["patterns"][1]["stop"]["reason"] = "max_steps"
+        self.assertEqual(outcome(sc, bad, "stops_stated", reasons=["time"])[0], "fail")
+        bad = copy.deepcopy(ok)
+        bad["body"]["patterns"][0]["counts"]["contexts"] = {"value": 3, "relation": "at_least"}
+        self.assertEqual(outcome(sc, bad, "stops_stated", reasons=["time"])[0], "fail")      # inexact without a stop
+        lv = self.entry(results=[{"mismatches": 0}] * 5)
+        self.assertEqual(outcome(sc, lv, "results_levels", max_level=0, min_returned=5)[0], "pass")
+        self.assertEqual(outcome(sc, self.entry(results=[{"mismatches": 0}, {"mismatches": 1}]), "results_levels",
+                                 max_level=0)[0], "fail")
+        self.assertEqual(outcome(sc, self.entry(results=[]), "results_levels", max_level=0)[0], "fail")
+
+    def test_count_relation_after_a_budget_stop(self):
+        sc = self.sc()
+        stopped = self.entry(stop={"phase": "discovery", "reason": "time"},
+                             counts={"contexts": {"value": 900, "relation": "at_least"}})
+        self.assertEqual(outcome(sc, stopped, "count_relation", relation="exact", min=1000)[0], "inconclusive")
+        unstopped = self.entry(stop=None, counts={"contexts": {"value": 900, "relation": "at_least"}})
+        self.assertEqual(outcome(sc, unstopped, "count_relation", relation="exact", min=1000)[0], "fail")
+        self.assertEqual(outcome(sc, self.entry(stop=None, counts={"contexts": {"value": 900, "relation": "exact"}}),
+                                 "count_relation", relation="exact", min=1000)[0], "fail")
+        self.assertEqual(outcome(sc, stopped, "count_relation", relation=["exact", "at_least"], min=800)[0], "pass")
+
+    def test_mirror_needs_a_mirror(self):
+        req, ans = fixture("predicate_selection_strands")
+        minus = next(r for r in ans["patterns"][0]["results"] if r["strand"] == "-")
+        rec_kmer = checks.revcomp(minus["kmer"])
+        t = {"record": "r", "taxid": "546", "seq_id": 0, "record_length": 10 ** 6, "start": 1000 + minus["offset"],
+             "length": 20, "strand": "+", "window": rec_kmer[minus["offset"]:minus["offset"] + 20],
+             "flank": rec_kmer, "flank_start": 1000}
+        sc = {"route": "POST /pattern", "request": req, "truth": t}
+        self.assertEqual(outcome(sc, ok_answer(ans), "predicate_either_mirror", label="546")[0], "pass")
+        none = copy.deepcopy(ans)
+        none["patterns"][0]["results"] = [r for r in none["patterns"][0]["results"] if r["strand"] != "-"]
+        self.assertEqual(outcome(sc, ok_answer(none), "predicate_either_mirror", label="546")[0], "fail")
+
+    def test_argument_schema(self):
+        self.assertEqual(checks.validate_expectation({"check": "count_relation", "args": {"relation": "exact", "min": 1}}), [])
+        self.assertTrue(checks.validate_expectation({"check": "count_relation", "args": {"relation": ["exact", "at_least",
+                                                                                                  "bounds"], "min": 0}}))
+        self.assertTrue(checks.validate_expectation({"check": "count_relation", "args": {}}))
+        self.assertTrue(checks.validate_expectation({"check": "walk_in_record", "args": {"label_scop": "record"}}))
+        self.assertTrue(checks.validate_expectation({"check": "walk_end", "args": {}}))
+        self.assertTrue(checks.validate_expectation({"check": "nope", "args": {}}))
+
+
 class BudgetChecks(unittest.TestCase):
     """budget_respected by each route's SPEC rule and the answer's own deadline record, no fixed allowance; on
     /traverse the seed phase is outside the seed's budget (the smoke run's lambda walk: 34,201 ms under 15,000, a
@@ -603,6 +682,15 @@ class ResolveChecks(unittest.TestCase):
         a = self.body([[0, 40]], num=40, graph=[[0, 40]], stop=stop)
         self.assertEqual(outcome(sc, a, "invariants")[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_runs", label="562", full=True, unless_stopped=True)[0], "pass")
+        self.assertEqual(outcome(sc, a, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "pass")
+        # a stop that claims the record's own k-mers unsupported, or absent from the graph, fails
+        hole = self.body([[0, 30]], num=40, graph=[[0, 40]], stop=stop)
+        self.assertEqual(outcome(sc, hole, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "fail")
+        gone = self.body([], num=40, graph=[], stop=stop)
+        self.assertEqual(outcome(sc, gone, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "fail")
+        zero = self.body([], num=0, graph=[], stop=dict(stop, resolved_kmers=0, resolved_bp=0, remainder_from_bp=0))
+        self.assertEqual(outcome(sc, zero, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0],
+                         "inconclusive")
         bad = copy.deepcopy(a)
         bad["body"]["stop"]["remainder_from_bp"] = 41
         self.assertEqual(outcome(sc, bad, "invariants")[0], "fail")

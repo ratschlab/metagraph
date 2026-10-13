@@ -303,7 +303,8 @@ def check_entry_fields(sc, ans, a, arm):
     for path, want in (a.get("equals") or {}).items():
         got = _get(e, path)
         if isinstance(want, float) and isinstance(got, (int, float)):
-            if abs(got - want) > a.get("tolerance", 0.051):
+            # information bits and the like are sums of exact binary logarithms: equal up to rounding only
+            if abs(got - want) > a.get("tolerance", 1e-9):
                 return FAIL, "%s = %r, expected %r" % (path, got, want)
         elif got != want:
             return FAIL, "%s = %r, expected %r" % (path, got, want)
@@ -410,6 +411,9 @@ def check_pattern_slot_error(sc, ans, a, arm):
 
 
 def check_count_relation(sc, ans, a, arm):
+    """A count's relation and value (`relation`, `value`, `min`, `max`; `level` for by_mismatches). A count a
+    budget stop left inexact (relation at_least or unknown under a time or max_steps stop) cannot show an exact
+    expectation: inconclusive, not fail, unless the scenario expects the stop."""
     e = _entry(ans, a.get("pattern", 0))
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
@@ -418,16 +422,26 @@ def check_count_relation(sc, ans, a, arm):
     if "level" in a:
         c = _get(c, "by_mismatches.%d" % a["level"])
     value, rel = _count(c)
+    stop = e.get("stop") or {}
+    stopped = stop.get("reason") in _BUDGET_STOP_REASONS and rel in ("at_least", "unknown")
     if "relation" in a:
         rels = a["relation"] if isinstance(a["relation"], list) else [a["relation"]]
         if rel not in rels:
+            if stopped:
+                return INCONCLUSIVE, "%s %s %s after a %s/%s stop: not the exact count expected" % (
+                    name, rel, value, stop.get("phase"), stop.get("reason"))
             return FAIL, "%s relation %s (value %s), expected %s" % (name, rel, value, rels)
     lower = c.get("lower", value) if rel == "bounds" else value
     if "value" in a and (rel != "exact" or value != a["value"]):
         return FAIL, "%s = %s %s, expected exact %s" % (name, rel, value, a["value"])
     if "min" in a:
         if rel == "unknown":
+            if stopped:
+                return INCONCLUSIVE, "%s unknown after a %s/%s stop" % (name, stop.get("phase"), stop.get("reason"))
             return FAIL, "%s unknown, expected at least %d" % (name, a["min"])
+        if rel == "at_least" and value is not None and value < a["min"] and stopped:
+            return INCONCLUSIVE, "%s at least %d after a %s/%s stop, %d expected" % (
+                name, value, stop.get("phase"), stop.get("reason"), a["min"])
         if rel == "exact" and value < a["min"]:
             return FAIL, "%s exact %d below %d" % (name, value, a["min"])
         if rel == "bounds" and c.get("upper", 0) < a["min"]:
@@ -471,8 +485,6 @@ def check_stop(sc, ans, a, arm):
     if a.get("null"):
         return (PASS, "stop null") if s is None else (FAIL, "stop %r, expected null" % s)
     if s is None:
-        if a.get("optional"):
-            return PASS, "no stop (allowed)"
         return FAIL, "stop null, expected %s/%s" % (a.get("phase"), a.get("reason"))
     for f in ("phase", "reason"):
         if f in a:
@@ -506,6 +518,81 @@ def check_notes(sc, ans, a, arm):
         if n in notes:
             return FAIL, "note %r present" % n
     return PASS, "notes %r" % notes
+
+
+_SEARCH_BUDGET_STOPS = {"max_steps", "time", "max_annotation_work", "max_memory"}
+
+
+def check_low_complexity_note(sc, ans, a, arm):
+    """The `low_complexity_pattern` note as SPEC-pattern-search §7.8 states it: on an exact pattern that sdust flags
+    (args.expected, computed by the builder with seqtools.sdust, the host's T = 20, W = 64), when the answer states
+    no budget stop of the search; never beside such a stop. A pattern of more than 191 bases whose diagnostic the
+    work time cut (determinism time_limited) may lack it: inconclusive then, as is an expected note a budget stop
+    left out."""
+    e = _entry(ans, a.get("pattern", 0))
+    if "error" in e:
+        return FAIL, "entry refused (%s)" % e["error"].get("code")
+    notes = e.get("notes")
+    if notes is None:
+        raise Missing("notes")
+    has = "low_complexity_pattern" in notes
+    stop = e.get("stop") or {}
+    if stop.get("reason") in _SEARCH_BUDGET_STOPS:
+        if has:
+            return FAIL, "low_complexity_pattern beside a budget stop %s/%s" % (stop.get("phase"), stop.get("reason"))
+        if a["expected"]:
+            return INCONCLUSIVE, "a budget stop %s/%s leaves the note out" % (stop.get("phase"), stop.get("reason"))
+        return PASS, "no note (a budget stop, and sdust does not flag the pattern)"
+    if has == bool(a["expected"]):
+        return PASS, "note %s, as sdust says" % ("present" if has else "absent")
+    try:
+        L = _pattern_length(*_request_pattern(sc, a.get("pattern", 0)))
+    except Missing:
+        L = 0
+    if not has and L > 191 and e.get("determinism") == "time_limited":
+        return INCONCLUSIVE, "the diagnostic of a %d-base pattern was cut by the work time" % L
+    return FAIL, "low_complexity_pattern %s, sdust %s the pattern" % (
+        "present" if has else "absent", "flags" if a["expected"] else "does not flag")
+
+
+def check_stops_stated(sc, ans, a, arm):
+    """Every answered entry either kept the budget (stop null, its primary count exact) or states a stop of the
+    reasons args.reasons (a time budget: "time"); a discovery or mask-scan stop leaves the count inexact
+    (SPEC-pattern-search §7.6: at_least or unknown, the stop sticky for the later patterns, which
+    counts_consistent checks)."""
+    pats = _get(_body(ans), "patterns")
+    n_stop = 0
+    for i, e in enumerate(pats):
+        if "error" in e or "counts" not in e:
+            continue
+        stop = e.get("stop")
+        name = _primary_count_name(e, sc["request"])
+        c = e["counts"].get(name) or {}
+        if stop is None:
+            if c.get("relation") != "exact":
+                return FAIL, "p%d: no stop, but %s %s" % (i, name, c.get("relation"))
+            continue
+        n_stop += 1
+        if stop.get("reason") not in a["reasons"]:
+            return FAIL, "p%d: stop %s/%s, expected one of %s" % (i, stop.get("phase"), stop.get("reason"), a["reasons"])
+        if stop.get("phase") in ("discovery", "mask_scan") and c.get("relation") == "exact":
+            return FAIL, "p%d: an exact %s after a %s stop" % (i, name, stop.get("phase"))
+    return PASS, "%d of %d entries stopped by %s, the others exact" % (n_stop, len(pats), a["reasons"])
+
+
+def check_results_levels(sc, ans, a, arm):
+    """Every released result lies at a level of at most args.max_level (mismatches first: a list cut inside the
+    lowest level holds that level only), and at least args.min_returned results are released."""
+    e = _entry(ans, a.get("pattern", 0))
+    res = e.get("results")
+    if res is None:
+        raise Missing("results")
+    if len(res) < a.get("min_returned", 1):
+        return FAIL, "%d results released, expected at least %d" % (len(res), a.get("min_returned", 1))
+    over = [r.get("mismatches", 0) for r in res if r.get("mismatches", 0) > a["max_level"]]
+    if over:
+        return FAIL, "%d of %d results above level %d (levels %s)" % (len(over), len(res), a["max_level"], sorted(set(over)))
+    return PASS, "%d results, all at level <= %d" % (len(res), a["max_level"])
 
 
 def check_absent(sc, ans, a, arm):
@@ -773,7 +860,9 @@ def check_predicate_selected(sc, ans, a, arm):
 
 def check_predicate_either_mirror(sc, ans, a, arm):
     """Under predicate_strands "either": every returned '-' context whose reverse complement is a record k-mer
-    of the truth is selected by the label with selection strand reverse_complement or both (SPEC §19.5)."""
+    of the truth is selected by the label with selection strand reverse_complement or both (SPEC §19.5), and at
+    least args.min (default 1) such contexts are returned (the builder picks windows of inverted copies, whose
+    mirrors the record holds)."""
     e = _entry(ans, a.get("pattern", 0))
     t = sc["truth"]
     rec_kmers = {km for km, _ in source_contexts(t)}
@@ -789,6 +878,9 @@ def check_predicate_either_mirror(sc, ans, a, arm):
                 return FAIL, "mirror context %s not selected by %s" % (r["kmer"], col)
             if r["selection_strands"][labs.index(col)] not in ("reverse_complement", "both"):
                 return FAIL, "mirror context selected with strand %r" % r["selection_strands"][labs.index(col)]
+    if checked < a.get("min", 1):
+        return FAIL, "%d mirror context(s) returned, at least %d expected (the record holds the window's reverse " \
+                     "complement in a longer inverted copy)" % (checked, a.get("min", 1))
     return PASS, "%d mirror context(s) selected through their reverse complement" % checked
 
 
@@ -1163,8 +1255,18 @@ def check_resolve_runs(sc, ans, a, arm):
         raise Missing("runs")
     num = body.get("num_kmers")
     ks = lab.get("kmers_supported")
-    if a.get("unless_stopped") and body.get("stop"):
-        return PASS, "stopped after %s k-mers: the prefix's answer (invariants check it)" % body["stop"].get("resolved_kmers")
+    stop = body.get("stop")
+    if (a.get("prefix_if_stopped") or a.get("unless_stopped")) and stop:
+        # a stop answers the resolve of the prefix of resolved_kmers k-mers (SPEC §4.5): the record's own label
+        # supports every k-mer of it; a stop before the first k-mer shows nothing
+        x = stop.get("resolved_kmers")
+        if not x:
+            return INCONCLUSIVE, "stopped before the first k-mer (resolved_kmers %r): no prefix to check" % x
+        if a.get("full") and (ks != x or runs != [[0, x]] or body.get("graph_runs") != [[0, x]]):
+            return FAIL, "stopped at %s k-mers: label %s supports %s, runs %s, graph_runs %s (expected [0, %s))" % (
+                x, a["label"], ks, runs[:4], (body.get("graph_runs") or [])[:4], x)
+        return PASS, "stopped after %s of %s k-mers: the prefix fully supported by %s" % (
+            x, stop.get("query_kmers"), a["label"])
     if a.get("full"):
         if ks != num or runs != [[0, num]]:
             return FAIL, "label %s: %s of %s k-mers, runs %s (expected one run [0, %s])" % (a["label"], ks, num, runs[:4], num)
@@ -1777,6 +1879,9 @@ CHECKS: Dict[str, Callable] = {
     "stop": check_stop,
     "retrieval_complete": check_retrieval_complete,
     "notes": check_notes,
+    "low_complexity_note": check_low_complexity_note,
+    "stops_stated": check_stops_stated,
+    "results_levels": check_results_levels,
     "absent": check_absent,
     "contains_source_context": check_contains_source_context,
     "source_absent": check_source_absent,
@@ -1993,6 +2098,77 @@ def evaluate_relation(rel: dict, a_scenario: dict, a_answer: dict, b_scenario: d
         outcome, detail = FAIL, "relation raised %s: %s" % (type(ex).__name__, ex)
     out.update(outcome=outcome, detail=detail)
     return out
+
+
+# The arguments each check reads (required, optional); `any_status` (evaluate) is accepted by every check. The
+# builder validates every expectation against this table, so that a misspelt argument cannot weaken a check.
+CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
+    "status": ((), ("http", "code", "text", "text_prefix", "text_contains")),
+    "answer_fields": ((), ("equals", "present", "absent")),
+    "entry_fields": ((), ("pattern", "equals", "present", "absent", "tolerance")),
+    "deterministic": ((), ()),
+    "content_encoding": (("value",), ()),
+    "capabilities_doc": ((), ("required", "equals", "max_bytes")),
+    "pattern_slot_error": (("pattern", "code"), ("text", "text_prefix", "text_contains", "fields")),
+    "count_relation": ((), ("pattern", "count", "level", "relation", "value", "min", "max")),
+    "withheld": (("reason",), ("pattern",)),
+    "cut": (("reason",), ("pattern",)),
+    "stop": ((), ("pattern", "null", "phase", "reason", "mismatch_level_in")),
+    "retrieval_complete": (("value",), ("pattern",)),
+    "notes": ((), ("pattern", "has", "lacks")),
+    "low_complexity_note": (("expected",), ("pattern",)),
+    "stops_stated": (("reasons",), ()),
+    "results_levels": (("max_level",), ("pattern", "min_returned")),
+    "absent": ((), ("pattern", "count")),
+    "contains_source_context": ((), ("pattern", "truth", "strand", "level", "require", "substitutions")),
+    "source_absent": ((), ("pattern", "strand")),
+    "source_label": ((), ("pattern", "strand")),
+    "source_placement": ((), ("pattern", "strand")),
+    "path_spells": ((), ("pattern", "strand")),
+    "path_record_verified": ((), ("pattern", "strand")),
+    "path_absent": ((), ("pattern", "sequence")),
+    "predicate_selected": (("selected",), ("pattern", "strand", "selection_strand_in", "label")),
+    "predicate_either_mirror": ((), ("pattern", "label", "min")),
+    "motif": ((), ("pattern", "selected", "decided_by_in", "label_present")),
+    "clamped": (("field", "requested", "effective"), ("where",)),
+    "budget_respected": ((), ("rule",)),
+    "counts_consistent": ((), ("pattern",)),
+    "invariants": ((), ()),
+    "resolve_runs": (("label",), ("full", "prefix_if_stopped", "unless_stopped", "covers", "run_end_in",
+                                  "run_start_in", "kmers", "max_kmers", "min_kmers")),
+    "label_not_full": (("label",), ()),
+    "resolve_absent": ((), ()),
+    "resolve_graph_runs": (("runs",), ()),
+    "resolve_discover_contains": (("label",), ()),
+    "walk_in_record": ((), ("seed", "arms", "label_scope", "any_copy", "expect_branching", "prefix_only", "if_walked")),
+    "walk_end": (("arm",), ("seed", "reasons_in")),
+    "traverse_seed_outcome": (("walks",), ("seed",)),
+    "traverse_stop": (("knob",), ("seed", "walks", "resource", "cap_reason")),
+    "labels_per_node": (("cap",), ("seed",)),
+    "label_dict_contains": (("name",), ("seed", "kind", "only_kind")),
+    "trace_coordinates": ((), ("seed",)),
+}
+
+
+def validate_expectation(exp: dict) -> List[str]:
+    """What is wrong with one expectation: an unknown check, a missing or unknown argument, or an argument set
+    that asserts nothing (a count_relation without a value, a minimum of at least 1, a maximum or a relation that
+    excludes something)."""
+    name, args = exp.get("check"), exp.get("args") or {}
+    if name not in CHECKS or name not in CHECK_ARGS:
+        return ["unknown check %r" % name]
+    req, opt = CHECK_ARGS[name]
+    probs = ["%s: argument %s missing" % (name, x) for x in req if x not in args]
+    probs += ["%s: unknown argument %s" % (name, x) for x in args if x not in req and x not in opt and x != "any_status"]
+    if name == "count_relation":
+        rels = args.get("relation")
+        rels = set(rels if isinstance(rels, list) else [rels]) if rels is not None else None
+        if args.get("min") is not None and args["min"] < 1:
+            probs.append("count_relation: min %r asserts nothing" % args["min"])
+        if "value" not in args and "max" not in args and not args.get("min") and \
+                (rels is None or rels >= {"exact", "at_least", "bounds", "unknown"}):
+            probs.append("count_relation: no value, minimum, maximum or relation to assert")
+    return probs
 
 
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[str]] = None) -> List[dict]:
