@@ -557,6 +557,27 @@ class ReportTest(unittest.TestCase):
         self.assertIn("check budget\\_respected: observed 34012 ms on a 15000 ms budget", text)
         self.assertIn('expected: \\{"max\\_ms": 15000\\}', text)
 
+    def test_merge_applies_the_property_rule(self):
+        # an MCP runner whose own rule counts an execution with every property check not exposed as a pass:
+        # merge_run applies checks.scenario_outcome where it is stricter, keeping the runner's outcome; a run
+        # judged by the stub is left as its runner said
+        nx = [{"check": "status", "outcome": "pass", "detail": ""}, {"check": "invariants", "outcome": "pass", "detail": ""},
+              {"check": "count_relation", "outcome": "not_exposed", "detail": ""}]
+        with tempfile.TemporaryDirectory() as d:
+            write_arm(d, "mcp", [line("P-1", "mcp", 0, T0, 5.0, checks=nx),
+                                 line("P-2", "mcp", 0, T0 + 1, 5.0)], run_extra={"checks_module": {"file": "x", "stub": False}})
+            write_arm(d, "direct-local", [line("P-1", "direct-local", 0, T0 + 2, 5.0, checks=nx)],
+                      run_extra={"checks_module": "stub"})
+            merged = merge_run.merge(d)
+            rows, _ = sc.read_jsonl(os.path.join(d, "executions.jsonl"))
+        key = dict((sc.execution_key(r), r) for r in rows)
+        self.assertEqual((key[("P-1", "mcp", 0)]["outcome"], key[("P-1", "mcp", 0)]["outcome_runner"]),
+                         ("inconclusive", "pass"))
+        self.assertEqual(key[("P-2", "mcp", 0)]["outcome"], "pass")
+        self.assertNotIn("outcome_runner", key[("P-2", "mcp", 0)])
+        self.assertEqual(key[("P-1", "direct-local", 0)]["outcome"], "pass")      # the stub's run: untouched
+        self.assertEqual(merged["outcomes_rederived"], {"mcp": 1})
+
     def test_relations(self):
         body = lambda results, ms: {"patterns": [{"id": "w", "results": results, "timing": {"elapsed_ms": ms}}]}  # noqa: E731
         ctx = [{"kmer": "ACGT", "offset": 0, "strand": "+"}, {"kmer": "ACGT", "offset": 5, "strand": "-"}]

@@ -137,6 +137,17 @@ class Generic(unittest.TestCase):
         self.assertEqual(outcome(sc, a, "deterministic", previous=[{"digest": d, "time_limited": ""}])[0], "pass")
         walk = ok_answer({"results": [{"arms": {"right": {"cap_trigger": {"reason": "time_budget"}}}}]})
         self.assertEqual(outcome(sc, walk, "deterministic", previous=["0" * 64])[0], "inconclusive")
+        # a time limitation that cannot have happened (a /pattern time stop after 300 ms of 60,000) explains nothing
+        psc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A" * 25, "id": "w"}], "time_budget_ms": 60000},
+               "truth": {}}
+        early = ok_answer({"patterns": [{"id": "w", "stop": {"phase": "discovery", "reason": "time"},
+                                         "determinism": "time_limited"}],
+                           "limits": {"time_budget_ms": 60000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": 300.0}})
+        o, d = outcome(psc, early, "deterministic", previous=["0" * 64])
+        self.assertEqual(o, "fail")
+        self.assertIn("before the work time", d)
+        early["body"]["timing"]["elapsed_ms"] = 59900.0
+        self.assertEqual(outcome(psc, early, "deterministic", previous=["0" * 64])[0], "inconclusive")
 
     def test_fields_encoding_capabilities_clamped(self):
         req, ans = fixture("clamped")
@@ -242,12 +253,19 @@ class PatternChecks(unittest.TestCase):
         bad["patterns"][0]["results"] = [r for r in bad["patterns"][0]["results"] if r["kmer"] != NDM_KMER]
         self.assertEqual(outcome(sc, ok_answer(bad), "contains_source_context", strand="+")[0], "fail")
         self.assertEqual(outcome(sc, ok_answer(bad), "source_absent", strand="+")[0], "pass")   # gone from a complete list
+        # retrieval_complete false alone (the labels incomplete) still lists every context (SPEC §7.5: only a
+        # cut or a withheld list shortens it)
         bad["patterns"][0]["retrieval_complete"] = False
-        self.assertEqual(outcome(sc, ok_answer(bad), "source_absent", strand="+")[0], "inconclusive")   # not complete
+        self.assertEqual(outcome(sc, ok_answer(bad), "source_absent", strand="+")[0], "pass")
+        bad["patterns"][0].update(mode="partial", cut={"reason": "max_contexts"})
+        cut = ok_answer(bad)
+        cut["body"]["limits"]["max_contexts"] = 3                                     # a legitimate cut hides it
+        self.assertEqual(outcome(sc, cut, "source_absent", strand="+")[0], "inconclusive")
         # a withheld list hides the source: inconclusive, never a fail of a host that withheld rightly
         hidden = copy.deepcopy(ans)
         hidden["patterns"][0].update(results=[], returned=0, retrieval_complete=False,
                                      withheld={"reason": "count_above_threshold"})
+        hidden["limits"]["max_contexts"] = 10                                         # rightly: the count is above it
         o, d = outcome(sc, ok_answer(hidden), "contains_source_context", strand="+", require="all", level=0)
         self.assertEqual(o, "inconclusive")
         self.assertIn("count_above_threshold", d)
@@ -460,49 +478,133 @@ class BudgetChecks(unittest.TestCase):
     /traverse the seed phase is outside the seed's budget (the smoke run's lambda walk: 34,201 ms under 15,000, a
     seed phase of 33,803 ms with a 20,556 ms read, stopped 19,201 ms after the deadline: within the rule)."""
 
-    def traverse(self, elapsed, seed_phase, sad=None, piece=100.0, budget=15000, echoed=True, timing=True,
-                 complete_to_bp=1, stopped=True):
-        r = {"outcome": {"walks": "partial"},
-             "arms": {"right": {"status": "truncated", "complete_to_bp": complete_to_bp,
-                                "cap_trigger": {"reason": "time_budget", "at_bp": complete_to_bp}}}}
+    def walk(self, elapsed, seed_phase, sad=None, piece=100.0, budget=15000, echoed=True, timing=True, at_bp=1,
+             stopped=True, sides=("right",), path_bp=None, used=None, radius=1000, limitation=True):
+        """A walked seed: per side one path, truncated by time_budget at at_bp with its walk_domain limitation and
+        resource_stop (stopped), else complete to the radius."""
+        if used is None:
+            used = budget + sad if sad is not None and sad > 0 else elapsed
+        arms = {}
+        for side in sides:
+            n = path_bp if path_bp is not None else (at_bp if stopped else radius)
+            reason = "time_budget" if stopped else "max_extension_bp"
+            a = {"status": "truncated" if stopped else "complete", "complete_to_bp": at_bp if stopped else radius,
+                 "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": n, "sequence": "A" * n}],
+                 "paths": [{"id": 0, "segments": [0], "length_bp": n, "path_reason": reason, "end_reasons": {reason: 1}}],
+                 "limitations": []}
+            if stopped:
+                a["cap_trigger"] = {"reason": "time_budget", "at_bp": at_bp}
+                if limitation:
+                    a["limitations"] = [{"kind": "walk_domain", "knob": "bounds.time_budget_ms", "limit": budget,
+                                         "observed": used}]
+            arms[side] = a
+        r = {"outcome": {"walks": "partial" if stopped else "complete"}, "arms": arms}
         if timing:
             dl = {"longest_piece": {"kind": "read", "ms": piece, "rows": 1}}
             if stopped:
                 dl.update(stopped_by="time_budget", stop_after_deadline_ms=sad if sad is not None else
                           max(0.0, elapsed - budget))
+                r["resource_stop"] = {"resource": "time", "requested": budget, "effective": budget, "used": used}
             r["timing"] = {"elapsed_ms": elapsed, "seed_phase_ms": seed_phase, "deadline": dl}
         body = {"results": [r], "timing": {"elapsed_ms": elapsed + 1}}
         if echoed:
-            body["strategy"] = {"bounds": {"time_budget_ms": budget}}
+            body["strategy"] = {"bounds": {"time_budget_ms": budget, "max_extension_bp": radius}}
         return ok_answer(body)
 
     def sc(self, route, req):
         return {"route": route, "request": req, "truth": {}}
 
-    def test_traverse(self):
-        sc = self.sc("POST /traverse", {"seeds": [{"sequence": "A" * 40}],
-                                        "strategy": {"direction": "right", "bounds": {"time_budget_ms": 15000}}})
-        o, d = outcome(sc, self.traverse(34201.3, 33803.4, sad=19201.0, piece=20556.4), "budget_respected")
-        self.assertEqual(o, "pass")
+    def walk_sc(self, sides=("right",), budget=15000, radius=1000):
+        d = "both" if len(sides) == 2 else sides[0]
+        return self.sc("POST /traverse", {"seeds": [{"sequence": "A" * 40}], "strategy": {
+            "direction": d, "bounds": {"time_budget_ms": budget, "max_extension_bp": radius}}})
+
+    def br(self, ans, sides=("right",), budget=15000, arm="direct-local"):
+        return outcome(self.walk_sc(sides, budget), ans, "budget_respected", arm)
+
+    def test_traverse_conformant_stops_are_no_finding(self):
+        # VERIFY-fixes.md X1: answers SPEC §6.8 and walker.cpp allow (no reading at depth 0, the depth-0 reads
+        # unpaced, a read followed by its head before the next reading)
+        o, d = self.br(self.walk(34201.3, 33803.4, sad=19201.0, piece=20556.4))   # the smoke run's 34 s lambda walk
+        self.assertEqual(o, "pass", d)
         self.assertIn("seed phase (33803 ms) outlasted the budget", d)
-        self.assertIn("within its longest piece", d)
-        # the walk saw its deadline 2,500 ms late with a longest piece of 100 ms
-        o, d = outcome(sc, self.traverse(17600, 2000, sad=2500), "budget_respected")
-        self.assertEqual(o, "finding")
-        self.assertIn("2500 ms after max(budget 15000, seed phase 2000)", d)
-        self.assertEqual(outcome(sc, self.traverse(15200, 2000, sad=90), "budget_respected")[0], "pass")
-        # a budget that passed in the seed phase leaves one level
-        o, d = outcome(sc, self.traverse(20500, 20000, sad=5400, piece=6000, complete_to_bp=7), "budget_respected")
-        self.assertEqual(o, "finding")
-        self.assertIn("one level expected", d)
+        self.assertIn("at depth 1", d)
+        self.assertIn("within its pieces", d)
+        # the same walk whose longest piece is the depth-0 read it made after the seed phase (397 ms): 398 ms late
+        # at the first depth-1 checkpoint is within the depth-0 level's pieces
+        o, d = self.br(self.walk(34201.3, 33803.4, sad=19201.0, piece=397.0))
+        self.assertEqual(o, "pass", d)
+        # budget 300, seed phase 250, both arms' unpaced depth-0 reads of 200 ms, stopped at depth 1 at 650 ms
+        o, d = self.br(self.walk(652.0, 250.0, sad=350.0, piece=200.0, budget=300, sides=("left", "right")),
+                       sides=("left", "right"), budget=300)
+        self.assertEqual(o, "pass", d)
+        # at a checked depth: 400 ms after the deadline with a longest piece of 300 ms (a read, then its head)
+        o, d = self.br(self.walk(15400.0, 500.0, sad=400.0, piece=300.0, at_bp=500))
+        self.assertEqual(o, "pass", d)
+        self.assertIn("checked depth (500 bp)", d)
+        # no time stop, complete to the radius 900 ms after the budget: within the pieces before the last reading
+        o, d = self.br(self.walk(15900.0, 500.0, piece=300.0, stopped=False))
+        self.assertEqual(o, "pass", d)
+        self.assertIn("a level at the radius is never stopped", d)
         # the effective budget is the echoed strategy's (a clamp lowers it), else the request's
-        self.assertEqual(outcome(sc, self.traverse(16500, 100, budget=60000, stopped=False), "budget_respected")[0],
-                         "pass")
-        self.assertEqual(outcome(sc, self.traverse(16600, 100, sad=1500, echoed=False), "budget_respected")[0],
-                         "finding")
+        self.assertEqual(outcome(self.walk_sc(budget=60000), self.walk(16500, 100, budget=60000, stopped=False),
+                                 "budget_respected")[0], "pass")
         # a walked seed without timing or seed phase: a direct arm fails, the MCP arm does not expose it
-        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected")[0], "fail")
-        self.assertEqual(outcome(sc, self.traverse(1, 0, timing=False), "budget_respected", "mcp")[0], "not_exposed")
+        self.assertEqual(self.br(self.walk(1, 0, timing=False))[0], "fail")
+        self.assertEqual(self.br(self.walk(1, 0, timing=False), arm="mcp")[0], "not_exposed")
+
+    def test_traverse_broken_stops_are_findings(self):
+        # VERIFY-fixes.md X1: answers SPEC §6.8 does not allow
+        o, d = self.br(self.walk(2000.0, 500.0, sad=-13000.0, piece=300.0, at_bp=500))
+        self.assertEqual(o, "finding", d)                                      # a time stop at 2 s of a 15 s budget
+        self.assertIn("before its 15000 ms budget", d)
+        o, d = self.br(self.walk(2000.0, 1500.0, sad=0.0, piece=300.0, at_bp=500))
+        self.assertEqual(o, "finding", d)                                      # the same, clamped at 0 (walker.cpp)
+        o, d = self.br(self.walk(60000.0, 500.0, piece=300.0, stopped=False))
+        self.assertEqual(o, "finding", d)                                      # no time stop, to the radius at 60 s
+        self.assertIn("without a time stop", d)
+        o, d = self.br(self.walk(20000.0, 500.0, sad=5000.0, piece=300.0, at_bp=500))
+        self.assertEqual(o, "finding", d)                                      # 5 s late at a checked depth
+        self.assertIn("checked depth", d)
+        o, d = self.br(self.walk(34201.3, 33803.4, sad=19201.0, piece=20556.4, at_bp=50))
+        self.assertEqual(o, "finding", d)                                      # seed phase past the budget, 50 bp walked
+        self.assertIn("at most 1 expected", d)
+        o, d = self.br(self.walk(60000.0, 33803.4, piece=20556.4, stopped=False))
+        self.assertEqual(o, "finding", d)                                      # the same without a stop, to the radius
+        o, d = self.br(self.walk(40000.0, 1000.0, sad=25000.0, piece=300.0, at_bp=1))
+        self.assertEqual(o, "finding", d)                                      # depth 1, far past the depth-0 pieces
+        self.assertIn("at depth 1", d)
+        self.assertEqual(outcome(self.walk_sc(), self.walk(16600, 100, sad=1500, echoed=False, at_bp=500),
+                                 "budget_respected")[0], "finding")
+
+    def test_503_long_past_the_budget(self):
+        # VERIFY-fixes.md: a 503 deadline 8.9 s after a 750 ms budget (the smoke run's R-budget-0002) is a finding,
+        # by the client's wall time the runner passes
+        def sc(budget, route="POST /resolve"):
+            req = {"sequence": "A" * 100, "labels": ["208964"], "bounds": {"time_budget_ms": budget}} \
+                if route == "POST /resolve" else {"patterns": [{"dna": "A" * 25, "id": "w"}], "time_budget_ms": budget}
+            return {"route": route, "request": req, "truth": {},
+                    "expect": [{"check": "status", "args": {"http": [200, 503]}}, {"check": "invariants", "args": {}},
+                               {"check": "budget_respected", "args": {}}]}
+        late = checks.normalise_direct(503, b'{"code": "deadline", "error": "resolve: the answer could not be built '
+                                            b'and written within bounds.time_budget_ms"}')
+        res = checks.evaluate(sc(750), late, "direct-local", client={"wall_ms": 9692.9})
+        self.assertEqual([r["outcome"] for r in res], ["pass", "inconclusive", "finding"])
+        self.assertIn("8943 ms after the 750 ms budget", res[2]["detail"])
+        self.assertEqual(checks.scenario_outcome(res), "finding")
+        # 0.8 s after an 8,000 ms budget: within max(1 s, the budget), nothing to judge
+        res = checks.evaluate(sc(8000), late, "direct-local", client={"wall_ms": 8803.5})
+        self.assertEqual(res[2]["outcome"], "inconclusive")
+        # no client wall time (the MCP runner passes none): inconclusive as before
+        self.assertEqual(checks.evaluate(sc(750), late, "mcp")[2]["outcome"], "inconclusive")
+        pat = checks.normalise_direct(503, b'{"code": "deadline", "error": "pattern: ..."}')
+        self.assertEqual(checks.evaluate(sc(60000, "POST /pattern"), pat, "direct-remote",
+                                         client={"wall_ms": 60906.0})[2]["outcome"], "inconclusive")
+        self.assertEqual(checks.evaluate(sc(60000, "POST /pattern"), pat, "direct-remote",
+                                         client={"wall_ms": 125000.0})[2]["outcome"], "finding")
+        busy = checks.normalise_direct(503, b'{"error": "loading"}')
+        self.assertEqual(checks.evaluate(sc(750), busy, "direct-local", client={"wall_ms": 99999.0})[2]["outcome"],
+                         "inconclusive")
 
     def test_pattern_and_resolve(self):
         sc = self.sc("POST /pattern", {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 300})
@@ -552,6 +654,339 @@ class BudgetChecks(unittest.TestCase):
                          "pass")
         self.assertEqual(o(("invariants", "not_exposed"), ("source_label", "not_exposed")), "inconclusive")
         self.assertEqual(o(), "inconclusive")                                             # no check at all
+        # VERIFY-fixes.md H3: the property checks all not exposed (an MCP P-exact-0001 without counts), the
+        # generic ones passing: inconclusive, never pass
+        self.assertEqual(o(("status", "pass"), ("invariants", "pass"), ("count_relation", "not_exposed"),
+                           ("entry_fields", "not_exposed"), ("budget_respected", "not_exposed")), "inconclusive")
+        self.assertEqual(o(("status", "pass"), ("invariants", "pass"), ("counts_consistent", "pass"),
+                           ("budget_respected", "pass")), "pass")                       # no property check: generic
+        self.assertEqual(o(("status", "pass"), ("count_relation", "pass"), ("entry_fields", "not_exposed")), "pass")
+        self.assertEqual(o(("status", "pass"), ("count_relation", "weird")), "fail")   # outside the vocabulary
+        self.assertTrue(checks.is_property("count_relation") and checks.is_property("deterministic"))
+        self.assertFalse(any(checks.is_property(n) for n in ("status", "invariants", "counts_consistent",
+                                                             "budget_respected")))
+        sc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A" * 12, "id": "w"}]}, "truth": {},
+              "expect": [{"check": "status", "args": {"http": 200}},
+                         {"check": "count_relation", "args": {"value": 1}}]}
+        res = checks.evaluate(sc, ok_answer({"patterns": [{"id": "w"}]}), "mcp")
+        self.assertEqual([(r["check"], r["outcome"], r["property"]) for r in res],
+                         [("status", "pass", False), ("count_relation", "not_exposed", True)])
+        self.assertEqual(checks.scenario_outcome(res), "inconclusive")
+
+
+V2 = os.path.join(SUITE, "manifest", "suite_v2.json")
+
+
+def v2_scenarios():
+    with open(V2) as f:
+        return dict((x["id"], x) for x in json.load(f)["scenarios"])
+
+
+class StatedReasons(unittest.TestCase):
+    """VERIFY-fixes.md X2: a check is inconclusive on a stated hiding, stop or time limitation only once the answer
+    shows it can have happened; each reason a check accepts (README, "Stated reasons") with a case where it holds
+    and one where it cannot have happened."""
+
+    LIMITS = {"max_contexts": 100, "max_paths": 10, "max_anchors": 1000, "max_steps": 1000, "time_budget_ms": 60000,
+              "finalize_reserve_ms": 250, "stop_at_threshold": False, "max_predicate_contexts": 50}
+
+    def problems(self, counts, withheld=None, cut=None, stop=None, det="full", steps=1000, limits=None,
+                 elapsed=1000.0, req=None, mode=None, **extra):
+        e = {"id": "w", "mode": mode or ("partial" if cut else "all_or_count"), "counts": counts,
+             "withheld": {"reason": withheld} if withheld else None, "cut": {"reason": cut} if cut else None,
+             "stop": {"phase": stop[0], "reason": stop[1]} if stop else None, "determinism": det, "results": [],
+             "returned": 0, "work": {"steps": steps}}
+        e.update(extra)
+        lim = dict(self.LIMITS)
+        lim.update(limits or {})
+        body = {"patterns": [e], "limits": lim, "timing": {"elapsed_ms": elapsed}}
+        sc = {"route": "POST /pattern", "request": req or {"patterns": [{"dna": "A" * 25, "id": "w"}]}, "truth": {}}
+        return checks._pattern_reason_problems(sc, body, 0, e)
+
+    def ok(self, *a, **k):
+        p = self.problems(*a, **k)
+        self.assertEqual(p, [], (a, k))
+
+    def bad(self, needle, *a, **k):
+        p = self.problems(*a, **k)
+        self.assertTrue(p and needle in p[0], (needle, p, a, k))
+
+    @staticmethod
+    def c(rel, value=None, **kw):
+        d = {"relation": rel, "value": value}
+        d.update(kw)
+        return d
+
+    def test_withheld_reasons(self):
+        ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
+        self.ok(ctx("exact", 101), withheld="count_above_threshold")
+        self.ok(ctx("bounds", 90, lower=90, upper=120), withheld="count_above_threshold")
+        self.bad("not above the threshold 100", ctx("exact", 100), withheld="count_above_threshold")
+        self.bad("not above the threshold 100", ctx("at_least", 500), withheld="count_above_threshold")
+        long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("exact", 11)}, withheld="count_above_threshold",
+                req=long_req)
+        self.bad("not above the threshold 10", {"anchors": self.c("exact", 2), "paths": self.c("exact", 3)},
+                 withheld="count_above_threshold", req=long_req)
+        self.ok(ctx("at_least", 101), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                limits={"stop_at_threshold": True})
+        self.bad("without stop_at_threshold", ctx("at_least", 101), withheld="threshold_crossed")
+        self.ok(ctx("at_least", 9), withheld="discovery_budget", stop=("discovery", "max_steps"))
+        self.bad("without a max_steps stop", ctx("at_least", 9), withheld="discovery_budget")
+        self.bad("after 10 steps of max_steps 1000", ctx("at_least", 9), withheld="discovery_budget",
+                 stop=("discovery", "max_steps"), steps=10)
+        self.ok(ctx("unknown"), withheld="deadline", stop=("discovery", "time"), det="time_limited", elapsed=59900.0)
+        self.bad("without a time stop", ctx("exact", 5), withheld="deadline")
+        self.bad("before the work time", ctx("unknown"), withheld="deadline", stop=("discovery", "time"),
+                 det="time_limited", elapsed=300.0)
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("unknown")}, withheld="paths_later_increment",
+                req={"patterns": [{"dna": "A" * 40, "id": "w"}]})
+        self.bad("L <= k", ctx("exact", 5), withheld="paths_later_increment")
+        self.bad("long_search 'paths'", {"anchors": self.c("exact", 2), "paths": self.c("exact", 1)},
+                 withheld="paths_later_increment", req=long_req)
+        self.ok({"anchors": self.c("exact", 1001), "paths": self.c("unknown")}, withheld="anchors_above_threshold",
+                req=long_req)
+        self.bad("not above max_anchors 1000", {"anchors": self.c("exact", 2), "paths": self.c("unknown")},
+                 withheld="anchors_above_threshold", req=long_req)
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        self.ok(ctx("exact", 24), withheld="annotation_budget", stop=("label_discovery", "max_annotation_work"),
+                req=labels)
+        self.ok(ctx("exact", 24), withheld="annotation_budget", rows_refused=[{"row": 1}], req=labels)
+        self.bad("without an annotation stop", ctx("exact", 24), withheld="annotation_budget", req=labels)
+        self.ok(ctx("exact", 24), withheld="anchor_labels_truncated", anchors_truncated=[{"cap": 2, "total": 9}])
+        self.bad("without anchors_truncated", ctx("exact", 24), withheld="anchor_labels_truncated")
+        self.ok(ctx("exact", 24), withheld="output_budget", stop=("output", "max_memory"))
+        self.bad("without a memory stop", ctx("exact", 24), withheld="output_budget")
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        self.ok(ctx("exact", 60), withheld="predicate_above_threshold", req=pred)
+        self.bad("not above max_predicate_contexts 50", ctx("exact", 10), withheld="predicate_above_threshold", req=pred)
+        self.ok({"contexts": self.c("exact", 500), "selected": self.c("exact", 101)}, withheld="selected_above_threshold",
+                req=pred)
+        self.bad("not above 100", {"contexts": self.c("exact", 500), "selected": self.c("exact", 5)},
+                 withheld="selected_above_threshold", req=pred)
+        self.ok(ctx("exact", 24), withheld="predicate_budget", stop=("selection", "max_predicate_work"), req=pred)
+        self.bad("without a predicate stop", ctx("exact", 24), withheld="predicate_budget", req=pred)
+        self.bad("does not list", ctx("exact", 24), withheld="no_such_reason")
+
+    def test_cut_reasons(self):
+        ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
+        self.ok(ctx("exact", 101), cut="max_contexts")
+        self.bad("within max_contexts 100", ctx("exact", 50), cut="max_contexts")
+        self.ok(ctx("at_least", 9), cut="max_steps", stop=("discovery", "max_steps"))
+        self.bad("without a max_steps stop", ctx("at_least", 9), cut="max_steps")
+        self.ok(ctx("at_least", 0), cut="time", stop=("discovery", "time"), det="time_limited", elapsed=59900.0)
+        self.ok(ctx("at_least", 9), cut="time", stop=("discovery", "max_steps"), det="time_limited", elapsed=59900.0)
+        self.bad("without a time stop", ctx("exact", 9), cut="time")
+        self.ok(ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"))
+        self.bad("without a memory stop", ctx("exact", 2000), cut="max_memory")
+        long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("exact", 11)}, cut="max_paths", req=long_req)
+        self.bad("within max_paths 10", {"anchors": self.c("exact", 2), "paths": self.c("exact", 3)}, cut="max_paths",
+                 req=long_req)
+        sp = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "supported_paths"}
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("exact", 2), "supported_paths": self.c("at_least", 1)},
+                cut="max_annotation_work", stop=("extension", "max_annotation_work"), req=sp)
+        self.bad("without that stop", {"anchors": self.c("exact", 2), "paths": self.c("exact", 2)},
+                 cut="max_annotation_work", req=sp)
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        self.ok({"contexts": self.c("exact", 1828), "selected": self.c("bounds", 6, lower=6, upper=1734)},
+                cut="max_predicate_contexts", req=pred)
+        self.bad("within 50", {"contexts": self.c("exact", 10), "selected": self.c("exact", 2)},
+                 cut="max_predicate_contexts", req=pred)
+        self.ok(ctx("exact", 1828), cut="max_predicate_work", stop=("selection", "max_predicate_work"), req=pred)
+        self.bad("without that stop", ctx("exact", 1828), cut="max_predicate_work", req=pred)
+        self.ok({"anchors": self.c("at_least", 1001)}, cut="max_anchors", stop=("discovery", "max_anchors"),
+                limits={"stop_at_threshold": True}, req=long_req)
+        self.bad("without that stop", {"anchors": self.c("exact", 2)}, cut="max_anchors", req=long_req)
+        self.bad("does not list", ctx("exact", 2), cut="no_such_reason")
+
+    def test_stop_reasons(self):
+        ctx = {"contexts": self.c("at_least", 3)}
+        self.ok(ctx, stop=("discovery", "time"), det="time_limited", elapsed=59900.0, mode="count")
+        self.bad("before the work time", ctx, stop=("discovery", "time"), det="time_limited", elapsed=300.0,
+                 mode="count")
+        self.ok(ctx, stop=("discovery", "max_steps"), mode="count")
+        self.bad("a max_steps stop after 999 steps", ctx, stop=("discovery", "max_steps"), steps=999, mode="count")
+        self.ok(ctx, stop=("discovery", "max_contexts"), limits={"stop_at_threshold": True}, mode="count")
+        self.bad("without stop_at_threshold", ctx, stop=("discovery", "max_contexts"), mode="count")
+        self.ok(ctx, stop=("label_discovery", "max_annotation_work"), mode="count",
+                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}})
+        self.bad("reads no annotation", ctx, stop=("label_discovery", "max_annotation_work"), mode="count")
+        self.ok(ctx, stop=("selection", "max_predicate_work"), mode="count",
+                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}})
+        self.bad("without a predicate", ctx, stop=("selection", "max_predicate_work"), mode="count")
+        self.ok(ctx, stop=("output", "max_memory"), mode="count")
+        self.bad("does not list", ctx, stop=("discovery", "no_such_reason"), mode="count")
+        # a low-complexity diagnostic the work time cut (stop null, determinism time_limited)
+        self.ok({"contexts": self.c("exact", 3)}, det="time_limited", elapsed=59900.0, mode="count")
+        self.bad("a time limitation after 300 ms", {"contexts": self.c("exact", 3)}, det="time_limited",
+                 elapsed=300.0, mode="count")
+        # the work time is a lower bound: E counts the results the answer withholds at a generous size (9,000
+        # plain results: about 5.5 s; labelled ones: more than the budget, so any time stop may be one)
+        self.ok({"contexts": self.c("exact", 9000)}, withheld="deadline", stop=("extraction", "time"),
+                det="time_limited", elapsed=54300.0, limits={"max_contexts": 10000})
+        self.bad("before the work time", {"contexts": self.c("exact", 9000)}, withheld="deadline",
+                 stop=("extraction", "time"), det="time_limited", elapsed=36000.0, limits={"max_contexts": 10000})
+        self.ok({"contexts": self.c("exact", 9000)}, withheld="deadline", stop=("extraction", "time"),
+                det="time_limited", elapsed=36000.0, limits={"max_contexts": 10000},
+                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}})
+
+    def pattern_body(self, sid, entry_update, elapsed):
+        """A /pattern answer of scenario |sid| (v2 manifest) with one entry of exact counts, updated."""
+        sc = v2_scenarios()[sid]
+        req = sc["request"]
+        p = req["patterns"][0]
+        L = 3 * len(p["protein"]) if "protein" in p else len(p.get("dna") or p.get("iupac"))
+        offs = [str(o) for o in range(0, 31 - L + 1)]
+        e = {"id": p["id"], "mode": req["mode"], "scope": req["scope"], "stop": None, "determinism": "full",
+             "notes": [], "results": [], "returned": 0, "retrieval_complete": False, "cut": None,
+             "withheld": None, "work": {"steps": 1000, "ranges_visited": 1000},
+             "counts": {"contexts": {"relation": "exact", "value": 0,
+                                     "by_offset": dict((o, {"relation": "exact", "value": 0}) for o in offs)}}}
+        e.update(entry_update)
+        body = {"patterns": [e], "limits": {"max_contexts": req["max_contexts"], "max_steps": 100000000,
+                                            "time_budget_ms": req["time_budget_ms"], "finalize_reserve_ms": 250},
+                "timing": {"elapsed_ms": elapsed}}
+        return sc, ok_answer(body)
+
+    @staticmethod
+    def exact(n, offs):
+        per = [n // len(offs)] * len(offs)
+        per[0] += n - sum(per)
+        return {"contexts": {"relation": "exact", "value": n, "by_offset": dict(
+            (o, {"relation": "exact", "value": v}) for o, v in zip(offs, per))}}
+
+    def test_verifier_examples_pattern(self):
+        # X-peptide10-0009 (exact 2,810, cap 10,000) and N-realrep-0007 (exact 2) withheld as count_above_threshold
+        for sid, n, offs in (("X-peptide10-0009", 2810, ["0", "1"]), ("N-realrep-0007", 2, ["0"])):
+            sc, a = self.pattern_body(sid, {"counts": self.exact(n, offs),
+                                            "withheld": {"reason": "count_above_threshold"}}, 100.0)
+            res = dict((r["check"], r) for r in checks.evaluate(sc, a, "direct-local"))
+            self.assertEqual(res["contains_source_context"]["outcome"], "fail", sid)
+            self.assertIn("not above the threshold 10000", res["contains_source_context"]["detail"])
+            self.assertEqual(res["invariants"]["outcome"], "fail", sid)
+            self.assertEqual(checks.scenario_outcome(list(res.values())), "fail")
+        # N-hard-0005: exact 2 withheld as count_above_threshold at max_contexts 100 (its v2 withheld check allows
+        # the reason): the invariants fail it
+        sc, a = self.pattern_body("N-hard-0005", {"counts": self.exact(2, ["0"]), "notes": ["low_complexity_pattern"],
+                                                  "withheld": {"reason": "count_above_threshold"}}, 100.0)
+        res = dict((r["check"], r) for r in checks.evaluate(sc, a, "direct-local"))
+        self.assertEqual(res["withheld"]["outcome"], "pass")
+        self.assertEqual(res["invariants"]["outcome"], "fail")
+        self.assertEqual(checks.scenario_outcome(list(res.values())), "fail")
+        # the 300 ms pattern stop: a discovery time stop after 300 ms of a 60,000 ms budget
+        unknown = {"contexts": {"relation": "unknown", "value": None, "by_offset": {
+            "0": {"relation": "unknown", "value": None}, "1": {"relation": "unknown", "value": None}}}}
+        stopped = {"counts": unknown, "stop": {"phase": "discovery", "reason": "time"}, "determinism": "time_limited",
+                   "withheld": {"reason": "deadline"}}
+        sc, a = self.pattern_body("X-peptide10-0009", stopped, 300.0)
+        res = dict((r["check"], r) for r in checks.evaluate(sc, a, "direct-local"))
+        self.assertEqual(res["contains_source_context"]["outcome"], "fail")
+        self.assertIn("before the work time", res["contains_source_context"]["detail"])
+        self.assertEqual(res["invariants"]["outcome"], "fail")
+        sc, a = self.pattern_body("X-peptide10-0009", stopped, 59800.0)      # the same stop at its work time
+        res = dict((r["check"], r) for r in checks.evaluate(sc, a, "direct-local"))
+        self.assertEqual(res["contains_source_context"]["outcome"], "inconclusive")
+        self.assertEqual(res["invariants"]["outcome"], "pass", res["invariants"]["detail"])
+        # count_relation accepts a budget stop only when it happened
+        sc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A" * 25, "id": "w"}], "time_budget_ms": 60000},
+              "truth": {}}
+        for el, want in ((300.0, "fail"), (59900.0, "inconclusive")):
+            a = ok_answer({"patterns": [{"id": "w", "counts": {"contexts": {"relation": "at_least", "value": 3}},
+                                         "stop": {"phase": "discovery", "reason": "time"}, "determinism": "time_limited"}],
+                           "limits": {"time_budget_ms": 60000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": el}})
+            self.assertEqual(outcome(sc, a, "count_relation", relation="exact", value=5)[0], want)
+
+    def walk_answer(self, sc, n, trig, counters, limitation, bounds=None, timing=None, resource_stop=None):
+        """A walk of scenario |sc| (v2 manifest) following its record for n bp on the requested arm, stopped by
+        |trig|."""
+        t = sc["truth"]
+        side = sc["request"]["strategy"]["direction"]
+        cont = checks._seed_frame(t, {"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]},
+                                  side, t["length"])[0]
+        arm = {"status": "truncated", "complete_to_bp": n, "cap_trigger": {"reason": trig, "at_bp": n},
+               "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": n, "sequence": cont(n)}],
+               "paths": [{"id": 0, "segments": [0], "length_bp": n, "path_reason": trig, "end_reasons": {trig: 1}}],
+               "counters": counters, "limitations": [limitation] if limitation else []}
+        b = dict(sc["request"]["strategy"]["bounds"], max_steps=1000000)
+        b.update(bounds or {})
+        r = {"outcome": {"walks": "partial"}, "arms": {side: arm},
+             "timing": timing or {"elapsed_ms": 2000.0, "seed_phase_ms": 500.0,
+                                  "deadline": {"longest_piece": {"kind": "read", "ms": 100.0, "rows": 1}}}}
+        if resource_stop:
+            r["resource_stop"] = resource_stop
+        return ok_answer({"results": [r], "strategy": {"bounds": b}})
+
+    def test_verifier_examples_traverse(self):
+        sc = v2_scenarios()["T-walk-0002"]                          # a left walk under the record's header, 1,000 bp
+        wd = lambda knob, limit, observed: {"kind": "walk_domain", "knob": knob, "limit": limit,  # noqa: E731
+                                            "observed": observed}
+        # the 500-of-500,000 bp walk: "truncated by max_output_bp" at 500 bp under the request's 500,000
+        a = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500},
+                             wd("bounds.max_output_bp", 500000, 501))
+        o, d = outcome(sc, a, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail")
+        self.assertIn("observed 501 within the limit 500000", d)
+        self.assertEqual(outcome(sc, a, "invariants")[0], "fail")
+        a = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500}, None)
+        self.assertIn("no walk_domain limitation names bounds.max_output_bp",
+                      outcome(sc, a, "walk_in_record", label_scope="record")[1])
+        # the same stop under a max_output_bp of 500 (the counter at the cap, the demand past it): inconclusive
+        a = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500},
+                             wd("bounds.max_output_bp", 500, 501), bounds={"max_output_bp": 500})
+        self.assertEqual(outcome(sc, a, "walk_in_record", label_scope="record")[0], "inconclusive")
+        self.assertEqual(outcome(sc, a, "invariants")[0], "pass")
+        # "by max_steps" with the request's max_steps 1,000,000 far away
+        a = self.walk_answer(sc, 500, "max_steps", {"output_bp": 500, "steps": 500},
+                             wd("bounds.max_steps", 1000000, 1000001))
+        o, d = outcome(sc, a, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail")
+        self.assertIn("after 500 steps of max_steps 1000000", d)
+        # a time stop 2 s into a 15 s budget, and one after it
+        early = {"elapsed_ms": 2000.0, "seed_phase_ms": 500.0, "deadline": {
+            "longest_piece": {"kind": "read", "ms": 100.0, "rows": 1}, "stopped_by": "time_budget",
+            "stop_after_deadline_ms": 0.0}}
+        a = self.walk_answer(sc, 500, "time_budget", {"output_bp": 500, "steps": 500},
+                             wd("bounds.time_budget_ms", 15000, 2000.0), timing=early,
+                             resource_stop={"resource": "time", "used": 2000.0})
+        o, d = outcome(sc, a, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail")
+        self.assertIn("before the 15000 ms budget", d)
+        late = dict(early, elapsed_ms=15301.0, deadline=dict(early["deadline"], stop_after_deadline_ms=300.0))
+        a = self.walk_answer(sc, 500, "time_budget", {"output_bp": 500, "steps": 500},
+                             wd("bounds.time_budget_ms", 15000, 15300.0), timing=late,
+                             resource_stop={"resource": "time", "used": 15300.0})
+        self.assertEqual(outcome(sc, a, "walk_in_record", label_scope="record")[0], "inconclusive")
+        # walk_end: a stop that cannot have happened fails, one that can is inconclusive
+        sc = v2_scenarios()["T-end-0001"]
+        a = self.walk_answer(sc, 30, "time_budget", {"output_bp": 30, "steps": 30},
+                             wd("bounds.time_budget_ms", 60000, 2000.0), timing=early,
+                             resource_stop={"resource": "time", "used": 2000.0})
+        self.assertEqual(outcome(sc, a, "walk_end", arm="right", reasons_in=["dead_end"])[0], "fail")
+        late = dict(late, elapsed_ms=60301.0)
+        a = self.walk_answer(sc, 30, "time_budget", {"output_bp": 30, "steps": 30},
+                             wd("bounds.time_budget_ms", 60000, 60300.0), timing=late,
+                             resource_stop={"resource": "time", "used": 60300.0})
+        self.assertEqual(outcome(sc, a, "walk_end", arm="right", reasons_in=["dead_end"])[0], "inconclusive")
+
+    def test_every_stored_pattern_answer_states_possible_reasons(self):
+        # the fixtures (real answers of the mini index) state only reasons that happened
+        n = 0
+        for name in sorted(os.listdir(PATTERN)):
+            pa, pq = os.path.join(PATTERN, name, "answer.json"), os.path.join(PATTERN, name, "request.json")
+            if not (os.path.exists(pa) and os.path.exists(pq)):
+                continue
+            with open(pa) as f:
+                ans = json.load(f)
+            with open(pq) as f:
+                req = json.load(f)
+            if not isinstance(ans, dict) or not isinstance(req, dict) or "patterns" not in ans:
+                continue
+            sc = {"route": "POST /pattern", "request": req, "truth": {}}
+            for i, e in enumerate(ans["patterns"]):
+                self.assertEqual(checks._pattern_reason_problems(sc, ans, i, e), [], name)
+                n += 1
+        self.assertGreater(n, 150)
 
 
 class Relations(unittest.TestCase):
@@ -668,6 +1103,10 @@ class ResolveChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, part, "resolve_runs", label="562", run_end_in=[25, 35])[0], "pass")
         self.assertEqual(outcome(sc, part, "resolve_runs", label="562", run_start_in=[35, 45])[0], "pass")
         self.assertEqual(outcome(sc, part, "resolve_runs", label="562", kmers=60)[0], "pass")
+        # exact runs (R-junction): one run more than stated fails, as a label covering the other's k-mers would
+        self.assertEqual(outcome(sc, part, "resolve_runs", label="562", runs=[[0, 30], [40, 70]])[0], "pass")
+        self.assertEqual(outcome(sc, part, "resolve_runs", label="562", runs=[[0, 30]])[0], "fail")
+        self.assertEqual(outcome(sc, part, "resolve_runs", label="562", run_end_in=[30, 30])[0], "pass")
         self.assertEqual(outcome(sc, part, "resolve_runs", label="562", max_kmers=59)[0], "fail")
         self.assertEqual(outcome(sc, part, "resolve_runs", label="NOPE", full=True)[0], "fail")
         broken = self.body([[0, 30]], graph=[[0, 20]])
@@ -676,19 +1115,32 @@ class ResolveChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, wrongnum, "invariants")[0], "fail")
 
     def test_stop_prefix_and_absent(self):
-        sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "labels": ["562", "9606"]}, "truth": {}}
+        sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "labels": ["562", "9606"],
+                                                    "bounds": {"time_budget_ms": 3000}}, "truth": {}}
         stop = {"phase": "rows", "reason": "time", "resolved_kmers": 40, "query_kmers": 70, "resolved_bp": 70,
                 "query_bp": 100, "remainder_from_bp": 40}
         a = self.body([[0, 40]], num=40, graph=[[0, 40]], stop=stop)
+        a["body"].update(limits={"time_budget_ms": 3000, "finalize_reserve_ms": 250}, timing={"elapsed_ms": 2800.0})
+        # a stop before the budget less the reserve cannot have happened (SPEC §4.5): fail, not a prefix
+        early = copy.deepcopy(a)
+        early["body"]["timing"]["elapsed_ms"] = 2000.0
+        o, d = outcome(sc, early, "resolve_runs", label="562", full=True, prefix_if_stopped=True)
+        self.assertEqual(o, "fail")
+        self.assertIn("before the budget 3000 ms less the reserve 250 ms", d)
+        self.assertEqual(outcome(sc, early, "invariants")[0], "fail")
         self.assertEqual(outcome(sc, a, "invariants")[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_runs", label="562", full=True, unless_stopped=True)[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "pass")
         # a stop that claims the record's own k-mers unsupported, or absent from the graph, fails
+        late = {"limits": {"time_budget_ms": 3000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": 2800.0}}
         hole = self.body([[0, 30]], num=40, graph=[[0, 40]], stop=stop)
+        hole["body"].update(late)
         self.assertEqual(outcome(sc, hole, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "fail")
         gone = self.body([], num=40, graph=[], stop=stop)
+        gone["body"].update(late)
         self.assertEqual(outcome(sc, gone, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "fail")
         zero = self.body([], num=0, graph=[], stop=dict(stop, resolved_kmers=0, resolved_bp=0, remainder_from_bp=0))
+        zero["body"].update(late)
         self.assertEqual(outcome(sc, zero, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0],
                          "inconclusive")
         bad = copy.deepcopy(a)
@@ -921,6 +1373,35 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(dict(sc, truth=longer), ok_answer(full), "walk_end", arm="right")[0], "fail")
         self.assertEqual(outcome(sc, ok_answer(full), "traverse_seed_outcome", walks="complete")[0], "pass")
         self.assertEqual(outcome(sc, ok_answer(full), "traverse_seed_outcome", walks="failed")[0], "fail")
+
+    def test_blocked_event(self):
+        # N-hard-0022: a tandem-repeat seed re-enters itself at 0 bp on each arm (SPEC §6.6)
+        sc = {"route": "POST /traverse", "request": {"seeds": [{"sequence": "TTAGGG" * 10}],
+                                                     "strategy": {"direction": "both"}}, "truth": {}}
+        def walk(events_left, events_right):
+            arms = {}
+            for side, evs in (("left", events_left), ("right", events_right)):
+                arms[side] = {"status": "complete", "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 0,
+                                                                  "sequence": "", "events": evs}], "paths": []}
+            return ok_answer({"results": [{"outcome": {"walks": "complete"}, "arms": arms}]})
+        rej = {"at_bp": 0, "type": "blocked", "char": "T", "reason": "rejoined_seed", "labels": [0]}
+        self.assertEqual(outcome(sc, walk([rej], [rej]), "blocked_event", reason="rejoined_seed", max_at_bp=0)[0], "pass")
+        o, d = outcome(sc, walk([rej], []), "blocked_event", reason="rejoined_seed", max_at_bp=0)
+        self.assertEqual(o, "fail")
+        self.assertIn("right: no blocked successor rejoined_seed", d)
+        self.assertEqual(outcome(sc, walk([rej], [dict(rej, reason="edge_reuse")]), "blocked_event",
+                                 reason="rejoined_seed")[0], "fail")
+        self.assertEqual(outcome(sc, walk([rej], [dict(rej, at_bp=7)]), "blocked_event", reason="rejoined_seed",
+                                 max_at_bp=0)[0], "fail")
+        # the graphlet (the MCP's export) states it in its E records
+        mgt = "\n".join(["A l c 0 p 0 0 1 0 0 steps=0 * 0 * 1 0 1 0 0 0", "G * 0 0 * * * * * * .", "E 0 b A J 1 0",
+                         "T J .", "A r c 0 p 0 0 1 0 0 steps=0 * 0 * 1 0 1 0 0 0", "G * 0 0 * * * * * * .",
+                         "E 0 b T J 1 0", "T J ."])
+        g = ok_answer({"results": [{"outcome": {"walks": "complete"}, "graphlet": mgt}]})
+        self.assertEqual(outcome(sc, g, "blocked_event", reason="rejoined_seed", max_at_bp=0, _arm="mcp")[0], "pass")
+        arms = checks.graphlet_arms(mgt)
+        self.assertEqual(arms["right"]["segments"][0]["events"],
+                         [{"at_bp": 0, "type": "blocked", "char": "T", "reason": "rejoined_seed"}])
 
     def test_trace_coordinates(self):
         req = self.load("mini_rep_00__trace_coords", "request")

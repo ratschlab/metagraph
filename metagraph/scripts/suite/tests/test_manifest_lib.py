@@ -100,7 +100,8 @@ class McpMapping(unittest.TestCase):
         s = ml.scenario("T-1", "T", "t", "POST /traverse", ml.traverse_request([{"sequence": "A" * 40}]), {},
                         [{"check": "status", "args": {"http": [200, 503]}}])
         b = [e for e in s["expect"] if e["check"] == "budget_respected"]
-        self.assertIn("seed_phase_ms", b[0]["args"]["rule"])     # no fixed allowance: the deadline record
+        self.assertIn("never read at depth 0", b[0]["args"]["rule"])     # no fixed allowance: walker.cpp's pieces
+        self.assertIn("first depth-1 checkpoint", b[0]["args"]["rule"])
         s = ml.scenario("R-1", "R", "t", "POST /resolve", ml.resolve_request("A" * 40, labels=["1"], time_budget_ms=250),
                         {}, [{"check": "status", "args": {"http": 400}}])
         self.assertFalse(any(e["check"] == "budget_respected" for e in s["expect"]))   # a refusal: no answer to time

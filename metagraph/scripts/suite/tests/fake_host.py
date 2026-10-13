@@ -2,7 +2,9 @@
 
 It serves the routes the runner touches under an optional path prefix (like the public URL's
 /api/refseq33m-experimental): the three capabilities documents, POST /pattern (gzip when asked; 400 for an
-unknown field), /resolve, /traverse, and /slow, which sleeps for the `sleep_s` of its body. It speaks HTTP/1.1
+unknown field; a 503 `deadline` after the body's `fake_503_after_s`), /resolve, /traverse, /slow, which sleeps
+for the `sleep_s` of its body, and /timed, a /pattern-shaped answer stopped by its time budget on its first call
+and complete afterwards (a cold repeat that ran into its budget, then a warm one). It speaks HTTP/1.1
 with keep-alive (`conns` records the client port of every request, so a test sees connection reuse);
 `drop=True` closes every connection silently after its answer, like a server dropping idle connections.
 """
@@ -32,6 +34,7 @@ class Handler(BaseHTTPRequestHandler):
     prefix = ""
     log = None
     conns = None
+    calls = None
     drop = False
 
     def log_message(self, fmt, *args):  # quiet
@@ -82,6 +85,11 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._send(400, {"code": "invalid_request", "error": "request: not JSON"}, compress=False)
             return
+        if isinstance(body, dict) and "fake_503_after_s" in body:
+            time.sleep(float(body["fake_503_after_s"]))
+            self._send(503, {"code": "deadline", "error": "fake: the answer could not be written within the budget"},
+                       compress=False)
+            return
         if path == "/pattern":
             if isinstance(body, dict) and "bogus" in body:
                 self._send(400, {"code": "invalid_request", "error": "request: unknown field 'bogus'"},
@@ -100,6 +108,14 @@ class Handler(BaseHTTPRequestHandler):
                                                    "left": {"counters": {"steps": 7}}},
                                           "annotation": {"rows_requested": 4},
                                           "timing": {"walk_ms": 1.0}}]})
+        elif path == "/timed":
+            self.calls["/timed"] = self.calls.get("/timed", 0) + 1
+            first = self.calls["/timed"] == 1
+            e = {"id": "a", "counts": {"contexts": {"relation": "at_least" if first else "exact", "value": 3}},
+                 "stop": {"phase": "discovery", "reason": "time"} if first else None,
+                 "determinism": "time_limited" if first else "full"}
+            self._send(200, {"patterns": [e], "limits": {"time_budget_ms": 1000, "finalize_reserve_ms": 250},
+                             "timing": {"elapsed_ms": 900.0 if first else 5.0}})
         elif path == "/slow":
             time.sleep(float((body or {}).get("sleep_s", 1.0)))
             self._send(200, {"slept": True})
@@ -109,13 +125,14 @@ class Handler(BaseHTTPRequestHandler):
 
 class FakeHost(object):
     def __init__(self, prefix="/api/refseq33m-experimental", drop=False):
-        log, conns = [], []
+        log, conns, calls = [], [], {}
 
         class H(Handler):
             pass
         H.prefix = prefix
         H.log = log
         H.conns = conns
+        H.calls = calls
         H.drop = drop
         self.log = log
         self.conns = conns

@@ -86,9 +86,15 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 - Resume: the same `--out` again skips the executions already in executions.jsonl (a line torn by a kill is
   ignored and its execution runs again); another manifest in the same directory is refused, and so is a
   directory whose state.json names a runner still alive on this host.
-- `checks.evaluate(scenario, answer, arm, previous=...)`: `previous` is the list of answer digests
-  (`suite_common.answer_digest`) of the scenario's earlier repeats on this arm, in repeat order, also across a
-  resume (lane S1's determinism check compares against them, so it must digest with the same function).
+- `checks.evaluate(scenario, answer, arm, previous=..., client=...)`: `previous` lists the scenario's earlier
+  repeats on this arm, in repeat order, also across a resume, as `{"digest", "time_limited"}` (lane S3, the
+  verification's L4: the answer digest `suite_common.answer_digest`, which lane S1's determinism check computes
+  with the same function, and what made that answer time-limited, `checks.time_limited`, recorded in the
+  execution line's `time_limited` and read from the raw answer for a line of before the field), so that a
+  time-stopped cold repeat followed by a complete warm one is not a determinism failure; `client` is
+  `{"wall_ms"}` of this execution (budget_respected judges an allowed 503 `deadline` by it), passed when the
+  module's evaluate takes it. The execution's outcome is `checks.scenario_outcome(checks)` (the stub's runs:
+  suite_common.outcome_from_checks).
 - Exit codes of run_direct.py: 0 done (or partial: a paired step), 130 stopped by a signal, 3 stopped at
   `--max-requests`, 1 failed. `--max-requests` counts every request of the invocation, the closing GET
   /capabilities included (review L4).
@@ -204,6 +210,11 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   manifest.json from `arms/*` and the orchestrator's `samples/*.jsonl` (raw paths rewritten to
   `arms/<arm>/raw/...`; for a key recorded twice the later line wins; lines of another arm in an arm's file
   are dropped with a warning; samples deduplicated by time and container). Re-runnable.
+- Outcomes (lane S3): merge_run gives every execution judged by checks.py (not by the stub) the outcome of
+  `checks.scenario_outcome` over its checks when that is stricter than its runner's (fail > finding > inconclusive
+  > pass; error, not_implemented_mcp and service_by_design are kept), the runner's under `outcome_runner`, counted
+  in run.json `outcomes_rederived`: the async MCP runner applies its own rule, which does not tell property checks
+  from the generic ones.
 - Host cache (review H1): merge_run gives every merged execution line `host_cache`, `since_prev_s` and
   `host_cache_after` from the order in which the run's executions of each scenario reached the host, over all
   arms (direct-local's times shifted by the mex clock offset the orchestrator measured): `cold` = the
@@ -370,38 +381,57 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   (lane S1b made that inconclusive). The three 503 deadlines of a 12-mer count at 60 s are themselves a host
   observation (SPEC-pattern-search §7.6: a request stopped by time still answers with its counts): the report
   should list them, which the P-heavy scenarios keep exercising.
-- Outcomes (lane S1b, the integrator's decision 1; the verification's H3 and M7). A check answers `pass`, `fail`,
-  `not_exposed` (the MCP arm lacks the field), `inconclusive` (the check could not test its property on this
-  answer: an HTTP status the scenario allows that is not a 200, such as a 503 `deadline`; a withheld, cut or
-  stopped list that does not show the source, in contains_source_context, source_label, source_placement,
-  path_spells, path_record_verified, and the absence checks source_absent, path_absent and predicate_selected;
-  a walk a stated resource limit stopped before its property) or `finding` (budget_respected).
+- Outcomes (lane S1b, the integrator's decision 1; the verification's H3 and M7; lane S3). A check answers
+  `pass`, `fail`, `not_exposed` (the MCP arm lacks the field), `inconclusive` (the check could not test its
+  property on this answer: an HTTP status the scenario allows that is not a 200, such as a 503 `deadline`; a
+  list that a legitimate withheld reason or cut hides the source in, in contains_source_context, source_label,
+  source_placement, path_spells, path_record_verified, and the absence checks source_absent, path_absent and
+  predicate_selected; a walk a legitimate stated resource limit stopped before its property: "Stated reasons"
+  below) or `finding` (budget_respected). Each result also carries `property`: every check is a PROPERTY check
+  (the claim the scenario was built to test) except the generic ones, `status`, `invariants`,
+  `counts_consistent` and `budget_respected` (`checks.GENERIC_CHECKS`, `checks.is_property`).
   `checks.scenario_outcome(results)` gives the execution's outcome by the precedence fail > finding >
-  inconclusive > pass, and `inconclusive` when there is no check or every check is not exposed (the rule lane
-  S2's comparator and report and the async MCP runner share). So an allowed 503, a withheld answer that hides the
-  source, a walk stopped by a stated resource limit before its property and an MCP execution whose checks are all
-  not exposed are inconclusive, never a pass. `deterministic` is left out of a scenario's first repeat (nothing to
-  compare yet), so that repeat's outcome rests on the other checks.
-- `budget_respected` (lane S1b, the integrator's decision 2, derived per route from the SPECs and each answer's
-  own deadline record after the two verifications of 2026-10-13; no fixed allowance anywhere, since the
-  capabilities state no bound on one uninterruptible piece, `deadline_check.max_uninterruptible_ms` null): every
-  scenario that names a time budget and allows a 200 carries it, its args stating the rule. /pattern and /resolve:
-  a 200 whose `timing.elapsed_ms` exceeds the effective `limits.time_budget_ms` broke the SPEC (past the budget
-  they answer 503; the deployed /resolve sets `timing.elapsed_ms` before its last deadline check). /traverse, per
-  walked seed: the deadline is the budget on the seed's clock (walker.cpp `time_exceeded`) and never stops the
-  seed phase (validation or derivation, depth 0, paced against no deadline); so a time stop must come within the
-  seed's own longest uninterruptible piece (`timing.deadline.longest_piece`) after max(budget, `seed_phase_ms`)
-  (`stop_after_deadline_ms` is measured from the budget), and a seed phase that outlasted the budget leaves one
-  level (`complete_to_bp` <= 1). A breach is the check outcome `finding`; a stop late within its stated piece, a
-  seed phase longer than the budget, or a walk past the budget without a time stop (a level at the radius is never
-  stopped) is a performance fact stated in the detail, for the report's timing section. The smoke run's lambda
-  walk (34,201 ms under 15,000: seed phase 33,803 ms with one cold 20,556 ms coordinate-tuple read; stopped
-  19,201 ms after the deadline, 398 ms after the seed phase) passes with those facts stated.
+  inconclusive > pass (an outcome outside the vocabulary is a fail), and `inconclusive` when there is no check,
+  every check is not exposed, or every PROPERTY check could not test anything (not exposed) although the generic
+  checks passed (the verification's H3: an MCP P-exact-0001 without counts is no pass); a scenario without a
+  property check (a refusal: its status, code and text are the claim) is judged by its generic checks. Both
+  direct runners use it; merge_run applies it to the MCP arm's lines (above). `deterministic` is left out of a
+  scenario's first repeat (nothing to compare yet), so that repeat's outcome rests on the other checks.
+- `budget_respected` (lane S1b, the integrator's decision 2; lane S3 after the verification of lane S1b, X1:
+  SPEC-labeled-traversal-core §6.8 and walker.cpp exactly; no fixed allowance anywhere, since the capabilities
+  state no bound on one uninterruptible piece, `deadline_check.max_uninterruptible_ms` null): every scenario that
+  names a time budget and allows a 200 carries it, its args stating the rule. /pattern and /resolve: a 200 whose
+  `timing.elapsed_ms` exceeds the effective `limits.time_budget_ms` broke the SPEC (past the budget they answer
+  503; the deployed /resolve sets `timing.elapsed_ms` before its last deadline check); an allowed 503 `deadline`
+  whose client wall time (the runner's `client`) exceeds the budget by more than max(1 s, the budget) is a finding
+  too (the deadline is read where the work and the delivery poll it, so the refusal comes at its next reading; the
+  wall also holds the network and any wait for a request thread, hence the margin): the smoke run's
+  R-budget-0002, a 503 8.9 s after a 750 ms budget, is one, its 8,000 ms twin 0.8 s late is not. /traverse, per
+  walked seed: the deadline is the budget on the seed's clock (walker.cpp `time_exceeded`: elapsed >= budget),
+  never read at depth 0 (`checkpoint`: depth > 0), and the depth-0 reads are unpaced. So: a time stop before
+  the budget (the smallest of `elapsed_ms`, `resource_stop.used` and budget + `stop_after_deadline_ms`, which
+  walker.cpp clamps at 0) is a finding; a budget that passed in the seed phase stops the walk at the first depth-1
+  checkpoint, so a path longer than 1 bp is a finding (paths' lengths, not complete_to_bp: structural ends make an
+  arm complete); a time stop at a checked depth (cap_trigger.at_bp >= 2) must come within one read (or chunk) and
+  the head piece after it after max(budget, seed phase), a stop at depth 1 (at_bp <= 1) within the depth-0
+  level's pieces of each requested arm (6: up to 3 unpaced level-fetch calls for the root's at most 4 keys, a
+  lookahead chunk, two head pieces), each piece at most the seed's `timing.deadline.longest_piece` and at most the
+  time since the seed phase (every such piece lies after it); a walk with no time stop may run past max(budget,
+  seed phase) only by the pieces before a reading that would stop a head below the radius (1 read + 1 head when a
+  path passed 1 bp, i.e. the depth-1 reading came before the deadline, else the depth-0 pieces) plus the radius
+  level and the finalisation (2). A breach is the check outcome `finding`; a stop late within its pieces or a seed
+  phase longer than the budget is a performance fact stated in the detail. The smoke run's lambda walk (34,201 ms
+  under 15,000: seed phase 33,803 ms with one cold 20,556 ms coordinate-tuple read; stopped at depth 1, 398 ms
+  after the seed phase) passes, also with its longest piece taken as the 397 ms depth-0 read; the verifier's
+  broken walks (a time stop at 2 s of 15 s, a walk to the radius at 60 s without a stop, 5 s late at a checked
+  depth with 300 ms pieces, 50 bp walked after a seed phase past the budget) are findings
+  (tests/test_checks.py BudgetChecks).
 - `deterministic` is inconclusive when this answer or an earlier repeat was limited by a time budget
   (SPEC-labeled-traversal-core §6.8: determinism provided no time budget tripped; SPEC-pattern-search §7.9:
   `determinism: time_limited`); `previous` may give each earlier repeat as a digest or as
-  `{"digest", "time_limited"}` (lane S2's runner passes digests today: an earlier time-limited repeat is then seen
-  only through the digest difference, which this answer's own time stop explains when it has one).
+  `{"digest", "time_limited"}` (run_direct.py passes the latter since lane S3; the async MCP runner passes digests,
+  so on that arm an earlier time-limited repeat is seen only through this answer's own time stop). A time
+  limitation that cannot have happened ("Stated reasons") explains no difference: fail.
 - Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
   implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...). Lane S1b's
   `suite_v2.json`: 679 scenarios, 719 executions per arm (content_sha256 bdf44c60...), 48 not implemented via MCP,
@@ -486,7 +516,7 @@ defaults, the relations and the tags above:
   (seed_label_kind header vs column on one seed of a multi-record column, A3), `paths_end` (the quorum); the
   traverse invariants add SPEC §7.0 (complete exactly at the radius, walks complete only with every arm complete).
 - Pattern and resolve (H2, M7, L2, S1, S2, A1, A2). A stopped resolve must show its prefix fully supported by the
-  record's label (a stop before the first k-mer is inconclusive; R-budget runs at 300 and 750 ms); the hard
+  record's label (a stop before the first k-mer is inconclusive; R-budget runs at 3,000 and 8,000 ms); the hard
   regions assert exact counts within 2 (k - L + 1) 4^(k - L) and `low_complexity_note` (sdust) instead of "min 0";
   A^40 and (AT)^16 are asked as patterns longer than k; `stops_stated` (P-caps-0004), `results_levels` (M-order);
   a count a budget stop left inexact is inconclusive, not fail; Q-strands' windows are 16S 20-mers whose 42 bp the
@@ -497,7 +527,11 @@ defaults, the relations and the tags above:
   first (table 12's five proteins hold no CTG in any window or shift: stated in `skipped`); an X-stop per code with
   stops; B, Z, J, X edges; M-protein positives in table 4. Planted windows from low-carrier records. R-junction
   expects the exact run ends from the records (A's run continues while B's first bases repeat A's continuation).
-- Coverage (M8/M5 as verified; toward the design's ~800: 679 scenarios). Not built: P-unmasked and M-unmasked (the
+- Coverage (M8/M5 as verified; toward the design's ~800: 679 scenarios). Not built (lane S3 completed the list from
+  the verification of lane S1b): `strategy.run_format`, `min_block_kmers`, `branching.on_reconverge`, the frontier
+  knobs, Q-motif's `decided_by: tested_contexts`, the quorum knobs other than `min_live_labels`, HTTP HEAD, more
+  T-attempts than the 2 scenarios, R-multi duplicate labels beyond the one R-order, partial-mode planted
+  mismatch variants; and: P-unmasked and M-unmasked (the
   host is masked: manifest `not_applicable`), the refuted items (left-arm repeats exist, A^31 cannot be withheld),
   a body above max_request_body_mb (256 MB would load the shared host), P-modes "at the count" (the count is not
   known before the run), a deadline stop of an attempt (needs a run-time not_after_ms), max_live_paths (needs a
@@ -506,3 +540,71 @@ defaults, the relations and the tags above:
   live service capabilities of 2026-10-13 stated; the service's code default is 256 MB and the MCP refuses an
   override above its preset row, so naming 512 in the traverse_fetch overrides would refuse every MCP walk if the
   row were 256. The run should pin the service's capabilities (run.json) and say which applied.
+
+## Lane S3: the integrated suite (2026-10-13)
+
+The suite is developed on the integrated tree from here on (base f9cdca10: lanes S1, S1b, S2, S2b, S2c). What lane
+S3 changed, beside the sections above:
+
+- Offline tests choose their checks: `run_suite.sh --checks auto|checks|stub` (above) and `compare(...,
+  relation_evaluator=None)`; tests/test_orchestrator.py `test_real_checks` runs the orchestrator with checks.py.
+- `budget_respected` per SPEC §6.8 and walker.cpp, and the 503 long past its budget (above).
+- Property and generic checks, `scenario_outcome` in every runner (above).
+- Stated reasons (the verification's X2), below.
+- Residuals: N-hard-0022 asserts the repeat (`blocked_event`: each arm of the (TTAGGG)^10 seed re-enters the seed
+  at 0 bp, `rejoined_seed`, SPEC §6.6, since the period closes a cycle inside the seed; the graphlet's `E b`
+  records are read for the MCP arm); R-junction asserts each label's runs exactly (`resolve_runs` `runs`: a label
+  with an extra run, A covering B's k-mers, fails); the N-hard all_or_count scenarios of L >= 30 expect `withheld`
+  null (at most 16 contexts, never above max_contexts 100).
+
+### Stated reasons
+A check that cannot test its property because the answer states a hiding (a withheld list, a cut), a stop or a
+time limitation accepts that statement only once the answer shows it can have happened; otherwise the check FAILS
+(and so do the route's invariants), it is never inconclusive. Not judged where the answer lacks the quantity (a
+missing cap, `work`, `timing`, a graphlet's limitations): then the statement is taken as stated.
+
+- /pattern, `withheld.reason` (SPEC-pattern-search §7.5): `count_above_threshold` the primary count (contexts; for
+  L > k paths, supported_paths) exact, or bounds with its upper bound, above max_contexts (max_paths); a lower
+  bound does not show it (that is `threshold_crossed`); `threshold_crossed` stop_at_threshold set;
+  `discovery_budget` a max_steps stop with the steps of all patterns at max_steps; `deadline` a time stop or
+  `determinism: time_limited` (and that time reason possible, below); `paths_later_increment` L > k without
+  long_search paths / supported_paths; `anchors_above_threshold` the anchors above max_anchors;
+  `annotation_budget` a max_annotation_work or max_memory stop or a refused row; `anchor_labels_truncated` a
+  non-empty `anchors_truncated`; `output_budget` a max_memory stop (or labels_status output_budget);
+  `predicate_above_threshold` the raw count above max_predicate_contexts; `selected_above_threshold` the
+  selected count above max_contexts (max_paths); `predicate_budget` a max_predicate_work or max_memory stop or a
+  refused row; any other reason fails.
+- /pattern, `cut.reason`: `max_contexts` the count (the selected one with a predicate) not exact within
+  max_contexts, unless stopped at the threshold; `max_steps` a max_steps stop that reached max_steps; `time` a time
+  stop or time limitation; `max_memory` a max_memory stop, a refused row or labels_status output_budget;
+  `max_paths` the paths not exact within max_paths, unless stopped at it; `max_annotation_work`,
+  `max_predicate_work`, `max_anchors` that stop; `max_predicate_contexts` the raw count not exact within it, unless
+  stopped at it; any other reason fails.
+- /pattern, `stop.reason` (§7.6): `time` and `determinism: time_limited` (also a low-complexity diagnostic the work
+  time cut) need `timing.elapsed_ms` at or after a lower bound of the work time, time_budget_ms -
+  finalize_reserve_ms - 2 E, E the §7.6 formula at the default (slowest) delivery rates 10 / 50 MB/s over the
+  results in the answer plus every withheld result at a generous 2 KiB (64 KiB with labels or a predicate);
+  `max_steps` the steps of all patterns at max_steps (every fixture's stop shows them equal); `max_contexts`,
+  `max_anchors`, `max_paths`, `max_predicate_contexts` stop_at_threshold; `max_annotation_work` a search that reads
+  annotation (labels all, supported_paths, a predicate); `max_predicate_work` a predicate; `max_memory` taken as
+  stated; any other reason fails. A stop of the graph search (discovery, mask_scan, extraction, extension,
+  selection) with neither a cut nor a withheld list is an invariant failure (§7.5: only these shorten a list), and
+  a list with neither holds every result: a source missing from it fails (retrieval_complete false alone means
+  the labels are incomplete).
+- /resolve, `stop` (SPEC-labeled-traversal-core §4.5): reason `time` only, with `timing.elapsed_ms` at or after the
+  budget less the reserve.
+- /traverse, an arm's `cap_trigger` (§6.7, §7.0): the arm's `walk_domain` limitation of the trigger's knob
+  (traverse.cpp cap_knob: max_steps, max_live_paths / beam_pruned, max_paths, max_output_bp, time_budget_ms; for
+  resource_limit the knob of the seed's resource_stop, which must exist) with the observed demand past its limit
+  (time: at or after it); max_output_bp the arm's `counters.output_bp`, max_steps the seed's steps within the at
+  most 4 successors a head follows of the cap (walker.cpp cap_check); max_paths the arm's paths and live paths
+  within that of max_paths; time_budget a stop at or after the budget (as budget_respected reads it).
+- The checks that accept a stated reason: contains_source_context, source_label, source_placement, path_spells,
+  path_record_verified, source_absent, path_absent, predicate_selected (a hiding), count_relation (a budget stop),
+  low_complexity_note (a budget stop, a time-limited diagnostic), deterministic (a time limitation),
+  resolve_runs (a resolve stop), walk_in_record and walk_end (an arm's cap trigger), and the invariants of each
+  route. The verifier's examples are tests (tests/test_checks.py StatedReasons): X-peptide10-0009 (exact 2,810 of
+  max_contexts 10,000) and N-realrep-0007 (exact 2) withheld as count_above_threshold, N-hard-0005 (exact 2 of
+  100), a 300 ms discovery time stop of a 60,000 ms budget, a 500 bp walk "truncated by max_output_bp" under
+  500,000 and one "by max_steps" under 1,000,000, a walk time stop 2 s into 15 s: each fails; the same statements
+  where they can have happened stay inconclusive.

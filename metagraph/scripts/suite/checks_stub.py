@@ -37,7 +37,7 @@ def _status(answer, args):
             "detail": "http %s%s" % (got, (" code %s" % err.get("code")) if err.get("code") else "")}
 
 
-def evaluate(scenario, answer, arm, previous=None):
+def evaluate(scenario, answer, arm, previous=None, client=None):
     """[{check, outcome: pass|fail|not_exposed, detail}] for the scenario's `expect` list.
 
     `previous` (the answer digests of the scenario's earlier repeats on this arm) is accepted as lane S1's

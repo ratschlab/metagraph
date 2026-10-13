@@ -113,8 +113,9 @@ def gen_R(ctx: Ctx) -> List[dict]:
         cs = next((x for x in range(min(len(b_prev), 100)) if ta["window"][-1 - x] != b_prev[-1 - x]),
                   min(len(b_prev), 100))
         a_end, b_start = 70 + min(cp, K - 1), 100 - min(cs, K - 1)
-        exp = [OK, INV, ex("resolve_runs", label=ra.column, run_end_in=[a_end, a_end]),
-               ex("resolve_runs", label=rb.column, run_start_in=[b_start, b_start])]
+        # exactly one run per label: A's label covering B's k-mers too (or B's A's) is a wrong answer
+        exp = [OK, INV, ex("resolve_runs", label=ra.column, runs=[[0, a_end]]),
+               ex("resolve_runs", label=rb.column, runs=[[b_start, len(q) - K + 1]])]
         out.append(scenario(nid(), "R", "junction of %s and %s: A's run ends at %d, B's starts at %d (from the records)" % (
                                 ra.key, rb.key, a_end, b_start),
                             "POST /resolve", req, {"a": ta, "b": tb, "junction_bp": 100, "a_run_end": a_end,
@@ -2146,6 +2147,14 @@ def gen_N(ctx: Ctx) -> List[dict]:
                             [OK, INV, CC, ex("count_relation", relation="exact", min=1, max=bound), note],
                             tags=["hard-region", "low-complexity"] + (["smoke"] if title == "(AT)^15A" else [])))
         req = pattern_request([_p(q, "hard")], max_contexts=100)
+        if bound <= 100:
+            # at most `bound` contexts, never above max_contexts 100: the list is complete, never withheld
+            out.append(scenario(nid(), "N", "%s in all_or_count with max_contexts 100: at most %d contexts, so complete "
+                                "and never withheld, exact" % (title, bound), "POST /pattern", req, truth,
+                                [OK, INV, CC, ex("withheld", reason=None),
+                                 ex("count_relation", relation="exact", min=1, max=bound), note],
+                                tags=["hard-region", "low-complexity"]))
+            continue
         out.append(scenario(nid(), "N", "%s in all_or_count with max_contexts 100: complete (or withheld above 100), "
                             "exact" % title, "POST /pattern", req, truth,
                             [OK, INV, CC, ex("withheld", reason=[None, "count_above_threshold"]),
@@ -2171,11 +2180,16 @@ def gen_N(ctx: Ctx) -> List[dict]:
                             resolve_request(t["window"], labels=[rec.column]), t,
                             [OK, INV, ex("resolve_runs", label=rec.column, full=True)], tags=["hard-region", "repeat"]))
     q = "TTAGGG" * 10
-    out.append(scenario(nid(), "N", "a telomeric seed (TTAGGG)^10 traversed: a walk with its stated outcome (or the seed's "
-                        "400 if the human column lacks it)", "POST /traverse",
+    # the seed's period closes a cycle inside the seed (its 30 k-mers use the cycle's 6 edges), so each arm's first
+    # step into the next copy is a step into a seed node: a blocked successor `rejoined_seed` at 0 bp on both arms
+    # (SPEC-labeled-traversal-core §6.6), whatever else the human column holds around telomeric repeats
+    out.append(scenario(nid(), "N", "a telomeric seed (TTAGGG)^10 traversed: each arm re-enters the seed at 0 bp "
+                        "(rejoined_seed), with its stated outcome (or the seed's 400 if the human column lacks it)",
+                        "POST /traverse",
                         traverse_request([_tseed(q, [ctx.rec("hsa").column])], {"bounds": {"max_extension_bp": 200, "time_budget_ms": 5000}}),
-                        {"low_complexity": "telomeric"},
-                        [ex("status", http=[200, 400]), INV, ex("traverse_seed_outcome", walks=["complete", "partial"])],
+                        {"low_complexity": "telomeric", "period": 6, "copies_in_seed": 10},
+                        [ex("status", http=[200, 400]), INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
+                         ex("blocked_event", reason="rejoined_seed", max_at_bp=0)],
                         tags=["hard-region", "telomeric", "traverse"]))
     out += _real_repeats(ctx)
     # every normal use case of an agent, with its failure modes

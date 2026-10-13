@@ -31,6 +31,7 @@ mex.
 """
 
 import argparse
+import inspect
 import http.client
 import json
 import os
@@ -111,6 +112,27 @@ def load_checks(mode):
             error = "%s: %s" % (type(exc).__name__, exc)
     import checks_stub
     return checks_stub, "stub", error
+
+
+def accepts_keyword(fn, name):
+    """Whether |fn| takes the keyword |name| (a vendored checks.evaluate of before may not take `client`)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(x.kind is inspect.Parameter.VAR_KEYWORD for x in params.values())
+
+
+def time_limited_of(checks, answer):
+    """What made an answer time-limited (checks.time_limited), '' when nothing did, None when the checks module
+    cannot tell (the stub)."""
+    fn = getattr(checks, "time_limited", None)
+    if fn is None:
+        return None
+    try:
+        return fn(answer) or ""
+    except Exception:  # never take the run down over a note
+        return None
 
 
 def host_load():
@@ -296,6 +318,7 @@ class Runner(object):
         self.manifest = manifest
         self.checks = checks
         self.checks_name = checks_name
+        self.evaluate_takes_client = accepts_keyword(getattr(checks, "evaluate", None), "client")
         self.checks_error = checks_error
         self.out = os.path.abspath(args.out)
         self.raw_dir = os.path.join(self.out, "raw")
@@ -439,8 +462,14 @@ class Runner(object):
             answer = sc.transport_failure(res["error"][0], res["error"][1])
         route = scenario.get("route", "%s %s" % (method, path))
         try:
-            checks = list(self.checks.evaluate(scenario, answer, self.args.arm, previous=previous))
-            outcome = sc.outcome_from_checks(checks)
+            kw = {"previous": previous}
+            if self.evaluate_takes_client:
+                # the client's wall time: budget_respected judges an allowed 503 deadline by it
+                kw["client"] = {"wall_ms": res["wall_ms"]}
+            checks = list(self.checks.evaluate(scenario, answer, self.args.arm, **kw))
+            # lane S1's rule (checks.scenario_outcome: property checks apart from the generic ones), else the
+            # stub's own (suite_common.outcome_from_checks)
+            outcome = getattr(self.checks, "scenario_outcome", sc.outcome_from_checks)(checks)
         except Exception as exc:  # a check that crashes is an error of this execution, never of the run
             checks = [{"check": "evaluate", "outcome": "fail",
                        "detail": "exception in checks.evaluate: %s: %s | %s"
@@ -461,6 +490,7 @@ class Runner(object):
             "http": answer["http"], "outcome": outcome, "checks": checks,
             "server": sc.extract_server(answer["body"]), "mcp_phases": None,
             "answer_digest": sc.answer_digest(answer, route), "raw": raw_rel, "job": None,
+            "time_limited": time_limited_of(self.checks, answer),
             "error": answer["error"],
             "client": {"connect_ms": res["connect_ms"], "reused": res["reused"], "attempts": res["attempts"],
                        "ttfb_ms": res["ttfb_ms"], "bytes_wire": res["bytes_wire"],
@@ -472,6 +502,16 @@ class Runner(object):
         sc.append_jsonl(self.exec_path, line)
         self.executed += 1
         return line
+
+    def previous_entry(self, line):
+        """{digest, time_limited} of a recorded execution, for checks.evaluate's `previous`."""
+        tl = line.get("time_limited")
+        if tl is None and line.get("raw"):
+            try:
+                tl = time_limited_of(self.checks, (sc.read_gz_json(os.path.join(self.out, line["raw"])) or {}).get("answer"))
+            except (OSError, ValueError):
+                tl = None
+        return {"digest": line.get("answer_digest"), "time_limited": tl or ""}
 
     # -- sampler ----------------------------------------------------------------------------------------------
     def start_sampler(self):
@@ -524,12 +564,14 @@ class Runner(object):
         self.open_run(len(planned), skipped)
         rows, bad = sc.read_jsonl(self.exec_path)
         done = set(sc.execution_key(r) for r in rows)
-        # The answer digests of each scenario's repeats so far, in repeat order: checks.evaluate's `previous`
-        # (lane S1's determinism check compares a repeat with the earlier ones).
+        # The earlier repeats of each scenario so far, in repeat order, as {digest, time_limited}: checks.evaluate's
+        # `previous` (lane S1's determinism check compares a repeat with the earlier ones, and a time-limited earlier
+        # repeat need not repeat: SPEC-labeled-traversal-core §6.8, SPEC-pattern-search §7.9). A line of a runner
+        # before the field gets it from its raw answer.
         digests = {}
         for r in sorted(rows, key=lambda r: (r.get("repeat") or 0)):
             if r.get("arm") == self.args.arm and r.get("answer_digest"):
-                digests.setdefault(r.get("scenario"), []).append(r["answer_digest"])
+                digests.setdefault(r.get("scenario"), []).append(self.previous_entry(r))
         if bad:
             self.run.setdefault("warnings", []).append("%d unparsable line(s) in executions.jsonl ignored" % bad)
         # The executions this invocation is for: the whole selection, a paired step's scenarios (--only), or
@@ -566,7 +608,7 @@ class Runner(object):
                 self.write_state("running", len(planned), ndone, sid)
                 after_resume = repeat > 0 and (sid, repeat - 1) not in ran_in_session
                 line = self.execute(index, scenario, repeat, cache, after_resume, list(digests.get(sid, [])))
-                digests.setdefault(sid, []).append(line["answer_digest"])
+                digests.setdefault(sid, []).append(self.previous_entry(line))
                 ran_in_session.add((sid, repeat))
                 ndone += 1
                 if not self.args.quiet:

@@ -727,13 +727,18 @@ def mcp_traverse(req: Any) -> dict:
 # The rule budget_respected applies per route (stated in the check's args): no fixed allowance, since the
 # capabilities state no bound on one uninterruptible piece (deadline_check.max_uninterruptible_ms null)
 BUDGET_RULE = {
-    "POST /traverse": "SPEC-labeled-traversal-core.md §6.8: the seed's budget runs on its clock and never stops the "
-                      "seed phase; a time stop within the seed's longest uninterruptible piece after max(budget, "
-                      "seed_phase_ms); a budget that passed in the seed phase leaves one level",
+    "POST /traverse": "SPEC-labeled-traversal-core.md §6.8 and walker.cpp: the deadline is the budget on the seed's "
+                      "clock, never read at depth 0, the depth-0 reads unpaced; a time stop not before the budget; "
+                      "a budget that passed in the seed phase stops the walk at the first depth-1 checkpoint (no path "
+                      "beyond 1 bp); a stop at a checked depth (at_bp >= 2) within one read and one head piece after "
+                      "max(budget, seed phase), at depth 1 within the depth-0 levels' pieces; no time stop only "
+                      "within the pieces before a reading that would stop a head below the radius",
     "POST /pattern": "SPEC-pattern-search.md §7.6: an answer that cannot be written by time_budget_ms is a 503 "
-                     "deadline, so a 200's timing.elapsed_ms (to the end of the search) is within the budget",
+                     "deadline, so a 200's timing.elapsed_ms (to the end of the search) is within the budget; an "
+                     "allowed 503 deadline long past the budget (client wall time) is a finding",
     "POST /resolve": "SPEC-labeled-traversal-core.md §4.5: past the budget the answer is a 503, never a partial "
-                     "answer, so a 200's timing.elapsed_ms is within the budget",
+                     "answer, so a 200's timing.elapsed_ms is within the budget; an allowed 503 deadline long past "
+                     "the budget (client wall time) is a finding",
 }
 
 

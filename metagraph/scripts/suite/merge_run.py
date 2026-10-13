@@ -11,6 +11,12 @@ last recorded one when a resume repeated it; each line with `host_cache`, `since
 suite_common.assign_host_cache), samples.jsonl (sorted by time, deduplicated, each sample's `phase` the arm or
 loop it was taken during), jobs.jsonl, manifest.json and run.json (the identity of the run from the direct
 arms, every arm's own run.json under `arms`). Re-running it rewrites the same files.
+
+Outcomes (lane S3): every execution judged by lane S1's checks (not the stub) gets the outcome of
+checks.scenario_outcome over its checks when that is stricter than the one its runner recorded (fail > finding >
+inconclusive > pass; a runner's error, not_implemented_mcp or service_by_design is kept), the runner's own under
+`outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
+from the generic ones (an execution whose property checks are all not exposed is inconclusive, not pass).
 """
 
 import json
@@ -22,6 +28,51 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import suite_common as sc  # noqa: E402
 
 ARM_ORDER = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
+# the outcomes a check-derived outcome may replace, by strictness
+_STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
+
+
+def load_scenario_outcome():
+    """checks.scenario_outcome of checks.py next to this script, or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checks.py")
+    if not os.path.exists(path):
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("suite_checks_for_outcomes", path)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:  # a checks.py that does not load leaves the runners' outcomes
+        return None
+    return getattr(mod, "scenario_outcome", None)
+
+
+def judged_by_stub(run):
+    """Whether an arm's run.json names the checks stub (run_direct: "stub"; the MCP runner: {file, stub})."""
+    mod = (run or {}).get("checks_module")
+    return mod == "stub" or (isinstance(mod, dict) and bool(mod.get("stub")))
+
+
+def stricter_outcomes(rows, arm_runs, outcome_fn):
+    """Applies checks.scenario_outcome where it is stricter than the runner's outcome (module docstring); returns
+    {arm: executions changed}."""
+    changed = {}
+    if outcome_fn is None:
+        return changed
+    for row in rows:
+        old = row.get("outcome")
+        checks = row.get("checks")
+        if old not in _STRICTNESS or not checks or judged_by_stub(arm_runs.get(row.get("arm"))):
+            continue
+        try:
+            new = outcome_fn(checks)
+        except Exception:
+            continue
+        if _STRICTNESS.get(new, 3) > _STRICTNESS[old]:
+            row.setdefault("outcome_runner", old)
+            row["outcome"] = new
+            changed[row.get("arm")] = changed.get(row.get("arm"), 0) + 1
+    return changed
 
 
 def arm_dirs(run_dir):
@@ -126,6 +177,10 @@ def merge(run_dir):
     orchestrator = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
     offsets = clock_offsets(orchestrator)
     merged_rows = sc.assign_host_cache([executions[k] for k in order], offsets)
+    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome())
+    for arm, n in sorted(rederived.items()):
+        warnings.append("arms/%s: %d outcome(s) made stricter by checks.scenario_outcome (outcome_runner keeps the "
+                        "runner's)" % (arm, n))
     seen = set()
     unique_samples = []
     for s in sorted(samples, key=lambda s: (sc.parse_utc(s.get("t_utc")) or 0.0)):
@@ -181,6 +236,7 @@ def merge(run_dir):
         "orchestrator": orchestrator,
         "host_cache": {"warm_window_s": sc.HOST_CACHE_WARM_S, "clock_offsets_s": offsets},
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
+        "outcomes_rederived": rederived,
         "warnings": warnings,
     }
     sc.write_json_atomic(os.path.join(run_dir, "run.json"), merged)

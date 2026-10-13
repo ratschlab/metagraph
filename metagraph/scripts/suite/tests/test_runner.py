@@ -52,6 +52,11 @@ def basic_scenarios():
     ]
 
 
+def with_expect(s, *expect):
+    s["expect"] = s["expect"] + list(expect)
+    return s
+
+
 class RunnerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -69,6 +74,44 @@ class RunnerTest(unittest.TestCase):
         argv = ["--manifest", self.manifest_path, "--arm", "direct-local", "--base", base, "--out", out,
                 "--pause", "0", "--quiet", "--checks", "stub"] + list(extra)
         return run_direct.main(argv)
+
+    def test_time_limited_repeat_and_client_wall(self):
+        # VERIFY-fixes.md L4: repeat 0 stopped by its time budget, repeat 1 complete: the runner passes {digest,
+        # time_limited} for the earlier repeats (also for a line of before the field, from its raw answer), so
+        # the determinism check is inconclusive, never a fail; and a 503 deadline long past its budget is a
+        # finding by the client's wall time the runner passes to budget_respected
+        req = {"patterns": [{"dna": "A" * 31, "id": "a"}], "time_budget_ms": 1000}
+        late = {"sequence": "ACGT" * 10, "labels": ["562"], "bounds": {"time_budget_ms": 100}, "fake_503_after_s": 1.3}
+        make_manifest(self.manifest_path, [
+            with_expect(scenario("D-T", "D", "POST /timed", req, repeat=2), {"check": "deterministic", "args": {}}),
+            with_expect(scenario("R-late", "R", "POST /resolve", late, http=[200, 503]),
+                        {"check": "budget_respected", "args": {}})])
+        out = os.path.join(self.dir, "run")
+        with FakeHost() as host:
+            self.assertEqual(self.run_direct(host.base, out, "--checks", "checks", "--warm-every", "0"), 0)
+            rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+            by = dict(((r["scenario"], r["repeat"]), r) for r in rows)
+            self.assertEqual(by[("D-T", 0)]["time_limited"], "pattern 0 time-limited")
+            self.assertEqual(by[("D-T", 1)]["time_limited"], "")
+            self.assertNotEqual(by[("D-T", 0)]["answer_digest"], by[("D-T", 1)]["answer_digest"])
+            det = [c for c in by[("D-T", 1)]["checks"] if c["check"] == "deterministic"][0]
+            self.assertEqual(det["outcome"], "inconclusive", det["detail"])
+            self.assertIn("time budget limited it", det["detail"])
+            self.assertEqual(by[("D-T", 1)]["outcome"], "inconclusive")
+            budget = [c for c in by[("R-late", 0)]["checks"] if c["check"] == "budget_respected"][0]
+            self.assertEqual(budget["outcome"], "finding", budget["detail"])
+            self.assertEqual(by[("R-late", 0)]["outcome"], "finding")
+            # resume after a runner of before the field: repeat 1 again, repeat 0's time limitation from its raw
+            kept = [dict((k, v) for k, v in r.items() if k != "time_limited") for r in rows
+                    if (r["scenario"], r["repeat"]) != ("D-T", 1)]
+            with open(os.path.join(out, "executions.jsonl"), "w") as fh:
+                for r in kept:
+                    fh.write(json.dumps(r) + "\n")
+            self.assertEqual(self.run_direct(host.base, out, "--checks", "checks", "--warm-every", "0"), 0)
+        rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+        again = [r for r in rows if (r["scenario"], r["repeat"]) == ("D-T", 1)][-1]
+        det = [c for c in again["checks"] if c["check"] == "deterministic"][0]
+        self.assertEqual(det["outcome"], "inconclusive", det["detail"])
 
     def test_full_run_lines_raw_and_identity(self):
         make_manifest(self.manifest_path, basic_scenarios())
@@ -270,7 +313,9 @@ class RunnerTest(unittest.TestCase):
             run(5)   # 3 capabilities + repeats 0 and 1
             run(0)   # resumed: repeat 2 sees the digests recorded in the first session
         rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
-        d = [r["answer_digest"] for r in rows]
+        # {digest, time_limited} per earlier repeat (a checks module without time_limited: ''); an evaluate
+        # without `client` is not passed one
+        d = [{"digest": r["answer_digest"], "time_limited": ""} for r in rows]
         self.assertEqual(seen, [("D-1", []), ("D-1", [d[0]]), ("D-1", [d[0], d[1]])])
 
     def test_load_checks_fallback(self):

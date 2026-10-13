@@ -58,6 +58,7 @@ FINDING = "finding"
 # the check could not test its property on this answer (an allowed refusal, a withheld or cut list that hides
 # the source, an arm a stated resource limit stopped before the property): counted apart, never as a pass
 INCONCLUSIVE = "inconclusive"
+OUTCOMES = (PASS, FAIL, NOT_EXPOSED, INCONCLUSIVE, FINDING)
 
 
 class Missing(Exception):
@@ -352,6 +353,11 @@ def check_deterministic(sc, ans, a, arm, previous=None):
                                      if isinstance(p, dict) and p.get("time_limited")), "")
     previous = [p.get("digest") if isinstance(p, dict) else p for p in previous]
     diff = [p for p in previous if p != d]
+    if diff and _time_limited(ans):
+        bad = _time_limitation_problem(sc, ans)
+        if bad:
+            return FAIL, "digest %s differs from %d earlier repeat(s); its time limitation cannot have happened: %s" % (
+                d[:16], len(diff), bad)
     if diff and tl:
         return INCONCLUSIVE, "digest %s differs from %d earlier repeat(s), but a time budget limited it (%s)" % (
             d[:16], len(diff), tl)
@@ -383,6 +389,401 @@ def check_capabilities_doc(sc, ans, a, arm):
         if n > a["max_bytes"]:
             return FAIL, "document of %d bytes, above %d" % (n, a["max_bytes"])
     return PASS, "capabilities document as expected"
+
+
+# ---------------------------------------------------------------------------------------------- stated reasons
+# A check that cannot test its property because the answer states a hiding (a withheld list, a cut), a stop or a
+# time limitation accepts the statement only once the answer shows it can have happened: a stated reason that
+# cannot have happened FAILS the check that met it (and the route's invariants), it never makes it inconclusive.
+# The reasons and what must hold for each are listed in README.md, "Stated reasons"; in short, /pattern
+# (SPEC-pattern-search §7.5, §7.6): a threshold reason needs its count above its threshold, a budget reason its
+# budget reached (max_steps: the steps of all patterns at max_steps), a time reason a work time that had passed,
+# a stop_at_threshold stop the knob set, a label or predicate reason its stop or its refused rows; /resolve
+# (SPEC-labeled-traversal-core §4.5): a time stop at the budget less the reserve; /traverse (§6.7, §7.0): a cap
+# trigger the walk_domain limitation of its knob with the observed demand past the limit, the arm's counters at
+# the cap, a time stop at or after the budget.
+
+# SPEC-pattern-search §7.6: E = 1.25 x (B / (b x 1000) + B / (c x 1000)) ms for B bytes of results built, at the
+# delivery rates b and c in MB/s (--pattern-delivery-build-mbps 10, --pattern-delivery-compress-mbps 50 by default).
+_DELIVERY_MBPS = (10.0, 50.0)
+# Bytes counted for each result an answer withholds (built, then not handed over): generous, so that E is an over-
+# estimate and the work time a lower bound (an occurrence list makes labelled results far larger).
+_RESULT_BYTES = {"plain": 2048, "labelled": 65536}
+
+
+def _limit(sc: dict, body: dict, name: str) -> Any:
+    """The effective value of a /pattern knob: the answer's `limits`, else the request's."""
+    lim = body.get("limits") if isinstance(body, dict) else None
+    if isinstance(lim, dict) and name in lim and lim[name] is not None:
+        return lim[name]
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    return req.get(name)
+
+
+def _pattern_work_time(sc: dict, body: dict) -> Optional[float]:
+    """A lower bound of the work time of SPEC-pattern-search §7.6, time_budget_ms - finalize_reserve_ms - E: E is
+    taken at twice its formula at the default (slowest) delivery rates, with every result the answer withholds
+    counted at a generous size (_RESULT_BYTES), so an elapsed time below this bound is a time stop or a time
+    limitation that came before the work time had passed. None without a budget."""
+    budget = _number(_limit(sc, body, "time_budget_ms"))
+    if budget is None:
+        return None
+    reserve = _number((body.get("limits") or {}).get("finalize_reserve_ms"))
+    reserve = 250.0 if reserve is None else reserve
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    labelled = (req.get("output") or {}).get("labels") in ("all", "predicate_only") or req.get("predicate") is not None
+    per = _RESULT_BYTES["labelled" if labelled else "plain"]
+    nbytes = 0
+    for e in body.get("patterns") or []:
+        if not isinstance(e, dict) or "counts" not in e:
+            continue
+        nbytes += len(json.dumps(e.get("results") or [], separators=(",", ":")))
+        if e.get("withheld"):
+            long_ = "contexts" not in (e.get("counts") or {})
+            cap = _number(_limit(sc, body, "max_paths" if long_ else "max_contexts")) or 0
+            c = (e.get("counts") or {}).get(_primary_count_name(e, req)) or {}
+            n = c.get("value") if c.get("relation") in ("exact", "at_least") and isinstance(c.get("value"), int) else cap
+            nbytes += int(min(n, cap)) * per
+    b, c = _DELIVERY_MBPS
+    e_ms = 2 * 1.25 * (nbytes / (b * 1000.0) + nbytes / (c * 1000.0))
+    return budget - reserve - e_ms
+
+
+def _pattern_time_problem(sc: dict, body: dict, what: str) -> Optional[str]:
+    """Why a /pattern time stop or time limitation (|what|) cannot have happened, or None: the work stops at the work
+    time and the answer's timing.elapsed_ms runs to the end of the search (SPEC-pattern-search §7.6)."""
+    el = _number((body.get("timing") or {}).get("elapsed_ms"))
+    w = _pattern_work_time(sc, body)
+    if el is None or w is None or el >= w:
+        return None
+    return "%s after %.0f ms, before the work time (at least %.0f ms of the %s ms budget: SPEC-pattern-search §7.6)" % (
+        what, el, w, _limit(sc, body, "time_budget_ms"))
+
+
+def _count_above(c: Any, cap: Optional[float]) -> Optional[bool]:
+    """Whether a count is shown above |cap| (exact > cap, or bounds whose upper bound > cap); None when the count
+    cannot show it either way (at_least, unknown) or the cap is unknown."""
+    if not isinstance(c, dict) or cap is None:
+        return None
+    if c.get("relation") == "exact" and isinstance(c.get("value"), (int, float)):
+        return c["value"] > cap
+    if c.get("relation") == "bounds" and isinstance(c.get("upper"), (int, float)):
+        return c["upper"] > cap
+    if c.get("relation") == "at_least" and isinstance(c.get("value"), (int, float)) and c["value"] > cap:
+        return True
+    return None
+
+
+def _count_text(c: Any) -> str:
+    if not isinstance(c, dict):
+        return "no count"
+    if c.get("relation") == "bounds":
+        return "bounds %s..%s" % (c.get("lower"), c.get("upper"))
+    return "%s %s" % (c.get("relation"), c.get("value"))
+
+
+def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]:
+    """What is wrong with entry i's stated withheld reason, cut reason, stop and time limitation: each must be one
+    SPEC-pattern-search §7.5 / §7.6 lists, and must have happened by what the answer shows (README, "Stated
+    reasons"). Nothing is judged where the answer does not show the quantity (a missing cap, work or timing)."""
+    probs: List[str] = []
+    if not isinstance(e, dict) or "counts" not in e or "error" in e:
+        return probs
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    counts = e.get("counts") or {}
+
+    def cnt(name: str) -> Optional[dict]:
+        c = counts.get(name)
+        return c if isinstance(c, dict) else None
+    long_ = "contexts" not in counts
+    main = cnt("contexts") if not long_ else (
+        cnt("supported_paths") if req.get("long_search") == "supported_paths" and cnt("supported_paths") else cnt("paths"))
+    main_cap = _number(_limit(sc, body, "max_paths" if long_ else "max_contexts"))
+    raw = cnt("contexts") or cnt("supported_paths") or cnt("paths")
+    stop = e.get("stop") if isinstance(e.get("stop"), dict) else {}
+    sr = stop.get("reason")
+    threshold = _limit(sc, body, "stop_at_threshold") is True
+    predicate = req.get("predicate") is not None
+    labels = (req.get("output") or {}).get("labels")
+    time_limited = sr == "time" or e.get("determinism") == "time_limited"
+    max_steps = _number(_limit(sc, body, "max_steps"))
+    steps = [((x.get("work") or {}).get("steps")) for x in body.get("patterns") or []
+             if isinstance(x, dict) and "counts" in x]
+    steps_sum = sum(steps) if steps and all(isinstance(v, int) for v in steps) else None
+    steps_short = max_steps is not None and steps_sum is not None and steps_sum < max_steps
+    where = "p%d" % i
+
+    w = e.get("withheld")
+    wr = w.get("reason") if isinstance(w, dict) else (w if isinstance(w, str) else None)
+    if wr == "count_above_threshold":
+        # exact (or, without the mask, bounds) and above the threshold: a lower bound is threshold_crossed's
+        if main_cap is not None and not ((main or {}).get("relation") in ("exact", "bounds") and
+                                         _count_above(main, main_cap)):
+            probs.append("%s: withheld count_above_threshold with %s, not above the threshold %s" % (
+                where, _count_text(main), int(main_cap)))
+    elif wr == "threshold_crossed":
+        if not threshold:
+            probs.append("%s: withheld threshold_crossed without stop_at_threshold" % where)
+    elif wr == "discovery_budget":
+        if sr != "max_steps":
+            probs.append("%s: withheld discovery_budget without a max_steps stop (stop %r)" % (where, sr))
+        elif steps_short:
+            probs.append("%s: withheld discovery_budget after %d steps of max_steps %d" % (where, steps_sum, max_steps))
+    elif wr == "deadline":
+        if not time_limited:
+            probs.append("%s: withheld deadline without a time stop or time limitation (stop %r)" % (where, sr))
+    elif wr == "paths_later_increment":
+        if not long_ or req.get("long_search") in ("paths", "supported_paths"):
+            probs.append("%s: withheld paths_later_increment for a pattern of L <= k or with long_search %r" % (
+                where, req.get("long_search")))
+    elif wr == "anchors_above_threshold":
+        cap = _number(_limit(sc, body, "max_anchors"))
+        if cap is not None and not _count_above(cnt("anchors"), cap):
+            probs.append("%s: withheld anchors_above_threshold with anchors %s, not above max_anchors %s" % (
+                where, _count_text(cnt("anchors")), int(cap)))
+    elif wr == "annotation_budget":
+        if sr not in ("max_annotation_work", "max_memory") and not e.get("rows_refused"):
+            probs.append("%s: withheld annotation_budget without an annotation stop or a refused row" % where)
+    elif wr == "anchor_labels_truncated":
+        if not e.get("anchors_truncated"):
+            probs.append("%s: withheld anchor_labels_truncated without anchors_truncated" % where)
+    elif wr == "output_budget":
+        if sr != "max_memory" and e.get("labels_status") != "output_budget":
+            probs.append("%s: withheld output_budget without a memory stop" % where)
+    elif wr == "predicate_above_threshold":
+        cap = _number(_limit(sc, body, "max_predicate_contexts"))
+        if cap is not None and not any(_count_above(cnt(n), cap) for n in ("contexts", "paths", "supported_paths")):
+            probs.append("%s: withheld predicate_above_threshold with %s, not above max_predicate_contexts %s" % (
+                where, _count_text(raw), int(cap)))
+    elif wr == "selected_above_threshold":
+        cap = _number(_limit(sc, body, "max_paths" if long_ else "max_contexts"))
+        if cap is not None and not _count_above(cnt("selected"), cap):
+            probs.append("%s: withheld selected_above_threshold with selected %s, not above %s" % (
+                where, _count_text(cnt("selected")), int(cap)))
+    elif wr == "predicate_budget":
+        if sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused"):
+            probs.append("%s: withheld predicate_budget without a predicate stop or a refused row" % where)
+    elif wr is not None:
+        probs.append("%s: withheld %r, a reason SPEC-pattern-search §7.5 does not list" % (where, wr))
+
+    cu = e.get("cut")
+    cr = cu.get("reason") if isinstance(cu, dict) else (cu if isinstance(cu, str) else None)
+    if cr == "max_contexts":
+        cap = _number(_limit(sc, body, "max_contexts"))
+        c = cnt("selected") if predicate and cnt("selected") else main
+        if cap is not None and sr != "max_contexts" and _count_above(c, cap) is False:
+            probs.append("%s: cut max_contexts with %s, within max_contexts %s" % (where, _count_text(c), int(cap)))
+    elif cr == "max_steps":
+        if sr != "max_steps":
+            probs.append("%s: cut max_steps without a max_steps stop (stop %r)" % (where, sr))
+        elif steps_short:
+            probs.append("%s: cut max_steps after %d steps of max_steps %d" % (where, steps_sum, max_steps))
+    elif cr == "time":
+        if not time_limited:
+            probs.append("%s: cut time without a time stop or time limitation (stop %r)" % (where, sr))
+    elif cr == "max_memory":
+        if sr != "max_memory" and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
+            probs.append("%s: cut max_memory without a memory stop or a refused row" % where)
+    elif cr == "max_paths":
+        cap = _number(_limit(sc, body, "max_paths"))
+        c = cnt("selected") if predicate and cnt("selected") else main
+        if cap is not None and sr != "max_paths" and _count_above(c, cap) is False:
+            probs.append("%s: cut max_paths with %s, within max_paths %s" % (where, _count_text(c), int(cap)))
+    elif cr == "max_annotation_work":
+        if sr != "max_annotation_work":
+            probs.append("%s: cut max_annotation_work without that stop (stop %r)" % (where, sr))
+    elif cr == "max_predicate_contexts":
+        cap = _number(_limit(sc, body, "max_predicate_contexts"))
+        if cap is not None and sr != "max_predicate_contexts" and _count_above(raw, cap) is False:
+            probs.append("%s: cut max_predicate_contexts with %s, within %s" % (where, _count_text(raw), int(cap)))
+    elif cr == "max_predicate_work":
+        if sr != "max_predicate_work":
+            probs.append("%s: cut max_predicate_work without that stop (stop %r)" % (where, sr))
+    elif cr == "max_anchors":
+        if sr != "max_anchors":
+            probs.append("%s: cut max_anchors without that stop (stop %r)" % (where, sr))
+    elif cr is not None:
+        probs.append("%s: cut %r, a reason SPEC-pattern-search §7.5 does not list" % (where, cr))
+
+    if sr == "max_steps":
+        if steps_short:
+            probs.append("%s: a max_steps stop after %d steps of max_steps %d (the steps of all patterns reach it: "
+                         "SPEC-pattern-search §7.6)" % (where, steps_sum, max_steps))
+    elif sr in ("max_contexts", "max_anchors", "max_paths", "max_predicate_contexts"):
+        if not threshold:
+            probs.append("%s: a %s stop (stop_at_threshold) without stop_at_threshold" % (where, sr))
+    elif sr == "max_annotation_work":
+        if labels != "all" and req.get("long_search") != "supported_paths" and not predicate:
+            probs.append("%s: a max_annotation_work stop of a search that reads no annotation" % where)
+    elif sr == "max_predicate_work":
+        if not predicate:
+            probs.append("%s: a max_predicate_work stop without a predicate" % where)
+    elif sr not in (None, "time", "max_memory"):
+        probs.append("%s: stop reason %r, one SPEC-pattern-search §7.6 does not list" % (where, sr))
+    if time_limited:
+        m = _pattern_time_problem(sc, body, "%s: %s" % (where, "a time stop" if sr == "time" else "a time limitation"))
+        if m:
+            probs.append(m)
+    return probs
+
+
+def _hiding(sc: dict, ans: dict, i: int, e: dict) -> Tuple[str, List[str]]:
+    """(what hides part of entry i's list, what is wrong with the entry's stated reasons). Only a withheld list or a
+    cut shortens a list of contexts or paths (SPEC-pattern-search §7.5: in partial every stop of the graph search
+    states a cut, in all_or_count a list not handed over is withheld; a stop of the label reads or retrieval_complete
+    false alone leave every context listed); '' when the list holds every result."""
+    if e.get("retrieval_complete") is True:
+        hidden = ""
+    else:
+        parts = []
+        if e.get("withheld"):
+            parts.append("withheld %s" % (e["withheld"].get("reason") if isinstance(e["withheld"], dict) else e["withheld"]))
+        if e.get("cut"):
+            parts.append("cut %s" % (e["cut"].get("reason") if isinstance(e["cut"], dict) else e["cut"]))
+        hidden = ", ".join(parts)
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    return hidden, _pattern_reason_problems(sc, body, i, e)
+
+
+def _resolve_stop_problem(sc: dict, body: dict) -> Optional[str]:
+    """Why a /resolve answer's stated stop cannot have happened, or None (SPEC-labeled-traversal-core §4.5: the
+    work stops at the budget less the reserve, the only stop reason being time; timing.elapsed_ms is set after the
+    work)."""
+    stop = body.get("stop") if isinstance(body, dict) else None
+    if not isinstance(stop, dict):
+        return None
+    if stop.get("reason") != "time":
+        return "a resolve stop of reason %r (SPEC §4.5 states time only)" % stop.get("reason")
+    lim = body.get("limits") or {}
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    budget = _number(lim.get("time_budget_ms"))
+    if budget is None:
+        budget = _number((req.get("bounds") or {}).get("time_budget_ms"))
+    if budget is None:
+        return "a resolve time stop without a time budget"
+    reserve = _number(lim.get("finalize_reserve_ms"))
+    reserve = 250.0 if reserve is None else reserve
+    el = _number((body.get("timing") or {}).get("elapsed_ms"))
+    if el is not None and el < budget - reserve - 1.0:
+        return "a resolve time stop after %.0f ms, before the budget %.0f ms less the reserve %.0f ms" % (el, budget, reserve)
+    return None
+
+
+# the cap trigger reasons of a walk and the knob each one's walk_domain limitation names (src/cli/traverse.cpp
+# cap_knob); resource_limit names the knob of its resource_stop
+_CAP_KNOBS = {"max_steps": "bounds.max_steps", "max_live_paths": "bounds.max_live_paths",
+              "beam_pruned": "bounds.max_live_paths", "max_paths": "bounds.max_paths",
+              "max_output_bp": "bounds.max_output_bp", "time_budget": "bounds.time_budget_ms"}
+_RESOURCE_KNOBS = {"work": "bounds.max_work_units", "memory": "bounds.max_memory_mb", "cancelled": "attempt_id",
+                   "attempt_deadline": "attempt_id"}
+# a cap trips when the next head's followed successors (at most 4) would pass it (walker.cpp cap_check)
+_MAX_FOLLOWED = 4
+
+
+def _arm_stop_problem(sc: dict, ans: dict, r: dict, i: int, side: str) -> Optional[str]:
+    """Why arm |side| of seed result |r| cannot have been stopped by its stated cap trigger, or None. The trigger's
+    walk_domain limitation must name its knob with the observed demand past the limit (src/cli/traverse.cpp
+    arm_limitations: the trigger's observed is what the cap compared), the arm's counters must stand at the cap
+    (max_output_bp: the arm's output_bp; max_steps: the seed's steps; within the at most 4 successors a head
+    follows), a time stop at or after the budget (walker.cpp time_exceeded), resource_limit with the seed's
+    resource_stop. Not judged where the answer lacks the field (a graphlet: no limitations or counters)."""
+    if isinstance(r.get("graphlet"), str):
+        return None   # a graphlet (the MCP's export) states no limitations, counters or stop records in JSON
+    armo = (r.get("arms") or {}).get(side) or {}
+    trig = (armo.get("cap_trigger") or {}).get("reason")
+    if trig not in _RESOURCE_ENDS:
+        return None
+    body = _body(ans)
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    bounds = dict((req.get("strategy") or {}).get("bounds") or {})
+    bounds.update(((body.get("strategy") or {}).get("bounds") or {}) if isinstance(body, dict) else {})
+    rs = r.get("resource_stop") if isinstance(r.get("resource_stop"), dict) else None
+    if trig == "resource_limit":
+        if rs is None:
+            return "%s: truncated by resource_limit without a resource_stop" % side
+        knob = _RESOURCE_KNOBS.get(rs.get("resource"))
+    else:
+        knob = _CAP_KNOBS.get(trig)
+    if trig == "time_budget":
+        budget = _number(bounds.get("time_budget_ms"))
+        if budget is not None and isinstance(r.get("timing"), dict):
+            latest, _ = _traverse_time_stop(r, budget)
+            if latest is not None and latest < budget - 1.0:
+                return "%s: truncated by time_budget by %.0f ms, before the %.0f ms budget" % (side, latest, budget)
+    lims = armo.get("limitations")
+    if isinstance(lims, list) and knob:
+        mine = [x for x in lims if x.get("kind") == "walk_domain" and x.get("knob") == knob]
+        if not mine:
+            return "%s: truncated by %s, but no walk_domain limitation names %s" % (side, trig, knob)
+        obs, lim = _number(mine[0].get("observed")), _number(mine[0].get("limit"))
+        if obs is not None and lim is not None and knob != "attempt_id":
+            if (obs < lim - 1.0) if trig == "time_budget" else (obs <= lim):
+                return "%s: truncated by %s with observed %s within the limit %s of %s" % (
+                    side, trig, mine[0].get("observed"), mine[0].get("limit"), knob)
+    if trig == "max_output_bp":
+        out_bp, cap = _number((armo.get("counters") or {}).get("output_bp")), _number(bounds.get("max_output_bp"))
+        if out_bp is not None and cap is not None and out_bp + _MAX_FOLLOWED <= cap:
+            return "%s: truncated by max_output_bp at output_bp %.0f of max_output_bp %.0f" % (side, out_bp, cap)
+    if trig == "max_steps":
+        steps = [_number(((x or {}).get("counters") or {}).get("steps")) for x in (r.get("arms") or {}).values()]
+        cap = _number(bounds.get("max_steps"))
+        if steps and None not in steps and cap is not None and sum(steps) + _MAX_FOLLOWED <= cap:
+            return "%s: truncated by max_steps after %.0f steps of max_steps %.0f" % (side, sum(steps), cap)
+    if trig == "max_paths":
+        cap = _number(bounds.get("max_paths"))
+        n = len(armo.get("paths") or [])
+        if cap is not None and isinstance(armo.get("paths"), list) and n + 2 * _MAX_FOLLOWED <= cap and \
+                isinstance(armo.get("frontier_remaining"), dict) and \
+                n + (_number(armo["frontier_remaining"].get("live_paths")) or 0) + _MAX_FOLLOWED <= cap:
+            return "%s: truncated by max_paths with %d paths and %s live of max_paths %.0f" % (
+                side, n, armo["frontier_remaining"].get("live_paths"), cap)
+    return None
+
+
+def _traverse_reason_problems(sc: dict, ans: dict) -> List[str]:
+    """Every requested arm's stated cap trigger that cannot have happened (_arm_stop_problem), over the walked seeds."""
+    probs: List[str] = []
+    try:
+        res = _get(_body(ans), "results")
+    except Missing:
+        return probs
+    for i in range(len(res)):
+        r = _result(ans, i)
+        if "arms" not in r:
+            continue
+        for side in _arms_of(sc, i):
+            m = _arm_stop_problem(sc, ans, r, i, side)
+            if m:
+                probs.append("seed %d %s" % (i, m))
+    return probs
+
+
+def time_limited(ans: dict) -> str:
+    """What makes an answer time-limited (SPEC-labeled-traversal-core §6.8: determinism holds provided no time
+    budget tripped; SPEC-pattern-search §7.9: determinism "time_limited"); '' when nothing did. The runners record
+    it beside an execution's digest and pass {digest, time_limited} for the earlier repeats (`previous`)."""
+    return _time_limited(ans)
+
+
+def _time_limitation_problem(sc: dict, ans: dict) -> Optional[str]:
+    """Why an answer's stated time limitation cannot have happened, or None: a /pattern time stop or limitation
+    before its work time, a /resolve stop before its budget less the reserve, a /traverse time stop before its
+    budget."""
+    body = ans.get("body")
+    if not isinstance(body, dict):
+        return None
+    route = sc.get("route", "")
+    if route == "POST /pattern":
+        for i, e in enumerate(body.get("patterns") or []):
+            if isinstance(e, dict) and (e.get("determinism") == "time_limited" or (e.get("stop") or {}).get("reason") == "time"):
+                return _pattern_time_problem(sc, body, "p%d: a time limitation" % i)
+        return None
+    if route == "POST /resolve":
+        return _resolve_stop_problem(sc, body)
+    if route == "POST /traverse":
+        probs = [m for m in _traverse_reason_problems(sc, ans) if "time_budget" in m]
+        return probs[0] if probs else None
+    return None
 
 
 # ---------------------------------------------------------------------------------------------- pattern checks
@@ -424,6 +825,11 @@ def check_count_relation(sc, ans, a, arm):
     value, rel = _count(c)
     stop = e.get("stop") or {}
     stopped = stop.get("reason") in _BUDGET_STOP_REASONS and rel in ("at_least", "unknown")
+    if stopped:
+        bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
+        if bad:
+            return FAIL, "%s %s %s after a %s/%s stop that cannot have happened: %s" % (
+                name, rel, value, stop.get("phase"), stop.get("reason"), bad[0])
     if "relation" in a:
         rels = a["relation"] if isinstance(a["relation"], list) else [a["relation"]]
         if rel not in rels:
@@ -537,6 +943,10 @@ def check_low_complexity_note(sc, ans, a, arm):
         raise Missing("notes")
     has = "low_complexity_pattern" in notes
     stop = e.get("stop") or {}
+    if stop.get("reason") in _SEARCH_BUDGET_STOPS or e.get("determinism") == "time_limited":
+        bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
+        if bad and not has:
+            return FAIL, "no note after a stop or time limitation that cannot have happened: %s" % bad[0]
     if stop.get("reason") in _SEARCH_BUDGET_STOPS:
         if has:
             return FAIL, "low_complexity_pattern beside a budget stop %s/%s" % (stop.get("phase"), stop.get("reason"))
@@ -635,19 +1045,16 @@ def _find_source(e: dict, t: dict, strand: str, level: Optional[int] = None,
     return wanted, found
 
 
-def _hidden(e: dict) -> str:
-    """What keeps an entry's list from being the whole answer ('' when retrieval_complete is true): a withheld
-    list, a cut, a stop. A source missing from such a list is not shown absent (inconclusive)."""
-    if e.get("retrieval_complete") is True:
-        return ""
-    parts = []
-    if e.get("withheld"):
-        parts.append("withheld %s" % (e["withheld"].get("reason") if isinstance(e["withheld"], dict) else e["withheld"]))
-    if e.get("cut"):
-        parts.append("cut %s" % (e["cut"].get("reason") if isinstance(e["cut"], dict) else e["cut"]))
-    if e.get("stop"):
-        parts.append("stop %s/%s" % (e["stop"].get("phase"), e["stop"].get("reason")))
-    return ", ".join(parts) or "the list is not complete"
+def _hidden_outcome(sc: dict, ans: dict, i: int, e: dict, hidden_fmt: str, complete: str) -> Tuple[str, str]:
+    """The outcome of a check whose result is missing from entry i's list: INCONCLUSIVE when a legitimate withheld
+    list or cut hides part of it (hidden_fmt % what), FAIL when the stated reason cannot have happened or when the
+    list holds every result (complete)."""
+    hidden, bad = _hiding(sc, ans, i, e)
+    if bad:
+        return FAIL, (hidden_fmt % (hidden or "nothing hidden")) + "; a stated reason that cannot have happened: " + bad[0]
+    if hidden:
+        return INCONCLUSIVE, hidden_fmt % hidden
+    return FAIL, complete
 
 
 def check_contains_source_context(sc, ans, a, arm):
@@ -668,16 +1075,10 @@ def check_contains_source_context(sc, ans, a, arm):
         missing = [p for (km, p) in wanted if not any(r["kmer"] == km and r["offset"] == p for r in found)]
         detail = "%d of %d source contexts (strand %s, level %s) returned; missing offsets %s (returned %d" % (
             len(found), len(wanted), strand, level, missing[:8], len(e.get("results", [])))
-        hidden = _hidden(e)
-        if hidden:
-            return INCONCLUSIVE, detail + "; %s)" % hidden
-        return FAIL, detail + ", complete)"
+        return _hidden_outcome(sc, ans, i, e, detail + "; %s)", detail + ", complete)")
     if require == "any" and not found:
-        hidden = _hidden(e)
-        if hidden:
-            return INCONCLUSIVE, "none of %d source contexts returned (strand %s, level %s; %s)" % (
-                len(wanted), strand, level, hidden)
-        return FAIL, "none of %d source contexts returned (strand %s, level %s)" % (len(wanted), strand, level)
+        detail = "none of %d source contexts returned (strand %s, level %s" % (len(wanted), strand, level)
+        return _hidden_outcome(sc, ans, i, e, detail + "; %s)", detail + ")")
     if "substitutions" in a:
         for r in found:
             if r.get("substitutions") != a["substitutions"]:
@@ -698,10 +1099,15 @@ def check_source_absent(sc, ans, a, arm):
     if found:
         return FAIL, "%d source context(s) returned (level %s), expected out of reach" % (
             len(found), [r.get("mismatches") for r in found])
-    if e.get("retrieval_complete") is not True:
+    hidden, bad = _hiding(sc, ans, i, e)
+    if bad:
+        return FAIL, "the source not among %d results; a stated reason that cannot have happened: %s" % (
+            len(e.get("results") or []), bad[0])
+    if hidden:
         return INCONCLUSIVE, "the source not among %d results, but the list is not complete (%s)" % (
-            len(e.get("results") or []), _hidden(e) or "retrieval_complete %r" % e.get("retrieval_complete"))
-    return PASS, "none of %d source contexts among %d results (complete)" % (len(wanted), len(e.get("results", [])))
+            len(e.get("results") or []), hidden)
+    return PASS, "none of %d source contexts among %d results (every context listed)" % (
+        len(wanted), len(e.get("results", [])))
 
 
 def _label_of(r: dict, column: str) -> Optional[dict]:
@@ -718,8 +1124,7 @@ def check_source_label(sc, ans, a, arm):
     strand = a.get("strand", t.get("strand", "+"))
     wanted, found = _find_source(e, t, strand, None, sc["request"].get("scope", "any_offset"))
     if not found:
-        hidden = _hidden(e)
-        return (INCONCLUSIVE, "no source context returned (%s)" % hidden) if hidden else (FAIL, "no source context returned")
+        return _hidden_outcome(sc, ans, i, e, "no source context returned (%s)", "no source context returned")
     for r in found:
         if r.get("labels") is None:
             raise Missing("results[].labels")
@@ -738,8 +1143,7 @@ def check_source_placement(sc, ans, a, arm):
     strand = a.get("strand", t.get("strand", "+"))
     wanted, found = _find_source(e, t, strand, None, sc["request"].get("scope", "any_offset"))
     if not found:
-        hidden = _hidden(e)
-        return (INCONCLUSIVE, "no source context returned (%s)" % hidden) if hidden else (FAIL, "no source context returned")
+        return _hidden_outcome(sc, ans, i, e, "no source context returned (%s)", "no source context returned")
     coords = "%d-%d" % (t["start"] + 1, t["start"] + t["length"])
     for r in found:
         lab = _label_of(r, t["taxid"])
@@ -767,15 +1171,15 @@ def _paths_with_sequence(e: dict, seq: str) -> List[dict]:
 
 
 def check_path_spells(sc, ans, a, arm):
-    e = _entry(ans, a.get("pattern", 0))
+    i = a.get("pattern", 0)
+    e = _entry(ans, i)
     t = sc["truth"]
     strand = a.get("strand", t.get("strand", "+"))
     hits = [r for r in _paths_with_sequence(e, t["window"]) if r.get("strand", r.get("orientation")) in (
         [strand] if strand != "=" else ["=", "palindromic"])]
     if not hits:
-        hidden = _hidden(e)
-        return (INCONCLUSIVE if hidden else FAIL), "no path spells the record's bases (strand %s; %d paths returned, %s)" % (
-            strand, len(e.get("results", [])), hidden or "complete")
+        detail = "no path spells the record's bases (strand %s; %d paths returned, " % (strand, len(e.get("results", [])))
+        return _hidden_outcome(sc, ans, i, e, detail + "%s)", detail + "every path listed)")
     for r in hits:
         if r.get("instance") not in (None, r["sequence"]) or r.get("offset", 0) != 0:
             return FAIL, "path instance/offset inconsistent"
@@ -786,15 +1190,15 @@ def check_path_spells(sc, ans, a, arm):
 
 
 def check_path_record_verified(sc, ans, a, arm):
-    e = _entry(ans, a.get("pattern", 0))
+    i = a.get("pattern", 0)
+    e = _entry(ans, i)
     t = sc["truth"]
     strand = a.get("strand", t.get("strand", "+"))
     coords = "%d-%d" % (t["start"] + 1, t["start"] + t["length"])
     hits = _paths_with_sequence(e, t["window"])
     if not hits:
-        hidden = _hidden(e)
-        return (INCONCLUSIVE if hidden else FAIL), "no path spells the record's bases (%d paths, %s)" % (
-            len(e.get("results", [])), hidden or "complete")
+        detail = "no path spells the record's bases (%d paths, " % len(e.get("results", []))
+        return _hidden_outcome(sc, ans, i, e, detail + "%s)", detail + "every path listed)")
     for r in hits:
         if r.get("labels") is None:
             continue
@@ -814,20 +1218,26 @@ def check_path_record_verified(sc, ans, a, arm):
 
 
 def check_path_absent(sc, ans, a, arm):
-    e = _entry(ans, a.get("pattern", 0))
+    i = a.get("pattern", 0)
+    e = _entry(ans, i)
     seq = a.get("sequence") or sc["truth"].get("spliced_dna")
     hits = _paths_with_sequence(e, seq)
     if hits:
         return FAIL, "%d path(s) spell the sequence expected absent" % len(hits)
-    if e.get("retrieval_complete") is not True:
+    hidden, bad = _hiding(sc, ans, i, e)
+    if bad:
+        return FAIL, "no path spells it among %d; a stated reason that cannot have happened: %s" % (
+            len(e.get("results") or []), bad[0])
+    if hidden:
         return INCONCLUSIVE, "no path spells it among %d, but the list is not complete (%s)" % (
-            len(e.get("results") or []), _hidden(e) or "retrieval_complete %r" % e.get("retrieval_complete"))
-    return PASS, "no path spells it (complete list of %d)" % len(e.get("results", []))
+            len(e.get("results") or []), hidden)
+    return PASS, "no path spells it (every path listed: %d)" % len(e.get("results", []))
 
 
 def check_predicate_selected(sc, ans, a, arm):
     """The source contexts are selected (in the results) or not (absent from a complete filtered list)."""
-    e = _entry(ans, a.get("pattern", 0))
+    i = a.get("pattern", 0)
+    e = _entry(ans, i)
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
     t = sc["truth"]
@@ -835,9 +1245,8 @@ def check_predicate_selected(sc, ans, a, arm):
     wanted, found = _find_source(e, t, strand, None, sc["request"].get("scope", "any_offset"))
     if a["selected"]:
         if len(found) != len(wanted):
-            hidden = _hidden(e)
-            return (INCONCLUSIVE if hidden else FAIL), "%d of %d source contexts selected%s" % (
-                len(found), len(wanted), (" (%s)" % hidden) if hidden else "")
+            detail = "%d of %d source contexts selected" % (len(found), len(wanted))
+            return _hidden_outcome(sc, ans, i, e, detail + " (%s)", detail)
         if "selection_strand_in" in a:
             for r in found:
                 ss = r.get("selection_strands")
@@ -852,10 +1261,12 @@ def check_predicate_selected(sc, ans, a, arm):
         return PASS, "%d source contexts selected" % len(found)
     if found:
         return FAIL, "%d source context(s) selected, expected none" % len(found)
-    if e.get("retrieval_complete") is not True:
-        return INCONCLUSIVE, "no source context selected, but the filtered list is not complete (%s)" % (
-            _hidden(e) or "retrieval_complete %r" % e.get("retrieval_complete"))
-    return PASS, "source contexts not selected (complete filtered list)"
+    hidden, bad = _hiding(sc, ans, i, e)
+    if bad:
+        return FAIL, "no source context selected; a stated reason that cannot have happened: %s" % bad[0]
+    if hidden:
+        return INCONCLUSIVE, "no source context selected, but the filtered list is not complete (%s)" % hidden
+    return PASS, "source contexts not selected (every selected context listed)"
 
 
 def check_predicate_either_mirror(sc, ans, a, arm):
@@ -924,17 +1335,92 @@ def _number(v: Any) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def check_budget_respected(sc, ans, a, arm):
+# The pieces a walk may pass after its deadline before a reading of the clock stops it (SPEC-labeled-traversal-core
+# §6.8; walker.cpp run(), run_level(), checkpoint(), pacing()). At a checked depth (>= 1) the deadline is read before
+# every head and before every chunk of a paced read: at most one read (or chunk) and the head piece after it.
+_CHECKED_PIECES = 2
+# The depth-0 level of each requested arm is never checked (checkpoint: depth_ > 0) and its reads are unpaced
+# (pacing(depth_ > 0 ? WALK : NONE)): its level fetch (under a request budget up to 3 calls for the root's at most
+# 4 successor keys: 1, 2, then the rest), its lookahead (paced at depth 0 too: one chunk or chain piece past the
+# deadline) and two head pieces (the root's successor enumeration before the fetch, its processing after it).
+_DEPTH0_PIECES_PER_ARM = 6
+# After the last reading that found no head below the radius: the radius level (its heads are only ended, with no
+# reading) and the seed's finalisation.
+_TAIL_PIECES = 2
+# A 503 `deadline` of /pattern or /resolve comes at the deadline's next reading (SPEC-pattern-search §7.6,
+# SPEC-labeled-traversal-core §4.5); the client's wall time also holds the network, the front and any wait for a
+# request-pool thread, so a 503 is judged "long past" its budget only beyond max(1 s, the budget again).
+_LATE_503_MIN_MS = 1000.0
+
+
+def _budget_503(sc, ans, client):
+    """budget_respected on an allowed 503 `deadline` of /pattern or /resolve: the client's wall time (the runner's
+    `client`) against the budget. FINDING when the refusal came long past it (an unpolled piece of that length,
+    which the SPECs' deadline rule answers at its next reading), else INCONCLUSIVE (nothing in the body to judge)."""
+    route = sc.get("route", "")
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    budget = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
+        _number((req.get("bounds") or {}).get("time_budget_ms")) if route == "POST /resolve" else None
+    wall = _number((client or {}).get("wall_ms"))
+    code = (ans.get("error") or {}).get("code")
+    if budget is None or wall is None or code != "deadline":
+        return INCONCLUSIVE, "not testable: http %s (%s), no client wall time against a budget" % (
+            ans.get("http"), code)
+    late = wall - budget
+    if late > max(_LATE_503_MIN_MS, budget):
+        return FINDING, ("503 deadline delivered %.0f ms after the %.0f ms budget (client wall %.0f ms): the deadline "
+                         "is read where the work and the delivery poll it, so an unpolled piece of about that length "
+                         "ran (the wall also holds the network and any wait for a request thread)" % (late, budget, wall))
+    return INCONCLUSIVE, "503 deadline at a client wall time of %.0f ms for a %.0f ms budget (within max(1 s, the " \
+                         "budget) of it): nothing in the body to judge" % (wall, budget)
+
+
+def _seed_paths_max(sc, r, i):
+    """The longest path of the requested arms of seed result |r| (bp; 0 without paths)."""
+    best = 0
+    for side in _arms_of(sc, i):
+        for p in ((r.get("arms") or {}).get(side) or {}).get("paths") or []:
+            if isinstance(p.get("length_bp"), int):
+                best = max(best, p["length_bp"])
+    return best
+
+
+def _traverse_time_stop(r: dict, budget: float) -> Tuple[Optional[float], Optional[float]]:
+    """(when the walk saw its time stop at the latest, when it saw it) on the seed's clock: the former the smallest
+    of timing.elapsed_ms, resource_stop.used and budget + stop_after_deadline_ms (walker.cpp note_stop clamps that
+    at 0, so a premature stop shows 0 there and its time in `used` or the elapsed time), the latter budget +
+    stop_after_deadline_ms when positive, else resource_stop.used (None when unknown)."""
+    t = r.get("timing") or {}
+    dl = t.get("deadline") or {}
+    rs = r.get("resource_stop") or {}
+    el = _number(t.get("elapsed_ms"))
+    sad = _number(dl.get("stop_after_deadline_ms"))
+    used = _number(rs.get("used")) if rs.get("resource") == "time" else None
+    known = [x for x in (el, used, (budget + sad) if sad is not None else None) if x is not None]
+    stop = budget + sad if sad is not None and sad > 0 else used
+    return (min(known) if known else None), stop
+
+
+def check_budget_respected(sc, ans, a, arm, client=None):
     """The server's time against the request's effective time budget, each route by its SPEC's rule and the
     answer's own deadline record; no fixed allowance (the capabilities state no bound on one uninterruptible
     piece: deadline_check.max_uninterruptible_ms is null). /pattern and /resolve: a 200 whose timing.elapsed_ms
-    exceeds limits.time_budget_ms broke the SPEC (past the budget they answer 503). /traverse
-    (SPEC-labeled-traversal-core §6.8), per walked seed: the deadline is the budget on the seed's clock and never
-    stops the seed phase (validation or derivation, depth 0), so a time stop must come within the seed's own
-    longest uninterruptible piece (timing.deadline.longest_piece) after max(budget, seed_phase_ms), and a seed
-    phase that outlasted the budget leaves one level (complete_to_bp <= 1). A breach is a FINDING (the request
-    still answered). A stop late within a stated piece, or a seed phase longer than the budget, is a performance
-    fact stated in the detail (the report's timing section), not a finding."""
+    exceeds limits.time_budget_ms broke the SPEC (past the budget they answer 503); an allowed 503 `deadline` long
+    past the budget by the client's wall time (_budget_503) is a finding too. /traverse (SPEC-labeled-traversal-core
+    §6.8, walker.cpp), per walked seed: the deadline is the budget on the seed's clock (time_exceeded: elapsed >=
+    budget), never read at depth 0, the depth-0 reads unpaced, so
+      - a time stop before the budget is a finding (the walker stops only once the budget has passed);
+      - a budget that passed in the seed phase stops the walk at the first depth-1 checkpoint: a path longer than
+        1 bp is a finding;
+      - a time stop at a checked depth (cap_trigger.at_bp >= 2) comes within one read and one head piece after
+        max(budget, seed phase), each at most the seed's longest piece (timing.deadline.longest_piece, and at most
+        the time since the seed phase); a stop at depth 1 (at_bp <= 1) within the depth-0 levels' pieces of the
+        requested arms (_DEPTH0_PIECES_PER_ARM each); later is a finding;
+      - a walk with no time stop past max(budget, seed phase) by more than the pieces that may follow the deadline
+        before a reading that would stop a head below the radius (_CHECKED_PIECES, or the depth-0 pieces when no
+        path passed 1 bp, plus _TAIL_PIECES: the radius level and the finalisation) is a finding.
+    A breach is a FINDING (the request still answered); a stop late within its pieces, or a seed phase longer than
+    the budget, is a performance fact stated in the detail (the report's timing section)."""
     body = _body(ans)
     route = sc.get("route", "")
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
@@ -947,7 +1433,8 @@ def check_budget_respected(sc, ans, a, arm):
             raise Missing("strategy.bounds.time_budget_ms")
         res = _get(body, "results")
         over, facts, seen = [], [], 0
-        for i, r in enumerate(res):
+        for i in range(len(res)):
+            r = _result(ans, i)
             if "arms" not in r:
                 continue   # no walk: the seed phase alone, which the budget does not govern
             t = r.get("timing")
@@ -961,37 +1448,65 @@ def check_budget_respected(sc, ans, a, arm):
             dl = t.get("deadline") or {}
             lp = dl.get("longest_piece") or {}
             lp_ms = _number(lp.get("ms")) or 0.0
-            piece = "%s of %.0f ms (%s rows)" % (lp.get("kind"), lp_ms, lp.get("rows"))
+            # every piece after the deadline lies after the seed phase, so none is longer than the time since then
+            piece_ms = min(lp_ms, max(0.0, el - sp))
+            piece = "%s of %.0f ms (%s rows%s)" % (lp.get("kind"), lp_ms, lp.get("rows"),
+                                                   ", %.0f ms since the seed phase" % (el - sp) if piece_ms < lp_ms else "")
+            arms = _arms_of(sc, i)
+            deadline = max(budget, sp)
+            longest = _seed_paths_max(sc, r, i)
             if sp >= budget:
                 facts.append("seed %d: the seed phase (%.0f ms) outlasted the budget, which does not govern it" % (i, sp))
-                for side in _arms_of(sc, i):
-                    armo = (r.get("arms") or {}).get(side) or {}
-                    if (armo.get("cap_trigger") or {}).get("reason") == "time_budget" and \
-                            (armo.get("complete_to_bp") or 0) > 1:
-                        over.append("seed %d %s: the budget passed in the seed phase, yet the walk went on to "
-                                    "complete_to_bp %s (one level expected)" % (i, side, armo.get("complete_to_bp")))
-            if dl.get("stopped_by") == "time_budget":
-                sad = _number(dl.get("stop_after_deadline_ms"))
-                if sad is None:
+                if longest > 1:
+                    over.append("seed %d: the budget passed in the seed phase (%.0f ms of %.0f), so the first depth-1 "
+                                "checkpoint stops the walk, yet a path runs %d bp (at most 1 expected)" % (
+                                    i, sp, budget, longest))
+            time_stop = dl.get("stopped_by") == "time_budget" or (r.get("resource_stop") or {}).get("resource") == "time"
+            if time_stop:
+                latest, stop = _traverse_time_stop(r, budget)
+                if latest is not None and latest < budget - 1.0:
+                    over.append("seed %d: a time stop by %.0f ms, before its %.0f ms budget (the walker stops only once "
+                                "the budget has passed)" % (i, latest, budget))
+                    continue
+                ats = [((r.get("arms") or {}).get(x) or {}).get("cap_trigger") or {} for x in arms]
+                ats = [c.get("at_bp") for c in ats if c.get("reason") == "time_budget" and isinstance(c.get("at_bp"), int)]
+                at = min(ats) if ats else None
+                if stop is None:
                     raise Missing("results[%d].timing.deadline.stop_after_deadline_ms" % i)
-                late = budget + sad - max(budget, sp)
-                if late > lp_ms:
-                    over.append("seed %d: the walk saw its deadline %.0f ms after max(budget %.0f, seed phase %.0f), "
-                                "beyond its longest uninterruptible piece, a %s" % (i, late, budget, sp, piece))
-                elif sad > 0:
-                    facts.append("seed %d: stopped %.0f ms after the deadline, within its longest piece, a %s "
-                                 "(elapsed %.0f ms)" % (i, sad, piece, el))
-            elif el > max(budget, sp):
-                facts.append("seed %d: elapsed %.0f ms past the budget without a time stop (%s)" % (
-                    i, el, "a level at the radius is never stopped" if all(
-                        ((r.get("arms") or {}).get(x) or {}).get("status") == "complete" for x in _arms_of(sc, i))
-                    else "arms stopped otherwise"))
+                late = stop - deadline
+                if at is not None and at >= 2:
+                    allow, where = _CHECKED_PIECES * piece_ms, "at a checked depth (%d bp)" % at
+                else:
+                    allow = _DEPTH0_PIECES_PER_ARM * len(arms) * piece_ms
+                    where = "at depth 1 (after the unpaced, unchecked depth-0 level of %d arm(s))" % len(arms)
+                if late > allow:
+                    over.append("seed %d: stopped %s %.0f ms after max(budget %.0f, seed phase %.0f), beyond the %.0f ms "
+                                "its pieces allow (longest piece a %s)" % (i, where, late, budget, sp, allow, piece))
+                elif late > 0:
+                    facts.append("seed %d: stopped %s %.0f ms after the deadline, within its pieces (longest a %s; "
+                                 "elapsed %.0f ms)" % (i, where, late, piece, el))
+            elif el > deadline:
+                walked_on = longest >= 2   # the depth-1 reading came before the deadline
+                pieces = (_CHECKED_PIECES if walked_on else _DEPTH0_PIECES_PER_ARM * len(arms)) + _TAIL_PIECES
+                allow = pieces * piece_ms
+                complete = all(((r.get("arms") or {}).get(x) or {}).get("status") == "complete" for x in arms)
+                if el - deadline > allow:
+                    over.append("seed %d: elapsed %.0f ms, %.0f ms past max(budget %.0f, seed phase %.0f) without a time "
+                                "stop (%s), beyond the %d pieces (%.0f ms; longest a %s) that may follow the deadline "
+                                "before a reading that stops a head below the radius" % (
+                                    i, el, el - deadline, budget, sp, "every arm complete" if complete else
+                                    "arms ended otherwise", pieces, allow, piece))
+                else:
+                    facts.append("seed %d: elapsed %.0f ms past the budget without a time stop, within %d pieces (%s)" % (
+                        i, el, pieces, "a level at the radius is never stopped" if complete else "arms ended otherwise"))
         if over:
             return FINDING, "; ".join(over[:4])
         if not seen:
             return INCONCLUSIVE, "no walked seed: nothing the budget governs"
         return PASS, "%d walked seed(s) kept the budget %.0f ms by the deadline record%s" % (
             seen, budget, ("; performance: " + "; ".join(facts)) if facts else "")
+    if ans.get("http") == 503:
+        return _budget_503(sc, ans, client)
     budget = _number((body.get("limits") or {}).get("time_budget_ms"))
     if budget is None:
         named = req.get("time_budget_ms") if route == "POST /pattern" else (req.get("bounds") or {}).get("time_budget_ms")
@@ -1156,6 +1671,11 @@ def _pattern_entry_problems(sc: dict, i: int, e: dict, limits: dict, sticky: Opt
     stop = e.get("stop")
     if stop and stop.get("reason") in _BUDGET_STOP_REASONS and "low_complexity_pattern" in (e.get("notes") or []):
         probs.append("p%d: low_complexity_pattern beside a budget stop" % i)
+    # SPEC-pattern-search §7.5: a stop of the graph search shortens a list only with a cut (partial) or a withheld
+    # list (all_or_count)
+    if isinstance(stop, dict) and stop.get("phase") in ("discovery", "mask_scan", "extraction", "extension", "selection") and \
+            not e.get("withheld") and not e.get("cut"):
+        probs.append("p%d: a %s/%s stop with neither a cut nor a withheld list" % (i, stop.get("phase"), stop.get("reason")))
     return probs
 
 
@@ -1233,6 +1753,7 @@ def _pattern_invariants(sc, ans, a, arm):
         if e.get("id") != req_id:
             probs.append("p%d: id %r, request %r" % (i, e.get("id"), req_id))
         probs += _pattern_entry_problems(sc, i, e, limits, None)
+        probs += _pattern_reason_problems(sc, body, i, e)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d entries consistent" % len(pats))
 
 
@@ -1256,6 +1777,10 @@ def check_resolve_runs(sc, ans, a, arm):
     num = body.get("num_kmers")
     ks = lab.get("kmers_supported")
     stop = body.get("stop")
+    if stop:
+        bad = _resolve_stop_problem(sc, body)
+        if bad:
+            return FAIL, "label %s: %s" % (a["label"], bad)
     if (a.get("prefix_if_stopped") or a.get("unless_stopped")) and stop:
         # a stop answers the resolve of the prefix of resolved_kmers k-mers (SPEC §4.5): the record's own label
         # supports every k-mer of it; a stop before the first k-mer shows nothing
@@ -1281,6 +1806,8 @@ def check_resolve_runs(sc, ans, a, arm):
         lo, hi = a["run_start_in"]
         if not any(r[1] == num and lo <= r[0] <= hi for r in runs):
             return FAIL, "label %s: no run [b, %s) with b in [%d, %d] (runs %s)" % (a["label"], num, lo, hi, runs[:6])
+    if "runs" in a and runs != a["runs"]:
+        return FAIL, "label %s: runs %s, expected exactly %s" % (a["label"], runs[:6], a["runs"])
     if "kmers" in a and ks != a["kmers"]:
         return FAIL, "label %s supports %s k-mers, expected %s" % (a["label"], ks, a["kmers"])
     if "max_kmers" in a and ks > a["max_kmers"]:
@@ -1340,6 +1867,9 @@ def _resolve_invariants(sc, ans, a, arm):
     qk = max(0, len(seq) - K + 1)
     num = body.get("num_kmers")
     if stop:
+        bad = _resolve_stop_problem(sc, body)
+        if bad:
+            probs.append(bad)
         x = stop.get("resolved_kmers")
         if num != x:
             probs.append("num_kmers %s != stop.resolved_kmers %s" % (num, x))
@@ -1423,6 +1953,10 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
                 cur["splits"].append({"segment": seg["id"], "ambiguous": f[8] == "1"})
         elif rec == "V":
             cur["branch_events"].append({"at_bp": int(f[1]), "segment": int(f[2])})
+        elif rec == "E" and seg is not None and len(f) >= 5 and f[2] == "b":
+            # a blocked successor: E <at_bp> b <char> <reason code> ... (SPEC §7.5)
+            seg.setdefault("events", []).append({"at_bp": int(f[1]), "type": "blocked", "char": f[3],
+                                                 "reason": _END_CODES.get(f[4][0], f[4])})
         elif rec == "T" and seg is not None:
             cur["_leaves"][seg["id"]] = None if f[1] == "*" else _END_CODES.get(f[1][0], f[1])
         elif rec == "R":
@@ -1628,6 +2162,11 @@ def check_walk_in_record(sc, ans, a, arm):
             stopped.append("no split or branch event before the stop (the record branches by %s bp)" % bys)
         else:
             probs.append("no split or branch event stated on a repeated seed (the record branches by %s bp)" % bys)
+    if stopped:
+        for side in a.get("arms") or _arms_of(sc, i):
+            m = _arm_stop_problem(sc, ans, r, i, side)
+            if m:
+                probs.append("a stated stop that cannot have happened: %s" % m)
     if probs:
         return FAIL, "; ".join(probs[:6])
     if stopped:
@@ -1717,6 +2256,36 @@ def check_label_dict_contains(sc, ans, a, arm):
     return PASS, "%s (%s) among %d label(s)" % (a["name"], hits[0].get("kind"), len(ld))
 
 
+def check_blocked_event(sc, ans, a, arm):
+    """Every requested arm of a walked seed states a blocked successor of reason args.reason (a `blocked` event,
+    SPEC-labeled-traversal-core §6.6: a step into a seed node is reported as `rejoined_seed`, an edge already used
+    as `edge_reuse`) at a depth of at most args.max_at_bp. A tandem-repeat seed's period closes a cycle inside the
+    seed, so each arm's first step into the next copy re-enters the seed at 0 bp; the depth-0 level is processed
+    whatever the budget (§6.8), so no stated stop can hide it."""
+    i = a.get("seed", 0)
+    r = _result(ans, i)
+    if "arms" not in r:
+        return FAIL, "seed %d not walked (%r)" % (i, r.get("error"))
+    notes = []
+    for side in a.get("arms") or _arms_of(sc, i):
+        armo = (r.get("arms") or {}).get(side)
+        if armo is None:
+            return FAIL, "arm %s absent" % side
+        segs = armo.get("segments")
+        if segs is None:
+            raise Missing("arms.%s.segments" % side)
+        hits = [ev for sg in segs for ev in sg.get("events") or []
+                if ev.get("type") == "blocked" and ev.get("reason") == a["reason"]
+                and isinstance(ev.get("at_bp"), int) and ev["at_bp"] <= a.get("max_at_bp", 0)]
+        if not hits:
+            seen = sorted({(ev.get("reason"), ev.get("at_bp")) for sg in segs for ev in sg.get("events") or []
+                           if ev.get("type") == "blocked"}, key=str)
+            return FAIL, "%s: no blocked successor %s at or before %d bp (blocked events %s)" % (
+                side, a["reason"], a.get("max_at_bp", 0), seen[:6])
+        notes.append("%s: %s at %d bp" % (side, a["reason"], min(ev["at_bp"] for ev in hits)))
+    return PASS, "; ".join(notes)
+
+
 def check_walk_end(sc, ans, a, arm):
     """Near the record's end the arm stops exactly at the record's end (header label), with a structural or
     label end reason. An arm a stated resource limit stopped before it (status truncated, every path ended by a
@@ -1736,6 +2305,9 @@ def check_walk_end(sc, ans, a, arm):
                 len(f) < want and (p.get("path_reason") in _RESOURCE_ENDS or set(p.get("end_reasons") or {}) & _RESOURCE_ENDS)
                 for p, f in fl):
             trig = armo.get("cap_trigger") or {}
+            bad = _arm_stop_problem(sc, ans, r, i, side)
+            if bad:
+                return FAIL, "not reached: a stated stop that cannot have happened: %s" % bad
             return INCONCLUSIVE, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
                 side, trig.get("reason"), trig.get("at_bp"), want)
         return FAIL, "%s arm path lengths %s, the record ends %d bp from the seed" % (side, lens[:8], want)
@@ -1876,6 +2448,7 @@ def _traverse_invariants(sc, ans, a, arm):
                         break
                 if maxbp and p.get("length_bp", 0) > maxbp:
                     probs.append("result %d %s path %s: %s bp above max_extension_bp %s" % (i, side, p.get("id"), p.get("length_bp"), maxbp))
+    probs += _traverse_reason_problems(sc, ans)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
 
 
@@ -1891,6 +2464,19 @@ def check_invariants(sc, ans, a, arm):
 
 
 # ---------------------------------------------------------------------------------------------- registry
+# The checks that hold on any answer of the route, whatever the scenario asks: the HTTP status, the route's
+# invariants, the counts' consistency and the time budget. Every other check is a PROPERTY check, the claim the
+# scenario was built to test; an execution whose property checks all could not test anything (not exposed on the
+# MCP arm) is inconclusive even when its generic checks pass (scenario_outcome). A scenario with no property check
+# (a refusal: its status, code and text are the claim) is judged by its generic checks.
+GENERIC_CHECKS = frozenset({"status", "invariants", "counts_consistent", "budget_respected"})
+
+
+def is_property(name: str) -> bool:
+    """Whether check |name| tests the scenario's own claim (README, "Outcomes")."""
+    return name not in GENERIC_CHECKS
+
+
 CHECKS: Dict[str, Callable] = {
     "status": check_status,
     "answer_fields": check_answer_fields,
@@ -1930,6 +2516,7 @@ CHECKS: Dict[str, Callable] = {
     "resolve_discover_contains": check_resolve_discover_contains,
     "walk_in_record": check_walk_in_record,
     "walk_end": check_walk_end,
+    "blocked_event": check_blocked_event,
     "traverse_seed_outcome": check_traverse_seed_outcome,
     "traverse_stop": check_traverse_stop,
     "labels_per_node": check_labels_per_node,
@@ -2162,13 +2749,14 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "counts_consistent": ((), ("pattern",)),
     "invariants": ((), ()),
     "resolve_runs": (("label",), ("full", "prefix_if_stopped", "unless_stopped", "covers", "run_end_in",
-                                  "run_start_in", "kmers", "max_kmers", "min_kmers")),
+                                  "run_start_in", "runs", "kmers", "max_kmers", "min_kmers")),
     "label_not_full": (("label",), ()),
     "resolve_absent": ((), ()),
     "resolve_graph_runs": (("runs",), ()),
     "resolve_discover_contains": (("label",), ()),
     "walk_in_record": ((), ("seed", "arms", "label_scope", "any_copy", "expect_branching", "prefix_only", "if_walked")),
     "walk_end": (("arm",), ("seed", "reasons_in")),
+    "blocked_event": (("reason",), ("seed", "arms", "max_at_bp")),
     "traverse_seed_outcome": (("walks",), ("seed",)),
     "traverse_stop": (("knob",), ("seed", "walks", "resource", "cap_reason")),
     "labels_per_node": (("cap",), ("seed",)),
@@ -2199,10 +2787,14 @@ def validate_expectation(exp: dict) -> List[str]:
     return probs
 
 
-def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[str]] = None) -> List[dict]:
-    """Every expectation of |scenario| against |answer| (DESIGN §8.2). A check whose field is missing answers
-    not_exposed on the MCP arm and fail on a direct arm; an unknown check name or a check that raises is a fail
-    stating why (never a silent pass). `deterministic` is left out of the first repeat (nothing to compare)."""
+def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[Any]] = None,
+             client: Optional[dict] = None) -> List[dict]:
+    """Every expectation of |scenario| against |answer| (DESIGN §8.2), each result {check, outcome, detail,
+    property} (is_property). A check whose field is missing answers not_exposed on the MCP arm and fail on a direct
+    arm; an unknown check name or a check that raises is a fail stating why (never a silent pass). `deterministic` is
+    left out of the first repeat (nothing to compare). `previous`: the earlier repeats' digests or {digest,
+    time_limited}; `client` (optional, from a runner): {"wall_ms"} of this execution, which budget_respected reads
+    on an allowed 503 `deadline` (_budget_503)."""
     out = []
     http = answer.get("http")
     allowed = [200]
@@ -2217,21 +2809,28 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
             continue   # the first repeat has nothing to compare: no result, so that it neither passes nor holds up
         fn = CHECKS.get(name)
         if fn is None:
-            out.append({"check": name, "outcome": FAIL, "detail": "unknown check %r" % name})
+            out.append({"check": name, "outcome": FAIL, "detail": "unknown check %r" % name, "property": True})
             continue
         if name not in ("status", "deterministic") and http != 200 and not args.get("any_status"):
-            if http in allowed:
+            if http in allowed and name == "budget_respected" and http == 503:
+                outcome, detail = _budget_503(scenario, answer, client)
+                out.append({"check": name, "outcome": outcome, "detail": detail, "property": is_property(name)})
+            elif http in allowed:
                 out.append({"check": name, "outcome": INCONCLUSIVE,
                             "detail": "not testable: http %s, an answer the scenario allows (%s)" % (
-                                http, ((answer.get("error") or {}).get("text") or "")[:200])})
+                                http, ((answer.get("error") or {}).get("text") or "")[:200]),
+                            "property": is_property(name)})
             else:
                 out.append({"check": name, "outcome": FAIL,
                             "detail": "no answer to check: http %s (%s)" % (
-                                http, ((answer.get("error") or {}).get("text") or "")[:200])})
+                                http, ((answer.get("error") or {}).get("text") or "")[:200]),
+                            "property": is_property(name)})
             continue
         try:
             if name == "deterministic":
                 outcome, detail = fn(scenario, answer, args, arm, previous=previous)
+            elif name == "budget_respected":
+                outcome, detail = fn(scenario, answer, args, arm, client=client)
             else:
                 outcome, detail = fn(scenario, answer, args, arm)
         except Missing as m:
@@ -2239,22 +2838,29 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
             detail = "field not in the answer: %s" % m
         except Exception as ex:   # a check must never take the run down
             outcome, detail = FAIL, "check raised %s: %s" % (type(ex).__name__, ex)
-        out.append({"check": name, "outcome": outcome, "detail": detail})
+        out.append({"check": name, "outcome": outcome, "detail": detail, "property": is_property(name)})
     return out
 
 
 def scenario_outcome(results: List[dict]) -> str:
     """The execution's outcome from its checks, by precedence fail > finding > inconclusive > pass (the rule lane
-    S2's comparator and report and the async session's MCP runner apply): `fail` when a check failed; else `finding`
-    when a check is a finding (the host broke a stated bound without failing the request); else `inconclusive` when
-    a check could not test its property (an allowed 503, a list that hides the source, a stated resource stop
-    before the property), or when there is no check or every check is not exposed; else `pass`."""
-    if any(r["outcome"] == FAIL for r in results):
+    S2's runner, comparator and report and the async session's MCP runner apply): `fail` when a check failed (or
+    reported an outcome outside the vocabulary); else `finding` when a check is a finding (the host broke a stated
+    bound without failing the request); else `inconclusive` when a check could not test its property (an allowed
+    503, a list a legitimate statement hides, a legitimate resource stop before the property), when there is no
+    check or every check is not exposed, or when the scenario's PROPERTY checks (is_property) all could not test
+    anything although its generic checks (status, invariants, counts_consistent, budget_respected) passed; else
+    `pass`."""
+    outs = [r.get("outcome") for r in results]
+    if any(o == FAIL or o not in OUTCOMES for o in outs):
         return FAIL
-    if any(r["outcome"] == FINDING for r in results):
+    if FINDING in outs:
         return FINDING
-    if any(r["outcome"] == INCONCLUSIVE for r in results):
+    if INCONCLUSIVE in outs:
         return INCONCLUSIVE
-    if not any(r["outcome"] != NOT_EXPOSED for r in results):
+    if not any(o != NOT_EXPOSED for o in outs):
+        return INCONCLUSIVE
+    props = [r for r in results if is_property(r.get("check"))]
+    if props and not any(r.get("outcome") == PASS for r in props):
         return INCONCLUSIVE
     return PASS
