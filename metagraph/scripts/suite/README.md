@@ -133,10 +133,22 @@ lists the environment overrides.
    --smoke / 12 h); then the MCP arm (`--mcp-cmd`: repeat 0 of every scenario, then repeat 1) or the copy of
    a finished MCP run directory (`--mcp-run DIR` -> arms/mcp; sequential only).
 6. `--mcp-cmd TEMPLATE`: async's runner (`--ids A,B --repeat N --out DIR --manifest M`; appends
-   DIR/executions.jsonl and jobs.jsonl, resumable, exit 0 / 1 / 130). Placeholders `{ids}`, `{repeat}` (the
-   repeat index to run), `{repeats}` (`{repeat}` + 1, should a runner take a count), `{out}`
-   (RUN_DIR/arms/mcp), `{manifest}`, replaced with shell-quoted values; run with `bash -c` in this
-   environment, unchanged (the runner reads its admin key from there); its output goes to the terminal only.
+   DIR/executions.jsonl and jobs.jsonl, resumable, exit 0 / 1 / 130; 3 without the admin key under
+   --check-queue, 2 when the key file is unreadable). Placeholders `{ids}`, `{repeat}` (the repeat index to
+   run), `{repeats}` (`{repeat}` + 1, should a runner take a count), `{out}` (RUN_DIR/arms/mcp), `{manifest}`,
+   replaced with shell-quoted values; run with `bash -c` in this environment, unchanged (the runner reads its
+   admin key from there); its output goes to the terminal only. A full run (not --smoke) takes the default
+   template `DEFAULT_MCP_CMD` at the top of run_suite.sh, async's runner of branch feat/suite-mcp-runner:
+
+       <search-service>/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py \
+         --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue \
+         --queue-ignore sra-logan-chunks --checks-dir <this directory>
+
+   so a full run is `METAGRAPH_ADMIN_KEY_FILE=/Users/raetsch/tmp/mgss/secrets/staging_admin_key
+   ./run_suite.sh` (the key file is passed through, never logged; without it the script refuses to start,
+   since the runner checks the service queue). `SUITE_MCP_CMD` replaces the default ('' for none), `--no-mcp`
+   runs without the MCP arm, `--mcp-cmd default` asks for it in a smoke run, `--resume` keeps the run's
+   template. The runner judges with checks.py of `--checks-dir` (it has no stub fallback).
 7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
    included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
    left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to

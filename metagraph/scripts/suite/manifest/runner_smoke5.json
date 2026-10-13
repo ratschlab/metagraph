@@ -1,6 +1,6 @@
 {
  "manifest_version": 1,
- "content_sha256": "c5c0602ed53b2101894242aec8f8dc414ab3b655f82d2bf4ef553b62cf1fe441",
+ "content_sha256": "7311124b217da50ce53d0412adae9ebfacc1298a9c183e51dfa01a5d77592229",
  "created_utc": "2026-10-13T11:00:00.000Z",
  "index": {
   "database": "refseq33m-experimental",
@@ -19,7 +19,7 @@
    }
   ]
  },
- "note": "The runner's hand-made 5-scenario manifest (lane S2) for its smoke run: status checks only, so it is valid with checks.py and with checks_stub.py. The verified manifests are lane S1's suite_smoke_v1.json and suite_v1.json.",
+ "note": "The runner's hand-made 5-scenario manifest (lane S2) for its smoke run: status checks only (with the refusal's code and text), so it is valid with checks.py and with checks_stub.py. One scenario (P-smoke-0001, a /pattern count) is mapped to the MCP's pattern_search, as lane S1's manifest_lib maps a /pattern body; the others are not implemented via MCP. The verified manifests are lane S1's suite_smoke_v1.json and suite_v1.json.",
  "scenarios": [
   {
    "id": "C-smoke-0001",
@@ -61,7 +61,22 @@
     "mode": "count"
    },
    "mcp": {
-    "not_implemented": "runner smoke manifest: no MCP mapping (lane S2 hand-made)"
+    "tool": "pattern_search",
+    "arguments": {
+     "databases": [
+      "refseq33m-experimental"
+     ],
+     "patterns": [
+      {
+       "dna": "GACAGATGCGGCGATCAATCCTGGTAACAGT",
+       "id": "gut153_w31"
+      }
+     ],
+     "mode": "count",
+     "scope": "any_offset",
+     "strands": "both",
+     "labels": "none"
+    }
    },
    "truth": {
     "record": "NZ_CABJBK010000001.1",

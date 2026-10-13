@@ -2,7 +2,8 @@
 # One command for a whole suite run (DESIGN §5, §7, §8.5): the arms against the staging host, never two at
 # once, then merge, compare and report (md + pdf).
 #
-#   run_suite.sh [--manifest M | --smoke] [--paired | --sequential] [--mcp-cmd TEMPLATE | --mcp-run DIR]
+#   run_suite.sh [--manifest M | --smoke] [--paired | --sequential]
+#                [--mcp-cmd TEMPLATE | --mcp-cmd default | --no-mcp | --mcp-run DIR]
 #                [--areas P,M] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
 #                [--warm-every N] [--allow-stub] [--no-pdf]
@@ -17,7 +18,12 @@
 # and repeat with {ids} (comma-separated scenario ids), {repeat} (the repeat index to run: 0 cold, >= 1 warm),
 # {repeats} ({repeat} + 1), {out} (RUN_DIR/arms/mcp) and {manifest} (the run's manifest) replaced by
 # shell-quoted values; run with `bash -c` and this environment unchanged. Only the template is recorded,
-# never the expanded command or any environment value.
+# never the expanded command or any environment value. A full run (not --smoke) uses the default template
+# DEFAULT_MCP_CMD below (SUITE_MCP_CMD replaces it, '' for none) unless --mcp-cmd, --no-mcp or --mcp-run is
+# given; --mcp-cmd default asks for it in a smoke run; --resume keeps the run's template. The default runner
+# needs METAGRAPH_ADMIN_KEY_FILE (a file holding the staging admin key) in the environment, e.g.
+#   METAGRAPH_ADMIN_KEY_FILE=/Users/raetsch/tmp/mgss/secrets/staging_admin_key run_suite.sh
+# and judges with checks.py of this directory (--checks-dir).
 #
 # A run directory is runs/<UTC>_<release-short>/ under this directory (SUITE_RUNS overrides). Every
 # invocation starts a new run directory, except --resume RUN_DIR, which continues that run (its mode unless
@@ -60,6 +66,11 @@ if [[ -z "$MEX_LOCAL" ]]; then
   mkdir -p "$CTL_DIR" && chmod 700 "$CTL_DIR"
   SSH_OPTS+=(-o ControlMaster=auto -o "ControlPath=$CTL_DIR/%C" -o ControlPersist=300)
 fi
+# The MCP arm of a full run: the async session's runner (search-service scripts/bench/suite_mcp_runner.py, branch
+# feat/suite-mcp-runner), judging with this directory's checks.py; --check-queue pauses while the service queue
+# holds other work (the Logan chunks aside) and needs the admin key from the environment.
+ASYNC_MCP_CMD="/Users/raetsch/git/services/metagraph-search-service/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue --queue-ignore sra-logan-chunks --checks-dir $(printf '%q' "$HERE")"
+DEFAULT_MCP_CMD="${SUITE_MCP_CMD-$ASYNC_MCP_CMD}"
 # The mex runners of the suite, as pgrep / pkill patterns ([s] keeps the pattern from matching its own shell).
 RUNNER_PATTERN='[s]cripts/run_direct\.py'
 
@@ -83,7 +94,8 @@ mex_rsync() {
 }
 
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
-RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10
+RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
+MCP_GIVEN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --manifest) MANIFEST="$2"; shift 2 ;;
@@ -95,7 +107,8 @@ while [[ $# -gt 0 ]]; do
     --skip-local) SKIP_LOCAL=1; shift ;;
     --skip-remote) SKIP_REMOTE=1; shift ;;
     --mcp-run) MCP_RUN="$2"; shift 2 ;;
-    --mcp-cmd) MCP_CMD="$2"; shift 2 ;;
+    --mcp-cmd) MCP_CMD="$2"; MCP_GIVEN=1; shift 2 ;;
+    --no-mcp) NO_MCP=1; MCP_CMD=""; shift ;;
     --compare) COMPARE="$2"; shift 2 ;;
     --resume) RESUME="$2"; shift 2 ;;
     --by-design) BY_DESIGN="$2"; shift 2 ;;
@@ -112,9 +125,8 @@ done
 if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ -z "$MCP_RUN" || -d "$MCP_RUN" ]] || die "--mcp-run $MCP_RUN is not a directory"
 [[ -z "$MCP_RUN" || -z "$MCP_CMD" ]] || die "--mcp-run and --mcp-cmd exclude each other"
-if [[ -n "$MCP_CMD" ]]; then
-  [[ "$MCP_CMD" == *"{ids}"* && "$MCP_CMD" == *"{out}"* ]] || die "--mcp-cmd needs the placeholders {ids} and {out}"
-fi
+[[ $NO_MCP == 0 || $MCP_GIVEN == 0 ]] || die "--no-mcp and --mcp-cmd exclude each other"
+[[ "$MCP_CMD" != default ]] || MCP_CMD="$DEFAULT_MCP_CMD"
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
 
 # --- the run directory ------------------------------------------------------------------------------------
@@ -132,6 +144,14 @@ if [[ -n "$RESUME" ]]; then
     MODE="$("$PY" -c 'import json, sys
 try:
     print(json.load(open(sys.argv[1]))["sessions"][-1].get("mode") or "")
+except (OSError, ValueError, KeyError, IndexError):
+    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+  fi
+  if [[ $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
+    # The run's own MCP template (the last invocation's), so a resume pairs the same arms.
+    MCP_CMD="$("$PY" -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["sessions"][-1].get("mcp_cmd") or "")
 except (OSError, ValueError, KeyError, IndexError):
     print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
   fi
@@ -154,6 +174,19 @@ PYEOF
 fi
 MODE="${MODE:-paired}"
 [[ "$MODE" == paired || "$MODE" == sequential ]] || die "unknown mode $MODE"
+if [[ -z "$RESUME" && $SMOKE == 0 && $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
+  MCP_CMD="$DEFAULT_MCP_CMD"   # a full run includes the MCP arm
+fi
+if [[ -n "$MCP_CMD" ]]; then
+  [[ "$MCP_CMD" == *"{ids}"* && "$MCP_CMD" == *"{out}"* ]] || die "--mcp-cmd needs the placeholders {ids} and {out}"
+  MCP_EXE="${MCP_CMD%% *}"
+  if [[ "$MCP_EXE" == /* && ! -x "$MCP_EXE" ]]; then
+    die "the MCP runner's interpreter $MCP_EXE is missing (--no-mcp runs without the MCP arm, --mcp-cmd names another)"
+  fi
+  if [[ "$MCP_CMD" == *--check-queue* && -z "${METAGRAPH_ADMIN_KEY_FILE:-}" && -z "${METAGRAPH_ADMIN_KEY:-}" ]]; then
+    die "the MCP runner checks the service queue and needs METAGRAPH_ADMIN_KEY_FILE (or METAGRAPH_ADMIN_KEY) in the environment"
+  fi
+fi
 [[ "$MODE" == sequential || -z "$MCP_RUN" ]] || die "--mcp-run reads a finished MCP run: use it with --sequential (or --mcp-cmd)"
 [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || die "no manifest (${MANIFEST:-none}); pass --manifest"
 MANIFEST="$(cd "$(dirname "$MANIFEST")" && pwd)/$(basename "$MANIFEST")"

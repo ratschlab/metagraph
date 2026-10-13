@@ -74,7 +74,10 @@ class RunSuiteOffline(unittest.TestCase):
 
     def env(self, host, **extra):
         env = dict(os.environ)
-        env.update({"SUITE_RUNS": self.runs, "SUITE_REMOTE_BASE": host.base, "SUITE_LOCAL_BASE": host.base,
+        # never the real MCP runner nor a real key in a test
+        for name in ("METAGRAPH_ADMIN_KEY_FILE", "METAGRAPH_ADMIN_KEY"):
+            env.pop(name, None)
+        env.update({"SUITE_MCP_CMD": "", "SUITE_RUNS": self.runs, "SUITE_REMOTE_BASE": host.base, "SUITE_LOCAL_BASE": host.base,
                     "SUITE_MEX": "local:" + self.mex, "SUITE_MEX_PY": sys.executable, "PYTHON": sys.executable,
                     "SUITE_SAMPLER": "0", "SUITE_WAIT_RUNNER_S": "4", "SUITE_POLL_S": "1",
                     "SUITE_TEST_SECRET": SECRET})
@@ -299,6 +302,32 @@ class RunSuiteOffline(unittest.TestCase):
         self.assertIn("# Verdict", report)
         self.assertIn("the stub ran", report)
 
+    def test_default_mcp_template(self):
+        make_manifest(self.mpath, mcp_scenarios()[:2])
+        with FakeHost() as host:
+            # a full run takes SUITE_MCP_CMD's template without any flag; --resume keeps it
+            p = self.run_suite(host, "--manifest", self.mpath, SUITE_MCP_CMD=self.mcp_cmd())
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+            self.assertEqual(sum(1 for r in rows if r["arm"] == "mcp"), 4)
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+            self.assertEqual([x["mcp_cmd"] for x in sessions], [self.mcp_cmd()] * 2)
+            # --no-mcp runs without it; a smoke run only with --mcp-cmd
+            time.sleep(1.1)
+            p = self.run_suite(host, "--manifest", self.mpath, "--no-mcp", SUITE_MCP_CMD=self.mcp_cmd())
+            self.assertEqual(p.returncode, 0, p.stderr)
+            rows, _ = sc.read_jsonl(os.path.join(p.stdout.strip().splitlines()[-1], "executions.jsonl"))
+            self.assertFalse(any(r["arm"] == "mcp" for r in rows))
+            # a template that checks the service queue refuses to start without the admin key
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd() + " --check-queue")
+            self.assertEqual(p.returncode, 2)
+            self.assertIn("METAGRAPH_ADMIN_KEY_FILE", p.stderr)
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", "/no/such/python x {ids} {out}")
+            self.assertIn("is missing", p.stderr)
+
     def test_bad_options(self):
         with FakeHost() as host:
             p = self.run_suite(host, "--bogus")
@@ -308,9 +337,9 @@ class RunSuiteOffline(unittest.TestCase):
             self.assertIn("no manifest", p.stderr)
             p = self.run_suite(host, "--mcp-cmd", "x {ids}", "--mcp-run", self.d)
             self.assertIn("exclude each other", p.stderr)
-            p = self.run_suite(host, "--mcp-cmd", "runner --ids {ids}")
-            self.assertIn("{ids} and {out}", p.stderr)
             make_manifest(self.mpath, basic_scenarios()[:1])
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", "runner --ids {ids}")
+            self.assertIn("{ids} and {out}", p.stderr)
             p = self.run_suite(host, "--manifest", self.mpath, "--mcp-run", self.d)
             self.assertIn("--sequential", p.stderr)
             self.assertEqual(p.returncode, 2)
