@@ -1,0 +1,299 @@
+"""Offline tests of suite_common (answers, digests, plans, statistics, files), checks_stub and the sampler's
+parsing. Run from metagraph/scripts/suite: python3 -m unittest discover -s tests"""
+
+import contextlib
+import gzip
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+
+import checks_stub  # noqa: E402
+import sampler  # noqa: E402
+import suite_common as sc  # noqa: E402
+
+
+class TimeAndNames(unittest.TestCase):
+    def test_iso_round_trip(self):
+        t = 1791800000.123
+        s = sc.iso_utc(t)
+        self.assertTrue(s.endswith("Z"))
+        self.assertAlmostEqual(sc.parse_utc(s), t, places=3)
+
+    def test_parse_utc_rejects(self):
+        self.assertIsNone(sc.parse_utc("yesterday"))
+        self.assertIsNone(sc.parse_utc(None))
+
+    def test_release_short(self):
+        self.assertEqual(sc.release_short("refseq97-b7214d29a934ff89512ad254bbb66ba793842928"), "refseq97-b7214d29")
+        self.assertEqual(sc.release_short(None), "unknown")
+        self.assertEqual(sc.release_short("a/b c"), "a_b_c")
+
+    def test_parse_route(self):
+        self.assertEqual(sc.parse_route("POST /pattern"), ("POST", "/pattern"))
+        self.assertEqual(sc.parse_route("get /capabilities"), ("GET", "/capabilities"))
+        self.assertEqual(sc.parse_route("/traverse/capabilities"), ("GET", "/traverse/capabilities"))
+
+    def test_raw_name(self):
+        self.assertEqual(sc.raw_name("M-x/1", "direct-local", 2), "raw/M-x_1.direct-local.2.json.gz")
+
+
+class ManifestAndPlan(unittest.TestCase):
+    def manifest(self, n=25):
+        scen = [{"id": "P-%03d" % i, "area": "P" if i % 2 else "R", "repeat": 1, "timing_class": "fast"}
+                for i in range(n)]
+        scen[3]["repeat"] = 3
+        scen[5]["timing_class"] = "long"
+        return {"scenarios": scen, "content_sha256": sc.scenarios_sha256(scen)}
+
+    def test_sha_verifies_and_detects_change(self):
+        m = self.manifest()
+        self.assertTrue(sc.verify_manifest(m)[0])
+        m["scenarios"][0]["title"] = "changed"
+        self.assertFalse(sc.verify_manifest(m)[0])
+
+    def test_select_keeps_global_index(self):
+        m = self.manifest()
+        sel = sc.select_scenarios(m, areas=["P"], limit=3)
+        self.assertEqual([i for i, _ in sel], [1, 3, 5])
+        sel = sc.select_scenarios(m, ids=["P-010", "P-002"])
+        self.assertEqual([s["id"] for _, s in sel], ["P-002", "P-010"])
+
+    def test_repeat_count(self):
+        self.assertEqual(sc.repeat_count(0, {"repeat": 1}, 10), 2)
+        self.assertEqual(sc.repeat_count(10, {}, 10), 2)
+        self.assertEqual(sc.repeat_count(7, {"repeat": 1}, 10), 1)
+        self.assertEqual(sc.repeat_count(0, {"repeat": 1}, 0), 1)
+        self.assertEqual(sc.repeat_count(4, {"repeat": 3}, 10), 3)
+        self.assertEqual(sc.repeat_count(4, {"repeat": "x"}, 10), 1)
+
+    def test_plan_local_and_remote(self):
+        m = self.manifest(12)
+        sel = sc.select_scenarios(m)
+        planned, skipped = sc.plan_executions(sel, "direct-local", 10)
+        # 12 scenarios + a warm repeat for indices 0 and 10 + 2 more repeats of index 3
+        self.assertEqual(len(planned), 12 + 2 + 2)
+        self.assertEqual(skipped, [])
+        self.assertEqual([p[3] for p in planned[:2]], ["cold", "warm"])
+        planned_r, skipped_r = sc.plan_executions(sel, "direct-remote", 10)
+        self.assertEqual(len(planned_r), len(planned) - 1)
+        self.assertEqual(skipped_r[0]["scenario"], "P-005")
+
+
+class Answers(unittest.TestCase):
+    def test_decode_body(self):
+        data = b'{"a": 1}'
+        self.assertEqual(sc.decode_body(gzip.compress(data), "gzip"), data)
+        import zlib
+        self.assertEqual(sc.decode_body(zlib.compress(data), "deflate"), data)
+        raw = zlib.compressobj(wbits=-15)
+        deflated = raw.compress(data) + raw.flush()
+        self.assertEqual(sc.decode_body(deflated, "deflate"), data)
+        self.assertEqual(sc.decode_body(data, None), data)
+        with self.assertRaises(ValueError):
+            sc.decode_body(data, "br")
+
+    def test_normalise_ok(self):
+        a = sc.normalise_direct(200, b'{"x": 1}', {"Content-Type": "application/json", "Server": "nginx"})
+        self.assertEqual(a["body"], {"x": 1})
+        self.assertIsNone(a["error"])
+        self.assertEqual(a["headers"], {"content-type": "application/json"})
+
+    def test_normalise_error_body(self):
+        a = sc.normalise_direct(400, b'{"code": "invalid_request", "error": "request: unknown field \'bogus\'"}')
+        self.assertEqual(a["error"], {"code": "invalid_request", "text": "request: unknown field 'bogus'"})
+        a = sc.normalise_direct(503, b'{"error": "Server is currently initializing, please come back later."}')
+        self.assertIsNone(a["error"]["code"])
+        a = sc.normalise_direct(502, b"<html>bad gateway</html>")
+        self.assertEqual(a["body"], "<html>bad gateway</html>")
+        self.assertEqual(a["error"], {"code": None, "text": "<html>bad gateway</html>"})
+        a = sc.normalise_direct(500, b"")
+        self.assertEqual(a["error"], {"code": None, "text": None})
+
+    def test_transport_failure(self):
+        a = sc.transport_failure("timeout", "no answer")
+        self.assertEqual(a["http"], 0)
+        self.assertEqual(a["error"]["code"], "timeout")
+
+    def test_digest_ignores_timing_and_headers(self):
+        a = sc.normalise_direct(200, b'{"patterns": [{"id": "a", "timing": {"elapsed_ms": 1}}], "timing": {"x": 2}}',
+                                {"Content-Encoding": "gzip"})
+        b = sc.normalise_direct(200, b'{"timing": {"x": 9}, "patterns": [{"timing": {"elapsed_ms": 5}, "id": "a"}]}')
+        self.assertEqual(sc.answer_digest(a, "POST /pattern"), sc.answer_digest(b, "POST /pattern"))
+        c = sc.normalise_direct(200, b'{"patterns": [{"id": "b"}]}')
+        self.assertNotEqual(sc.answer_digest(a, "POST /pattern"), sc.answer_digest(c, "POST /pattern"))
+
+    def test_digest_capability_volatile_fields(self):
+        a = sc.normalise_direct(200, b'{"deadline_check": {"observed_max_uninterruptible_ms": 1, "rule": "r"}}')
+        b = sc.normalise_direct(200, b'{"deadline_check": {"observed_max_uninterruptible_ms": 7, "rule": "r"}}')
+        self.assertEqual(sc.answer_digest(a, "GET /capabilities"), sc.answer_digest(b, "GET /capabilities"))
+        self.assertEqual(sc.answer_digest(a, "GET /traverse/capabilities"),
+                         sc.answer_digest(b, "GET /traverse/capabilities"))
+        # elsewhere an observed_ field is part of the answer
+        self.assertNotEqual(sc.answer_digest(a, "POST /traverse"), sc.answer_digest(b, "POST /traverse"))
+
+    def test_extract_server_pattern(self):
+        body = {"timing": {"elapsed_ms": 4.0}, "patterns": [
+            {"timing": {"elapsed_ms": 1.0}, "work": {"steps": 10, "memory_bytes": 100,
+                                                     "steps_by_mismatches": {"0": 4, "1": 6}}},
+            {"timing": {"elapsed_ms": 2.0}, "work": {"steps": 5, "memory_bytes": 300,
+                                                     "steps_by_mismatches": {"0": 5}}},
+            {"error": {"code": "bad_alphabet"}}]}
+        s = sc.extract_server(body)
+        self.assertEqual(s["elapsed_ms"], 4.0)
+        self.assertEqual(s["work"]["steps"], 15)
+        self.assertEqual(s["work"]["memory_bytes"], 300)
+        self.assertEqual(s["work"]["steps_by_mismatches.0"], 9)
+        self.assertEqual(s["work"]["steps_by_mismatches.1"], 6)
+
+    def test_extract_server_entries_only(self):
+        body = {"patterns": [{"timing": {"elapsed_ms": 1.5}}, {"timing": {"elapsed_ms": 2.5}}]}
+        s = sc.extract_server(body)
+        self.assertEqual(s["elapsed_ms"], 4.0)
+        self.assertEqual(len(s["timing"]["entries"]), 2)
+
+    def test_extract_server_traverse(self):
+        body = {"results": [{"arms": {"right": {"counters": {"steps": 3, "output_bp": 10}},
+                                      "left": {"counters": {"steps": 4}}},
+                             "annotation": {"rows_requested": 2, "access_path": "x"},
+                             "timing": {"walk_ms": 1}}]}
+        s = sc.extract_server(body)
+        self.assertIsNone(s["elapsed_ms"])
+        self.assertEqual(s["work"]["counters.steps"], 7)
+        self.assertEqual(s["work"]["counters.output_bp"], 10)
+        self.assertEqual(s["work"]["annotation.rows_requested"], 2)
+
+    def test_extract_server_none(self):
+        self.assertIsNone(sc.extract_server("text"))
+        self.assertIsNone(sc.extract_server({"code": "x", "error": "y"}))
+
+    def test_identity(self):
+        docs = {"/capabilities": {"release": "r1", "server_instance": "s1", "pattern": {"index_fp": None}},
+                "/pattern/capabilities": {"index": {"index_fp": "fp1"}}}
+        self.assertEqual(sc.identity_from_capabilities(docs),
+                         {"release": "r1", "server_instance": "s1", "index_fp": "fp1"})
+
+    def test_outcome_from_checks(self):
+        self.assertEqual(sc.outcome_from_checks([{"outcome": "pass"}, {"outcome": "not_exposed"}]), "pass")
+        self.assertEqual(sc.outcome_from_checks([{"outcome": "pass"}, {"outcome": "fail"}]), "fail")
+        self.assertEqual(sc.outcome_from_checks([]), "pass")
+
+
+class Statistics(unittest.TestCase):
+    def test_percentile(self):
+        vals = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        self.assertEqual(sc.percentile(vals, 50), 5.5)
+        self.assertAlmostEqual(sc.percentile(vals, 90), 9.1)
+        self.assertEqual(sc.percentile(vals, 100), 10)
+        self.assertEqual(sc.percentile(vals, 0), 1)
+        self.assertEqual(sc.percentile([7], 90), 7.0)
+        self.assertIsNone(sc.percentile([], 50))
+        self.assertEqual(sc.percentile([None, 3, True, 1], 50), 2.0)
+
+    def test_summarise(self):
+        s = sc.summarise([3.0, 1.0, 2.0])
+        self.assertEqual((s["n"], s["p50"], s["max"], s["mean"]), (3, 2.0, 3.0, 2.0))
+        self.assertEqual(sc.summarise([None])["n"], 0)
+
+
+class Files(unittest.TestCase):
+    def test_jsonl_tolerates_torn_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.jsonl")
+            sc.append_jsonl(p, {"a": 1})
+            sc.append_jsonl(p, {"a": 2})
+            with open(p, "a") as fh:
+                fh.write('{"a": 3')
+            rows, bad = sc.read_jsonl(p)
+            self.assertEqual([r["a"] for r in rows], [1, 2])
+            self.assertEqual(bad, 1)
+            self.assertEqual(sc.read_jsonl(os.path.join(d, "missing")), ([], 0))
+
+    def test_gz_and_atomic(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "a.json.gz")
+            sc.write_gz_json(p, {"x": [1, 2]})
+            self.assertEqual(sc.read_gz_json(p), {"x": [1, 2]})
+            q = os.path.join(d, "b.json")
+            sc.write_json_atomic(q, {"y": 1})
+            self.assertEqual(sc.read_json(q), {"y": 1})
+            self.assertEqual(sc.read_json(os.path.join(d, "none"), {}), {})
+
+    def test_cli_manifest_sha(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "m.json")
+            scen = [{"id": "a"}]
+            with open(p, "w") as fh:
+                json.dump({"scenarios": scen, "content_sha256": "old"}, fh)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sc._main(["manifest-sha", p, "--write"]), 0)
+            self.assertEqual(sc.read_json(p)["content_sha256"], sc.scenarios_sha256(scen))
+
+
+class ChecksStub(unittest.TestCase):
+    def test_status_pass_fail(self):
+        scen = {"expect": [{"check": "status", "args": {"http": 400, "code": "invalid_request"}},
+                           {"check": "contains_source_context", "args": {}}]}
+        res = checks_stub.evaluate(scen, {"http": 400}, "direct-local")
+        self.assertEqual([r["outcome"] for r in res], ["pass", "not_exposed"])
+        res = checks_stub.evaluate(scen, {"http": 200}, "direct-local")
+        self.assertEqual(res[0]["outcome"], "fail")
+
+    def test_implicit_status(self):
+        res = checks_stub.evaluate({"expect": []}, {"http": 204}, "direct-remote")
+        self.assertEqual(res, [{"check": "status", "outcome": "pass",
+                                "detail": "http 204, expected 2xx (implicit: no status expectation)"}])
+        self.assertEqual(checks_stub.evaluate({}, {"http": 0}, "x")[0]["outcome"], "fail")
+
+
+class SamplerParsing(unittest.TestCase):
+    LINES = (
+        '{"BlockIO":"126GB / 0B","CPUPerc":"0.00%","Container":"metagraph_refseq33m_experimental",'
+        '"ID":"a92f51b0c9ee","MemPerc":"9.27%","MemUsage":"11.87GiB / 128GiB",'
+        '"Name":"metagraph_refseq33m_experimental","NetIO":"141kB / 3.85MB","PIDs":"8"}\n'
+        '{"BlockIO":"440TB / 183GB","CPUPerc":"7704.04%","Container":"metagraph_sra_all","ID":"bbf00438a6b5",'
+        '"MemPerc":"69.51%","MemUsage":"787.9GiB / 1.107TiB","Name":"metagraph_sra_all",'
+        '"NetIO":"12.7GB / 188MB","PIDs":"513"}\n'
+        'Error response from daemon: something\n')
+
+    def test_sizes(self):
+        self.assertEqual(sampler.parse_size("11.87GiB"), int(round(11.87 * 1024 ** 3)))
+        self.assertEqual(sampler.parse_size("141kB"), 141000)
+        self.assertEqual(sampler.parse_size("0B"), 0)
+        self.assertEqual(sampler.parse_size("3.85MB"), 3850000)
+        self.assertIsNone(sampler.parse_size("--"))
+        self.assertIsNone(sampler.parse_size("12XB"))
+        self.assertEqual(sampler.parse_pair("1kB / 2kB"), (1000, 2000))
+        self.assertEqual(sampler.parse_pair("--"), (None, None))
+        self.assertEqual(sampler.parse_percent("7704.04%"), 7704.04)
+        self.assertIsNone(sampler.parse_percent("--"))
+
+    def test_stats_and_sample(self):
+        stats = sampler.parse_stats_lines(self.LINES)
+        self.assertEqual(set(stats), {"metagraph_refseq33m_experimental", "metagraph_sra_all"})
+        s = sampler.build_sample("2026-10-13T10:00:00.000Z", stats, 240.19, sampler.CONTAINER,
+                                 sampler.SRA_CONTAINER, label="direct-local")
+        self.assertEqual(s["cpu_pct"], 0.0)
+        self.assertEqual(s["mem_limit_bytes"], 128 * 1024 ** 3)
+        self.assertEqual(s["blk_read"], 126 * 1000 ** 3)
+        self.assertEqual(s["net_tx"], 3850000)
+        self.assertEqual(s["sra_all_cpu_pct"], 7704.04)
+        self.assertEqual(s["host_load1"], 240.19)
+        self.assertEqual(s["phase"], "direct-local")
+        for key in ("t_utc", "container", "cpu_pct", "mem_bytes", "mem_limit_bytes", "net_rx", "net_tx",
+                    "blk_read", "blk_write", "host_load1", "sra_all_cpu_pct"):
+            self.assertIn(key, s)
+
+    def test_missing_container(self):
+        s = sampler.build_sample("t", {}, None, sampler.CONTAINER, sampler.SRA_CONTAINER, error="no docker")
+        self.assertIsNone(s["cpu_pct"])
+        self.assertEqual(s["error"], "no docker")
+
+
+if __name__ == "__main__":
+    unittest.main()
