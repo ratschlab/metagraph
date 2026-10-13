@@ -2,15 +2,17 @@
 every arm so that a disagreement between arms is never a difference of checking code.
 
     evaluate(scenario, answer, arm, previous=None)
-        -> [{"check": name, "outcome": "pass" | "fail" | "not_exposed" | "finding", "detail": str}]
+        -> [{"check": name, "outcome": "pass" | "fail" | "not_exposed" | "inconclusive" | "finding", "detail": str}]
 
 `answer` is the NORMALISED answer: {"http": int, "body": obj | None, "error": {"code", "text"} | None} and, where
 the arm has them, "headers" (lower-case names). `normalise_direct` builds it from a direct HTTP answer; the MCP
 arm's normaliser maps its tool results into the same shape for the fields both expose. A check that needs a field
 the MCP arm does not expose answers "not_exposed" on that arm (and "fail" on a direct arm, where the field is part
-of the contract). A `finding` is a stated bound or SPEC promise the host broke without failing the request (the
-time budget, budget_respected): the report lists findings in their own section. `previous` (optional) lists the
-`answer_digest`s of the earlier repeats of the same scenario and arm, for the `deterministic` check.
+of the contract). `inconclusive`: the check could not test its property on this answer (an allowed non-200, a
+withheld or incomplete list that hides the source, a stated resource stop before the property). A `finding` is a
+stated bound or SPEC promise the host broke without failing the request (the time budget, budget_respected): the
+report lists findings in their own section. scenario_outcome(results) gives the execution's outcome. `previous`
+(optional) lists the `answer_digest`s of the earlier repeats of the same scenario and arm, for `deterministic`.
 
 Every check named in a manifest's `expect` is a function registered in CHECKS; new checks are added here only.
 Coordinates: truth["start"] is 0-based on the record's forward strand; host placements (`nt_coords`) are 1-based
@@ -53,6 +55,12 @@ PASS, FAIL, NOT_EXPOSED = "pass", "fail", "not_exposed"
 # the host broke a stated bound or a SPEC promise without failing the request: reported in its own section of the
 # report, never counted as a pass (budget_respected)
 FINDING = "finding"
+# the check could not test its property on this answer (an allowed refusal, a withheld or cut list that hides
+# the source, an arm a stated resource limit stopped before the property): counted apart, never as a pass
+INCONCLUSIVE = "inconclusive"
+# checks that guard an answer rather than state a scenario's property: an execution whose other checks were all
+# inconclusive or not exposed is inconclusive, whatever these say (scenario_outcome)
+GUARD_CHECKS = ("status", "invariants", "counts_consistent", "budget_respected")
 
 
 class Missing(Exception):
@@ -316,7 +324,7 @@ def check_entry_fields(sc, ans, a, arm):
 def check_deterministic(sc, ans, a, arm, previous=None):
     d = answer_digest(ans, sc.get("route"))
     if not previous:
-        return PASS, "first repeat (digest %s)" % d[:16]
+        return INCONCLUSIVE, "first repeat: nothing to compare yet (digest %s)" % d[:16]
     diff = [p for p in previous if p != d]
     if diff:
         return FAIL, "digest %s differs from %d earlier repeat(s) (%s)" % (d[:16], len(diff), diff[0][:16])
@@ -512,6 +520,21 @@ def _find_source(e: dict, t: dict, strand: str, level: Optional[int] = None,
     return wanted, found
 
 
+def _hidden(e: dict) -> str:
+    """What keeps an entry's list from being the whole answer ('' when retrieval_complete is true): a withheld
+    list, a cut, a stop. A source missing from such a list is not shown absent (inconclusive)."""
+    if e.get("retrieval_complete") is True:
+        return ""
+    parts = []
+    if e.get("withheld"):
+        parts.append("withheld %s" % (e["withheld"].get("reason") if isinstance(e["withheld"], dict) else e["withheld"]))
+    if e.get("cut"):
+        parts.append("cut %s" % (e["cut"].get("reason") if isinstance(e["cut"], dict) else e["cut"]))
+    if e.get("stop"):
+        parts.append("stop %s/%s" % (e["stop"].get("phase"), e["stop"].get("reason")))
+    return ", ".join(parts) or "the list is not complete"
+
+
 def check_contains_source_context(sc, ans, a, arm):
     i = a.get("pattern", 0)
     e = _entry(ans, i)
@@ -528,10 +551,17 @@ def check_contains_source_context(sc, ans, a, arm):
     require = a.get("require", "all")
     if require == "all" and len(found) != len(wanted):
         missing = [p for (km, p) in wanted if not any(r["kmer"] == km and r["offset"] == p for r in found)]
-        return FAIL, "%d of %d source contexts (strand %s, level %s) returned; missing offsets %s (returned %d, %s)" % (
-            len(found), len(wanted), strand, level, missing[:8], len(e.get("results", [])),
-            "complete" if e.get("retrieval_complete") else "incomplete")
+        detail = "%d of %d source contexts (strand %s, level %s) returned; missing offsets %s (returned %d" % (
+            len(found), len(wanted), strand, level, missing[:8], len(e.get("results", [])))
+        hidden = _hidden(e)
+        if hidden:
+            return INCONCLUSIVE, detail + "; %s)" % hidden
+        return FAIL, detail + ", complete)"
     if require == "any" and not found:
+        hidden = _hidden(e)
+        if hidden:
+            return INCONCLUSIVE, "none of %d source contexts returned (strand %s, level %s; %s)" % (
+                len(wanted), strand, level, hidden)
         return FAIL, "none of %d source contexts returned (strand %s, level %s)" % (len(wanted), strand, level)
     if "substitutions" in a:
         for r in found:
@@ -554,7 +584,8 @@ def check_source_absent(sc, ans, a, arm):
         return FAIL, "%d source context(s) returned (level %s), expected out of reach" % (
             len(found), [r.get("mismatches") for r in found])
     if e.get("retrieval_complete") is not True:
-        return FAIL, "inconclusive: the list is not complete (withheld %r, cut %r)" % (e.get("withheld"), e.get("cut"))
+        return INCONCLUSIVE, "the source not among %d results, but the list is not complete (%s)" % (
+            len(e.get("results") or []), _hidden(e) or "retrieval_complete %r" % e.get("retrieval_complete"))
     return PASS, "none of %d source contexts among %d results (complete)" % (len(wanted), len(e.get("results", [])))
 
 
@@ -572,7 +603,8 @@ def check_source_label(sc, ans, a, arm):
     strand = a.get("strand", t.get("strand", "+"))
     wanted, found = _find_source(e, t, strand, None, sc["request"].get("scope", "any_offset"))
     if not found:
-        return FAIL, "no source context returned"
+        hidden = _hidden(e)
+        return (INCONCLUSIVE, "no source context returned (%s)" % hidden) if hidden else (FAIL, "no source context returned")
     for r in found:
         if r.get("labels") is None:
             raise Missing("results[].labels")
@@ -591,7 +623,8 @@ def check_source_placement(sc, ans, a, arm):
     strand = a.get("strand", t.get("strand", "+"))
     wanted, found = _find_source(e, t, strand, None, sc["request"].get("scope", "any_offset"))
     if not found:
-        return FAIL, "no source context returned"
+        hidden = _hidden(e)
+        return (INCONCLUSIVE, "no source context returned (%s)" % hidden) if hidden else (FAIL, "no source context returned")
     coords = "%d-%d" % (t["start"] + 1, t["start"] + t["length"])
     for r in found:
         lab = _label_of(r, t["taxid"])
@@ -625,8 +658,9 @@ def check_path_spells(sc, ans, a, arm):
     hits = [r for r in _paths_with_sequence(e, t["window"]) if r.get("strand", r.get("orientation")) in (
         [strand] if strand != "=" else ["=", "palindromic"])]
     if not hits:
-        return FAIL, "no path spells the record's bases (strand %s; %d paths returned, %s)" % (
-            strand, len(e.get("results", [])), "complete" if e.get("retrieval_complete") else "incomplete")
+        hidden = _hidden(e)
+        return (INCONCLUSIVE if hidden else FAIL), "no path spells the record's bases (strand %s; %d paths returned, %s)" % (
+            strand, len(e.get("results", [])), hidden or "complete")
     for r in hits:
         if r.get("instance") not in (None, r["sequence"]) or r.get("offset", 0) != 0:
             return FAIL, "path instance/offset inconsistent"
@@ -643,8 +677,9 @@ def check_path_record_verified(sc, ans, a, arm):
     coords = "%d-%d" % (t["start"] + 1, t["start"] + t["length"])
     hits = _paths_with_sequence(e, t["window"])
     if not hits:
-        return FAIL, "no path spells the record's bases (%d paths, %s)" % (
-            len(e.get("results", [])), "complete" if e.get("retrieval_complete") else "incomplete")
+        hidden = _hidden(e)
+        return (INCONCLUSIVE if hidden else FAIL), "no path spells the record's bases (%d paths, %s)" % (
+            len(e.get("results", [])), hidden or "complete")
     for r in hits:
         if r.get("labels") is None:
             continue
@@ -670,7 +705,8 @@ def check_path_absent(sc, ans, a, arm):
     if hits:
         return FAIL, "%d path(s) spell the sequence expected absent" % len(hits)
     if e.get("retrieval_complete") is not True:
-        return FAIL, "inconclusive: the list is not complete (withheld %r, cut %r)" % (e.get("withheld"), e.get("cut"))
+        return INCONCLUSIVE, "no path spells it among %d, but the list is not complete (%s)" % (
+            len(e.get("results") or []), _hidden(e) or "retrieval_complete %r" % e.get("retrieval_complete"))
     return PASS, "no path spells it (complete list of %d)" % len(e.get("results", []))
 
 
@@ -684,7 +720,9 @@ def check_predicate_selected(sc, ans, a, arm):
     wanted, found = _find_source(e, t, strand, None, sc["request"].get("scope", "any_offset"))
     if a["selected"]:
         if len(found) != len(wanted):
-            return FAIL, "%d of %d source contexts selected" % (len(found), len(wanted))
+            hidden = _hidden(e)
+            return (INCONCLUSIVE if hidden else FAIL), "%d of %d source contexts selected%s" % (
+                len(found), len(wanted), (" (%s)" % hidden) if hidden else "")
         if "selection_strand_in" in a:
             for r in found:
                 ss = r.get("selection_strands")
@@ -700,7 +738,8 @@ def check_predicate_selected(sc, ans, a, arm):
     if found:
         return FAIL, "%d source context(s) selected, expected none" % len(found)
     if e.get("retrieval_complete") is not True:
-        return FAIL, "inconclusive: the filtered list is not complete"
+        return INCONCLUSIVE, "no source context selected, but the filtered list is not complete (%s)" % (
+            _hidden(e) or "retrieval_complete %r" % e.get("retrieval_complete"))
     return PASS, "source contexts not selected (complete filtered list)"
 
 
@@ -1550,7 +1589,6 @@ CHECKS: Dict[str, Callable] = {
 # ---------------------------------------------------------------------------------------------- relations
 # The manifest's `relations` (README.md, "Relations"): comparisons of two scenarios' answers on the same arm. The
 # comparator (lane S2b's compare.py) evaluates them; this is the reference implementation of their semantics.
-INCONCLUSIVE = "inconclusive"
 
 
 def _drop(o: Any, ignore: Sequence[str], prefix: str = "") -> Any:
@@ -1756,8 +1794,9 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
             continue
         if name not in ("status", "deterministic") and http != 200 and not args.get("any_status"):
             if http in allowed:
-                out.append({"check": name, "outcome": PASS,
-                            "detail": "not applicable: http %s, an answer the scenario allows" % http})
+                out.append({"check": name, "outcome": INCONCLUSIVE,
+                            "detail": "not testable: http %s, an answer the scenario allows (%s)" % (
+                                http, ((answer.get("error") or {}).get("text") or "")[:200])})
             else:
                 out.append({"check": name, "outcome": FAIL,
                             "detail": "no answer to check: http %s (%s)" % (
@@ -1778,10 +1817,16 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
 
 
 def scenario_outcome(results: List[dict]) -> str:
-    """fail when a check failed; finding when none failed and a check is a finding (the host broke a stated bound
-    without failing the request: never counted as a pass); pass otherwise (not_exposed checks aside)."""
+    """The execution's outcome from its checks: `fail` when a check failed; else `finding` when a check is a
+    finding (the host broke a stated bound without failing the request); else `pass` when a check that states the
+    scenario's property passed, `inconclusive` when none could test it (an allowed 503, a withheld answer that
+    hides the source, a stated resource stop before the property, an MCP execution whose checks are not exposed).
+    The property checks are the checks outside GUARD_CHECKS; a scenario with none has its guards beyond status as
+    its property (an invariants-only scenario), and a refusal scenario its status."""
     if any(r["outcome"] == FAIL for r in results):
-        return "fail"
+        return FAIL
     if any(r["outcome"] == FINDING for r in results):
         return FINDING
-    return "pass"
+    prop = [r for r in results if r["check"] not in GUARD_CHECKS] \
+        or [r for r in results if r["check"] != "status"] or list(results)
+    return PASS if any(r["outcome"] == PASS for r in prop) else INCONCLUSIVE

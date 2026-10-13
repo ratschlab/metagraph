@@ -113,7 +113,9 @@ class Generic(unittest.TestCase):
         sc = {"route": "POST /pattern", "request": {"patterns": []}, "truth": {},
               "expect": [{"check": "status", "args": {"http": [200, 503]}}, {"check": "invariants", "args": {}}]}
         res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "deadline"}'), "direct-local")
-        self.assertEqual([r["outcome"] for r in res], ["pass", "pass"])
+        # an allowed 503 tests nothing: the body's checks are inconclusive, and so is the execution
+        self.assertEqual([r["outcome"] for r in res], ["pass", "inconclusive"])
+        self.assertEqual(checks.scenario_outcome(res), "inconclusive")
         sc["expect"][0]["args"]["http"] = 200
         res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "deadline"}'), "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
@@ -122,7 +124,7 @@ class Generic(unittest.TestCase):
         a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})
         d = checks.answer_digest(a)
         sc = {"route": "POST /pattern", "request": {}, "truth": {}}
-        self.assertEqual(outcome(sc, a, "deterministic", previous=None)[0], "pass")
+        self.assertEqual(outcome(sc, a, "deterministic", previous=None)[0], "inconclusive")   # nothing to compare
         self.assertEqual(outcome(sc, a, "deterministic", previous=[d, d])[0], "pass")
         self.assertEqual(outcome(sc, a, "deterministic", previous=[d, "0" * 64])[0], "fail")
 
@@ -231,7 +233,16 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, ok_answer(bad), "contains_source_context", strand="+")[0], "fail")
         self.assertEqual(outcome(sc, ok_answer(bad), "source_absent", strand="+")[0], "pass")   # gone from a complete list
         bad["patterns"][0]["retrieval_complete"] = False
-        self.assertEqual(outcome(sc, ok_answer(bad), "source_absent", strand="+")[0], "fail")   # inconclusive
+        self.assertEqual(outcome(sc, ok_answer(bad), "source_absent", strand="+")[0], "inconclusive")   # not complete
+        # a withheld list hides the source: inconclusive, never a fail of a host that withheld rightly
+        hidden = copy.deepcopy(ans)
+        hidden["patterns"][0].update(results=[], returned=0, retrieval_complete=False,
+                                     withheld={"reason": "count_above_threshold"})
+        o, d = outcome(sc, ok_answer(hidden), "contains_source_context", strand="+", require="all", level=0)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("count_above_threshold", d)
+        self.assertEqual(outcome(sc, ok_answer(hidden), "source_label", strand="+")[0], "inconclusive")
+        self.assertEqual(outcome(sc, ok_answer(hidden), "source_placement", strand="+")[0], "inconclusive")
         self.assertEqual(outcome(sc, a, "source_absent", strand="+")[0], "fail")                # present
         # the predicate projection places 562's record
         req, ans = fixture("predicate_only_record")
@@ -443,10 +454,21 @@ class BudgetChecks(unittest.TestCase):
         self.assertGreater(n, 100)
 
     def test_outcome_of_an_execution(self):
-        res = [{"check": "status", "outcome": "pass"}, {"check": "budget_respected", "outcome": "finding"}]
-        self.assertEqual(checks.scenario_outcome(res), "finding")
-        self.assertEqual(checks.scenario_outcome(res + [{"check": "x", "outcome": "fail"}]), "fail")
-        self.assertEqual(checks.scenario_outcome(res[:1]), "pass")
+        def o(*pairs):
+            return checks.scenario_outcome([{"check": c, "outcome": x} for c, x in pairs])
+        self.assertEqual(o(("status", "pass"), ("budget_respected", "finding")), "finding")
+        self.assertEqual(o(("status", "pass"), ("budget_respected", "finding"), ("absent", "fail")), "fail")
+        self.assertEqual(o(("status", "pass")), "pass")                                  # a refusal scenario
+        self.assertEqual(o(("status", "pass"), ("invariants", "pass")), "pass")           # an invariants-only one
+        self.assertEqual(o(("status", "pass"), ("invariants", "inconclusive")), "inconclusive")
+        # the guards cannot carry a scenario whose property was not tested
+        self.assertEqual(o(("status", "pass"), ("invariants", "pass"), ("counts_consistent", "pass"),
+                           ("budget_respected", "pass"), ("contains_source_context", "inconclusive")), "inconclusive")
+        self.assertEqual(o(("status", "pass"), ("contains_source_context", "pass"), ("source_label", "not_exposed")),
+                         "pass")
+        self.assertEqual(o(("status", "pass"), ("invariants", "not_exposed"), ("source_label", "not_exposed")),
+                         "inconclusive")                                                 # an MCP arm exposing nothing
+        self.assertEqual(o(("status", "pass"), ("deterministic", "inconclusive"), ("absent", "pass")), "pass")
 
 
 class Relations(unittest.TestCase):

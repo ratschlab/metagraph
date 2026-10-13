@@ -78,6 +78,19 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   shortest length whose ball meets fewer than ~1,000 random contexts (a 20-mer at max_mismatches 2 had 21,563
   level-2 contexts and was rightly withheld); `walk_end` passes an arm a resource stopped before the record's end
   (status truncated, a resource path reason: a stated stop) and says so, the walk so far being `walk_in_record`'s.
+- Outcomes (lane S1b, the integrator's decision 1; the verification's H3 and M7). A check answers `pass`, `fail`,
+  `not_exposed` (the MCP arm lacks the field), `inconclusive` (the check could not test its property on this
+  answer: an HTTP status the scenario allows that is not a 200, such as a 503 `deadline`; a withheld, cut or
+  stopped list that does not show the source, in contains_source_context, source_label, source_placement,
+  path_spells, path_record_verified, and the absence checks source_absent, path_absent and predicate_selected;
+  a walk a stated resource limit stopped before its property; the first repeat of `deterministic`) or `finding`
+  (budget_respected). `checks.scenario_outcome(results)` gives the execution's outcome: `fail` when a check
+  failed, else `finding` when one is a finding, else `pass` when a check stating the scenario's property passed,
+  else `inconclusive`. The property checks are those outside `GUARD_CHECKS` (status, invariants,
+  counts_consistent, budget_respected); a scenario without any has its non-status guards as its property (an
+  invariants-only scenario), a refusal scenario its status. So an allowed 503, a withheld answer that hides the
+  source, and an MCP execution whose checks are all not exposed are inconclusive, never a pass. The runners and the
+  comparator take the outcome from `scenario_outcome` (lane S2b).
 - `budget_respected` (lane S1b, the integrator's decision 2, derived per route from the SPECs after the
   verification of 2026-10-13): every scenario that names a time budget and allows a 200 checks the server's elapsed
   time against the effective budget (the answer's `limits.time_budget_ms`, on /traverse the echoed
