@@ -131,15 +131,17 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByManyLabels) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
-    for (size_t num_labels : {127, 128, 255, 256}) {
-        std::vector<std::string> sequences(num_labels, "AAACCCGGG");
+    // Include non-power-of-two counter widths and enough nodes to cross word boundaries.
+    for (size_t num_labels : {5, 20, 127, 128, 255, 256, 600, 2500}) {
+        std::vector<std::string> sequences(num_labels,
+            "AAACCCGGGTTTACGATCGATGCTAGCTAGGCTAACCGTTAGCATCGGATCCATGCTACGTTAGGCTACTG");
         std::vector<std::string> labels;
         tsl::hopscotch_set<std::string> initial_labels, later_labels;
         for (size_t i = 0; i < num_labels; ++i) {
             labels.push_back(std::to_string(i));
             (i < num_labels / 2 ? initial_labels : later_labels).insert(labels.back());
         }
-        auto anno_graph = build_anno_graph<Graph, Annotation>(3, sequences, labels);
+        auto anno_graph = build_anno_graph<Graph, Annotation>(7, sequences, labels);
         std::unordered_set<std::string> expected;
         anno_graph->get_graph().call_kmers([&](auto, const std::string &kmer) {
             expected.insert(kmer);
