@@ -1417,6 +1417,90 @@ TEST(PatternSupportedRoute, HeldAboveMaxPredicateContexts) {
     }
 }
 
+// After a mirror read stops on a budget, the walks not yet decided are still decided where
+// their own support decides them, and no mirror is read after the stop (SPEC §20.9: a walk
+// whose mirror is not known is decided when no mirror support can change the value); after a
+// time stop nothing more is decided. The records of HeldAboveMaxPredicateContexts with any(d):
+// every walk's own support {x} leaves any(d) undecided but d's, a definite true; the mirrors
+// are not in the graph (looked up, L units each, no row). With max_annotation_work one above
+// the search's units the first mirror's lookup spends the budget and the second stops the
+// reads: the first walk is decided on its lookup (false), the walk the record of d holds on
+// its own support (true), the two others stay undecided. Mutation tried: the loop left at the
+// stop (tested 1, nothing listed): fails.
+TEST(PatternSupportedRoute, DecidableWalksAreDecidedAfterTheMirrorReadsStop) {
+    const std::vector<Record> records = {
+        { "a", "a0", "TTACGTAACGGAT" }, { "b", "b0", "TTACGTCACGGAT" },
+        { "c", "c0", "TTACGTGACGGAT" }, { "d", "d0", "TTACGTTACGGAT" },
+    };
+    const Index idx = build_rd(5, records);
+    Ask r;
+    r.patterns = { "ACGTNACGG" };
+    r.kind = "iupac";
+    r.strands = "forward";
+    r.mode = "partial";
+    r.predicate = "{\"any\": [\"d\"]}";
+    r.predicate_strands = "either";
+    const Json::Value full = answer_of(idx, r)["patterns"][0];
+    ASSERT_FALSE(full.isMember("error")) << compact(full);
+    ASSERT_EQ("completed", full["selection"]["pass"].asString()) << compact(full);
+    ASSERT_EQ(3u, full["work"]["predicate_lookups"].asUInt64());
+    ASSERT_EQ(0u, full["work"]["mirror_rows"].asUInt64());
+    ASSERT_EQ(1u, full["counts"]["selected"]["value"].asUInt64());
+    ASSERT_EQ(1u, full["results"].size());
+    EXPECT_EQ("ACGTTACGG", full["results"][0]["sequence"].asString());
+    // the search's units: the three lookups cost L each, their rows nothing (none read)
+    const uint64_t search_units = full["work"]["annotation_units"].asUInt64() - 3 * 9;
+    r.max_annotation_work = search_units + 1;
+    for (const char *mode : { "partial", "all_or_count", "count" }) {
+        SCOPED_TRACE(mode);
+        r.mode = mode;
+        const Json::Value e = answer_of(idx, r)["patterns"][0];
+        ASSERT_FALSE(e.isMember("error")) << compact(e);
+        EXPECT_EQ("stopped", e["selection"]["pass"].asString());
+        EXPECT_EQ("selection", e["stop"]["phase"].asString());
+        EXPECT_EQ("max_annotation_work", e["stop"]["reason"].asString());
+        EXPECT_EQ(1u, e["work"]["predicate_lookups"].asUInt64());
+        EXPECT_EQ(2u, e["counts"]["tested"]["value"].asUInt64()) << compact(e);
+        EXPECT_EQ("bounds", e["counts"]["selected"]["relation"].asString());
+        EXPECT_EQ(1u, e["counts"]["selected"]["lower"].asUInt64());
+        EXPECT_EQ(3u, e["counts"]["selected"]["upper"].asUInt64());
+        if (std::string(mode) == "partial") {
+            ASSERT_EQ(1u, e["results"].size()) << compact(e);
+            EXPECT_EQ("ACGTTACGG", e["results"][0]["sequence"].asString());
+            EXPECT_EQ("max_annotation_work", e["cut"]["reason"].asString());
+        } else if (std::string(mode) == "all_or_count") {
+            EXPECT_EQ("annotation_budget", e["withheld"]["reason"].asString());
+            EXPECT_EQ(0u, e["results"].size());
+        }
+    }
+    // a time stop of the decisions (the clock before the index, before the first walk and
+    // before each of the three mirror reads) ends them: the walk after it, d's, is not
+    // decided, however its own support decides it (the walks before it are: at most the
+    // three read)
+    r.max_annotation_work = 0;
+    r.mode = "partial";
+    uint64_t time_stops = 0;
+    for (size_t n = 1; n < 200; ++n) {
+        Ask q = r;
+        auto readings = std::make_shared<size_t>(0);
+        const Clock::time_point t0 = Clock::now();
+        q.clock = [readings, n, t0]() {
+            return ++*readings < n ? t0 : t0 + std::chrono::hours(1);
+        };
+        const Json::Value e = answer_of(idx, q)["patterns"][0];
+        if (e["stop"].isNull() || e["stop"]["phase"] != "selection"
+                || e["stop"]["reason"] != "time")
+            continue;
+        ++time_stops;
+        EXPECT_EQ("time_limited", e["determinism"].asString());
+        EXPECT_GE(3u, e["counts"]["tested"]["value"].asUInt64()) << n << " " << compact(e);
+        EXPECT_EQ("bounds", e["counts"]["selected"]["relation"].asString()) << n;
+        EXPECT_EQ(0u, e["counts"]["selected"]["lower"].asUInt64()) << n << " " << compact(e);
+        EXPECT_EQ(0u, e["results"].size()) << n;
+    }
+    EXPECT_LT(0u, time_stops);
+}
+
 // "either" in all_or_count and count: once more walks are held than max_predicate_contexts
 // (the selection not admitted) or the account refuses a held walk, neither the held walks nor
 // the paths the sink kept for them can be listed, and both are given back to the account at

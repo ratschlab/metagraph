@@ -3485,8 +3485,10 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   §20.7 reads (n rows, the first twice at `record_verified`; under `max_annotation_work`, the account and the
   deadline; `work.mirror_rows`, part of `work.annotation_rows`); the search's row cache is given back to the
   account before, so the mirrors' allotment replaces it. A walk whose mirror is not known (the search stopped
-  before it, `partial` held the first walks only) is decided only when no mirror support can change the value
-  (Kleene, as §19.7's undecided labels), else left undecided. A decided walk the release lists is charged its
+  before it, `partial` held the first walks only, or the mirror reads stopped on `max_annotation_work` or the
+  account: no mirror is read after such a stop, and every later walk is decided on its own support alone) is
+  decided only when no mirror support can change the value (Kleene, as §19.7's undecided labels), else left
+  undecided; after a time stop nothing more is decided. A decided walk the release lists is charged its
   `selection_labels` and `selection_strands` as a path decided at completion is (above), when it is listed.
 - **More held walks than `max_predicate_contexts`**: `all_or_count` and `count`: not admitted
   (`selection.pass: "not_admitted"`, `withheld: predicate_above_threshold`; with `stop_at_threshold` the search
@@ -4642,3 +4644,20 @@ pattern), `PatternPaths.TheMemoryAccountStopsPathRetention` (its pattern now one
 test stays the descriptors'). The validator (`test_pattern_fixtures.py`) accepts `stop {extension, max_memory}`
 and `stop {output, max_memory}` on a `long_search: "paths"` entry of any projection. No stored body of the mini
 index changes.
+
+**The selection of supported paths: its stated reasons and its memory (§20.5, §20.7, §20.9).** A selected path
+beyond `max_paths` is never charged its `selection_labels`, so `partial` states `cut: max_paths` with no stop
+where it stated `cut: max_memory` and `stop {output, max_memory}` when that charge did not fit (the listed paths
+and the counts were right; `PatternSupportedRoute.SelectionLabelNamesAreCharged`). Under `"either"`, after a
+mirror read stops on `max_annotation_work` or the account, the later held walks are decided on their own support
+alone instead of left undecided, and no mirror is read after the stop (`counts.tested`, `counts.selected`,
+`work.predicate_units` and `partial`'s list change in that case;
+`DecidableWalksAreDecidedAfterTheMirrorReadsStop`); the walks held and the paths kept for them are given back to
+the account as soon as `all_or_count` or `count` cannot admit them (`HeldPathsAreReleasedWithTheHeldWalks`); a
+held walk's model is 192 + 2L + 8 per predicate label (64 before: below its descriptor), and a listed walk's
+label evidence is admitted before it is copied, as it is decided (`HeldWalksAndTheirListedLabelsAreCharged`).
+`work.memory_bytes`, the account's peak, grows with the held walks in every answer that holds walks: by 128 per
+walk where the peak falls while they are held (the fixtures `supported_paths_predicate_label` and
+`supported_paths_predicate_either`, two walks each: +256), by less where it falls elsewhere
+(`supported_paths_predicate_mirror`, one walk: +96); nothing else of the stored bodies changes. Where the account
+is tight under `"either"` with a projection, the listed walks' charges now precede the later mirror reads.

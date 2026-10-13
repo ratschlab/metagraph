@@ -231,9 +231,10 @@ class PathSelection final : public graph::pattern::SupportTracker,
     bool hold(const graph::pattern::PathView &path);
     bool decide_now(const graph::pattern::PathView &path);
     void drop_held();
-    // the mirror walk of |sequence| read by mirror_: its support (true), or a stop (false,
-    // answer_.stop set)
-    bool read_mirror(const std::string &sequence, std::vector<graph::traversal::LabelId> *out);
+    // the mirror walk of |sequence| read by mirror_: its support (null), or the reason the
+    // read stopped (answer_.stop set): time, max_annotation_work, max_memory
+    const char* read_mirror(const std::string &sequence,
+                            std::vector<graph::traversal::LabelId> *out);
 };
 
 } // namespace cli

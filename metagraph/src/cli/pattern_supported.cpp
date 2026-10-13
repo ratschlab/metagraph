@@ -371,7 +371,8 @@ bool PathSelection::hold(const PathView &path) {
     return true;
 }
 
-bool PathSelection::read_mirror(const std::string &sequence, std::vector<LabelId> *out) {
+const char* PathSelection::read_mirror(const std::string &sequence,
+                                       std::vector<LabelId> *out) {
     const PathSupportEnv &env = tracker_.env();
     const size_t k = env.oracle.get_k();
     const size_t n = sequence.size() - k + 1;
@@ -379,7 +380,7 @@ bool PathSelection::read_mirror(const std::string &sequence, std::vector<LabelId
         if (!answer_.stop)
             answer_.stop = std::make_pair(std::string("selection"), std::string(reason));
         answer_.time_limited |= std::string_view(reason) == "time";
-        return false;
+        return reason;
     };
     // the work and the clock before each mirror; its k-mers looked up, one unit a base
     if (!env.budget.check_time())
@@ -398,7 +399,7 @@ bool PathSelection::read_mirror(const std::string &sequence, std::vector<LabelId
     if (nodes.size() != n
             || std::find(nodes.begin(), nodes.end(), DeBruijnGraph::npos) != nodes.end()) {
         // a k-mer of the mirror is not in the graph: no label supports it
-        return true;
+        return nullptr;
     }
     if (!mirror_) {
         PathSupportOptions o;
@@ -456,7 +457,7 @@ bool PathSelection::read_mirror(const std::string &sequence, std::vector<LabelId
             predicate_labels(t, label_of_, &frame_, out);
     }
     finish();
-    return true;
+    return nullptr;
 }
 
 PathSelectionAnswer PathSelection::finish(const Result &result) {
@@ -701,6 +702,10 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         }
         chosen.push_back(held_[i].kept);
     };
+    // the mirrors are read until a read stops on a budget (the work, the account): the walks
+    // from there on are decided on their own support alone, as walks whose mirror is not
+    // known; a time stop ends the decisions
+    bool reads = true;
     for (size_t i = 0; i < held_.size() && !ended; ++i) {
         if (!(i % Budget::kReleaseClockStride) && !budget.check_time()) {
             set_stop("selection", "time");
@@ -732,10 +737,14 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             units = 0;
             known = false;
             const bool own = value && (!*value || !options_.selection_labels);
-            if (!own) {
-                if (!read_mirror(rc, &mirror))
-                    break;
-                known = true;
+            if (!own && reads) {
+                if (const char *reason = read_mirror(rc, &mirror)) {
+                    if (std::string_view(reason) == "time")
+                        break;
+                    reads = false;
+                } else {
+                    known = true;
+                }
             }
         }
         if (known) {
@@ -745,7 +754,8 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             value = bound_.eval(present.data(), present.size(), &units);
         } else if (!value) {
             // the mirror's support is not known (the search stopped before it, partial held
-            // the first walks only): decided only when no mirror support can change it
+            // the first walks only, or the reads stopped): decided only when no mirror
+            // support can change it
             value = bound_.eval3(h.support.data(), h.support.size(), all_labels.data(),
                                  all_labels.size(), &units);
         }
