@@ -144,8 +144,10 @@ def gen_R(ctx: Ctx) -> List[dict]:
     for i, key in enumerate(["eco", "pae"]):
         rec = ctx.rec(key)
         t = ctx.window(rng, rec, 10000, unique=False, max_dust=5.0)
-        # 50 and 500 ms of work after the 250 ms finalisation reserve: a stop within the 10 kb is likely
-        budget = (300, 750)[i]
+        # the smoke validation of lane S1b: at 750 ms the 10 kb answered 503 after 9.7 s (the query's k-mer mapping
+        # and a row batch are not polled, SPEC §4.5), so the budgets leave that room: a stop inside the 10 kb on a
+        # cold or loaded host, the whole profile on a warm one
+        budget = (3000, 8000)[i]
         req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=budget)
         t2 = dict(t)
         t2["flank"] = ""
@@ -723,10 +725,12 @@ def gen_P(ctx: Ctx) -> List[dict]:
         out.append(scenario(nid(), "P", "strands reverse with the reverse complement: the record as a - context", "POST /pattern",
                             req, t2, [OK, INV, CC, ex("contains_source_context", strand="-", require="all"),
                                       ex("entry_fields", equals={"strands": ["-"]})], tags=["strands"]))
+    # in suffix scope (one offset): the smoke validation of lane S1b saw a 16 bp palindrome's any_offset list
+    # rightly withheld above 10,000 contexts after 32 s (palindromic 16-mers are enriched over chance)
     for j, (key, t) in enumerate(_palindromes(ctx, n=2)):
         t["strand"] = "="
-        req = pattern_request([_p(t["window"])])
-        out.append(scenario(nid(), "P", "a %d bp palindrome of %s: searched once, strand =" % (t["length"], key),
+        req = pattern_request([_p(t["window"])], scope="suffix")
+        out.append(scenario(nid(), "P", "a %d bp palindrome of %s in suffix scope: searched once, strand =" % (t["length"], key),
                             "POST /pattern", req, t,
                             [OK, INV, CC, ex("entry_fields", equals={"palindromic": True, "strands": ["="]}),
                              ex("contains_source_context", strand="=", require="all")], tags=["palindrome"]))
@@ -954,7 +958,7 @@ def gen_P(ctx: Ctx) -> List[dict]:
 def _palindromes(ctx: Ctx, n: int) -> List[Tuple[str, dict]]:
     out = []
     # 16 bp only: a 14-bp palindrome meets ~42,000 chance contexts in any_offset scope, above the cap of 10,000
-    # (the verification's S1), so its list is rightly withheld; a 16-mer meets ~2,300
+    # (the verification's S1); the scenarios search them in suffix scope (a single offset) besides
     for key in ["lam", "t4", "eco", "bsu"]:
         rec = ctx.rec(key)
         seq = rec.seq
@@ -1461,6 +1465,8 @@ def gen_M(ctx: Ctx) -> List[dict]:
                             tags=["mismatch", "iupac"]))
     # protein: one substituted residue (a sense codon of another residue), m = 1
     from truth import load_proteins
+    # machine-dependent: the smoke validation of lane S1b saw a table-4 decapeptide at max_mismatches 1 stopped by its
+    # 60 s budget in discovery on the loaded host (withheld deadline): the scenario is then inconclusive
     nid = _ids("M-protein")
     prots = [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (1, 11)]
     n = 0
@@ -1483,7 +1489,7 @@ def gen_M(ctx: Ctx) -> List[dict]:
         out.append(scenario(nid(), "M", "decapeptide of %s with residue %d %s->%s, max_mismatches 1: the source at level 1" % (prot["key"], res_i, orig, new),
                             "POST /pattern", req, tr,
                             [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1, substitutions=subs)],
-                            timing_class="slow", tags=["mismatch", "protein"]))
+                            timing_class="slow", tags=["mismatch", "protein", "machine-dependent"]))
         n += 1
         if n >= 6:
             break
@@ -1507,7 +1513,8 @@ def gen_M(ctx: Ctx) -> List[dict]:
                             "at level 1" % (prot["key"], prot["transl_table"], res_i, orig, new), "POST /pattern", req, tr,
                             [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1,
                                              substitutions=subs)],
-                            timing_class="slow", tags=["mismatch", "protein", "table-%d" % prot["transl_table"]]))
+                            timing_class="slow", tags=["mismatch", "protein", "machine-dependent",
+                                                       "table-%d" % prot["transl_table"]]))
         np_ += 1
         if np_ >= 2:
             break
@@ -1531,7 +1538,7 @@ def gen_M(ctx: Ctx) -> List[dict]:
                             "cap 3): the source at level 2" % prot["key"], "POST /pattern", req, tr,
                             [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=2,
                                              substitutions=subs)],
-                            timing_class="slow", tags=["mismatch", "protein", "until-next-deploy"]))
+                            timing_class="slow", tags=["mismatch", "protein", "until-next-deploy", "machine-dependent"]))
     # suffix scope with substitutions: one offset, the floor without exemption (§21.5)
     nid_s = _ids("M-suffix")
     for j, key in enumerate(("hvo", "pfa")):
@@ -1713,7 +1720,8 @@ def gen_Q(ctx: Ctx) -> List[dict]:
                             "row, the mirrors (which exist) by their reverse complement" % key,
                             "POST /pattern", req, t,
                             [OK, INV, ex("predicate_selected", strand="+", selected=True, selection_strand_in=["context", "both"], label=rec.column),
-                             ex("predicate_either_mirror", label=rec.column, min=1)], tags=["predicate", "strands"]))
+                             ex("predicate_either_mirror", label=rec.column, min=1)],
+                            timing_class="slow", tags=["predicate", "strands"]))
     # a window taken from the reverse strand under predicate_strands context: its source contexts are '-' and
     # selected by their own rows; `or` and an at_least above the list's size under either
     nid = _ids("Q-more")

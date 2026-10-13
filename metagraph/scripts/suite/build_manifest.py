@@ -88,12 +88,26 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
         },
         "conventions": CONVENTIONS,
         "skipped": ctx.skipped,
+        "not_applicable": not_applicable(caps),
         "counts": counts(scenarios, relations),
         "relations_sha256": sha256_json(relations),
         "relations": relations,
         "scenarios": scenarios,
     }
     return manifest
+
+
+def not_applicable(caps: dict) -> list:
+    """DESIGN §3's areas that need a host property the snapshot does not state, left out with the reason (the
+    integrator's decision 7: P-unmasked and M-unmasked only on an unmasked host)."""
+    pc = caps["pattern_capabilities"]
+    out = []
+    if pc.get("counting") == "exact" and pc.get("mask") not in (None, "none"):
+        out.append({"areas": ["P-unmasked", "M-unmasked"], "tag": "not_applicable_masked",
+                    "reason": "the staging host is masked (capabilities counting %r, mask %r): counts are exact, "
+                              "no upper_bound or estimate to test; build these on an unmasked host" % (
+                                  pc.get("counting"), pc.get("mask"))})
+    return out
 
 
 def _records_of(t: dict) -> list:
