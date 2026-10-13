@@ -3776,6 +3776,43 @@
     "app/mcp_server.py:2157",
     "app/settings.py:1354"
    ]
+  },
+  {
+   "id": "pattern.deadline_ends_task",
+   "areas": [
+    "P",
+    "L",
+    "X",
+    "M",
+    "Q",
+    "N"
+   ],
+   "scenario_match": "any POST /pattern scenario whose host answer is HTTP 503 with code deadline (the request's own time_budget_ms overran while the answer was written; nothing delivered)",
+   "direct_expectation": {
+    "http": 503,
+    "code": "deadline",
+    "text": "pattern: the answer could not be written within time_budget_ms",
+    "text_source": "the host's 503 deadline answer (stable part; it continues with the budget and the finalisation reserve)"
+   },
+   "service_answer": {
+    "tool": "pattern_search",
+    "outcome": "relayed",
+    "http": 502,
+    "code": "search_failed",
+    "text_contains": "pattern_deadline",
+    "stage": "task",
+    "detail": "Since service 0d127f4a (live 2026-10-13 23:01Z; before it the deadline was retried in-call twice with a 60 s backoff and then at task level after 30 min). The task's single host request answers 503 deadline; the service does not retry it (service._retryable; the circuit ignores it as before) and ends the task at once as error_type pattern_deadline (permanent; PATTERN_DEADLINE_TASK_RETRIES 0 by default, 1 allows one quick retry) with Task.error 'pattern_deadline: <the host's text>; retry with a larger time_budget_ms (up to the database's time_budget_ms_cap ...) or a narrower pattern / scope'. The search completes failed (partial next to an answered database), get_status lists the db under failed_dbs with that text. The suite's MCP normaliser renders a failed search with no answered task as http 502, code search_failed, text = the task error (suite_mcp_normalise.normalise_pattern); a run against a service before 0d127f4a shows a runner error at its poll deadline instead."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/metagraph/service.py:281",
+    "app/metagraph/pattern_client.py:177",
+    "app/pattern/worker.py:113",
+    "app/pattern/worker.py:477",
+    "app/pattern/worker.py:545",
+    "app/settings.py:2360",
+    "scripts/bench/suite_mcp_normalise.py:334"
+   ]
   }
  ]
 }

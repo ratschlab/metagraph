@@ -361,7 +361,7 @@ class CompareTest(unittest.TestCase):
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 124)
+        self.assertEqual(info["cases"], 125)
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
         self.assertEqual(cmp.load_by_design(""), ({}, None))
