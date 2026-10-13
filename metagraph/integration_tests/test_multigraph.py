@@ -25,6 +25,7 @@ import json
 import os
 import random
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -785,6 +786,119 @@ class TestMultiGraphServer(TestingBase):
             log = server.text()
             self.assertEqual(6, log.count('loaded into RAM for it'), log[-3000:])
             self.assertEqual(1, log.count(notice), log[-3000:])
+        finally:
+            server.stop()
+
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
+                     "root reads a file without permissions")
+    def test_a_failed_in_ram_load_is_answered_and_the_server_lives(self):
+        """A pair whose annotation cannot be read any more after start-up (chmod 000; the resident
+        index, mapped at start-up, still answers): an `in_ram` request on it is answered, not the
+        process ended -- /pattern's pair refused with the loader's message (400, no code, the
+        request 200), /traverse and /resolve 400 with it --, its memory released, and the server
+        lives: the pair without in_ram, the other pair with it (above the cap: served resident)
+        and, once readable again, the pair with in_ram answer, the last proving the release (the
+        cap holds one copy of it: a reservation a failed load kept would make it wait). A malformed
+        body with in_ram: true naming the pair is refused before any load (SPEC §24.2): the
+        loader's line, which every attempt to load the unreadable file logs, not logged again."""
+        d = os.path.join(self.tempdir.name, 'unreadable')
+        pairs = {}
+        for name in ('kleb', 'pseudo'):
+            dst = os.path.join(d, name)
+            shutil.copytree(os.path.dirname(self.pairs[name][0]), dst)
+            pairs[name] = tuple(os.path.join(dst, os.path.basename(p)) for p in self.pairs[name])
+        csv = os.path.join(d, 'graphs.csv')
+        with open(csv, 'w') as f:
+            for name, (graph, anno) in pairs.items():
+                f.write(f'{name},{graph},{anno}\n')
+        kleb_bytes = sum(os.path.getsize(p) for p in pairs['kleb'])
+        pseudo_bytes = sum(os.path.getsize(p) for p in pairs['pseudo'])
+        # one copy of kleb fits the cap, pseudo does not
+        cap_gb = kleb_bytes * 1.2 / 1e9
+        self.assertGreater(pseudo_bytes, cap_gb * 1e9)
+        server = Server([csv, '--mmap', '--mem-cap-gb', f'{cap_gb:.9f}'],
+                        os.path.join(d, 'server.log'))
+        anno = pairs['kleb'][1]
+        failed = f"Cannot load annotation from '{anno}'"
+        # the loader's own error line (a column annotation's), logged by every load attempt
+        attempted = f"Cannot load columns from '{anno}'"
+        kleb = self.records['kleb'][0]
+        seed = kleb[20000:20100]
+        p = {'patterns': [{'dna': kleb[5000:5020]}], 'mode': 'count', 'graphs': ['kleb']}
+        t = {'graphs': ['kleb'], 'seeds': [{'sequence': seed}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                          'output': {'detail': 'full'}}}
+        r = {'graphs': ['kleb'], 'sequence': seed, 'discover': {'max_labels': 10}}
+        try:
+            os.chmod(anno, 0)
+            # the resident index answers
+            self.assertEqual(1, server.post('pattern', p).json()['answered'])
+            # /pattern: the pair refused with the loader's message, the request answered
+            ret = server.post('pattern', dict(p, in_ram=True))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            body = ret.json()
+            self.assertEqual((0, 1), (body['answered'], body['refused']), body)
+            entry = body['answers'][0]
+            self.assertEqual(('kleb', 'refused'), (entry['graph'], entry['outcome']), entry)
+            self.assertEqual({'http_status', 'error'}, set(entry['refusal']), entry)
+            self.assertEqual(400, entry['refusal']['http_status'])
+            self.assertIn(failed, entry['refusal']['error'])
+            self.assertIn('read permission', entry['refusal']['error'])
+            # /traverse: 400 with the message; with usage on a managed attempt
+            ret = server.post('traverse', dict(t, in_ram=True))
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error'}, set(ret.json()))
+            self.assertIn(failed, ret.json()['error'])
+            ret = server.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-unreadable'))
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error', 'usage'}, set(ret.json()))
+            self.assertIn(failed, ret.json()['error'])
+            self.assertEqual('error', ret.json()['usage']['reason'])
+            # /resolve: 400 with the message
+            ret = server.post('resolve', dict(r, in_ram=True))
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error'}, set(ret.json()))
+            self.assertIn(failed, ret.json()['error'])
+            log = server.text()
+            self.assertEqual(4, log.count(attempted), log[-3000:])
+            self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
+
+            # a malformed body with in_ram naming the pair: refused before any load
+            for route, payload, words in (
+                    ('pattern', dict(p, in_ram=True, mode='x'), 'mode'),
+                    ('traverse', dict(t, in_ram=True, seeds=[]), 'request.seeds'),
+                    ('resolve', dict(r, in_ram=True, sequence=''), 'request.sequence')):
+                with self.subTest(route=route):
+                    ret = server.post(route, payload)
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertIn(words, ret.json()['error'])
+                    self.assertNotIn(failed, ret.text)
+            log = server.text()
+            self.assertEqual(4, log.count(attempted), log[-3000:])
+            self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
+
+            # the server lives: the pair without in_ram, the other pair with it (above the cap)
+            self.assertEqual(1, server.post('pattern', p).json()['answered'])
+            pseudo = self.records['pseudo'][0]
+            q = {'patterns': [{'dna': pseudo[5000:5020]}], 'mode': 'count', 'graphs': ['pseudo'],
+                 'in_ram': True}
+            ret = server.post('pattern', q)
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual(1, ret.json()['answered'], ret.text[:2000])
+            self.assertEqual(0, ret.json()['answers'][0]['timing']['load_ms'])
+            self.assertIn('too large to fit into RAM', server.text())
+        finally:
+            os.chmod(anno, 0o644)
+        try:
+            # readable again: the load succeeds, the memory of the failed loads was released
+            # (the cap holds one copy; a kept reservation would make this request wait)
+            ret = requests.post(server.url('pattern'), data=json.dumps(dict(p, in_ram=True)),
+                                timeout=120)
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual(1, ret.json()['answered'], ret.text[:2000])
+            self.assertGreater(ret.json()['answers'][0]['timing']['load_ms'], 0)
+            self.assertEqual(1, server.text().count('loaded into RAM for it'))
+            self.assertIsNone(server.process.poll())
         finally:
             server.stop()
 
