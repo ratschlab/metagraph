@@ -149,6 +149,9 @@ def scripts_commit(explicit):
 # never reached the application, so it is sent once more on a fresh connection.
 STALE_CONNECTION_ERRORS = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
                            ConnectionAbortedError, http.client.CannotSendRequest)
+# A closed idle connection fails at once (about a round trip); one that fails later may have carried a request
+# the server was already processing, which is not sent again (review N10).
+STALE_RESEND_MAX_S = 1.0
 
 
 class Client(object):
@@ -186,7 +189,8 @@ class Client(object):
 
         wall_ms runs from sending the request to the last body byte, ttfb_ms to the status line, both on an
         established connection; connect_ms is the set-up of a fresh connection (null when reused). A request on
-        a reused connection the server had closed meanwhile is sent once more on a fresh one (attempts 2).
+        a reused connection the server had closed meanwhile is sent once more on a fresh one (attempts 2), when
+        it failed within STALE_RESEND_MAX_S of being sent; a later failure is recorded as a transport error.
         """
         result = {"http": 0, "raw": b"", "headers": {}, "wall_ms": None, "connect_ms": None, "ttfb_ms": None,
                   "bytes_wire": 0, "reused": False, "attempts": 0, "error": None}
@@ -210,7 +214,7 @@ class Client(object):
                 result["wall_ms"] = (time.perf_counter() - t0) * 1000.0
             except STALE_CONNECTION_ERRORS as exc:
                 self.close()
-                if reused and attempt == 0:
+                if reused and attempt == 0 and time.perf_counter() - t0 <= STALE_RESEND_MAX_S:
                     continue
                 result["wall_ms"] = (time.perf_counter() - t0) * 1000.0
                 result["error"] = ("transport", "%s: %s" % (type(exc).__name__, exc))

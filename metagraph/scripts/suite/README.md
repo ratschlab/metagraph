@@ -74,7 +74,9 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   open; `wall_ms` runs from sending the request to the last body byte on an established connection, and the
   set-up of a fresh connection (TCP, and TLS on the public URL) is `client.connect_ms` (null when reused;
   `client.reused`, `client.attempts`). A request on a reused connection the server had closed meanwhile is
-  sent once more on a fresh one (the first attempt never reached the application). Reusing across paired steps
+  sent once more on a fresh one (the first attempt never reached the application), but only when it failed
+  within 1 s of being sent (`STALE_RESEND_MAX_S`; review N10): a later drop may follow a request the server
+  was already processing, and is recorded as a transport error. Reusing across paired steps
   would not keep the TCP window either (Linux restarts slow start after an idle second), so a fresh connection
   per paired step with the connect left out measures the same front cost.
 - run.json keeps the three capabilities documents of the run's start, release / server_instance / index_fp

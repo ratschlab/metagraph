@@ -341,6 +341,60 @@ class RunnerTest(unittest.TestCase):
             self.assertLessEqual(r["client"]["attempts"], 2)
         self.assertEqual(n, 3 + 3 + 1)  # a resend never reaches the server twice: the first attempt died unsent
 
+    def test_no_resend_after_a_slow_drop(self):
+        # review N10: a reused connection dropped after the server held the request for a while is not resent
+        # (the server may have processed it); one dropped at once is
+        import socket
+        import threading
+
+        def serve(srv, delay, accepted):
+            c, _ = srv.accept()
+            accepted.append(1)
+            for answer in (True, False):
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    data += c.recv(65536)
+                if answer:
+                    c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+            time.sleep(delay)
+            c.close()
+            srv.settimeout(1.5)
+            try:
+                c2, _ = srv.accept()
+                accepted.append(2)
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    data += c2.recv(65536)
+                c2.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+                c2.close()
+            except socket.timeout:
+                pass
+
+        old = run_direct.STALE_RESEND_MAX_S
+        run_direct.STALE_RESEND_MAX_S = 0.2
+        try:
+            for delay, resent in ((0.6, False), (0.0, True)):
+                srv = socket.socket()
+                srv.bind(("127.0.0.1", 0))
+                srv.listen(2)
+                accepted = []
+                t = threading.Thread(target=serve, args=(srv, delay, accepted), daemon=True)
+                t.start()
+                client = run_direct.Client("http://127.0.0.1:%d" % srv.getsockname()[1])
+                first = client.call("GET", "/a", None, {}, 10)
+                second = client.call("GET", "/b", None, {}, 10)
+                client.close()
+                t.join(5)
+                srv.close()
+                self.assertEqual(first["http"], 200)
+                if resent:
+                    self.assertEqual((second["http"], second["attempts"], accepted), (200, 2, [1, 2]))
+                else:
+                    self.assertEqual((second["http"], second["attempts"], accepted), (0, 1, [1]))
+                    self.assertEqual(second["error"][0], "transport")
+        finally:
+            run_direct.STALE_RESEND_MAX_S = old
+
     def test_paired_steps_only_and_finish(self):
         make_manifest(self.manifest_path, basic_scenarios())
         out = os.path.join(self.dir, "run")
