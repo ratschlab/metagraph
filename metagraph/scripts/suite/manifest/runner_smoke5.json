@@ -1,0 +1,226 @@
+{
+ "manifest_version": 1,
+ "content_sha256": "7311124b217da50ce53d0412adae9ebfacc1298a9c183e51dfa01a5d77592229",
+ "created_utc": "2026-10-13T11:00:00.000Z",
+ "index": {
+  "database": "refseq33m-experimental",
+  "release_at_build": "refseq97-b7214d29a934ff89512ad254bbb66ba793842928",
+  "index_fp": null
+ },
+ "ground_truth": {
+  "genomes_source": "scripts/traversal/bench_panel_refseq33m.json (runner smoke only)",
+  "records": [
+   {
+    "accession": "NZ_CABJBK010000001.1",
+    "taxid": "1898203",
+    "length": null,
+    "sha256": null,
+    "fetched_from": "bench panel source window NZ_CABJBK010000001.1:172649-182708"
+   }
+  ]
+ },
+ "note": "The runner's hand-made 5-scenario manifest (lane S2) for its smoke run: status checks only (with the refusal's code and text), so it is valid with checks.py and with checks_stub.py. One scenario (P-smoke-0001, a /pattern count) is mapped to the MCP's pattern_search, as lane S1's manifest_lib maps a /pattern body; the others are not implemented via MCP. The verified manifests are lane S1's suite_smoke_v1.json and suite_v1.json.",
+ "scenarios": [
+  {
+   "id": "C-smoke-0001",
+   "area": "C",
+   "title": "GET /capabilities answers",
+   "route": "GET /capabilities",
+   "request": null,
+   "mcp": {
+    "not_implemented": "runner smoke manifest: no MCP mapping (lane S2 hand-made)"
+   },
+   "truth": {},
+   "expect": [
+    {
+     "check": "status",
+     "args": {
+      "http": 200
+     }
+    }
+   ],
+   "timing_class": "fast",
+   "repeat": 1,
+   "tags": [
+    "smoke",
+    "capabilities"
+   ]
+  },
+  {
+   "id": "P-smoke-0001",
+   "area": "P",
+   "title": "count of a 31-mer of a single-carrier record",
+   "route": "POST /pattern",
+   "request": {
+    "patterns": [
+     {
+      "dna": "GACAGATGCGGCGATCAATCCTGGTAACAGT",
+      "id": "gut153_w31"
+     }
+    ],
+    "mode": "count"
+   },
+   "mcp": {
+    "tool": "pattern_search",
+    "arguments": {
+     "databases": [
+      "refseq33m-experimental"
+     ],
+     "patterns": [
+      {
+       "dna": "GACAGATGCGGCGATCAATCCTGGTAACAGT",
+       "id": "gut153_w31"
+      }
+     ],
+     "mode": "count",
+     "scope": "any_offset",
+     "strands": "both",
+     "labels": "none"
+    }
+   },
+   "truth": {
+    "record": "NZ_CABJBK010000001.1",
+    "taxid": "1898203",
+    "start": 177648,
+    "strand": "+",
+    "window": "GACAGATGCGGCGATCAATCCTGGTAACAGT",
+    "source": "scripts/traversal/bench_panel_refseq33m.json seed gut_153 (single carrier: 1 column, 1 record)"
+   },
+   "expect": [
+    {
+     "check": "status",
+     "args": {
+      "http": 200
+     }
+    }
+   ],
+   "timing_class": "fast",
+   "repeat": 1,
+   "tags": [
+    "smoke",
+    "positive"
+   ]
+  },
+  {
+   "id": "R-smoke-0001",
+   "area": "R",
+   "title": "resolve a 60 bp window against its record's taxid",
+   "route": "POST /resolve",
+   "request": {
+    "sequence": "GACAGATGCGGCGATCAATCCTGGTAACAGTGGCGGCGCTTTGCTTAATATGAAAGGCGA",
+    "labels": [
+     "1898203"
+    ]
+   },
+   "mcp": {
+    "not_implemented": "runner smoke manifest: no MCP mapping (lane S2 hand-made)"
+   },
+   "truth": {
+    "record": "NZ_CABJBK010000001.1",
+    "taxid": "1898203",
+    "start": 177648,
+    "strand": "+",
+    "window": "GACAGATGCGGCGATCAATCCTGGTAACAGTGGCGGCGCTTTGCTTAATATGAAAGGCGA",
+    "source": "scripts/traversal/bench_panel_refseq33m.json seed gut_153 (single carrier: 1 column, 1 record)"
+   },
+   "expect": [
+    {
+     "check": "status",
+     "args": {
+      "http": 200
+     }
+    }
+   ],
+   "timing_class": "fast",
+   "repeat": 1,
+   "tags": [
+    "smoke",
+    "positive"
+   ]
+  },
+  {
+   "id": "T-smoke-0001",
+   "area": "T",
+   "title": "walk 100 bp both ways from a 60 bp seed constrained to its taxid",
+   "route": "POST /traverse",
+   "request": {
+    "seeds": [
+     {
+      "sequence": "GACAGATGCGGCGATCAATCCTGGTAACAGTGGCGGCGCTTTGCTTAATATGAAAGGCGA",
+      "labels": [
+       "1898203"
+      ]
+     }
+    ],
+    "strategy": {
+     "direction": "both",
+     "bounds": {
+      "max_extension_bp": 100,
+      "time_budget_ms": 5000
+     }
+    }
+   },
+   "mcp": {
+    "not_implemented": "runner smoke manifest: no MCP mapping (lane S2 hand-made)"
+   },
+   "truth": {
+    "record": "NZ_CABJBK010000001.1",
+    "taxid": "1898203",
+    "start": 177648,
+    "strand": "+",
+    "window": "GACAGATGCGGCGATCAATCCTGGTAACAGTGGCGGCGCTTTGCTTAATATGAAAGGCGA",
+    "source": "scripts/traversal/bench_panel_refseq33m.json seed gut_153 (single carrier: 1 column, 1 record)"
+   },
+   "expect": [
+    {
+     "check": "status",
+     "args": {
+      "http": 200
+     }
+    }
+   ],
+   "timing_class": "fast",
+   "repeat": 1,
+   "tags": [
+    "smoke",
+    "positive"
+   ]
+  },
+  {
+   "id": "P-smoke-0002",
+   "area": "P",
+   "title": "an unknown request field is refused",
+   "route": "POST /pattern",
+   "request": {
+    "patterns": [
+     {
+      "dna": "GACAGATGCGGCGATCAATCCTGGTAACAGT",
+      "id": "x"
+     }
+    ],
+    "mode": "count",
+    "bogus": 1
+   },
+   "mcp": {
+    "not_implemented": "runner smoke manifest: no MCP mapping (lane S2 hand-made)"
+   },
+   "truth": {},
+   "expect": [
+    {
+     "check": "status",
+     "args": {
+      "http": 400,
+      "code": "invalid_request",
+      "text": "request: unknown field 'bogus'"
+     }
+    }
+   ],
+   "timing_class": "fast",
+   "repeat": 1,
+   "tags": [
+    "smoke",
+    "error"
+   ]
+  }
+ ]
+}
