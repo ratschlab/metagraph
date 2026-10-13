@@ -10,13 +10,16 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
 - `run_direct.py`: runs a manifest against one direct arm (`direct-local` on mex, `direct-remote` from the
   laptop); writes `executions.jsonl`, `raw/`, `run.json`, `state.json`; resumable; stops cleanly on SIGINT.
 - `sampler.py`: `docker stats --no-stream` of the staging container and of sra_all (CPU) plus the host load,
-  every 2 s, into `samples.jsonl` (started by `run_direct.py --sample-docker`, or on its own).
+  every 2 s, into `samples.jsonl` (started by `run_direct.py --sample-docker`, by run_suite.sh, or on its own;
+  it stops on a signal, a stop file, --max-seconds, a gone --parent-pid, or a --heartbeat file untouched for
+  --heartbeat-max-age seconds).
 - `checks_stub.py`: stand-in for lane S1's `checks.py` with the same API: it evaluates `status` as S1's check
   does (http, code, text, text_prefix, text_contains) and reports every other check `not_exposed`. The runner
   uses `checks.py` whenever it imports; it refuses the stub for a selection that expects any other check unless
   `--allow-stub`, and `run.json` names the module that ran (and the import error when auto fell back).
 - `manifest/runner_smoke5.json`: the runner's own 5-scenario smoke manifest (status checks only, with the
-  error code and text of the refusal; never for an MCP comparison: every scenario is marked not implemented).
+  error code and text of the refusal); P-smoke-0001 (a /pattern count) is mapped to pattern_search, the
+  other four are marked not implemented via MCP.
 - `tests/fake_host.py`, `tests/fake_mcp.py`: a local stand-in for the host (HTTP/1.1 keep-alive) and for
   async's MCP runner, for the offline tests.
 
@@ -35,7 +38,8 @@ Each arm writes only its own sub-directory, so it resumes on its own and a pull 
 another arm's lines. `run_direct.py --out X` on its own writes X/executions.jsonl in the §8.3 schema.
 
 ### Decisions where the design is silent
-- Executions per scenario: its `repeat` (default 1); repeat 0 is `cold`, later repeats `warm`. A scenario with
+- Executions per scenario: its `repeat` (default 1); repeat 0 is `cache: cold`, later repeats `warm` (the
+  arm's own repeat mark of §8.3; the host's cache state is `host_cache`, below). A scenario with
   `repeat` 1 whose index in the whole manifest is a multiple of 10 gets one warm repeat (§5 "every tenth
   scenario"; `--warm-every 0` turns it off). The index is global, so a subset run repeats the same scenarios.
 - `timing_class` long is not run on direct-remote (the front proxy cuts at ~120 s): no execution line, the
