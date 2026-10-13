@@ -4774,8 +4774,9 @@ ledger that refuses hosts whose observation exceeds its allowance refused every 
 meaning stay; `deadline_check.observed_window_s` is stated beside it (an additive integer field: no feature level,
 contract version 1 stays). The twelve capabilities fixtures (`capabilities`, `capabilities_mask_absent`,
 `capabilities_built_at_load`, `capabilities_multi_graph`, `capabilities_representation_unsupported` and the seven
-`traverse_capabilities*`) gain `"observed_window_s": 3600`; no other stored body changes. Tests:
+`traverse_capabilities*`) gain `"observed_window_s": 3600` (and a new `server_instance`, which the check blanks);
+no other stored body changes. Tests:
 `GraphletAttemptRegistry.ObservedMaximumIsOverTheWindow`, `ObservedWindowIsTheSettings`,
 `WindowedMaximumBucketsAndLateNotes`, `ObservedMaximumUnderConcurrentNotes`, `ObservedWindowFlagIsValidated`;
-integration `TestTraverseAttempts.test_observed_window_is_validated_and_stated` (a 2 s window: the piece of one
+integration `TestTraverseAttempts.test_observed_window_is_validated_and_stated` (a 5 s window: the piece of one
 `/traverse` stated on both routes, gone 2.2 s later; the flag's refusals).

@@ -2657,7 +2657,7 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     processing, a derivation's steps and a seed's finalisation, §6.8; 0 when none was noted in the window),
     `observed_window_s` (integer, `--traverse-observed-window-s`, an integer in [1, 31 536 000], 3600 by default:
     the window of that observation — a piece counts from the moment the response of the `/traverse` that saw it
-    was written for at least `observed_window_s` seconds and at most a 60th of it longer, §6.8; it was the
+    was written (or found its client gone) for at least `observed_window_s` seconds and at most a 60th of it longer, §6.8; it was the
     process's lifetime before the staging finding of 2026-10-13, so a reader that finds no `observed_window_s`
     reads a lifetime maximum), `poll_stride` (integer, 8: one in this many
     of a walk's polls — the one before a head — reads the clock for an attempt's walk-until and bound, so a

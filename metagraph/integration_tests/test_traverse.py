@@ -4473,18 +4473,18 @@ class TestTraverseAttempts(TestingBase):
             self.assertEqual(out[0], out[1])
             return out[0]
 
-        with self._Server(self, '--traverse-observed-window-s', '2') as server:
-            self.assertEqual((2, 0), observed(server))
+        with self._Server(self, '--traverse-observed-window-s', '5') as server:
+            self.assertEqual((5, 0), observed(server))
             ret = server.post('traverse', self._request(1, radius=200), timeout=120)
             self.assertEqual(200, ret.status_code, ret.text[:500])
             # noted when the response was written, before the client read it
             written = time.time()
             window, seen = observed(server)
-            self.assertEqual(2, window)
+            self.assertEqual(5, window)
             self.assertGreater(seen, 0)
-            # gone once the window and a bucket (2 s / 60) passed
-            time.sleep(max(0.0, written + 2.2 - time.time()))
-            self.assertEqual((2, 0), observed(server))
+            # gone once the window and a bucket (5 s / 60) passed
+            time.sleep(max(0.0, written + 5.2 - time.time()))
+            self.assertEqual((5, 0), observed(server))
 
     def _half_uploaded(self, server, req):
         """Send the header and half the body of |req| on a raw socket: the request is on the
