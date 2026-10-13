@@ -55,19 +55,29 @@ def scen(sid, area, by_design=None, not_implemented=None, expect_http=200):
             "timing_class": "fast", "repeat": 1, "tags": []}
 
 
+# An MCP refusal at submit as async's runner records it: no host timing, the backend phase null.
+SUBMIT_ONLY = {"submit_ms": 40.0, "queue_ms": None, "backend_ms": None, "terminal_lag_ms": None, "paging_ms": None}
+
+
 def line(sid, arm, repeat, t, wall, outcome="pass", http=200, digest="d", checks=None, error=None,
-         memory=None, phases=None, area=None, server_ms=None):
+         memory=None, phases=None, area=None, server_ms=None, reached=True):
+    """An execution line; an MCP line with reached=False (or not implemented via MCP) carries no evidence of a
+    backend call (server null, mcp_phases without backend_ms)."""
     checks = checks if checks is not None else [{"check": "status", "outcome": "pass", "detail": "ok"},
                                                 {"check": "contains_source_context", "outcome": "pass",
                                                  "detail": "found"}]
     work = {"steps": 10}
     if memory is not None:
         work["memory_bytes"] = memory
+    server = {"elapsed_ms": server_ms if server_ms is not None else wall / 2.0, "timing": None, "work": work}
+    if arm == "mcp" and outcome == "not_implemented_mcp":
+        server, phases = None, None
+    elif arm == "mcp" and not reached:
+        server, phases = None, dict(SUBMIT_ONLY)
     return {"run_id": "R", "scenario": sid, "area": area or sid.split("-")[0], "arm": arm, "repeat": repeat,
             "cache": "cold" if repeat == 0 else "warm", "started_utc": sc.iso_utc(t),
             "ended_utc": sc.iso_utc(t + wall / 1000.0), "wall_ms": wall, "http": http, "outcome": outcome,
-            "checks": checks, "server": {"elapsed_ms": server_ms if server_ms is not None else wall / 2.0,
-                                         "timing": None, "work": work},
+            "checks": checks, "server": server,
             "mcp_phases": phases, "answer_digest": digest, "raw": "raw/%s.%s.%d.json.gz" % (sid, arm, repeat),
             "job": None, "error": error}
 
@@ -163,12 +173,12 @@ def build_run(run_dir):
                                                           {"check": "contains_source_context",
                                                            "outcome": "not_exposed", "detail": ""}]),
            line("P-003", "mcp", 0, tm + 8, 800.0),  # answered by the service: by design
-           line("P-004", "mcp", 0, tm + 10, 800.0, outcome="service_by_design",
+           line("P-004", "mcp", 0, tm + 10, 800.0, outcome="service_by_design", reached=False,
                 error={"code": "pattern_invalid", "text": "more than 64 per search (PATTERN_MAX_PATTERNS_PER_SEARCH)",
                        "field": "patterns"}),
            line("M-001", "mcp", 0, tm + 12, 800.0, error={"code": "pattern_unsupported", "text": "no"}),
            line("P-005", "mcp", 0, tm + 14, 1.0, outcome="not_implemented_mcp"),
-           line("S-001", "mcp", 0, tm + 16, 50.0, outcome="service_by_design",
+           line("S-001", "mcp", 0, tm + 16, 50.0, outcome="service_by_design", reached=False,
                 error={"code": "rate_limited", "text": "slow down"})]
     write_arm(run_dir, "mcp", mcp, jobs=[{"search_id": "s1", "token": "t1"}])
     return manifest
@@ -387,11 +397,27 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(r1["cold_wall_ms"], 800.0)
         self.assertNotIn("minus_local_ms", r1)                    # no MCP warm execution
         self.assertEqual(self.s["mcp_phases"]["queue_ms"]["n"], 1)
-        # only MCP executions that reached the host (pass / fail) count towards the overhead
+        # only MCP executions that reached the host (a backend call on record) count towards the overhead
         self.assertEqual(self.s["mcp_overhead"]["minus_local_ms"]["n"], 1)
         self.assertEqual(self.s["mcp_overhead"]["minus_remote_ms"]["n"], 3)
         self.assertEqual(self.s["mcp_cold_wall_ms"]["n"], 1)
         self.assertNotIn("mcp_overhead", self.comp["scenarios"]["P-005"])
+
+    def test_mcp_overhead_skips_a_refusal_at_submit(self):
+        # review N2: a refusal at submit recorded as `fail` is no MCP warm execution, nor does it make the
+        # direct-local execution after it warm
+        refused = line("T-1", "mcp", 1, T0 + 3.0, 210.0, outcome="fail", http=400, reached=False,
+                       error={"code": "traversal_refused", "text": "host overrun"})
+        cold = line("T-1", "mcp", 0, T0, 900.0, phases={"queue_ms": 100.0, "backend_ms": 400.0})
+        local = line("T-1", "direct-local", 0, T0 + 1.5, 300.0)
+        rows = [cold, local, refused]
+        sc.assign_host_cache(rows)
+        self.assertEqual([r["host_cache"] for r in rows], ["cold", "warm", "not_reached"])
+        mo = cmp.mcp_overhead({0: cold, 1: refused}, {0: local}, {})
+        self.assertIsNone(mo["repeat"])            # no MCP warm execution reached the host
+        self.assertEqual(mo["cold_wall_ms"], 900.0)
+        self.assertNotIn("minus_local_ms", mo)
+        self.assertIsNone(cmp.mcp_overhead({1: refused}, {0: local}, {}))
 
     def test_wall_without_connect(self):
         new = line("P-1", "direct-remote", 0, T0, 100.0)

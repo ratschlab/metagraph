@@ -208,11 +208,14 @@ HOST_CACHE_VALUES = ("cold", "warm", "aged", "not_reached", "unknown")
 
 def reached_host(line):
     """Whether an execution reached the host, and so touched its row cache: a direct request that got an
-    answer or timed out (not a refused connection), an MCP execution the host answered (outcome pass, fail,
-    finding or inconclusive;
-    a refusal at submit or a request the MCP cannot express never reaches it)."""
+    answer or timed out (not a refused connection); an MCP execution only on evidence of a backend call, i.e.
+    the host's own timing (`server.elapsed_ms`) or the service's backend phase (`mcp_phases.backend_ms`) is a
+    number. Never from the MCP outcome (review N2): a refusal at submit can read `fail` without reaching the
+    host, and an `error` or a service_by_design mark can follow a backend call (a relayed refusal does)."""
     if line.get("arm") == "mcp":
-        return line.get("outcome") in ("pass", "fail", "finding", "inconclusive")
+        server = line.get("server") if isinstance(line.get("server"), dict) else {}
+        phases = line.get("mcp_phases") if isinstance(line.get("mcp_phases"), dict) else {}
+        return _is_number(server.get("elapsed_ms")) or _is_number(phases.get("backend_ms"))
     err = line.get("error") or {}
     return not (not line.get("http") and err.get("code") == "transport")
 

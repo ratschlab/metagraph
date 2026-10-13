@@ -238,10 +238,14 @@ class Files(unittest.TestCase):
 T0 = 1791800000.0
 
 
-def hline(sid, arm, repeat, t, wall=100.0, outcome="pass", http=200, error=None):
+def hline(sid, arm, repeat, t, wall=100.0, outcome="pass", http=200, error=None, server=None, phases=None):
     return {"scenario": sid, "arm": arm, "repeat": repeat, "started_utc": sc.iso_utc(t),
             "ended_utc": sc.iso_utc(t + wall / 1000.0), "wall_ms": wall, "outcome": outcome, "http": http,
-            "error": error}
+            "error": error, "server": server, "mcp_phases": phases}
+
+
+BACKEND = {"submit_ms": 200.0, "queue_ms": 140.0, "backend_ms": 30.0, "terminal_lag_ms": 2700.0, "paging_ms": 0.0}
+SUBMIT_ONLY = {"submit_ms": 200.0, "queue_ms": None, "backend_ms": None, "terminal_lag_ms": None, "paging_ms": None}
 
 
 class HostCache(unittest.TestCase):
@@ -250,7 +254,7 @@ class HostCache(unittest.TestCase):
                 hline("A", "direct-local", 0, T0),                     # first on the host: cold
                 hline("A", "direct-local", 1, T0 + 1.0),               # 0.9 s later: warm
                 hline("A", "mcp", 0, T0 + 70.2, outcome="service_by_design"),   # refused by the service
-                hline("A", "mcp", 1, T0 + 80.0),                       # after the remote one: warm
+                hline("A", "mcp", 1, T0 + 80.0, phases=BACKEND),       # after the remote one: warm
                 hline("B", "mcp", 0, T0 + 2.0, outcome="not_implemented_mcp"),  # never reached the host
                 hline("B", "direct-local", 0, T0 + 3.0),               # so this is B's cold execution
                 hline("C", "direct-local", 0, T0 + 4.0, http=0, error={"code": "transport", "text": "refused"}),
@@ -270,6 +274,37 @@ class HostCache(unittest.TestCase):
             ("C", "direct-local", 0, "not_reached", None, None),
             ("C", "direct-remote", 0, "cold", None, None),
             ("D", "direct-local", 0, "unknown", None, None)])
+
+    def test_mcp_reached_only_on_backend_evidence(self):
+        # review N2: an MCP line reached the host only when it carries the host's timing or the backend phase,
+        # whatever its outcome
+        rows = [hline("X", "mcp", 0, T0, outcome="fail", http=400, phases=SUBMIT_ONLY,
+                      error={"code": "traversal_refused", "text": "host overrun"}),     # refused at submit
+                hline("X", "direct-local", 0, T0 + 1.7),                                # so this one is cold
+                hline("Y", "mcp", 0, T0, outcome="error", phases=BACKEND,
+                      error={"code": "runner_error", "text": "not terminal in time"}),  # the backend ran
+                hline("Y", "direct-local", 0, T0 + 1.7),
+                hline("Z", "mcp", 0, T0, outcome="service_by_design", http=400, phases=BACKEND,
+                      error={"code": "resolve_too_short", "text": "relayed"}),          # a relayed refusal
+                hline("Z", "direct-local", 0, T0 + 1.7),
+                hline("W", "mcp", 0, T0, outcome="pass", server={"elapsed_ms": 0.7}),   # host timing only
+                hline("W", "direct-local", 0, T0 + 1.7),
+                hline("V", "mcp", 0, T0, outcome="pass"),                               # no evidence at all
+                hline("V", "direct-local", 0, T0 + 1.7),
+                hline("U", "mcp", 0, T0, outcome="pass", server={"elapsed_ms": True}, phases={"backend_ms": "30"}),
+                hline("U", "direct-local", 0, T0 + 1.7)]
+        sc.assign_host_cache(rows)
+        got = dict(((r["scenario"], r["arm"]), r["host_cache"]) for r in rows)
+        self.assertEqual(got, {("X", "mcp"): "not_reached", ("X", "direct-local"): "cold",
+                               ("Y", "mcp"): "cold", ("Y", "direct-local"): "warm",
+                               ("Z", "mcp"): "cold", ("Z", "direct-local"): "warm",
+                               ("W", "mcp"): "cold", ("W", "direct-local"): "warm",
+                               ("V", "mcp"): "not_reached", ("V", "direct-local"): "cold",
+                               ("U", "mcp"): "not_reached", ("U", "direct-local"): "cold"})
+        # direct lines are unchanged: anything but a refused connection reached the host
+        self.assertTrue(sc.reached_host(hline("D", "direct-remote", 0, T0, http=503)))
+        self.assertFalse(sc.reached_host(hline("D", "direct-remote", 0, T0, http=0,
+                                               error={"code": "transport", "text": "refused"})))
 
     def test_clock_offset(self):
         # mex's clock 2 s ahead: its line stamped T0 + 2.5 ran at T0 + 0.5 on the laptop, before the remote one

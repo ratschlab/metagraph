@@ -177,8 +177,11 @@ lists the environment overrides.
   arms (direct-local's times shifted by the mex clock offset the orchestrator measured): `cold` = the
   scenario's first execution on the host in this run, `warm` = another execution of it ended at most 60 s
   before this one started, `aged` = longer ago (cache state unknown), `not_reached` = an execution the host
-  never saw (an MCP refusal at submit or a request the MCP cannot express: MCP outcome other than pass /
-  fail; a direct request whose connection was refused), `unknown` = no start time. `cache` (the arm's own
+  never saw (an MCP line without evidence of a backend call, i.e. neither `server.elapsed_ms` nor
+  `mcp_phases.backend_ms` is a number: a refusal at submit, whatever its outcome, or a request the MCP cannot
+  express; a direct request whose connection was refused), `unknown` = no start time. The MCP outcome never
+  decides it (review N2): a refusal at submit may read `fail`, and an `error` or a relayed refusal may follow
+  a backend call. `cache` (the arm's own
   repeat 0 / later) stays as §8.3 has it; everything timed keys on `host_cache`.
 - `compare.py RUN_DIR [--by-design PATH]`: merges first when `arms/` exists, then writes compare.json:
   per scenario and arm the outcome over the repeats (the common one, else error > fail > mixed) and whether
@@ -211,8 +214,8 @@ lists the environment overrides.
   both are warm). Wall times exclude the connection set-up (`client.connect_ms`, reported apart per arm; for
   lines of the older runner that timed from before the connect, compare subtracts connect_ms). A scenario
   whose first arm ran only its cold execution has no warm pair and is counted as such; the cold executions
-  are reported apart (per arm: wall and server). MCP: only executions that reached the host (outcome pass /
-  fail); the MCP warm execution (repeat 1 preferred) minus each direct arm's first warm one, with and without
+  are reported apart (per arm: wall and server). MCP: only executions that reached the host (a backend call
+  on record, as above); the MCP warm execution (repeat 1 preferred) minus each direct arm's first warm one, with and without
   `mcp_phases.queue_ms`, and `backend_ms` minus each direct arm; the phases of the warm execution; the MCP
   cold execution's wall time apart. Cold vs warm: an arm's host-cold execution and its next host-warm repeat.
 - Relations (review of lane S1): the manifest's `relations` [{id, type, a, b, title, args}] between two
