@@ -403,6 +403,17 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(self.s["mcp_cold_wall_ms"]["n"], 1)
         self.assertNotIn("mcp_overhead", self.comp["scenarios"]["P-005"])
 
+    def test_answered_case_needs_the_answer_on_record(self):
+        # review N11: an answered / clamped case is verified only by a line that records the service's answer
+        want = {"outcome": "answered"}
+        answered = line("P-1", "mcp", 0, T0, 800.0)
+        self.assertEqual(cmp.match_service(want, [answered], None), (True, "matches"))
+        mark = line("P-1", "mcp", 0, T0, 1.0, outcome="service_by_design", http=None, reached=False)
+        self.assertEqual(cmp.match_service(want, [mark], None)[0], None)
+        self.assertEqual(cmp.match_service({"outcome": "clamped"}, [mark, answered], None)[0], True)
+        refused = line("P-1", "mcp", 0, T0, 1.0, http=400, reached=False, error={"code": "x", "text": "y"})
+        self.assertEqual(cmp.match_service(want, [refused], None)[0], False)
+
     def test_mcp_overhead_skips_a_refusal_at_submit(self):
         # review N2: a refusal at submit recorded as `fail` is no MCP warm execution, nor does it make the
         # direct-local execution after it warm

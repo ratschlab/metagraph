@@ -169,8 +169,19 @@ def match_service(service_answer, lines, run_dir):
                     line.get("repeat"), err.get("code"), outcome)
     if not lines:
         return None, "no MCP execution"
-    verified = any(mcp_error(x, run_dir) is not None for x in lines) or outcome in ("answered", "clamped")
+    if outcome in ("answered", "clamped"):
+        # Verified only when the service's answer is on record (review N11): a line without an error code says
+        # nothing when it never reached the service.
+        verified = any(_service_answered(x) for x in lines)
+        return (True if verified else None), ("matches" if verified else "no answer of the service on record")
+    verified = any(mcp_error(x, run_dir) is not None for x in lines)
     return (True if verified else None), ("matches" if verified else "marked service_by_design by the MCP runner")
+
+
+def _service_answered(line):
+    """Whether an MCP line records the service's answer: a 2xx status, or a backend call (sc.reached_host)."""
+    http = line.get("http")
+    return (isinstance(http, int) and not isinstance(http, bool) and 200 <= http < 300) or sc.reached_host(line)
 
 
 def by_design_class(case, direct_line, mcp_lines, run_dir):

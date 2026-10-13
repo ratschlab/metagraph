@@ -228,7 +228,8 @@ lists the environment overrides.
   with digits ignored, each where stated; the code may also be a pattern slot's) and the MCP executions match
   `service_answer` (`refused_at_submit` / `relayed`: error.code (alternatives written `a | b`),
   `text_contains` and `field` where the MCP line states them, a line without an error only when the MCP
-  runner marked it service_by_design; `answered` / `clamped`: no error). A pair that does not hold is
+  runner marked it service_by_design; `answered` / `clamped`: no error, and verified only by a line that
+  records the service's answer, a 2xx status or a backend call: review N11). A pair that does not hold is
   `disagree` with the side (direct / mcp / table for an unknown case id). With a list of cases the first
   whose pair holds decides. `verified` is true only when every side the case has was checked and held; the
   report counts verified and unverified by-design pairs. The MCP arm's execution lines should carry `error`
