@@ -1028,6 +1028,9 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
 // annotation whose anchors or fork successors beside the graph cannot be loaded. Each file
 // loadable again, the same call loads the index.
 TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
+    // the start-up loader's exits are death tests: in a Release run of the whole binary other
+    // threads exist, and a forked child can lose the loader's log line; re-exec instead
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
     const PairOnDisk pair = write_pair("failed");
     auto config = config_of(pair);
     PatternPreparation none;
