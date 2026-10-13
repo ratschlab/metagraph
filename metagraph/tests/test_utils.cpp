@@ -1206,37 +1206,23 @@ TEST(AsyncActivity, RunBoth) {
 
 TEST(AsyncActivity, RunBothParallel) {
     AsyncActivity async;
+    std::atomic<int> completed = 0;
 
-    std::string result;
-
-    std::thread t1([&](std::string *result) {
-                    async.run_async(
-                        [](std::string *result_) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                            result_->push_back('a');
-                            return true;
-                        }, result);
-                    }, &result);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    async.run_unique([](std::string *result_) { result_->push_back('b'); }, &result);
-    ASSERT_EQ(2u, result.size()) << result;
-    EXPECT_EQ('b', result.back()) << result;
-
-    std::thread t2([&](std::string *result) {
-                    async.run_async(
-                        [](std::string *result_) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                            result_->push_back('a');
-                            return true;
-                        }, result);
-                    }, &result);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    async.run_unique([](std::string *result_) { result_->push_back('c'); }, &result);
-    ASSERT_EQ(4u, result.size()) << result;
-    EXPECT_EQ('c', result.back()) << result;
-
-    t1.join();
-    t2.join();
+    for (int i = 1; i <= 2; ++i) {
+        std::promise<void> started;
+        std::thread worker([&]() {
+            async.run_async([&]() {
+                started.set_value();
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                return ++completed;
+            });
+        });
+        // Wait until run_async has registered the job, regardless of scheduling.
+        started.get_future().wait();
+        int observed = async.run_unique([&]() { return completed.load(); });
+        worker.join();
+        EXPECT_EQ(i, observed);
+    }
 }
 
 TEST(Misc, SplitString) {
