@@ -8,6 +8,7 @@ RunSuiteOverSsh runs the ssh path through tests/fake_ssh.py: the per-invocation 
 import json
 import os
 import platform
+import re
 import shlex
 import signal
 import subprocess
@@ -82,7 +83,10 @@ class SuiteCase(unittest.TestCase):
         env.update({"SUITE_MCP_CMD": "", "SUITE_RUNS": self.runs, "SUITE_REMOTE_BASE": host.base, "SUITE_LOCAL_BASE": host.base,
                     "SUITE_MEX": "local:" + self.mex, "SUITE_MEX_PY": sys.executable, "PYTHON": sys.executable,
                     "SUITE_SAMPLER": "0", "SUITE_WAIT_RUNNER_S": "4", "SUITE_POLL_S": "1",
-                    "SUITE_TEST_SECRET": SECRET})
+                    "SUITE_TEST_SECRET": SECRET,
+                    # this test's runners only (they name its fake host), and a stand-in whose command line ends
+                    # in the script: a real run's step on this machine (another base) is not this test's runner
+                    "SUITE_RUNNER_PATTERN": r"[s]cripts/run_direct\.py( .*--base %s|$)" % re.escape(host.base)})
         env.update(extra)
         return env
 

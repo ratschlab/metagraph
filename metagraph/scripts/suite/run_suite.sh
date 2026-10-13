@@ -46,7 +46,8 @@
 # SUITE_REMOTE_BASE (the public refseq33m-experimental URL), SUITE_RUNS, PYTHON (python3), SUITE_POLL_S (15),
 # SUITE_SAMPLER (1; 0: no mex sampler besides direct-local's own in sequential mode), SUITE_WAIT_RUNNER_S
 # (150), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
-# macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat interval).
+# macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat interval),
+# SUITE_RUNNER_PATTERN (the pgrep pattern of the mex runners; the offline tests narrow it to their own).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,7 +79,9 @@ fi
 ASYNC_MCP_CMD="/Users/raetsch/git/services/metagraph-search-service/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue --queue-ignore sra-logan-chunks --checks-dir $(printf '%q' "$HERE")"
 DEFAULT_MCP_CMD="${SUITE_MCP_CMD-$ASYNC_MCP_CMD}"
 # The mex runners of the suite, as pgrep / pkill patterns ([s] keeps the pattern from matching its own shell).
-RUNNER_PATTERN='[s]cripts/run_direct\.py'
+# SUITE_RUNNER_PATTERN narrows it for the offline tests, whose "mex" is this machine: there a real run's ssh step
+# (its command line holds scripts/run_direct.py) would otherwise read as a runner of the test's own.
+RUNNER_PATTERN="${SUITE_RUNNER_PATTERN:-[s]cripts/run_direct\.py}"
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
 log() { printf '[run_suite %s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }

@@ -25,6 +25,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 K = 31
@@ -337,6 +338,11 @@ def _time_limited(ans: dict) -> str:
             continue
         if (r.get("resource_stop") or {}).get("resource") == "time":
             return "seed %d stopped by its time budget" % i
+        # the attempt's duration bound: the seeds' time budgets plus an allowance (SPEC §6.8)
+        if (r.get("resource_stop") or {}).get("resource") == "attempt_deadline":
+            return "seed %d stopped by its attempt's duration bound" % i
+        if "arms" not in r and _AT_BOUND_RE.fullmatch(_seed_error_text(r) or ""):
+            return "seed %d: the attempt reached its duration bound (AttemptAtBound)" % i
         for side, armo in (r.get("arms") or {}).items():
             if (armo.get("cap_trigger") or {}).get("reason") == "time_budget":
                 return "seed %d %s arm stopped by time_budget" % (i, side)
@@ -354,7 +360,7 @@ def check_deterministic(sc, ans, a, arm, previous=None):
     previous = [p.get("digest") if isinstance(p, dict) else p for p in previous]
     diff = [p for p in previous if p != d]
     if diff and _time_limited(ans):
-        bad = _time_limitation_problem(sc, ans)
+        bad = _time_limitation_problem(sc, ans, arm)
         if bad:
             return FAIL, "digest %s differs from %d earlier repeat(s); its time limitation cannot have happened: %s" % (
                 d[:16], len(diff), bad)
@@ -686,9 +692,10 @@ def _arm_stop_problem(sc: dict, ans: dict, r: dict, i: int, side: str) -> Option
     arm_limitations: the trigger's observed is what the cap compared), the arm's counters must stand at the cap
     (max_output_bp: the arm's output_bp; max_steps: the seed's steps; within the at most 4 successors a head
     follows), a time stop at or after the budget (walker.cpp time_exceeded), resource_limit with the seed's
-    resource_stop. Not judged where the answer lacks the field (a graphlet: no limitations or counters)."""
-    if isinstance(r.get("graphlet"), str):
-        return None   # a graphlet (the MCP's export) states no limitations, counters or stop records in JSON
+    resource_stop. Judged on every answer shape: a graphlet result (`detail: graphlet`, and the MCP's export) carries
+    its arms' cap_trigger, limitations and counters as JSON beside the MGT text (traverse.cpp arm_certificate_json:
+    every detail level), so only a quantity the answer lacks is not judged (a missing limitations list, counter or
+    timing)."""
     armo = (r.get("arms") or {}).get(side) or {}
     trig = (armo.get("cap_trigger") or {}).get("reason")
     if trig not in _RESOURCE_ENDS:
@@ -740,6 +747,57 @@ def _arm_stop_problem(sc: dict, ans: dict, r: dict, i: int, side: str) -> Option
     return None
 
 
+def _resource_end_problem(r: dict, armo: dict, side: str, reasons: Iterable[str]) -> Optional[str]:
+    """Why a path of arm |side| that ended by the resource reason(s) |reasons| cannot have been ended by them, or
+    None. A resource reason ends a path only on an arm a cap left short of its radius (SPEC-labeled-traversal-core
+    §6.7, §7.0: `truncated`, or `pruned` by a beam, with `cap_trigger` naming the cap), and the path's reason is the
+    cap in cap_trigger or a later cap that ended walks after it, which the arm's walk_domain limitations name (§7.0
+    table: "the cap in cap_trigger, then any other cap that ended walks after it")."""
+    reasons = set(reasons) & _RESOURCE_ENDS
+    if not reasons:
+        return None
+    named = "/".join(sorted(reasons))
+    status = armo.get("status")
+    trig = (armo.get("cap_trigger") or {}).get("reason")
+    if status not in ("truncated", "pruned"):
+        return "%s: a path ended by %s on an arm %s" % (side, named, status or "without a status")
+    if trig not in _RESOURCE_ENDS:
+        return "%s: a path ended by %s on a %s arm without a resource cap trigger (cap_trigger %r)" % (
+            side, named, status, trig)
+    if trig in reasons:
+        return None
+    lims = armo.get("limitations")
+    if not isinstance(lims, list):
+        return None   # the arm states no limitations: a later cap cannot be told from a wrong reason
+    knobs = {x.get("knob") for x in lims if isinstance(x, dict) and x.get("kind") == "walk_domain"}
+    rs = r.get("resource_stop") if isinstance(r.get("resource_stop"), dict) else {}
+    for reason in reasons:
+        knob = _RESOURCE_KNOBS.get(rs.get("resource")) if reason == "resource_limit" else _CAP_KNOBS.get(reason)
+        if knob and knob in knobs:
+            return None
+    return "%s: a path ended by %s, but the arm's cap trigger is %s and no walk_domain limitation names a later cap" % (
+        side, named, trig)
+
+
+def _path_resource_problems(sc: dict, r: dict, i: int) -> List[str]:
+    """_resource_end_problem for every path of the requested arms of seed result |r| (its path_reason and the label
+    end reasons it counts: a resource reason censors the path's labels with the same reason, §7.0)."""
+    probs: List[str] = []
+    for side in _arms_of(sc, i):
+        armo = (r.get("arms") or {}).get(side)
+        if not isinstance(armo, dict):
+            continue
+        seen = set()
+        for p in armo.get("paths") or []:
+            ends = ({p.get("path_reason")} | set(p.get("end_reasons") or {})) & _RESOURCE_ENDS
+            if ends and frozenset(ends) not in seen:
+                seen.add(frozenset(ends))
+                m = _resource_end_problem(r, armo, side, ends)
+                if m:
+                    probs.append("seed %d %s (path %s)" % (i, m, p.get("id")))
+    return probs
+
+
 def _traverse_reason_problems(sc: dict, ans: dict) -> List[str]:
     """Every requested arm's stated cap trigger that cannot have happened (_arm_stop_problem), over the walked seeds."""
     probs: List[str] = []
@@ -765,10 +823,11 @@ def time_limited(ans: dict) -> str:
     return _time_limited(ans)
 
 
-def _time_limitation_problem(sc: dict, ans: dict) -> Optional[str]:
+def _time_limitation_problem(sc: dict, ans: dict, arm: Optional[str] = None) -> Optional[str]:
     """Why an answer's stated time limitation cannot have happened, or None: a /pattern time stop or limitation
     before its work time, a /resolve stop before its budget less the reserve, a /traverse time stop before its
-    budget."""
+    budget, an attempt-bound stop before its bound (_attempt_stops; AttemptAtBound in a 200 seed result only on the
+    MCP arm, which relays the host's 503 so)."""
     body = ans.get("body")
     if not isinstance(body, dict):
         return None
@@ -782,6 +841,11 @@ def _time_limitation_problem(sc: dict, ans: dict) -> Optional[str]:
         return _resolve_stop_problem(sc, body)
     if route == "POST /traverse":
         probs = [m for m in _traverse_reason_problems(sc, ans) if "time_budget" in m]
+        probs += [p for _, p in _attempt_stops(sc, ans, "mcp").values() if p]
+        if arm not in (None, "mcp"):
+            probs += ["seed %d states the host's AttemptAtBound in a 200 (a direct arm receives it as a 503)" % i
+                      for i, r in enumerate(body.get("results") or [])
+                      if isinstance(r, dict) and "arms" not in r and _AT_BOUND_RE.fullmatch(_seed_error_text(r) or "")]
         return probs[0] if probs else None
     return None
 
@@ -1920,7 +1984,7 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
     far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation),
     splits (non-empty when a segment ends in a split), branch_events (the V records), and paths (one per leaf,
     the chain through parents[0], length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf
-    with to_bp = the path length, path_reason from T)."""
+    with to_bp = the path length, path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
     arms: Dict[str, dict] = {}
     cur = None
     seg = None
@@ -1933,6 +1997,20 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             side = "left" if f[1] == "l" else "right"
             cur = {"status": {"c": "complete", "t": "truncated", "p": "pruned"}.get(f[2], f[2]),
                    "segments": [], "splits": [], "branch_events": [], "paths": [], "_runs": [], "_leaves": {}}
+            # the arm's counters (name=value,...) and cap trigger (reason,at_bp,segment,live_paths,live_labels,
+            # exact,demand, or *) of SPEC §7.5's A record; a result's JSON arm states them too and is preferred
+            if len(f) > 11:
+                cnt = {}
+                for kv in f[10].split(","):
+                    name, _, val = kv.partition("=")
+                    if name and val.lstrip("-").isdigit():
+                        cnt[name] = int(val)
+                if cnt:
+                    cur["counters"] = cnt
+                if f[11] != "*":
+                    c = f[11].split(",")
+                    cur["cap_trigger"] = {"reason": _END_CODES.get(c[0], c[0]),
+                                          "at_bp": int(c[1]) if len(c) > 1 and c[1].isdigit() else None}
             arms[side] = cur
             cur["_side"] = side
             seg = None
@@ -1996,7 +2074,10 @@ def _result(ans: dict, i: int) -> dict:
         arms = {}
         for side, a in parsed.items():
             merged = dict((r.get("arms") or {}).get(side) or {})
-            merged.update(a)
+            for key, value in a.items():
+                if key in ("counters", "cap_trigger") and key in merged:
+                    continue   # the JSON arm's own statement (exact types) over the MGT's copy
+                merged[key] = value
             arms[side] = merged
         r["arms"] = arms
     return r
@@ -2147,9 +2228,14 @@ def check_walk_in_record(sc, ans, a, arm):
             if len(f) == best:
                 ends |= {p.get("path_reason")} | set(p.get("end_reasons") or {})
         ends.discard(None)
+        # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
+        unstopped = _resource_end_problem(r, armo, side, ends)
         if ends & _STATED_STRUCTURAL_ENDS and exact is None:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
                 side, best, sorted(ends & _STATED_STRUCTURAL_ENDS)[0], expected))
+        elif unstopped:
+            probs.append("a stated stop that cannot have happened: %s, the record followed for %d of %d bp" % (
+                unstopped, best, expected))
         elif ends & _RESOURCE_ENDS or (armo.get("status") == "truncated" and trig in _RESOURCE_ENDS):
             stopped.append("%s: the record followed for %d of %d bp, stopped by %s" % (
                 side, best, expected, sorted(ends & _RESOURCE_ENDS)[0] if ends & _RESOURCE_ENDS else trig))
@@ -2305,7 +2391,8 @@ def check_walk_end(sc, ans, a, arm):
                 len(f) < want and (p.get("path_reason") in _RESOURCE_ENDS or set(p.get("end_reasons") or {}) & _RESOURCE_ENDS)
                 for p, f in fl):
             trig = armo.get("cap_trigger") or {}
-            bad = _arm_stop_problem(sc, ans, r, i, side)
+            bad = next((m for m in (_resource_end_problem(r, armo, side, {p.get("path_reason")} | set(
+                p.get("end_reasons") or {})) for p, _ in fl) if m), None) or _arm_stop_problem(sc, ans, r, i, side)
             if bad:
                 return FAIL, "not reached: a stated stop that cannot have happened: %s" % bad
             return INCONCLUSIVE, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
@@ -2448,6 +2535,8 @@ def _traverse_invariants(sc, ans, a, arm):
                         break
                 if maxbp and p.get("length_bp", 0) > maxbp:
                     probs.append("result %d %s path %s: %s bp above max_extension_bp %s" % (i, side, p.get("id"), p.get("length_bp"), maxbp))
+        # a path ended by a resource reason lies on an arm that cap stopped (§7.0)
+        probs += _path_resource_problems(sc, r, i)
     probs += _traverse_reason_problems(sc, ans)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
 
@@ -2766,6 +2855,10 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
 }
 
 
+# the checks of one seed of a /traverse answer (their `seed` argument)
+_SEED_CHECKS = frozenset(n for n, (req, opt) in CHECK_ARGS.items() if "seed" in req + opt)
+
+
 def validate_expectation(exp: dict) -> List[str]:
     """What is wrong with one expectation: an unknown check, a missing or unknown argument, or an argument set
     that asserts nothing (a count_relation without a value, a minimum of at least 1, a maximum or a relation that
@@ -2787,25 +2880,106 @@ def validate_expectation(exp: dict) -> List[str]:
     return probs
 
 
-# The host's refusal of an attempt that reached its duration bound (traverse_attempts.cpp's AttemptAtBound; the
-# MCP arm carries it as the seed result's error, since the service always walks inside an attempt): a stop the host
-# states and enforces itself, after which nothing of the walk is delivered, so no traversal property can be tested.
-_ATTEMPT_BOUND_TEXT = "the attempt reached the duration bound the server enforces for it"
+# The host's statements that an attempt's duration bound stopped a seed (SPEC-labeled-traversal-core §6.8): a stop the
+# host states and enforces itself, after which nothing of that seed is delivered, so no traversal property of that
+# seed can be tested. Each is matched in full, in the wording the deployed host serves and in the current source's
+# (which adds the in_ram load term), never as a substring: the MCP tool's own hint ("the attempt reached the duration
+# bound the server enforces for it; a retry needs a new attempt_id") is no host statement.
+# AttemptAtBound (src/cli/traverse_attempts.cpp Attempt::check_delivery): the bound reached while the response was
+# built or written; the host answers the request 503 `deadline` (server.cpp), which the MCP service relays as the
+# seed result's error. Accepted on the MCP arm only: a direct arm receives the 503 itself, so a 200 seed result
+# stating it is not the host's answer.
+_AT_BOUND_RE = re.compile(
+    r"the attempt reached the duration bound the server enforces for it \((\d+) ms: the "
+    r"(?:in_ram load \(if any\) plus the )?seeds' time budgets plus the server's allowance, at most hard_cap_ms, the "
+    r"content timeout less one second; see usage\.bound\) while its response was built or written: nothing of it "
+    r"is delivered")
+# attempt_deadline (src/cli/traverse.cpp external_cause and not_started_seed_to_json, src/graph/traversal/walker.cpp
+# seed_external_stop): the attempt's walk-until (its bound less the larger of half the allowance and the delivery
+# reserve) passed before the seed began or in its seed phase; the host answers 200 with the seed failed
+# (resource_stop attempt_deadline). Any arm.
+_WALK_UNTIL_CAUSE = (r"the attempt reached the time at which the server stops walking it \(the duration bound it "
+                     r"enforces, (?:in_ram load \+ seeds' time budgets \+ allowance|the seeds' time budgets plus its "
+                     r"allowance) \(at most hard_cap_ms\), less the larger of half the allowance and the delivery "
+                     r"reserve, kept for the delivery; see usage\.bound\.walk_until_ms\)")
+_NOT_STARTED_RE = re.compile(r"not started: " + _WALK_UNTIL_CAUSE + r" before this seed began, (\d+) ms after the "
+                             r"request was received; no budget of the request ran out: a new attempt can traverse it")
+_SEED_PHASE_STOP_RE = re.compile(
+    r"the attempt reached the time at which the server stops walking it \(its duration bound less the larger of "
+    r"half the allowance and the delivery reserve; see usage\.bound\.walk_until_ms\) while the seed was "
+    r"(?:read to derive its permitted set|validated against its labels), (\d+) ms after the request was received: "
+    r"no traversal was made")
 
 
-def _attempt_bound_stop(scenario: dict, answer: dict) -> Optional[str]:
-    """The host's attempt-bound text when a /traverse answer's seed result states it, else None."""
+def _seed_error_text(r: Any) -> Optional[str]:
+    err = r.get("error") if isinstance(r, dict) else None
+    if isinstance(err, dict):
+        err = err.get("text")
+    return err if isinstance(err, str) else None
+
+
+def _attempt_stops(scenario: dict, answer: dict, arm: str, client: Optional[dict] = None
+                   ) -> Dict[int, Tuple[str, Optional[str]]]:
+    """{seed index: (the host's statement, why it cannot have happened or None)} for the seed results of a /traverse
+    200 that state that the attempt's bound stopped them (above). The stated bound must have been reached where the
+    answer states the attempt's elapsed time: AttemptAtBound's bound against usage.elapsed_ms and the client's wall
+    time (`client`: the runner's, which spans the host's work; the MCP runner passes the service's backend time); a
+    walk-until stop at or after usage.bound.walk_until_ms where the answer states it, with its resource_stop (where
+    stated) naming attempt_deadline and the seed failed."""
+    out: Dict[int, Tuple[str, Optional[str]]] = {}
     if not str(scenario.get("route", "")).endswith("/traverse") or answer.get("http") != 200:
-        return None
+        return out
     body = answer.get("body")
     if not isinstance(body, dict):
-        return None
-    for r in body.get("results") or []:
-        err = r.get("error") if isinstance(r, dict) else None
-        text = err if isinstance(err, str) else (err or {}).get("text") if isinstance(err, dict) else None
-        if text and _ATTEMPT_BOUND_TEXT in text:
-            return text
-    return None
+        return out
+    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+    bound_block = usage.get("bound") if isinstance(usage.get("bound"), dict) else {}
+    for i, r in enumerate(body.get("results") or []):
+        text = _seed_error_text(r)
+        if not text or "arms" in r:
+            continue
+        m = _AT_BOUND_RE.fullmatch(text)
+        if m:
+            if arm != "mcp":
+                continue
+            bound = float(m.group(1))
+            seen = [("usage.elapsed_ms", _number(usage.get("elapsed_ms"))),
+                    ("the client's wall time", _number((client or {}).get("wall_ms")))]
+            early = [(what, v) for what, v in seen if v is not None and v < bound - 1.0]
+            out[i] = (text, "seed %d: the attempt's bound of %.0f ms stated as reached after %.0f ms (%s)" % (
+                i, bound, early[0][1], early[0][0]) if early else None)
+            continue
+        m = _NOT_STARTED_RE.fullmatch(text) or _SEED_PHASE_STOP_RE.fullmatch(text)
+        if not m:
+            continue
+        used = float(m.group(1))
+        rs = r.get("resource_stop") if isinstance(r.get("resource_stop"), dict) else None
+        walks = (r.get("outcome") or {}).get("walks") if isinstance(r.get("outcome"), dict) else None
+        until = _number(bound_block.get("walk_until_ms"))
+        problem = None
+        if rs is not None and rs.get("resource") != "attempt_deadline":
+            problem = "seed %d: stopped by the attempt's walk-until, but its resource_stop names %r" % (
+                i, rs.get("resource"))
+        elif walks is not None and walks != "failed":
+            problem = "seed %d: stopped by the attempt's walk-until before any traversal, but outcome.walks %r" % (
+                i, walks)
+        elif until is not None and used < until - 1.0:
+            problem = "seed %d: stopped by the attempt's walk-until %.0f ms after the request was received, before " \
+                      "usage.bound.walk_until_ms %.0f" % (i, used, until)
+        out[i] = (text, problem)
+    return out
+
+
+def _with_stopped_seeds_failed(answer: dict, stops: Dict[int, Tuple[str, Optional[str]]]) -> dict:
+    """|answer| with each stopped seed's result in the shape of a failed seed (an outcome, no arms), so that the checks
+    of the whole answer judge the other seeds and pass over these."""
+    body = dict(answer["body"])
+    res = list(body.get("results") or [])
+    for i in stops:
+        if isinstance(res[i], dict) and "outcome" not in res[i]:
+            res[i] = dict(res[i], outcome={"walks": "failed"})
+    body["results"] = res
+    return dict(answer, body=body)
 
 
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[Any]] = None,
@@ -2823,6 +2997,11 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
         if exp.get("check") == "status":
             w = exp.get("args", {}).get("http", 200)
             allowed = w if isinstance(w, list) else [w]
+    # the seeds the attempt's duration bound stopped (_attempt_stops): their own checks are inconclusive (or fail
+    # when the stated bound cannot have been reached), the other seeds keep theirs
+    stops = _attempt_stops(scenario, answer, arm, client)
+    stopped_view = _with_stopped_seeds_failed(answer, stops) if stops else answer
+    stop_problems = [p for _, p in stops.values() if p]
     for exp in scenario.get("expect", []):
         name = exp.get("check")
         args = exp.get("args", {})
@@ -2847,19 +3026,32 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
                                 http, ((answer.get("error") or {}).get("text") or "")[:200]),
                             "property": is_property(name)})
             continue
-        bound_text = _attempt_bound_stop(scenario, answer)
-        if bound_text and name not in ("status", "deterministic", "budget_respected"):
-            out.append({"check": name, "outcome": INCONCLUSIVE,
-                        "detail": "not testable: the attempt reached its duration bound (stated by the host: %s)" % bound_text[:160],
-                        "property": is_property(name)})
-            continue
+        judged = answer
+        if stops and name not in ("status", "deterministic"):
+            seed = args.get("seed", 0)
+            if name in _SEED_CHECKS and seed in stops:
+                text, problem = stops[seed]
+                if problem:
+                    out.append({"check": name, "outcome": FAIL, "property": is_property(name),
+                                "detail": "a stated attempt-bound stop that cannot have happened: %s" % problem})
+                else:
+                    out.append({"check": name, "outcome": INCONCLUSIVE, "property": is_property(name),
+                                "detail": "not testable: seed %d stopped by its attempt's duration bound (stated by "
+                                          "the host: %s)" % (seed, text[:160])})
+                continue
+            if name not in _SEED_CHECKS:
+                judged = stopped_view
         try:
             if name == "deterministic":
                 outcome, detail = fn(scenario, answer, args, arm, previous=previous)
             elif name == "budget_respected":
-                outcome, detail = fn(scenario, answer, args, arm, client=client)
+                outcome, detail = fn(scenario, judged, args, arm, client=client)
             else:
-                outcome, detail = fn(scenario, answer, args, arm)
+                outcome, detail = fn(scenario, judged, args, arm)
+            if name == "invariants" and stop_problems:
+                outcome = FAIL
+                detail = "a stated attempt-bound stop that cannot have happened: %s; %s" % (
+                    "; ".join(stop_problems), detail)
         except Missing as m:
             outcome = NOT_EXPOSED if arm == "mcp" else FAIL
             detail = "field not in the answer: %s" % m

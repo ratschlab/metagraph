@@ -36,6 +36,44 @@ def outcome(sc, ans, check, _arm="direct-local", previous=None, **args):
     return res[1]["outcome"], res[1]["detail"]
 
 
+_REASON_CODE = dict((v, k) for k, v in checks._END_CODES.items())
+
+
+def mcp_shaped(answer, json_arms=True):
+    """A `detail: full` /traverse answer in the shape the MCP's export (and `detail: graphlet`) gives: each result's
+    segments and paths as an MGT graphlet (SPEC-labeled-traversal-core §7.5: A, G, T and R records), the arms' other
+    fields (status, cap_trigger, limitations, counters, ...) as JSON beside it (none with json_arms False)."""
+    out = copy.deepcopy(answer)
+    for r in out["body"]["results"]:
+        if "arms" not in r:
+            continue
+        lines = ["H mgt 1 31 basic"]
+        for side, arm in r["arms"].items():
+            trig = arm.get("cap_trigger")
+            cap = "%s,%s,0,1,1,1,0" % (_REASON_CODE[trig["reason"]], trig.get("at_bp", 0)) if trig else "*"
+            counters = ",".join("%s=%s" % kv for kv in (arm.get("counters") or {}).items()) or "steps=0"
+            lines.append("A %s %s %s u 1 1 1 0 0 %s %s 0 * %d 0 %d 0 0 0" % (
+                side[0], arm["status"][0], arm.get("complete_to_bp", 0), counters, cap, len(arm["segments"]),
+                len(arm["paths"])))
+            leaves = dict((p["segments"][-1], p) for p in arm["paths"])
+            for seg in arm["segments"]:
+                parents = ",".join(str(x) for x in seg["parents"]) or "*"
+                bases = seg["sequence"] if side == "right" else seg["sequence"][::-1]
+                lines.append("G %s %d %d * * * * * * %s" % (parents, seg["from_bp"], seg["length_bp"], bases or "."))
+                p = leaves.get(seg["id"])
+                if p is not None:
+                    lines.append("T %s" % (_REASON_CODE.get(p.get("path_reason"), "*")))
+                    for reason in p.get("end_reasons") or {}:
+                        lines.append("R %d 0 0 %d %s" % (seg["id"], p["length_bp"], _REASON_CODE[reason]))
+            if json_arms:
+                for key in ("segments", "paths", "splits", "branch_events"):
+                    arm.pop(key, None)
+        r["graphlet"] = "\n".join(lines) + "\n"
+        if not json_arms:
+            del r["arms"]
+    return out
+
+
 # the NDM-F primer context of the fixtures: the k-mer, its offset and one of its placed records
 NDM_KMER = "CCAACGGTTTGGCGATCTGGTTTTCCGCCAG"
 NDM_F = "GGTTTGGCGATCTGGTTTTC"
@@ -968,6 +1006,92 @@ class StatedReasons(unittest.TestCase):
                              wd("bounds.time_budget_ms", 60000, 60300.0), timing=late,
                              resource_stop={"resource": "time", "used": 60300.0})
         self.assertEqual(outcome(sc, a, "walk_end", arm="right", reasons_in=["dead_end"])[0], "inconclusive")
+
+    def test_mcp_shaped_stops(self):
+        # G1 of the verification of lane S3: a graphlet result (the MCP's export, and `detail: graphlet`) carries its
+        # arms' cap_trigger, limitations and counters as JSON beside the MGT text; they are judged there too
+        sc = v2_scenarios()["T-walk-0002"]
+        wd = lambda knob, limit, observed: {"kind": "walk_domain", "knob": knob, "limit": limit,  # noqa: E731
+                                            "observed": observed}
+        # the 500-of-500,000 bp walk "truncated by max_output_bp", with and without the walk_domain limitation
+        for lim in (wd("bounds.max_output_bp", 500000, 501), None):
+            full = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500}, lim)
+            mcp = mcp_shaped(full)
+            r = mcp["body"]["results"][0]
+            self.assertIn("graphlet", r)
+            self.assertNotIn("segments", r["arms"]["left"])
+            for arm in ("mcp", "direct-local"):
+                o, d = outcome(sc, mcp, "walk_in_record", _arm=arm, label_scope="record")
+                self.assertEqual(o, "fail", (arm, lim, d))
+                self.assertEqual(outcome(sc, mcp, "invariants", _arm=arm)[0], "fail", (arm, lim))
+        # the same stop where it happened (max_output_bp 500): inconclusive, the invariants pass
+        full = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500},
+                                wd("bounds.max_output_bp", 500, 501), bounds={"max_output_bp": 500})
+        for arm in ("mcp", "direct-local"):
+            self.assertEqual(outcome(sc, mcp_shaped(full), "walk_in_record", _arm=arm, label_scope="record")[0],
+                             "inconclusive", arm)
+            self.assertEqual(outcome(sc, mcp_shaped(full), "invariants", _arm=arm)[0], "pass", arm)
+        # a time stop 2 s into a 15 s budget in MCP shape (E4): walk_in_record fails, not only budget_respected
+        early = {"elapsed_ms": 2000.0, "seed_phase_ms": 500.0, "deadline": {
+            "longest_piece": {"kind": "read", "ms": 100.0, "rows": 1}, "stopped_by": "time_budget",
+            "stop_after_deadline_ms": 0.0}}
+        full = self.walk_answer(sc, 500, "time_budget", {"output_bp": 500, "steps": 500},
+                                wd("bounds.time_budget_ms", 15000, 2000.0), timing=early,
+                                resource_stop={"resource": "time", "used": 2000.0})
+        o, d = outcome(sc, mcp_shaped(full), "walk_in_record", _arm="mcp", label_scope="record")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("before the 15000 ms budget", d)
+        # the MGT's own A record states the cap trigger where the JSON arm does not
+        bare = mcp_shaped(full, json_arms=False)
+        arms = checks.graphlet_arms(bare["body"]["results"][0]["graphlet"])
+        self.assertEqual(arms["left"]["cap_trigger"]["reason"], "time_budget")
+        self.assertEqual(arms["left"]["counters"]["output_bp"], 500)
+
+    def test_resource_end_needs_a_cap_trigger(self):
+        # G2 of the verification of lane S3: a path ended by a resource reason lies on an arm that cap stopped
+        sc = v2_scenarios()["T-walk-0002"]
+        wd = lambda knob, limit, observed: {"kind": "walk_domain", "knob": knob, "limit": limit,  # noqa: E731
+                                            "observed": observed}
+        # E7: a path ended by max_steps at 500 bp on an arm `complete` without a cap trigger
+        a = self.walk_answer(sc, 500, "max_steps", {"output_bp": 500, "steps": 500}, None)
+        arm = a["body"]["results"][0]["arms"]["left"]
+        arm["status"], arm["complete_to_bp"] = "complete", 1000
+        del arm["cap_trigger"]
+        a["body"]["results"][0]["outcome"]["walks"] = "complete"
+        for shape in (a, mcp_shaped(a)):
+            o, d = outcome(sc, shape, "walk_in_record", label_scope="record")
+            self.assertEqual(o, "fail", d)
+            self.assertIn("a path ended by max_steps on an arm complete", d)
+            o, d = outcome(sc, shape, "invariants")
+            self.assertEqual(o, "fail", d)
+        # truncated, but with no cap trigger
+        arm["status"], arm["complete_to_bp"] = "truncated", 500
+        a["body"]["results"][0]["outcome"]["walks"] = "partial"
+        o, d = outcome(sc, a, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("without a resource cap trigger", d)
+        # a path ended by max_output_bp on an arm whose cap trigger is time_budget: only as a later cap that the
+        # arm's walk_domain limitations name (SPEC §7.0)
+        late = {"elapsed_ms": 15301.0, "seed_phase_ms": 500.0, "deadline": {
+            "longest_piece": {"kind": "read", "ms": 100.0, "rows": 1}, "stopped_by": "time_budget",
+            "stop_after_deadline_ms": 300.0}}
+        a = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500},
+                             wd("bounds.time_budget_ms", 15000, 15300.0), timing=late,
+                             resource_stop={"resource": "time", "used": 15300.0}, bounds={"max_output_bp": 500})
+        a["body"]["results"][0]["arms"]["left"]["cap_trigger"]["reason"] = "time_budget"
+        o, d = outcome(sc, a, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("no walk_domain limitation names a later cap", d)
+        a["body"]["results"][0]["arms"]["left"]["limitations"].append(wd("bounds.max_output_bp", 500, 501))
+        self.assertEqual(outcome(sc, a, "walk_in_record", label_scope="record")[0], "inconclusive")
+        self.assertEqual(outcome(sc, a, "invariants")[0], "pass")
+        # walk_end: a resource end on an arm without a cap trigger fails
+        sc = v2_scenarios()["T-end-0001"]
+        a = self.walk_answer(sc, 30, "max_steps", {"output_bp": 30, "steps": 30}, None)
+        del a["body"]["results"][0]["arms"]["right"]["cap_trigger"]
+        o, d = outcome(sc, a, "walk_end", arm="right", reasons_in=["dead_end"])
+        self.assertEqual(o, "fail", d)
+        self.assertIn("without a resource cap trigger", d)
 
     def test_every_stored_pattern_answer_states_possible_reasons(self):
         # the fixtures (real answers of the mini index) state only reasons that happened

@@ -563,7 +563,10 @@ S3 changed, beside the sections above:
 A check that cannot test its property because the answer states a hiding (a withheld list, a cut), a stop or a
 time limitation accepts that statement only once the answer shows it can have happened; otherwise the check FAILS
 (and so do the route's invariants), it is never inconclusive. Not judged where the answer lacks the quantity (a
-missing cap, `work`, `timing`, a graphlet's limitations): then the statement is taken as stated.
+missing cap, `work`, `timing`, an arm's `limitations` or `counters`): then the statement is taken as stated. A
+graphlet result (`detail: graphlet`, and the MCP's export) carries its arms' cap_trigger, limitations and counters
+as JSON beside the MGT text, and is judged like a full one (lane S4, G1 of the verification of lane S3; the MGT's
+A record gives the cap trigger and counters where a result has no JSON arm).
 
 - /pattern, `withheld.reason` (SPEC-pattern-search §7.5): `count_above_threshold` the primary count (contexts; for
   L > k paths, supported_paths) exact, or bounds with its upper bound, above max_contexts (max_paths); a lower
@@ -601,6 +604,27 @@ missing cap, `work`, `timing`, a graphlet's limitations): then the statement is 
   (time: at or after it); max_output_bp the arm's `counters.output_bp`, max_steps the seed's steps within the at
   most 4 successors a head follows of the cap (walker.cpp cap_check); max_paths the arm's paths and live paths
   within that of max_paths; time_budget a stop at or after the budget (as budget_respected reads it).
+- /traverse, a path's resource end (lane S4, G2 of the verification of lane S3; SPEC-labeled-traversal-core §7.0): a
+  path whose `path_reason` or label end reasons name a resource reason lies on an arm the cap left short of its
+  radius (`truncated`, or `pruned` by a beam) whose `cap_trigger` names a resource reason, and the path's reason is
+  that trigger's or a later cap's that the arm's walk_domain limitations name ("the cap in cap_trigger, then any
+  other cap that ended walks after it"); otherwise walk_in_record and walk_end fail, and so do the invariants.
+- /traverse, the attempt's duration bound (SPEC §6.8; lane S3's rule of 6f945db4, narrowed by lane S4 after the
+  verification of lane S3, C1-C4): a seed result whose `error` is, in full, the host's statement that the attempt's
+  bound stopped it is a stated stop of THAT seed: its own checks (those with a `seed` argument) are inconclusive,
+  the other seeds keep theirs, and the checks of the whole answer (invariants, budget_respected) judge the others
+  and pass over it. The statements, matched in full in the deployed host's wording and the current source's (which
+  adds the in_ram load term), never as a substring (the MCP tool's hint "the attempt reached the duration bound the
+  server enforces for it; a retry needs a new attempt_id" is none): AttemptAtBound (traverse_attempts.cpp: the
+  bound reached while the response was built or written, a 503 `deadline` that the MCP service relays as the seed's
+  error), on the MCP arm only, since a direct arm receives the 503 itself; and the attempt's walk-until before the
+  seed began or in its seed phase (traverse.cpp not_started_seed_to_json, walker.cpp seed_external_stop: a 200 with
+  the seed failed), on any arm. The stated bound must have been reached where the answer states the attempt's
+  elapsed time: AttemptAtBound's bound against `usage.elapsed_ms` and the client's wall time (`client`; the MCP
+  runner passes the service's backend time), a walk-until stop at or after `usage.bound.walk_until_ms`, with a
+  resource_stop (where stated) of `attempt_deadline` and the seed failed; else the seed's checks and the
+  invariants fail. Both make the answer time-limited for `deterministic`. tests/test_smoke_v3_fixes.py rebuilds the
+  texts from the C++ string literals, so a change of the host's wording fails a test.
 - The checks that accept a stated reason: contains_source_context, source_label, source_placement, path_spells,
   path_record_verified, source_absent, path_absent, predicate_selected (a hiding), count_relation (a budget stop),
   low_complexity_note (a budget stop, a time-limited diagnostic), deterministic (a time limitation),
@@ -626,3 +650,23 @@ P-exact-0001 (the MCP's property exposure), X-peptide10-0009, M-refusal-0012 and
 relation), N-hard-0005, N-hard-0022, N-realrep-0007: in paired mode with all three arms at most 9 + 4 x 11 + 4 = 57
 host requests (the warm repeats of indices 0 and 10 included), fewer where the service refuses at submit
 (R-budget-0001's 10 kb query, T-end-0001's budget above the walk preset's row).
+
+## Lane S4: the last check gaps, and the offline re-evaluation of a recorded run (2026-10-13)
+
+From the Opus verification of lane S3 (VERIFY.md; base 6f945db4):
+- G1: `_arm_stop_problem` no longer exempts a graphlet result: the MCP's export and a direct `detail: graphlet` answer
+  carry their arms' cap_trigger, limitations and counters as JSON beside the MGT text, and a stated cap stop there is
+  judged as on a full answer ("Stated reasons"); `graphlet_arms` also reads the A record's cap trigger and counters
+  for a result without JSON arms. tests/test_checks.py StatedReasons.test_mcp_shaped_stops builds the MCP shape from a
+  full answer (`mcp_shaped`): the "max_output_bp at 500 of 500,000" walk fails on the MCP and on a direct arm, with
+  and without its walk_domain limitation; the same stop under a max_output_bp of 500 stays inconclusive.
+- G2: a path's resource end needs an arm the cap stopped, with a matching cap trigger ("Stated reasons");
+  StatedReasons.test_resource_end_needs_a_cap_trigger (the verifier's E7, a later cap, walk_end).
+- The attempt-bound rule of 6f945db4: per seed, the host's exact wording (both variants), the MCP arm for
+  AttemptAtBound, the stated bound reached ("Stated reasons"; tests/test_smoke_v3_fixes.py AttemptBound, HostWording).
+  The stopped seed's own checks are inconclusive; the invariants judge the other seeds and pass over it (6f945db4
+  made them inconclusive too).
+- Test isolation: run_suite.sh takes its runner pattern from SUITE_RUNNER_PATTERN (default unchanged,
+  `[s]cripts/run_direct\.py`); tests/test_orchestrator.py narrows it to runners naming the test's own fake host (and
+  a stand-in whose command line ends in the script), so a real run's ssh step on this machine, whose command line
+  holds scripts/run_direct.py, no longer reads as the test's runner (the verification's two failures).
