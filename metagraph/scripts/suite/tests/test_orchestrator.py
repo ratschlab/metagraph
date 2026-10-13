@@ -2,7 +2,8 @@
 against the local fake host, the MCP arm through tests/fake_mcp.py. Covered: the paired order and host_cache,
 the MCP command template (environment passed through, never recorded), the request cap and --resume, the lock
 (held, stale, foreign), the refusal next to a running run_direct.py, the stub refusal, the samplers' files,
-Ctrl-C and --resume, the sequential mode, and the runner's refusal of a directory another live runner holds."""
+Ctrl-C and --resume, the sequential mode, and the runner's refusal of a directory another live runner holds.
+RunSuiteOverSsh runs the ssh path through tests/fake_ssh.py: the per-invocation ssh control path."""
 
 import json
 import os
@@ -60,7 +61,9 @@ class LiveRunnerGuard(unittest.TestCase):
                 sleeper.wait()
 
 
-class RunSuiteOffline(unittest.TestCase):
+class SuiteCase(unittest.TestCase):
+    """run_suite.sh with the mex side in a local directory and both direct arms against a local fake host."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.d = self.tmp.name
@@ -96,6 +99,8 @@ class RunSuiteOffline(unittest.TestCase):
     def lock_path(self):
         return os.path.join(self.mex, "suite-dev", "LOCK")
 
+
+class RunSuiteOffline(SuiteCase):
     def test_paired_order_host_cache_and_mcp_template(self):
         make_manifest(self.mpath, mcp_scenarios())
         with FakeHost() as host:
@@ -343,6 +348,73 @@ class RunSuiteOffline(unittest.TestCase):
             p = self.run_suite(host, "--manifest", self.mpath, "--mcp-run", self.d)
             self.assertIn("--sequential", p.stderr)
             self.assertEqual(p.returncode, 2)
+
+
+class RunSuiteOverSsh(SuiteCase):
+    """The ssh path: SUITE_MEX names a host and tests/fake_ssh.py stands in for ssh (the mex side runs in a
+    local directory, its multiplexing as far as the control paths go)."""
+
+    def setUp(self):
+        super(RunSuiteOverSsh, self).setUp()
+        self.bin = os.path.join(self.d, "bin")
+        os.makedirs(self.bin)
+        with open(os.path.join(self.bin, "ssh"), "w") as fh:
+            fh.write("#!/bin/sh\nexec %s %s \"$@\"\n" % (shlex.quote(sys.executable),
+                                                         shlex.quote(os.path.join(HERE, "fake_ssh.py"))))
+        os.chmod(os.path.join(self.bin, "ssh"), 0o755)
+        self.ssh_log = os.path.join(self.d, "ssh.log")
+        self.ctl = os.path.join(self.d, "ctl")
+
+    def env(self, host, **extra):
+        env = super(RunSuiteOverSsh, self).env(host)
+        env.update({"SUITE_MEX": "fake@mex", "PATH": self.bin + os.pathsep + env.get("PATH", ""),
+                    "FAKE_SSH_HOME": self.mex, "FAKE_SSH_LOG": self.ssh_log, "SUITE_SSH_CONTROL_DIR": self.ctl})
+        env.update(extra)
+        return env
+
+    def ssh_calls(self):
+        with open(self.ssh_log) as fh:
+            return [json.loads(x) for x in fh]
+
+    def start_suite(self, host, *args, **env_extra):
+        cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0"] + list(args)
+        return subprocess.Popen(cmd, env=self.env(host, **env_extra), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, universal_newlines=True, stdin=subprocess.DEVNULL)
+
+    def wait_for(self, cond, timeout=60.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline and not cond():
+            time.sleep(0.05)
+        self.assertTrue(cond(), "timed out")
+
+    def test_a_refused_invocation_leaves_the_holders_connection(self):
+        # review N1: the second invocation's cleanup closes its own ssh master only, never the one the
+        # holder's step in flight runs through
+        make_manifest(self.mpath, [scenario("S-01", "S", "POST /slow", {"sleep_s": 4})])
+        with FakeHost() as host:
+            holder = self.start_suite(host, "--manifest", self.mpath, "--warm-every", "0")
+            self.wait_for(lambda: ("POST", "/slow") in host.log)      # the holder's direct-local step runs
+            p = self.run_suite(host, "--manifest", self.mpath, "--warm-every", "0")
+            self.assertEqual(p.returncode, 2, p.stderr)
+            self.assertIn("held by pid %d" % holder.pid, p.stderr)
+            out, err = holder.communicate(timeout=120)
+            self.assertEqual(holder.returncode, 0, err)
+        calls = self.ssh_calls()
+        exits = [c for c in calls if c["op"] == "exit"]
+        self.assertEqual([c["killed"] for c in exits], [[], []])       # no session was cut
+        self.assertNotIn("direct-local: exit", err)                    # the holder's step did not fail
+        own = os.path.join(self.ctl, "%%C-%d" % holder.pid)
+        paths = set(c["control_path"] for c in calls if c["op"] == "run")
+        self.assertIn(own, paths)
+        self.assertEqual(len(paths), 2, paths)                         # one per invocation
+        self.assertEqual(sorted(c["control_path"] for c in exits), sorted(paths))
+        run_dir = out.strip().splitlines()[-1]
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(sorted((r["arm"], r["outcome"]) for r in rows),
+                         [("direct-local", "pass"), ("direct-remote", "pass")])
+        sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+        self.assertEqual(sess["loop"]["state"], "done")
+        self.assertFalse(os.path.exists(self.lock_path()))
 
 
 if __name__ == "__main__":

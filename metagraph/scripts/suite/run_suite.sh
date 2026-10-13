@@ -58,13 +58,16 @@ POLL_S="${SUITE_POLL_S:-15}"
 SAMPLER="${SUITE_SAMPLER:-${SUITE_REMOTE_SAMPLER:-1}}"
 WAIT_RUNNER_S="${SUITE_WAIT_RUNNER_S:-150}"
 CTL_DIR="${SUITE_SSH_CONTROL_DIR:-/tmp/suite-ssh-$(id -u)}"
+# This invocation's own control socket (review N1): a shared one would let another invocation's exit (`-O exit`
+# in its cleanup) end this one's master and with it the ssh step in flight.
+CTL_PATH="$CTL_DIR/%C-$$"
 MEX_LOCAL=""
 if [[ "$MEX" == local:* ]]; then MEX_LOCAL="${MEX#local:}"; fi
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o LogLevel=ERROR)
 if [[ -z "$MEX_LOCAL" ]]; then
-  # One persistent connection for every ssh / rsync of this invocation (closed on exit).
+  # One persistent connection for every ssh / rsync of this invocation, and only of this one (closed on exit).
   mkdir -p "$CTL_DIR" && chmod 700 "$CTL_DIR"
-  SSH_OPTS+=(-o ControlMaster=auto -o "ControlPath=$CTL_DIR/%C" -o ControlPersist=300)
+  SSH_OPTS+=(-o ControlMaster=auto -o "ControlPath=$CTL_PATH" -o ControlPersist=300)
 fi
 # The MCP arm of a full run: the async session's runner (search-service scripts/bench/suite_mcp_runner.py, branch
 # feat/suite-mcp-runner), judging with this directory's checks.py; --check-queue pauses while the service queue
@@ -254,9 +257,9 @@ release_lock() {
   mex "grep -q $LOCK_TOKEN $MEX_DIR/LOCK && rm -f $MEX_DIR/LOCK" || true
   LOCK_HELD=0
 }
-close_master() {
+close_master() {  # this invocation's master only (its own ControlPath)
   [[ -z "$MEX_LOCAL" ]] || return 0
-  ssh -o "ControlPath=$CTL_DIR/%C" -O exit "$MEX" >/dev/null 2>&1 || true
+  ssh -o "ControlPath=$CTL_PATH" -O exit "$MEX" >/dev/null 2>&1 || true
 }
 cleanup() {
   [[ $CLEANED == 0 ]] || return 0

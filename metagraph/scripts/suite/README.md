@@ -118,8 +118,10 @@ lists the environment overrides.
    The lock is released on exit (only if it is still this invocation's). Then any `run_direct.py` under
    ~/suite-dev (pgrep on mex) is waited for (SUITE_WAIT_RUNNER_S, 150 s) and refused if it stays, except a
    sequential --resume attaching to its own direct-local runner. An invocation refused before any arm ran
-   leaves no run directory behind. All ssh and rsync calls share one ControlMaster connection
-   (ControlPersist, closed on exit).
+   leaves no run directory behind. All ssh and rsync calls of an invocation share its own ControlMaster
+   connection (ControlPath `<SUITE_SSH_CONTROL_DIR>/%C-<pid>`, ControlPersist), closed on exit; another
+   invocation's exit never closes it (review N1: a shared socket let a refused second invocation end the
+   holder's master and the ssh step in flight).
 4. `--paired` (the default; review H1): per scenario in manifest order, MCP cold (`--mcp-cmd`, repeat 0) ->
    direct-local (one `run_direct.py --only ID` step on mex over the shared ssh connection, its stderr into
    arms/direct-local/runner.log there) -> direct-remote (a `--only ID` step from here) -> MCP warm (each
