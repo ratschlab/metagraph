@@ -1316,6 +1316,32 @@ TEST(Misc, RemoveSuffix) {
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", "Aacb.cde.efg"));
 }
 
+TEST(Misc, RemoveSuffixEmbeddedNull) {
+    const std::string name("reads\0.fasta.gz", 15);
+    EXPECT_EQ(std::string("reads\0.fasta", 12), utils::remove_suffix(name, ".gz"));
+    EXPECT_EQ("reads", utils::remove_suffix(name, std::string("\0.fasta.gz", 10)));
+    EXPECT_EQ(name, utils::remove_suffix(name, std::string(".gz\0", 4)));
+}
+
+TEST(Misc, RemoveSuffixSequence) {
+    EXPECT_EQ("reads", utils::remove_suffix("reads.fasta.gz", ".gz", ".fasta"));
+    EXPECT_EQ("reads.fasta", utils::remove_suffix("reads.fasta.gz", ".fasta", ".gz"));
+    EXPECT_EQ("reads", utils::remove_suffix("reads.fasta", ".gz", ".fasta"));
+}
+
+TEST(Misc, MakeSuffix) {
+    EXPECT_EQ("", utils::make_suffix("", ""));
+    EXPECT_EQ(".fasta", utils::make_suffix("", ".fasta"));
+    EXPECT_EQ("reads", utils::make_suffix("reads", ""));
+    EXPECT_EQ("reads.fasta", utils::make_suffix("reads", ".fasta"));
+    EXPECT_EQ("reads.fasta", utils::make_suffix("reads.fasta", ".fasta"));
+    EXPECT_EQ("reads.fasta.fasta", utils::make_suffix("reads.fasta.fasta", ".fasta"));
+    const std::string name("reads\0", 6);
+    const std::string suffix("\0.fasta", 7);
+    EXPECT_EQ(name + suffix, utils::make_suffix(name, suffix));
+    EXPECT_EQ(name + suffix, utils::make_suffix(name + suffix, suffix));
+}
+
 TEST(Misc, CountIntersectionEmpty) {
     {
         std::vector<int> first;

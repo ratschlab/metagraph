@@ -637,8 +637,8 @@ Config::Config(int argc, char *argv[]) {
         // bitmaps are embedded in the .annodbg, so no graph is needed when
         // re-formatting to another row_diff representation.
         const bool input_has_embedded_anchor = fnames.size()
-                && (utils::ends_with(fnames.front(), annot::RowDiffBRWTAnnotator::kExtension)
-                        || utils::ends_with(fnames.front(), annot::RowDiffRowFlatAnnotator::kExtension));
+                && (fnames.front().ends_with(annot::RowDiffBRWTAnnotator::kExtension)
+                        || fnames.front().ends_with(annot::RowDiffRowFlatAnnotator::kExtension));
         if (input_has_embedded_anchor && fnames.size() != 1) {
             std::cerr << "Can only convert " << fnames.front()
                       << " annotations one at a time" << std::endl;

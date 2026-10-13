@@ -8,21 +8,6 @@
 
 namespace utils {
 
-bool starts_with(const std::string &str, const std::string &prefix) {
-    if (prefix.size() > str.size()) {
-        return false;
-    }
-    return prefix == std::string_view(str).substr(0, prefix.size());
-}
-
-bool ends_with(const std::string &str, const std::string &suffix) {
-    auto actual_suffix = str.substr(
-        std::max(0, static_cast<int>(str.size())
-                    - static_cast<int>(suffix.size()))
-    );
-    return actual_suffix == suffix;
-}
-
 // Try to parse ka:f:[abundance] or km:f:[abundance] from header
 // https://github.com/IndexThePlanet/Logan/blob/main/Unitigs.md
 std::optional<uint64_t> parse_abundance(const std::string &comment) {
@@ -36,13 +21,13 @@ std::optional<uint64_t> parse_abundance(const std::string &comment) {
 }
 
 std::string remove_suffix(const std::string &str, const std::string &suffix) {
-    return ends_with(str, suffix)
+    return str.ends_with(suffix)
             ? str.substr(0, str.size() - suffix.size())
             : str;
 }
 
 std::string make_suffix(const std::string &str, const std::string &suffix) {
-    return remove_suffix(str, suffix) + suffix;
+    return str.ends_with(suffix) ? str : str + suffix;
 }
 
 std::string join_strings(const std::vector<std::string> &strings,

@@ -233,7 +233,7 @@ void sum_and_call_counts(const fs::path &dir,
     std::vector<sdsl::int_vector_buffer<>> vectors;
     for (const auto &p : fs::directory_iterator(dir)) {
         auto path = p.path();
-        if (utils::ends_with(path, file_extension)) {
+        if (path.native().ends_with(file_extension)) {
             logger->trace("Found count vector {}", path);
             vectors.emplace_back(path, std::ios::in, BUFFER_SIZE);
 
@@ -311,7 +311,7 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
 
     bool optimize_forks = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
-        if (utils::ends_with(p.path(), row_count_extension))
+        if (p.path().native().ends_with(row_count_extension))
             optimize_forks = true;
     }
 
@@ -575,7 +575,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
 
     bool optimize_anchors = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
-        if (utils::ends_with(p.path(), row_reduction_extension))
+        if (p.path().native().ends_with(row_reduction_extension))
             optimize_anchors = true;
     }
 

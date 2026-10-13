@@ -10,10 +10,6 @@
 
 namespace utils {
 
-bool starts_with(const std::string &str, const std::string &prefix);
-
-bool ends_with(const std::string &str, const std::string &suffix);
-
 std::optional<uint64_t> parse_abundance(const std::string &comment);
 
 std::string remove_suffix(const std::string &str, const std::string &suffix);
