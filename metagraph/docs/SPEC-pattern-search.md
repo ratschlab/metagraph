@@ -3491,7 +3491,10 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   decided only when no mirror support can change the value (Kleene, as §19.7's undecided labels; a walk evaluated
   so before its read stopped keeps that evaluation, its units charged once), else left undecided; after a time stop
   nothing more is decided. A decided walk the release lists is charged its `selection_labels` and
-  `selection_strands` as a path decided at completion is (above), when it is listed.
+  `selection_strands` as a path decided at completion is (above), as it is decided: `partial` lists the first
+  `max_paths` selected; `all_or_count` lists every selected walk or none, so it gives these charges back as soon
+  as it can list none (more than `max_paths` selected, the account refused one, or the decisions stopped), before
+  the later mirrors are read, and charges nothing more.
 - **More held walks than `max_predicate_contexts`**: `all_or_count` and `count`: not admitted
   (`selection.pass: "not_admitted"`, `withheld: predicate_above_threshold`; with `stop_at_threshold` the search
   stops there, `stop {extension, max_predicate_contexts}`, `pass: "not_started"`, `withheld: threshold_crossed`);
@@ -4716,7 +4719,11 @@ label evidence is admitted before it is copied, as it is decided (`HeldWalksAndT
 walk where the peak falls while they are held (the fixtures `supported_paths_predicate_label` and
 `supported_paths_predicate_either`, two walks each: +256), by less where it falls elsewhere
 (`supported_paths_predicate_mirror`, one walk: +96); nothing else of the stored bodies changes. Where the account
-is tight under `"either"` with a projection, the listed walks' charges now precede the later mirror reads.
+is tight under `"either"` with a projection, the listed walks' charges now precede the later mirror reads:
+`partial`'s, which it lists; `all_or_count`'s only while it can list them all: they are given back as soon as more
+than `max_paths` are selected, the account refuses one or the decisions stop (nothing can be listed then), before
+the later reads (`AllOrCountGivesBackItsListOnceItCannotList`: under an account that holds the reads without
+them, the answer stays `selected_above_threshold` with exact counts instead of `annotation_budget` with bounds).
 
 **A row refused as runs is stated (§20.5, §20.7).** A budgeted row of the supported-path search that the account
 admits and then cannot hold as runs is stated in `rows_refused` as a refused decode is, with what its hits and

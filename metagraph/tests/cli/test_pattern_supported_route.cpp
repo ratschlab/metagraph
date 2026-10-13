@@ -1737,6 +1737,127 @@ TEST(PatternSupportedRoute, HeldWalksAndTheirListedLabelsAreCharged) {
     }
 }
 
+// all_or_count lists every selected walk or none: once more walks are selected than max_paths,
+// the selection labels charged for the walks listed so far are given back before the later
+// mirrors are read (SPEC §20.9), so that they cannot refuse a read and turn the answer from
+// selected_above_threshold with exact counts into annotation_budget with bounds. The records of
+// DecidableWalksAreDecidedAfterTheMirrorReadsStop in one column with a 16 KiB name, any(it)
+// under a projection: each walk a definite true on its own support, whose mirror is read for
+// the label evidence; the mirrors of the first three walks are not in the graph (a lookup, no
+// row, nothing charged), the fourth's is held by 200 records of another column (its rows read,
+// two hundred coordinates each). With max_paths 2 the first two walks' labels are charged and
+// the third walk gives them back, before the fourth's read; with max_paths 0 nothing is ever
+// charged: at every account the two answers are the same, the account's peak aside. And once
+// the decisions stopped (the answer withheld), all_or_count charges nothing: the graph of all
+// 64 3-mers with one label of a 1 KiB name, ANNNNN, any(it) under a projection and
+// max_annotation_work one above the search's units: the second mirror read stops the reads
+// and every later walk is decided on its own support (true, 1,024 selected); max_paths 2,000
+// answers as max_paths 0 under accounts from 1 to 8 MiB, the account's peak too. Mutations
+// tried: the charges held until the end of the decisions (the fourth read refused under
+// accounts that hold it without them); the walks decided after the stop charged (the peak
+// higher under 4 MiB): fail.
+TEST(PatternSupportedRoute, AllOrCountGivesBackItsListOnceItCannotList) {
+    const std::string long_name(16 * 1024, 'x');
+    std::vector<Record> records = {
+        { long_name, "x0", "TTACGTAACGGAT" }, { long_name, "x1", "TTACGTCACGGAT" },
+        { long_name, "x2", "TTACGTGACGGAT" }, { long_name, "x3", "TTACGTTACGGAT" },
+    };
+    for (size_t i = 0; i < 200; ++i) {
+        records.push_back({ "m", "m" + std::to_string(i), "CCGTAACGT" });
+    }
+    const Index idx = build_rd(5, records);
+    Ask r;
+    r.patterns = { "ACGTNACGG" };
+    r.kind = "iupac";
+    r.strands = "forward";
+    r.mode = "all_or_count";
+    r.labels = "predicate_only";
+    r.occurrences = false;
+    r.predicate = "{\"any\": [\"" + long_name + "\"]}";
+    r.predicate_strands = "either";
+    r.max_paths = 2;
+    const Json::Value full = answer_of(idx, r)["patterns"][0];
+    ASSERT_FALSE(full.isMember("error")) << compact(full["error"]);
+    ASSERT_EQ("completed", full["selection"]["pass"].asString()) << compact(full["stop"]);
+    ASSERT_EQ("selected_above_threshold", full["withheld"]["reason"].asString());
+    ASSERT_EQ("exact", full["counts"]["selected"]["relation"].asString());
+    ASSERT_EQ(4u, full["counts"]["selected"]["value"].asUInt64());
+    ASSERT_EQ(4u, full["work"]["predicate_lookups"].asUInt64());
+    ASSERT_LT(0u, full["work"]["mirror_rows"].asUInt64());
+    auto outcome = [](const Json::Value &e) {
+        return compact(e["selection"]) + compact(e["withheld"]) + compact(e["stop"])
+                + compact(e["counts"]) + compact(e["rows_refused"])
+                + compact(e["work"]["predicate_lookups"]) + compact(e["work"]["mirror_rows"]);
+    };
+    // the accounts from below the search's need to beyond the fourth read's need with the
+    // two charges beside it (about 5.5, 6.2 and 8.2 times the name with libc++)
+    uint64_t refused = 0, above = 0;
+    for (uint64_t bytes = 2 * long_name.size(); bytes <= 16 * long_name.size(); bytes += 256) {
+        SCOPED_TRACE(bytes);
+        Ask q = r;
+        q.max_memory_bytes = bytes;
+        const Json::Value e = answer_of(idx, q)["patterns"][0];
+        q.max_paths = 0;
+        const Json::Value none = answer_of(idx, q)["patterns"][0];
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        EXPECT_EQ(outcome(none), outcome(e));
+        EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), bytes);
+        if (e["stop"]["phase"] == "selection" && e["stop"]["reason"] == "max_memory") {
+            ++refused;
+        }
+        if (e["withheld"]["reason"] == "selected_above_threshold") {
+            ++above;
+        }
+    }
+    // the sweep reaches accounts that refuse the fourth read and accounts that hold it
+    EXPECT_LT(0u, refused);
+    EXPECT_LT(0u, above);
+
+    std::string record;
+    for (char x : std::string("ACGT")) {
+        for (char y : std::string("ACGT")) {
+            for (char z : std::string("ACGT")) {
+                record += x;
+                record += y;
+                record += z;
+            }
+        }
+    }
+    const std::string name(1024, 'n');
+    const Index all = build_rd(3, { { name, "h0", record } });
+    Ask s = r;
+    s.patterns = { "ANNNNN" };
+    s.level = "label_intersection";
+    s.predicate = "{\"any\": [\"" + name + "\"]}";
+    s.max_paths = 2'000;
+    // the search's units: without a projection a definite true reads no mirror
+    Ask plain = s;
+    plain.labels = "none";
+    const Json::Value searched = answer_of(all, plain)["patterns"][0];
+    ASSERT_FALSE(searched.isMember("error")) << compact(searched["error"]);
+    ASSERT_EQ(1024u, searched["counts"]["selected"]["value"].asUInt64());
+    s.max_annotation_work = searched["work"]["annotation_units"].asUInt64() + 1;
+    uint64_t decided = 0;
+    for (uint64_t kb = 1024; kb <= 8192; kb += 256) {
+        SCOPED_TRACE(kb);
+        Ask t = s;
+        t.max_memory_bytes = kb << 10;
+        const Json::Value listing = answer_of(all, t)["patterns"][0];
+        t.max_paths = 0;
+        const Json::Value unlisted = answer_of(all, t)["patterns"][0];
+        ASSERT_FALSE(listing.isMember("error")) << compact(listing["error"]);
+        EXPECT_EQ(outcome(unlisted), outcome(listing));
+        EXPECT_EQ(unlisted["work"]["memory_bytes"].asUInt64(),
+                  listing["work"]["memory_bytes"].asUInt64());
+        if (listing["stop"]["reason"] == "max_annotation_work"
+                && listing["counts"]["tested"]["value"].asUInt64() == 1024) {
+            EXPECT_EQ("annotation_budget", listing["withheld"]["reason"].asString());
+            ++decided;
+        }
+    }
+    EXPECT_LT(0u, decided);
+}
+
 // A constant normal form selects without deciding: true is the request without the predicate,
 // false lists nothing (complete); an unbound or spent selection does not start
 TEST(PatternSupportedRoute, ConstantPredicates) {

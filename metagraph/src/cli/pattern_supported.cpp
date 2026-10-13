@@ -680,7 +680,8 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     auto lists = [&]() {
         if (options_.mode == Mode::COUNT || memory)
             return false;
-        return all_or_count ? searched && selected_ <= options_.max_paths
+        // (all_or_count after a stop of the decisions: withheld, none listed)
+        return all_or_count ? searched && !a.stop && selected_ <= options_.max_paths
                             : chosen.size() < options_.max_paths;
     };
     auto list = [&](size_t i, const std::vector<LabelId> &evidence) {
@@ -701,6 +702,18 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             rows.push_back(on);
         }
         chosen.push_back(held_[i].kept);
+    };
+    // all_or_count lists every selected walk or none: once it can list none (more selected
+    // than max_paths, the account ended the list, or the decisions stopped), what the list
+    // holds is given back at once, before the later mirrors are read, and nothing more is
+    // charged for it
+    auto unlist = [&]() {
+        account.release(label_bytes);
+        label_bytes = 0;
+        label_text = 0;
+        std::vector<size_t>().swap(chosen);
+        std::vector<std::vector<LabelId>>().swap(labels);
+        std::vector<std::vector<uint8_t>>().swap(rows);
     };
     // the mirrors are read until a read stops on a budget (the work, the account): the walks
     // from there on are decided on their own support alone, as walks whose mirror is not
@@ -780,6 +793,10 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
                                     ? PathSelectionAnswer::kOnMirror : 0));
             }
             list(i, evidence);
+        }
+        if (all_or_count && (memory || a.stop || selected_ > options_.max_paths)
+                && !chosen.empty()) {
+            unlist();
         }
     }
     const bool all_decided = std::all_of(held_.begin(), held_.end(),
