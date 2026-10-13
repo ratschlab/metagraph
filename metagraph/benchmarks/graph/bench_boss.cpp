@@ -97,31 +97,19 @@ DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
 
-// Compare both implementations on the same GRAPH, including mask allocation.
-template <bool scan>
+// Include mask allocation in the measured operation.
 static void BM_BOSS_mark_sink_dummy_edges(benchmark::State &state) {
     auto graph = load_graph(state);
     const BOSS &boss = graph->get_boss();
 
     for (auto _ : state) {
         sdsl::bit_vector mask(boss.num_edges() + 1, false);
-        uint64_t count = 0;
-        if constexpr (scan) {
-            for (uint64_t i = 2; i < boss.get_W().size(); ++i) {
-                if (!boss.get_W(i)) {
-                    mask[i] = true;
-                    ++count;
-                }
-            }
-        } else {
-            count = boss.mark_sink_dummy_edges(&mask);
-        }
+        uint64_t count = boss.mark_sink_dummy_edges(&mask);
         benchmark::DoNotOptimize(count);
         benchmark::ClobberMemory();
     }
 }
-BENCHMARK_TEMPLATE(BM_BOSS_mark_sink_dummy_edges, true) -> Unit(benchmark::kMicrosecond);
-BENCHMARK_TEMPLATE(BM_BOSS_mark_sink_dummy_edges, false) -> Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_BOSS_mark_sink_dummy_edges) -> Unit(benchmark::kMicrosecond);
 
 
 #define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE, RC_INDEX) \
