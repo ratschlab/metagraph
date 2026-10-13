@@ -83,10 +83,15 @@ mex() {
   if [[ -n "$MEX_LOCAL" ]]; then (cd "$MEX_LOCAL" && bash -c "$*") 2>/dev/null < /dev/null
   else ssh "${SSH_OPTS[@]}" "$MEX" "$*" 2>/dev/null < /dev/null; fi
 }
-# The same with stderr kept (a runner step: its own stderr goes to runner.log on mex).
+# The same for a runner step (its own stderr goes to runner.log on mex): what else the session prints on stderr
+# (mex's login banner, an ssh error) is shown only when the step fails.
 mex_step() {
-  if [[ -n "$MEX_LOCAL" ]]; then (cd "$MEX_LOCAL" && bash -c "$*") < /dev/null
-  else ssh "${SSH_OPTS[@]}" "$MEX" "$*" < /dev/null; fi
+  local rc=0 errf="$RUN_DIR/.mex-step.err"
+  if [[ -n "$MEX_LOCAL" ]]; then (cd "$MEX_LOCAL" && bash -c "$*") < /dev/null 2> "$errf" || rc=$?
+  else ssh "${SSH_OPTS[@]}" "$MEX" "$*" < /dev/null 2> "$errf" || rc=$?; fi
+  if [[ $rc != 0 ]]; then tail -5 "$errf" | sed 's/^/    ssh: /' >&2; fi
+  rm -f "$errf"
+  return $rc
 }
 mex_path() { if [[ -n "$MEX_LOCAL" ]]; then printf '%s/%s' "$MEX_LOCAL" "$1"; else printf '%s:%s' "$MEX" "$1"; fi; }
 mex_rsync() {

@@ -123,6 +123,14 @@ HOST_CACHE_LABEL = {"cold": "cold", "warm": "warm", "aged": "aged", "not_reached
                     "unknown": "unknown"}
 
 
+def checks_name(info):
+    """The checks module an arm ran: run_direct records "checks" / "stub", the MCP runner {file, stub}."""
+    mod = (info or {}).get("checks_module")
+    if isinstance(mod, dict):
+        return "stub" if mod.get("stub") else (os.path.basename(str(mod.get("file") or "")) or "checks")
+    return mod
+
+
 def orchestrator_session(run):
     """The orchestrator's last invocation (run_suite.sh), or {}."""
     sessions = ((run.get("orchestrator") or {}).get("sessions")) or []
@@ -170,8 +178,7 @@ def verdict_section(run, comp, rows, samples):
     dis_direct = s["direct_agreement"].get("disagree", 0)
     dis_mcp = s["mcp_agreement"].get("disagree", 0)
     rel_failed = sum((v or {}).get("fail", 0) for v in ((s.get("relations") or {}).get("per_arm") or {}).values())
-    modules = sorted(set((info or {}).get("checks_module") for info in (run.get("arms") or {}).values()
-                         if (info or {}).get("checks_module")))
+    modules = sorted(set(checks_name(info) for info in (run.get("arms") or {}).values() if checks_name(info)))
     stub = "stub" in modules
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
@@ -275,7 +282,7 @@ def environment_section(run, comp, rows, samples):
         kv.append(("arm %s" % md(arm), "%s; state %s; %s execution(s); checks %s; %s to %s; runner %s; "
                    "runner's load1 at start %s, at end %s" % (
                        md(info.get("base") or "-"), md(info.get("state") or "-"),
-                       md(info.get("executions_recorded", "-")), md(info.get("checks_module") or "-"),
+                       md(info.get("executions_recorded", "-")), md(checks_name(info) or "-"),
                        md(info.get("started_utc") or "-"), md(info.get("ended_utc") or "-"),
                        md(info.get("runner_host") or "-"), fmt_num(load_s[0] if load_s else None, 1),
                        fmt_num(load_e[0] if load_e else None, 1))))
@@ -515,6 +522,8 @@ def timing_section(comp):
                 continue
             for hc, b in sorted((t.get("by_host_cache") or {}).items(), key=lambda kv: HOST_CACHE_ORDER.get(kv[0], 9)):
                 a, sv = b["wall"], b["server"]
+                if not a["n"] and not sv["n"]:
+                    continue  # e.g. MCP marks of scenarios it cannot express: nothing was timed
                 rows.append([md(area), md(arm), md(HOST_CACHE_LABEL.get(hc, hc)), a["n"], fmt_ms(a["p50"]),
                              fmt_ms(a["p90"]), fmt_ms(a["max"]), fmt_ms(sv["p50"]), fmt_ms(sv["p90"]),
                              fmt_ms(sv["max"])])

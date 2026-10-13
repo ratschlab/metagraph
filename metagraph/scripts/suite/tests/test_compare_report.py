@@ -610,7 +610,8 @@ class ReportTest(unittest.TestCase):
 
     def test_report_stub_warning_and_quiet_host(self):
         run = sc.read_json(os.path.join(self.dir, "run.json"))
-        run["arms"]["direct-local"]["checks_module"] = "stub"
+        # the MCP runner records its checks module as {file, stub}
+        run["arms"]["mcp"]["checks_module"] = {"file": "/x/checks.py", "stub": True}
         sc.write_json_atomic(os.path.join(self.dir, "run.json"), run)
         os.remove(os.path.join(self.dir, "samples.jsonl"))
         text = report.build_report(self.dir)
