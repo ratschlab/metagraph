@@ -739,8 +739,10 @@ def reevaluation_section(run_dir, max_items=200):
     for ch in changes[:max_items]:
         checks = "; ".join("%s %s->%s" % (c.get("check"), c.get("before") or "-", c.get("after") or "-")
                            for c in ch.get("checks") or [])
-        detail = next((c.get("detail") for c in ch.get("checks") or [] if c.get("after") in ("fail", "finding")),
-                      None) or next((c.get("detail") for c in ch.get("checks") or []), "")
+        # the detail of a check that now gives the execution's outcome (else a failing one, else the first)
+        detail = next((c.get("detail") for c in ch.get("checks") or [] if c.get("after") == ch.get("after")), None) \
+            or next((c.get("detail") for c in ch.get("checks") or [] if c.get("after") in ("fail", "finding")), None) \
+            or next((c.get("detail") for c in ch.get("checks") or []), "")
         rows.append([md(ch.get("scenario")), md(ch.get("arm")), str(ch.get("repeat")), md(ch.get("before")),
                      md(ch.get("after")) + (" (kept)" if ch.get("kept") else ""), md(checks, 200), md(detail, 220)])
     out.append(table(["scenario", "arm", "rep", "recorded", "re-evaluated", "checks changed", "detail"], rows))
