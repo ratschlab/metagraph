@@ -1,8 +1,6 @@
 #pragma once
 #include <memory>
 
-#include "common/compile_definitions.hpp"
-
 #include <spdlog/fmt/ostr.h> // for logging custom classes
 #include <spdlog/fmt/ranges.h>
 #include <spdlog/fmt/std.h>

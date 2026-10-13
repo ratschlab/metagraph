@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "common/compile_definitions.hpp"
-
 #if _USE_FOLLY
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>

@@ -54,12 +54,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT CMAKE_SYSTEM_NAME MATCHES "Darwin"
   target_link_libraries(metagraph_common PUBLIC atomic)
 endif()
 target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
-set(_USE_FOLLY 1)
-set(MODE_TI 1)
-set(SPDLOG_FMT_EXTERNAL 1)
-configure_file(compile_definitions.hpp.in
-    ${PROJECT_BINARY_DIR}/gen/include/common/compile_definitions.hpp @ONLY)
-target_include_directories(metagraph_common PUBLIC ${PROJECT_BINARY_DIR}/gen/include)
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"

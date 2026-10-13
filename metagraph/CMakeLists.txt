@@ -23,8 +23,7 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
-# Keep legacy dependency targets at C++17. Folly propagates C++20 to MetaGraph.
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_VERBOSE_MAKEFILE 1)
@@ -582,8 +581,7 @@ endif()
 # Run the header installation at install time (after ExternalProjects are built)
 install(CODE "
   set(INCLUDE_DIRS \"$<TARGET_PROPERTY:metagraph-core,INCLUDE_DIRECTORIES>;$<TARGET_PROPERTY:metagraph-cli,INCLUDE_DIRECTORIES>\")
-  set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
-  
+
   list(REMOVE_DUPLICATES INCLUDE_DIRS)
   foreach(dir \${INCLUDE_DIRS})
     # Do not package system headers or flatten SSHash's private dependency trees.
@@ -598,28 +596,12 @@ install(CODE "
     if(NOT EXISTS \"\${dir}\")
       continue()
     endif()
-    
-    file(GLOB_RECURSE subdirs LIST_DIRECTORIES true \"\${dir}/*\")
-    list(APPEND subdirs \${dir})
-    
-    foreach(subdir \${subdirs})
-      if(NOT IS_DIRECTORY \"\${subdir}\")
-        continue()
-      endif()
-      
-      file(GLOB headers \"\${subdir}/*.h\" \"\${subdir}/*.hpp\"
-                        \"\${subdir}/*.ipp\" \"\${subdir}/*.inl\")
-      if(\"\${subdir}\" MATCHES \"/external-libraries/eigen/(Eigen|unsupported/Eigen)(/|$)\")
-        file(GLOB eigen_headers LIST_DIRECTORIES false \"\${subdir}/[A-Z]*\")
-        list(FILTER eigen_headers EXCLUDE REGEX \"[.][^/]*$\")
-        list(APPEND headers \${eigen_headers})
-      endif()
-      if(headers)
-        file(RELATIVE_PATH rel_path \"\${dir}\" \"\${subdir}\")
-        file(INSTALL \${headers}
-             DESTINATION \"\${CMAKE_INSTALL_PREFIX}/include/\${rel_path}\")
-      endif()
-    endforeach()
+
+    file(INSTALL \"\${dir}/\"
+         DESTINATION \"\${CMAKE_INSTALL_PREFIX}/include\"
+         FILES_MATCHING
+         PATTERN \"*.h\" PATTERN \"*.hpp\" PATTERN \"*.ipp\" PATTERN \"*.inl\"
+         REGEX \"/external-libraries/eigen/(Eigen|unsupported/Eigen)(/[^/]+)*/[A-Z][^/.]*$\")
   endforeach()
 ")
 
