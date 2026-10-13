@@ -1201,19 +1201,22 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
         }
     }
     const std::string long_name(64 * 1024, 'x');
-    auto body = [&](const std::string &name, const std::string &mode) {
+    auto body = [&](const std::string &name, const std::string &mode, uint64_t max_paths) {
         return "{\"patterns\": [{\"iupac\": \"NNNN\"}], \"mode\": \"" + mode + "\", \"strands\": "
                "\"forward\", \"long_search\": \"supported_paths\", \"supported_paths_level\": "
                "\"label_intersection\", \"predicate\": {\"any\": [\"" + name + "\"]}, "
                "\"predicate_strands\": \"context\", \"output\": {\"labels\": \"all\", "
-               "\"occurrences\": false}, \"max_labels\": 0}";
+               "\"occurrences\": false}, \"max_labels\": 0, \"max_paths\": "
+               + std::to_string(max_paths) + "}";
     };
-    auto answer = [&](const Index &idx, const std::string &name, const std::string &mode) {
+    auto answer = [&](const Index &idx, const std::string &name, const std::string &mode,
+                      uint64_t max_paths = 1'000) {
         RetrievalHooks hooks;
         hooks.coord_to_header = idx.cth.get();
         hooks.max_memory_bytes = 1 << 20;
-        return process_pattern_request(parse_pattern_body(body(name, mode)), *idx.anno,
-                                       route_limits(), "rel", nullptr, nullptr, nullptr, &hooks);
+        return process_pattern_request(parse_pattern_body(body(name, mode, max_paths)),
+                                       *idx.anno, route_limits(), "rel", nullptr, nullptr,
+                                       nullptr, &hooks);
     };
     {
         const Index idx = build_rd(3, { { long_name, "h0", record } });
@@ -1238,6 +1241,23 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
         EXPECT_LE(listed * long_name.size(), e["work"]["memory_bytes"].asUInt64());
         EXPECT_GE(1u << 20, e["work"]["memory_bytes"].asUInt64());
         EXPECT_GT(1u << 20, compact(out).size());
+
+        // the same list under max_paths: the path after it is beyond max_paths, so its
+        // selection labels are not charged and the list ends on max_paths, not on the
+        // account (the selection owns max_paths, SPEC §20.9); all_or_count withholds on the
+        // selected count
+        const Json::Value capped = answer(idx, long_name, "partial", listed)["patterns"][0];
+        ASSERT_EQ(listed, capped["results"].size()) << compact(capped);
+        for (Json::ArrayIndex i = 0; i < capped["results"].size(); ++i) {
+            EXPECT_EQ(e["results"][i]["sequence"].asString(),
+                      capped["results"][i]["sequence"].asString());
+        }
+        EXPECT_EQ(256u, capped["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ("max_paths", capped["cut"]["reason"].asString());
+        EXPECT_TRUE(capped["stop"].isNull()) << compact(capped["stop"]);
+        const Json::Value withheld = answer(idx, long_name, "all_or_count", listed)["patterns"][0];
+        EXPECT_EQ("selected_above_threshold", withheld["withheld"]["reason"].asString());
+        EXPECT_TRUE(withheld["stop"].isNull()) << compact(withheld["stop"]);
 
         out = answer(idx, long_name, "all_or_count");
         const Json::Value &w = out["patterns"][0];

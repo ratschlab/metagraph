@@ -260,10 +260,16 @@ bool PathSelection::decide_now(const PathView &path) {
     ++selected_;
     if (keeping_) {
         retrieval::Account &account = tracker_.env().account;
+        // the sink keeps a selected path under the mode's rule (partial: the first max_paths;
+        // all_or_count: all while they are at most max_paths): a path beyond it is never
+        // listed, so its selection labels are not charged and cannot end the list on memory
+        const bool listed_by_mode = options_.mode == Mode::PARTIAL
+                ? sink_.paths().size() < options_.max_paths
+                : selected_ <= options_.max_paths;
         uint64_t bytes = 0;
         uint64_t text = 0;
         bool fits = true;
-        if (options_.selection_labels) {
+        if (options_.selection_labels && listed_by_mode) {
             const uint64_t names = names_length(bound_.labels(), present_);
             bytes = selection_bytes(present_.size(), names);
             text = selection_text_bytes(present_.size(), names);
