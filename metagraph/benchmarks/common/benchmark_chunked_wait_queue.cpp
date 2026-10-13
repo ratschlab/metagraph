@@ -1,7 +1,6 @@
 #include <cstddef>
 #include <fstream>
 #include <random>
-#include <string>
 
 #include <benchmark/benchmark.h>
 #include <sdsl/uint128_t.hpp>
@@ -13,9 +12,6 @@
 namespace {
 
 using namespace mtg;
-
-const std::string chunk_prefix = "/tmp/chunk_";
-
 
 template <typename T>
 static void BM_queue_push_pop(benchmark::State &state) {

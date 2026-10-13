@@ -8,7 +8,7 @@
 #include <vector>
 
 #include <json/json.h>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
@@ -349,10 +349,6 @@ class Alignment {
     Cigar cigar_;
 };
 
-inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
-    return out << fmt::format("{}", a);
-}
-
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
         // 1) score is less, or
@@ -443,7 +439,7 @@ template <> struct formatter<mtg::graph::align::Alignment> {
 
     template <typename FormatContext>
     auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) const -> decltype(ctx.out()) {
-        return format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
+        return fmt::format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
                          a.get_orientation() ? "-" : "+",
                          a.get_sequence(),
                          a.get_score(),
@@ -453,5 +449,11 @@ template <> struct formatter<mtg::graph::align::Alignment> {
     }
 };
 } // namespace fmt
+
+namespace mtg::graph::align {
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
+    return out << fmt::format("{}", a);
+}
+} // namespace mtg::graph::align
 
 #endif  // __ALIGNER_ALIGNMENT_HPP__

@@ -63,8 +63,8 @@ Prerequisites
 ^^^^^^^^^^^^^
 Before compiling MetaGraph, install the following dependencies:
 
-- cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang
+- cmake 3.19 or higher
+- GNU GCC, LLVM Clang, or AppleClang with a C++20-capable standard library
 - bzip2
 
 *Optional:*
@@ -86,39 +86,35 @@ Before compiling MetaGraph, install the following dependencies:
 
     .. group-tab:: Ubuntu / Debian
 
-        For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
+        On **Ubuntu** or **Debian**, install the development packages below.
+        Use a release providing CMake 3.19+ and a C++20 compiler and standard library;
+        otherwise install a newer toolchain first::
 
-            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
+            sudo apt-get install g++ cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
 
 
     .. group-tab:: CentOS
 
-        For **CentOS** (8 or higher)::
+        On **CentOS**, first ensure CMake and the C++ toolchain meet the requirements
+        above; older distribution packages may need replacement::
 
             yum install cmake bzip2-devel jemalloc-devel boost-devel automake autoconf libdeflate
 
 
-    .. group-tab:: brew + GNU gcc
+    .. group-tab:: Homebrew on Linux (GNU GCC)
 
-        GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
+        On **Linux**, install the current GCC formula and build dependencies::
 
-            brew install gcc autoconf automake libtool cmake make libdeflate
-            [[ "$OSTYPE" == "darwin"* ]] \
-                && brew remove -f boost \
-                && brew install --cc=gcc-7 boost \
-                && brew install gcc@9
-            [[ "$OSTYPE" != "darwin"* ]] \
-                && brew install gcc@9 libomp \
-                && brew remove -f openssl@1.1 boost \
-                && brew install --cc=gcc-9 openssl@1.1 boost
+            brew install gcc libomp cmake make bzip2 boost jemalloc autoconf automake libtool libdeflate
 
-        Then, the following environment variables have to be set::
+        Set ``CC`` and ``CXX`` to the versioned compiler executables installed by
+        Homebrew before configuring CMake.
 
-            echo "\
-            # Use gcc-9 with cmake
-            export CC=\"\$(which gcc-9)\"
-            export CXX=\"\$(which g++-9)\"
-            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+        On **macOS**, use the AppleClang instructions above. Homebrew's macOS Boost
+        packages use libc++, while GNU GCC uses libstdc++; choosing GCC therefore
+        requires building and installing Boost separately with that GCC toolchain.
+        See Homebrew's `C++ runtime compatibility guidance
+        <https://docs.brew.sh/C%2B%2B-Standard-Libraries>`_.
 
     .. group-tab:: brew + LLVM Clang
 
@@ -187,7 +183,7 @@ When configuring via ``cmake .. <arguments>`` additional arguments can be provid
 - ``-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]`` -- build modes (``Release`` by default)
 - ``-DBUILD_STATIC=[ON|OFF]`` -- link statically (``OFF`` by default)
 - ``-DLINK_OPT=[ON|OFF]`` -- enable link time optimization (``OFF`` by default)
-- ``-DBUILD_KMC=[ON|OFF]`` -- compile the KMC executable (``ON`` by default)
+- ``-DBUILD_KMC=[ON|OFF]`` -- compile the standalone KMC executable (``OFF`` by default; reading KMC files is always supported)
 - ``-DWITH_AVX=[ON|OFF]`` -- compile with *avx* instructions (``ON`` by default, if available)
 - ``-DWITH_MSSE42=[ON|OFF]`` -- compile with *msse4.2* instructions (``ON`` by default, if available)
 - ``-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]`` -- alphabet to use (``DNA`` by default)

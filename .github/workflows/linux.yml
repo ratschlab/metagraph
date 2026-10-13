@@ -275,14 +275,8 @@ jobs:
         name: Build and run ExternalProject example
         run: |
           cd metagraph/examples/ExternalProject
-          mkdir -p build/metagraph-external-prefix/src
-          ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
-          cd build
-          cmake -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} ${CMAKE_ARGS} ..
-          # Skip GitHub sync for speed and to bypass github.sha unavailability in PRs from forks
-          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
-          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
-          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
+          mkdir -p build && cd build
+          cmake -DMETAGRAPH_SOURCE_DIR="${GITHUB_WORKSPACE}" ${CMAKE_ARGS} ..
           make -j"$(getconf _NPROCESSORS_ONLN)"
           make run_example
 

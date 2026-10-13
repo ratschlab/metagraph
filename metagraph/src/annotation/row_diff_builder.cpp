@@ -1,5 +1,6 @@
 #include "row_diff_builder.hpp"
 
+#include <atomic>
 #include <omp.h>
 #include <progress_bar.hpp>
 
@@ -34,6 +35,9 @@ using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 using rd_succ_bv_type = RowDiff<ColumnMajor>::fork_succ_bv_type;
 template <typename T>
 using Encoder = mtg::elias_fano::EliasFanoEncoderBuffered<T>;
+
+static_assert(std::atomic_ref<uint32_t>::required_alignment <= alignof(uint32_t));
+static_assert(std::atomic_ref<int32_t>::required_alignment <= alignof(int32_t));
 
 
 std::vector<annot::ColumnCompressed<>>
@@ -180,15 +184,17 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
                         uint64_t rk = source_col.rank1(i);
                         uint32_t num_coords = delims[l_idx][j].select1(rk + 1)
                                                 - delims[l_idx][j].select1(rk);
-                        __atomic_add_fetch(&row_count_block[i - block_begin], num_coords, __ATOMIC_RELAXED);
+                        std::atomic_ref(row_count_block[i - block_begin])
+                            .fetch_add(num_coords, std::memory_order_relaxed);
                     } else {
-                        __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
+                        std::atomic_ref(row_count_block[i - block_begin])
+                            .fetch_add(1, std::memory_order_relaxed);
                     }
                 }
             );
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         async_writer.join();
         row_count_block_other.swap(row_count_block);
@@ -260,11 +266,12 @@ void sum_and_call_counts(const fs::path &dir,
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t j = 0; j < vectors.size(); ++j) {
             for (uint64_t t = 0; t < buf.size(); ++t) {
-                __atomic_add_fetch(&buf[t], (int32_t)vectors[j][i + t], __ATOMIC_RELAXED);
+                std::atomic_ref(buf[t])
+                    .fetch_add((int32_t)vectors[j][i + t], std::memory_order_relaxed);
             }
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         std::for_each(buf.begin(), buf.end(), callback);
 
@@ -279,7 +286,7 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
     } else {
         sdsl::bit_vector last_bv(graph.max_index() + 1);
 
-        __atomic_thread_fence(__ATOMIC_RELEASE);
+        std::atomic_thread_fence(std::memory_order_release);
         graph.call_nodes([&](node_index v) {
             std::pair<char, node_index> last = { '\0', graph::DeBruijnGraph::npos };
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
@@ -287,9 +294,9 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
             });
 
             if (last.second != graph::DeBruijnGraph::npos)
-                set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
+                set_bit(last_bv.data(), last.second, true, std::memory_order_relaxed);
         }, []() { return false; }, get_num_threads());
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
     }
 }
@@ -1043,7 +1050,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 if (compute_row_reduction) {
                     if (succ && curr_value == get_value(source_col, source_idx, j, *succ)) {
                         // reduction (zero diff)
-                        __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
+                        std::atomic_ref(row_nbits_block[chunk_idx])
+                            .fetch_add(1, std::memory_order_relaxed);
                     }
                 } else if (succ || anchor[row_idx]) {
                     bool is_anchor = anchor[row_idx];
@@ -1077,7 +1085,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 if (!compute_row_reduction)
                     return;
 
-                __atomic_thread_fence(__ATOMIC_ACQUIRE);
+                std::atomic_thread_fence(std::memory_order_acquire);
 
                 async_writer.join();
                 row_nbits_block_other.swap(row_nbits_block);
@@ -1203,12 +1211,13 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             auto [l_idx, j] = col_indexes[c];
             diff_columns[l_idx][j]->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
                 [&](uint64_t i) {
-                    __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
+                    std::atomic_ref(row_nbits_block[i - chunk])
+                        .fetch_add(1, std::memory_order_relaxed);
                 }
             );
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         async_writer.join();
         row_nbits_block_other.swap(row_nbits_block);
@@ -1345,12 +1354,11 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     const auto curr_value = get_value(source_col, s, j, row_idx);
                     const auto diff = get_diff(curr_value, get_value(source_col, s, j, *succ));
                     // reduction (zero diff)
-                    __atomic_add_fetch(&row_nbits_block[chunk_idx],
-                                       curr_value.size() - diff.size(),
-                                       __ATOMIC_RELAXED);
+                    std::atomic_ref(row_nbits_block[chunk_idx])
+                        .fetch_add(curr_value.size() - diff.size(), std::memory_order_relaxed);
                 },
                 [&](uint64_t block_begin) {
-                    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+                    std::atomic_thread_fence(std::memory_order_acquire);
 
                     async_writer.join();
                     row_nbits_block_other.swap(row_nbits_block);

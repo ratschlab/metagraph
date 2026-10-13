@@ -131,7 +131,7 @@ class ThreadPool {
 
         auto wrapped_task = [task,future]() {
             (*task)();
-            future.get(); // re-thrown exceptions (if any) from packaged_task
+            (void)future.get(); // re-thrown exceptions (if any) from packaged_task
         };
 
         if (!workers.size()) {
