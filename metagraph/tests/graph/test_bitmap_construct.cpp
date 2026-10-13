@@ -14,6 +14,7 @@
 #include "../test_helpers.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
+#include "graph/graph_extensions/node_weights.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
@@ -140,6 +141,58 @@ TEST(DBGBitmapConstruct, ConstructionEQAppendingCanonical) {
 
         DBGBitmap appended(k);
         EXPECT_NE(constructed, appended);
+    }
+}
+
+TEST(DBGBitmapConstruct, WeightedFactory) {
+    for (uint8_t bits : { 1, 8, 9, 16, 17, 32 }) {
+        const uint64_t max_count = sdsl::bits::lo_set[bits];
+        for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+            for (const std::string suffix : { "", "A" }) {
+                SCOPED_TRACE(std::to_string(bits) + ":" + std::to_string(mode) + ":" + suffix);
+                DBGBitmapConstructor constructor(3, mode, bits, suffix);
+                constructor.add_sequence("AAA", max_count - 1);
+                constructor.add_sequence("AAA", 2);
+                constructor.add_sequence("CCC", 3);
+                DBGBitmap graph(&constructor);
+                auto weights = graph.get_extension<NodeWeights>();
+                ASSERT_TRUE(weights);
+                EXPECT_EQ(bits, weights->get_data().width());
+                EXPECT_EQ(graph.num_nodes() + 1, weights->get_data().size());
+                EXPECT_EQ(0u, (*weights)[0]);
+                EXPECT_EQ(suffix.empty() ? (mode == DeBruijnGraph::BASIC ? 2u : 4u) : 1u,
+                          graph.num_nodes());
+                for (std::string_view kmer : { "AAA", "CCC", "TTT", "GGG" }) {
+                    auto node = graph.kmer_to_node(kmer);
+                    bool present = (mode == DeBruijnGraph::CANONICAL || kmer == "AAA" || kmer == "CCC")
+                                    && (suffix.empty() || kmer.ends_with(suffix));
+                    EXPECT_EQ(present, node != DeBruijnGraph::npos);
+                    if (present && node) {
+                        uint64_t expected = kmer == "AAA" || kmer == "TTT"
+                                                ? max_count : std::min<uint64_t>(3, max_count);
+                        EXPECT_EQ(expected, (*weights)[node]);
+                    }
+                }
+
+                std::stringstream serialized_graph;
+                graph.serialize(serialized_graph);
+                DBGBitmap loaded_graph(2);
+                ASSERT_TRUE(loaded_graph.load(serialized_graph));
+                EXPECT_EQ(graph, loaded_graph);
+                std::stringstream serialized_weights;
+                weights->get_data().serialize(serialized_weights);
+                sdsl::int_vector<> loaded_weights;
+                loaded_weights.load(serialized_weights);
+                EXPECT_EQ(weights->get_data(), loaded_weights);
+            }
+        }
+    }
+}
+
+TEST(DBGBitmapConstruct, InvalidCountWidthBeforeK) {
+    for (size_t k : { 0UL, 3UL, 64UL }) {
+        EXPECT_THROW(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 33),
+                     std::runtime_error);
     }
 }
 
