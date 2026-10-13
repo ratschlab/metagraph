@@ -302,6 +302,25 @@ class RunSuiteOffline(SuiteCase):
                               universal_newlines=True).stdout.split()
         self.assertEqual(pids, [])
 
+    def test_heartbeat_kept_during_a_long_step(self):
+        # review N7: the paired sampler's heartbeat is touched while a step runs, not only between scenarios
+        make_manifest(self.mpath, [scenario("S-01", "S", "POST /slow", {"sleep_s": 3})])
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--warm-every", "0", SUITE_SAMPLER="1",
+                               SUITE_HEARTBEAT_S="1")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        local = [r for r in rows if r["arm"] == "direct-local"][0]
+        hb = os.path.join(self.mex, "suite-dev", "runs", os.path.basename(run_dir), "samples", ".heartbeat")
+        # the scenario's own touch came before this step; the keeper's came during or after it
+        self.assertGreater(os.path.getmtime(hb), sc.parse_utc(local["started_utc"]) + 1.0)
+        # neither the keeper nor the sampler outlives the run
+        left = subprocess.run(["pgrep", "-f", self.mpath], stdout=subprocess.PIPE, universal_newlines=True).stdout
+        self.assertEqual(left.split(), [])
+        self.assertIsNotNone(sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1][
+            "mex_clock_offset_s"])
+
     def test_sigint_then_resume(self):
         scen = [scenario("S-%02d" % i, "S", "POST /slow", {"sleep_s": 0.3}) for i in range(12)]
         make_manifest(self.mpath, scen)

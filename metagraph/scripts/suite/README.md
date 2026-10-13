@@ -107,9 +107,10 @@ lists the environment overrides.
    URL, logged, sent only once the lock of item 3 is held and no other runner is on mex: review N4), or the
    one named by `--resume` (then the run's mode and manifest copy unless given).
    `orchestrator.json` records every invocation: options, mode, the scripts' commit (`+dirty` when the suite
-   directory has uncommitted changes), the checks module, the mex clock offset, the MCP command TEMPLATE (never
+   directory has uncommitted changes), the checks module, the mex clock offset (mex's `date +%s.%N` against
+   the midpoint of two laptop readings; python only where date lacks %N: review N8), the MCP command TEMPLATE (never
    an expanded command or an environment value), and the loop's state (`loop`: running / done / capped /
-   failed / interrupted, scenarios, completed, direct requests).
+   failed / interrupted, its reason when it stopped early, scenarios, completed, direct requests).
 2. Checks (review M3): `--checks checks` when checks.py is next to the script; otherwise the stub, which is
    refused before anything runs when the selected scenarios expect any check but `status`, unless
    `--allow-stub`. The whole suite directory (minus runs/, tests/, __pycache__) is rsynced (with --delete) to
@@ -139,7 +140,8 @@ lists the environment overrides.
    every other arm); a scenario the manifest marks not implemented via MCP gets the MCP repeat 0 only (the
    runner records the mark). One sampler on mex covers the loop (`samples/paired-<stamp>.jsonl`), stopped at
    the end, after 24 h (30 min for --smoke), or when the orchestrator stops touching its heartbeat file for an
-   hour. Three failing steps of one direct arm in a row stop the loop (exit 1 after the report). The MCP
+   hour (a background keeper touches it every `SUITE_HEARTBEAT_S`, 300 s, while the orchestrator lives, so one
+   long step does not end the sampling: review N7). Three failing steps of one direct arm in a row stop the loop (exit 1 after the report). The MCP
    arm follows async's exit codes: the loop stops on the runner's exit 2 / 3 (a start refusal: key file,
    queue wait ran out) or 130 (interrupted), or after three MCP executions in a row that ended `error` (a
    runner-level failure) or were not recorded (`loop.reason` mcp_exit_N / mcp_interrupted / mcp_errors);

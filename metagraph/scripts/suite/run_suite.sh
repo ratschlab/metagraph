@@ -45,7 +45,7 @@
 # SUITE_REMOTE_BASE (the public refseq33m-experimental URL), SUITE_RUNS, PYTHON (python3), SUITE_POLL_S (15),
 # SUITE_SAMPLER (1; 0: no mex sampler besides direct-local's own in sequential mode), SUITE_WAIT_RUNNER_S
 # (150), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
-# macOS's LocalHostName, else the node name).
+# macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat interval).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -206,7 +206,32 @@ LOCK_HELD=0; LOCK_TOKEN=""; LOCK_HOST=""; LOCK_STARTED_UTC=""; LOCK_STARTED_EPOC
 SAMPLER_PID=""; HB_REL=""; REMOTE_PID=""; LOOP_STARTED=0; CLEANED=0; ARMS_STARTED=0
 CREATED_RUN_DIR=0; CREATED_MEX_RUN=0; ARM_REL="${ARM_REL:-}"
 
+# Touches the paired sampler's heartbeat every SUITE_HEARTBEAT_S (300) seconds while this invocation lives (review
+# N7): one step longer than the sampler's heartbeat max age (an MCP step waiting on the service queue, a long-class
+# request) no longer ends the sampling, while a sampler whose orchestrator died still stops after that age.
+HB_KEEPER=""
+start_heartbeat_keeper() {
+  [[ -n "$SAMPLER_PID" && -n "$HB_REL" ]] || return 0
+  local every="${SUITE_HEARTBEAT_S:-300}" me=$$
+  (
+    trap - INT TERM EXIT
+    n=0
+    while kill -0 "$me" 2>/dev/null; do
+      sleep 1
+      n=$((n + 1))
+      if (( n >= every )); then mex "touch $MEX_DIR/$HB_REL" || true; n=0; fi
+    done
+  ) > /dev/null 2>&1 < /dev/null &
+  HB_KEEPER=$!
+}
+stop_heartbeat_keeper() {
+  [[ -n "$HB_KEEPER" ]] || return 0
+  kill "$HB_KEEPER" 2>/dev/null || true
+  wait "$HB_KEEPER" 2>/dev/null || true
+  HB_KEEPER=""
+}
 stop_sampler() {
+  stop_heartbeat_keeper
   [[ -n "$SAMPLER_PID" ]] || return 0
   mex "kill -TERM $SAMPLER_PID" || true
   local i
@@ -439,7 +464,9 @@ LOCAL_ARGS[1]="manifest/$RUN_ID.json"
 [[ -n "$RESUME" ]] || mex "test -e $MEX_DIR/runs/$RUN_ID" || CREATED_MEX_RUN=1
 mex "mkdir -p $MEX_DIR/scripts $MEX_DIR/manifest $MEX_DIR/runs/$RUN_ID/arms" || die "ssh $MEX failed"
 T_A="$("$PY" -c 'import time; print("%.3f" % time.time())')"
-T_MEX="$(mex "$MEX_PY -c 'import time; print(\"%.3f\" % time.time())'" || true)"
+# mex's clock from `date` (no interpreter start-up inside the measured interval: review N8); python where date
+# has no %N (BSD date, the local test mode).
+T_MEX="$(mex "t=\$(date +%s.%N 2>/dev/null); case \"\$t\" in ''|*[!0-9.]*) $MEX_PY -c 'import time; print(\"%.3f\" % time.time())' ;; *) echo \"\$t\" ;; esac" || true)"
 T_B="$("$PY" -c 'import time; print("%.3f" % time.time())')"
 CLOCK_OFFSET="$("$PY" "$HERE/suite_common.py" clock-offset "$T_A" "$T_MEX" "$T_B")"
 log "mex clock offset ${CLOCK_OFFSET:-unknown} s"
@@ -599,6 +626,7 @@ run_paired() {
   COMPLETED=0
   local max_s=86400; [[ $SMOKE == 0 ]] || max_s=1800
   start_sampler paired "$max_s" heartbeat
+  start_heartbeat_keeper
   LOOP_STARTED=1
   LOOP_STATE=running
   LOOP_REASON=""
