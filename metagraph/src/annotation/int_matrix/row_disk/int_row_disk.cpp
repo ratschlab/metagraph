@@ -10,7 +10,7 @@ namespace matrix {
 using mtg::common::logger;
 
 std::vector<BinaryMatrix::SetBitPositions>
-IntRowDisk::get_rows(const std::vector<Row> &row_ids) const {
+IntRowDisk::get_rows(std::span<const Row> row_ids) const {
     View view = get_view();
     std::vector<SetBitPositions> rows(row_ids.size());
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -20,7 +20,7 @@ IntRowDisk::get_rows(const std::vector<Row> &row_ids) const {
 }
 
 std::vector<IntRowDisk::RowValues>
-IntRowDisk::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
+IntRowDisk::get_row_values(std::span<const Row> rows, size_t num_threads) const {
     return get_row_data_parallel<RowValues>(rows, num_threads,
                 [&](const auto &rows) { return get_view().get_row_values(rows); });
 }
@@ -83,7 +83,7 @@ IntMatrix::RowValues IntRowDisk::View::get_row_values(Row row) const {
 
 
 std::vector<IntMatrix::RowValues>
-IntRowDisk::View::get_row_values(const std::vector<Row> &row_ids) const {
+IntRowDisk::View::get_row_values(std::span<const Row> row_ids) const {
     std::vector<RowValues> rows_with_values(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {

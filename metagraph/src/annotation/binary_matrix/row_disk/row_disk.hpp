@@ -25,7 +25,7 @@ class RowDisk : public BinaryMatrix {
     uint64_t num_rows() const { return num_rows_; }
 
     using BinaryMatrix::get_rows;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const;
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 

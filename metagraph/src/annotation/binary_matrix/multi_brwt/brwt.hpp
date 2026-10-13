@@ -33,11 +33,11 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows, size_t num_threads) const override;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const override;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows, size_t num_threads) const override;
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
-    get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const;
+    get_column_ranks(std::span<const Row> rows, size_t num_threads) const;
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    bool show_progress = common::get_verbose()) const;
 
@@ -61,16 +61,16 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // helper function for querying rows in batches
     // appends to `slice`
     template <typename T>
-    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice,
+    void slice_rows(std::span<const Row> rows, Vector<T> *slice,
                     ThreadPool *thread_pool = nullptr) const;
 
     template <typename RowT>
-    std::vector<RowT> slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
+    std::vector<RowT> slice_rows_parallel(std::span<const Row> row_ids, size_t num_threads) const;
 
     // `call_stack` tracks the child indexes at each level during parallel tree
     // traversal, so that column indices can be remapped when merging results from subtrees.
     template <typename T, class CallSlice>
-    void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
+    void slice_rows(std::span<const Row> row_ids, std::vector<size_t> rows,
                     const BRWT *root, std::vector<size_t> call_stack,
                     size_t max_columns_cutoff, ThreadPool &thread_pool,
                     CallSlice call_slice) const;
@@ -79,7 +79,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // the rows with the set bit in `nonzero_rows_`, and their recalculated
     // (via rank) row indices for the respective rows in the children.
     std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
-    get_nonzero_rows(const std::vector<Row> &rows,
+    get_nonzero_rows(std::span<const Row> rows,
                      ThreadPool *thread_pool = nullptr,
                      bool adaptive_chunk_size = true) const;
 

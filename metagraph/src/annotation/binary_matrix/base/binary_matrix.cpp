@@ -21,8 +21,8 @@ using Column = RainbowMatrix::Column;
 
 template <typename T>
 std::vector<T>
-BinaryMatrix::get_row_data_parallel(const std::vector<Row> &rows, size_t num_threads,
-                                    const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
+BinaryMatrix::get_row_data_parallel(std::span<const Row> rows, size_t num_threads,
+                                    const std::function<std::vector<T>(std::span<const Row>)> &get_rows) {
     std::vector<T> result(rows.size());
 
     const size_t batch_size = get_chunk_size(rows.size(), kRowBatchSize, num_threads);
@@ -30,7 +30,7 @@ BinaryMatrix::get_row_data_parallel(const std::vector<Row> &rows, size_t num_thr
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t begin = 0; begin < rows.size(); begin += batch_size) {
         size_t end = std::min(begin + batch_size, rows.size());
-        auto batch = get_rows(std::vector<Row>(rows.begin() + begin, rows.begin() + end));
+        auto batch = get_rows(rows.subspan(begin, end - begin));
         std::copy(std::make_move_iterator(batch.begin()),
                   std::make_move_iterator(batch.end()),
                   result.begin() + begin);
@@ -41,8 +41,8 @@ BinaryMatrix::get_row_data_parallel(const std::vector<Row> &rows, size_t num_thr
 
 #define INSTANTIATE_GET_ROWS_PARALLEL(T) \
     template std::vector<T> \
-    BinaryMatrix::get_row_data_parallel<T>(const std::vector<Row> &, size_t, \
-                                           const std::function<std::vector<T>(const std::vector<Row> &)> &)
+    BinaryMatrix::get_row_data_parallel<T>(std::span<const Row>, size_t, \
+                                           const std::function<std::vector<T>(std::span<const Row>)> &)
 
 INSTANTIATE_GET_ROWS_PARALLEL(BinaryMatrix::SetBitPositions);
 using RowWithCounts = Vector<std::pair<Column, uint64_t>>;
@@ -51,9 +51,9 @@ using RowWithCoords = Vector<std::pair<Column, SmallVector<uint64_t>>>;
 INSTANTIATE_GET_ROWS_PARALLEL(RowWithCoords);
 
 std::vector<BinaryMatrix::SetBitPositions>
-BinaryMatrix::get_rows(const std::vector<Row> &rows, size_t num_threads) const {
+BinaryMatrix::get_rows(std::span<const Row> rows, size_t num_threads) const {
     return get_row_data_parallel<SetBitPositions>(rows, num_threads,
-                [&](const std::vector<Row> &rows) { return get_rows(rows); });
+                [&](std::span<const Row> rows) { return get_rows(rows); });
 }
 
 std::vector<BinaryMatrix::SetBitPositions>
@@ -142,8 +142,8 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
 
 std::vector<RainbowMatrix::SetBitPositions>
-RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
-    std::vector<Row> pointers = rows;
+RainbowMatrix::get_rows(std::span<const Row> rows) const {
+    std::vector<Row> pointers(rows.begin(), rows.end());
     auto distinct_rows = get_rows_dict(&pointers);
 
     std::vector<SetBitPositions> result(rows.size());
@@ -190,9 +190,8 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < codes.size(); i += batch_size) {
-        std::vector<uint64_t> ids(codes.begin() + i,
-                                  codes.begin() + std::min(i + batch_size, codes.size()));
-        auto rows = codes_to_rows(ids);
+        auto rows = codes_to_rows(std::span<const Row>(codes).subspan(
+                i, std::min(batch_size, codes.size() - i)));
         for (size_t j = 0; j < rows.size(); ++j) {
             unique_rows[i + j] = std::move(rows[j]);
         }
@@ -237,7 +236,7 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
 
 std::vector<BinaryMatrix::SetBitPositions>
-RowMajor::get_rows(const std::vector<Row> &row_ids) const {
+RowMajor::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
     for (size_t i = 0; i < row_ids.size(); ++i) {
         rows[i] = get_row(row_ids[i]);
@@ -245,10 +244,9 @@ RowMajor::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-// Parallelized directly instead of via get_row_data_parallel to avoid
-// sub-vector allocation overhead — each get_row call is independent.
+// Each get_row call is independent, so no batch results need to be merged.
 std::vector<BinaryMatrix::SetBitPositions>
-RowMajor::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
+RowMajor::get_rows(std::span<const Row> row_ids, size_t num_threads) const {
     std::vector<SetBitPositions> rows(row_ids.size());
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < row_ids.size(); ++i) {
