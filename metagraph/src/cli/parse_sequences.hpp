@@ -179,7 +179,11 @@ void parse_sequences(const std::string &file,
                 uint64_t abundance = 1;
                 
                 if (parse_counts_from_headers) {
-                    if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
+                    // kseq keeps the comment buffer across records: only a record with a
+                    // comment (comment.l) carries a count, else the previous record's would
+                    // be read again
+                    if (auto count = read_stream->comment.l
+                            ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
                         abundance = *count;
                         parsed_first_header = true;
                     } else if (parsed_first_header) {

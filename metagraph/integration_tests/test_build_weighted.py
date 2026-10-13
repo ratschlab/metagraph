@@ -380,5 +380,21 @@ class TestBuildWeighted(TestingBase):
         self.assertEqual(stats_graph['mode'], 'basic')
         self.assertIn(stats_graph['nodes (k)'], ['728', '1079'])
 
+    def test_header_abundance_counts_refuse_a_record_without_a_count(self):
+        """--count-kmers from the headers (no .kmer_counts.gz): a record without a comment
+        carries no count, so after a record with one it is refused as inconsistent rather than
+        given the previous record's count (kseq keeps the comment buffer across records)."""
+        fasta_path = os.path.join(self.tempdir.name, 'counts.fa')
+        with open(fasta_path, 'w') as f:
+            f.write('>r1 ka:f:3\nACGTTGCAGGCTAGCTTACGGATCCAGTACGATGCCTTAGC\n'
+                    '>r2\nTTGACCGTAGGCATCGATTCAAGGCTTACGACTGGATACCA\n')
+        outbase = os.path.join(self.tempdir.name, 'counts_graph')
+        cmd = f'{METAGRAPH} build --graph succinct --count-kmers -k 11 -o {outbase} {fasta_path}'
+        res = subprocess.run(cmd, shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('Inconsistent k-mer count headers',
+                      res.stderr.decode('utf-8', 'replace'))
+        self.assertFalse(os.path.exists(outbase + '.dbg'))
+
 if __name__ == '__main__':
     unittest.main()
