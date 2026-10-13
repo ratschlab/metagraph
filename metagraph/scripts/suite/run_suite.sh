@@ -160,6 +160,7 @@ if [[ -n "$REEVALUATE" ]]; then
   REEVALUATE="$(cd "$REEVALUATE" && pwd)"
   RE_ARGS=("$REEVALUATE")
   [[ -z "$REEVAL_CHECKS" ]] || RE_ARGS+=(--checks "$REEVAL_CHECKS")
+  [[ -z "$BY_DESIGN" ]] || RE_ARGS+=(--by-design "$BY_DESIGN")
   "$PY" "$HERE/reevaluate.py" "${RE_ARGS[@]}"
   "$PY" "$HERE/merge_run.py" "$REEVALUATE" --reevaluated
   CMP_ARGS=("$REEVALUATE" --no-merge --reevaluated)

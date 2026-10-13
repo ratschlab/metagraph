@@ -283,6 +283,27 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(p.returncode, 2)
         self.assertIn("no arms/ directory", p.stderr)
 
+    def test_answer_triggered_outcome(self):
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)  # the real table: pattern.deadline_ends_task
+        sc_ = scenario("N-0001", "POST /pattern", STATUS)
+        relayed = {"http": 502, "body": None,
+                   "error": {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be "
+                                                             "written within time_budget_ms; retry"}}
+        fail = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
+        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases)
+        self.assertEqual((out, kept), ("service_by_design",
+                                       "the table's answer-triggered case pattern.deadline_ends_task"))
+        # another failed search, a direct arm, another route or no table: judged by the checks
+        other = dict(relayed, error={"code": "search_failed", "text": "backend_down"})
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, other, {"outcome": "fail"}, fail, False, cases)[0],
+                         "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "direct-local", sc_, relayed, {"outcome": "fail"}, fail, False,
+                                               cases)[0], "fail")
+        res = scenario("R-0009", "POST /resolve", STATUS)
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, relayed, {"outcome": "fail"}, fail, False, cases)[0],
+                         "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False)[0], "fail")
+
     def test_merge_without_a_reevaluation(self):
         with self.assertRaises(SystemExit):
             merge_run.merge(self.run_dir, reevaluated=True)

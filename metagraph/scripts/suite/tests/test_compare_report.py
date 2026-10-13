@@ -359,11 +359,61 @@ class CompareTest(unittest.TestCase):
         self.assertIsNone(unverified["mcp_verified"])
         self.assertFalse(unverified["verified"])
 
+    def test_answer_triggered_case(self):
+        case = {"id": "pattern.deadline_ends_task", "agreement": "by_design",
+                "direct_expectation": {"http": 503, "code": "deadline"},
+                "service_answer": {"outcome": "relayed", "http": 502, "code": "search_failed",
+                                   "text_contains": "pattern_deadline"},
+                "answer_match": {"routes": ["POST /pattern"], "direct": {"http": 503, "code": "deadline"},
+                                 "mcp": {"http": 502, "code": "search_failed", "text_contains": "pattern_deadline"}}}
+        cases = dict(CASES, **{case["id"]: case})
+        s = scen("N-1", "N")  # names no case
+        st = lambda o, h: [{"check": "status", "outcome": o, "detail": "http %d" % h}]  # noqa: E731
+        dead = line("N-1", "direct-local", 0, T0, 60000.0, outcome="fail", http=503, checks=st("fail", 503),
+                    error={"code": "deadline", "text": "pattern: the answer could not be written within time_budget_ms"})
+        relayed = line("N-1", "mcp", 0, T0, 61000.0, outcome="fail", http=502, checks=st("fail", 502),
+                       error={"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be "
+                                                                "written within time_budget_ms; retry with a larger"})
+        res = cmp.mcp_agreement({0: relayed}, {"direct-local": {0: dead}}, s, cases, None)
+        self.assertEqual((res["class"], res["by"], res["case"], res["verified"], res["repeats"]),
+                         ("service_by_design", "answer", case["id"], True, [0]))
+        # the host answered within the budget on the direct arm: by design, unverified (a timing difference)
+        res = cmp.mcp_agreement({0: relayed}, {"direct-local": {0: line("N-1", "direct-local", 0, T0, 1.0)}}, s,
+                                cases, None)
+        self.assertEqual((res["class"], res["verified"], res["direct_verified"]), ("service_by_design", False, None))
+        # another failed search, another route, or a table without the case: no trigger
+        other = dict(relayed, error={"code": "search_failed", "text": "backend_down: no answer"})
+        self.assertEqual(cmp.mcp_agreement({0: other}, {"direct-local": {0: dead}}, s, cases, None)["class"],
+                         "agree")  # both read status fail: compared by the checks as before
+        res = cmp.mcp_agreement({0: relayed}, {"direct-local": {0: line("N-1", "direct-local", 0, T0, 1.0)}},
+                                dict(s, route="POST /resolve"), cases, None)
+        self.assertEqual(res["class"], "disagree")
+        res = cmp.mcp_agreement({0: relayed}, {"direct-local": {0: dead}}, s, CASES, None)
+        self.assertNotEqual(res["class"], "service_by_design")
+        # the scenario's other MCP executions are compared as usual
+        ok1 = line("N-1", "direct-local", 1, T0, 1.0)
+        bad1 = line("N-1", "mcp", 1, T0, 1.0, outcome="fail",
+                    checks=[{"check": "status", "outcome": "pass", "detail": "ok"},
+                            {"check": "contains_source_context", "outcome": "fail", "detail": "absent"}])
+        res = cmp.mcp_agreement({0: relayed, 1: bad1}, {"direct-local": {0: dead, 1: ok1}}, s, cases, None)
+        self.assertEqual((res["class"], res["answer_case"], res["answer_case_repeats"]),
+                         ("disagree", case["id"], [0]))
+        res = cmp.mcp_agreement({0: relayed, 1: line("N-1", "mcp", 1, T0, 1.0)}, {"direct-local": {0: dead, 1: ok1}},
+                                s, cases, None)
+        self.assertEqual((res["class"], res["verified"], res["other_repeats"]["class"]),
+                         ("service_by_design", True, "agree"))
+        # a code with alternatives, as the MCP runner reads it
+        self.assertTrue(cmp.answer_side_matches({"code": "a | search_failed"}, 502, {"search_failed"}, []))
+        self.assertFalse(cmp.answer_side_matches({}, 502, {"search_failed"}, []))
+        self.assertIs(cmp.answer_case_of(cases, "POST /pattern", 502, relayed["error"]), case)
+        self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 503, relayed["error"]))
+
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         self.assertEqual(info["cases"], 125)
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
+        self.assertEqual([c["id"] for c in cmp.answer_cases(cases)], ["pattern.deadline_ends_task"])
         self.assertEqual(cmp.load_by_design(""), ({}, None))
         for case in cases.values():
             self.assertIn(case["agreement"], ("by_design", "not_implemented_mcp", "service_only"))

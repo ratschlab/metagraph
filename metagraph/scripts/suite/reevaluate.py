@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Re-evaluates a recorded run OFFLINE with the current checks (no request to any host).
 
-    reevaluate.py RUN_DIR [--checks DIR] [--quiet]
+    reevaluate.py RUN_DIR [--checks DIR] [--by-design PATH] [--quiet]
 
 For every arm under RUN_DIR/arms/ and every execution line of its executions.jsonl (the last one per scenario,
 arm and repeat, as merge_run keeps it), the raw answer the runner recorded (raw/...json.gz: both runners keep the
@@ -13,7 +13,8 @@ and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), t
 backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
-own exception, which a re-evaluation repeats), `not_implemented_mcp`, `service_by_design` (async's table), and the
+own exception, which a re-evaluation repeats), `not_implemented_mcp`, `service_by_design` (async's table; also an
+MCP answer an answer-triggered case of the table matches, --by-design PATH, default compare.py's), and the
 MCP runner's host-state rule (an unexpected `uninterruptible_overrun_exceeds_allowance` is inconclusive).
 
 Writes, keeping every original file:
@@ -40,6 +41,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import compare  # noqa: E402
 import merge_run  # noqa: E402
 import suite_common as sc  # noqa: E402
 
@@ -145,11 +147,18 @@ def evaluate_raised(checks):
     return bool(checks) and all(c.get("check") == "evaluate" for c in checks)
 
 
-def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised):
+def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None):
     """The re-evaluated outcome (module docstring) and why it was kept, if it was."""
     recorded = line.get("outcome")
     if recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks"))):
         return recorded, "decided by the runner without the checks"
+    if arm == "mcp" and cases:
+        # an answer-triggered table case (answer_match), as the MCP runner's matcher applies it since async's
+        # 2d1cd9b3 table: the host's answer relayed by design, whatever the scenario names
+        case = compare.answer_case_of(cases, scenario.get("route") or line.get("route"), (answer or {}).get("http"),
+                                      (answer or {}).get("error"))
+        if case is not None:
+            return "service_by_design", "the table's answer-triggered case %s" % case["id"]
     if raised:
         return ("fail" if arm == "mcp" else "error"), None
     err = (answer or {}).get("error") or {}
@@ -181,9 +190,10 @@ def changed_checks(old, new):
     return out
 
 
-def reevaluate(run_dir, checks_dir=None, log=None):
+def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
     """Writes the re-evaluated set (module docstring); returns the mark (reevaluated.json's content)."""
     checks_dir = os.path.abspath(checks_dir or HERE)
+    cases, by_design_info = compare.load_by_design(by_design or compare.DEFAULT_BY_DESIGN)
     checks_mod = load_checks(checks_dir)
     ident = checks_identity(checks_dir)
     takes = inspect.signature(checks_mod.evaluate).parameters
@@ -192,7 +202,7 @@ def reevaluate(run_dir, checks_dir=None, log=None):
     top_manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
     mark = {"run_dir": os.path.abspath(run_dir), "reevaluated_utc": sc.iso_utc(time.time()), "checks": ident,
             "client_passed": {"direct-local": "wall_ms", "direct-remote": "wall_ms", "mcp": "mcp_phases.backend_ms"},
-            "recorded": {}, "arms": {}, "changes": [], "warnings": []}
+            "by_design": by_design_info, "recorded": {}, "arms": {}, "changes": [], "warnings": []}
     for name, arm_dir in merge_run.arm_dirs(run_dir):
         run = sc.read_json(os.path.join(arm_dir, "run.json"), {}) or {}
         mark["recorded"][name] = {"checks_module": run.get("checks_module"),
@@ -252,7 +262,7 @@ def reevaluate(run_dir, checks_dir=None, log=None):
                 new_checks = [{"check": "evaluate", "outcome": "fail",
                                "detail": "exception in checks.evaluate: %s: %s" % (type(exc).__name__, exc)}]
                 raised = True
-            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised)
+            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases)
             diff = changed_checks(line.get("checks"), new_checks)
             entry = entries.get(key) or {"digest": line.get("answer_digest"), "time_limited": line.get("time_limited")}
             row.update({"checks": new_checks, "outcome": outcome, "answer_digest": entry["digest"],
@@ -263,6 +273,8 @@ def reevaluate(run_dir, checks_dir=None, log=None):
                                    "checks_changed": [c["check"] for c in diff]}
             if kept:
                 row["reevaluation"]["kept"] = kept
+            if kept and kept.startswith("the table's answer-triggered case "):
+                row["service_by_design_case"] = kept.rsplit(" ", 1)[-1]
             counts["kept" if kept else "reevaluated"] += 1
             if outcome != line.get("outcome"):
                 counts["outcome_changed"] += 1
@@ -287,13 +299,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Re-evaluate a recorded run offline with the current checks.")
     ap.add_argument("run_dir")
     ap.add_argument("--checks", default=None, help="the directory of the checks.py to judge with (default: here)")
+    ap.add_argument("--by-design", default=None,
+                    help="the by-design table whose answer-triggered cases apply (default: compare.py's)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     if not os.path.isdir(os.path.join(args.run_dir, "arms")):
         sys.stderr.write("reevaluate: %s has no arms/ directory\n" % args.run_dir)
         return 2
     log = None if args.quiet else (lambda m: sys.stdout.write(m + "\n"))
-    mark = reevaluate(args.run_dir, args.checks, log)
+    mark = reevaluate(args.run_dir, args.checks, log, args.by_design)
     if not args.quiet:
         sys.stdout.write("checks %s (sha256 %s)\n" % (mark["checks"]["commit_label"] or mark["checks"]["dir"],
                                                        (mark["checks"]["checks_sha256"] or "")[:16]))

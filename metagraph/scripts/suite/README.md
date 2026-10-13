@@ -234,13 +234,15 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   evaluated on both) or `disagree`, with `checks_compared`; the MCP class of DESIGN §1.3; overheads, cold vs
   warm, timing and resource summaries per area, arm and host cache.
 - MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; the scenario's
-  `mcp.by_design` case(s) in async's table (below); the MCP runner's own `not_implemented_mcp` /
+  `mcp.by_design` case(s) in async's table (below); an answer-triggered case of the table (below); the MCP
+  runner's own `not_implemented_mcp` /
   `service_by_design` outcome; else, on the checks both arms evaluated (a check `not_exposed` on either side
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
-- `service_by_design.json`: async's table (124 cases), copied byte-identical from the search-service work at
-  commit 22d034ba (`service_commit` inside; sha256 7ae2ee30...). A case's `agreement`
+- `service_by_design.json`: async's table (125 cases), copied byte-identical from the search-service work
+  (vendored branch 8ccf4243 for case 125 and `answer_match`; `service_commit` inside 22d034ba; sha256
+  08218b9e...). A case's `agreement`
   `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) -> service-side
   by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
   service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text
@@ -253,6 +255,15 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   whose pair holds decides. `verified` is true only when every side the case has was checked and held; the
   report counts verified and unverified by-design pairs. The MCP arm's execution lines should carry `error`
   {code, text, field}.
+- Answer-triggered cases (`answer_match` {routes, direct, mcp}, each side {http, code (or `a | b`),
+  text_contains}; so far pattern.deadline_ends_task: the host's 503 deadline the service relays as a failed
+  search, 502 search_failed with the text pattern_deadline): they apply whatever the scenario names. An MCP
+  execution on one of `routes` matching the `mcp` side is service-side by design (`by` answer), verified when a
+  reference direct execution of the scenario matches the `direct` side, unverified otherwise (the host answered
+  within the budget on the direct arm while the MCP call did not: a timing difference under load); the
+  scenario's other MCP executions are compared as usual (`other_repeats`; a disagreement there is the class,
+  with `answer_case`). The MCP runner (async's vendored runner since 8ccf4243) and reevaluate.py give such an
+  execution the outcome `service_by_design`.
 - Overheads (DESIGN §5, review H1/M1), on pairs of host-warm executions only: front = direct-remote minus
   direct-local (each arm's first warm execution of the scenario): the wall difference, the client-side
   difference ((wall - server elapsed) remote minus the same locally) and the server difference (near 0 when
@@ -673,7 +684,7 @@ From the Opus verification of lane S3 (VERIFY.md; base 6f945db4):
   holds scripts/run_direct.py, no longer reads as the test's runner (the verification's two failures).
 
 ### Offline re-evaluation of a recorded run
-`reevaluate.py RUN_DIR [--checks DIR]` judges a recorded run's answers again with the current checks (checks.py of
+`reevaluate.py RUN_DIR [--checks DIR] [--by-design PATH]` judges a recorded run's answers again with the current checks (checks.py of
 DIR, default this directory), without any request; `merge_run.py RUN_DIR --reevaluated`, `compare.py RUN_DIR
 --reevaluated` and `report.py RUN_DIR --reevaluated` then build the re-evaluated set, and `run_suite.sh --reevaluate
 RUN_DIR [--reeval-checks DIR] [--compare EARLIER] [--by-design PATH] [--no-pdf]` runs the four (offline: before the
@@ -691,7 +702,8 @@ lock, the ssh connection or the release GET).
   MCP wall holds the queue and the polling; none without it).
 - Outcome: `checks.scenario_outcome` of the new checks, except where the runner decided it without them, which is
   kept: `error` (no answer, transport, decode, a busy deployment; but an `error` whose recorded checks are the
-  checks module's own exception is judged again), `not_implemented_mcp`, `service_by_design` (async's table), and
+  checks module's own exception is judged again), `not_implemented_mcp`, `service_by_design` (async's table; also
+  an MCP answer an answer-triggered case of the table matches, `--by-design PATH`, default this directory's), and
   async's host-state rule (an MCP answer refused with `uninterruptible_overrun_exceeds_allowance` the scenario does
   not expect is inconclusive). A new exception in checks.evaluate is `error` on a direct arm and `fail` on the MCP
   arm, as the runners record it.

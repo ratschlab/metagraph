@@ -17,7 +17,8 @@
    "by_design": "a mapped pair counts as agreement",
    "not_implemented_mcp": "the scenario is 'not implemented yet via MCP'",
    "service_only": "no host counterpart (service behaviour only)"
-  }
+  },
+  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`, unverified otherwise"
  },
  "assumptions": [
   "staging settings at their code defaults: PATTERN_DB_BUDGETS_MS empty, PATTERN_DEFAULT_MAX_ANCHORS unset, TRAVERSAL_ADVANCED_ENABLED false, IDEMPOTENCY_REUSE_DONE true, BACKEND_CACHE_MAX_ANSWER_AGE_SECS 604800, PATTERN_MAX_* / TRAVERSAL_* as in app/settings.py",
@@ -3812,7 +3813,21 @@
     "app/pattern/worker.py:545",
     "app/settings.py:2360",
     "scripts/bench/suite_mcp_normalise.py:334"
-   ]
+   ],
+   "answer_match": {
+    "routes": [
+     "POST /pattern"
+    ],
+    "direct": {
+     "http": 503,
+     "code": "deadline"
+    },
+    "mcp": {
+     "http": 502,
+     "code": "search_failed",
+     "text_contains": "pattern_deadline"
+    }
+   }
   }
  ]
 }

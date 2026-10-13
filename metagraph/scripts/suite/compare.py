@@ -374,6 +374,59 @@ def direct_agreement(local, remote):
             "differing_checks": differing, "checks_compared": compared, "repeats": common}
 
 
+def answer_cases(cases):
+    """The table cases an answer triggers (`answer_match`, whatever the scenario names): {routes, direct, mcp},
+    each side {http, code, text_contains}; e.g. pattern.deadline_ends_task, the host's 503 deadline the service
+    relays as a failed search."""
+    return [c for c in (cases or {}).values() if isinstance(c.get("answer_match"), dict)]
+
+
+def answer_side_matches(side, http, codes, texts):
+    """Whether one side of an answer_match holds for an answer (its status, error codes and texts); a side that
+    states nothing never matches."""
+    if not isinstance(side, dict) or not any(side.get(k) is not None for k in ("http", "code", "text_contains")):
+        return False
+    if side.get("http") is not None and http != side["http"]:
+        return False
+    if side.get("code") is not None and not any(c.strip() in codes for c in str(side["code"]).split("|")):
+        return False  # a code or alternatives "a | b", as the MCP runner's matcher reads them
+    tc = side.get("text_contains")
+    return not tc or any(tc in (t or "") for t in texts)
+
+
+def answer_case_of(cases, route, http, error):
+    """The first answer-triggered case whose MCP side the MCP answer (status, error {code, text}) matches on the
+    scenario's route, else None (reevaluate.py's outcome rule and the MCP runner's matcher)."""
+    err = error if isinstance(error, dict) else {}
+    for case in answer_cases(cases):
+        am = case["answer_match"]
+        if am.get("routes") and route not in am["routes"]:
+            continue
+        if answer_side_matches(am.get("mcp"), http, set([err.get("code")]) - {None}, [err.get("text")]):
+            return case
+    return None
+
+
+def _mcp_answer_case(cases, route, line, run_dir):
+    return answer_case_of(cases, route, line.get("http"), mcp_error(line, run_dir))
+
+
+def answer_triggered(cases, route, reps, ref, run_dir):
+    """(case, MCP lines it triggers on, the reference direct lines matching its direct side) for the first
+    answer-triggered case one of the scenario's MCP executions matches; None when none does."""
+    for case in answer_cases(cases):
+        hit = [r for r in reps if _mcp_answer_case({case["id"]: case}, route, r, run_dir) is not None]
+        if not hit:
+            continue
+        direct = []
+        for x in (ref or {}).values():
+            codes, texts = direct_errors(x, run_dir)
+            if answer_side_matches(case["answer_match"].get("direct"), x.get("http"), codes, texts):
+                direct.append(x)
+        return case, hit, direct
+    return None
+
+
 def case_ids(scenario):
     """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
     ids = ((scenario or {}).get("mcp") or {}).get("by_design")
@@ -388,7 +441,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     """The MCP arm's outcome class against the reference direct arm (DESIGN §1.3).
 
     Order: the manifest's `mcp.not_implemented`; the scenario's table cases (the first whose pair holds, else
-    the first); the MCP runner's own marks; else the per-check agreement with direct-local (or direct-remote).
+    the first); an answer-triggered table case (answer_triggered); the MCP runner's own marks; else the
+    per-check agreement with direct-local (or direct-remote).
     """
     mcp = mcp or {}
     reps = [mcp[k] for k in sorted(mcp)]
@@ -416,6 +470,29 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         return results[0]
     if not reps:
         return {"class": "missing"}
+    route = (scenario or {}).get("route") or reps[0].get("route")
+    trig = answer_triggered(cases, route, reps, ref, run_dir)
+    if trig is not None:
+        # An answer-triggered case (the table's answer_match): its MCP executions are the host's answer relayed by
+        # design, verified when a reference direct execution answered the same (e.g. both hit the host's deadline);
+        # otherwise the host answered within the budget on the direct arm while the MCP call did not, a timing
+        # difference under load and no content one. The scenario's other MCP executions are compared as usual.
+        case, hit, direct = trig
+        rest = dict((r.get("repeat"), r) for r in reps if r not in hit)
+        res = {"class": "service_by_design", "by": "answer", "case": case["id"],
+               "case_agreement": case.get("agreement"),
+               "service_outcome": (case.get("service_answer") or {}).get("outcome"),
+               "repeats": [r.get("repeat") for r in hit], "mcp_verified": True,
+               "direct_verified": True if direct else None, "verified": bool(direct),
+               "direct_detail": ("repeat(s) %s match" % [x.get("repeat") for x in direct]) if direct else
+               "no reference direct execution answered %s" % case["answer_match"].get("direct")}
+        if rest:
+            others = dict((k, v) for k, v in cases.items() if k != case["id"])
+            other = mcp_agreement(rest, direct_lines, scenario, others, run_dir)
+            res["other_repeats"] = other
+            if other.get("class") == "disagree":
+                return dict(other, answer_case=case["id"], answer_case_repeats=res["repeats"])
+        return res
     outcomes = set(r.get("outcome") for r in reps)
     if "not_implemented_mcp" in outcomes:
         return {"class": "not_implemented_mcp", "by": "mcp runner"}
