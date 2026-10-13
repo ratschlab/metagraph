@@ -1,6 +1,8 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <array>
 #include <atomic>
+#include <mutex>
 #include <utility>
 #include <variant>
 
@@ -68,19 +70,22 @@ void replace_field(uint64_t &value, uint64_t mask, uint64_t bits) {
                                        std::memory_order_relaxed)) {}
 }
 
-uint64_t atomic_fetch(sdsl::int_vector<> &vector, uint64_t i, std::mutex &mutex) {
+// Spread crossing fields across locks without padding the packed counter storage.
+using CounterLocks = std::array<std::mutex, 256>;
+
+uint64_t atomic_fetch(sdsl::int_vector<> &vector, uint64_t i, CounterLocks &locks) {
     const unsigned width = vector.width();
     uint64_t bit = i * width, k = bit / 64;
     unsigned shift = bit % 64;
     uint64_t mask = sdsl::bits::lo_set[width];
     if (shift + width <= 64)
         return (counter_atomic(vector.data()[k]).load(std::memory_order_relaxed) >> shift) & mask;
-    std::lock_guard lock(mutex);
+    std::lock_guard lock(locks[k % locks.size()]);
     return ((counter_atomic(vector.data()[k]).load(std::memory_order_relaxed) >> shift)
           | (counter_atomic(vector.data()[k + 1]).load(std::memory_order_relaxed) << (64 - shift))) & mask;
 }
 
-void atomic_add(sdsl::int_vector<> &vector, uint64_t i, uint64_t value, std::mutex &mutex) {
+void atomic_add(sdsl::int_vector<> &vector, uint64_t i, uint64_t value, CounterLocks &locks) {
     const unsigned width = vector.width();
     uint64_t bit = i * width, k = bit / 64;
     unsigned shift = bit % 64;
@@ -95,8 +100,8 @@ void atomic_add(sdsl::int_vector<> &vector, uint64_t i, uint64_t value, std::mut
                 return;
         }
     }
-    // Crossing fields share this lock; CAS still preserves unlocked neighboring fields.
-    std::lock_guard lock(mutex);
+    // Readers and writers of this field share a lock; CAS preserves neighboring fields.
+    std::lock_guard lock(locks[k % locks.size()]);
     uint64_t next = (word.load(std::memory_order_relaxed) >> shift)
           | (counter_atomic(vector.data()[k + 1]).load(std::memory_order_relaxed) << (64 - shift));
     next = (next + value) & mask;
@@ -105,12 +110,12 @@ void atomic_add(sdsl::int_vector<> &vector, uint64_t i, uint64_t value, std::mut
 }
 
 template <class T>
-uint64_t atomic_fetch(std::vector<T> &vector, uint64_t i, std::mutex &) {
+uint64_t atomic_fetch(std::vector<T> &vector, uint64_t i, CounterLocks &) {
     return counter_atomic(vector[i]).load(std::memory_order_relaxed);
 }
 
 template <class T>
-void atomic_add(std::vector<T> &vector, uint64_t i, uint64_t value, std::mutex &) {
+void atomic_add(std::vector<T> &vector, uint64_t i, uint64_t value, CounterLocks &) {
     counter_atomic(vector[i]).fetch_add(value, std::memory_order_relaxed);
 }
 
@@ -195,7 +200,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
-        std::mutex vector_backup_mutex;
+        CounterLocks counter_locks;
         std::atomic_thread_fence(std::memory_order_release);
 
         auto mask_or = [&](sdsl::bit_vector &a,
@@ -215,7 +220,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                 call_ones(b, [&](size_t i) {
                     if (id_map[i]) {
                         set_bit(a.data(), id_map[i], parallel, std::memory_order_relaxed);
-                        atomic_add(values, id_map[i] * 2 + offset, 1, vector_backup_mutex);
+                        atomic_add(values, id_map[i] * 2 + offset, 1, counter_locks);
                     }
                 });
             };
@@ -364,7 +369,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (add_complement) {
         logger->trace("Adding reverse complements");
-        std::mutex vector_backup_mutex;
+        CounterLocks counter_locks;
         std::atomic_thread_fence(std::memory_order_release);
         counts.visit([&](auto &values) {
             masked_graph->call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
@@ -375,10 +380,10 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 auto it = rc_path.rbegin();
                 for (size_t i = 0; i < path.size(); ++i, ++it) {
                     if (*it) {
-                        uint64_t in_count = atomic_fetch(values, path[i] * 2, vector_backup_mutex);
-                        uint64_t out_count = atomic_fetch(values, path[i] * 2 + 1, vector_backup_mutex);
-                        atomic_add(values, *it * 2, in_count, vector_backup_mutex);
-                        atomic_add(values, *it * 2 + 1, out_count, vector_backup_mutex);
+                        uint64_t in_count = atomic_fetch(values, path[i] * 2, counter_locks);
+                        uint64_t out_count = atomic_fetch(values, path[i] * 2 + 1, counter_locks);
+                        atomic_add(values, *it * 2, in_count, counter_locks);
+                        atomic_add(values, *it * 2 + 1, out_count, counter_locks);
 
                         set_bit(mask.data(), *it, num_threads > 1, std::memory_order_relaxed);
                     }
@@ -425,7 +430,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         label_codes.push_back(code);
     }
 
-    std::mutex vector_backup_mutex;
+    CounterLocks counter_locks;
     std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
 
@@ -437,10 +442,10 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                     node_index i = AnnotatedDBG::anno_to_graph_index(r);
                     set_bit(indicator.data(), i, parallel, std::memory_order_relaxed);
                     if (col_indicator & 1)
-                        atomic_add(values, i * 2, 1, vector_backup_mutex);
+                        atomic_add(values, i * 2, 1, counter_locks);
 
                     if (col_indicator & 2)
-                        atomic_add(values, i * 2 + 1, 1, vector_backup_mutex);
+                        atomic_add(values, i * 2 + 1, 1, counter_locks);
                 });
             },
             num_threads
