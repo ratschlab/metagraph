@@ -416,6 +416,71 @@ class RunSuiteOverSsh(SuiteCase):
         self.assertEqual(sess["loop"]["state"], "done")
         self.assertFalse(os.path.exists(self.lock_path()))
 
+    def runner_gone(self, run_id):
+        out = subprocess.run(["pgrep", "-f", "run_direct.py.*--run-id %s" % run_id], stdout=subprocess.PIPE,
+                             universal_newlines=True).stdout
+        return not out.strip()
+
+    def test_mex_silent_after_a_cut_step_stops_the_loop(self):
+        # review N3: the direct-local step's connection drops and mex stays silent: the wait for its runner must
+        # not read the failing ssh as "no runner"; the loop stops with no further request (no direct-remote
+        # step, no closing GETs), and --resume finishes the run once mex answers again
+        make_manifest(self.mpath, [scenario("S-01", "S", "POST /slow", {"sleep_s": 3}),
+                                   scenario("S-02", "S", "POST /slow", {"sleep_s": 0})])
+        down = os.path.join(self.mex, ".ssh-down")
+        with FakeHost() as host:
+            proc = self.start_suite(host, "--manifest", self.mpath, "--warm-every", "0")
+            self.wait_for(lambda: ("POST", "/slow") in host.log)
+            open(down, "w").close()
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 1, err)
+            self.assertIn("does not answer after the direct-local step of S-01 failed", err)
+            self.assertIn("no closing steps", err)
+            run_dir = out.strip().splitlines()[-1]
+            run_id = os.path.basename(run_dir)
+            self.wait_for(lambda: self.runner_gone(run_id))
+            # the release GET, direct-local's three capabilities documents and its S-01 request: nothing else
+            self.assertEqual(host.log, [("GET", "/capabilities"), ("GET", "/capabilities"),
+                                        ("GET", "/pattern/capabilities"), ("GET", "/traverse/capabilities"),
+                                        ("POST", "/slow")])
+            sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+            self.assertEqual((sess["loop"]["state"], sess["loop"]["reason"]), ("failed", "mex_unreachable"))
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertIn("INCOMPLETE", fh.read())
+            self.assertTrue(os.path.exists(self.lock_path()))      # left behind: mex did not answer
+            os.unlink(down)
+            p = self.run_suite(host, "--resume", run_dir, "--warm-every", "0")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("removing a stale lock", p.stderr)
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(sorted(sc.execution_key(r) for r in rows),
+                         [("S-01", "direct-local", 0), ("S-01", "direct-remote", 0),
+                          ("S-02", "direct-local", 0), ("S-02", "direct-remote", 0)])
+        self.assertFalse(os.path.exists(self.lock_path()))
+
+    def test_no_closing_get_next_to_a_live_runner(self):
+        # review N3: the step's connection drops, mex answers again, but the runner outlives the wait: the loop
+        # stops and neither arm sends its closing GET /capabilities while the runner is on the host
+        make_manifest(self.mpath, [scenario("S-01", "S", "POST /slow", {"sleep_s": 9})])
+        down = os.path.join(self.mex, ".ssh-down")
+        with FakeHost() as host:
+            proc = self.start_suite(host, "--manifest", self.mpath, "--warm-every", "0")
+            self.wait_for(lambda: ("POST", "/slow") in host.log)
+            open(down, "w").close()
+            self.wait_for(lambda: os.path.exists(self.ssh_log) and any(
+                c["op"] == "dropped" for c in self.ssh_calls()))
+            os.unlink(down)
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 1, err)
+            self.assertIn("still runs on fake@mex", err)
+            n = len(host.log)
+            run_dir = out.strip().splitlines()[-1]
+            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir)))
+        self.assertEqual(n, 5)                                      # no direct-remote request, no closing GET
+        sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+        self.assertEqual((sess["loop"]["state"], sess["loop"]["reason"]), ("failed", "runner_still_running"))
+        self.assertFalse(os.path.exists(self.lock_path()))
+
 
 if __name__ == "__main__":
     unittest.main()

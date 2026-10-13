@@ -132,7 +132,13 @@ lists the environment overrides.
    runner records the mark). One sampler on mex covers the loop (`samples/paired-<stamp>.jsonl`), stopped at
    the end, after 24 h (30 min for --smoke), or when the orchestrator stops touching its heartbeat file for an
    hour. Three failing steps of one arm in a row stop the loop (exit 1 after the report). An ssh failure on a
-   direct-local step waits until that step's runner is gone before the next arm starts.
+   direct-local step waits until that step's runner is gone before the next arm starts (review N3): the
+   check on mex answers with an explicit marker, so a failing ssh never reads as "no runner"; it is retried
+   every 5 s for SUITE_WAIT_RUNNER_S. A runner still there after that, or a mex that stays silent, stops
+   the loop with an error (`loop.reason` runner_still_running / mex_unreachable, exit 1 after the report),
+   and then no closing step runs, so no request goes to the host while that runner may still be on it; the
+   run's manifest is copied into the run directory at the start, so --resume continues it once mex answers
+   (a lock that could not be released is then removed as stale).
 5. `--sequential`: direct-local on mex with nohup and its own sampler (`--sample-docker`), polled through
    state.json (an ssh answering neither alive nor dead is retried, never read as finished); then
    direct-remote from here with a sampler on mex (`samples/direct-remote-<stamp>.jsonl`, at most 30 min for

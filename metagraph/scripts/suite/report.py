@@ -174,7 +174,8 @@ def verdict_section(run, comp, rows, samples):
                   if st not in (None, "done") and arm != "mcp"]
     loop = orchestrator_session(run).get("loop") or {}
     if loop and loop.get("state") not in (None, "done"):
-        incomplete.append("the %s loop (%s)" % (loop.get("mode", "paired"), loop.get("state")))
+        incomplete.append("the %s loop (%s%s)" % (loop.get("mode", "paired"), loop.get("state"),
+                                                  (": %s" % loop["reason"]) if loop.get("reason") else ""))
     dis_direct = s["direct_agreement"].get("disagree", 0)
     dis_mcp = s["mcp_agreement"].get("disagree", 0)
     rel_failed = sum((v or {}).get("fail", 0) for v in ((s.get("relations") or {}).get("per_arm") or {}).values())

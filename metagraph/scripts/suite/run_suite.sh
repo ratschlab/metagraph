@@ -207,6 +207,9 @@ if [[ $CHECKS == stub && $ALLOW_STUB == 0 ]]; then
 fi
 
 mkdir -p "$RUN_DIR/arms"
+# The run's manifest from the start, so a --resume finds it even when no arm's copy reached this side (merge_run
+# keeps an existing one).
+[[ -f "$RUN_DIR/manifest.json" ]] || cp "$MANIFEST" "$RUN_DIR/manifest.json"
 COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
 DIRTY="$(git -C "$HERE" status --porcelain -- . 2>/dev/null | grep -v '^?? runs/' | head -1 || true)"
 [[ -z "$DIRTY" ]] || COMMIT="$COMMIT+dirty"
@@ -254,7 +257,11 @@ pull_local_arm() {
 }
 release_lock() {
   [[ $LOCK_HELD == 1 ]] || return 0
-  mex "grep -q $LOCK_TOKEN $MEX_DIR/LOCK && rm -f $MEX_DIR/LOCK" || true
+  local out
+  out="$(mex "if grep -q $LOCK_TOKEN $MEX_DIR/LOCK 2>/dev/null; then rm -f $MEX_DIR/LOCK; fi; echo released" || true)"
+  if [[ "$out" != *released* ]]; then
+    log "the lock ~/$MEX_DIR/LOCK on $MEX could not be released (no answer); the next invocation removes it as stale once this process is gone"
+  fi
   LOCK_HELD=0
 }
 close_master() {  # this invocation's master only (its own ControlPath)
@@ -269,6 +276,7 @@ cleanup() {
   if [[ $NEW_RUN == 1 && $ARMS_STARTED == 0 ]]; then
     # Refused before any arm ran (lock, runner, options): leave no empty run directory behind.
     mex "rmdir $MEX_DIR/runs/$RUN_ID/arms $MEX_DIR/runs/$RUN_ID" || true
+    rm -f "$RUN_DIR/manifest.json"
     rmdir "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
   fi
   release_lock
@@ -288,13 +296,37 @@ with open(path + ".tmp", "w") as fh:
 os.replace(path + ".tmp", path)
 PYEOF
 }
-# Waits until no run_direct.py of this suite runs on mex; 1 when one still does after `$1` seconds.
+# The pids of this suite's run_direct.py processes on mex in RUNNER_PIDS ('' for none); returns 1 when mex gave no
+# answer (the marker is missing), which says nothing about the runner.
+runner_pids() {
+  local out
+  out="$(mex "printf 'runners:'; pgrep -u \$(id -u) -f '$RUNNER_PATTERN' | tr '\n' ' '; echo" || true)"
+  [[ "$out" == *runners:* ]] || return 1
+  RUNNER_PIDS="$(printf '%s' "${out##*runners:}" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
+}
+# Waits until no run_direct.py of this suite runs on mex: 0 then; 1 when one still runs after `$1` seconds; 2 when
+# mex did not answer the last check after `$1` seconds. A failing ssh is retried every 5 s within that time and
+# never reads as "no runner" (review N3: the next arm would start next to a runner cut off from its ssh).
 wait_no_runner() {
-  local waited=0 pids
+  local waited=0 last="" silent=0
+  RUNNER_PIDS=""
   while true; do
-    pids="$(mex "pgrep -u \$(id -u) -f '$RUNNER_PATTERN' | tr '\n' ' '" || true)"
-    [[ -n "${pids// /}" ]] || return 0
-    (( waited < $1 )) || { log "run_direct.py still running on $MEX (pid(s) $pids)"; return 1; }
+    if runner_pids; then
+      [[ -n "$RUNNER_PIDS" ]] || return 0
+      last=running
+    else
+      last=silent
+      silent=$((silent + 1))
+      (( silent % 6 != 1 )) || log "no answer from $MEX while checking for a running run_direct.py; retrying for up to $1 s"
+    fi
+    if (( waited >= $1 )); then
+      if [[ $last == running ]]; then
+        log "run_direct.py still running on $MEX (pid(s) $RUNNER_PIDS)"
+        return 1
+      fi
+      log "no answer from $MEX for $waited s: whether a run_direct.py still runs there is unknown"
+      return 2
+    fi
     sleep 5
     waited=$((waited + 5))
   done
@@ -305,9 +337,12 @@ interrupted() {
   if [[ $LOCK_HELD == 1 ]]; then
     # The runner of the step in flight (paired) or of the arm (sequential) stops after its request.
     mex "pkill -INT -u \$(id -u) -f '$RUNNER_PATTERN .*--run-id $RUN_ID'" || true
-    if ! wait_no_runner 120; then
-      log "the mex runner still runs (a long request may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume waits for it or attaches to it"
-    fi
+    local wrc=0
+    wait_no_runner 120 || wrc=$?
+    case $wrc in
+      1) log "the mex runner still runs (a long request may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume waits for it or attaches to it" ;;
+      2) log "no answer from $MEX: the mex runner may still run there; --resume waits for it once mex answers" ;;
+    esac
     pull_local_arm
   fi
   [[ $LOOP_STARTED == 0 ]] || orch_set loop "{\"mode\": \"$MODE\", \"state\": \"interrupted\", \"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}}"
@@ -366,8 +401,14 @@ print(s.get("pid", "") if s.get("state") == "running" else "")' 2>/dev/null || t
   PIDS="$(mex "pgrep -u \$(id -u) -f '$RUNNER_PATTERN' | tr '\n' ' '" || true)"
   if [[ "$LIVE" =~ ^[0-9]+$ && "${PIDS// /}" == "$LIVE" ]]; then ATTACH_PID="$LIVE"; fi
 fi
-if [[ -z "$ATTACH_PID" ]] && ! wait_no_runner "$WAIT_RUNNER_S"; then
-  die "a run_direct.py runs under ~/$MEX_DIR on $MEX (an earlier invocation's); wait for it, stop it with kill -INT, or --resume its run"
+if [[ -z "$ATTACH_PID" ]]; then
+  WRC=0
+  wait_no_runner "$WAIT_RUNNER_S" || WRC=$?
+  case $WRC in
+    0) ;;
+    1) die "a run_direct.py runs under ~/$MEX_DIR on $MEX (an earlier invocation's); wait for it, stop it with kill -INT, or --resume its run" ;;
+    *) die "no answer from $MEX while checking for a running run_direct.py: refusing to start (an ssh failure never reads as no runner)" ;;
+  esac
 fi
 
 mex_rsync --delete --exclude 'runs/' --exclude 'tests/' --exclude '__pycache__/' --exclude '*.pyc' \
@@ -478,7 +519,7 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
 FINAL_RC=0
 # --- paired mode ----------------------------------------------------------------------------------------------
 run_paired() {
-  local arms="" entry sid l r mc mw rep rc fails_local=0 fails_remote=0 fails_mcp=0 since_pull=0
+  local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 fails_mcp=0 since_pull=0 runner_live=0
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -493,6 +534,7 @@ run_paired() {
   start_sampler paired "$max_s" heartbeat
   LOOP_STARTED=1
   LOOP_STATE=running
+  LOOP_REASON=""
   orch_set loop "{\"mode\": \"paired\", \"state\": \"running\", \"scenarios\": $N_PLAN, \"completed\": 0}"
   log "paired: $N_PLAN scenario(s); arms ${arms%,}"
   for entry in ${plan[@]+"${plan[@]}"}; do
@@ -508,8 +550,19 @@ run_paired() {
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
       if [[ $rc != 0 ]]; then
         fails_local=$((fails_local + 1)); log "direct-local: exit $rc on $sid (see arms/direct-local/runner.log)"
-        # An ssh that failed may have left the step running: never start the next arm next to it.
-        wait_no_runner "$WAIT_RUNNER_S" || { LOOP_STATE=failed; break; }
+        # An ssh that failed may have left the step running: never start the next arm next to it, and never read
+        # a failing ssh as "the runner is gone" (review N3).
+        wrc=0
+        wait_no_runner "$WAIT_RUNNER_S" || wrc=$?
+        if [[ $wrc == 1 ]]; then
+          runner_live=1; LOOP_STATE=failed; LOOP_REASON=runner_still_running
+          log "error: the direct-local step of $sid still runs on $MEX after $WAIT_RUNNER_S s: stopping the loop (--resume $RUN_DIR once it ended)"
+          break
+        elif [[ $wrc != 0 ]]; then
+          runner_live=1; LOOP_STATE=failed; LOOP_REASON=mex_unreachable
+          log "error: $MEX does not answer after the direct-local step of $sid failed, so its runner may still run there: stopping the loop, no further request (--resume $RUN_DIR once mex answers)"
+          break
+        fi
       else
         fails_local=0
       fi
@@ -528,7 +581,7 @@ run_paired() {
     fi
     if (( fails_local >= 3 || fails_remote >= 3 || fails_mcp >= 3 )); then
       log "three failing steps of one arm in a row: stopping the loop"
-      LOOP_STATE=failed
+      LOOP_STATE=failed; LOOP_REASON=failing_steps
       break
     fi
     COMPLETED=$((COMPLETED + 1))
@@ -538,18 +591,22 @@ run_paired() {
   [[ $LOOP_STATE != running ]] || LOOP_STATE=done
   [[ $LOOP_STATE != capped ]] || log "paired: stopped at --max-requests $MAX_REQUESTS ($USED direct requests); --resume continues"
   # The closing GET /capabilities of each direct arm (one request kept back for each) and its state over the
-  # whole selection.
-  if [[ $SKIP_LOCAL == 0 ]]; then
-    RESERVE=$((RESERVE - 1))
-    direct_call local --finish || log "direct-local: the closing step failed"
-  fi
-  if [[ $SKIP_REMOTE == 0 ]]; then
-    RESERVE=$((RESERVE - 1))
-    direct_call remote --finish || log "direct-remote: the closing step failed"
+  # whole selection; none while a direct-local runner may still be on the host (review N3).
+  if [[ $runner_live == 1 ]]; then
+    log "paired: no closing steps (a direct-local runner may still run on $MEX); --resume finishes the run"
+  else
+    if [[ $SKIP_LOCAL == 0 ]]; then
+      RESERVE=$((RESERVE - 1))
+      direct_call local --finish || log "direct-local: the closing step failed"
+    fi
+    if [[ $SKIP_REMOTE == 0 ]]; then
+      RESERVE=$((RESERVE - 1))
+      direct_call remote --finish || log "direct-remote: the closing step failed"
+    fi
   fi
   [[ $SKIP_LOCAL == 1 ]] || pull_local_arm
   stop_sampler
-  orch_set loop "{\"mode\": \"paired\", \"state\": \"$LOOP_STATE\", \"scenarios\": $N_PLAN, \"completed\": $COMPLETED, \"direct_requests\": $USED}"
+  orch_set loop "{\"mode\": \"paired\", \"state\": \"$LOOP_STATE\", \"reason\": \"$LOOP_REASON\", \"scenarios\": $N_PLAN, \"completed\": $COMPLETED, \"direct_requests\": $USED}"
   log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s), $USED direct request(s)"
   [[ $LOOP_STATE != failed ]] || FINAL_RC=1
 }
