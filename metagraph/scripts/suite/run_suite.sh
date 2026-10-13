@@ -7,6 +7,12 @@
 #                [--areas P,M] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
 #                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf]
+#   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf]
+#
+# --reevaluate RUN_DIR: offline, no lock and no request to any host: judges the run's recorded answers again with
+# checks.py of this directory (or of --reeval-checks DIR) (reevaluate.py), then merge_run / compare / report
+# --reevaluated: executions.reevaluated.jsonl, compare.reevaluated.json, report.reevaluated.md / .pdf beside the
+# recorded files, which stay.
 #
 # --paired (the default): per scenario in manifest order, MCP cold (with --mcp-cmd) -> direct-local (one
 # run_direct.py step on mex over one persistent ssh connection) -> direct-remote (a step from here through the
@@ -109,9 +115,11 @@ mex_rsync() {
 
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
-MCP_GIVEN=0; CHECKS_MODE=""
+MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --reevaluate) REEVALUATE="$2"; shift 2 ;;
+    --reeval-checks) REEVAL_CHECKS="$2"; shift 2 ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --smoke) SMOKE=1; shift ;;
     --paired) MODE=paired; shift ;;
@@ -144,6 +152,27 @@ if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ "$MCP_CMD" != default ]] || MCP_CMD="$DEFAULT_MCP_CMD"
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
 [[ -z "$CHECKS_MODE" || "$CHECKS_MODE" =~ ^(auto|checks|stub)$ ]] || die "--checks takes auto, checks or stub"
+
+# --- the offline re-evaluation of a recorded run (lane S4): no lock, no ssh, no request to any host ----------
+if [[ -n "$REEVALUATE" ]]; then
+  [[ -d "$REEVALUATE/arms" ]] || die "--reevaluate $REEVALUATE has no arms/ directory"
+  [[ -z "$REEVAL_CHECKS" || -f "$REEVAL_CHECKS/checks.py" ]] || die "--reeval-checks $REEVAL_CHECKS has no checks.py"
+  REEVALUATE="$(cd "$REEVALUATE" && pwd)"
+  RE_ARGS=("$REEVALUATE")
+  [[ -z "$REEVAL_CHECKS" ]] || RE_ARGS+=(--checks "$REEVAL_CHECKS")
+  "$PY" "$HERE/reevaluate.py" "${RE_ARGS[@]}"
+  "$PY" "$HERE/merge_run.py" "$REEVALUATE" --reevaluated
+  CMP_ARGS=("$REEVALUATE" --no-merge --reevaluated)
+  [[ -z "$BY_DESIGN" ]] || CMP_ARGS+=(--by-design "$BY_DESIGN")
+  "$PY" "$HERE/compare.py" "${CMP_ARGS[@]}"
+  REP_ARGS=("$REEVALUATE" --reevaluated)
+  [[ -z "$COMPARE" ]] || REP_ARGS+=(--compare "$COMPARE")
+  [[ $NO_PDF == 0 ]] || REP_ARGS+=(--no-pdf)
+  "$PY" "$HERE/report.py" "${REP_ARGS[@]}" || log "report: the PDF was not produced (see above); report.reevaluated.md is there"
+  log "re-evaluated: $REEVALUATE"
+  printf '%s\n' "$REEVALUATE"
+  exit 0
+fi
 
 # --- the run directory ------------------------------------------------------------------------------------
 if [[ -n "$RESUME" ]]; then

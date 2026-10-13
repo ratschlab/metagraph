@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Merges the arms of a run directory into the run's top-level files (DESIGN §6).
 
-    merge_run.py RUN_DIR
+    merge_run.py RUN_DIR [--reevaluated]
 
 Each arm writes RUN_DIR/arms/<arm>/ (run.json, executions.jsonl, samples.jsonl, raw/, and for the MCP arm
 jobs.jsonl); the orchestrator's samplers on mex write RUN_DIR/samples/*.jsonl. This writes
@@ -17,6 +17,12 @@ checks.scenario_outcome over its checks when that is stricter than the one its r
 inconclusive > pass; a runner's error, not_implemented_mcp or service_by_design is kept), the runner's own under
 `outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
 from the generic ones (an execution whose property checks are all not exposed is inconclusive, not pass).
+
+--reevaluated (lane S4): merges the re-evaluated set of reevaluate.py instead, each arm's
+executions.reevaluated.jsonl into RUN_DIR/executions.reevaluated.jsonl and run.reevaluated.json (with the set's
+mark, RUN_DIR/reevaluated.json, under `reevaluation`); scenario_outcome is the re-evaluation's checks'; an arm
+without a re-evaluated file keeps its recorded lines (a warning says so); samples.jsonl, jobs.jsonl and
+manifest.json, which no re-evaluation changes, are written only where missing, so every recorded file stays.
 """
 
 import json
@@ -32,9 +38,9 @@ ARM_ORDER = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
 _STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
 
 
-def load_scenario_outcome():
-    """checks.scenario_outcome of checks.py next to this script, or None."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checks.py")
+def load_scenario_outcome(checks_dir=None):
+    """checks.scenario_outcome of checks.py in |checks_dir| (default: next to this script), or None."""
+    path = os.path.join(checks_dir or os.path.dirname(os.path.abspath(__file__)), "checks.py")
     if not os.path.exists(path):
         return None
     import importlib.util
@@ -55,14 +61,16 @@ def judged_by_stub(run):
 
 def stricter_outcomes(rows, arm_runs, outcome_fn):
     """Applies checks.scenario_outcome where it is stricter than the runner's outcome (module docstring); returns
-    {arm: executions changed}."""
+    {arm: executions changed}. A re-evaluated line (`reevaluation`) was judged by checks.py whatever its runner
+    ran."""
     changed = {}
     if outcome_fn is None:
         return changed
     for row in rows:
         old = row.get("outcome")
         checks = row.get("checks")
-        if old not in _STRICTNESS or not checks or judged_by_stub(arm_runs.get(row.get("arm"))):
+        if old not in _STRICTNESS or not checks or (
+                judged_by_stub(arm_runs.get(row.get("arm"))) and "reevaluation" not in row):
             continue
         try:
             new = outcome_fn(checks)
@@ -120,8 +128,17 @@ def write_jsonl(path, rows):
     os.replace(tmp, path)
 
 
-def merge(run_dir):
-    """Writes the merged files; returns the merged run.json."""
+def reevaluation_mark(run_dir):
+    """RUN_DIR/reevaluated.json (reevaluate.py's mark of the re-evaluated set), or None."""
+    return sc.read_json(os.path.join(run_dir, "reevaluated.json"))
+
+
+def merge(run_dir, reevaluated=False):
+    """Writes the merged files (of the re-evaluated set with |reevaluated|); returns the merged run.json."""
+    name_of = lambda n: sc.reevaluated_name(n, reevaluated)  # noqa: E731
+    mark = reevaluation_mark(run_dir) if reevaluated else None
+    if reevaluated and mark is None:
+        raise SystemExit("merge_run: %s has no reevaluated.json: run reevaluate.py first" % run_dir)
     warnings = []
     executions = {}
     order = []
@@ -133,9 +150,13 @@ def merge(run_dir):
     for name, path in arm_dirs(run_dir):
         run = sc.read_json(os.path.join(path, "run.json"), {}) or {}
         arm_runs[name] = run
-        rows, bad = sc.read_jsonl(os.path.join(path, "executions.jsonl"))
+        exec_name = name_of("executions.jsonl")
+        if reevaluated and not os.path.exists(os.path.join(path, exec_name)):
+            warnings.append("arms/%s: not re-evaluated, its recorded lines are merged" % name)
+            exec_name = "executions.jsonl"
+        rows, bad = sc.read_jsonl(os.path.join(path, exec_name))
         if bad:
-            warnings.append("arms/%s/executions.jsonl: %d unparsable line(s) ignored" % (name, bad))
+            warnings.append("arms/%s/%s: %d unparsable line(s) ignored" % (name, exec_name, bad))
         dropped = 0
         for row in rows:
             arm = row.get("arm")
@@ -177,7 +198,13 @@ def merge(run_dir):
     orchestrator = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
     offsets = clock_offsets(orchestrator)
     merged_rows = sc.assign_host_cache([executions[k] for k in order], offsets)
-    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome())
+    checks_dir = None
+    if mark is not None:
+        checks_dir = (mark.get("checks") or {}).get("dir")
+        if not checks_dir or not os.path.exists(os.path.join(checks_dir, "checks.py")):
+            warnings.append("the re-evaluation's checks (%s) are gone: scenario_outcome of the checks here" % checks_dir)
+            checks_dir = None
+    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir))
     for arm, n in sorted(rederived.items()):
         warnings.append("arms/%s: %d outcome(s) made stricter by checks.scenario_outcome (outcome_runner keeps the "
                         "runner's)" % (arm, n))
@@ -190,9 +217,11 @@ def merge(run_dir):
         seen.add(key)
         unique_samples.append(s)
 
-    write_jsonl(os.path.join(run_dir, "executions.jsonl"), merged_rows)
-    write_jsonl(os.path.join(run_dir, "samples.jsonl"), unique_samples)
-    write_jsonl(os.path.join(run_dir, "jobs.jsonl"), jobs)
+    write_jsonl(os.path.join(run_dir, name_of("executions.jsonl")), merged_rows)
+    # a re-evaluation changes neither the samples nor the jobs: the recorded merge's files stay
+    for fname, data in (("samples.jsonl", unique_samples), ("jobs.jsonl", jobs)):
+        if not reevaluated or not os.path.exists(os.path.join(run_dir, fname)):
+            write_jsonl(os.path.join(run_dir, fname), data)
     top_manifest = os.path.join(run_dir, "manifest.json")
     if manifest_copy and not os.path.exists(top_manifest):
         sc.write_json_atomic(top_manifest, sc.read_json(manifest_copy))
@@ -239,16 +268,21 @@ def merge(run_dir):
         "outcomes_rederived": rederived,
         "warnings": warnings,
     }
-    sc.write_json_atomic(os.path.join(run_dir, "run.json"), merged)
+    if mark is not None:
+        merged["reevaluation"] = dict((k, v) for k, v in mark.items() if k != "changes")
+        merged["reevaluation"]["changes"] = len(mark.get("changes") or [])
+    sc.write_json_atomic(os.path.join(run_dir, name_of("run.json")), merged)
     return merged
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1:
+    reevaluated = "--reevaluated" in argv
+    argv = [a for a in argv if a != "--reevaluated"]
+    if len(argv) != 1 or argv[0].startswith("-"):
         sys.stderr.write(__doc__)
         return 2
-    merged = merge(argv[0])
+    merged = merge(argv[0], reevaluated)
     sys.stdout.write("merged %s: %d executions, %d samples, arms %s\n" % (
         argv[0], merged["counts"]["executions"], merged["counts"]["samples"], ", ".join(sorted(merged["arms"]))))
     for w in merged["warnings"]:

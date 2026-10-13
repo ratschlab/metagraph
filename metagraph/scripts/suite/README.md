@@ -108,7 +108,8 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 `run_suite.sh [--manifest M | --smoke] [--paired | --sequential] [--mcp-cmd TEMPLATE | --mcp-run DIR]
 [--areas ...] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR] [--compare RUN_DIR]
 [--by-design PATH] [--pause S] [--max-requests N] [--warm-every N] [--checks auto|checks|stub] [--allow-stub]
-[--no-pdf]`; `--help` lists the environment overrides.
+[--no-pdf]`; `--help` lists the environment overrides. `run_suite.sh --reevaluate RUN_DIR` re-evaluates a recorded run
+offline instead ("Offline re-evaluation of a recorded run", lane S4).
 1. A new run directory `runs/<UTC>_<release-short>/` (the release from one GET /capabilities of the public
    URL, logged, sent only once the lock of item 3 is held and no other runner is on mex: review N4), or the
    one named by `--resume` (then the run's mode and manifest copy unless given).
@@ -670,3 +671,45 @@ From the Opus verification of lane S3 (VERIFY.md; base 6f945db4):
   `[s]cripts/run_direct\.py`); tests/test_orchestrator.py narrows it to runners naming the test's own fake host (and
   a stand-in whose command line ends in the script), so a real run's ssh step on this machine, whose command line
   holds scripts/run_direct.py, no longer reads as the test's runner (the verification's two failures).
+
+### Offline re-evaluation of a recorded run
+`reevaluate.py RUN_DIR [--checks DIR]` judges a recorded run's answers again with the current checks (checks.py of
+DIR, default this directory), without any request; `merge_run.py RUN_DIR --reevaluated`, `compare.py RUN_DIR
+--reevaluated` and `report.py RUN_DIR --reevaluated` then build the re-evaluated set, and `run_suite.sh --reevaluate
+RUN_DIR [--reeval-checks DIR] [--compare EARLIER] [--by-design PATH] [--no-pdf]` runs the four (offline: before the
+lock, the ssh connection or the release GET).
+- Input: every arm's executions.jsonl (the last line per scenario, arm and repeat, as merge_run keeps it) and the
+  raw answer of each line. Both runners keep the NORMALISED answer in the raw file under `answer` (run_direct.py;
+  async's suite_mcp_runner.py writes its normaliser's answer there, beside the tool calls), so the MCP arm is
+  re-evaluated like the direct ones and no normaliser runs again; on both smoke runs of lane S3 the digest of every
+  raw answer equals the line's recorded answer_digest on all three arms (the answer the runner judged).
+- What the checks are passed, as the runners pass it: `previous` = the scenario's earlier repeats on the arm in
+  repeat order as {digest, time_limited}, both by the re-evaluating checks from the earlier raw answers (the
+  recorded digest and time_limited where a raw answer is missing), so the MCP arm gets the L4 form too, which
+  async's runner did not pass; `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), the MCP
+  arm's `mcp_phases.backend_ms` (async's runner since its 0d127f4a: the service-measured backend call, since the
+  MCP wall holds the queue and the polling; none without it).
+- Outcome: `checks.scenario_outcome` of the new checks, except where the runner decided it without them, which is
+  kept: `error` (no answer, transport, decode, a busy deployment; but an `error` whose recorded checks are the
+  checks module's own exception is judged again), `not_implemented_mcp`, `service_by_design` (async's table), and
+  async's host-state rule (an MCP answer refused with `uninterruptible_overrun_exceeds_allowance` the scenario does
+  not expect is inconclusive). A new exception in checks.evaluate is `error` on a direct arm and `fail` on the MCP
+  arm, as the runners record it.
+- Output, beside the recorded files, which all stay: `arms/<arm>/executions.reevaluated.jsonl` (the recorded line
+  with checks, outcome, answer_digest and time_limited replaced, `answer_digest_recorded` where the digest changed,
+  and `reevaluation` {checks_sha256 (16 hex), outcome_recorded, checks_changed, kept}), `reevaluated.json` (the
+  set's mark: the checks' directory, git commit with `+dirty` when checks.py or suite_common.py differ from it,
+  sha256 of both files; what each arm recorded with; per arm counts; every execution whose outcome or checks
+  changed, with each changed check's before, after and detail), and from the three scripts
+  `executions.reevaluated.jsonl`, `run.reevaluated.json` (`reevaluation`), `compare.reevaluated.json` (the
+  relations judged by the re-evaluation's checks) and `report.reevaluated.md` / `.pdf` (title "(re-evaluated)", a
+  "Re-evaluation" section after the verdict with the counts and every changed execution; never UNVERIFIED for a run
+  recorded with the stub, since checks.py judged it). samples.jsonl, jobs.jsonl and manifest.json are shared (written
+  by the re-evaluated merge only where missing). `--compare EARLIER` compares with the earlier run's re-evaluated set
+  where it has one.
+- The checks are loaded as their own module, with their directory's suite_common.py, so a re-evaluation with an
+  older or newer checks.py (`--checks DIR`, e.g. an export of a commit) digests and judges as that version.
+- tests/test_reevaluate.py: a synthetic recorded run over three arms (the attempt bound reached and not, a stale
+  check, an evaluate exception, the kept outcomes, a 503 judged by the wall and by the backend time, a time-limited
+  cold repeat), a checks.py of another directory that records what it is passed, every recorded file byte-identical
+  after the re-evaluated merge, compare and report, and run_suite.sh --reevaluate with nothing reachable.

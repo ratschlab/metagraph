@@ -653,6 +653,18 @@ def read_gz_json(path):
         return json.load(fh)
 
 
+REEVALUATED_TAG = "reevaluated"
+
+
+def reevaluated_name(name, reevaluated=True):
+    """The file of a run's re-evaluated set (reevaluate.py) beside the recorded one: executions.jsonl ->
+    executions.reevaluated.jsonl, report.md -> report.reevaluated.md; |name| itself when not reevaluated."""
+    if not reevaluated:
+        return name
+    stem, ext = os.path.splitext(name)
+    return "%s.%s%s" % (stem, REEVALUATED_TAG, ext)
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # the suite lock on mex (review M4)
 

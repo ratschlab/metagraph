@@ -2,7 +2,10 @@
 """Report of a suite run: RUN_DIR/report.md from run.json, executions, samples and compare.json, then
 report.pdf via pandoc + xelatex (DESIGN §6).
 
-    report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf] [--max-failures 200]
+    report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf] [--max-failures 200] [--reevaluated]
+
+--reevaluated: the run's re-evaluated set (reevaluate.py) into report.reevaluated.md / .pdf, with a section on
+what the re-evaluation judged with and every execution whose outcome or checks it changed.
 
 Sections: verdict and environment (with the load caveat), outcomes per area and arm, every failure with its
 expectation and the observed value, agreement of the direct arms and of the MCP arm, timing per area and arm
@@ -137,11 +140,12 @@ def orchestrator_session(run):
     return sessions[-1] if sessions else {}
 
 
-def load_compare(run_dir, by_design_path=None):
-    path = os.path.join(run_dir, "compare.json")
+def load_compare(run_dir, by_design_path=None, reevaluated=False):
+    path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
     data = sc.read_json(path)
     if data is None:
-        data = cmp.compare(run_dir, cmp.load_by_design(by_design_path or cmp.DEFAULT_BY_DESIGN))
+        data = cmp.compare(run_dir, cmp.load_by_design(by_design_path or cmp.DEFAULT_BY_DESIGN),
+                           reevaluated=reevaluated)
         sc.write_json_atomic(path, data)
     return data
 
@@ -162,7 +166,7 @@ def load_figures(samples):
             "n": len(samples)}
 
 
-def verdict_section(run, comp, rows, samples):
+def verdict_section(run, comp, rows, samples, reevaluated=False):
     s = comp["summary"]
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
@@ -182,7 +186,8 @@ def verdict_section(run, comp, rows, samples):
     dis_mcp = s["mcp_agreement"].get("disagree", 0)
     rel_failed = sum((v or {}).get("fail", 0) for v in ((s.get("relations") or {}).get("per_arm") or {}).values())
     modules = sorted(set(checks_name(info) for info in (run.get("arms") or {}).values() if checks_name(info)))
-    stub = "stub" in modules
+    # a re-evaluated set is judged by checks.py whatever the runners ran
+    stub = "stub" in modules and not reevaluated
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
     elif failing or dis_direct or dis_mcp or rel_failed:
@@ -698,18 +703,65 @@ def warm_wall(summary, area, arm):
     return ((t.get("by_host_cache") or {}).get("warm") or {}).get("wall") or {}
 
 
-def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=None):
-    run = sc.read_json(os.path.join(run_dir, "run.json"), {}) or {}
-    rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+def reevaluation_section(run_dir, max_items=200):
+    """What a re-evaluation (reevaluate.py's mark, RUN_DIR/reevaluated.json) judged with, and every execution whose
+    outcome or checks it changed."""
+    mark = sc.read_json(os.path.join(run_dir, "reevaluated.json")) or {}
+    ck = mark.get("checks") or {}
+    out = ["# Re-evaluation", ""]
+    out.append("The answers this run recorded, judged again offline (no request sent) on %s with the checks of %s "
+               "(checks.py sha256 %s, suite_common.py %s, from %s). Outcomes a runner decided without the checks "
+               "are kept: error, not implemented yet via MCP, service-side by design, the MCP runner's host-state "
+               "rule. `previous` is each earlier repeat's digest and time limitation by these checks; `client` the "
+               "direct arms' wall time and the MCP arm's service-measured backend time." % (
+                   md(mark.get("reevaluated_utc") or "-"), md(short_commit(ck.get("commit_label")) if ck.get(
+                       "commit_label") else "an unversioned directory"), md(short(ck.get("checks_sha256"), 16)),
+                   md(short(ck.get("suite_common_sha256"), 16)), md(ck.get("dir") or "-")))
+    out.append("")
+    rec = mark.get("recorded") or {}
+    rows = []
+    for arm, c in sorted((mark.get("arms") or {}).items(), key=lambda kv: kv[0]):
+        r = rec.get(arm) or {}
+        mod = checks_name(r) or "-"
+        rows.append([md(arm), md(mod), md(short_commit(r.get("scripts_commit"))), str(c.get("lines", 0)),
+                     str(c.get("reevaluated", 0)), str(c.get("kept", 0)), str(c.get("no_answer", 0)),
+                     str(c.get("outcome_changed", 0)), str(c.get("checks_changed", 0))])
+    out.append(table(["arm", "recorded checks", "runner's commit", "lines", "re-evaluated", "kept", "no answer",
+                      "outcome changed", "checks changed"], rows))
+    changes = mark.get("changes") or []
+    if not changes:
+        out.append("No outcome and no check changed.\n")
+        return "\n".join(out)
+    out.append("%d execution(s) changed%s:" % (len(changes), "" if len(changes) <= max_items else
+                                                 " (the first %d listed; all are in reevaluated.json)" % max_items))
+    out.append("")
+    rows = []
+    for ch in changes[:max_items]:
+        checks = "; ".join("%s %s->%s" % (c.get("check"), c.get("before") or "-", c.get("after") or "-")
+                           for c in ch.get("checks") or [])
+        detail = next((c.get("detail") for c in ch.get("checks") or [] if c.get("after") in ("fail", "finding")),
+                      None) or next((c.get("detail") for c in ch.get("checks") or []), "")
+        rows.append([md(ch.get("scenario")), md(ch.get("arm")), str(ch.get("repeat")), md(ch.get("before")),
+                     md(ch.get("after")) + (" (kept)" if ch.get("kept") else ""), md(checks, 200), md(detail, 220)])
+    out.append(table(["scenario", "arm", "rep", "recorded", "re-evaluated", "checks changed", "detail"], rows))
+    return "\n".join(out)
+
+
+def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=None, reevaluated=False):
+    run = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated)), {}) or {}
+    rows, _ = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
     samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
-    comp = load_compare(run_dir, by_design_path)
-    title = "MetaGraph suite: %s" % ascii_safe(run.get("run_id") or os.path.basename(os.path.abspath(run_dir)))
+    comp = load_compare(run_dir, by_design_path, reevaluated)
+    title = "MetaGraph suite: %s%s" % (ascii_safe(run.get("run_id") or os.path.basename(os.path.abspath(run_dir))),
+                                       " (re-evaluated)" if reevaluated else "")
     parts = ["---", "title: \"%s\"" % title.replace('"', "'"),
              "subtitle: \"/traverse, /resolve, /pattern on %s\"" % ascii_safe(
                  ((manifest or {}).get("index") or {}).get("database") or "refseq33m-experimental"),
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
-    parts.append(verdict_section(run, comp, rows, samples))
+    parts.append(verdict_section(run, comp, rows, samples, reevaluated))
+    if reevaluated:
+        parts.append(reevaluation_section(run_dir, max_failures))
     parts.append(environment_section(run, comp, rows, samples))
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))
@@ -720,8 +772,10 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(overhead_section(comp))
     parts.append(resources_section(comp))
     if compare_dir:
-        old = load_compare(compare_dir, by_design_path)
-        parts.append(compare_runs_section(comp, old, compare_dir))
+        # like with like: the earlier run's re-evaluated set where it has one
+        old_re = reevaluated and os.path.exists(os.path.join(compare_dir, "reevaluated.json"))
+        old = load_compare(compare_dir, by_design_path, old_re)
+        parts.append(compare_runs_section(comp, old, compare_dir + (" (re-evaluated)" if old_re else "")))
     return "\n".join(parts) + "\n"
 
 
@@ -744,14 +798,16 @@ def main(argv=None):
     ap.add_argument("--no-pdf", action="store_true")
     ap.add_argument("--max-failures", type=int, default=200)
     ap.add_argument("--by-design", default=None, help="the table compare.py uses when compare.json is missing")
+    ap.add_argument("--reevaluated", action="store_true",
+                    help="the run's re-evaluated set (reevaluate.py): report.reevaluated.md / .pdf")
     args = ap.parse_args(argv)
-    text = build_report(args.run_dir, args.compare, args.max_failures, args.by_design)
-    md_path = os.path.join(args.run_dir, "report.md")
+    text = build_report(args.run_dir, args.compare, args.max_failures, args.by_design, args.reevaluated)
+    md_path = os.path.join(args.run_dir, sc.reevaluated_name("report.md", args.reevaluated))
     with open(md_path, "w", encoding="ascii", errors="replace") as fh:
         fh.write(text)
     sys.stdout.write("wrote %s\n" % md_path)
     if not args.no_pdf:
-        ok, msg = to_pdf(md_path, os.path.join(args.run_dir, "report.pdf"))
+        ok, msg = to_pdf(md_path, os.path.join(args.run_dir, sc.reevaluated_name("report.pdf", args.reevaluated)))
         sys.stdout.write(msg + "\n")
         if not ok:
             return 1

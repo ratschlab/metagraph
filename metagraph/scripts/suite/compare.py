@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Comparator of the suite: joins the arms of a run per scenario and writes RUN_DIR/compare.json.
 
-    compare.py RUN_DIR [--by-design service_by_design.json]
+    compare.py RUN_DIR [--by-design service_by_design.json] [--reevaluated]
+
+--reevaluated: the run's re-evaluated set (reevaluate.py; merged with merge_run --reevaluated) into
+compare.reevaluated.json, the relations judged by the re-evaluation's checks.
 
 Reads the merged run (merge_run.py; it merges first when RUN_DIR/arms exists): run.json, executions.jsonl,
 samples.jsonl, manifest.json. Per scenario and arm: the outcome over the repeats, the repeats' digests (equal
@@ -649,9 +652,10 @@ RELATION_TYPES = ("prefix_equals", "zero_equals_absent", "subset", "same_answer"
 RELATION_OUTCOMES = ("pass", "fail", "inconclusive", "not_exposed", "not_evaluated")
 
 
-def load_relation_evaluator():
-    """checks.evaluate_relation of checks.py next to this script (lane S1's reference), or None."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checks.py")
+def load_relation_evaluator(checks_dir=None):
+    """checks.evaluate_relation of checks.py in |checks_dir| (default: next to this script; lane S1's reference),
+    or None."""
+    path = os.path.join(checks_dir or os.path.dirname(os.path.abspath(__file__)), "checks.py")
     if not os.path.exists(path):
         return None
     import importlib.util
@@ -783,11 +787,22 @@ def resources(lines, index):
 # ---------------------------------------------------------------------------------------------------------------
 # the comparison
 
-def compare(run_dir, by_design=None, relation_evaluator="auto"):
-    """compare.json's content for a merged run directory; by_design is load_by_design's (cases, info);
-    relation_evaluator as evaluate_relations takes it ("auto": checks.py next to this script when present)."""
-    run = sc.read_json(os.path.join(run_dir, "run.json"), {}) or {}
-    rows, bad = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+def reevaluation_checks_dir(run_dir):
+    """The directory of the checks a run's re-evaluated set was judged with (reevaluated.json), when still there."""
+    mark = merge_run.reevaluation_mark(run_dir) or {}
+    d = (mark.get("checks") or {}).get("dir")
+    return d if d and os.path.exists(os.path.join(d, "checks.py")) else None
+
+
+def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=False):
+    """compare.json's content for a merged run directory (of its re-evaluated set with |reevaluated|: the merged
+    executions.reevaluated.jsonl and run.reevaluated.json); by_design is load_by_design's (cases, info);
+    relation_evaluator as evaluate_relations takes it ("auto": checks.py next to this script when present, for
+    the re-evaluated set the re-evaluation's checks.py)."""
+    run = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated)), {}) or {}
+    rows, bad = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
+    if reevaluated and relation_evaluator == "auto":
+        relation_evaluator = load_relation_evaluator(reevaluation_checks_dir(run_dir))
     samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
     cases, table_info = by_design if by_design else ({}, None)
@@ -941,7 +956,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto"):
         "manifest_sha256": (run.get("manifest") or {}).get("computed_sha256")
         or (run.get("manifest") or {}).get("content_sha256"),
         "arms": arms_present, "unparsable_lines": bad, "by_design_table": table_info,
-        "host_cache": run.get("host_cache"),
+        "host_cache": run.get("host_cache"), "reevaluation": run.get("reevaluation") if reevaluated else None,
         "order": order, "scenarios": scenarios, "relations": relations,
         "summary": {
             "relations": relations_summary,
@@ -971,11 +986,13 @@ def main(argv=None):
     ap.add_argument("--by-design", default=DEFAULT_BY_DESIGN,
                     help="async's service-by-design table (default: service_by_design.json here; '' for none)")
     ap.add_argument("--no-merge", action="store_true", help="do not merge RUN_DIR/arms first")
+    ap.add_argument("--reevaluated", action="store_true",
+                    help="the run's re-evaluated set (reevaluate.py): compare.reevaluated.json")
     args = ap.parse_args(argv)
     if not args.no_merge and os.path.isdir(os.path.join(args.run_dir, "arms")):
-        merge_run.merge(args.run_dir)
-    result = compare(args.run_dir, load_by_design(args.by_design))
-    sc.write_json_atomic(os.path.join(args.run_dir, "compare.json"), result)
+        merge_run.merge(args.run_dir, args.reevaluated)
+    result = compare(args.run_dir, load_by_design(args.by_design), reevaluated=args.reevaluated)
+    sc.write_json_atomic(os.path.join(args.run_dir, sc.reevaluated_name("compare.json", args.reevaluated)), result)
     s = result["summary"]
     sys.stdout.write("compare %s: %d scenarios, arms %s; direct agreement %s; mcp %s\n" % (
         args.run_dir, len(result["order"]), ", ".join(result["arms"]),
