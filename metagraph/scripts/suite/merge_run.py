@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Merges the arms of a run directory into the run's top-level files (DESIGN §6).
+
+    merge_run.py RUN_DIR
+
+Each arm writes RUN_DIR/arms/<arm>/ (run.json, executions.jsonl, samples.jsonl, raw/, and for the MCP arm
+jobs.jsonl). This writes RUN_DIR/executions.jsonl (raw paths rewritten relative to RUN_DIR; one line per
+scenario x arm x repeat, the last recorded one when a resume repeated it), samples.jsonl (sorted by time,
+each sample's `phase` the arm it was taken during), jobs.jsonl, manifest.json and run.json (the identity of the
+run from the direct arms, every arm's own run.json under `arms`). Re-running it rewrites the same files.
+"""
+
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import suite_common as sc  # noqa: E402
+
+ARM_ORDER = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
+
+
+def arm_dirs(run_dir):
+    root = os.path.join(run_dir, "arms")
+    if not os.path.isdir(root):
+        return []
+    names = [n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)) and not n.startswith(".")]
+    names.sort(key=lambda n: (ARM_ORDER.get(n, 9), n))
+    return [(n, os.path.join(root, n)) for n in names]
+
+
+def write_jsonl(path, rows):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
+
+
+def merge(run_dir):
+    """Writes the merged files; returns the merged run.json."""
+    warnings = []
+    executions = {}
+    order = []
+    samples = []
+    jobs = []
+    arm_runs = {}
+    arm_counts = {}
+    manifest_copy = None
+    for name, path in arm_dirs(run_dir):
+        run = sc.read_json(os.path.join(path, "run.json"), {}) or {}
+        arm_runs[name] = run
+        rows, bad = sc.read_jsonl(os.path.join(path, "executions.jsonl"))
+        if bad:
+            warnings.append("arms/%s/executions.jsonl: %d unparsable line(s) ignored" % (name, bad))
+        dropped = 0
+        for row in rows:
+            arm = row.get("arm")
+            if name in ARM_ORDER and arm != name:
+                dropped += 1
+                continue
+            row = dict(row)
+            raw = row.get("raw")
+            if isinstance(raw, str) and raw and not os.path.isabs(raw) and not raw.startswith("arms/"):
+                row["raw"] = "arms/%s/%s" % (name, raw)
+            key = sc.execution_key(row)
+            if key not in executions:
+                order.append(key)
+            executions[key] = row
+        arm_counts[name] = len(rows) - dropped
+        if dropped:
+            warnings.append("arms/%s: %d line(s) of another arm dropped" % (name, dropped))
+        srows, sbad = sc.read_jsonl(os.path.join(path, "samples.jsonl"))
+        if sbad:
+            warnings.append("arms/%s/samples.jsonl: %d unparsable line(s) ignored" % (name, sbad))
+        for s in srows:
+            s = dict(s)
+            s.setdefault("phase", name)
+            samples.append(s)
+        jrows, _ = sc.read_jsonl(os.path.join(path, "jobs.jsonl"))
+        jobs.extend(jrows)
+        if manifest_copy is None and os.path.exists(os.path.join(path, "manifest.json")):
+            manifest_copy = os.path.join(path, "manifest.json")
+
+    merged_rows = [executions[k] for k in order]
+    seen = set()
+    unique_samples = []
+    for s in sorted(samples, key=lambda s: (sc.parse_utc(s.get("t_utc")) or 0.0)):
+        key = (s.get("t_utc"), s.get("container"))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_samples.append(s)
+
+    write_jsonl(os.path.join(run_dir, "executions.jsonl"), merged_rows)
+    write_jsonl(os.path.join(run_dir, "samples.jsonl"), unique_samples)
+    write_jsonl(os.path.join(run_dir, "jobs.jsonl"), jobs)
+    top_manifest = os.path.join(run_dir, "manifest.json")
+    if manifest_copy and not os.path.exists(top_manifest):
+        sc.write_json_atomic(top_manifest, sc.read_json(manifest_copy))
+
+    direct = [arm_runs[a] for a in ("direct-local", "direct-remote") if a in arm_runs]
+    reference = direct[0] if direct else (next(iter(arm_runs.values())) if arm_runs else {})
+    shas = set()
+    for name, run in arm_runs.items():
+        sha = (run.get("manifest") or {}).get("computed_sha256") or (run.get("manifest") or {}).get("content_sha256")
+        if sha:
+            shas.add(sha)
+    if len(shas) > 1:
+        warnings.append("the arms ran different manifests: %s" % ", ".join(sorted(shas)))
+    instances = set()
+    for run in direct:
+        for sess in run.get("sessions", []):
+            for key in ("server_instance_start", "server_instance_end"):
+                if sess.get(key):
+                    instances.add(sess[key])
+    if len(instances) > 1:
+        warnings.append("the server restarted during the run (server_instance %s)" % ", ".join(sorted(instances)))
+    for name, run in arm_runs.items():
+        for w in run.get("warnings", []) or []:
+            warnings.append("arms/%s: %s" % (name, w))
+
+    arms_summary = {}
+    for name, run in arm_runs.items():
+        slim = dict((k, v) for k, v in run.items() if k != "capabilities")
+        slim["executions_recorded"] = arm_counts.get(name, 0)
+        arms_summary[name] = slim
+    merged = {
+        "run_id": reference.get("run_id") or os.path.basename(os.path.abspath(run_dir)),
+        "merged_utc": sc.iso_utc(time.time()),
+        "manifest": reference.get("manifest"),
+        "release": reference.get("release"), "server_instance": reference.get("server_instance"),
+        "index_fp": reference.get("index_fp"), "capabilities": reference.get("capabilities"),
+        "scripts_commit": reference.get("scripts_commit"),
+        "host_load_start": (arm_runs.get("direct-local") or {}).get("host_load_start"),
+        "host_load_end": (arm_runs.get("direct-local") or {}).get("host_load_end"),
+        "arms": arms_summary,
+        "orchestrator": sc.read_json(os.path.join(run_dir, "orchestrator.json")),
+        "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
+        "warnings": warnings,
+    }
+    sc.write_json_atomic(os.path.join(run_dir, "run.json"), merged)
+    return merged
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 1:
+        sys.stderr.write(__doc__)
+        return 2
+    merged = merge(argv[0])
+    sys.stdout.write("merged %s: %d executions, %d samples, arms %s\n" % (
+        argv[0], merged["counts"]["executions"], merged["counts"]["samples"], ", ".join(sorted(merged["arms"]))))
+    for w in merged["warnings"]:
+        sys.stdout.write("warning: %s\n" % w)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

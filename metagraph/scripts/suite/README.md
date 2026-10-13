@@ -56,3 +56,42 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   /capabilities: did the server restart during the run). The run directory keeps a copy of the manifest.
 - Resume: the same `--out` again skips the executions already in executions.jsonl (a line torn by a kill is
   ignored and its execution runs again); another manifest in the same directory is refused.
+
+### Comparator and report
+- `merge_run.py RUN_DIR`: writes the top-level run.json / executions.jsonl / samples.jsonl / jobs.jsonl /
+  manifest.json from `arms/*` (raw paths rewritten to `arms/<arm>/raw/...`; for a key recorded twice the
+  later line wins; lines of another arm in an arm's file are dropped with a warning). Re-runnable.
+- `compare.py RUN_DIR [--by-design PATH]`: merges first when `arms/` exists, then writes compare.json:
+  per scenario and arm the outcome over the repeats (the common one, else error > fail > mixed) and whether
+  the repeats' digests agree; direct-local vs direct-remote as `identical` (same digest), `same_checks`
+  (other answer, same check outcomes) or `disagree`; the MCP class of DESIGN §1.3; overheads, cold vs warm,
+  timing and resource summaries per area and arm.
+- MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; the scenario's
+  `mcp.by_design` case(s) in async's table (below); the MCP runner's own `not_implemented_mcp` /
+  `service_by_design` outcome; else `agree` when the checks both arms evaluated have the same outcomes (a
+  check `not_exposed` on either side is not compared) and neither side alone errored, `disagree` otherwise.
+  No MCP line: `missing`.
+- `service_by_design.json`: async's table (124 cases), copied byte-identical from the search-service work at
+  commit 22d034ba (`service_commit` inside; sha256 7ae2ee30...). A case's `agreement`
+  `not_implemented_mcp` -> not implemented yet via MCP; `service_only` -> service-side by design;
+  `by_design` -> service-side by design when the pair holds: the direct answer matches
+  `direct_expectation` (http, code, text with digits ignored, each where stated; the code may also be a
+  pattern slot's) and the MCP executions match `service_answer` (`refused_at_submit` / `relayed`: error.code,
+  `text_contains` and `field` where the MCP line states them, a line without an error only when the MCP
+  runner marked it service_by_design; `answered` / `clamped`: no error). A pair that does not hold is
+  `disagree` with the side (direct / mcp / table for an unknown case id). With a list of cases the first
+  whose pair holds decides. The MCP arm's execution lines should carry `error` {code, text, field}.
+- Overheads (DESIGN §5): front = direct-remote minus direct-local wall time per scenario (cold: repeat 0;
+  warm: repeat 1), also the server elapsed difference. MCP: only executions that reached the host (outcome
+  pass / fail); the MCP warm line (repeat 1, else 0) minus each direct arm's line of the same repeat (else its
+  repeat 0), with and without `mcp_phases.queue_ms`, and `backend_ms` minus each direct arm; the phases'
+  distributions as given; the cold MCP wall time separately.
+- Resources: each execution joins the samples from its start - 1 s to its end + 2 s (docker averages CPU over
+  its own window), else the nearest sample within 5 s; per area and arm the peak container CPU and memory,
+  the mean sra_all CPU and host load1, and the peak `work.memory_bytes` of the answers.
+- `report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf]`: report.md (ASCII-safe pipe tables: common
+  signs spelled out, other non-ASCII as '?', sequences over 40 bp cut, markdown specials escaped), then
+  `pandoc report.md -o report.pdf --pdf-engine=xelatex`. Verdict: INCOMPLETE when an arm did not finish,
+  FAIL on any failed / errored execution or any direct / MCP disagreement, else PASS; a stub run says so in
+  bold. The load caveat appears when the sra_all CPU mean exceeds 400 % or the load1 mean exceeds 48 (half
+  of mex's 96 cores). compare.json is computed when missing.
