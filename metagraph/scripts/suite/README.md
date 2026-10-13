@@ -70,5 +70,16 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   shortest length whose ball meets fewer than ~1,000 random contexts (a 20-mer at max_mismatches 2 had 21,563
   level-2 contexts and was rightly withheld); `walk_end` passes an arm a resource stopped before the record's end
   (status truncated, a resource path reason: a stated stop) and says so, the walk so far being `walk_in_record`'s.
+- `budget_respected` (lane S1b, the integrator's decision 2; the smoke run's lambda walk took 34,202 ms under a
+  15,000 ms budget, one coordinate-tuple read of 20,556 ms in its seed phase): every scenario that names a time
+  budget and allows a 200 checks the server's elapsed time against the effective budget (the answer's
+  `limits.time_budget_ms` or, on /traverse, the echoed `strategy.bounds.time_budget_ms`, per seed) plus an
+  allowance stated in the check's args with its source: /traverse 1,000 ms (`attempts.delivery_reserve.stop_ms`
+  of the capabilities snapshot = `chunk_target_ms` + 950, the SPEC's time from a stop's deadline to the walk's
+  end; one row's read has no stated bound, `max_uninterruptible_ms` null, so nothing more), /pattern and
+  /resolve 0 (past the budget their SPECs answer 503, so a 200 was written within it). An overrun is the check
+  outcome `finding` (the request answered; the detail names the longest uninterruptible piece, how long after the
+  deadline the walk saw it and the seed phase), and an execution with a finding and no failure has the outcome
+  `finding` (checks.scenario_outcome): the report lists findings in their own section, never as passes.
 - Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
   implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...).

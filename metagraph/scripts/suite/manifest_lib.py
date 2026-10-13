@@ -11,11 +11,12 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import random
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import seqtools as st
-from truth import K, Record
+from truth import K, TRUTH_DIR, Record
 
 DB = "refseq33m-experimental"
 
@@ -593,6 +594,55 @@ def mcp_traverse(req: Any) -> dict:
     return block
 
 
+# ---------------------------------------------------------------------------------------------- the time budget
+def _traverse_stop_ms() -> float:
+    with open(os.path.join(TRUTH_DIR, "staging_capabilities", "traverse_capabilities.json")) as f:
+        return json.load(f)["attempts"]["delivery_reserve"]["stop_ms"]
+
+
+# The allowance budget_respected grants above the effective time budget, per route, with its source: taken from the
+# SPECs and the capabilities snapshot, never fitted to an answer
+BUDGET_ALLOWANCE = {
+    "POST /traverse": (_traverse_stop_ms(),
+                       "SPEC-labeled-traversal-core.md §6.8, the delivery reserve's calibration: stop_ms = "
+                       "chunk_target_ms + 950, the time from a stop's deadline to the walk's end (capabilities "
+                       "attempts.delivery_reserve.stop_ms, snapshot 2026-10-13); one row's read has no stated bound "
+                       "(deadline_check.max_uninterruptible_ms null), so nothing more is granted"),
+    "POST /pattern": (0, "SPEC-pattern-search.md §7.6: an answer that cannot be written by time_budget_ms is a 503 "
+                         "deadline, so a 200's timing.elapsed_ms (to the end of the search) is within the budget"),
+    "POST /resolve": (0, "SPEC-labeled-traversal-core.md §4.5: past the budget the answer is a 503, never a partial "
+                         "answer, so a 200's timing.elapsed_ms is within the budget"),
+}
+
+
+def time_budget_of(route: str, req: Any) -> Optional[Any]:
+    """The time budget a request names (None without one)."""
+    if not isinstance(req, dict):
+        return None
+    if route == "POST /pattern":
+        return req.get("time_budget_ms")
+    if route == "POST /resolve":
+        return (req.get("bounds") or {}).get("time_budget_ms")
+    if route == "POST /traverse":
+        return ((req.get("strategy") or {}).get("bounds") or {}).get("time_budget_ms")
+    return None
+
+
+def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dict]:
+    """budget_respected for a scenario that names a time budget and allows a 200 answer."""
+    if time_budget_of(route, req) is None or route not in BUDGET_ALLOWANCE:
+        return None
+    allowed = [200]
+    for e in expect:
+        if e.get("check") == "status":
+            w = e.get("args", {}).get("http", 200)
+            allowed = w if isinstance(w, list) else [w]
+    if 200 not in allowed:
+        return None
+    ms, source = BUDGET_ALLOWANCE[route]
+    return {"check": "budget_respected", "args": {"allowance_ms": ms, "allowance_source": source}}
+
+
 # ---------------------------------------------------------------------------------------------- scenarios
 def scenario(sid: str, area: str, title: str, route: str, request: Any, truth: Optional[dict],
              expect: List[dict], timing_class: str = "fast", tags: Iterable[str] = (), repeat: int = 1,
@@ -623,6 +673,11 @@ def scenario(sid: str, area: str, title: str, route: str, request: Any, truth: O
     for e in expect:
         if e["check"] == "contains_source_context" and exact and "level" not in e["args"]:
             e["args"]["level"] = 0
+    # every scenario that names a time budget and allows a 200 checks the elapsed time against it (a FINDING)
+    if not any(e["check"] == "budget_respected" for e in expect):
+        b = budget_expectation(route, request, expect)
+        if b is not None:
+            expect = list(expect) + [b]
     sc = {"id": sid, "area": area, "title": title, "route": route, "request": request, "mcp": mcp,
           "truth": truth or {}, "expect": expect, "timing_class": timing_class, "repeat": repeat,
           "tags": sorted(set(tags))}

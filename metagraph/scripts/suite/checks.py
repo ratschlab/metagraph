@@ -2,14 +2,15 @@
 every arm so that a disagreement between arms is never a difference of checking code.
 
     evaluate(scenario, answer, arm, previous=None)
-        -> [{"check": name, "outcome": "pass" | "fail" | "not_exposed", "detail": str}]
+        -> [{"check": name, "outcome": "pass" | "fail" | "not_exposed" | "finding", "detail": str}]
 
 `answer` is the NORMALISED answer: {"http": int, "body": obj | None, "error": {"code", "text"} | None} and, where
 the arm has them, "headers" (lower-case names). `normalise_direct` builds it from a direct HTTP answer; the MCP
 arm's normaliser maps its tool results into the same shape for the fields both expose. A check that needs a field
 the MCP arm does not expose answers "not_exposed" on that arm (and "fail" on a direct arm, where the field is part
-of the contract). `previous` (optional) lists the `answer_digest`s of the earlier repeats of the same scenario and
-arm, for the `deterministic` check.
+of the contract). A `finding` is a stated bound or SPEC promise the host broke without failing the request (the
+time budget, budget_respected): the report lists findings in their own section. `previous` (optional) lists the
+`answer_digest`s of the earlier repeats of the same scenario and arm, for the `deterministic` check.
 
 Every check named in a manifest's `expect` is a function registered in CHECKS; new checks are added here only.
 Coordinates: truth["start"] is 0-based on the record's forward strand; host placements (`nt_coords`) are 1-based
@@ -49,6 +50,9 @@ _BUDGET_STOP_REASONS = {"max_steps", "time"}
 _ORIENT_RANK = {"+": 0, "forward": 0, "-": 1, "reverse": 1, "=": 2, "palindromic": 2}
 
 PASS, FAIL, NOT_EXPOSED = "pass", "fail", "not_exposed"
+# the host broke a stated bound or a SPEC promise without failing the request: reported in its own section of the
+# report, never counted as a pass (budget_respected)
+FINDING = "finding"
 
 
 class Missing(Exception):
@@ -756,6 +760,76 @@ def check_clamped(sc, ans, a, arm):
     return FAIL, "%s not in clamped %r" % (a["field"], lst)
 
 
+# ---------------------------------------------------------------------------------------------- the time budget
+def _number(v: Any) -> Optional[float]:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def check_budget_respected(sc, ans, a, arm):
+    """The server's elapsed time within the request's effective time budget plus the stated allowance
+    (args.allowance_ms, from the SPEC and the capabilities snapshot, never fitted to an answer). /pattern and
+    /resolve: the top-level timing.elapsed_ms against limits.time_budget_ms (allowance 0: past the budget the
+    SPEC answers 503, so a 200 was written within it); /traverse: each walked seed's timing.elapsed_ms against
+    the effective per-seed bounds.time_budget_ms (the strategy echo, else the request's) plus the allowance for
+    the time from a stop to the walk's end. An overrun is a FINDING (the request still answered), stating the
+    evidence: the seed's longest uninterruptible piece, how long after the deadline the walk saw it, its seed
+    phase."""
+    allowance = _number(a.get("allowance_ms")) or 0.0
+    body = _body(ans)
+    route = sc.get("route", "")
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    if route == "POST /traverse":
+        bounds = (req.get("strategy") or {}).get("bounds") or {}
+        budget = _number(((body.get("strategy") or {}).get("bounds") or {}).get("time_budget_ms"))
+        if budget is None:
+            budget = _number(bounds.get("time_budget_ms"))
+        if budget is None:
+            raise Missing("strategy.bounds.time_budget_ms")
+        res = _get(body, "results")
+        over, worst, seen = [], 0.0, 0
+        for i, r in enumerate(res):
+            t = r.get("timing")
+            if not isinstance(t, dict) or _number(t.get("elapsed_ms")) is None:
+                if "arms" in r:
+                    raise Missing("results[%d].timing.elapsed_ms" % i)
+                continue   # a failed seed without its timing: nothing to compare
+            el = _number(t["elapsed_ms"])
+            seen += 1
+            worst = max(worst, el)
+            if el > budget + allowance:
+                dl = t.get("deadline") or {}
+                lp = dl.get("longest_piece") or {}
+                over.append("seed %d: %.0f ms (longest piece %s %.0f ms, %s rows; stopped_by %s %.0f ms after the "
+                            "deadline; seed phase %.0f ms)" % (
+                                i, el, lp.get("kind"), _number(lp.get("ms")) or 0, lp.get("rows"),
+                                dl.get("stopped_by"), _number(dl.get("stop_after_deadline_ms")) or 0,
+                                _number(t.get("seed_phase_ms")) or 0))
+        if over:
+            return FINDING, "time budget %.0f ms + allowance %.0f ms overrun: %s" % (budget, allowance, "; ".join(over[:4]))
+        if not seen:
+            raise Missing("results[].timing.elapsed_ms")
+        return PASS, "%d seed(s) within %.0f + %.0f ms (longest %.0f ms)" % (seen, budget, allowance, worst)
+    budget = _number((body.get("limits") or {}).get("time_budget_ms"))
+    if budget is None:
+        named = req.get("time_budget_ms") if route == "POST /pattern" else (req.get("bounds") or {}).get("time_budget_ms")
+        budget = _number(named)
+    if budget is None:
+        raise Missing("limits.time_budget_ms")
+    el = _number(_get(body, "timing.elapsed_ms"))
+    if el is None:
+        raise Missing("timing.elapsed_ms")
+    if el > budget + allowance:
+        stops = []
+        for i, e in enumerate(body.get("patterns") or []):
+            if isinstance(e, dict) and e.get("stop"):
+                stops.append("p%d stop %s/%s" % (i, e["stop"].get("phase"), e["stop"].get("reason")))
+        if body.get("stop"):
+            stops.append("stop %s/%s" % (body["stop"].get("phase"), body["stop"].get("reason")))
+        return FINDING, "elapsed %.0f ms above the time budget %.0f ms + allowance %.0f ms (%s)" % (
+            el, budget, allowance, ", ".join(stops) or "no stop stated")
+    return PASS, "elapsed %.0f ms within %.0f + %.0f ms" % (el, budget, allowance)
+
+
 # ---------------------------------------------------------------------------------------------- pattern invariants
 def _sum_counts(parts: List[dict]) -> Tuple[Optional[int], str]:
     """§7.4's algebra over counts (without lower/upper detail: value and relation)."""
@@ -1441,6 +1515,7 @@ CHECKS: Dict[str, Callable] = {
     "predicate_either_mirror": check_predicate_either_mirror,
     "motif": check_motif,
     "clamped": check_clamped,
+    "budget_respected": check_budget_respected,
     "counts_consistent": check_counts_consistent,
     "invariants": check_invariants,
     "resolve_runs": check_resolve_runs,
@@ -1497,7 +1572,10 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
 
 
 def scenario_outcome(results: List[dict]) -> str:
-    """pass when every check passed (not_exposed ones aside), fail otherwise."""
+    """fail when a check failed; finding when none failed and a check is a finding (the host broke a stated bound
+    without failing the request: never counted as a pass); pass otherwise (not_exposed checks aside)."""
     if any(r["outcome"] == FAIL for r in results):
         return "fail"
+    if any(r["outcome"] == FINDING for r in results):
+        return FINDING
     return "pass"

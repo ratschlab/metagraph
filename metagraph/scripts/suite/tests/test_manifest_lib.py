@@ -74,6 +74,22 @@ class McpMapping(unittest.TestCase):
         m = ml.mcp_traverse(ml.traverse_request([{"sequence": "A" * 40}], {"bounds": {"max_extension_bp": 50}}, preset="trie"))
         self.assertEqual(m["arguments"]["preset"], "trie")
 
+    def test_budget_expectation(self):
+        ok = {"check": "status", "args": {"http": 200}}
+        s = ml.scenario("P-1", "P", "t", "POST /pattern", ml.pattern_request([{"dna": "A" * 25}]), {}, [ok])
+        b = [e for e in s["expect"] if e["check"] == "budget_respected"]
+        self.assertEqual(b[0]["args"]["allowance_ms"], 0)
+        s = ml.scenario("T-1", "T", "t", "POST /traverse", ml.traverse_request([{"sequence": "A" * 40}]), {},
+                        [{"check": "status", "args": {"http": [200, 503]}}])
+        b = [e for e in s["expect"] if e["check"] == "budget_respected"]
+        self.assertEqual(b[0]["args"]["allowance_ms"], 1000)    # the capabilities' delivery_reserve.stop_ms
+        s = ml.scenario("R-1", "R", "t", "POST /resolve", ml.resolve_request("A" * 40, labels=["1"], time_budget_ms=250),
+                        {}, [{"check": "status", "args": {"http": 400}}])
+        self.assertFalse(any(e["check"] == "budget_respected" for e in s["expect"]))   # a refusal: no answer to time
+        s = ml.scenario("R-2", "R", "t", "POST /resolve", ml.resolve_request("A" * 40, discover={"max_labels": 5}),
+                        {}, [ok])
+        self.assertFalse(any(e["check"] == "budget_respected" for e in s["expect"]))   # a discovery names none
+
     def test_scenario_levels(self):
         s = ml.scenario("X-1", "P", "t", "POST /pattern", ml.pattern_request([{"dna": "A" * 25}]), {},
                         [{"check": "status", "args": {"http": 200}}, {"check": "contains_source_context", "args": {}}])

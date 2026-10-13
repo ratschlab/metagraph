@@ -355,6 +355,80 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, ok_answer(bad), "predicate_either_mirror", label="546")[0], "fail")
 
 
+class BudgetChecks(unittest.TestCase):
+    """budget_respected: the server's elapsed time within the effective budget plus the stated allowance, an
+    overrun a finding (the smoke run's lambda walk: 34,202 ms under a 15,000 ms budget)."""
+
+    def traverse(self, elapsed, budget=15000, echoed=True, timing=True):
+        r = {"outcome": {"walks": "partial"}, "arms": {}}
+        if timing:
+            r["timing"] = {"elapsed_ms": elapsed, "seed_phase_ms": elapsed - 400,
+                           "deadline": {"longest_piece": {"kind": "read", "ms": 20556.4, "rows": 1},
+                                        "stopped_by": "time_budget", "stop_after_deadline_ms": elapsed - budget}}
+        body = {"results": [r], "timing": {"elapsed_ms": elapsed + 1}}
+        if echoed:
+            body["strategy"] = {"bounds": {"time_budget_ms": budget}}
+        return ok_answer(body)
+
+    def sc(self, route, req):
+        return {"route": route, "request": req, "truth": {}}
+
+    def test_traverse(self):
+        sc = self.sc("POST /traverse", {"seeds": [{"sequence": "A" * 40}],
+                                        "strategy": {"bounds": {"time_budget_ms": 15000}}})
+        o, d = outcome(sc, self.traverse(34201.3), "budget_respected", allowance_ms=1000)
+        self.assertEqual(o, "finding")
+        self.assertIn("longest piece read 20556 ms", d)
+        self.assertEqual(outcome(sc, self.traverse(15900), "budget_respected", allowance_ms=1000)[0], "pass")
+        self.assertEqual(outcome(sc, self.traverse(16001), "budget_respected", allowance_ms=1000)[0], "finding")
+        # the effective budget is the echoed strategy's (a clamp lowers it), else the request's
+        self.assertEqual(outcome(sc, self.traverse(16500, budget=60000), "budget_respected", allowance_ms=1000)[0], "pass")
+        self.assertEqual(outcome(sc, self.traverse(16500, echoed=False), "budget_respected", allowance_ms=1000)[0], "finding")
+        # a walked seed without timing: a direct arm fails, the MCP arm does not expose it
+        self.assertEqual(outcome(sc, self.traverse(1, timing=False), "budget_respected", allowance_ms=1000)[0], "fail")
+        self.assertEqual(outcome(sc, self.traverse(1, timing=False), "budget_respected", "mcp", allowance_ms=1000)[0],
+                         "not_exposed")
+
+    def test_pattern_and_resolve(self):
+        sc = self.sc("POST /pattern", {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 300})
+        over = ok_answer({"patterns": [{"stop": {"phase": "discovery", "reason": "time"}}],
+                          "limits": {"time_budget_ms": 300}, "timing": {"elapsed_ms": 412.5}})
+        o, d = outcome(sc, over, "budget_respected", allowance_ms=0)
+        self.assertEqual(o, "finding")
+        self.assertIn("p0 stop discovery/time", d)
+        within = ok_answer({"patterns": [{}], "limits": {"time_budget_ms": 300}, "timing": {"elapsed_ms": 299.0}})
+        self.assertEqual(outcome(sc, within, "budget_respected", allowance_ms=0)[0], "pass")
+        sc = self.sc("POST /resolve", {"sequence": "A" * 40, "labels": ["562"], "bounds": {"time_budget_ms": 70000}})
+        clamped = ok_answer({"num_kmers": 10, "limits": {"time_budget_ms": 60000}, "timing": {"elapsed_ms": 61000}})
+        self.assertEqual(outcome(sc, clamped, "budget_respected", allowance_ms=0)[0], "finding")
+        clamped["body"]["timing"]["elapsed_ms"] = 59000
+        self.assertEqual(outcome(sc, clamped, "budget_respected", allowance_ms=0)[0], "pass")
+
+    def test_every_stored_pattern_answer_within_its_budget(self):
+        n = 0
+        for name in sorted(os.listdir(PATTERN)):
+            p, q = os.path.join(PATTERN, name, "answer.json"), os.path.join(PATTERN, name, "request.json")
+            if not (os.path.exists(p) and os.path.exists(q)):
+                continue
+            with open(p) as f:
+                ans = json.load(f)
+            with open(q) as f:
+                req = json.load(f)
+            if not isinstance(ans, dict) or "limits" not in ans or "timing" not in ans or not isinstance(req, dict):
+                continue
+            o, d = outcome({"route": "POST /pattern", "request": req, "truth": {}}, ok_answer(ans),
+                           "budget_respected", allowance_ms=0)
+            self.assertEqual(o, "pass", "%s: %s" % (name, d))
+            n += 1
+        self.assertGreater(n, 100)
+
+    def test_outcome_of_an_execution(self):
+        res = [{"check": "status", "outcome": "pass"}, {"check": "budget_respected", "outcome": "finding"}]
+        self.assertEqual(checks.scenario_outcome(res), "finding")
+        self.assertEqual(checks.scenario_outcome(res + [{"check": "x", "outcome": "fail"}]), "fail")
+        self.assertEqual(checks.scenario_outcome(res[:1]), "pass")
+
+
 class ResolveChecks(unittest.TestCase):
     def body(self, runs, num=70, graph=None, stop=None):
         b = {"k": 31, "num_kmers": num, "graph_runs": graph if graph is not None else [[0, num]],
