@@ -504,13 +504,14 @@ def cold_warm(lines):
 # ---------------------------------------------------------------------------------------------------------------
 # relations between scenarios (the manifest's `relations`)
 #
-# A relation {id, type, a, b, args} states how the answers of scenarios a and b relate; it is evaluated per arm
-# on the answers both scenarios got there (the lowest repeat both ran), from the raw files. Types:
-#   same_answer   the normalised answers are the same, `timing` aside (args.ignore: dotted paths left out too).
-#   subset        the items of a at args.path (default patterns.*.results.*; `*` steps into every element) are
-#                 all among b's, compared whole (timing aside) or on args.key (a list of field names).
-#   prefix_equals, zero_equals_absent: evaluated once lane S1b's README states their semantics; until then
-#                 `not_evaluated`.
+# A relation {id, type, a, b, title, args} states how the answers of scenarios a and b relate; it is evaluated per
+# arm on the normalised answers of the first repeat of each there, from the raw files, with the outcome pass,
+# fail, inconclusive (the pair cannot test the claim) or not_exposed (the MCP arm lacks a field the type reads).
+# The semantics are lane S1b's (its README, "Relations"): checks.evaluate_relation of checks.py next to this
+# script is the reference implementation and is used whenever checks.py is there. Without it, same_answer is
+# evaluated here with the same rule (same HTTP status; not 200: the same error code and text; args.paths pairs
+# of dotted paths equal, else the bodies equal without timing and without args.ignore) and the other types read
+# not_evaluated.
 
 def load_answer(line, run_dir):
     """The normalised answer of an execution from its raw file (both runners keep it under `answer`)."""
@@ -594,73 +595,100 @@ def first_difference(a, b, path=""):
 
 
 def relation_same_answer(a, b, args):
-    va, vb = sc.digest_view(a), sc.digest_view(b)
+    """same_answer as lane S1b states it (for runs without checks.py)."""
+    if a.get("http") != b.get("http"):
+        return "fail", "http %s vs %s" % (a.get("http"), b.get("http"))
+    if a.get("http") != 200:
+        ea, eb = a.get("error") or {}, b.get("error") or {}
+        if (ea.get("code"), ea.get("text")) != (eb.get("code"), eb.get("text")):
+            return "fail", "errors differ: %s %r vs %s %r" % (ea.get("code"), (ea.get("text") or "")[:120],
+                                                              eb.get("code"), (eb.get("text") or "")[:120])
+        return "pass", "the same refusal (http %s, %s)" % (a.get("http"), ea.get("code"))
+    ba = sc.digest_view({"body": a.get("body")})["body"]
+    bb = sc.digest_view({"body": b.get("body")})["body"]
+    pairs = args.get("paths")
+    if pairs:
+        for pa, pb in pairs:
+            va = path_values(ba, pa) if pa else [ba]
+            vb = path_values(bb, pb) if pb else [bb]
+            if not va or not vb:
+                return "fail", "path %s missing" % (pa if not va else pb)
+            if va[0] != vb[0]:
+                return "fail", "%s differs from %s" % (pa or "(body)", pb or "(body)")
+        return "pass", "%d path pair(s) equal" % len(pairs)
     for p in args.get("ignore") or []:
-        va, vb = drop_path(va, p), drop_path(vb, p)
-    diff = first_difference(va, vb)
+        ba, bb = drop_path(ba, p), drop_path(bb, p)
+    diff = first_difference(ba, bb)
     if diff is None:
         return "pass", "the same answer (timing aside)"
-    return "fail", "the answers differ at %s" % diff
+    return "fail", "the bodies differ at %s" % diff
 
 
-def relation_subset(a, b, args):
-    path = args.get("path") or "patterns.*.results.*"
-    key = args.get("key")
-    if not isinstance(a.get("body"), dict) or not isinstance(b.get("body"), dict):
-        return "not_evaluated", "an answer without a JSON body (http %s / %s)" % (a.get("http"), b.get("http"))
-
-    def project(x):
-        if key and isinstance(x, dict):
-            x = dict((k, x.get(k)) for k in key)
-        return sc.canonical_json(sc.digest_view({"v": x})["v"] if isinstance(x, (dict, list)) else x)
-    items_a = [project(x) for x in path_values(a["body"], path)]
-    items_b = set(project(x) for x in path_values(b["body"], path))
-    missing = [x for x in items_a if x not in items_b]
-    if not missing:
-        return "pass", "%d item(s) of a at %s, all among b's %d" % (len(items_a), path, len(items_b))
-    return "fail", "%d of a's %d item(s) at %s missing from b's %d, e.g. %s" % (
-        len(missing), len(items_a), path, len(items_b), missing[0].decode("utf-8", "replace")[:200])
-
-
-RELATIONS = {"same_answer": relation_same_answer, "subset": relation_subset}
+BUILT_IN_RELATIONS = {"same_answer": relation_same_answer}
 RELATION_TYPES = ("prefix_equals", "zero_equals_absent", "subset", "same_answer")
+RELATION_OUTCOMES = ("pass", "fail", "inconclusive", "not_exposed", "not_evaluated")
 
 
-def evaluate_relations(manifest, grouped, run_dir, arms):
-    """(relations, summary): every manifest relation per arm that ran both scenarios."""
-    rels = (manifest or {}).get("relations") or [] if isinstance(manifest, dict) else []
+def load_relation_evaluator():
+    """checks.evaluate_relation of checks.py next to this script (lane S1's reference), or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checks.py")
+    if not os.path.exists(path):
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("suite_checks_for_relations", path)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:  # a checks.py that does not load leaves the built-in evaluation
+        return None
+    return getattr(mod, "evaluate_relation", None)
+
+
+def evaluate_relations(manifest, grouped, run_dir, arms, evaluator="auto"):
+    """(relations, summary): every manifest relation per arm that ran both scenarios. evaluator: lane S1's
+    checks.evaluate_relation (found next to this script when "auto"), or None for the built-in evaluation."""
+    if evaluator == "auto":
+        evaluator = load_relation_evaluator()
+    rels = (manifest.get("relations") or []) if isinstance(manifest, dict) else []
+    scen = dict((x.get("id"), x) for x in manifest.get("scenarios", [])) if isinstance(manifest, dict) else {}
     out, per_arm = [], {}
     for rel in rels:
         if not isinstance(rel, dict):
             continue
         entry = {"id": rel.get("id"), "type": rel.get("type"), "a": rel.get("a"), "b": rel.get("b"),
-                 "args": rel.get("args") or {}, "arms": {}}
-        fn = RELATIONS.get(rel.get("type"))
+                 "title": rel.get("title"), "args": rel.get("args") or {}, "arms": {}}
         for arm in arms:
             la_all = (grouped.get(rel.get("a")) or {}).get(arm) or {}
             lb_all = (grouped.get(rel.get("b")) or {}).get(arm) or {}
-            common = sorted(set(la_all) & set(lb_all))
-            if not common:
+            if not la_all or not lb_all:
                 continue
-            la, lb = la_all[common[0]], lb_all[common[0]]
-            if rel.get("type") not in RELATION_TYPES:
+            la, lb = la_all[min(la_all)], lb_all[min(lb_all)]
+            aa, ab = load_answer(la, run_dir), load_answer(lb, run_dir)
+            if aa is None or ab is None:
+                outcome, detail = "not_evaluated", "a raw answer is missing"
+            elif evaluator is not None:
+                try:
+                    res = evaluator(rel, scen.get(rel.get("a")) or {}, aa, scen.get(rel.get("b")) or {}, ab, arm)
+                    outcome, detail = res.get("outcome"), res.get("detail")
+                except Exception as exc:  # never take the comparison down
+                    outcome, detail = "fail", "evaluate_relation raised %s: %s" % (type(exc).__name__, exc)
+            elif rel.get("type") not in RELATION_TYPES:
                 outcome, detail = "fail", "unknown relation type %r" % rel.get("type")
-            elif fn is None:
-                outcome, detail = "not_evaluated", "%s: semantics pending (lane S1b's README)" % rel.get("type")
+            elif rel.get("type") in BUILT_IN_RELATIONS:
+                outcome, detail = BUILT_IN_RELATIONS[rel.get("type")](aa, ab, entry["args"])
             else:
-                aa, ab = load_answer(la, run_dir), load_answer(lb, run_dir)
-                if aa is None or ab is None:
-                    outcome, detail = "not_evaluated", "a raw answer is missing"
-                else:
-                    try:
-                        outcome, detail = fn(aa, ab, entry["args"])
-                    except Exception as exc:  # a relation that cannot be evaluated is reported, never fatal
-                        outcome, detail = "not_evaluated", "%s: %s" % (type(exc).__name__, exc)
-            entry["arms"][arm] = {"outcome": outcome, "detail": detail, "repeat": common[0]}
-            counts = per_arm.setdefault(arm, {"pass": 0, "fail": 0, "not_evaluated": 0})
-            counts[outcome] = counts.get(outcome, 0) + 1
+                outcome, detail = "not_evaluated", "%s needs lane S1's checks.evaluate_relation (checks.py)" % (
+                    rel.get("type"))
+            if outcome not in RELATION_OUTCOMES:
+                detail = "outcome %r read as a failure: %s" % (outcome, detail)
+                outcome = "fail"
+            entry["arms"][arm] = {"outcome": outcome, "detail": detail,
+                                  "repeats": [la.get("repeat"), lb.get("repeat")]}
+            counts = per_arm.setdefault(arm, dict((k, 0) for k in RELATION_OUTCOMES))
+            counts[outcome] += 1
         out.append(entry)
-    return out, {"total": len(out), "per_arm": per_arm}
+    return out, {"total": len(out), "per_arm": per_arm,
+                 "implementation": "checks.evaluate_relation" if evaluator is not None else "compare.py built-in"}
 
 
 # ---------------------------------------------------------------------------------------------------------------

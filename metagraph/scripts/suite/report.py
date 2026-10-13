@@ -475,10 +475,14 @@ def relations_section(comp):
         return "\n".join(out)
     arms = comp["arms"]
     per_arm = ((comp["summary"].get("relations") or {}).get("per_arm")) or {}
-    out.append("%d relation(s), each evaluated per arm on the answers both scenarios got there: %s." % (
-        len(rels), "; ".join("%s %d pass, %d fail, %d not evaluated" % (
-            md(arm), c.get("pass", 0), c.get("fail", 0), c.get("not_evaluated", 0))
-            for arm, c in sorted(per_arm.items())) or "none ran"))
+    impl = (comp["summary"].get("relations") or {}).get("implementation") or "-"
+    out.append("%d relation(s), each evaluated per arm on the answers of the first repeat of both scenarios there "
+               "(semantics: lane S1's README; evaluated by %s): %s." % (
+                   len(rels), md(impl), "; ".join("%s %d pass, %d fail, %d inconclusive, %d not exposed, %d not "
+                                                  "evaluated" % (md(arm), c.get("pass", 0), c.get("fail", 0),
+                                                                 c.get("inconclusive", 0), c.get("not_exposed", 0),
+                                                                 c.get("not_evaluated", 0))
+                                                  for arm, c in sorted(per_arm.items())) or "none ran"))
     out.append("")
     rows = []
     for r in rels:

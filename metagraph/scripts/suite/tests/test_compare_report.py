@@ -541,14 +541,45 @@ class ReportTest(unittest.TestCase):
             comp = cmp.compare(d, ({}, None))
             sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
             text = report.build_report(d)
+        # without checks.py next to compare.py: same_answer built in, the other types not evaluated
         got = dict((r["id"], (r["arms"].get("direct-local") or {}).get("outcome")) for r in comp["relations"])
-        self.assertEqual(got, {"rel-same": "pass", "rel-sub": "pass", "rel-sub-bad": "fail",
+        self.assertEqual(got, {"rel-same": "pass", "rel-sub": "not_evaluated", "rel-sub-bad": "not_evaluated",
                                "rel-prefix": "not_evaluated", "rel-odd": "fail", "rel-gone": None})
         self.assertEqual(comp["summary"]["relations"]["per_arm"]["direct-local"],
-                         {"pass": 2, "fail": 2, "not_evaluated": 1})
+                         {"pass": 1, "fail": 1, "inconclusive": 0, "not_exposed": 0, "not_evaluated": 3})
+        self.assertEqual(comp["summary"]["relations"]["implementation"], "compare.py built-in")
         self.assertIn("# Relations between scenarios", text)
-        self.assertIn("| rel-sub-bad | subset | P-a | P-c | fail |", text)
-        self.assertIn("2 failed relation(s)", text)
+        self.assertIn("| rel-odd | bogus | P-a | P-b | fail |", text)
+        self.assertIn("1 failed relation(s)", text)
+        # with lane S1's evaluate_relation: its outcome per arm, an unknown outcome read as a failure
+        seen = []
+
+        def evaluator(rel, a_sc, a_ans, b_sc, b_ans, arm):
+            seen.append((rel["id"], a_sc.get("id"), b_sc.get("id"), arm, a_ans["http"]))
+            return {"outcome": {"rel-sub": "inconclusive", "rel-odd": "weird"}.get(rel["id"], "pass"), "detail": "x"}
+        with tempfile.TemporaryDirectory() as d2:
+            os.makedirs(os.path.join(d2, "arms", "direct-local"))
+            sc.write_json_atomic(os.path.join(d2, "arms", "direct-local", "manifest.json"), manifest)
+            write_arm(d2, "direct-local", [line(i, "direct-local", 0, T0 + n, 1.0, checks=ok)
+                                           for n, i in enumerate(("P-a", "P-b", "P-c"))],
+                      raw_bodies={("P-a", 0): body(ctx, 1.0), ("P-b", 0): body(ctx, 9.0),
+                                  ("P-c", 0): body(ctx[:1], 2.0)})
+            merge_run.merge(d2)
+            rows, _ = sc.read_jsonl(os.path.join(d2, "executions.jsonl"))
+            grouped, _ = cmp.group_lines(rows)
+            rels, summary = cmp.evaluate_relations(sc.read_json(os.path.join(d2, "manifest.json")), grouped, d2,
+                                                   ["direct-local"], evaluator=evaluator)
+        got = dict((r["id"], (r["arms"].get("direct-local") or {}).get("outcome")) for r in rels)
+        self.assertEqual(got["rel-sub"], "inconclusive")
+        self.assertEqual(got["rel-odd"], "fail")
+        self.assertEqual(summary["implementation"], "checks.evaluate_relation")
+        self.assertIn(("rel-same", "P-a", "P-b", "direct-local", 200), seen)
+        res = cmp.relation_same_answer({"http": 400, "error": {"code": "c", "text": "t"}},
+                                       {"http": 400, "error": {"code": "c", "text": "u"}}, {})
+        self.assertEqual(res[0], "fail")
+        res = cmp.relation_same_answer({"http": 200, "body": {"a": 1, "b": 2}}, {"http": 200, "body": {"a": 1, "b": 3}},
+                                       {"paths": [["a", "a"]]})
+        self.assertEqual(res[0], "pass")
         self.assertEqual(cmp.first_difference({"a": [1, {"b": 2}]}, {"a": [1, {"b": 3}]}), "a.1.b")
         self.assertEqual(cmp.drop_path({"a": {"b": 1, "c": 2}}, "a.b"), {"a": {"c": 2}})
         self.assertEqual(cmp.path_values({"p": [{"r": [1, 2]}, {"r": [3]}]}, "p.*.r.*"), [1, 2, 3])
