@@ -64,3 +64,11 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   meets its own 409 within the host's retention of an hour).
 - `deterministic` compares the answer's digest (suite_common.answer_digest) with `previous`, the digests of the
   earlier repeats on the same arm; the first repeat passes with its digest stated.
+- What the smoke validation of 2026-10-13 changed (laptop -> public URL, 36 requests in two paced runs): short
+  patterns are counted in suffix scope (a 12-mer in any_offset scope ran into the 503 deadline at 60 s three times on
+  the loaded host; two such scenarios stay as `heavy`, allowing the 503); planted-mismatch windows take the
+  shortest length whose ball meets fewer than ~1,000 random contexts (a 20-mer at max_mismatches 2 had 21,563
+  level-2 contexts and was rightly withheld); `walk_end` passes an arm a resource stopped before the record's end
+  (status truncated, a resource path reason: a stated stop) and says so, the walk so far being `walk_in_record`'s.
+- Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
+  implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...).

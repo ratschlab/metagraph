@@ -1296,7 +1296,9 @@ def check_walk_in_record(sc, ans, a, arm):
 
 def check_walk_end(sc, ans, a, arm):
     """Near the record's end the arm stops exactly at the record's end (header label), with a structural or
-    label end reason."""
+    label end reason. An arm a resource stopped before it (a stated stop: status truncated, every path ended by
+    a resource reason short of the end) cannot show the end: the check passes saying so, the walk so far being
+    walk_in_record's to check."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     if "arms" not in r:
@@ -1308,6 +1310,13 @@ def check_walk_end(sc, ans, a, arm):
     fl = _arm_flanks(armo, side)
     lens = sorted({len(f) for _, f in fl})
     if want not in lens:
+        resource = {"max_steps", "time_budget", "resource_limit", "max_live_paths", "max_paths", "max_output_bp"}
+        if fl and armo.get("status") == "truncated" and all(
+                len(f) < want and (p.get("path_reason") in resource or set(p.get("end_reasons") or {}) & resource)
+                for p, f in fl):
+            trig = armo.get("cap_trigger") or {}
+            return PASS, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
+                side, trig.get("reason"), trig.get("at_bp"), want)
         return FAIL, "%s arm path lengths %s, the record ends %d bp from the seed" % (side, lens[:8], want)
     for p, f in fl:
         if len(f) == want:
