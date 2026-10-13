@@ -3980,6 +3980,11 @@ documents, which gain the object).
   `"supported_paths"` from `mismatches.later_increment`.
 - **Stops as substitutes** (M1 = B as an opt-in, `protein_substitutes: "all_codons"`): a later addition the
   capabilities would announce as a second value of the enumeration.
+- **Count-only continuation of the extension** (scheduled with increment 5m-4, the mismatch extension for patterns
+  longer than k): in `all_or_count` the extension of a long pattern with more paths than `max_paths` drops the
+  retained walks and counts on, unless the walks stop fitting their half of the memory account first, where it stops
+  with `output_budget` and an `at_least` count (§28); the increment keeps counting without retaining once they do not
+  fit, so that the exact count (`count_above_threshold`) returns.
 
 ## 23. `GET /pattern/capabilities`, and the gate block of `GET /traverse/capabilities`
 
@@ -4643,7 +4648,8 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   `PatternPaths.TheMemoryAccountBoundsLabelFreePaths`, two patterns); a `long_search: "paths"` entry of a pattern
   longer than k outside mode `count`, whose request named `max_memory_mb` and no other annotation field, no longer
   carries `annotation_not_read` (§4.1, §8.10: the field acts on it;
-  `PatternPaths.MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry`).
+  `PatternPaths.MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry`). §28 states what the half rule costs, and §21.16
+  names the count-only continuation of the extension.
 
 ## 28. Changed after the review of 2026-10-12
 
@@ -4680,6 +4686,19 @@ route's cut in both modes, the engine's stop in both modes and with labels, the 
 `PatternPaths.TheMemoryAccountStopsPathRetention` (its pattern now one with few paths, so that the test stays the
 descriptors'). The validator (`test_pattern_fixtures.py`) accepts `stop {extension, max_memory}` and `stop {output,
 max_memory}` on a `long_search: "paths"` entry of any projection. No stored body of the mini index changes.
+
+**What the half rule costs** (the verification of 2026-10-13; the owner accepted the behaviour). The walks kept for a
+release take at most half of what the account has left when the extension begins and the result objects built from
+them the rest: a fixed split, though one object (512 + 2k + 3L + 192n) costs about 22 walks (128 + 8n + L). (1) In
+`partial` mode the result objects are built beside the walks still held, so once one label-free result object needs
+more than half of what the account has left (at the 256 MiB cap a pattern of more than about 0.69 Mb), a request
+whose kept walks fill their half answers zero paths with `cut: max_memory`, although one object alone would fit; a
+labelled `partial` answers zero there too, through its descriptors' half. (2) In `all_or_count` mode a long pattern
+with more paths than `max_paths` answered `count_above_threshold` with an exact count before; once the walks retained
+up to `max_paths` exceed half the account, the extension stops instead of dropping them and counting on, and the
+entry answers `output_budget` with an `at_least` count (at the default caps, `max_paths` 1,000 and `max_memory_mb`
+256, from patterns of about 15 kb). A later increment, the count-only continuation of the extension (§21.16), keeps
+counting without retaining once the walks no longer fit, so that the exact count returns.
 
 **The selection of supported paths: its stated reasons and its memory (§20.5, §20.7, §20.9).** A selected path
 beyond `max_paths` is never charged its `selection_labels`, so `partial` states `cut: max_paths` with no stop
