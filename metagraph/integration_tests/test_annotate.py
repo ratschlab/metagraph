@@ -590,6 +590,25 @@ class TestAnnotateHeaderChecks(TestingBase):
         self.assertEqual(['good.fa.column.annodbg', 'ok.fa.column.annodbg'],
                          sorted(os.listdir(os.path.join(self.d, 'anno'))))
 
+    def test_separately_with_one_file_creates_no_directory_when_it_is_refused(self):
+        """--separately -o DIR with a single input file: its headers are checked before the
+        output directory is created, so a refusal leaves no (empty) directory behind."""
+        bad = self._fasta([(b'ok', self.SEQ_A), (b'bad\xff', self.SEQ_B)], 'bad.fa')
+        graph = self._graph(bad)
+        cmd = (f'{METAGRAPH} annotate -p 1 -i {graph} --separately --anno-header '
+               f'-o {os.path.join(self.d, "anno")} {bad}')
+        res = subprocess.run([cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self._assert_refused(res, bad, 'record 2', 'not valid UTF-8', '626164ff')
+        self.assertFalse(os.path.exists(os.path.join(self.d, 'anno')))
+        # the same file passes once its header does, annotated into the directory
+        ok = self._fasta([(b'ok', self.SEQ_A), (b'fine', self.SEQ_B)], 'ok.fa')
+        cmd = (f'{METAGRAPH} annotate -p 1 -i {graph} --separately --anno-header '
+               f'-o {os.path.join(self.d, "anno")} {ok}')
+        res = subprocess.run([cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertEqual(['ok.fa.column.annodbg'],
+                         os.listdir(os.path.join(self.d, 'anno')))
+
     def test_index_header_coords_refuses_a_repeated_record_header(self):
         fasta = self._fasta([(b'dup', self.SEQ_A), (b'other', self.SEQ_B), (b'dup', self.SEQ_C)])
         graph = self._graph(fasta)

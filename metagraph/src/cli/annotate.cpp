@@ -258,10 +258,10 @@ void add_kmer_counts(const std::string &file,
 }
 
 // Runs the header check of push_header_labels over every FASTA/FASTQ file of |files| (other
-// formats carry no headers) before any annotation is written: with --separately each file's
-// annotation is serialized as soon as it is annotated, so a label refused during a later
-// file's annotation would leave the earlier files' annotations on disk, while a refusal
-// writes nothing
+// formats carry no headers) before any annotation is written or the output directory is
+// created: with --separately each file's annotation is serialized as soon as it is annotated,
+// so a label refused during a later file's annotation would leave the earlier files'
+// annotations on disk, while a refusal writes nothing
 void check_header_labels(const std::vector<std::string> &files,
                          const Config &config,
                          size_t num_threads) {
@@ -597,9 +597,11 @@ int annotate_graph(Config *config) {
         set_num_threads(std::max(1u, config->parallel_each));
         omp_set_max_active_levels(3);
 
-        // with one file nothing is written before its own check
+        // before anything is created: with several files an earlier file's annotation, with
+        // an output directory the directory itself (a single file without one writes nothing
+        // before its own check)
         if (config->annotate_sequence_headers && !config->allow_unchecked_headers
-                && files.size() > 1) {
+                && (files.size() > 1 || !config->outfbase.empty())) {
             check_header_labels(files, *config, num_threads);
         }
 
