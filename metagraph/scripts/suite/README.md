@@ -382,7 +382,8 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   never in the smoke manifest), `until-next-deploy` (m = 2 peptides, answered under today's protein cap of 3 and
   refused after that restart), `code-derived` (set by the builder on every exact error text no smoke run exercised,
   and by hand on expectations read from the source: treat a first failure there as a possible suite error),
-  `machine-dependent` (time budgets: 200 or 503, stop or not), `expected-miss`, `retention-dependent` (an attempt id
+  `machine-dependent` (time budgets: 200 or 503, stop or not; for /pattern the checks hold this for every scenario
+  that expects a 200, tagged or not: lane S5, below), `expected-miss`, `retention-dependent` (an attempt id
   meets its own 409 within the host's retention of an hour), `last-record-verified` (above), `relation` (a twin
   scenario made for a relation).
 - `deterministic` compares the answer's digest (suite_common.answer_digest) with `previous`, the digests of the
@@ -725,3 +726,40 @@ lock, the ssh connection or the release GET).
   check, an evaluate exception, the kept outcomes, a 503 judged by the wall and by the backend time, a time-limited
   cold repeat), a checks.py of another directory that records what it is passed, every recorded file byte-identical
   after the re-evaluated merge, compare and report, and run_suite.sh --reevaluate with nothing reachable.
+
+## Lane S5: the suite fixes of the verified triage (2026-10-14)
+
+From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25) as its three verifications amend it
+(VERIFY-T, VERIFY-RP, VERIFY-MN; where a verification amends the triage, the verification is followed).
+
+### Checks (judged offline by re-evaluation)
+- Walks through merges (G13, as VERIFY-T amends it). A merged walk (`branching.on_reconverge: merge`, the walk
+  preset's default) displays each merge through its first parent (SPEC-labeled-traversal-core §7.1: the parent
+  carried by the most labels; the arrival order in `tree` / `full` detail under a memory budget), so after a split
+  that several records (a column's alleles, a derived set) or repeat copies carry, a displayed path may be another
+  record's allele while the record's own route passes the merge through another parent. `walk_in_record` and
+  `walk_end` now search the root-to-leaf routes of the arm's segment DAG through `segments[].parents`, taking ANY
+  parent at a merge (`_record_routes`); a route follows the record when its whole spelled flank is the truth's
+  continuation (of any copy with `any_copy`), and its end reasons are its leaf's (`_leaf_ends`: the leaf's paths[]
+  entry and the label_end events on the leaf at its end). `labels_via_parent` is not followed: VERIFY-T showed that
+  a label's kept entry may come through the other allele's parent (T-repeat-0001, T-walk-0036), where only the
+  any-parent rule holds. The search runs forward from the roots and is pruned at the first base that departs from
+  every copy, so it visits a segment at most once per copy (the children of a split differ in their first base);
+  it stops after `_MAX_ROUTE_STATES` (100,000) visits, and a check that could not finish it is inconclusive, never
+  failed. `walk_end` asks for a route that follows the record to its end (where the truth's flank reaches the end;
+  otherwise the leaves' lengths as before), its leaf's end reasons in `reasons_in`.
+- Quorum ends (G16). `paths_end` accepts a reason that the label_end event on the path's leaf at its end names: the
+  deployed engine has no `below_min_labels` end reason, a quorum or split-limit stop is `branch` with the qualifier
+  text in that event (SPEC §13, I3 note 2). `graphlet_arms` derives the label_end events from the R records as the
+  SPEC's §7.5.6 does (a code end, on the run's segment at `to_bp`, the reason the qualifier's text through
+  `_END_QUALIFIERS`, e.g. `Rb` below_min_labels, or the code's enum; `Lw` and `m` give none); on every mini-index
+  fixture they equal the full result's events.
+- The /pattern deadline (G21, as VERIFY-MN amends it: required, not optional). A POST /pattern 503 with code
+  `deadline` is an answer SPEC-pattern-search §6 / §7.6 allow for any search whose answer could not be written
+  within its time_budget_ms, so on a loaded host every searching /pattern request may get it.
+  `checks.pattern_deadline_allowed`: where the scenario's status expectation asks for a 200 and does not itself name
+  the deadline (an http 503, the code `deadline` or a text naming it), such a 503 makes `status` inconclusive and
+  joins evaluate's allowed list, so the body's checks read inconclusive and `budget_respected` judges it by the
+  client's wall time (`_budget_503`: a 503 long past its budget stays a finding). A scenario that expects a refusal
+  (no 200), names the deadline itself, or another route or code is judged as it states.
+

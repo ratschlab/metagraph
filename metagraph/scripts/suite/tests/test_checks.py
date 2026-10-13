@@ -154,9 +154,33 @@ class Generic(unittest.TestCase):
         # an allowed 503 tests nothing: the body's checks are inconclusive, and so is the execution
         self.assertEqual([r["outcome"] for r in res], ["pass", "inconclusive"])
         self.assertEqual(checks.scenario_outcome(res), "inconclusive")
+        # G21: a /pattern 503 deadline in place of a 200 is an answer SPEC-pattern §6/§7.6 allows on any host (the
+        # README's machine-dependent): inconclusive, never a fail ...
         sc["expect"][0]["args"]["http"] = 200
-        res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "deadline"}'), "direct-local")
+        dl = checks.normalise_direct(503, b'{"error": "d", "code": "deadline"}')
+        res = checks.evaluate(sc, dl, "direct-local")
+        self.assertEqual([r["outcome"] for r in res], ["inconclusive", "inconclusive"])
+        self.assertIn("503 deadline in place of 200", res[0]["detail"])
+        self.assertEqual(checks.scenario_outcome(res), "inconclusive")
+        # ... and budget_respected judges it by the client's wall time (a 503 long past the budget is a finding)
+        sc_b = dict(sc, request={"patterns": [], "time_budget_ms": 1000},
+                    expect=sc["expect"] + [{"check": "budget_respected", "args": {}}])
+        self.assertEqual(checks.evaluate(sc_b, dl, "direct-local", client={"wall_ms": 1500.0})[2]["outcome"],
+                         "inconclusive")
+        self.assertEqual(checks.evaluate(sc_b, dl, "direct-local", client={"wall_ms": 9000.0})[2]["outcome"],
+                         "finding")
+        # another code, another route, or a scenario expecting a refusal: as stated
+        res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "loading"}'), "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
+        res = checks.evaluate(dict(sc, route="POST /resolve"), dl, "direct-local")
+        self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
+        sc["expect"][0]["args"] = {"http": 400, "code": "invalid_request"}
+        res = checks.evaluate(sc, dl, "direct-local")
+        self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
+        # a scenario whose status names the deadline is judged as it states
+        sc["expect"][0]["args"] = {"http": 200, "text_contains": ["deadline"]}
+        self.assertEqual(checks.evaluate(sc, dl, "direct-local")[0]["outcome"], "fail")
+        self.assertFalse(checks.pattern_deadline_allowed(sc, dl))
 
     def test_deterministic(self):
         a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})
@@ -1436,6 +1460,72 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, failed, "walk_in_record")[0], "fail")
         self.assertEqual(outcome(sc, failed, "walk_in_record", if_walked=True)[0], "inconclusive")
 
+    def merged_walk(self, record, start, L, other):
+        """A right arm whose displayed path (first parents) passes a merge through another record's allele |other| at
+        30 bp, while the record's own allele is the merge's second parent (SPEC §7.1, on_reconverge merge)."""
+        cont = record[start + L:start + L + 100]
+        segs = [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 30, "sequence": cont[:30]},
+                {"id": 1, "parents": [0], "from_bp": 30, "length_bp": 1, "sequence": other},
+                {"id": 2, "parents": [0], "from_bp": 30, "length_bp": 1, "sequence": cont[30]},
+                {"id": 3, "parents": [1, 2], "from_bp": 31, "length_bp": 69, "sequence": cont[31:],
+                 "labels_via_parent": [[0], []],
+                 "events": [{"at_bp": 100, "type": "label_end", "label": 0, "reason": "dead_end"}]}]
+        arm = {"status": "complete", "complete_to_bp": 100, "segments": segs, "splits": [{"at_bp": 30, "segment": 0}],
+               "paths": [{"id": 0, "segments": [0, 1, 3], "length_bp": 100, "path_reason": "max_extension_bp",
+                          "end_reasons": {"max_extension_bp": 1}}]}
+        return ok_answer({"results": [{"outcome": {"walks": "complete"}, "arms": {"right": arm}}],
+                          "strategy": {"bounds": {"max_extension_bp": 100}}})
+
+    def test_walk_in_record_takes_any_parent_at_a_merge(self):
+        # G13 (as amended by VERIFY-T): the record's route through a non-first parent of a merge follows the record
+        import random
+        rnd = random.Random(11)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}], "strategy": {"direction": "right",
+                                                                   "bounds": {"max_extension_bp": 100}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+        own = record[start + L + 30]
+        other = "A" if own != "A" else "C"
+        ans = self.merged_walk(record, start, L, other)
+        o, d = outcome(sc, ans, "walk_in_record")
+        self.assertEqual(o, "pass", d)
+        self.assertIn("through a non-first parent of a merge", d)
+        # the displayed path alone does not follow it (the check of before read only that)
+        arm = ans["body"]["results"][0]["arms"]["right"]
+        self.assertNotEqual(checks._arm_flanks(arm, "right")[0][1], record[start + L:start + L + 100])
+        # with the record's allele on neither parent no route follows it: fail
+        bad = self.merged_walk(record, start, L, other)
+        bad["body"]["results"][0]["arms"]["right"]["segments"][2]["sequence"] = "G" if own not in "AG" else "T"
+        self.assertEqual(outcome(sc, bad, "walk_in_record")[0], "fail")
+        # the graphlet (the MCP's export) reads the same DAG
+        o, d = outcome(sc, mcp_shaped(ans), "walk_in_record", _arm="mcp")
+        self.assertEqual(o, "pass", d)
+        # the route search is bounded: a search that stops before it shows the minimum is inconclusive, not fail
+        frames = [checks._seed_frame(t, {"start": start, "flank": record, "flank_start": 0}, "right", L)]
+        routes, beyond, capped = checks._record_routes(arm, "right", frames)
+        self.assertEqual(([len(f) for _, f in routes], beyond, capped), ([100], 0, False))
+        self.assertTrue(checks._record_routes(arm, "right", frames, cap=2)[2])
+        saved = checks._MAX_ROUTE_STATES
+        try:
+            checks._MAX_ROUTE_STATES = 2
+            o, d = outcome(sc, ans, "walk_in_record")
+            self.assertEqual(o, "inconclusive", d)
+            self.assertIn("route search stopped", d)
+            self.assertEqual(outcome(sc, bad, "walk_in_record")[0], "inconclusive")
+        finally:
+            checks._MAX_ROUTE_STATES = saved
+        # walk_end: the record's route to its end, its leaf's end reasons (the label_end event included)
+        t_end = dict(t, record_length=start + L + 100)
+        sc_end = dict(sc, truth=t_end)
+        self.assertEqual(outcome(sc_end, ans, "walk_end", arm="right", reasons_in=["dead_end"])[0], "pass")
+        self.assertEqual(outcome(sc_end, ans, "walk_end", arm="right", reasons_in=["label_lost"])[0], "fail")
+        o, d = outcome(sc_end, bad, "walk_end", arm="right", reasons_in=["dead_end"])
+        self.assertEqual(o, "fail")
+        self.assertIn("no route through the segments follows the record", d)
+
     def test_paths_end(self):
         sc = {"route": "POST /traverse", "truth": {},
               "request": {"seeds": [{"sequence": "A" * 40}], "strategy": {"direction": "right"}}}
@@ -1447,6 +1537,27 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, ans("below_min_labels", 50), "paths_end", reasons_in=["below_min_labels"], max_bp=1)[0], "fail")
         empty = ok_answer({"results": [{"arms": {"right": {"paths": []}}}]})
         self.assertEqual(outcome(sc, empty, "paths_end", reasons_in=["below_min_labels"])[0], "fail")
+        # G16: the deployed engine ends a quorum stop as `branch`, the text below_min_labels in the leaf's label_end
+        # event (SPEC §13 I3 note 2): T-quorum-0001's answer
+        def quorum(at_bp=0):
+            seg = {"id": 0, "parents": [], "from_bp": 0, "length_bp": 0, "sequence": "",
+                   "events": [{"at_bp": at_bp, "label": 0, "reason": "below_min_labels", "structural_successors": 1,
+                               "type": "label_end"}]}
+            return ok_answer({"results": [{"outcome": {"walks": "complete"}, "arms": {"right": {
+                "status": "complete", "segments": [seg],
+                "paths": [{"id": 0, "segments": [0], "length_bp": 0, "end_reasons": {"branch": 1}}]}}}]})
+        self.assertEqual(outcome(sc, quorum(), "paths_end", reasons_in=["below_min_labels"], max_bp=1)[0], "pass")
+        self.assertEqual(outcome(sc, quorum(), "paths_end", reasons_in=["minority"], max_bp=1)[0], "fail")
+        self.assertEqual(outcome(sc, quorum(at_bp=5), "paths_end", reasons_in=["below_min_labels"])[0], "fail")
+        # the graphlet states it as the R record's qualifier Rb (SPEC §7.5.2), read through _END_QUALIFIERS
+        mgt = "\n".join(["A r c 0 u 0 0 1 0 0 steps=0 * 0 * 1 0 1 0 0 0", "G * 0 0 * * * * * * .", "T *",
+                         "R 0 0 0 0 Rb 0 * * 1 0 0"])
+        g = ok_answer({"results": [{"outcome": {"walks": "complete"}, "graphlet": mgt}]})
+        self.assertEqual(outcome(sc, g, "paths_end", reasons_in=["below_min_labels"], max_bp=1, _arm="mcp")[0], "pass")
+        arms = checks.graphlet_arms(mgt)
+        self.assertEqual(arms["right"]["paths"][0]["end_reasons"], {"branch": 1})
+        self.assertEqual(arms["right"]["segments"][0]["events"],
+                         [{"at_bp": 0, "type": "label_end", "label": 0, "reason": "below_min_labels"}])
 
     def test_traverse_stop(self):
         sc = {"route": "POST /traverse", "truth": {},
@@ -1538,7 +1649,7 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(dict(sc, truth=dict(t, record="NOPE")), ok_answer(full), "trace_coordinates")[0], "fail")
 
     def test_graphlet_reader_matches_full(self):
-        n = 0
+        n = label_ends = 0
         for name in sorted(os.listdir(self.MINI)):
             if not name.endswith(".graphlet.json.gz"):
                 continue
@@ -1553,7 +1664,14 @@ class TraverseChecks(unittest.TestCase):
                     self.assertEqual([x for _, x in checks._arm_flanks(fa, side)],
                                      [x for _, x in checks._arm_flanks(arms[side], side)], cell)
                     n += 1
+                    # the label_end events derived from the R records (SPEC §7.5.6) are the full result's
+                    for sf, sg in zip(fa["segments"], arms[side]["segments"]):
+                        ends = lambda x: sorted((e["at_bp"], e.get("label"), e["reason"])  # noqa: E731
+                                                for e in x.get("events") or [] if e.get("type") == "label_end")
+                        self.assertEqual(ends(sf), ends(sg), cell)
+                        label_ends += len(ends(sf))
         self.assertGreater(n, 4)
+        self.assertGreater(label_ends, 50)
 
 
 if __name__ == "__main__":

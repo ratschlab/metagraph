@@ -260,12 +260,37 @@ def _instance_matches(kind: str, pattern: str, instance: str, strand: str, table
 
 
 # ---------------------------------------------------------------------------------------------- generic checks
+def pattern_deadline_allowed(sc: dict, ans: dict) -> bool:
+    """Whether |ans| is a /pattern 503 `deadline` that the scenario's status expectation allows implicitly: a search
+    whose answer could not be written within its time_budget_ms answers 503 deadline whatever the budget
+    (SPEC-pattern-search §6, §7.6), so on a loaded host any /pattern request that searches may get it in place of its
+    200 (the README's `machine-dependent`: time budgets give 200 or 503). Allowed where the status expectation asks
+    for a 200 and does not itself name the deadline (an http 503, the code `deadline` or a text naming it): a
+    scenario that names it is judged as it states."""
+    if sc.get("route") != "POST /pattern" or ans.get("http") != 503 or \
+            (ans.get("error") or {}).get("code") != "deadline":
+        return False
+    for exp in sc.get("expect", []):
+        if exp.get("check") != "status":
+            continue
+        args = exp.get("args") or {}
+        want = args.get("http", 200)
+        wants = want if isinstance(want, list) else [want]
+        if 200 not in wants or 503 in wants or "deadline" in json.dumps(args):
+            return False
+    return True
+
+
 def check_status(sc, ans, a, arm):
     http = ans.get("http")
     want = a.get("http", 200)
     wants = want if isinstance(want, list) else [want]
     if http not in wants:
         err = ans.get("error") or {}
+        if pattern_deadline_allowed(sc, ans):
+            return INCONCLUSIVE, "http 503 deadline in place of %s: the search could not answer within its " \
+                                 "time_budget_ms, an answer SPEC-pattern-search §6/§7.6 allows on any host (%s)" % (
+                                     want, (err.get("text") or "")[:200])
         return FAIL, "http %s, expected %s (error %s: %s)" % (http, want, err.get("code"), (err.get("text") or "")[:300])
     err = ans.get("error") or {}
     if "code" in a:
@@ -1981,10 +2006,11 @@ _END_QUALIFIERS = {"Rm": "minority", "Rb": "below_min_labels", "Rs": "split_limi
 
 def graphlet_arms(mgt: str) -> Dict[str, dict]:
     """The arms of an MGT v1 body (SPEC-labeled-traversal-core.md §7.5) in the shape of a `detail: full` arm, as
-    far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation),
-    splits (non-empty when a segment ends in a split), branch_events (the V records), and paths (one per leaf,
-    the chain through parents[0], length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf
-    with to_bp = the path length, path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
+    far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation, events:
+    the blocked successors of the E records and the label_end events of the R records), splits (non-empty when a
+    segment ends in a split), branch_events (the V records), and paths (one per leaf, the chain through parents[0],
+    length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf with to_bp = the path length,
+    path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
     arms: Dict[str, dict] = {}
     cur = None
     seg = None
@@ -2042,6 +2068,15 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
                                  "end": f[5]})
     for side, a in arms.items():
         segs = a["segments"]
+        # the label_end events (SPEC §7.5.6: derived from the R records with a code end, on their segment at to_bp,
+        # reason = the qualifier's text or the code's enum; `Lw` ends silently and `m` is closed by a merge)
+        for r in a["_runs"]:
+            end = r["end"]
+            if end in ("m", "Lw") or not 0 <= r["segment"] < len(segs):
+                continue
+            segs[r["segment"]].setdefault("events", []).append(
+                {"at_bp": r["to_bp"], "type": "label_end", "label": r["label"],
+                 "reason": _END_QUALIFIERS.get(end) or _END_CODES.get(end[0], end)})
         for leaf, reason in sorted(a["_leaves"].items()):
             chain = [leaf]
             while segs[chain[-1]]["parents"]:
@@ -2100,6 +2135,83 @@ def _arm_flanks(arm_obj: dict, side: str) -> List[Tuple[dict, str]]:
     return out
 
 
+def _leaf_ends(armo: dict, p: dict, path_reason: bool = True) -> set:
+    """The end reasons of path |p|'s leaf: its path_reason (unless |path_reason| is False), its end_reasons and the
+    reasons of the label_end events on its leaf segment at the path's end (SPEC-labeled-traversal-core §7.1, §7.5.6:
+    a run that ends at the leaf states its label_end event there at to_bp = the path length; a quorum or split-limit
+    stop is the end reason `branch` with the qualifier text, e.g. below_min_labels, in that event: §13, I3 note 2).
+    Every route to a leaf ends with the leaf's reasons, whichever parent it took at a merge."""
+    ends = set(p.get("end_reasons") or {})
+    if path_reason:
+        ends.add(p.get("path_reason"))
+    segs = p.get("segments") or []
+    if segs:
+        leaf = next((x for x in armo.get("segments") or [] if x.get("id") == segs[-1]), None)
+        for ev in (leaf or {}).get("events") or []:
+            if ev.get("type") == "label_end" and ev.get("reason") and ev.get("at_bp") == p.get("length_bp"):
+                ends.add(ev["reason"])
+    ends.discard(None)
+    return ends
+
+
+# A merged walk (branching.on_reconverge "merge", the walk preset's default) is displayed through the first parent of
+# each merge (SPEC-labeled-traversal-core §7.1: the parent carried by the most labels, or the arrival order under a
+# memory budget in tree / full detail), so after a split that several records (or repeat copies of one) carry, the
+# displayed path may be another record's allele while the record's own route passes the merge through another parent.
+# The walk checks therefore search the arm's segment DAG through segments[].parents, taking ANY parent at a merge
+# (labels_via_parent is not followed: a label's kept entry may come through the other allele's parent). The search
+# is pruned at the first base that departs from the record, so it visits a segment at most once per copy of the seed
+# (the children of a split differ in their first base); it still stops after _MAX_ROUTE_STATES visits, and a check
+# that could not finish it is inconclusive, never failed.
+_MAX_ROUTE_STATES = 100000
+
+
+def _record_routes(armo: dict, side: str, frames: Sequence[Tuple[Callable[[int], str], int, int]],
+                   cap: Optional[int] = None) -> Tuple[List[Tuple[dict, str]], int, bool]:
+    """The root-to-leaf routes of arm |armo| through segments[].parents, any parent at a merge, whose spelled flank
+    (natural orientation: a right flank root -> leaf, a left flank leaf -> root) is, for its whole length, the
+    continuation of one of |frames| (_seed_frame: one per copy of the seed). Returns (routes as (the leaf's paths[]
+    entry, flank), the number of prefixes that ran past every frame's truth flank, whether the search stopped at
+    |cap| visits, default _MAX_ROUTE_STATES)."""
+    cap = _MAX_ROUTE_STATES if cap is None else cap
+    segs = dict((x.get("id"), x) for x in armo.get("segments") or [])
+    children: Dict[Any, List[Any]] = {}
+    for x in armo.get("segments") or []:
+        for par in x.get("parents") or []:
+            children.setdefault(par, []).append(x.get("id"))
+    leaves = dict((p["segments"][-1], p) for p in armo.get("paths") or [] if p.get("segments"))
+    stack = [(x.get("id"), "", tuple(range(len(frames)))) for x in reversed(armo.get("segments") or [])
+             if not x.get("parents")]
+    routes: List[Tuple[dict, str]] = []
+    beyond = visits = 0
+    while stack:
+        visits += 1
+        if visits > cap:
+            return routes, beyond, True
+        sid, flank, alive = stack.pop()
+        sg = segs.get(sid)
+        if sg is None or "sequence" not in sg:
+            raise Missing("segment sequences")
+        flank = flank + sg["sequence"] if side == "right" else sg["sequence"] + flank
+        n = len(flank)
+        keep, past = [], False
+        for fi in alive:
+            cont, room, _ = frames[fi]
+            if room < n:
+                past = True
+            elif flank == cont(n):
+                keep.append(fi)
+        if not keep:
+            beyond += 1 if past else 0
+            continue
+        kids = children.get(sid) or []
+        if not kids:
+            routes.append((leaves.get(sid) or {"id": None, "segments": [sid], "length_bp": n}, flank))
+        for c in reversed(kids):
+            stack.append((c, flank, tuple(keep)))
+    return routes, beyond, False
+
+
 def _arms_of(sc: dict, i: int) -> List[str]:
     d = (sc["request"].get("strategy") or {}).get("direction", "both")
     return ["left", "right"] if d == "both" else [d]
@@ -2137,16 +2249,18 @@ def _seed_frame(t: dict, c: dict, side: str, L: int) -> Tuple[Callable[[int], st
 
 
 def check_walk_in_record(sc, ans, a, arm):
-    """The walk follows the record: per requested arm, some path's flank is the record's own continuation from the
-    seed (for its whole length; with any_copy, the continuation of any copy of a repeated seed; a '-' truth: the
-    seed is the reverse complement of the record's window), the root segment agrees with it, and the longest such
-    path reaches its minimum. The minimum is truth.walk[side].min_bp where the builder computed it exactly from
-    the record (header-label walks on whole records: the first base where the record offers a second successor on
-    either strand, the first reused edge, the record's end, max_extension_bp), and a shorter path fails unless a
-    stated resource limit stopped the arm (inconclusive). Otherwise it is min(max_extension_bp, the record's end,
-    the truth's flank), and a shorter path may also end at a stated branch or re-entry (_STATED_STRUCTURAL_ENDS:
-    other records of a column or taxa can branch where this record does not). With the record's header as the only
-    label (label_scope "record") no flank may run past the record's end. expect_branching: some arm states a
+    """The walk follows the record: per requested arm, some root-to-leaf route through the segments, taking any
+    parent at a merge (_record_routes: a merged walk displays first parents only), spells the record's own
+    continuation from the seed (for its whole length; with any_copy, the continuation of any copy of a repeated seed;
+    a '-' truth: the seed is the reverse complement of the record's window), the root segment agrees with it, and the
+    longest such route reaches its minimum; a route's end reasons are its leaf's (_leaf_ends). A route search that
+    stops at its bound before it shows the minimum is inconclusive. The minimum is truth.walk[side].min_bp where the
+    builder computed it exactly from the record (header-label walks on whole records: the first base where the
+    record offers a second successor on either strand, the first reused edge, the record's end, max_extension_bp),
+    and a shorter route fails unless a stated resource limit stopped the arm (inconclusive). Otherwise it is
+    min(max_extension_bp, the record's end, the truth's flank), and a shorter route may also end at a stated branch
+    or re-entry (_STATED_STRUCTURAL_ENDS: other records of a column or taxa can branch where this record does not).
+    With the record's header as the only label (label_scope "record") no flank may run past the record's end. expect_branching: some arm states a
     split or a branch event, at or before truth.walk[side].branch_by_bp where the builder stated it (a copy's
     divergence or a second successor on the record's forward strand). prefix_only: no minimum (a walk a budget
     cut); if_walked: a seed that was not walked (an allowed failed outcome) is inconclusive here."""
@@ -2162,7 +2276,7 @@ def check_walk_in_record(sc, ans, a, arm):
     if a.get("any_copy"):
         copies += t.get("copies", [])
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
-    probs, notes, stopped = [], [], []
+    probs, notes, stopped, searched = [], [], [], []
     branching = False
     for side in a.get("arms") or _arms_of(sc, i):
         armo = r["arms"].get(side)
@@ -2194,40 +2308,45 @@ def check_walk_in_record(sc, ans, a, arm):
             else:
                 probs.append("%s: no path (status %s)" % (side, armo.get("status")))
             continue
-        following, beyond = [], 0
-        for p, f in fl:
-            if a.get("label_scope") == "record" and len(f) > own_end:
-                probs.append("%s path %s runs %d bp, past the record's end (%d bp)" % (side, p.get("id"), len(f), own_end))
-                continue
-            ok = False
-            for cont, room, _ in frames:
-                if room < len(f):
-                    beyond += 1
-                    continue
-                if f == cont(len(f)):
-                    ok = True
-                    break
-            if ok:
-                following.append((p, f))
+        if a.get("label_scope") == "record":
+            for p, f in fl:
+                if len(f) > own_end:
+                    probs.append("%s path %s runs %d bp, past the record's end (%d bp)" % (
+                        side, p.get("id"), len(f), own_end))
+        # the routes that follow the record, through any parent at a merge (_record_routes)
+        following, beyond, capped = _record_routes(armo, side, frames)
+        if a.get("label_scope") == "record":
+            following = [(p, f) for p, f in following if len(f) <= own_end]
         if not following:
             lens = [len(f) for _, f in fl]
-            probs.append("%s: none of %d paths follows the record (lengths %s%s)" % (
-                side, len(fl), lens[:6], "; %d beyond the truth flank" % beyond if beyond else ""))
+            if capped:
+                searched.append("%s: the route search stopped at %d visits of the segment graph before a route "
+                                "following the record was found (paths of %s bp)" % (side, _MAX_ROUTE_STATES, lens[:6]))
+                continue
+            probs.append("%s: no route of the arm's %d segment(s) follows the record, any parent taken at a merge "
+                         "(%d path(s) of %s bp%s)" % (side, len(armo.get("segments") or []), len(fl), lens[:6],
+                                                      "; %d route(s) beyond the truth flank" % beyond if beyond else ""))
             continue
         for sg in [x for x in armo.get("segments", []) if not x.get("parents")]:
             rs = sg.get("sequence", "")
             if not any(room >= len(rs) and rs == cont(len(rs)) for cont, room, _ in frames):
                 probs.append("%s: the root segment disagrees with the record" % side)
         best = max(len(f) for _, f in following)
+        shown = set(f for _, f in fl)
+        merged = "" if any(f in shown for _, f in following if len(f) == best) else \
+            ", through a non-first parent of a merge"
         if best >= expected:
-            notes.append("%s: %d of %d paths follow the record (longest %d bp of %d expected)" % (
-                side, len(following), len(fl), best, expected))
+            notes.append("%s: %d route(s) follow the record (longest %d bp of %d expected%s)" % (
+                side, len(following), best, expected, merged))
+            continue
+        if capped:
+            searched.append("%s: the record followed for %d of %d bp when the route search stopped at %d visits" % (
+                side, best, expected, _MAX_ROUTE_STATES))
             continue
         ends = set()
         for p, f in following:
             if len(f) == best:
-                ends |= {p.get("path_reason")} | set(p.get("end_reasons") or {})
-        ends.discard(None)
+                ends |= _leaf_ends(armo, p)
         # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
         unstopped = _resource_end_problem(r, armo, side, ends)
         if ends & _STATED_STRUCTURAL_ENDS and exact is None:
@@ -2255,8 +2374,8 @@ def check_walk_in_record(sc, ans, a, arm):
                 probs.append("a stated stop that cannot have happened: %s" % m)
     if probs:
         return FAIL, "; ".join(probs[:6])
-    if stopped:
-        return INCONCLUSIVE, "; ".join(stopped + notes)
+    if stopped or searched:
+        return INCONCLUSIVE, "; ".join(stopped + searched + notes)
     return PASS, "; ".join(notes)
 
 
@@ -2276,8 +2395,11 @@ def _first_branch_bp(armo: dict) -> Optional[int]:
 
 
 def check_paths_end(sc, ans, a, arm):
-    """Every path of every requested arm ends with one of args.reasons_in (its path_reason or an end reason), at
-    most args.max_bp long when given (a semantic stop such as below_min_labels, SPEC-labeled-traversal-core §6.4)."""
+    """Every path of every requested arm ends with one of args.reasons_in (its path_reason, an end reason or the
+    reason of a label_end event on its leaf at its end: _leaf_ends), at most args.max_bp long when given (a semantic
+    stop such as below_min_labels, SPEC-labeled-traversal-core §6.4: the deployed engine states it as the end reason
+    `branch` with the text below_min_labels in the label_end event, §13 I3 note 2; a graphlet as the R record's
+    qualifier, `Rb`)."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     if "arms" not in r:
@@ -2291,7 +2413,7 @@ def check_paths_end(sc, ans, a, arm):
         if not paths:
             return FAIL, "%s: no path" % side
         for p in paths:
-            ends = {p.get("path_reason")} | set(p.get("end_reasons") or {})
+            ends = _leaf_ends(armo, p)
             if not ends & set(a["reasons_in"]):
                 return FAIL, "%s path %s ended by %s, expected %s" % (side, p.get("id"), sorted(x for x in ends if x),
                                                                     a["reasons_in"])
@@ -2374,8 +2496,11 @@ def check_blocked_event(sc, ans, a, arm):
 
 def check_walk_end(sc, ans, a, arm):
     """Near the record's end the arm stops exactly at the record's end (header label), with a structural or
-    label end reason. An arm a stated resource limit stopped before it (status truncated, every path ended by a
-    resource reason short of the end) cannot show the end: inconclusive, naming the stop."""
+    label end reason: a route that follows the record (_record_routes: any parent at a merge) reaches its end, and
+    its leaf's end reasons (end_reasons and label_end events, _leaf_ends) name one of args.reasons_in. Where the
+    truth's flank does not reach the record's end, the arm's leaves are read by their lengths alone. An arm a stated
+    resource limit stopped before it (status truncated, every path ended by a resource reason short of the end)
+    cannot show the end: inconclusive, naming the stop; so is a route search that stopped at its bound."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     if "arms" not in r:
@@ -2386,7 +2511,18 @@ def check_walk_end(sc, ans, a, arm):
     want = t["record_length"] - (t["start"] + t["length"]) if side == "right" else t["start"]
     fl = _arm_flanks(armo, side)
     lens = sorted({len(f) for _, f in fl})
-    if want not in lens:
+    frames = [_seed_frame(t, {"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]}, side,
+                          t["length"])]
+    capped = False
+    if frames[0][1] >= want:
+        routes, _, capped = _record_routes(armo, side, frames)
+        at_end = [(p, f) for p, f in routes if len(f) == want]
+    else:
+        at_end = [(p, f) for p, f in fl if len(f) == want]
+    if not at_end:
+        if capped:
+            return INCONCLUSIVE, "the route search stopped at %d visits before a route following the record reached " \
+                                 "its end (%s arm path lengths %s)" % (_MAX_ROUTE_STATES, side, lens[:8])
         if fl and armo.get("status") == "truncated" and all(
                 len(f) < want and (p.get("path_reason") in _RESOURCE_ENDS or set(p.get("end_reasons") or {}) & _RESOURCE_ENDS)
                 for p, f in fl):
@@ -2397,12 +2533,14 @@ def check_walk_end(sc, ans, a, arm):
                 return FAIL, "not reached: a stated stop that cannot have happened: %s" % bad
             return INCONCLUSIVE, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
                 side, trig.get("reason"), trig.get("at_bp"), want)
+        if want in lens:
+            return FAIL, "%s arm: a path of %d bp reaches the record's end, but no route through the segments follows " \
+                         "the record there" % (side, want)
         return FAIL, "%s arm path lengths %s, the record ends %d bp from the seed" % (side, lens[:8], want)
-    for p, f in fl:
-        if len(f) == want:
-            reasons = set((p.get("end_reasons") or {}).keys())
-            if a.get("reasons_in") and not reasons & set(a["reasons_in"]):
-                return FAIL, "path at the record's end ended by %s, expected one of %s" % (sorted(reasons), a["reasons_in"])
+    for p, f in at_end:
+        reasons = _leaf_ends(armo, p, path_reason=False)
+        if a.get("reasons_in") and not reasons & set(a["reasons_in"]):
+            return FAIL, "path at the record's end ended by %s, expected one of %s" % (sorted(reasons), a["reasons_in"])
     return PASS, "%s arm ends at the record's end (%d bp)" % (side, want)
 
 
@@ -2997,6 +3135,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
         if exp.get("check") == "status":
             w = exp.get("args", {}).get("http", 200)
             allowed = w if isinstance(w, list) else [w]
+    if pattern_deadline_allowed(scenario, answer):
+        allowed = list(allowed) + [503]   # a /pattern 503 deadline: the other checks cannot test their property
     # the seeds the attempt's duration bound stopped (_attempt_stops): their own checks are inconclusive (or fail
     # when the stated bound cannot have been reached), the other seeds keep theirs
     stops = _attempt_stops(scenario, answer, arm, client)
