@@ -169,6 +169,8 @@ def verdict_section(run, comp, rows, samples):
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
     findings = sum(t["outcomes"].get("finding", 0) for t in totals.values())
     inconclusive = sum(t["outcomes"].get("inconclusive", 0) for t in totals.values())
+    passed = sum(t["outcomes"].get("pass", 0) for t in totals.values())
+    executions = sum(t.get("executions", 0) for t in totals.values())
     states = dict((arm, (info or {}).get("state")) for arm, info in (run.get("arms") or {}).items())
     incomplete = ["%s (%s)" % (arm, st) for arm, st in sorted(states.items())
                   if st not in (None, "done") and arm != "mcp"]
@@ -189,12 +191,18 @@ def verdict_section(run, comp, rows, samples):
     elif findings:
         verdict = ("FINDINGS (%d execution(s) where the host broke a stated bound without failing the request; no "
                    "failure, no disagreement)" % findings)
+    elif inconclusive and not passed:
+        # Nothing was shown to hold: never PASS (review N5).
+        verdict = ("INCONCLUSIVE (no execution passed: %d inconclusive execution(s), where no check could test its "
+                   "property; no failure, no disagreement)" % inconclusive)
+    elif not executions:
+        verdict = "EMPTY (no execution recorded)"
     elif stub:
         # A stub run checked the HTTP status only: never PASS (review L2).
         verdict = "UNVERIFIED (stub checks: HTTP status only): no failed status, no disagreement between the arms"
     else:
         verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
-    if inconclusive and not incomplete:
+    if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
     lines.append("**%s**" % md(verdict))
     lines.append("")

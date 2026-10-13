@@ -245,8 +245,9 @@ lists the environment overrides.
   signs spelled out, other non-ASCII as '?', sequences over 40 bp cut, markdown specials escaped), then
   `pandoc report.md -o report.pdf --pdf-engine=xelatex`. Verdict: INCOMPLETE when a direct arm did not
   finish (state other than done) or the orchestrator's loop was cut, FAIL on any failed / errored execution,
-  any direct / MCP disagreement or failed relation, FINDINGS on any finding, UNVERIFIED when the checks stub
-  ran (never PASS: review L2), else PASS; inconclusive executions are counted after it. The
+  any direct / MCP disagreement or failed relation, FINDINGS on any finding, INCONCLUSIVE when no execution
+  passed and some were inconclusive (review N5), EMPTY when nothing was recorded, UNVERIFIED when the checks
+  stub ran (never PASS: review L2), else PASS; inconclusive executions are counted after it. The
   scripts commit keeps its `+dirty` marker (L1); a failing check is shown with the expectation at the same
   position among the scenario's expectations of that name (L3); the resource columns are captioned as the
   container's figures during the run, not the request's own (L5). The load caveat appears when the sra_all CPU mean exceeds 400 % or the load1 mean exceeds 48 (half

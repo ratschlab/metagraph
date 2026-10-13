@@ -610,6 +610,38 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(cmp.drop_path({"a": {"b": 1, "c": 2}}, "a.b"), {"a": {"c": 2}})
         self.assertEqual(cmp.path_values({"p": [{"r": [1, 2]}, {"r": [3]}]}, "p.*.r.*"), [1, 2, 3])
 
+    def test_inconclusive_verdict(self):
+        # review N5: a run in which no execution passed and some were inconclusive is INCONCLUSIVE, never PASS
+        manifest = {"scenarios": [{"id": "T-%d" % i, "route": "POST /traverse", "expect": [
+            {"check": "walk_in_record", "args": {}}]} for i in (1, 2)]}
+        inc = [{"check": "walk_in_record", "outcome": "inconclusive", "detail": "stopped by max_memory"}]
+        ok = [{"check": "walk_in_record", "outcome": "pass", "detail": "in record"}]
+
+        def verdict(rows, arms=("direct-local",)):
+            with tempfile.TemporaryDirectory() as d:
+                for arm in arms:
+                    os.makedirs(os.path.join(d, "arms", arm), exist_ok=True)
+                    sc.write_json_atomic(os.path.join(d, "arms", arm, "manifest.json"), manifest)
+                    write_arm(d, arm, [r for r in rows if r["arm"] == arm])
+                merge_run.merge(d)
+                cmp.compare(d, ({}, None))
+                text = report.build_report(d)
+            return [x for x in text.splitlines() if x.startswith("**")][0]
+
+        both = [line("T-1", "direct-local", 0, T0, 10.0, outcome="inconclusive", checks=inc),
+                line("T-2", "direct-local", 0, T0 + 1, 10.0, outcome="inconclusive", checks=inc)]
+        v = verdict(both)
+        self.assertTrue(v.startswith("**INCONCLUSIVE (no execution passed: 2 inconclusive"), v)
+        self.assertNotIn("PASS", v)
+        self.assertNotIn("not counted as pass", v)
+        # with an MCP execution not implemented via MCP beside them: still nothing passed
+        nim = line("T-1", "mcp", 0, T0 + 2, 1.0, outcome="not_implemented_mcp", checks=[])
+        self.assertTrue(verdict(both + [nim], arms=("direct-local", "mcp")).startswith("**INCONCLUSIVE"))
+        mixed = [both[0], line("T-2", "direct-local", 0, T0 + 1, 10.0, checks=ok)]
+        v = verdict(mixed)
+        self.assertTrue(v.startswith("**PASS ("), v)
+        self.assertIn("1 inconclusive execution(s) (not counted as pass)", v)
+
     def test_unverified_verdict_and_commit(self):
         with tempfile.TemporaryDirectory() as d:
             write_arm(d, "direct-local", [line("P-1", "direct-local", 0, T0, 1.0, checks=[
