@@ -320,6 +320,8 @@ bool PathSelection::hold(const PathView &path) {
         } else {
             over_ = true;
             drop_held();
+            // the sink's paths can never be listed: given back to the search at once
+            sink_.retain({});
         }
         if (options_.stop_at_threshold) {
             stop_ = "max_predicate_contexts";
@@ -337,6 +339,7 @@ bool PathSelection::hold(const PathView &path) {
         } else {
             hold_memory_ = true;
             drop_held();
+            sink_.retain({});
         }
         return true;
     }

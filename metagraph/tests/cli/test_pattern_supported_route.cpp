@@ -19,9 +19,14 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "cli/pattern.hpp"
+#include "cli/pattern_predicate.hpp"
+#include "cli/pattern_retrieval_impl.hpp"
+#include "cli/pattern_support.hpp"
+#include "cli/pattern_supported.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/traversal/label_oracle.hpp"
 
 
 // POST /pattern with long_search "supported_paths" (SPEC-pattern-search.md §20), with a
@@ -1410,6 +1415,150 @@ TEST(PatternSupportedRoute, HeldAboveMaxPredicateContexts) {
         EXPECT_EQ("completed", e["selection"]["pass"].asString());
         EXPECT_EQ(3u, e["results"].size());
     }
+}
+
+// "either" in all_or_count and count: once more walks are held than max_predicate_contexts
+// (the selection not admitted) or the account refuses a held walk, neither the held walks nor
+// the paths the sink kept for them can be listed, and both are given back to the account at
+// once, before the search goes on (SPEC §20.9). Driven below the route, so that the sink and
+// the account are seen between the search and finish(): the sink keeps no path, and the
+// account holds what it holds in count mode, where the sink keeps nothing. Four records of
+// 1,001 bases, one base apart in the middle, and the pattern with N there, on a column
+// annotation without coordinates (an unbudgeted read of a row costs a few hundred bytes at
+// its peak, a label-level frame 8 bytes a label): four walks of one anchor, each held at
+// 192 + 2,002 + 8 bytes, the largest charge of the search by far, so that an account can
+// refuse a held walk after the reads before it went through. Mutation tried: the sink's
+// paths kept until finish(): fails.
+TEST(PatternSupportedRoute, HeldPathsAreReleasedWithTheHeldWalks) {
+    std::mt19937 rng(1);
+    auto bases = [&](size_t n) {
+        std::string s;
+        for (size_t i = 0; i < n; ++i) {
+            s += "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const std::string left = bases(500), right = bases(500);
+    std::vector<Record> records;
+    for (char x : std::string("ACGT")) {
+        records.push_back({ std::string(1, x), std::string(1, x) + "0", left + x + right });
+    }
+    const Index idx = build<annot::ColumnCompressed<>>(11, records, false);
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    const std::string pattern = left + "N" + right;
+    struct Seen {
+        // the search ran to its end
+        bool searched = false;
+        // the walks the sink was handed (held), and the paths it keeps
+        uint64_t accepted = 0;
+        size_t kept = 0;
+        uint64_t held = 0;
+        PathSelectionAnswer answer;
+    };
+    auto run = [&](gp::Mode mode, uint64_t max_predicate_contexts, uint64_t max_memory) {
+        Seen seen;
+        graph::traversal::LabelOracle oracle(*idx.anno, nullptr);
+        retrieval::Account account(max_memory);
+        gp::Budget budget(1'000'000'000,
+                          gp::Deadline(Clock::now(), std::numeric_limits<double>::infinity(),
+                                       0, std::function<Clock::time_point()>(&Clock::now)));
+        uint64_t units = 0;
+        RetrievalLimits limits;
+        limits.max_memory_bytes = max_memory;
+        PathSupportEnv env { oracle, budget, account, units, limits,
+                             gp::PatternSearch::support(graph).mode, oracle.decode_charged(),
+                             nullptr, nullptr };
+        PathSupportOptions o;
+        o.level = graph::traversal::Support::KMER;
+        o.labels = true;
+        PathTracker tracker(env, o);
+        SupportedPathSink sink(tracker);
+        const predicate::Binding binding = predicate::Bound::bind(
+                predicate::Predicate::parse(parse_pattern_body("{\"none\": [\"A\"]}"), 1'000),
+                oracle, budget);
+        PathSelection selection(tracker, sink, *binding.bound);
+        gp::PatternSearch search(graph);
+        gp::Request rq;
+        rq.mode = mode;
+        rq.strands = gp::Strands::FORWARD;
+        rq.extend_paths = true;
+        rq.max_paths = std::numeric_limits<uint64_t>::max();
+        rq.min_information_bits = 0;
+        rq.support = &selection;
+        rq.sink = &selection;
+        PathSelectionOptions so;
+        so.mode = mode;
+        so.max_paths = 1'000;
+        so.max_predicate_contexts = max_predicate_contexts;
+        so.either = true;
+        so.mirrors_searched = false;
+        so.selection_labels = true;
+        const gp::Pattern p = gp::Pattern::parse(gp::PatternKind::IUPAC, pattern);
+        tracker.begin_pattern(p.length());
+        sink.begin_pattern(PathSelection::sink_mode(so), PathSelection::sink_threshold(so));
+        selection.begin_pattern(so, p.length());
+        const gp::Result result = search.count(p, rq, budget);
+        seen.searched = result.anchors
+                && result.anchors->extension == gp::Extension::COMPLETED;
+        seen.accepted = sink.accepted();
+        seen.kept = sink.paths().size();
+        seen.held = account.held();
+        seen.answer = selection.finish(result);
+        selection.end_pattern();
+        sink.end_pattern(0);
+        tracker.end_pattern();
+        return seen;
+    };
+    // the four walks, held and decided under a large account
+    {
+        const Seen all = run(gp::Mode::ALL_OR_COUNT, 100, 1 << 24);
+        EXPECT_EQ(SelectionPass::COMPLETED, all.answer.pass);
+        EXPECT_EQ(4u, all.answer.tested.value);
+        EXPECT_EQ(3u, all.answer.selected.value);
+        EXPECT_EQ(4u, all.kept);
+    }
+    // not admitted: the third of the four supported walks ends the holding
+    {
+        const Seen all = run(gp::Mode::ALL_OR_COUNT, 2, 1 << 24);
+        const Seen count = run(gp::Mode::COUNT, 2, 1 << 24);
+        EXPECT_EQ(SelectionPass::NOT_ADMITTED, all.answer.pass);
+        EXPECT_EQ("predicate_above_threshold", all.answer.withheld.value_or(""));
+        EXPECT_EQ(SelectionPass::NOT_ADMITTED, count.answer.pass);
+        EXPECT_EQ(0u, count.kept);
+        EXPECT_EQ(0u, all.kept);
+        EXPECT_EQ(count.held, all.held);
+    }
+    // the account refusing a held walk after holding at least one: from the smallest account
+    // whose search runs to its end (below it the engine's own frames and rows stop it) every
+    // 32 bytes up to where the fourth walk is held; partial at the same size decides the
+    // walks held before the refused one, so its tested count tells the holding was refused,
+    // not the index of the held walks after the search
+    uint64_t searched_at = 0;
+    for (uint64_t bytes = 1 << 12; bytes <= 1 << 22 && !searched_at; bytes += 512) {
+        if (run(gp::Mode::ALL_OR_COUNT, 100, bytes).searched)
+            searched_at = bytes;
+    }
+    ASSERT_LT(512u, searched_at);
+    uint64_t refused = 0;
+    for (uint64_t bytes = searched_at - 512; bytes < searched_at + 8192; bytes += 32) {
+        const Seen all = run(gp::Mode::ALL_OR_COUNT, 100, bytes);
+        if (all.answer.withheld.value_or("") != "predicate_budget" || !all.answer.stop
+                || *all.answer.stop != std::make_pair(std::string("selection"),
+                                                      std::string("max_memory")))
+            continue;
+        const Seen part = run(gp::Mode::PARTIAL, 100, bytes);
+        if (part.answer.cut.value_or("") != "max_memory" || !part.answer.tested.value)
+            continue;
+        ++refused;
+        EXPECT_TRUE(all.searched) << bytes;
+        // the walks held before the refused one were handed to the sink, and partial
+        // decided just those
+        EXPECT_EQ(part.answer.tested.value, all.accepted) << bytes;
+        EXPECT_GT(4u, all.accepted) << bytes;
+        EXPECT_EQ(0u, all.kept) << bytes;
+        EXPECT_EQ(run(gp::Mode::COUNT, 100, bytes).held, all.held) << bytes;
+    }
+    EXPECT_LT(0u, refused);
 }
 
 // A constant normal form selects without deciding: true is the request without the predicate,

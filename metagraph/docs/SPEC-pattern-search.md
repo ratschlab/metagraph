@@ -3492,7 +3492,9 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   (`selection.pass: "not_admitted"`, `withheld: predicate_above_threshold`; with `stop_at_threshold` the search
   stops there, `stop {extension, max_predicate_contexts}`, `pass: "not_started"`, `withheld: threshold_crossed`);
   `partial`: the first ones decided, `cut: max_predicate_contexts`. The account refusing a held walk: `stop
-  {selection, max_memory}` (`partial`: the walks held before it are decided).
+  {selection, max_memory}` (`partial`: the walks held before it are decided). In `all_or_count` and `count` the
+  walks held so far, and the paths kept for them, are given back to the account at once, so that the rest of
+  the search has what they held.
 
 **Counts** (§19.7, unit `paths`): `tested` the supported walks decided (`exact`), `selected` the selected among
 them: `exact` when the search completed and every walk was decided; after a stop or an undecided walk `bounds`
