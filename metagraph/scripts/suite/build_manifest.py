@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the suite's frozen scenario manifests (DESIGN §8.1): the full catalogue and the smoke selection.
 
-    build_manifest.py --out manifest/suite_v1.json --smoke-out manifest/suite_smoke_v1.json [--seed N] [--no-fetch]
+    build_manifest.py --out manifest/suite_v2.json --smoke-out manifest/suite_smoke_v2.json [--seed N] [--no-fetch]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
 same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
@@ -25,7 +25,7 @@ import truth  # noqa: E402
 from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 CONVENTIONS = {
     "truth.start": "0-based position of the window's first base on the record's forward strand (whole-record coordinates)",
     "truth.window": "the record's bases on its forward strand (for a '-' source the reverse complement of the pattern)",
@@ -63,6 +63,7 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
         scenarios += areas.gen_REL(ctx, scenarios, caps)   # the relations' twins (needs every area)
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
+    tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios)
     if problems:
@@ -75,7 +76,8 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
         "seed": seed,
         "index": {"database": DB, "release_at_build": caps["capabilities"].get("release"),
                   "index_fp": tc.get("index_fp"), "index_ns": tc.get("index_ns"), "k": tc.get("k"),
-                  "capabilities_snapshot": "truth/staging_capabilities/ (2026-10-13)"},
+                  "capabilities_snapshot": "truth/staging_capabilities/ (2026-10-13)",
+                  "kmers_for_the_chance_model": areas.REFSEQ33M_KMERS},
         "ground_truth": {
             "genomes_source": truth.SOURCES["genomes"],
             "proteins_source": truth.SOURCES["manifest_v1"],
@@ -85,12 +87,56 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
             "records_not_fetched": missing,
         },
         "conventions": CONVENTIONS,
+        "skipped": ctx.skipped,
         "counts": counts(scenarios, relations),
         "relations_sha256": sha256_json(relations),
         "relations": relations,
         "scenarios": scenarios,
     }
     return manifest
+
+
+def _records_of(t: dict) -> list:
+    out = []
+    if isinstance(t, dict):
+        if "record" in t and "genome" in t:
+            out.append(t)
+        for key in ("a", "b", "shuffled_from"):
+            out += _records_of(t.get(key))
+    return out
+
+
+def _exact_text(e: dict) -> bool:
+    a = e.get("args") or {}
+    return (e["check"] in ("status", "pattern_slot_error") and any(x in a for x in ("text", "text_prefix", "text_contains")))
+
+
+def tag_scenarios(scenarios, recs) -> None:
+    """Tags read from the scenario and the index facts, after every area is built:
+    - `last-record-verified`: a truth record that is the last of its taxid column (the 2026-10-09 defect); the
+      truth carries last_in_column and last_record_scan (the scan's status, or "single-record column": 0 of 500
+      single-record NC_ columns were found missing), so that the report can list a failure there apart;
+    - `code-derived`: an exact error text (status, slot) that no smoke run exercised: read from the source and
+      the fixtures (smoke scenarios are exercised by the smoke validation)."""
+    by_acc = {r.accession: r for r in recs}
+    for sc in scenarios:
+        truths = []
+        for t in [sc.get("truth")] + list(sc.get("truths") or []):
+            truths += _records_of(t)
+        last = False
+        for t in truths:
+            r = by_acc.get(t["record"])
+            if r is None or not r.last_in_column:
+                continue
+            t["last_in_column"] = True
+            t["last_record_scan"] = r.last_record_scan or ("single-record column" if r.records_in_column == 1 else None)
+            last = True
+        tags = set(sc["tags"])
+        if last and "index-defect" not in tags:
+            tags.add("last-record-verified")
+        if "smoke" not in tags and any(_exact_text(e) for e in sc["expect"]):
+            tags.add("code-derived")
+        sc["tags"] = sorted(tags)
 
 
 def counts(scenarios, relations=()) -> dict:
@@ -103,7 +149,9 @@ def counts(scenarios, relations=()) -> dict:
     return {"scenarios": len(scenarios), "executions_per_arm": sum(s["repeat"] for s in scenarios),
             "by_area": dict(sorted(by_area.items())),
             "mcp_not_implemented": sum(1 for s in scenarios if "not_implemented" in s["mcp"]),
-            "relations": len(relations), "relations_by_type": dict(sorted(by_type.items()))}
+            "relations": len(relations), "relations_by_type": dict(sorted(by_type.items())),
+            "by_tag": {t: sum(1 for s in scenarios if t in s["tags"])
+                       for t in ("last-record-verified", "code-derived", "machine-dependent", "smoke")}}
 
 
 def validate_relations(relations, scenarios) -> list:
@@ -163,8 +211,7 @@ def validate(scenarios) -> list:
         if not any(e["check"] == "status" for e in s["expect"]):
             problems.append("%s: no status expectation" % s["id"])
         for e in s["expect"]:
-            if e["check"] not in checks.CHECKS:
-                problems.append("%s: unknown check %s" % (s["id"], e["check"]))
+            problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
         req = s["request"]
         if s["route"] == "POST /pattern" and isinstance(req, dict) and "patterns" in req:
             for f in ("mode", "max_contexts", "time_budget_ms"):
@@ -207,8 +254,8 @@ def write(path: str, manifest: dict) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v1.json"))
-    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v1.json"))
+    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v2.json"))
+    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v2.json"))
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--no-fetch", action="store_true", help="use the record cache only")
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
@@ -218,6 +265,8 @@ def main(argv=None) -> int:
     write(args.out, m)
     s = smoke_of(m)
     write(args.smoke_out, s)
+    for sk in m["skipped"]:
+        print("skipped: %(area)s %(scenario)s: %(reason)s" % sk, file=sys.stderr)
     print(json.dumps({"full": {"path": args.out, "content_sha256": m["content_sha256"], **m["counts"]},
                       "smoke": {"path": args.smoke_out, "content_sha256": s["content_sha256"], **s["counts"]}}, indent=1))
     return 0

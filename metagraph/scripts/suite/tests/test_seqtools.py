@@ -68,5 +68,51 @@ class SeqTools(unittest.TestCase):
         self.assertEqual(st.iupac_code_holding("A", 4, rng), "N")
 
 
+class Sdust(unittest.TestCase):
+    """The sdust port against the host: every stored /pattern answer of an exact DNA pattern without a budget stop
+    carries low_complexity_pattern exactly when the port flags the pattern."""
+
+    def test_port_agrees_with_the_host(self):
+        import json
+        data = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "api",
+                                             "python", "tests", "data", "traverse", "pattern"))
+        n = flagged = 0
+        for name in sorted(os.listdir(data)):
+            try:
+                with open(os.path.join(data, name, "request.json")) as f:
+                    req = json.load(f)
+                with open(os.path.join(data, name, "answer.json")) as f:
+                    ans = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(req, dict) or not isinstance(ans, dict) or not isinstance(req.get("patterns"), list) \
+                    or len(req["patterns"]) != len(ans.get("patterns") or []):
+                continue
+            for p, e in zip(req["patterns"], ans["patterns"]):
+                if not isinstance(p, dict) or "error" in e or "counts" not in e:
+                    continue
+                kind = [k for k in ("dna", "iupac") if k in p]
+                q = p[kind[0]].upper() if kind else ""
+                if not q or any(c not in "ACGT" for c in q):
+                    continue
+                stop = e.get("stop") or {}
+                if stop.get("reason") in ("max_steps", "time", "max_annotation_work", "max_memory") \
+                        or e.get("determinism") == "time_limited":
+                    continue
+                want = st.sdust_flags(q)
+                self.assertEqual("low_complexity_pattern" in (e.get("notes") or []), want, "%s %s" % (name, q[:40]))
+                n += 1
+                flagged += want
+        self.assertGreater(n, 100)
+        self.assertGreater(flagged, 3)
+
+    def test_homopolymers_and_repeats(self):
+        # cross-checked against the compiled sdust.c on 3,000 strings (lane S1b): these as the C code says
+        self.assertTrue(st.sdust_flags("A" * 31))
+        self.assertFalse(st.sdust_flags("TTAGGG" * 5))
+        self.assertTrue(st.sdust_flags("TTAGGG" * 15))
+        self.assertFalse(st.sdust_flags("ACGTTGCAAGGCTTACCGATCGATTGCAAGT"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 import seqtools as st
 from manifest_lib import (Ctx, DB, K, PATTERN_MAX_CONTEXTS, PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS,
                           WALK_PRESET, pattern_request, relation, resolve_request, scenario, source_contexts,
-                          traverse_request)
+                          traverse_request, walk_expectations)
 from truth import TRUTH_DIR
 
 OK = {"check": "status", "args": {"http": 200}}
@@ -93,6 +93,8 @@ def gen_R(ctx: Ctx) -> List[dict]:
         req = resolve_request(t["window"], labels=labels)
         exp = [OK, INV, ex("resolve_runs", label=rec.column, full=True),
                ex("resolve_runs", label=rec.accession, full=True), ex("label_not_full", label=other.column)]
+        t["note"] = ("label_not_full assumes the unrelated taxon (another kingdom) lacks one of this random, "
+                     "DUST-filtered 100 bp window's k-mers; a window of a gene conserved across kingdoms would break it")
         out.append(scenario(nid(), "R", "%s window against its taxid, its header and the unrelated %s" % (rec.key, other.key),
                             "POST /resolve", req, t, exp, tags=["positive", "multi-label"]))
     nid = _ids("R-junction")
@@ -103,10 +105,20 @@ def gen_R(ctx: Ctx) -> List[dict]:
         tb = ctx.window(rng, rb, 100)
         q = ta["window"] + tb["window"]
         req = resolve_request(q, labels=[ra.column, rb.column])
-        exp = [OK, INV, ex("resolve_runs", label=ra.column, run_end_in=[70, 100]),
-               ex("resolve_runs", label=rb.column, run_start_in=[70, 100])]
-        out.append(scenario(nid(), "R", "junction of %s and %s: two runs split at the junction (+/- k-1)" % (ra.key, rb.key),
-                            "POST /resolve", req, {"a": ta, "b": tb, "junction_bp": 100}, exp,
+        # the exact split: A's k-mers run past 70 while B's first bases repeat A's own continuation, B's start before
+        # 100 while A's last bases repeat what precedes B in its record (computed from the records)
+        a_next = ra.seq[ta["start"] - ra.offset + 100:ta["start"] - ra.offset + 100 + K]
+        b_prev = rb.seq[max(0, tb["start"] - rb.offset - K):tb["start"] - rb.offset]
+        cp = next((x for x in range(min(len(a_next), 100)) if tb["window"][x] != a_next[x]), min(len(a_next), 100))
+        cs = next((x for x in range(min(len(b_prev), 100)) if ta["window"][-1 - x] != b_prev[-1 - x]),
+                  min(len(b_prev), 100))
+        a_end, b_start = 70 + min(cp, K - 1), 100 - min(cs, K - 1)
+        exp = [OK, INV, ex("resolve_runs", label=ra.column, run_end_in=[a_end, a_end]),
+               ex("resolve_runs", label=rb.column, run_start_in=[b_start, b_start])]
+        out.append(scenario(nid(), "R", "junction of %s and %s: A's run ends at %d, B's starts at %d (from the records)" % (
+                                ra.key, rb.key, a_end, b_start),
+                            "POST /resolve", req, {"a": ta, "b": tb, "junction_bp": 100, "a_run_end": a_end,
+                                                   "b_run_start": b_start}, exp,
                             tags=["positive", "junction"]))
     nid = _ids("R-discover")
     for i, key in enumerate(["buc", "mge", "mpn", "ser", "mja", "sso"]):
@@ -132,11 +144,14 @@ def gen_R(ctx: Ctx) -> List[dict]:
     for i, key in enumerate(["eco", "pae"]):
         rec = ctx.rec(key)
         t = ctx.window(rng, rec, 10000, unique=False, max_dust=5.0)
-        req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=251 + i * 249)
+        # 50 and 500 ms of work after the 250 ms finalisation reserve: a stop within the 10 kb is likely
+        budget = (300, 750)[i]
+        req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=budget)
         t2 = dict(t)
         t2["flank"] = ""
-        exp = [ex("status", http=[200, 503]), INV, ex("resolve_runs", label=rec.column, full=True, unless_stopped=True)]
-        out.append(scenario(nid(), "R", "10 kb of %s under a %d ms budget: a stated stop answers the prefix" % (key, 251 + i * 249),
+        exp = [ex("status", http=[200, 503]), INV, ex("resolve_runs", label=rec.column, full=True, prefix_if_stopped=True)]
+        out.append(scenario(nid(), "R", "10 kb of %s under a %d ms budget: a stated stop answers the prefix, the record's "
+                            "own label supporting every k-mer of it" % (key, budget),
                             "POST /resolve", req, t2, exp, timing_class="slow", tags=["budget", "machine-dependent"]))
     # R-edge
     nid = _ids("R-edge")
@@ -223,6 +238,25 @@ def gen_R(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "R", "discover.max_labels 0: refused naming the field", "POST /resolve",
                         resolve_request(t["window"][:60], discover={"max_labels": 0, "kind": "column"}), t,
                         [err400(prefix="request.discover.max_labels: out of range [1, ")], tags=["edge", "refusal"]))
+    # the reverse complement of a window unique on both strands of its record: the record's header supports none
+    # of its k-mers (on this basic graph a k-mer and its reverse complement are different nodes)
+    nid = _ids("R-rc")
+    for key in ("sau", "mja"):
+        rec = ctx.rec(key)
+        t = ctx.window(ctx.rng("R", "rc", key), rec, 100)
+        out.append(scenario(nid(), "R", "the reverse complement of a unique %s window: its header supports none of it" % key,
+                            "POST /resolve", resolve_request(st.revcomp(t["window"]), labels=[rec.accession]),
+                            dict(t, strand="-"), [OK, INV, ex("resolve_runs", label=rec.accession, kmers=0)],
+                            tags=["negative", "reverse-complement", "header-label"]))
+    # the label order: the same labels in another order answer each label alike (resolve_runs reads them by name)
+    nid = _ids("R-order")
+    rec = ctx.rec("hvo")
+    other = _distant(ctx, rec, 1)
+    t = ctx.window(ctx.rng("R", "order"), rec, 100)
+    out.append(scenario(nid(), "R", "labels in reverse order (header, unrelated, taxid): each answered as alone",
+                        "POST /resolve", resolve_request(t["window"], labels=[rec.accession, other.column, rec.column]), t,
+                        [OK, INV, ex("resolve_runs", label=rec.column, full=True),
+                         ex("resolve_runs", label=rec.accession, full=True)], tags=["positive", "multi-label"]))
     return out
 
 
@@ -268,25 +302,33 @@ def gen_T(ctx: Ctx) -> List[dict]:
         out.append(scenario(nid(), "T", "%s seed with its derived carrier set (permit per_hit)" % key, "POST /traverse",
                             req, t, exp, tags=["walk", "derived-labels"]))
     nid = _ids("T-end")
-    # records without terminal repeats (HSV-1's and HIV-1's ends are repeated inside them)
+    # records without terminal repeats (HSV-1's and HIV-1's ends are repeated inside them); a 31 bp seed (one k-mer,
+    # a validation of few rows) 40-100 bp from the end, under staging's time cap of 60,000 ms, so that the walk
+    # reaches the end unless a stated stop says otherwise
     for i, key in enumerate(["lam", "t4", "hsam", "drem", "dmem", "scem"]):
         rec = ctx.rec(key)
         side = "right" if i % 2 == 0 else "left"
         n = len(rec.seq)
-        where = (n - 400 - 100, n - 300 - 100) if side == "right" else (300, 400)
-        try:
-            t = ctx.window(rng, rec, 100, margin=0, where=where, unique=True)
-        except ValueError:
+        where = (n - 100 - 31, n - 40 - 31) if side == "right" else (40, 100)
+        t = None
+        for dust in (2.0, 3.0):
+            try:
+                t = ctx.window(rng, rec, 31, margin=0, where=where, unique=True, max_dust=dust)
+                break
+            except ValueError:
+                continue
+        if t is None:
+            ctx.skip("T", "T-end %s %s" % (key, side), "no unique 31 bp window 40-100 bp from the %s end" % side)
             continue
-        t = ctx.flank_for(rec, t, 1100)
+        t = ctx.flank_for(rec, t, 300)
         req = traverse_request([_tseed(t["window"], [rec.accession])],
-                               {"direction": side, "bounds": {"max_extension_bp": 1000}})
+                               {"direction": side, "bounds": {"max_extension_bp": 200, "time_budget_ms": 60000}})
         exp = [OK, INV, ex("walk_end", arm=side, reasons_in=["label_lost", "dead_end"]),
                ex("walk_in_record", label_scope="record")]
-        out.append(scenario(nid(), "T", "seed near the %s end of %s: the walk stops at the record's end" % (side, key),
+        out.append(scenario(nid(), "T", "31 bp seed near the %s end of %s: the walk stops at the record's end" % (side, key),
                             "POST /traverse", req, t, exp, tags=["walk", "record-end"] + (["smoke"] if i == 0 else [])))
     nid = _ids("T-repeat")
-    for i, (key, t, copies) in enumerate(_repeat_windows(ctx, rng, n=4)):
+    for i, (key, t, copies) in enumerate(_repeat_windows(ctx, rng, n=4, ext=1000)):
         rec = ctx.rec(key)
         t = ctx.flank_for(rec, t, 1050)
         t["copies"] = [{"start": c, "flank": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), 1050)["flank"],
@@ -294,7 +336,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
                        for c in copies if c != t["start"]]
         req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 1000}})
         exp = [OK, INV, ex("walk_in_record", label_scope="record", any_copy=True, expect_branching=True)]
-        out.append(scenario(nid(), "T", "seed in a %d-copy repeat of %s: branching stated, a branch follows a copy" % (len(copies), key),
+        out.append(scenario(nid(), "T", "seed in a %d-copy repeat of %s: a branch stated where the record branches "
+                            "(copies diverge at %s bp), a path follows a copy" % (
+                                len(copies), key, "/".join(str(t["copy_divergence_bp"][x]) for x in ("left", "right"))),
                             "POST /traverse", req, t, exp, tags=["walk", "repeat"]))
     nid = _ids("T-labels")
     eco = ctx.rec("eco")
@@ -306,19 +350,29 @@ def gen_T(ctx: Ctx) -> List[dict]:
         out.append(scenario(nid(), "T", "annotate mode on %s: every structural successor, a path follows the record" % rec.key,
                             "POST /traverse", req, t,
                             [OK, INV, ex("walk_in_record", label_scope="annotate")], tags=["labels", "annotate"]))
-    for i, kind in enumerate(["column", "header"]):
-        rec = ctx.rec(LOW_CARRIER[2 + i])
+    # seed_label_kind header vs column on one seed of a multi-record column (the verification's A3: on a
+    # single-record column both kinds carry the same k-mers): the derived set holds the record's own label of the
+    # kind asked, and only labels of that kind
+    for key in ("eco", "cal"):
+        rec = ctx.rec(key)
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
-        req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200},
-                                                       "labels": {"seed_label_kind": kind}})
-        out.append(scenario(nid(), "T", "derived %s labels on %s" % (kind, rec.key), "POST /traverse", req, t,
-                            [OK, INV, ex("walk_in_record", label_scope="derived")], tags=["labels", "derived-labels"]))
+        for kind in ("column", "header"):
+            req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200},
+                                                           "labels": {"seed_label_kind": kind}})
+            name = rec.column if kind == "column" else rec.accession
+            out.append(scenario(nid(), "T", "derived %s labels on %s (%d records in its column): %s among them" % (
+                                    kind, rec.key, rec.records_in_column, name), "POST /traverse", req, t,
+                                [OK, INV, ex("walk_in_record", label_scope="derived"),
+                                 ex("label_dict_contains", name=name, kind=kind, only_kind=True)],
+                                tags=["labels", "derived-labels", "label-kind-pair"]))
     rec = ctx.rec(LOW_CARRIER[4])
     t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
     req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 200},
                                                                    "labels": {"max_labels_per_node": 1}})
-    out.append(scenario(nid(), "T", "max_labels_per_node 1: lists cut, walk unchanged", "POST /traverse", req, t,
-                        [OK, INV, ex("walk_in_record", label_scope="record")], tags=["labels"]))
+    out.append(scenario(nid(), "T", "max_labels_per_node 1: the cap echoed, a cut list stated, the walk unchanged",
+                        "POST /traverse", req, t,
+                        [OK, INV, ex("labels_per_node", cap=1), ex("walk_in_record", label_scope="record")],
+                        tags=["labels"]))
     nid = _ids("T-exhaustive")
     for i, key in enumerate(["buc", "mja", "lam"]):
         rec = ctx.rec(key)
@@ -338,12 +392,24 @@ def gen_T(ctx: Ctx) -> List[dict]:
                             req, t, [OK, INV, ex("trace_coordinates"), ex("walk_in_record", label_scope="record")],
                             tags=["coordinates", "trace"]))
     nid = _ids("T-budget")
-    for i, (knob, val) in enumerate([("time_budget_ms", 1), ("max_memory_mb", 1), ("max_work_units", 10), ("max_steps", 5)]):
+    # each knob's stated stop (SPEC-labeled-traversal-core §5, §7.0): a request budget (time, memory, work) states a
+    # resource_stop of its resource and may fail the seed when it cannot hold the seed itself; max_steps is a cap
+    # (no resource_stop); the walk so far follows the record
+    budgets = [("time_budget_ms", 1, "time", "time_budget", ["partial"]),
+               ("max_memory_mb", 1, "memory", "resource_limit", ["partial", "failed"]),
+               ("max_work_units", 10, "work", "resource_limit", ["partial", "failed"]),
+               ("max_steps", 5, None, "max_steps", ["partial"])]
+    for i, (knob, val, resource, reason, walks) in enumerate(budgets):
         rec = recs[(i * 11 + 5) % len(recs)]
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=1300), 1050)
         req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 1000, knob: val}})
-        out.append(scenario(nid(), "T", "bounds.%s %s: a stated stop" % (knob, val), "POST /traverse", req, t,
-                            [OK, INV, ex("traverse_seed_outcome", walks=["partial", "failed", "complete"])],
+        stop = {"knob": "bounds." + knob, "walks": walks, "cap_reason": reason}
+        if resource:
+            stop["resource"] = resource
+        out.append(scenario(nid(), "T", "bounds.%s %s: its stated stop (%s), the walk so far in the record" % (
+                                knob, val, resource or reason), "POST /traverse", req, t,
+                            [OK, INV, ex("traverse_stop", **stop),
+                             ex("walk_in_record", label_scope="record", prefix_only=True, if_walked=True)],
                             tags=["budget"]))
     nid = _ids("T-attempts")
     t = ctx.flank_for(eco, ctx.window(rng, eco, 100, margin=400), 250)
@@ -356,10 +422,15 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # an id runs once per server process while it is retained (retention_s 3600): a repeat or the second
     # direct arm within the hour meets the duplicate's 409, which states the attempt
     req["attempt_id"] = "suite-s1-%s" % t["window"][:16]
-    out.append(scenario(nid(), "T", "an attempt: the response states its usage (409 duplicate when retained)",
+    # the attempt's bound (SPEC-labeled-traversal-core §6.8: seeds, the effective per-seed budget and the server's
+    # allowance, capabilities attempts.allowance_ms 10,000; walk_until_ms below seeds x T + allowance)
+    out.append(scenario(nid(), "T", "an attempt: the response states its usage and bound (409 duplicate when retained)",
                         "POST /traverse", req, t,
-                        [ex("status", http=[200, 409]), INV, ex("answer_fields", present=["usage"])],
-                        tags=["attempts", "retention-dependent"]))
+                        [ex("status", http=[200, 409]), INV, ex("answer_fields", present=["usage"], any_status=True),
+                         ex("answer_fields", equals={"usage.bound.seeds": 1, "usage.bound.time_budget_ms": 15000,
+                                                     "usage.bound.allowance_ms": 10000},
+                            present=["usage.bound.walk_until_ms"])],
+                        tags=["attempts", "retention-dependent", "code-derived"]))
     # T-edge
     nid = _ids("T-edge")
     t = ctx.window(rng, eco, 100, margin=400)
@@ -420,12 +491,92 @@ def gen_T(ctx: Ctx) -> List[dict]:
     req = {"seeds": [], "strategy": traverse_request([], base_over)["strategy"]}
     out.append(scenario(nid(), "T", "no seed: refused", "POST /traverse", req, None,
                         [err400("request.seeds: expected a non-empty array")], tags=["edge", "refusal"]))
+    out += _t_coverage(ctx)
+    _annotate_walks(ctx, out)
     return out
 
 
-def _repeat_windows(ctx: Ctx, rng, n: int) -> List[Tuple[str, dict, List[int]]]:
-    """Windows of 100 bp that occur at least twice (exactly) on the forward strand of a bacterial record
-    (rRNA operons, IS elements): found by sampling 31-mers and keeping those with several copies."""
+def _t_coverage(ctx: Ctx) -> List[dict]:
+    """The /traverse cases the verification found missing (M5/M8): several distinct seeds in one request, the
+    graphlet detail on the direct arm, a per-arm output cap, the min_live_labels quorum, and a seed on the reverse
+    strand (on this basic graph the reverse complement of a record's unique window is not in the graph). Own random
+    streams, after the other T scenarios."""
+    out: List[dict] = []
+    rng = ctx.rng("T", "coverage")
+    nid = _ids("T-seeds")
+    truths = []
+    for key in ("bsu", "hvo", "sso"):
+        rec = ctx.rec(key)
+        truths.append(ctx.flank_for(rec, ctx.window(rng, rec, 60, margin=600), 300))
+    req = traverse_request([_tseed(t["window"], [t["record"]]) for t in truths],
+                           {"direction": "right", "bounds": {"max_extension_bp": 200}})
+    out.append(scenario(nid(), "T", "three distinct seeds of three records in one request: each walk follows its record",
+                        "POST /traverse", req, truths[0],
+                        [OK, INV] + [ex("walk_in_record", seed=j, label_scope="record") for j in range(3)],
+                        tags=["walk", "seeds"], truths=truths))
+    nid = _ids("T-graphlet")
+    for key in ("mtb", "mja"):
+        rec = ctx.rec(key)
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 60, margin=800), 550)
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 500}},
+                               detail="graphlet")
+        out.append(scenario(nid(), "T", "output.detail graphlet on %s: the MGT body's walks follow the record" % key,
+                            "POST /traverse", req, t,
+                            [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
+                             ex("walk_in_record", label_scope="record")], tags=["walk", "graphlet"]))
+    nid = _ids("T-caps")
+    rec = ctx.rec("sau")
+    t = ctx.flank_for(rec, ctx.window(rng, rec, 60, margin=1300), 1050)
+    req = traverse_request([_tseed(t["window"], [rec.accession])],
+                           {"direction": "right", "bounds": {"max_extension_bp": 1000, "max_output_bp": 50}})
+    out.append(scenario(nid(), "T", "bounds.max_output_bp 50 (per arm): the arm truncated by it, its walk in the record",
+                        "POST /traverse", req, t,
+                        [OK, INV, ex("traverse_stop", knob="bounds.max_output_bp", cap_reason="max_output_bp",
+                                     walks=["partial"]),
+                         ex("walk_in_record", label_scope="record", prefix_only=True)], tags=["walk", "caps"]))
+    nid = _ids("T-quorum")
+    rec = ctx.rec("mpn")
+    t = ctx.flank_for(rec, ctx.window(rng, rec, 60, margin=600), 300)
+    req = traverse_request([_tseed(t["window"], [rec.accession])],
+                           {"bounds": {"max_extension_bp": 200, "min_live_labels": 2}})
+    out.append(scenario(nid(), "T", "bounds.min_live_labels 2 on a seed of one header label: every path ends "
+                        "below_min_labels at once (SPEC §6.4)", "POST /traverse", req, t,
+                        [OK, INV, ex("paths_end", reasons_in=["below_min_labels"], max_bp=1)],
+                        tags=["labels", "quorum", "code-derived"]))
+    nid = _ids("T-strand")
+    rec = ctx.rec("buc")
+    t = ctx.window(rng, rec, 60, margin=600)
+    q = st.revcomp(t["window"])
+    out.append(scenario(nid(), "T", "the reverse complement of a unique buc window as the seed: not in this basic graph",
+                        "POST /traverse", traverse_request([_tseed(q, [rec.accession])], {"bounds": {"max_extension_bp": 100}}),
+                        dict(t, strand="-"),
+                        [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q[:32])],
+                        tags=["edge", "negative", "reverse-complement", "refusal"]))
+    return out
+
+
+def _copy_divergence(seq: str, s0: int, L: int, copies: List[int], side: str, cap: int) -> int:
+    """How far the window's other copies stay identical to it on |side| (the first copy to differ makes the walk
+    split there): the least common extent over the copies, at most |cap|."""
+    least = cap
+    for c in copies:
+        if c == s0:
+            continue
+        n = 0
+        while n < least:
+            a, b = (s0 + L + n, c + L + n) if side == "right" else (s0 - 1 - n, c - 1 - n)
+            if a < 0 or b < 0 or a >= len(seq) or b >= len(seq) or seq[a] != seq[b]:
+                break
+            n += 1
+        least = min(least, n)
+    return least
+
+
+def _repeat_windows(ctx: Ctx, rng, n: int, ext: Optional[int] = None) -> List[Tuple[str, dict, List[int]]]:
+    """Windows of 100 bp that occur at least twice (exactly) on the forward strand of a bacterial record (rRNA
+    operons, IS elements): found by sampling and keeping those with 2-8 copies; with |ext|, only those whose copies
+    diverge within ext - 50 bp on some side (the verification's M1: a copy identical beyond the walk's bound gives
+    no branch to expect)."""
     found = []
     for key in ["eco", "bsu", "sau", "pae", "mtb", "sco"]:
         rec = ctx.rec(key)
@@ -437,13 +588,50 @@ def _repeat_windows(ctx: Ctx, rng, n: int) -> List[Tuple[str, dict, List[int]]]:
             if not st.is_acgt(w) or st.revcomp(w) in seq:
                 continue
             copies = st.find_all(seq, w)
-            if 2 <= len(copies) <= 8:
-                t = ctx.truth_at(rec, s, 100)
-                found.append((key, t, [rec.offset + c for c in copies]))
-                break
+            if not 2 <= len(copies) <= 8:
+                continue
+            t = ctx.truth_at(rec, s, 100)
+            if ext is not None:
+                div = {side: _copy_divergence(seq, s, 100, copies, side, ext) for side in ("left", "right")}
+                if min(div.values()) > ext - 50:
+                    continue
+                t["copy_divergence_bp"] = div
+            found.append((key, t, [rec.offset + c for c in copies]))
+            break
         if len(found) >= n:
             break
     return found
+
+
+def _annotate_walks(ctx: Ctx, scenarios: List[dict]) -> None:
+    """truth.walk[side] = {min_bp, first, branch_by_bp} for every /traverse scenario whose walk_in_record reads
+    the record's header (label_scope record) on a whole record, computed exactly from the record
+    (manifest_lib.walk_expectations: one pass per strand per record). Region records (only part fetched) and
+    other label scopes keep the generic minimum."""
+    by_rec: Dict[str, List[Tuple[dict, dict]]] = {}
+    for sc in scenarios:
+        if sc["route"] != "POST /traverse" or not isinstance(sc["request"], dict):
+            continue
+        if not any(e["check"] == "walk_in_record" and e["args"].get("label_scope") == "record"
+                   and not e["args"].get("prefix_only") for e in sc["expect"]):
+            continue
+        for t in sc.get("truths") or [sc["truth"]]:
+            if "genome" not in t or t.get("strand", "+") != "+":
+                continue
+            rec = ctx.rec(t["genome"])
+            if rec.region:
+                continue
+            by_rec.setdefault(rec.key, []).append((sc, t))
+    for key, items in sorted(by_rec.items()):
+        rec = ctx.rec(key)
+        plans = []
+        for sc, t in items:
+            stg = sc["request"]["strategy"]
+            d = stg.get("direction", "both")
+            plans.append((t["start"] - rec.offset, t["length"], ["left", "right"] if d == "both" else [d],
+                          stg["bounds"]["max_extension_bp"]))
+        for (sc, t), res in zip(items, walk_expectations(rec.seq, plans)):
+            t["walk"] = res
 
 
 # ================================================================================================= P: /pattern
@@ -668,9 +856,11 @@ def gen_P(ctx: Ctx) -> List[dict]:
                         [OK, INV, CC, ex("stop", phase="discovery", reason="max_steps"), ex("cut", reason="max_steps")],
                         tags=["caps"]))
     pats = [_p(ctx.window(rng, recs[j % len(recs)], 20)["window"], "p%d" % j) for j in range(16)]
-    out.append(scenario(nid(), "P", "16 patterns under a 300 ms budget: answered within it or 503 deadline", "POST /pattern",
+    out.append(scenario(nid(), "P", "16 patterns under a 300 ms budget: each exact within it or a stated time stop "
+                        "(inexact after a discovery stop, sticky), or a 503 deadline", "POST /pattern",
                         pattern_request(pats, time_budget_ms=300), None,
-                        [ex("status", http=[200, 503]), INV, CC], tags=["caps", "machine-dependent"]))
+                        [ex("status", http=[200, 503]), INV, CC, ex("stops_stated", reasons=["time"])],
+                        tags=["caps", "machine-dependent"]))
     # P-edge
     nid = _ids("P-edge")
     t = ctx.window(rng, ctx.rec("cje"), 25)
@@ -726,6 +916,25 @@ def gen_P(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "P", "a body that is not JSON: refused", "POST /pattern", None, None,
                         [err400(code="invalid_request")], tags=["edge", "refusal", "protocol"],
                         body_raw='{"patterns": [{"dna": "%s"}],}' % w))
+    # an IUPAC code at the last position, and partial with max_contexts above the count (a complete list, no cut)
+    nid = _ids("P-more")
+    rm = ctx.rng("P", "more")
+    rec = ctx.rec("mja")
+    t = ctx.window(rm, rec, 25)
+    w = list(t["window"])
+    w[24] = st.iupac_code_holding(w[24], 2, rm)
+    w[0] = st.iupac_code_holding(w[0], 3, rm)
+    t["iupac_positions"] = [0, 24]
+    out.append(scenario(nid(), "P", "IUPAC codes at the first and the last position: the record's contexts found",
+                        "POST /pattern", pattern_request([_p("".join(w), kind="iupac")]), t,
+                        [OK, INV, CC, ex("contains_source_context", strand="+", require="all")], tags=["iupac"]))
+    rec = ctx.rec("hvo")
+    t = ctx.window(rm, rec, 25)
+    out.append(scenario(nid(), "P", "partial with max_contexts 10,000 above the count: the complete list, no cut",
+                        "POST /pattern", pattern_request([_p(t["window"])], mode="partial"), t,
+                        [OK, INV, CC, ex("contains_source_context", strand="+", require="all"),
+                         ex("retrieval_complete", value=True), ex("entry_fields", equals={"cut": None})],
+                        tags=["modes"]))
     # P-heavy: short patterns in any_offset scope. A 12-mer's flank discovery ran past its 60 s budget on the
     # loaded staging host (503 deadline, three times, in the smoke run): kept as benchmark scenarios, a 200 with
     # its counts or the stated 503 (an own random stream, after the others, so that their windows stay as built)
@@ -744,10 +953,12 @@ def gen_P(ctx: Ctx) -> List[dict]:
 
 def _palindromes(ctx: Ctx, n: int) -> List[Tuple[str, dict]]:
     out = []
+    # 16 bp only: a 14-bp palindrome meets ~42,000 chance contexts in any_offset scope, above the cap of 10,000
+    # (the verification's S1), so its list is rightly withheld; a 16-mer meets ~2,300
     for key in ["lam", "t4", "eco", "bsu"]:
         rec = ctx.rec(key)
         seq = rec.seq
-        for L in (16, 14):
+        for L in (16,):
             r = ctx.rng("P", "pal", key, L)
             starts = list(range(100, len(seq) - 200))
             r.shuffle(starts)
@@ -841,6 +1052,45 @@ def gen_L(ctx: Ctx) -> List[dict]:
                         [OK, INV, ex("stop", phase=["extension", "output"], reason="max_memory"), ex("cut", reason="max_memory"),
                          ex("notes", lacks=["low_complexity_pattern"])],
                         timing_class="slow", tags=["paths", "memory", "low-complexity"]))
+    # marker-gene lengths (the verification's M5): long windows of low-carrier records as paths; one on the minus
+    # strand; an IUPAC long pattern; a max_anchors threshold below the anchors (the extension not admitted)
+    nid = _ids("L-long")
+    rl = ctx.rng("L", "long")
+    for j, (key, L) in enumerate((("buc", 500), ("mja", 1000), ("cal", 2000), ("hvo", 500))):
+        rec = ctx.rec(key)
+        t = ctx.window(rl, rec, L, max_dust=3.0)
+        out.append(scenario(nid(), "L", "%d bp of %s with long_search paths: one path spells it" % (L, key),
+                            "POST /pattern", pattern_request([_p(t["window"])], long_search="paths"), t,
+                            [OK, INV, CC, ex("path_spells", strand="+"),
+                             ex("count_relation", count="paths", relation="exact", min=1)],
+                            timing_class="slow" if L >= 1000 else "fast", tags=["paths", "long-window"]))
+    rec = ctx.rec("mpn")
+    t = ctx.window(rl, rec, 100)
+    t["strand"] = "-"
+    out.append(scenario(nid(), "L", "100 bp of mpn as its reverse complement, strands reverse: the record's path as '-'",
+                        "POST /pattern", pattern_request([_p(st.revcomp(t["window"]))], long_search="paths",
+                                                         strands="reverse"), t,
+                        [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1)],
+                        tags=["paths", "strands"]))
+    rec = ctx.rec("sso")
+    t = ctx.window(rl, rec, 60)
+    w = list(t["window"])
+    for p in (10, 30, 50):
+        w[p] = st.iupac_code_holding(w[p], 2, rl)
+    t["iupac_positions"] = [10, 30, 50]
+    out.append(scenario(nid(), "L", "a 60 bp IUPAC pattern (3 two-base codes) with paths: the record's path among them",
+                        "POST /pattern", pattern_request([_p("".join(w), kind="iupac")], long_search="paths"), t,
+                        [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1)],
+                        tags=["paths", "iupac"]))
+    # an exact anchor window is one k-mer per orientation: A^60's anchors are A^31 (+) and T^31 (-), two, above
+    # max_anchors 1
+    out.append(scenario(nid(), "L", "A^60 with paths and max_anchors 1: its two anchors (A^31, T^31) above it, the "
+                        "extension not admitted", "POST /pattern",
+                        pattern_request([_p("A" * 60, "homo")], long_search="paths", max_anchors=1), {"low_complexity": "A^60"},
+                        [OK, INV, CC, ex("withheld", reason="anchors_above_threshold"),
+                         ex("count_relation", count="anchors", relation="exact", min=2, max=2),
+                         ex("entry_fields", equals={"counts.paths.extension": "not_admitted"})],
+                        tags=["paths", "caps", "low-complexity", "code-derived"]))
     nid = _ids("L-repeat")
     for j, q in enumerate(["A" * 60, "T" * 100]):
         out.append(scenario(nid(), "L", "homopolymer of %d with paths: low_complexity_pattern noted" % len(q), "POST /pattern",
@@ -877,35 +1127,88 @@ def _peptide_truth(ctx: Ctx, prot: dict, win: dict, dna_override: Optional[str] 
     return t
 
 
+def _peptide_windows(prot: dict, length_aa: int) -> List[dict]:
+    """The manifest_v1 windows of |length_aa| residues of a protein, its shifted windows included."""
+    out = []
+    for win in prot["windows"]:
+        if win["length_aa"] != length_aa:
+            continue
+        out.append(win)
+        for sh in win.get("shifts") or []:
+            out.append(dict(win, id=sh["id"], peptide=sh["peptide"], dna=sh["dna"], genomic_blocks=sh["genomic_blocks"]))
+    return out
+
+
+def _table_positives(ctx: Ctx, prots: List[dict], length_aa: int, quota: Dict[int, int]) -> List[Tuple[dict, dict, dict]]:
+    """Per genetic code, up to quota[table] windows of |length_aa| residues taken round-robin over the code's
+    genomes; for a code other than 1 and 11, windows whose coding DNA reads differently in table 1 first (the
+    verification's M4: else a positive proves nothing about the table). Returns (protein, window, truth)."""
+    out = []
+    for table, n in sorted(quota.items()):
+        by_genome: Dict[str, List[Tuple[int, dict, dict, dict]]] = {}
+        for prot in prots:
+            if prot["transl_table"] != table:
+                continue
+            for win in _peptide_windows(prot, length_aa):
+                t = _peptide_truth(ctx, prot, win)
+                if t is None:
+                    continue
+                differs = st.translate(win["dna"], 1) != win["peptide"]
+                rank = 0 if (table in (1, 11) or differs) else 1
+                t["table1_reads_differently"] = differs
+                by_genome.setdefault(prot["genome"], []).append((rank, prot, win, t))
+        for g in by_genome.values():
+            g.sort(key=lambda x: x[0])
+        picked: List[Tuple[dict, dict, dict]] = []
+        while len(picked) < n and any(by_genome.values()):
+            best = min((g[0][0], k) for k, g in by_genome.items() if g)
+            for k in sorted(by_genome):
+                g = by_genome[k]
+                if g and g[0][0] == best[0] and len(picked) < n:
+                    _, prot, win, t = g.pop(0)
+                    picked.append((prot, win, t))
+        if len(picked) < n:
+            ctx.skip("X", "%d-residue positives of table %d" % (length_aa, table),
+                     "%d of the %d planned exist in the fetched records" % (len(picked), n))
+        alike = sum(1 for _, _, t in picked if not t["table1_reads_differently"])
+        if table not in (1, 11) and alike:
+            ctx.skip("X", "%d-residue positives of table %d read differently in table 1" % (length_aa, table),
+                     "%d of %d windows hold no codon the table reassigns (all its genomes' windows and shifts "
+                     "searched): they test the table's sense codons only" % (alike, len(picked)))
+        out += picked
+    return out
+
+
 def gen_X(ctx: Ctx) -> List[dict]:
     from truth import load_proteins
     out: List[dict] = []
     prots = [p for p in load_proteins() if p["genome"] in ctx.by_key]
     nid10 = _ids("X-peptide10")
     nidl = _ids("X-peptide-long")
-    n10 = nl = 0
-    for pi, prot in enumerate(prots):
-        for win in prot["windows"]:
-            t = _peptide_truth(ctx, prot, win)
-            if t is None:
-                continue
-            table = prot["transl_table"]
-            if win["length_aa"] == 10 and n10 < 40:
-                n10 += 1
-                req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=table)
-                out.append(scenario(nid10(), "X", "decapeptide %s of %s (table %d): the coding DNA's contexts" % (win["id"], prot["key"], table),
-                                    "POST /pattern", req, t,
-                                    [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")],
-                                    tags=["peptide", "table-%d" % table] + (["smoke"] if n10 == 1 else [])))
-            elif win["length_aa"] in (20, 30) and nl < 30 and pi % 2 == 0:
-                nl += 1
-                req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=table,
-                                      long_search="supported_paths", output={"labels": "predicate_only"},
-                                      predicate={"any": [t["taxid"]]}, predicate_strands="context", max_paths=1024)
-                out.append(scenario(nidl(), "X", "%d-residue %s of %s: a supported path of its taxid, record verified" % (win["length_aa"], win["id"], prot["key"]),
-                                    "POST /pattern", req, t,
-                                    [OK, INV, ex("path_record_verified", strand=t["strand"])],
-                                    timing_class="slow", tags=["peptide", "supported-paths", "table-%d" % table]))
+    # every genetic code the genomes carry (1, 2, 3, 4, 5, 6, 11, 12), balanced per code
+    quota10 = {1: 8, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 11: 8, 12: 5}
+    for n10, (prot, win, t) in enumerate(_table_positives(ctx, prots, 10, quota10)):
+        table = prot["transl_table"]
+        req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=table)
+        out.append(scenario(nid10(), "X", "decapeptide %s of %s (table %d%s): the coding DNA's contexts" % (
+                                win["id"], prot["key"], table,
+                                ", read differently in table 1" if t["table1_reads_differently"] else ""),
+                            "POST /pattern", req, t,
+                            [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")],
+                            tags=["peptide", "table-%d" % table] + (["smoke"] if n10 == 0 else [])))
+    quotal = {1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3, 11: 4, 12: 3}
+    picked = _table_positives(ctx, prots, 20, quotal)
+    picked += [x for x in _table_positives(ctx, prots, 30, {1: 1, 11: 1})]
+    for prot, win, t in picked:
+        table = prot["transl_table"]
+        req = pattern_request([{"id": win["id"], "protein": win["peptide"]}], genetic_code=table,
+                              long_search="supported_paths", output={"labels": "predicate_only"},
+                              predicate={"any": [t["taxid"]]}, predicate_strands="context", max_paths=1024)
+        out.append(scenario(nidl(), "X", "%d-residue %s of %s (table %d): a supported path of its taxid, record verified" % (
+                                win["length_aa"], win["id"], prot["key"], table),
+                            "POST /pattern", req, t,
+                            [OK, INV, ex("path_record_verified", strand=t["strand"])],
+                            timing_class="slow", tags=["peptide", "supported-paths", "table-%d" % table]))
     # the table-1 arm of non-standard codes: where a reassigned codon lies in the window the source is out of reach
     nid = _ids("X-table1")
     n = 0
@@ -932,8 +1235,12 @@ def gen_X(ctx: Ctx) -> List[dict]:
     # X-stop: the last 9 residues and the stop codon
     nid = _ids("X-stop")
     n = 0
+    per_table: Dict[int, int] = {}
     for prot in prots:
-        if prot["transl_table"] not in (1, 11) or prot["n_exons"] != 1 or not ctx.rec(prot["genome"]).usable_for_positives:
+        # a stop positive per code with stop codons that the genomes carry: 1, 2, 4, 11, 12 (one each, two for 11)
+        if prot["transl_table"] not in (1, 2, 4, 11, 12) or prot["n_exons"] != 1 \
+                or not ctx.rec(prot["genome"]).usable_for_positives \
+                or per_table.get(prot["transl_table"], 0) >= (2 if prot["transl_table"] == 11 else 1):
             continue
         rec = ctx.rec(prot["genome"])
         cds = prot["cds_seq"]
@@ -957,10 +1264,14 @@ def gen_X(ctx: Ctx) -> List[dict]:
         req = pattern_request([{"id": "stop", "protein": pep}], genetic_code=prot["transl_table"])
         out.append(scenario(nid(), "X", "%s's last 9 residues and its stop (table %d): found at the stop codon" % (prot["key"], prot["transl_table"]),
                             "POST /pattern", req, t,
-                            [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")], tags=["peptide", "stop"]))
+                            [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")],
+                            tags=["peptide", "stop", "table-%d" % prot["transl_table"]]))
+        per_table[prot["transl_table"]] = per_table.get(prot["transl_table"], 0) + 1
         n += 1
-        if n >= 4:
-            break
+    for table in (1, 2, 4, 11, 12):
+        if not per_table.get(table):
+            ctx.skip("X", "X-stop table %d" % table, "no single-exon protein whose last 9 residues and stop read in "
+                     "table %d lie in a fetched record" % table)
     for table in (27, 28, 31):
         req = pattern_request([{"id": "nostop", "protein": "MKV*LLAAGR"}], genetic_code=table)
         out.append(scenario(nid(), "X", "a stop in table %d (no stop codon): exact 0 without a search" % table, "POST /pattern",
@@ -994,16 +1305,30 @@ def gen_X(ctx: Ctx) -> List[dict]:
     w0 = next(w for w in p0["windows"] if w["length_aa"] == 10)
     t = _peptide_truth(ctx, p0, w0)
     pep = w0["peptide"]
-    variants = []
-    for j, (code, members) in enumerate((("B", "DN"), ("Z", "EQ"), ("J", "IL"))):
-        pos = [k for k, aa in enumerate(pep) if aa in members]
-        if pos:
-            variants.append((code, pep[:pos[0]] + code + pep[pos[0] + 1:]))
-    variants.append(("X", pep[:4] + "X" + pep[5:]))
-    for code, v in variants:
+    # B (D|N), Z (E|Q), J (I|L) and X each in place of a member residue of a table-11 decapeptide that holds one
+    for code, members in (("B", "DN"), ("Z", "EQ"), ("J", "IL"), ("X", "")):
+        cand = None
+        for prot in prots:
+            if prot["transl_table"] != 11 or not ctx.rec(prot["genome"]).usable_for_positives:
+                continue
+            for win in _peptide_windows(prot, 10):
+                pos = [k for k, aa in enumerate(win["peptide"]) if (aa in members if members else 3 <= k <= 6)]
+                tt = _peptide_truth(ctx, prot, win) if pos else None
+                if tt is not None:
+                    cand = (win, tt, pos[0])
+                    break
+            if cand:
+                break
+        if cand is None:
+            ctx.skip("X", "X-edge %s" % code, "no table-11 decapeptide holds a member of %s" % code)
+            continue
+        win, tt, k = cand
+        v = win["peptide"][:k] + code + win["peptide"][k + 1:]
+        tt["ambiguity"] = {"residue": k, "code": code, "replaces": win["peptide"][k]}
         req = pattern_request([{"id": code, "protein": v}], genetic_code=11)
-        out.append(scenario(nid(), "X", "the decapeptide with %s for a member residue: still found" % code, "POST /pattern",
-                            req, t, [OK, INV, CC, ex("contains_source_context", strand=t["strand"], require="all")],
+        out.append(scenario(nid(), "X", "a decapeptide with %s for its residue %s: still found" % (code, win["peptide"][k]),
+                            "POST /pattern", req, tt,
+                            [OK, INV, CC, ex("contains_source_context", strand=tt["strand"], require="all")],
                             tags=["peptide", "ambiguity"]))
     req = pattern_request([{"id": "gc7", "protein": pep}], genetic_code=7)
     out.append(scenario(nid(), "X", "genetic_code 7: refused", "POST /pattern", req, t,
@@ -1050,7 +1375,10 @@ def _subs_minus(pattern: str, record_bases: str) -> List[dict]:
 def gen_M(ctx: Ctx) -> List[dict]:
     out: List[dict] = []
     rng = ctx.rng("M")
-    recs = ctx.positives
+    # planted windows from records with few relatives in RefSeq (the verification's M2: a window of a gene
+    # conserved across many genera has homologs within 1-3 substitutions that can push the list past the cap;
+    # bacteria, archaea and eukaryotes all stay represented)
+    recs = [ctx.rec(k) for k in LOW_CARRIER if ctx.rec(k).usable_for_positives]
     nid = _ids("M-planted")
     i = 0
     for t_sub in (1, 2, 3):
@@ -1159,6 +1487,69 @@ def gen_M(ctx: Ctx) -> List[dict]:
         n += 1
         if n >= 6:
             break
+    # protein positives in a code other than 11 (the verification's M4), and at m = 2 under today's cap of 3
+    np_ = 0
+    for prot in [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (4, 12)]:
+        win = next((w for w in prot["windows"] if w["length_aa"] == 10 and st.translate(w["dna"], 1) != w["peptide"]), None)
+        tr = _peptide_truth(ctx, prot, win) if win else None
+        if tr is None:
+            continue
+        r2 = ctx.rng("M", "prot-nc", prot["key"])
+        res_i = r2.randrange(1, 9)
+        orig = win["peptide"][res_i]
+        new = r2.choice([a for a in st.AMINO if a != orig])
+        pv = win["peptide"][:res_i] + new + win["peptide"][res_i + 1:]
+        codon = win["dna"][3 * res_i:3 * res_i + 3]
+        tr["residue_edit"] = {"residue": res_i, "from": orig, "to": new, "record_codon": codon}
+        subs = [{"residue": res_i, "expected": new, "found": orig, "codon": codon}]
+        req = pattern_request([{"id": "pv", "protein": pv}], genetic_code=prot["transl_table"], max_mismatches=1)
+        out.append(scenario(nid(), "M", "decapeptide of %s (table %d) with residue %d %s->%s, max_mismatches 1: the source "
+                            "at level 1" % (prot["key"], prot["transl_table"], res_i, orig, new), "POST /pattern", req, tr,
+                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1,
+                                             substitutions=subs)],
+                            timing_class="slow", tags=["mismatch", "protein", "table-%d" % prot["transl_table"]]))
+        np_ += 1
+        if np_ >= 2:
+            break
+    for j, prot in enumerate(prots[1::11][:2]):
+        win = next((w for w in prot["windows"] if w["length_aa"] == 10), None)
+        tr = _peptide_truth(ctx, prot, win) if win else None
+        if tr is None:
+            ctx.skip("M", "M-protein m=2 %s" % prot["key"], "its decapeptide is not in a fetched record")
+            continue
+        r2 = ctx.rng("M", "prot2", prot["key"])
+        res = sorted(r2.sample(range(1, 9), 2))
+        pv = list(win["peptide"])
+        subs = []
+        for res_i in res:
+            orig = pv[res_i]
+            pv[res_i] = r2.choice([a for a in st.AMINO if a != orig])
+            subs.append({"residue": res_i, "expected": pv[res_i], "found": orig, "codon": win["dna"][3 * res_i:3 * res_i + 3]})
+        tr["residue_edits"] = subs
+        req = pattern_request([{"id": "pv2", "protein": "".join(pv)}], genetic_code=prot["transl_table"], max_mismatches=2)
+        out.append(scenario(nid(), "M", "decapeptide of %s with 2 substituted residues, max_mismatches 2 (today's protein "
+                            "cap 3): the source at level 2" % prot["key"], "POST /pattern", req, tr,
+                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=2,
+                                             substitutions=subs)],
+                            timing_class="slow", tags=["mismatch", "protein", "until-next-deploy"]))
+    # suffix scope with substitutions: one offset, the floor without exemption (§21.5)
+    nid_s = _ids("M-suffix")
+    for j, key in enumerate(("hvo", "pfa")):
+        rec = ctx.rec(key)
+        tr = _mm_window(ctx, rng, rec, 18)
+        r2 = ctx.rng("M", "suffix", j)
+        positions = st.spread_positions(r2, 18, 1)
+        variant, edits = st.substitute_bases(tr["window"], positions, r2)
+        tr["edits"], tr["variant"] = edits, variant
+        if st.mismatch_information_bits_iupac(variant, 1) < 24:
+            ctx.skip("M", "M-planted suffix %s" % key, "below the floor at m 1")
+            continue
+        req = pattern_request([_p(variant, "v")], scope="suffix", max_mismatches=1)
+        out.append(scenario(nid_s(), "M", "an 18-mer of %s with 1 substitution in suffix scope, max_mismatches 1: the source "
+                            "at offset k-L, level 1" % key, "POST /pattern", req, tr,
+                            [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=1,
+                                             substitutions=_subs_plus(variant, tr["window"], positions))],
+                            tags=["mismatch", "planted", "suffix"]))
     # the staging protein cap after the next restart (1): m = 2 for a peptide -> its slot
     if prots:
         prot = prots[0]
@@ -1176,9 +1567,12 @@ def gen_M(ctx: Ctx) -> List[dict]:
     rec = ctx.rec("eco")
     tr = _mm_window(ctx, rng, rec, 20)
     req = pattern_request([_p(tr["window"])], mode="partial", max_contexts=5, max_mismatches=1)
-    out.append(scenario(nid(), "M", "a 20-mer, max_mismatches 1, partial max_contexts 5: the closest first, the order level-first",
+    # the record alone holds 12 level-0 contexts of its 20-mer, so a list cut at 5 holds level 0 only (mismatches
+    # first); which 5 of them, in node order, the truth cannot say (the verification's S2)
+    out.append(scenario(nid(), "M", "a 20-mer, max_mismatches 1, partial max_contexts 5: the 5 released all at level 0",
                         "POST /pattern", req, tr,
-                        [OK, INV, CC, ex("contains_source_context", strand="+", require="any", level=0, substitutions=[])],
+                        [OK, INV, CC, ex("results_levels", max_level=0, min_returned=5), ex("cut", reason="max_contexts"),
+                         ex("count_relation", level=0, relation="exact", min=len(source_contexts(tr)))],
                         tags=["mismatch", "order"]))
     tr = _mm_window(ctx, rng, rec, 31)
     req = pattern_request([_p(tr["window"])], mode="count", max_mismatches=2, max_steps=1500)
@@ -1303,17 +1697,65 @@ def gen_Q(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "Q", "predicate_only without a predicate: refused", "POST /pattern", req, t,
                         [err400("request.output.labels: \"predicate_only\" returns the labels a predicate names: it needs a predicate (request.predicate)",
                                 code="invalid_request")], tags=["predicate", "refusal"]))
-    # Q-strands: the mirror under "either"
+    # Q-strands: the mirror under "either", on 20-mers of a 16S gene whose 42 bp around them the record also holds
+    # in reverse (rRNA operons on both strands): the '-' contexts are then the reverse complements of the record's
+    # own k-mers, which must exist (the verification's A2: a mirror check with no mirror tests nothing)
     nid = _ids("Q-strands")
     for j, key in enumerate(["eco", "sau", "pae"]):
         rec = ctx.rec(key)
-        t = ctx.window(rng, rec, 20)
+        t = _inverted_window(ctx, rec, 20)
+        if t is None:
+            ctx.skip("Q", "Q-strands %s" % key, "no 16S window with an inverted copy of its 42 bp")
+            continue
         req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"}, predicate={"any": [rec.column]},
                               predicate_strands="either")
-        out.append(scenario(nid(), "Q", "either on %s: the record's + contexts by their own row, mirrors by their reverse complement" % key,
+        out.append(scenario(nid(), "Q", "either on a 16S 20-mer of %s held on both strands: the + contexts by their own "
+                            "row, the mirrors (which exist) by their reverse complement" % key,
                             "POST /pattern", req, t,
                             [OK, INV, ex("predicate_selected", strand="+", selected=True, selection_strand_in=["context", "both"], label=rec.column),
-                             ex("predicate_either_mirror", label=rec.column)], tags=["predicate", "strands"]))
+                             ex("predicate_either_mirror", label=rec.column, min=1)], tags=["predicate", "strands"]))
+    # a window taken from the reverse strand under predicate_strands context: its source contexts are '-' and
+    # selected by their own rows; `or` and an at_least above the list's size under either
+    nid = _ids("Q-more")
+    rq = ctx.rng("Q", "more")
+    rec = ctx.rec("mja")
+    t = ctx.window(rq, rec, 25)
+    t["strand"] = "-"
+    req = pattern_request([_p(st.revcomp(t["window"]))], output={"labels": "predicate_only"},
+                          predicate={"any": [rec.column]}, predicate_strands="context")
+    out.append(scenario(nid(), "Q", "the reverse complement of a mja window, context strands: the '-' source contexts "
+                        "selected by their own rows", "POST /pattern", req, t,
+                        [OK, INV, ex("predicate_selected", strand="-", selected=True, selection_strand_in=["context"],
+                                     label=rec.column)], tags=["predicate", "strands"]))
+    rec = ctx.rec("tth")
+    t = ctx.window(rq, rec, 25)
+    req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"},
+                          predicate={"or": [{"any": [human]}, {"any": [rec.column]}]}, predicate_strands="either")
+    out.append(scenario(nid(), "Q", "or(any human, any A) under either on tth: selected", "POST /pattern", req, t,
+                        [OK, INV, ex("predicate_selected", strand="+", selected=True)], tags=["predicate"]))
+    rec = ctx.rec("hvo")
+    t = ctx.window(rq, rec, 25)
+    req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"},
+                          predicate={"at_least": {"n": 3, "labels": [rec.column, human]}}, predicate_strands="either")
+    out.append(scenario(nid(), "Q", "at_least 3 of two labels: never true, nothing selected (complete filtered list)",
+                        "POST /pattern", req, t,
+                        [OK, INV, ex("predicate_selected", strand="+", selected=False)], tags=["predicate"]))
+    # predicates on supported paths (Q-supported): none() deselects the record's path, any() under either selects it
+    nid = _ids("Q-supported")
+    for j, key in enumerate(("buc", "sso")):
+        rec = ctx.rec(key)
+        t = ctx.window(rq, rec, 60)
+        req = pattern_request([_p(t["window"])], mode="partial", long_search="supported_paths",
+                              output={"labels": "predicate_only"}, predicate={"none": [rec.column]},
+                              predicate_strands="context", max_paths=1024)
+        out.append(scenario(nid(), "Q", "supported paths of a %s window under none(A): the record's path not selected" % key,
+                            "POST /pattern", req, t, [OK, INV, ex("path_absent", sequence=t["window"])],
+                            tags=["predicate", "supported-paths"]))
+        req = pattern_request([_p(t["window"])], long_search="supported_paths", output={"labels": "predicate_only"},
+                              predicate={"any": [rec.column]}, predicate_strands="either", max_paths=1024)
+        out.append(scenario(nid(), "Q", "supported paths of the same window under any(A), either strands: the record "
+                            "verified", "POST /pattern", req, t, [OK, INV, ex("path_record_verified", strand="+")],
+                            tags=["predicate", "supported-paths", "strands"]))
     # Q-motif
     nid = _ids("Q-motif")
     rec = ctx.rec("mge")
@@ -1347,6 +1789,26 @@ def gen_Q(ctx: Ctx) -> List[dict]:
                         [OK, INV, ex("withheld", reason="predicate_budget"),
                          ex("stop", phase="selection", reason="max_predicate_work")], tags=["predicate", "budget"]))
     return out
+
+
+_16S_MOTIF = "GTGCCAGCAGCCGCGGTAA"   # the 515F site, exact in the 16S genes of eco, sau and pae
+
+
+def _inverted_window(ctx: Ctx, rec, L: int) -> Optional[dict]:
+    """A window of L bases downstream of a forward 16S site whose surrounding (k - L) bases on each side, every
+    k-mer holding the window, also occur reverse-complemented in the record (an operon on the other strand)."""
+    seq = rec.seq
+    pad = K - L
+    for p in st.find_all(seq, _16S_MOTIF):
+        for off in range(30, 900, 37):
+            s0 = p + off
+            region = seq[s0 - pad:s0 + L + pad]
+            if len(region) == L + 2 * pad and st.is_acgt(region) and st.revcomp(region) in seq \
+                    and st.low_complexity_dust_score(seq[s0:s0 + L]) < 2:
+                t = ctx.truth_at(rec, s0, L)
+                t["inverted_copy"] = rec.offset + seq.find(st.revcomp(region))
+                return t
+    return None
 
 
 # ================================================================================================= C: capabilities
@@ -1401,6 +1863,8 @@ def gen_C(ctx: Ctx, caps: Dict[str, dict]) -> List[dict]:
                         headers={"Content-Type": "text/plain"}))
     out.append(scenario(nid(), "C", "GET on POST /pattern: not served", "GET /pattern", None, None,
                         [ex("status", http=[400, 404, 405])], tags=["protocol"]))
+    out.append(scenario(nid(), "C", "GET on POST /resolve: not served", "GET /resolve", None, None,
+                        [ex("status", http=[400, 404, 405])], tags=["protocol"]))
     return out
 
 
@@ -1450,6 +1914,74 @@ def _iupac_sites(seq: str, pat: str) -> List[Tuple[int, str]]:
             out.append((s, "+"))
         if st.iupac_match(rc, w):
             out.append((s, "-"))
+    return out
+
+
+def _tandem_repeats(seq: str, min_len: int = 40) -> List[Tuple[int, int, str]]:
+    """Perfect tandem repeats of period 1-6 (homopolymers included) of at least |min_len| bases in |seq| (ACGT
+    units): (start, length, unit), the longest first, each once at its smallest period."""
+    found = []
+    for p in range(1, 7):
+        run, j, n = 0, p, len(seq)
+        while j <= n:
+            if j < n and seq[j] == seq[j - p]:
+                run += 1
+            else:
+                if run + p >= min_len:
+                    start = j - run - p
+                    unit = seq[start:start + p]
+                    if st.is_acgt(unit) and len(set(unit)) > (1 if p > 1 else 0):
+                        found.append((start, run + p, unit))
+                run = 0
+            j += 1
+    # keep a repeat once, at its smallest period
+    found.sort(key=lambda x: (-x[1], len(x[2])))
+    out, seen = [], set()
+    for st0, ln, unit in found:
+        if st0 not in seen:
+            out.append((st0, ln, unit))
+            seen.add(st0)
+    return out
+
+
+def _real_repeats(ctx: Ctx) -> List[dict]:
+    """Low-complexity windows found in the fetched records (the verification's M8: DESIGN N asks for real ones):
+    the longest perfect tandem repeat of each record that has one of at least 40 bp, a 31-mer inside it as a
+    pattern (the record's contexts, a count at least theirs, the note where sdust flags it), 60 bp of it resolved
+    against the record's column, and two traversed under the record's header (a walk in a repeat re-enters its
+    own edges: walk_in_record's exact minimum states where)."""
+    out: List[dict] = []
+    nid = _ids("N-realrep")
+    walked = 0
+    for rec in ctx.positives:
+        reps = [r for r in _tandem_repeats(rec.seq) if r[0] > 100 and r[0] + 100 < len(rec.seq)]
+        if not reps:
+            continue
+        s0, ln, unit = reps[0]
+        t = ctx.truth_at(rec, s0 + 2, K)
+        t["tandem_repeat"] = {"start": rec.offset + s0, "length": ln, "unit": unit}
+        lc = st.sdust_flags(t["window"])
+        out.append(scenario(nid(), "N", "a 31-mer inside %s's %d bp (%s)n repeat: the record's contexts, the note %s" % (
+                                rec.key, ln, unit, "stated" if lc else "absent"), "POST /pattern",
+                            pattern_request([_p(t["window"], "rep")]), t,
+                            [OK, INV, CC, ex("contains_source_context", strand="+", require="all"),
+                             ex("count_relation", relation="exact", min=len(set(source_contexts(t)))),
+                             ex("low_complexity_note", expected=lc)],
+                            tags=["hard-region", "low-complexity", "real-repeat"]))
+        if ln >= 60:
+            t60 = ctx.truth_at(rec, s0, 60)
+            out.append(scenario(nid(), "N", "60 bp of %s's (%s)n repeat resolved: its column supports every k-mer" % (
+                                    rec.key, unit), "POST /resolve", resolve_request(t60["window"], labels=[rec.column]),
+                                t60, [OK, INV, ex("resolve_runs", label=rec.column, full=True)],
+                                tags=["hard-region", "real-repeat"]))
+        if walked < 2 and not rec.region and ln >= 60:
+            ts = ctx.flank_for(rec, ctx.truth_at(rec, s0, 40), 250)
+            out.append(scenario(nid(), "N", "a 40 bp seed in %s's (%s)n repeat walked under its header: the record "
+                                "followed to where it re-enters or branches" % (rec.key, unit), "POST /traverse",
+                                traverse_request([_tseed(ts["window"], [rec.accession])], {"bounds": {"max_extension_bp": 200}}),
+                                ts, [OK, INV, ex("walk_in_record", label_scope="record")],
+                                tags=["hard-region", "real-repeat", "traverse"]))
+            walked += 1
     return out
 
 
@@ -1580,29 +2112,46 @@ def gen_N(ctx: Ctx) -> List[dict]:
                             "POST /traverse", traverse_request([_tseed(q2, [rec.accession])], {"bounds": {"max_extension_bp": 100}}), t,
                             [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q2[:32])],
                             tags=["near-miss", "mutated-seed", "refusal"]))
-    # hard regions: homopolymers, dinucleotide and short tandem repeats, microsatellites, multi-copy, telomeres
+    # hard regions: homopolymers, dinucleotide and short tandem repeats, microsatellites, multi-copy, telomeres.
+    # Contexts are graph k-mers, not occurrences: a pattern of L <= k has at most 2 (k - L + 1) 4^(k - L) of them
+    # (A^31: 2), so the counts are exact and bounded, the patterns occur in refseq33m, and the low_complexity_pattern
+    # note is asserted exactly where sdust flags the pattern (seqtools.sdust_flags, the host's T = 20, W = 64)
     nid = _ids("N-hard")
-    hard = [("A" * 31, "A^31"), ("A" * 40, "A^40"), ("AT" * 16, "(AT)^16"), ("CAG" * 10, "(CAG)^10"),
-            ("CA" * 12 + "CAC", "(CA)^12C"), ("TTAGGG" * 5, "(TTAGGG)^5 telomeric"), ("CCCTAA" * 5, "(CCCTAA)^5 telomeric")]
+    hard = [("A" * 31, "A^31"), ("A" * 40, "A^40"), ("AT" * 15 + "A", "(AT)^15A"), ("AT" * 16, "(AT)^16"),
+            ("CAG" * 10, "(CAG)^10"), ("CA" * 12 + "C", "(CA)^12C"), ("TTAGGG" * 5, "(TTAGGG)^5 telomeric"),
+            ("CCCTAA" * 5, "(CCCTAA)^5 telomeric")]
     for q, title in hard:
-        pat = q[:31]
-        req = pattern_request([_p(pat, "hard")], mode="partial", max_contexts=100)
-        out.append(scenario(nid(), "N", "%s (%d bp) in partial: answered, list cut or complete, counts exact or stated" % (title, len(pat)),
-                            "POST /pattern", req, {"low_complexity": title},
-                            [OK, INV, CC, ex("count_relation", relation=["exact", "at_least", "bounds"], min=0)],
-                            tags=["hard-region", "low-complexity"] + (["smoke"] if title == "(AT)^16" else [])))
-        req = pattern_request([_p(pat, "hard")], max_contexts=100)
-        out.append(scenario(nid(), "N", "%s in all_or_count with max_contexts 100: withheld or complete" % title, "POST /pattern",
-                            req, {"low_complexity": title},
-                            [OK, INV, CC, ex("withheld", reason=[None, "count_above_threshold", "threshold_crossed"])],
+        lc = st.sdust_flags(q)
+        note = ex("low_complexity_note", expected=lc)
+        truth = {"low_complexity": title, "sdust_flags": lc}
+        if len(q) > K:
+            req = pattern_request([_p(q, "hard")], mode="partial", long_search="paths", max_paths=100)
+            out.append(scenario(nid(), "N", "%s (%d bp > k) with paths, partial: its path counted, the note %s" % (
+                                    title, len(q), "stated" if lc else "absent"), "POST /pattern", req, truth,
+                                [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1), note],
+                                tags=["hard-region", "low-complexity", "paths"]))
+            continue
+        bound = 2 * (K - len(q) + 1) * 4 ** (K - len(q))
+        req = pattern_request([_p(q, "hard")], mode="partial", max_contexts=100)
+        out.append(scenario(nid(), "N", "%s (%d bp) in partial: exact, at most %d contexts, the note %s" % (
+                                title, len(q), bound, "stated" if lc else "absent"), "POST /pattern", req, truth,
+                            [OK, INV, CC, ex("count_relation", relation="exact", min=1, max=bound), note],
+                            tags=["hard-region", "low-complexity"] + (["smoke"] if title == "(AT)^15A" else [])))
+        req = pattern_request([_p(q, "hard")], max_contexts=100)
+        out.append(scenario(nid(), "N", "%s in all_or_count with max_contexts 100: complete (or withheld above 100), "
+                            "exact" % title, "POST /pattern", req, truth,
+                            [OK, INV, CC, ex("withheld", reason=[None, "count_above_threshold"]),
+                             ex("count_relation", relation="exact", min=1, max=bound), note],
                             tags=["hard-region", "low-complexity"]))
     for q, title in (("A" * 80, "A^80"), ("TTAGGG" * 15, "(TTAGGG)^15"), ("CAG" * 30, "(CAG)^30")):
         req = pattern_request([_p(q, "hardlong")], mode="partial", long_search="paths", max_paths=100, max_anchors=1000)
-        exp = [OK, INV, CC]
+        lc = st.sdust_flags(q)
+        exp = [OK, INV, CC, ex("low_complexity_note", expected=lc)]
         if q == "A" * 80:
-            exp.append(ex("notes", has=["low_complexity_pattern"]))
-        out.append(scenario(nid(), "N", "%s with paths: stated stops or cut, the note on homopolymers" % title, "POST /pattern",
-                            req, {"low_complexity": title}, exp, tags=["hard-region", "low-complexity", "paths"]))
+            exp.append(ex("count_relation", count="paths", relation="exact", min=1))
+        out.append(scenario(nid(), "N", "%s with paths: stated stops or cut, the note %s" % (title, "stated" if lc else "absent"),
+                            "POST /pattern", req, {"low_complexity": title, "sdust_flags": lc}, exp,
+                            tags=["hard-region", "low-complexity", "paths"]))
     for j, (key, t, copies) in enumerate(_repeat_windows(ctx, ctx.rng("N", "rep"), n=2)):
         rec = ctx.rec(key)
         w31 = t["window"][:31]
@@ -1614,10 +2163,13 @@ def gen_N(ctx: Ctx) -> List[dict]:
                             resolve_request(t["window"], labels=[rec.column]), t,
                             [OK, INV, ex("resolve_runs", label=rec.column, full=True)], tags=["hard-region", "repeat"]))
     q = "TTAGGG" * 10
-    out.append(scenario(nid(), "N", "a telomeric seed (TTAGGG)^10 traversed: stated branching or stops", "POST /traverse",
+    out.append(scenario(nid(), "N", "a telomeric seed (TTAGGG)^10 traversed: a walk with its stated outcome (or the seed's "
+                        "400 if the human column lacks it)", "POST /traverse",
                         traverse_request([_tseed(q, [ctx.rec("hsa").column])], {"bounds": {"max_extension_bp": 200, "time_budget_ms": 5000}}),
                         {"low_complexity": "telomeric"},
-                        [ex("status", http=[200, 400]), INV], tags=["hard-region", "telomeric", "traverse"]))
+                        [ex("status", http=[200, 400]), INV, ex("traverse_seed_outcome", walks=["complete", "partial"])],
+                        tags=["hard-region", "telomeric", "traverse"]))
+    out += _real_repeats(ctx)
     # every normal use case of an agent, with its failure modes
     nid = _ids("N-usecase")
     sites = {}
@@ -1694,6 +2246,46 @@ def gen_N(ctx: Ctx) -> List[dict]:
                         "POST /resolve", resolve_request(t["window"], labels=[athc.accession]), t,
                         [OK, INV, ex("resolve_graph_runs", runs=[[0, 1]]), ex("resolve_runs", label=athc.accession, kmers=0)],
                         tags=["index-defect", "documented"]))
+    out += _near_miss_more(ctx)
+    _annotate_walks(ctx, out)
+    return out
+
+
+def _near_miss_more(ctx: Ctx) -> List[dict]:
+    """Near misses at another length and on the minus strand (the verification's M8), on low-carrier records: a
+    25-mer with 3 substitutions at max_mismatches 1 (out of reach), the reverse complement of a 31-mer with 4 at 2
+    (out of reach, the source a '-' context), and its pair with 1 at 1 (the source back at level 1, the
+    substitutions in P's coordinates, SPEC §21.8)."""
+    out: List[dict] = []
+    rng = ctx.rng("N", "near-more")
+    nid = _ids("N-nearmiss2")
+    rec = ctx.rec("cal")
+    t = ctx.window(rng, rec, 25)
+    pos = st.spread_positions(rng, 25, 3)
+    v, edits = st.substitute_bases(t["window"], pos, rng)
+    t["edits"], t["variant"] = edits, v
+    out.append(scenario(nid(), "N", "a 25-mer of cal with 3 spread substitutions, max_mismatches 1: the source out of reach",
+                        "POST /pattern", pattern_request([_p(v, "near")], mode="partial", max_mismatches=1), t,
+                        [OK, INV, CC, ex("source_absent", strand="+")], tags=["near-miss"]))
+    rec = ctx.rec("mja")
+    t = ctx.window(rng, rec, 31)
+    pos = st.spread_positions(rng, 31, 4)
+    v, edits = st.substitute_bases(t["window"], pos, rng)
+    tm = dict(t, strand="-", edits=edits, variant=v)
+    out.append(scenario(nid(), "N", "the reverse complement of a mja 31-mer with 4 substitutions, max_mismatches 2: the "
+                        "'-' source out of reach", "POST /pattern",
+                        pattern_request([_p(st.revcomp(v), "near")], mode="partial", max_mismatches=2), tm,
+                        [OK, INV, CC, ex("source_absent", strand="-")], tags=["near-miss", "reverse"]))
+    keep = [edits[0]]
+    v1 = list(t["window"])
+    v1[keep[0]["pos"]] = keep[0]["to"]
+    v1 = "".join(v1)
+    P = st.revcomp(v1)
+    t1 = dict(t, strand="-", edits=keep, variant=v1)
+    out.append(scenario(nid(), "N", "its pair with 1 substitution at max_mismatches 1: the '-' source back at level 1",
+                        "POST /pattern", pattern_request([_p(P, "reach")], mode="partial", max_mismatches=1), t1,
+                        [OK, INV, CC, ex("contains_source_context", strand="-", require="all", level=1,
+                                         substitutions=_subs_minus(P, t["window"]))], tags=["near-miss", "pair", "reverse"]))
     return out
 
 

@@ -1650,6 +1650,32 @@ def _first_branch_bp(armo: dict) -> Optional[int]:
     return min(at) if at else None
 
 
+def check_paths_end(sc, ans, a, arm):
+    """Every path of every requested arm ends with one of args.reasons_in (its path_reason or an end reason), at
+    most args.max_bp long when given (a semantic stop such as below_min_labels, SPEC-labeled-traversal-core §6.4)."""
+    i = a.get("seed", 0)
+    r = _result(ans, i)
+    if "arms" not in r:
+        return FAIL, "seed %d not walked (%r)" % (i, r.get("error"))
+    n = 0
+    for side in _arms_of(sc, i):
+        armo = r["arms"].get(side) or {}
+        paths = armo.get("paths")
+        if paths is None:
+            raise Missing("arms.%s.paths" % side)
+        if not paths:
+            return FAIL, "%s: no path" % side
+        for p in paths:
+            ends = {p.get("path_reason")} | set(p.get("end_reasons") or {})
+            if not ends & set(a["reasons_in"]):
+                return FAIL, "%s path %s ended by %s, expected %s" % (side, p.get("id"), sorted(x for x in ends if x),
+                                                                    a["reasons_in"])
+            if "max_bp" in a and (p.get("length_bp") or 0) > a["max_bp"]:
+                return FAIL, "%s path %s of %s bp, at most %d expected" % (side, p.get("id"), p.get("length_bp"), a["max_bp"])
+            n += 1
+    return PASS, "%d path(s) ended by %s" % (n, a["reasons_in"])
+
+
 def check_labels_per_node(sc, ans, a, arm):
     """labels.max_labels_per_node echoed on every requested arm (labels_per_node.cap == args.cap), and a cut list
     (nodes_truncated > 0) stated by a limitation naming the knob (SPEC-labeled-traversal-core §7.0)."""
@@ -1907,6 +1933,7 @@ CHECKS: Dict[str, Callable] = {
     "traverse_seed_outcome": check_traverse_seed_outcome,
     "traverse_stop": check_traverse_stop,
     "labels_per_node": check_labels_per_node,
+    "paths_end": check_paths_end,
     "label_dict_contains": check_label_dict_contains,
     "trace_coordinates": check_trace_coordinates,
 }
@@ -2145,6 +2172,7 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "traverse_seed_outcome": (("walks",), ("seed",)),
     "traverse_stop": (("knob",), ("seed", "walks", "resource", "cap_reason")),
     "labels_per_node": (("cap",), ("seed",)),
+    "paths_end": (("reasons_in",), ("seed", "max_bp")),
     "label_dict_contains": (("name",), ("seed", "kind", "only_kind")),
     "trace_coordinates": ((), ("seed",)),
 }

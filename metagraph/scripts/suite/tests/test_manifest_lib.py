@@ -114,6 +114,50 @@ class McpMapping(unittest.TestCase):
         self.assertEqual(s["expect"][1]["args"]["level"], 0)
 
 
+class WalkExpectations(unittest.TestCase):
+    """The exact walk minimum and branch depth from a record (manifest_lib.walk_expectations)."""
+
+    def test_copies_ends_and_reentry(self):
+        import random
+        rng = random.Random(1)
+        seq = "".join(rng.choice("ACGT") for _ in range(5000))
+        seq = seq[:3000] + seq[1000:1200] + seq[3200:]          # a second copy of [1000, 1200) at 3000
+        res = ml.walk_expectations(seq, [(1050, 50, ["left", "right"], 300), (100, 40, ["right"], 100),
+                                         (4950, 40, ["right"], 100)])
+        self.assertEqual(res[0]["left"], {"min_bp": 50, "first": "ambiguous", "branch_by_bp": 50})   # copies diverge
+        self.assertEqual(res[0]["right"]["min_bp"], 100)
+        self.assertEqual(res[1]["right"], {"min_bp": 100, "first": "max_extension", "branch_by_bp": None})
+        self.assertEqual(res[2]["right"], {"min_bp": 10, "first": "record_end", "branch_by_bp": None})
+        rep = "ACGTTG" * 20 + "".join(rng.choice("ACGT") for _ in range(300))
+        r = ml.walk_expectations(rep, [(0, 40, ["right"], 100)])[0]["right"]
+        self.assertLess(r["min_bp"], 100)                         # a tandem repeat re-enters its own edges
+        self.assertIn(r["first"], ("reentry", "ambiguous"))
+
+
+class Builder(unittest.TestCase):
+    def test_tags_and_repeats(self):
+        import areas
+        import build_manifest as bm
+        reps = areas._tandem_repeats("G" * 50 + "CA" * 30 + "TTGACCATGA" + "A" * 45 + "C")
+        self.assertEqual(reps[0][1:], (60, "CA"))
+        self.assertEqual(sorted(u for _, _, u in reps), ["A", "CA", "G"])      # each once, at its smallest period
+
+        class R:
+            def __init__(self, acc, last, scan, n):
+                self.accession, self.last_in_column, self.last_record_scan, self.records_in_column = acc, last, scan, n
+        recs = [R("NC_1.1", True, "ok", 3), R("NC_2.1", False, None, 5), R("NC_3.1", True, None, 1)]
+        scs = [{"tags": [], "truth": {"record": "NC_1.1", "genome": "x"}, "expect": [{"check": "status", "args": {}}]},
+               {"tags": ["smoke"], "truth": {"a": {"record": "NC_2.1", "genome": "y"}, "b": {"record": "NC_3.1", "genome": "z"}},
+                "expect": [{"check": "status", "args": {"http": 400, "text": "x"}}]},
+               {"tags": [], "truth": {}, "expect": [{"check": "status", "args": {"http": 400, "text": "x"}}]}]
+        bm.tag_scenarios(scs, recs)
+        self.assertEqual(scs[0]["tags"], ["last-record-verified"])
+        self.assertEqual(scs[0]["truth"]["last_record_scan"], "ok")
+        self.assertEqual(scs[1]["tags"], ["last-record-verified", "smoke"])           # exercised by the smoke run
+        self.assertEqual(scs[1]["truth"]["b"]["last_record_scan"], "single-record column")
+        self.assertEqual(scs[2]["tags"], ["code-derived"])
+
+
 class FrozenManifests(unittest.TestCase):
     """The committed manifests: their digest, the contract's fields, every check known to checks.py."""
 

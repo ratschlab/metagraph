@@ -252,3 +252,111 @@ def first_codon_table_mismatch(dna: str, peptide: str, table: int) -> Optional[i
         if a != b:
             return i
     return None
+
+
+# ---------------------------------------------------------------------------------------------- sdust
+# A port of sdust (metagraph/external-libraries/sdust/sdust.c, minimap2's): the low-complexity intervals of a DNA
+# string. The host states `low_complexity_pattern` on an exact pattern that sdust flags anywhere with the seeder's
+# parameters T = 20, W = 64 (pattern_search.cpp is_low_complexity; SPEC-pattern-search §7.8), when its answer
+# states no budget stop; the builder uses sdust_flags for that expectation (tests/test_seqtools.py checks the port
+# against every stored /pattern answer of an exact DNA pattern).
+_NT4 = {"A": 0, "C": 1, "G": 2, "T": 3, "a": 0, "c": 1, "g": 2, "t": 3}
+_WLEN = 3
+_WMSK = (1 << (_WLEN << 1)) - 1
+
+
+def sdust(seq: str, T: int = 20, W: int = 64) -> List[Tuple[int, int]]:
+    """The masked intervals [(start, finish)] of |seq|, as sdust_core computes them."""
+    st = {"rv": 0, "rw": 0, "L": 0}
+    cv, cw = [0] * 64, [0] * 64
+    w = []
+    P = []      # [start, finish, r, l], by descending start, then ascending finish
+    res = []
+
+    def save(start):
+        if not P or P[-1][0] >= start:
+            return
+        p = P[-1]
+        saved = False
+        if res:
+            s, f = res[-1]
+            if p[0] <= f:
+                saved = True
+                res[-1] = (s, f if f > p[1] else p[1])
+        if not saved:
+            res.append((p[0], p[1]))
+        i = len(P) - 1
+        while i >= 0 and P[i][0] < start:
+            i -= 1
+        del P[i + 1:]
+
+    def shift(t):
+        if len(w) >= W - _WLEN + 1:
+            s = w.pop(0)
+            cw[s] -= 1
+            st["rw"] -= cw[s]
+            if st["L"] > len(w):
+                st["L"] -= 1
+                cv[s] -= 1
+                st["rv"] -= cv[s]
+        w.append(t)
+        st["L"] += 1
+        st["rw"] += cw[t]
+        cw[t] += 1
+        st["rv"] += cv[t]
+        cv[t] += 1
+        if cv[t] * 10 > T << 1:
+            while True:
+                s = w[len(w) - st["L"]]
+                cv[s] -= 1
+                st["rv"] -= cv[s]
+                st["L"] -= 1
+                if s == t:
+                    break
+
+    def find_perfect(start):
+        c = cv[:]
+        r = st["rv"]
+        max_r = max_l = 0
+        for i in range(len(w) - st["L"] - 1, -1, -1):
+            t = w[i]
+            r += c[t]
+            c[t] += 1
+            new_r, new_l = r, len(w) - i - 1
+            if new_r * 10 > T * new_l:
+                j = 0
+                while j < len(P) and P[j][0] >= i + start:
+                    p = P[j]
+                    if max_r == 0 or p[2] * max_l > max_r * p[3]:
+                        max_r, max_l = p[2], p[3]
+                    j += 1
+                if max_r == 0 or new_r * max_l >= max_r * new_l:
+                    max_r, max_l = new_r, new_l
+                    P.insert(j, [i + start, len(w) + (_WLEN - 1) + start, new_r, new_l])
+
+    l = t = 0
+    n = len(seq)
+    for i in range(n + 1):
+        b = _NT4.get(seq[i], 4) if i < n else 4
+        if b < 4:
+            l += 1
+            t = ((t << 2) | b) & _WMSK
+            if l >= _WLEN:
+                start = (l - W if l - W > 0 else 0) + (i + 1 - l)
+                save(start)
+                shift(t)
+                if st["rw"] * 10 > st["L"] * T:
+                    find_perfect(start)
+        else:
+            start = (l - W + 1 if l - W + 1 > 0 else 0) + (i + 1 - l)
+            while P:
+                save(start)
+                start += 1
+            l = t = 0
+    return res
+
+
+def sdust_flags(seq: str, T: int = 20, W: int = 64) -> bool:
+    """Whether sdust flags |seq| anywhere (the host reads it in overlapping pieces, which flag exactly when the
+    whole does)."""
+    return len(sdust(seq, T, W)) > 0

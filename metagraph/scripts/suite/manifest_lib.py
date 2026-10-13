@@ -89,6 +89,11 @@ class Ctx:
         self.positives = [r for r in records if r.usable_for_positives and r.key != "athc"]
         self._used: Dict[str, set] = {}
         self.relations: List[dict] = []   # the manifest's cross-scenario comparisons (relation())
+        self.skipped: List[dict] = []     # planned scenarios a generator could not build, with the reason
+
+    def skip(self, area: str, what: str, reason: str) -> None:
+        """State a planned scenario that could not be built (the manifest lists them; nothing drops silently)."""
+        self.skipped.append({"area": area, "scenario": what, "reason": reason})
 
     def rng(self, *parts: Any) -> random.Random:
         h = hashlib.sha256(("%d:" % self.seed + ":".join(str(p) for p in parts)).encode()).hexdigest()
@@ -147,6 +152,108 @@ class Ctx:
         out["flank"] = rec.seq[a:b]
         out["flank_start"] = rec.offset + a
         return out
+
+
+# ---------------------------------------------------------------------------------------------- walk expectations
+def walk_expectations(seq: str, plans: List[Tuple[int, int, List[str], int]], k: int = K) -> List[Dict[str, dict]]:
+    """For walks constrained to the header of the record |seq| (whole, both strands considered), per plan
+    (s0 = seed start in seq, L = seed length, sides, E = max_extension_bp) and side: {"min_bp", "first",
+    "branch_by_bp"}.
+
+    min_bp: how far the walk must follow the record before any stated end is legitimate: the first step whose
+    (k-1)-mer context has a second successor (right; a second predecessor, left) anywhere in the record on either
+    strand (the header may then label a branch), the first edge (k+1-mer) or seed k-mer the walk meets again on
+    either strand (edge_reuse / rejoined_seed), the record's end, or E. branch_by_bp: the first step whose
+    context has a second successor on the forward strand (the record's own copies, which the header certainly
+    labels: the walk must state a split or branch event by then), None when there is none within E.
+    One pass per strand over the record for all plans (the verification's h1c.py method)."""
+    need: Dict[Tuple[str, str], List[set]] = {}
+    for s0, L, sides, E in plans:
+        for side in sides:
+            for j in range(E):
+                if side == "right":
+                    p = s0 + L + j
+                    if p >= len(seq):
+                        break
+                    need.setdefault(("R", seq[p - k + 1:p]), [set(), set()])
+                else:
+                    p = s0 - 1 - j
+                    if p < 0:
+                        break
+                    need.setdefault(("L", seq[p + 1:p + k]), [set(), set()])
+    ctx_r = {c: v for (d, c), v in need.items() if d == "R"}
+    ctx_l = {c: v for (d, c), v in need.items() if d == "L"}
+    for strand, text in ((0, seq), (1, st.revcomp(seq))):
+        for i in range(len(text) - k + 1):
+            km = text[i:i + k]
+            v = ctx_r.get(km[:-1])
+            if v is not None:
+                v[0].add(km[-1])
+                if strand == 0:
+                    v[1].add(km[-1])
+            v = ctx_l.get(km[1:])
+            if v is not None:
+                v[0].add(km[0])
+                if strand == 0:
+                    v[1].add(km[0])
+    out = []
+    for s0, L, sides, E in plans:
+        res: Dict[str, dict] = {}
+        seed = seq[s0:s0 + L]
+        seen_edges = set()
+        for x in range(L - k):
+            e = seed[x:x + k + 1]
+            seen_edges |= {e, st.revcomp(e)}
+        seed_kmers = set()
+        for x in range(L - k + 1):
+            km = seed[x:x + k]
+            seed_kmers |= {km, st.revcomp(km)}
+        for side in sides:
+            edges = set(seen_edges)
+            first, at, branch_by = "max_extension", E, None
+            for j in range(E):
+                if side == "right":
+                    p = s0 + L + j
+                    if p >= len(seq):
+                        first, at = "record_end", j
+                        break
+                    succ = ctx_r[seq[p - k + 1:p]]
+                    edge, kmer = seq[p - k:p + 1], seq[p - k + 1:p + 1]
+                else:
+                    p = s0 - 1 - j
+                    if p < 0:
+                        first, at = "record_end", j
+                        break
+                    succ = ctx_l[seq[p + 1:p + k]]
+                    edge, kmer = seq[p:p + k + 1], seq[p:p + k]
+                if branch_by is None and len(succ[1]) > 1:
+                    branch_by = j
+                if len(succ[0]) > 1:
+                    first, at = "ambiguous", j
+                    break
+                if edge in edges or kmer in seed_kmers:
+                    first, at = "reentry", j
+                    break
+                edges |= {edge, st.revcomp(edge)}
+            if branch_by is None:
+                # the forward-strand scan may reach past the first both-strand ambiguity
+                for j in range(at, E):
+                    if side == "right":
+                        p = s0 + L + j
+                        if p >= len(seq):
+                            break
+                        succ = ctx_r.get(seq[p - k + 1:p])
+                    else:
+                        p = s0 - 1 - j
+                        if p < 0:
+                            break
+                        succ = ctx_l.get(seq[p + 1:p + k])
+                    if succ is not None and len(succ[1]) > 1:
+                        branch_by = j
+                        break
+            res[side] = {"min_bp": at, "first": first, "branch_by_bp": branch_by}
+        out.append(res)
+    return out
 
 
 # ---------------------------------------------------------------------------------------------- requests
@@ -402,7 +509,9 @@ def mcp_pattern(req: Any) -> dict:
         if f in req:
             args[f] = copy.deepcopy(req[f])
     if "in_ram" in req:
+        # the service's documented mapping: high_throughput sends in_ram (async: pattern.in_ram_by_size)
         args["high_throughput"] = req["in_ram"]
+        by_design = sorted(set(by_design) | {"pattern.in_ram_by_size"})
     block = {"tool": "pattern_search", "arguments": args}
     if req.get("max_mismatches", 0):
         block["requires_service"] = "I12"

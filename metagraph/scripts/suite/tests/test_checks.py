@@ -860,6 +860,18 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, failed, "walk_in_record")[0], "fail")
         self.assertEqual(outcome(sc, failed, "walk_in_record", if_walked=True)[0], "inconclusive")
 
+    def test_paths_end(self):
+        sc = {"route": "POST /traverse", "truth": {},
+              "request": {"seeds": [{"sequence": "A" * 40}], "strategy": {"direction": "right"}}}
+        def ans(reason, length):
+            return ok_answer({"results": [{"arms": {"right": {"paths": [
+                {"id": 0, "length_bp": length, "path_reason": "branch", "end_reasons": {reason: 1}}]}}}]})
+        self.assertEqual(outcome(sc, ans("below_min_labels", 0), "paths_end", reasons_in=["below_min_labels"], max_bp=1)[0], "pass")
+        self.assertEqual(outcome(sc, ans("max_extension_bp", 200), "paths_end", reasons_in=["below_min_labels"])[0], "fail")
+        self.assertEqual(outcome(sc, ans("below_min_labels", 50), "paths_end", reasons_in=["below_min_labels"], max_bp=1)[0], "fail")
+        empty = ok_answer({"results": [{"arms": {"right": {"paths": []}}}]})
+        self.assertEqual(outcome(sc, empty, "paths_end", reasons_in=["below_min_labels"])[0], "fail")
+
     def test_traverse_stop(self):
         sc = {"route": "POST /traverse", "truth": {},
               "request": {"seeds": [{"sequence": "A" * 40}],
