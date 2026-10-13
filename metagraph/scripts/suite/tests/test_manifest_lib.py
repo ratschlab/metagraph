@@ -21,6 +21,24 @@ class Builders(unittest.TestCase):
         r = ml.pattern_request([{"dna": "A" * 25}], predicate={"any": ["562"]})
         self.assertEqual(r["max_predicate_contexts"], 10000)
 
+    def test_defaults_named_where_they_act_on_both_arms(self):
+        r = ml.pattern_request([{"dna": "A" * 25}], mode="count")
+        self.assertEqual((r["scope"], r["strands"], r["output"]), ("any_offset", "both", {"labels": "none"}))
+        self.assertNotIn("predicate_strands", r)            # a service refusal without a predicate
+        r = ml.pattern_request([{"dna": "A" * 25}], output={"labels": "all"}, strands="reverse")
+        self.assertEqual(r["output"], {"labels": "all", "occurrences": True})
+        self.assertEqual(r["strands"], "reverse")
+        r = ml.pattern_request([{"dna": "A" * 25}], output={"labels": "none", "occurrences": True})
+        self.assertEqual(r["output"], {"labels": "none", "occurrences": True})   # a refusal case stays as asked
+        r = ml.pattern_request([{"dna": "A" * 25}], output={"labels": "predicate_only"}, predicate={"any": ["562"]})
+        self.assertEqual((r["output"]["occurrences"], r["predicate_strands"]), (True, "either"))
+        a = ml.mcp_pattern(r)["arguments"]
+        self.assertEqual((a["scope"], a["strands"], a["labels"], a["occurrences"], a["predicate_strands"]),
+                         ("any_offset", "both", "predicate_only", True, "either"))
+        a = ml.mcp_pattern(ml.pattern_request([{"dna": "A" * 25}], strands="forward"))["arguments"]
+        self.assertEqual(a["strands"], "plus")
+        self.assertNotIn("occurrences", a)
+
     def test_resolve_request_mirrors_the_service(self):
         r = ml.resolve_request("A" * 100, labels=["562"])
         self.assertEqual(r["bounds"], {"max_query_bp": 2000, "time_budget_ms": 20000})

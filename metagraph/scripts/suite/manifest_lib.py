@@ -24,6 +24,11 @@ DB = "refseq33m-experimental"
 PATTERN_TIME_BUDGET_MS = 60000
 PATTERN_MAX_CONTEXTS = 10000
 PATTERN_MAX_PREDICATE_CONTEXTS = 10000   # the MCP's default and the staging host's cap
+# The host's defaults (the capabilities: default_scope any_offset, default_strands both, default_projection none,
+# default_occurrences true; SPEC-pattern-search.md §4.1: predicate_strands "either"), equal to the MCP's
+# (async's table), named in every body where they act (pattern_request)
+PATTERN_DEFAULTS = {"scope": "any_offset", "strands": "both", "labels": "none", "occurrences": True,
+                    "predicate_strands": "either"}
 # Explicit-label resolves name the deadline and the query bound the service sends (its max_time_ms 20,000 on
 # staging and its own max_query_bp 2,000 / 500 for a discovery), so that both arms send the same body
 RESOLVE_TIME_BUDGET_MS = 20000
@@ -146,11 +151,25 @@ class Ctx:
 # ---------------------------------------------------------------------------------------------- requests
 def pattern_request(patterns: List[dict], mode: str = "all_or_count", max_contexts: int = PATTERN_MAX_CONTEXTS,
                     time_budget_ms: int = PATTERN_TIME_BUDGET_MS, **fields: Any) -> dict:
-    """A /pattern body that names mode, max_contexts and time_budget_ms (async finding 1)."""
+    """A /pattern body that names mode, max_contexts and time_budget_ms (async finding 1) and the defaults both arms
+    must agree on wherever they act (the contract: one question on every arm): scope, strands and output.labels
+    always; output.occurrences with labels "all" or "predicate_only"; predicate_strands with a predicate. Where
+    they do not act they stay unnamed: occurrences with labels "none" is a host 400 when true and a service
+    refusal for any value (async: pattern.occurrences_without_labels), predicate_strands without a predicate a
+    service refusal (pattern.predicate_options_without_predicate) and a no-op on the host."""
     req = {"patterns": patterns, "mode": mode, "max_contexts": max_contexts, "time_budget_ms": time_budget_ms}
     for k, v in fields.items():
         if v is not None:
             req[k] = v
+    req.setdefault("scope", PATTERN_DEFAULTS["scope"])
+    req.setdefault("strands", PATTERN_DEFAULTS["strands"])
+    out = dict(req.get("output") or {})
+    out.setdefault("labels", PATTERN_DEFAULTS["labels"])
+    if out["labels"] in ("all", "predicate_only"):
+        out.setdefault("occurrences", PATTERN_DEFAULTS["occurrences"])
+    req["output"] = out
+    if req.get("predicate") is not None:
+        req.setdefault("predicate_strands", PATTERN_DEFAULTS["predicate_strands"])
     if req.get("output", {}).get("labels") in ("all", "predicate_only") and mode == "partial" \
             and "max_labels" not in req:
         req["max_labels"] = 1000   # the host's default, named: the MCP's default is 100

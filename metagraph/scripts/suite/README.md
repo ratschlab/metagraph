@@ -48,7 +48,13 @@ Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 
   holding one are absent from the graph); the host has no cap on explicit resolve labels; the resolve server
   limit is 10,000 bp on staging.
 - Both arms ask the same question: every /pattern body names `mode`, `max_contexts`, `time_budget_ms` (and with a
-  predicate `max_predicate_contexts`, in partial with labels `max_labels`); explicit-label resolves name
+  predicate `max_predicate_contexts`, in partial with labels `max_labels`), and the defaults wherever they act
+  (lane S1b, decision 6), in the body as in `mcp.arguments`: `scope`, `strands` (the MCP's plus / minus for
+  forward / reverse) and `output.labels` always, `output.occurrences` with labels "all" or "predicate_only",
+  `predicate_strands` with a predicate. Where they do not act they stay unnamed: `output.occurrences` with labels
+  "none" is a host 400 when true and a service refusal for any value (async: pattern.occurrences_without_labels),
+  `predicate_strands` without a predicate a service refusal (pattern.predicate_options_without_predicate) and a
+  no-op on the host; a scenario that tests such a refusal names the field itself; explicit-label resolves name
   `bounds.time_budget_ms` 20,000 and `bounds.max_query_bp` 2,000 (500 for a discovery), as the service sends them;
   /traverse bodies are the MCP preset's merged strategy (walk: 15,000 ms, 512 MB, 1e8 work units, 5,000 bp,
   500,000 output bp, 2 label branches; trie: exhaustive, 30,000 ms, 512 MB, 1,000 live paths, 2,000 bp), with
