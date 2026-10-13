@@ -266,5 +266,7 @@ lists the environment overrides.
   stub ran (never PASS: review L2), else PASS; inconclusive executions are counted after it. The
   scripts commit keeps its `+dirty` marker (L1); a failing check is shown with the expectation at the same
   position among the scenario's expectations of that name (L3); the resource columns are captioned as the
-  container's figures during the run, not the request's own (L5). The load caveat appears when the sra_all CPU mean exceeds 400 % or the load1 mean exceeds 48 (half
-  of mex's 96 cores). compare.json is computed when missing.
+  container's figures during the run, not the request's own (L5). The timing tables give the server columns
+  their own n (only answers with the host's timing count: N9); `--compare` puts the host-warm wall p50 of the
+  two runs side by side (like with like: N12). The load caveat appears when the sra_all CPU mean exceeds
+  400 % or the load1 mean exceeds 48 (half of mex's 96 cores). compare.json is computed when missing.

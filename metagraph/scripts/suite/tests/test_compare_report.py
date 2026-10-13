@@ -523,6 +523,8 @@ class ReportTest(unittest.TestCase):
         self.assertIn("M-002", text)  # listed as not implemented yet via MCP
         self.assertNotIn("checks stub", text.lower())
         self.assertIn("| P | direct-local | cold | 5 |", text)
+        # review N9: the server columns state their own n (the error answers carry no host timing)
+        self.assertIn("| server n |", text)
         self.assertIn("| P | direct-remote | warm | 4 |", text)
         self.assertIn("warm pairs", text)
         self.assertIn("3 pair(s) verified", text)
@@ -693,14 +695,19 @@ class ReportTest(unittest.TestCase):
             merge_run.merge(old)
             comp_old = cmp.compare(old, (CASES, {"cases": 5}))
             comp_old["scenarios"]["R-001"]["arms"]["direct-local"]["outcome"] = "pass"
-            comp_old["summary"]["timing"]["P"]["direct-local"]["all"]["p50"] = 4.0
+            # review N12: the change compares host-warm executions; the mixed p50 is not used
+            comp_old["summary"]["timing"]["P"]["direct-local"]["all"]["p50"] = 1000.0
+            comp_old["summary"]["timing"]["P"]["direct-local"]["by_host_cache"]["warm"]["wall"]["p50"] = 4.0
             comp_old["manifest_sha256"] = "different"
             sc.write_json_atomic(os.path.join(old, "compare.json"), comp_old)
             text = report.build_report(self.dir, compare_dir=old)
         self.assertIn("# Change against", text)
         self.assertIn("The manifests differ", text)
         self.assertIn("| R-001 | direct-local | pass | fail |", text)
-        self.assertIn("+", text.split("# Change against")[1])
+        change = text.split("# Change against")[1]
+        self.assertIn("warm wall p50", change)
+        row = [x for x in change.splitlines() if x.startswith("| P | direct-local |")][0]
+        self.assertIn("+50%", row)
 
     def test_compare_json_computed_when_missing(self):
         os.remove(os.path.join(self.dir, "compare.json"))

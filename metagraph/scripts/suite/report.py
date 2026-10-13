@@ -534,10 +534,11 @@ def timing_section(comp):
                 if not a["n"] and not sv["n"]:
                     continue  # e.g. MCP marks of scenarios it cannot express: nothing was timed
                 rows.append([md(area), md(arm), md(HOST_CACHE_LABEL.get(hc, hc)), a["n"], fmt_ms(a["p50"]),
-                             fmt_ms(a["p90"]), fmt_ms(a["max"]), fmt_ms(sv["p50"]), fmt_ms(sv["p90"]),
+                             fmt_ms(a["p90"]), fmt_ms(a["max"]), sv["n"], fmt_ms(sv["p50"]), fmt_ms(sv["p90"]),
                              fmt_ms(sv["max"])])
-    out.append(table(["area", "arm", "host cache", "n", "wall p50", "wall p90", "wall max", "server p50",
-                      "server p90", "server max"], rows))
+    # The server columns cover only the answers that carry the host's timing (review N9: their own n).
+    out.append(table(["area", "arm", "host cache", "n", "wall p50", "wall p90", "wall max", "server n",
+                      "server p50", "server p90", "server max"], rows))
     rows = []
     for arm, cw in sorted(s["cold_warm"].items()):
         rows.append([md(arm), cw["n"], fmt_ms(cw["delta_ms"]["p50"]), fmt_ms(cw["delta_ms"]["p90"]),
@@ -594,12 +595,12 @@ def overhead_section(comp):
     for arm, cv in sorted((fo.get("cold") or {}).items()):
         w, sv = cv.get("wall_ms") or {}, cv.get("server_ms") or {}
         if w.get("n"):
-            rows.append([md(arm), w["n"], fmt_ms(w["p50"]), fmt_ms(w["p90"]), fmt_ms(sv.get("p50")),
+            rows.append([md(arm), w["n"], fmt_ms(w["p50"]), fmt_ms(w["p90"]), sv.get("n", 0), fmt_ms(sv.get("p50")),
                          fmt_ms(sv.get("p90"))])
     if rows:
         out.append("Cold executions (a scenario's first on the host; the arm that ran it first), reported apart "
                    "from the warm pairs:\n")
-        out.append(table(["arm", "n", "wall p50", "wall p90", "server p50", "server p90"], rows))
+        out.append(table(["arm", "n", "wall p50", "wall p90", "server n", "server p50", "server p90"], rows))
     out.append("## MCP")
     out.append("")
     if not s["mcp_phases"] and not s["mcp_overhead"] and not (s.get("mcp_cold_wall_ms") or {}).get("n"):
@@ -659,8 +660,10 @@ def compare_runs_section(comp, old, old_dir):
         for arm in sorted(set(s_new["per_area"].get(area, {})) | set(s_old.get("per_area", {}).get(area, {}))):
             n = s_new["per_area"].get(area, {}).get(arm, {})
             o = s_old.get("per_area", {}).get(area, {}).get(arm, {})
-            tn = (s_new["timing"].get(area, {}).get(arm) or {}).get("all", {})
-            to = (s_old.get("timing", {}).get(area, {}).get(arm) or {}).get("all", {})
+            # Like with like (review N12): the host-warm executions of each run (an earlier run without host
+            # cache states shows none).
+            tn = warm_wall(s_new, area, arm)
+            to = warm_wall(s_old, area, arm)
             p_new, p_old = tn.get("p50"), to.get("p50")
             delta = "-"
             if p_new is not None and p_old:
@@ -669,7 +672,7 @@ def compare_runs_section(comp, old, old_dir):
                          "%s -> %s" % (o.get("fail", 0) + o.get("error", 0) if o else "-",
                                        n.get("fail", 0) + n.get("error", 0) if n else "-"),
                          "%s -> %s" % (fmt_ms(p_old), fmt_ms(p_new)), delta])
-    out.append(table(["area", "arm", "pass", "fail+error", "wall p50 (ms)", "change"], rows))
+    out.append(table(["area", "arm", "pass", "fail+error", "warm wall p50 (ms)", "change"], rows))
     changed = []
     for sid, entry in comp["scenarios"].items():
         old_entry = old.get("scenarios", {}).get(sid)
@@ -686,6 +689,13 @@ def compare_runs_section(comp, old, old_dir):
     if new_only or gone:
         out.append("%d scenario(s) only in this run, %d only in the earlier one.\n" % (len(new_only), len(gone)))
     return "\n".join(out)
+
+
+def warm_wall(summary, area, arm):
+    """The wall-time summary of an area's and arm's host-warm executions in a compare.json summary ({} when the
+    run has none or predates host_cache)."""
+    t = ((summary.get("timing") or {}).get(area) or {}).get(arm) or {}
+    return ((t.get("by_host_cache") or {}).get("warm") or {}).get("wall") or {}
 
 
 def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=None):
