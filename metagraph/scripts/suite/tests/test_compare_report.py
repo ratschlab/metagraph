@@ -518,6 +518,41 @@ class ReportTest(unittest.TestCase):
         self.assertIn("check budget\\_respected: observed 34012 ms on a 15000 ms budget", text)
         self.assertIn('expected: \\{"max\\_ms": 15000\\}', text)
 
+    def test_relations(self):
+        body = lambda results, ms: {"patterns": [{"id": "w", "results": results, "timing": {"elapsed_ms": ms}}]}  # noqa: E731
+        ctx = [{"kmer": "ACGT", "offset": 0, "strand": "+"}, {"kmer": "ACGT", "offset": 5, "strand": "-"}]
+        manifest = {"scenarios": [{"id": i, "route": "POST /pattern", "expect": []} for i in ("P-a", "P-b", "P-c")],
+                    "relations": [
+                        {"id": "rel-same", "type": "same_answer", "a": "P-a", "b": "P-b"},
+                        {"id": "rel-sub", "type": "subset", "a": "P-c", "b": "P-a", "args": {"key": ["offset"]}},
+                        {"id": "rel-sub-bad", "type": "subset", "a": "P-a", "b": "P-c"},
+                        {"id": "rel-prefix", "type": "prefix_equals", "a": "P-a", "b": "P-b"},
+                        {"id": "rel-odd", "type": "bogus", "a": "P-a", "b": "P-b"},
+                        {"id": "rel-gone", "type": "same_answer", "a": "P-a", "b": "P-z"}]}
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "arms", "direct-local"))
+            sc.write_json_atomic(os.path.join(d, "arms", "direct-local", "manifest.json"), manifest)
+            ok = [{"check": "status", "outcome": "pass", "detail": ""}]
+            write_arm(d, "direct-local", [line(i, "direct-local", 0, T0 + n, 1.0, checks=ok)
+                                          for n, i in enumerate(("P-a", "P-b", "P-c"))],
+                      raw_bodies={("P-a", 0): body(ctx, 1.0), ("P-b", 0): body(ctx, 9.0),
+                                  ("P-c", 0): body(ctx[:1], 2.0)})
+            merge_run.merge(d)
+            comp = cmp.compare(d, ({}, None))
+            sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+            text = report.build_report(d)
+        got = dict((r["id"], (r["arms"].get("direct-local") or {}).get("outcome")) for r in comp["relations"])
+        self.assertEqual(got, {"rel-same": "pass", "rel-sub": "pass", "rel-sub-bad": "fail",
+                               "rel-prefix": "not_evaluated", "rel-odd": "fail", "rel-gone": None})
+        self.assertEqual(comp["summary"]["relations"]["per_arm"]["direct-local"],
+                         {"pass": 2, "fail": 2, "not_evaluated": 1})
+        self.assertIn("# Relations between scenarios", text)
+        self.assertIn("| rel-sub-bad | subset | P-a | P-c | fail |", text)
+        self.assertIn("2 failed relation(s)", text)
+        self.assertEqual(cmp.first_difference({"a": [1, {"b": 2}]}, {"a": [1, {"b": 3}]}), "a.1.b")
+        self.assertEqual(cmp.drop_path({"a": {"b": 1, "c": 2}}, "a.b"), {"a": {"c": 2}})
+        self.assertEqual(cmp.path_values({"p": [{"r": [1, 2]}, {"r": [3]}]}, "p.*.r.*"), [1, 2, 3])
+
     def test_unverified_verdict_and_commit(self):
         with tempfile.TemporaryDirectory() as d:
             write_arm(d, "direct-local", [line("P-1", "direct-local", 0, T0, 1.0, checks=[

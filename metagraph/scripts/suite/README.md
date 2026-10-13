@@ -199,6 +199,15 @@ lists the environment overrides.
   fail); the MCP warm execution (repeat 1 preferred) minus each direct arm's first warm one, with and without
   `mcp_phases.queue_ms`, and `backend_ms` minus each direct arm; the phases of the warm execution; the MCP
   cold execution's wall time apart. Cold vs warm: an arm's host-cold execution and its next host-warm repeat.
+- Relations (review of lane S1): the manifest may state `relations` [{id, type, a, b, args}] between two
+  scenarios; compare.py evaluates each per arm on the answers both scenarios got there (the lowest common
+  repeat, from the raw files; both runners keep the normalised answer under `answer`): `same_answer` = the
+  normalised answers are equal with `timing` left out (args.ignore: further dotted paths); `subset` = every
+  item of a at args.path (default `patterns.*.results.*`, `*` steps into each element) is among b's, whole
+  (timing aside) or on args.key (field names); `prefix_equals` and `zero_equals_absent` read `not_evaluated`
+  until lane S1b's README states their semantics; an unknown type fails. compare.json `relations` (per arm
+  outcome pass / fail / not_evaluated with a detail) and `summary.relations`; the report has its own table,
+  and a failed relation makes the verdict FAIL.
 - Resources: each execution joins the samples from its start - 1 s to its end + 2 s (docker averages CPU over
   its own window), else the nearest sample within 5 s; per area and arm the peak container CPU and memory,
   the mean sra_all CPU and host load1, and the peak `work.memory_bytes` of the answers.

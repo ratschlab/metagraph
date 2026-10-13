@@ -502,6 +502,168 @@ def cold_warm(lines):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# relations between scenarios (the manifest's `relations`)
+#
+# A relation {id, type, a, b, args} states how the answers of scenarios a and b relate; it is evaluated per arm
+# on the answers both scenarios got there (the lowest repeat both ran), from the raw files. Types:
+#   same_answer   the normalised answers are the same, `timing` aside (args.ignore: dotted paths left out too).
+#   subset        the items of a at args.path (default patterns.*.results.*; `*` steps into every element) are
+#                 all among b's, compared whole (timing aside) or on args.key (a list of field names).
+#   prefix_equals, zero_equals_absent: evaluated once lane S1b's README states their semantics; until then
+#                 `not_evaluated`.
+
+def load_answer(line, run_dir):
+    """The normalised answer of an execution from its raw file (both runners keep it under `answer`)."""
+    raw = line.get("raw") if line else None
+    if not raw or not run_dir:
+        return None
+    try:
+        obj = sc.read_gz_json(os.path.join(run_dir, raw))
+    except (OSError, ValueError, EOFError):
+        return None
+    ans = obj.get("answer") if isinstance(obj, dict) else None
+    return ans if isinstance(ans, dict) else None
+
+
+def path_values(obj, path):
+    """The values at a dotted path; `*` steps into every element of a list (or value of an object), a number
+    into that element of a list."""
+    cur = [obj]
+    for part in str(path).split("."):
+        nxt = []
+        for c in cur:
+            if part == "*":
+                if isinstance(c, list):
+                    nxt.extend(c)
+                elif isinstance(c, dict):
+                    nxt.extend(c.values())
+            elif isinstance(c, dict) and part in c:
+                nxt.append(c[part])
+            elif isinstance(c, list) and part.isdigit() and int(part) < len(c):
+                nxt.append(c[int(part)])
+        cur = nxt
+    return cur
+
+
+def drop_path(obj, path):
+    """obj without the value at a dotted path (`*` as in path_values); obj itself is left unchanged."""
+    obj = json.loads(json.dumps(obj))
+    parts = str(path).split(".")
+
+    def walk(node, i):
+        if i == len(parts) - 1:
+            if isinstance(node, dict):
+                node.pop(parts[i], None)
+            elif isinstance(node, list) and parts[i] == "*":
+                del node[:]
+            return
+        nxt = []
+        if parts[i] == "*":
+            nxt = list(node.values()) if isinstance(node, dict) else (node if isinstance(node, list) else [])
+        elif isinstance(node, dict) and parts[i] in node:
+            nxt = [node[parts[i]]]
+        elif isinstance(node, list) and parts[i].isdigit() and int(parts[i]) < len(node):
+            nxt = [node[int(parts[i])]]
+        for n in nxt:
+            walk(n, i + 1)
+    walk(obj, 0)
+    return obj
+
+
+def first_difference(a, b, path=""):
+    """The first dotted path where two JSON values differ, or None."""
+    if type(a) is not type(b):
+        return path or "(top)"
+    if isinstance(a, dict):
+        for k in sorted(set(a) | set(b), key=str):
+            if k not in a or k not in b:
+                return (path + "." if path else "") + str(k)
+            d = first_difference(a[k], b[k], (path + "." if path else "") + str(k))
+            if d:
+                return d
+        return None
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return (path or "(top)") + " (length %d vs %d)" % (len(a), len(b))
+        for i, (x, y) in enumerate(zip(a, b)):
+            d = first_difference(x, y, "%s.%d" % (path, i) if path else str(i))
+            if d:
+                return d
+        return None
+    return None if a == b else (path or "(top)")
+
+
+def relation_same_answer(a, b, args):
+    va, vb = sc.digest_view(a), sc.digest_view(b)
+    for p in args.get("ignore") or []:
+        va, vb = drop_path(va, p), drop_path(vb, p)
+    diff = first_difference(va, vb)
+    if diff is None:
+        return "pass", "the same answer (timing aside)"
+    return "fail", "the answers differ at %s" % diff
+
+
+def relation_subset(a, b, args):
+    path = args.get("path") or "patterns.*.results.*"
+    key = args.get("key")
+    if not isinstance(a.get("body"), dict) or not isinstance(b.get("body"), dict):
+        return "not_evaluated", "an answer without a JSON body (http %s / %s)" % (a.get("http"), b.get("http"))
+
+    def project(x):
+        if key and isinstance(x, dict):
+            x = dict((k, x.get(k)) for k in key)
+        return sc.canonical_json(sc.digest_view({"v": x})["v"] if isinstance(x, (dict, list)) else x)
+    items_a = [project(x) for x in path_values(a["body"], path)]
+    items_b = set(project(x) for x in path_values(b["body"], path))
+    missing = [x for x in items_a if x not in items_b]
+    if not missing:
+        return "pass", "%d item(s) of a at %s, all among b's %d" % (len(items_a), path, len(items_b))
+    return "fail", "%d of a's %d item(s) at %s missing from b's %d, e.g. %s" % (
+        len(missing), len(items_a), path, len(items_b), missing[0].decode("utf-8", "replace")[:200])
+
+
+RELATIONS = {"same_answer": relation_same_answer, "subset": relation_subset}
+RELATION_TYPES = ("prefix_equals", "zero_equals_absent", "subset", "same_answer")
+
+
+def evaluate_relations(manifest, grouped, run_dir, arms):
+    """(relations, summary): every manifest relation per arm that ran both scenarios."""
+    rels = (manifest or {}).get("relations") or [] if isinstance(manifest, dict) else []
+    out, per_arm = [], {}
+    for rel in rels:
+        if not isinstance(rel, dict):
+            continue
+        entry = {"id": rel.get("id"), "type": rel.get("type"), "a": rel.get("a"), "b": rel.get("b"),
+                 "args": rel.get("args") or {}, "arms": {}}
+        fn = RELATIONS.get(rel.get("type"))
+        for arm in arms:
+            la_all = (grouped.get(rel.get("a")) or {}).get(arm) or {}
+            lb_all = (grouped.get(rel.get("b")) or {}).get(arm) or {}
+            common = sorted(set(la_all) & set(lb_all))
+            if not common:
+                continue
+            la, lb = la_all[common[0]], lb_all[common[0]]
+            if rel.get("type") not in RELATION_TYPES:
+                outcome, detail = "fail", "unknown relation type %r" % rel.get("type")
+            elif fn is None:
+                outcome, detail = "not_evaluated", "%s: semantics pending (lane S1b's README)" % rel.get("type")
+            else:
+                aa, ab = load_answer(la, run_dir), load_answer(lb, run_dir)
+                if aa is None or ab is None:
+                    outcome, detail = "not_evaluated", "a raw answer is missing"
+                else:
+                    try:
+                        outcome, detail = fn(aa, ab, entry["args"])
+                    except Exception as exc:  # a relation that cannot be evaluated is reported, never fatal
+                        outcome, detail = "not_evaluated", "%s: %s" % (type(exc).__name__, exc)
+            entry["arms"][arm] = {"outcome": outcome, "detail": detail, "repeat": common[0]}
+            counts = per_arm.setdefault(arm, {"pass": 0, "fail": 0, "not_evaluated": 0})
+            counts[outcome] = counts.get(outcome, 0) + 1
+        out.append(entry)
+    return out, {"total": len(out), "per_arm": per_arm}
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # resources
 
 class SampleIndex(object):
@@ -698,6 +860,8 @@ def compare(run_dir, by_design=None):
     if "disagree_scenarios" in mcp_summary:
         mcp_summary["disagreeing"] = mcp_summary.pop("disagree_scenarios")
 
+    relations, relations_summary = evaluate_relations(manifest, grouped, run_dir, arms_present)
+
     index = SampleIndex(samples)
     resources_out = {}
     for area, by_arm in lines_by_area_arm.items():
@@ -728,8 +892,9 @@ def compare(run_dir, by_design=None):
         or (run.get("manifest") or {}).get("content_sha256"),
         "arms": arms_present, "unparsable_lines": bad, "by_design_table": table_info,
         "host_cache": run.get("host_cache"),
-        "order": order, "scenarios": scenarios,
+        "order": order, "scenarios": scenarios, "relations": relations,
         "summary": {
+            "relations": relations_summary,
             "per_area": per_area, "totals": totals,
             "direct_agreement": direct_summary, "mcp_agreement": mcp_summary,
             "timing": timing,

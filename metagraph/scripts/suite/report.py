@@ -467,6 +467,34 @@ def agreement_section(comp):
     return "\n".join(out)
 
 
+def relations_section(comp):
+    rels = comp.get("relations") or []
+    out = ["# Relations between scenarios", ""]
+    if not rels:
+        out.append("The manifest states no relation.\n")
+        return "\n".join(out)
+    arms = comp["arms"]
+    per_arm = ((comp["summary"].get("relations") or {}).get("per_arm")) or {}
+    out.append("%d relation(s), each evaluated per arm on the answers both scenarios got there: %s." % (
+        len(rels), "; ".join("%s %d pass, %d fail, %d not evaluated" % (
+            md(arm), c.get("pass", 0), c.get("fail", 0), c.get("not_evaluated", 0))
+            for arm, c in sorted(per_arm.items())) or "none ran"))
+    out.append("")
+    rows = []
+    for r in rels:
+        rows.append([md(r.get("id")), md(r.get("type")), md(r.get("a")), md(r.get("b"))]
+                    + [md((r["arms"].get(arm) or {}).get("outcome") or "-") for arm in arms])
+    out.append(table(["relation", "type", "a", "b"] + [md(a) for a in arms], rows,
+                     align=["l"] * (4 + len(arms))))
+    bad = [(r, arm, v) for r in rels for arm, v in sorted(r["arms"].items()) if v.get("outcome") != "pass"]
+    if bad:
+        out.append("Not passed:\n")
+        for r, arm, v in bad[:200]:
+            out.append("- %s on %s: %s: %s" % (md(r.get("id")), md(arm), md(v.get("outcome")), md(v.get("detail"), 300)))
+        out.append("")
+    return "\n".join(out)
+
+
 def timing_section(comp):
     s = comp["summary"]
     out = ["# Timing", "",
@@ -655,6 +683,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(failures_section(rows, manifest, max_failures))
     parts.append(findings_section(rows, manifest, max_failures))
     parts.append(agreement_section(comp))
+    parts.append(relations_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))
     parts.append(resources_section(comp))
