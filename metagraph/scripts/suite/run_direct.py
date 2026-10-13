@@ -113,16 +113,6 @@ def load_checks(mode):
     return checks_stub, "stub", error
 
 
-def beyond_status(scenarios):
-    """The expectation names of the scenarios that the stub cannot evaluate (anything but `status`)."""
-    names = set()
-    for scenario in scenarios:
-        for exp in scenario.get("expect") or []:
-            if isinstance(exp, dict) and exp.get("check") != "status":
-                names.add(str(exp.get("check")))
-    return sorted(names)
-
-
 def host_load():
     try:
         with open("/proc/loadavg") as fh:
@@ -520,7 +510,7 @@ class Runner(object):
         selected = sc.select_scenarios(self.manifest, self.args.areas, self.args.limit, self.args.ids)
         planned, skipped = sc.plan_executions(selected, self.args.arm, self.args.warm_every)
         if self.checks_name == "stub" and not self.args.allow_stub:
-            names = beyond_status([s for _, s in selected])
+            names = sc.beyond_status([s for _, s in selected])
             if names:
                 raise SystemExit("run_direct: the checks stub cannot evaluate %s (expected by the selected "
                                  "scenarios)%s; install lane S1's checks.py, or pass --allow-stub for a run that "

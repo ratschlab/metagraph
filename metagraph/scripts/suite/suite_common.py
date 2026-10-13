@@ -144,6 +144,129 @@ def execution_key(line):
     return (line.get("scenario"), line.get("arm"), line.get("repeat"))
 
 
+def beyond_status(scenarios):
+    """The expectation names of the scenarios that the checks stub cannot evaluate (anything but `status`)."""
+    names = set()
+    for scenario in scenarios:
+        for exp in scenario.get("expect") or []:
+            if isinstance(exp, dict) and exp.get("check") != "status":
+                names.add(str(exp.get("check")))
+    return sorted(names)
+
+
+def mcp_repeats(index, scenario, warm_every=10):
+    """The MCP executions of a scenario in paired mode, as repeat indices: repeat 0 before the direct arms
+    (cold), the others after them (warm); one more than the direct arms' repeats when those run once, so
+    every scenario has an MCP warm execution. A scenario the manifest marks not implemented via MCP gets
+    repeat 0 only (the MCP runner records the mark); the long class none (the front cuts every arm behind it)."""
+    if scenario.get("timing_class") == "long":
+        return []
+    if ((scenario.get("mcp") or {}).get("not_implemented")):
+        return [0]
+    return list(range(max(2, repeat_count(index, scenario, warm_every))))
+
+
+def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=("direct-local", "direct-remote")):
+    """The paired loop's work per scenario, in manifest order: [{scenario, direct-local, direct-remote,
+    mcp_cold, mcp_warm}] where a direct arm's value is True (executions left), False (all recorded) or None
+    (the arm does not run it), mcp_cold likewise, and mcp_warm the warm repeat indices left. Recorded
+    executions are read from RUN_DIR/arms/<arm>/executions.jsonl."""
+    recorded = {}
+    for arm in ARMS:
+        rows, _ = read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
+        recorded[arm] = set(execution_key(r) for r in rows if r.get("arm") == arm)
+    out = []
+    for index, scenario in select_scenarios(manifest, areas, limit):
+        sid = scenario.get("id")
+        item = {"scenario": sid, "mcp_cold": None, "mcp_warm": []}
+        for arm in DIRECT_ARMS:
+            if arm not in arms:
+                item[arm] = None
+                continue
+            planned, _ = plan_executions([(index, scenario)], arm, warm_every)
+            item[arm] = (any((sid, arm, p[2]) not in recorded[arm] for p in planned)) if planned else None
+        if "mcp" in arms:
+            reps = mcp_repeats(index, scenario, warm_every)
+            if reps:
+                item["mcp_cold"] = (sid, "mcp", 0) not in recorded["mcp"]
+                item["mcp_warm"] = [r for r in reps[1:] if (sid, "mcp", r) not in recorded["mcp"]]
+        out.append(item)
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the host's cache state per execution (review H1)
+
+HOST_CACHE_WARM_S = 60.0
+HOST_CACHE_VALUES = ("cold", "warm", "aged", "not_reached", "unknown")
+
+
+def reached_host(line):
+    """Whether an execution reached the host, and so touched its row cache: a direct request that got an
+    answer or timed out (not a refused connection), an MCP execution the host answered (outcome pass / fail;
+    a refusal at submit or a request the MCP cannot express never reaches it)."""
+    if line.get("arm") == "mcp":
+        return line.get("outcome") in ("pass", "fail")
+    err = line.get("error") or {}
+    return not (not line.get("http") and err.get("code") == "transport")
+
+
+def line_times(line, offset_s=0.0):
+    """(start, end) POSIX times of an execution on the reference clock (offset_s: how far the clock that
+    stamped it is ahead); end from ended_utc, else start + wall_ms."""
+    start = parse_utc(line.get("started_utc"))
+    end = parse_utc(line.get("ended_utc"))
+    wall = line.get("wall_ms")
+    if end is None and start is not None and _is_number(wall):
+        end = start + wall / 1000.0
+    if start is not None:
+        start -= offset_s
+    if end is not None:
+        end -= offset_s
+    return start, end
+
+
+def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
+    """Adds `host_cache`, `since_prev_s` and `host_cache_after` to every execution line (in place), from the
+    order in which the run's executions of each scenario reached the host, over all arms:
+    cold = the first execution of the scenario on the host in this run; warm = another execution of it ended
+    at most warm_s seconds before this one started; aged = longer ago (the cache state is unknown);
+    not_reached = the execution never reached the host; unknown = no start time. since_prev_s is the time from
+    the end of the scenario's previous host execution to this start, host_cache_after that execution's arm.
+    clock_offsets {arm: seconds} puts the arms on one clock (direct-local is stamped on mex)."""
+    offsets = clock_offsets or {}
+    arm_rank = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
+    timed = []
+    for i, r in enumerate(rows):
+        start, end = line_times(r, offsets.get(r.get("arm"), 0.0) or 0.0)
+        timed.append((start if start is not None else float("inf"), arm_rank.get(r.get("arm"), 9),
+                      r.get("repeat") or 0, i, start, end))
+    timed.sort(key=lambda t: t[:4])
+    last = {}
+    for _, _, _, i, start, end in timed:
+        r = rows[i]
+        sid = r.get("scenario")
+        prev = last.get(sid)
+        since = None
+        if start is None:
+            label = "unknown"
+        elif prev is None:
+            label = "cold"
+        else:
+            since = round(start - prev[0], 3)
+            label = "warm" if since <= warm_s else "aged"
+        reached = reached_host(r)
+        if not reached:
+            label = "not_reached"
+        r["host_cache"] = label
+        r["since_prev_s"] = since
+        r["host_cache_after"] = prev[1] if prev else None
+        if reached and start is not None:
+            stop = end if end is not None else start
+            last[sid] = (max(stop, prev[0]) if prev else stop, r.get("arm"))
+    return rows
+
+
 def raw_name(scenario_id, arm, repeat):
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(scenario_id))
     return "raw/%s.%s.%d.json.gz" % (safe, arm, repeat)
@@ -434,12 +557,86 @@ def read_gz_json(path):
         return json.load(fh)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# the suite lock on mex (review M4)
+
+def parse_etime(text):
+    """ps's etime ([[dd-]hh:]mm:ss) in seconds; None when unparsable."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    days = 0
+    if "-" in t:
+        d, t = t.split("-", 1)
+        try:
+            days = int(d)
+        except ValueError:
+            return None
+    try:
+        parts = [int(x) for x in t.split(":")]
+    except ValueError:
+        return None
+    secs = 0
+    for x in parts:
+        secs = secs * 60 + x
+    return days * 86400 + secs
+
+
+def lock_verdict(lock, hostname, now, pid_alive, pid_age_s):
+    """('stale' | 'live' | 'foreign', reason) for the lock document of another invocation.
+
+    stale: the lock names a process of this host that is gone, or whose pid now belongs to a process younger
+    than the lock (the pid was reused); live: that process still runs; foreign: another host's process, which
+    cannot be checked from here. pid_alive / pid_age_s are the facts of this host (callables of the pid)."""
+    if not isinstance(lock, dict):
+        return "stale", "unreadable lock"
+    pid = lock.get("pid")
+    if lock.get("host") != hostname:
+        return "foreign", "held by pid %s on %s since %s" % (pid, lock.get("host"), lock.get("started_utc"))
+    if not isinstance(pid, int) or not pid_alive(pid):
+        return "stale", "pid %s on %s is gone" % (pid, hostname)
+    age = pid_age_s(pid)
+    started = lock.get("started_epoch")
+    if age is not None and _is_number(started) and now - age > started + 5.0:
+        return "stale", "pid %s now belongs to a process younger than the lock" % pid
+    return "live", "held by pid %s on %s since %s (run %s)" % (pid, hostname, lock.get("started_utc"),
+                                                              lock.get("run_id"))
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _pid_age_s(pid):
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, universal_newlines=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_etime(out)
+
+
 def _main(argv):
     """Small command-line helpers for run_suite.sh.
 
     release-short RELEASE        print the run directory's release part
     stamp                        print the run directory's UTC part for now
     manifest-sha FILE [--write]  print (or write into the file) the manifest's content_sha256
+    beyond-status MANIFEST AREAS LIMIT
+                                 print the expected checks the stub cannot evaluate ('' for none)
+    paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS
+                                 print the paired loop's work: 'SID L R MC MW' per scenario (L, R, MC: 1 to
+                                 do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -)
+    lock-check LOCK_JSON HOSTNAME
+                                 print 'stale|live|foreign REASON' for another invocation's lock
+    clock-offset T0 REMOTE T1    print REMOTE - (T0 + T1) / 2 (how far mex's clock is ahead)
     """
     import time
     if len(argv) >= 2 and argv[0] == "release-short":
@@ -455,6 +652,38 @@ def _main(argv):
             manifest["content_sha256"] = sha
             write_json_atomic(argv[1], manifest)
         print(sha)
+        return 0
+    if len(argv) >= 2 and argv[0] == "beyond-status":
+        areas = [a for a in (argv[2] if len(argv) > 2 else "").split(",") if a] or None
+        limit = int(argv[3]) if len(argv) > 3 and argv[3] else None
+        selected = select_scenarios(read_json(argv[1]), areas, limit)
+        print(",".join(beyond_status([sc_ for _, sc_ in selected])))
+        return 0
+    if len(argv) >= 7 and argv[0] == "paired-plan":
+        areas = [a for a in argv[3].split(",") if a] or None
+        limit = int(argv[4]) if argv[4] else None
+        arms = [a for a in argv[6].split(",") if a]
+        flag = lambda v: "-" if v is None else ("1" if v else "0")  # noqa: E731
+        for item in paired_plan(read_json(argv[1]), argv[2], areas, limit, int(argv[5]), arms):
+            print("%s %s %s %s %s" % (item["scenario"], flag(item["direct-local"]), flag(item["direct-remote"]),
+                                      flag(item["mcp_cold"]),
+                                      ",".join(str(r) for r in item["mcp_warm"]) or "-"))
+        return 0
+    if len(argv) >= 3 and argv[0] == "lock-check":
+        try:
+            lock = json.loads(argv[1])
+        except ValueError:
+            lock = None
+        verdict, reason = lock_verdict(lock, argv[2], time.time(), _pid_alive, _pid_age_s)
+        print("%s %s" % (verdict, reason))
+        return 0
+    if len(argv) >= 4 and argv[0] == "clock-offset":
+        try:
+            t0, remote, t1 = float(argv[1]), float(argv[2]), float(argv[3])
+        except ValueError:
+            print("")
+            return 0
+        print("%.3f" % (remote - (t0 + t1) / 2.0))
         return 0
     sys.stderr.write(_main.__doc__ + "\n")
     return 2

@@ -4,10 +4,13 @@
     merge_run.py RUN_DIR
 
 Each arm writes RUN_DIR/arms/<arm>/ (run.json, executions.jsonl, samples.jsonl, raw/, and for the MCP arm
-jobs.jsonl). This writes RUN_DIR/executions.jsonl (raw paths rewritten relative to RUN_DIR; one line per
-scenario x arm x repeat, the last recorded one when a resume repeated it), samples.jsonl (sorted by time,
-each sample's `phase` the arm it was taken during), jobs.jsonl, manifest.json and run.json (the identity of the
-run from the direct arms, every arm's own run.json under `arms`). Re-running it rewrites the same files.
+jobs.jsonl); the orchestrator's samplers on mex write RUN_DIR/samples/*.jsonl. This writes
+RUN_DIR/executions.jsonl (raw paths rewritten relative to RUN_DIR; one line per scenario x arm x repeat, the
+last recorded one when a resume repeated it; each line with `host_cache`, `since_prev_s` and
+`host_cache_after` from the order in which the run's executions reached the host, see
+suite_common.assign_host_cache), samples.jsonl (sorted by time, deduplicated, each sample's `phase` the arm or
+loop it was taken during), jobs.jsonl, manifest.json and run.json (the identity of the run from the direct
+arms, every arm's own run.json under `arms`). Re-running it rewrites the same files.
 """
 
 import json
@@ -28,6 +31,34 @@ def arm_dirs(run_dir):
     names = [n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)) and not n.startswith(".")]
     names.sort(key=lambda n: (ARM_ORDER.get(n, 9), n))
     return [(n, os.path.join(root, n)) for n in names]
+
+
+def clock_offsets(orchestrator):
+    """{arm: seconds its clock is ahead of the laptop's}: direct-local is stamped on mex, whose offset the
+    orchestrator measures per invocation (the median of the invocations is used)."""
+    vals = []
+    for sess in (orchestrator or {}).get("sessions", []) or []:
+        v = sess.get("mex_clock_offset_s")
+        try:
+            vals.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    if not vals:
+        return {}
+    vals.sort()
+    return {"direct-local": vals[len(vals) // 2]}
+
+
+def sample_files(run_dir):
+    """The orchestrator's sample files (RUN_DIR/samples/*.jsonl), as (phase, path)."""
+    root = os.path.join(run_dir, "samples")
+    if not os.path.isdir(root):
+        return []
+    out = []
+    for name in sorted(os.listdir(root)):
+        if name.endswith(".jsonl"):
+            out.append((name.split("-", 1)[0], os.path.join(root, name)))
+    return out
 
 
 def write_jsonl(path, rows):
@@ -83,7 +114,18 @@ def merge(run_dir):
         if manifest_copy is None and os.path.exists(os.path.join(path, "manifest.json")):
             manifest_copy = os.path.join(path, "manifest.json")
 
-    merged_rows = [executions[k] for k in order]
+    for phase, path in sample_files(run_dir):
+        srows, sbad = sc.read_jsonl(path)
+        if sbad:
+            warnings.append("samples/%s: %d unparsable line(s) ignored" % (os.path.basename(path), sbad))
+        for s in srows:
+            s = dict(s)
+            s.setdefault("phase", phase)
+            samples.append(s)
+
+    orchestrator = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
+    offsets = clock_offsets(orchestrator)
+    merged_rows = sc.assign_host_cache([executions[k] for k in order], offsets)
     seen = set()
     unique_samples = []
     for s in sorted(samples, key=lambda s: (sc.parse_utc(s.get("t_utc")) or 0.0)):
@@ -136,7 +178,8 @@ def merge(run_dir):
         "host_load_start": (arm_runs.get("direct-local") or {}).get("host_load_start"),
         "host_load_end": (arm_runs.get("direct-local") or {}).get("host_load_end"),
         "arms": arms_summary,
-        "orchestrator": sc.read_json(os.path.join(run_dir, "orchestrator.json")),
+        "orchestrator": orchestrator,
+        "host_cache": {"warm_window_s": sc.HOST_CACHE_WARM_S, "clock_offsets_s": offsets},
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
         "warnings": warnings,
     }

@@ -103,43 +103,61 @@ manifest/suite_smoke_v1.json (lane S1's); without `--manifest` a full run takes 
 
 ### Comparator and report
 - `merge_run.py RUN_DIR`: writes the top-level run.json / executions.jsonl / samples.jsonl / jobs.jsonl /
-  manifest.json from `arms/*` (raw paths rewritten to `arms/<arm>/raw/...`; for a key recorded twice the
-  later line wins; lines of another arm in an arm's file are dropped with a warning). Re-runnable.
+  manifest.json from `arms/*` and the orchestrator's `samples/*.jsonl` (raw paths rewritten to
+  `arms/<arm>/raw/...`; for a key recorded twice the later line wins; lines of another arm in an arm's file
+  are dropped with a warning; samples deduplicated by time and container). Re-runnable.
+- Host cache (review H1): merge_run gives every merged execution line `host_cache`, `since_prev_s` and
+  `host_cache_after` from the order in which the run's executions of each scenario reached the host, over all
+  arms (direct-local's times shifted by the mex clock offset the orchestrator measured): `cold` = the
+  scenario's first execution on the host in this run, `warm` = another execution of it ended at most 60 s
+  before this one started, `aged` = longer ago (cache state unknown), `not_reached` = an execution the host
+  never saw (an MCP refusal at submit or a request the MCP cannot express: MCP outcome other than pass /
+  fail; a direct request whose connection was refused), `unknown` = no start time. `cache` (the arm's own
+  repeat 0 / later) stays as §8.3 has it; everything timed keys on `host_cache`.
 - `compare.py RUN_DIR [--by-design PATH]`: merges first when `arms/` exists, then writes compare.json:
   per scenario and arm the outcome over the repeats (the common one, else error > fail > mixed) and whether
   the repeats' digests agree; direct-local vs direct-remote as `identical` (same digest), `same_checks`
-  (other answer, same check outcomes) or `disagree`; the MCP class of DESIGN §1.3; overheads, cold vs warm,
-  timing and resource summaries per area and arm.
+  (other answer, same check outcomes, at least one check compared), `not_comparable` (other answer, no check
+  evaluated on both) or `disagree`, with `checks_compared`; the MCP class of DESIGN §1.3; overheads, cold vs
+  warm, timing and resource summaries per area, arm and host cache.
 - MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; the scenario's
   `mcp.by_design` case(s) in async's table (below); the MCP runner's own `not_implemented_mcp` /
-  `service_by_design` outcome; else `agree` when the checks both arms evaluated have the same outcomes (a
-  check `not_exposed` on either side is not compared) and neither side alone errored, `disagree` otherwise.
-  No MCP line: `missing`.
+  `service_by_design` outcome; else, on the checks both arms evaluated (a check `not_exposed` on either side
+  is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
+  side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
+  vacuous), `agree` otherwise. No MCP line: `missing`.
 - `service_by_design.json`: async's table (124 cases), copied byte-identical from the search-service work at
   commit 22d034ba (`service_commit` inside; sha256 7ae2ee30...). A case's `agreement`
-  `not_implemented_mcp` -> not implemented yet via MCP; `service_only` -> service-side by design;
-  `by_design` -> service-side by design when the pair holds: the direct answer matches
-  `direct_expectation` (http, code, text with digits ignored, each where stated; the code may also be a
-  pattern slot's) and the MCP executions match `service_answer` (`refused_at_submit` / `relayed`: error.code,
+  `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) -> service-side
+  by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
+  service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text
+  with digits ignored, each where stated; the code may also be a pattern slot's) and the MCP executions match
+  `service_answer` (`refused_at_submit` / `relayed`: error.code (alternatives written `a | b`),
   `text_contains` and `field` where the MCP line states them, a line without an error only when the MCP
   runner marked it service_by_design; `answered` / `clamped`: no error). A pair that does not hold is
   `disagree` with the side (direct / mcp / table for an unknown case id). With a list of cases the first
-  whose pair holds decides. The MCP arm's execution lines should carry `error` {code, text, field}.
-- Overheads (DESIGN §5): front = direct-remote minus direct-local per scenario (cold: repeat 0; warm: repeat
-  1). The arms run one after the other, so the later one finds the host's row cache warm (smoke run: resolve
-  345 ms server time on direct-local, 1.1 ms on direct-remote) and the raw wall difference mixes cache and
-  network, even going negative; the client-side difference, (wall - server elapsed) remote minus the same
-  locally, leaves the server's part out and is the front cost to read. Both are reported, with the server
-  elapsed difference; answers without `timing` (errors, capabilities) count in the raw rows only. MCP: only executions that reached the host (outcome
-  pass / fail); the MCP warm line (repeat 1, else 0) minus each direct arm's line of the same repeat (else its
-  repeat 0), with and without `mcp_phases.queue_ms`, and `backend_ms` minus each direct arm; the phases'
-  distributions as given; the cold MCP wall time separately.
+  whose pair holds decides. `verified` is true only when every side the case has was checked and held; the
+  report counts verified and unverified by-design pairs. The MCP arm's execution lines should carry `error`
+  {code, text, field}.
+- Overheads (DESIGN §5, review H1/M1), on pairs of host-warm executions only: front = direct-remote minus
+  direct-local (each arm's first warm execution of the scenario): the wall difference, the client-side
+  difference ((wall - server elapsed) remote minus the same locally) and the server difference (near 0 when
+  both are warm). Wall times exclude the connection set-up (`client.connect_ms`, reported apart per arm; for
+  lines of the older runner that timed from before the connect, compare subtracts connect_ms). A scenario
+  whose first arm ran only its cold execution has no warm pair and is counted as such; the cold executions
+  are reported apart (per arm: wall and server). MCP: only executions that reached the host (outcome pass /
+  fail); the MCP warm execution (repeat 1 preferred) minus each direct arm's first warm one, with and without
+  `mcp_phases.queue_ms`, and `backend_ms` minus each direct arm; the phases of the warm execution; the MCP
+  cold execution's wall time apart. Cold vs warm: an arm's host-cold execution and its next host-warm repeat.
 - Resources: each execution joins the samples from its start - 1 s to its end + 2 s (docker averages CPU over
   its own window), else the nearest sample within 5 s; per area and arm the peak container CPU and memory,
   the mean sra_all CPU and host load1, and the peak `work.memory_bytes` of the answers.
 - `report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf]`: report.md (ASCII-safe pipe tables: common
   signs spelled out, other non-ASCII as '?', sequences over 40 bp cut, markdown specials escaped), then
-  `pandoc report.md -o report.pdf --pdf-engine=xelatex`. Verdict: INCOMPLETE when an arm did not finish,
-  FAIL on any failed / errored execution or any direct / MCP disagreement, else PASS; a stub run says so in
-  bold. The load caveat appears when the sra_all CPU mean exceeds 400 % or the load1 mean exceeds 48 (half
+  `pandoc report.md -o report.pdf --pdf-engine=xelatex`. Verdict: INCOMPLETE when a direct arm did not
+  finish (state other than done) or the orchestrator's loop was cut, FAIL on any failed / errored execution or
+  any direct / MCP disagreement, UNVERIFIED when the checks stub ran (never PASS: review L2), else PASS. The
+  scripts commit keeps its `+dirty` marker (L1); a failing check is shown with the expectation at the same
+  position among the scenario's expectations of that name (L3); the resource columns are captioned as the
+  container's figures during the run, not the request's own (L5). The load caveat appears when the sra_all CPU mean exceeds 400 % or the load1 mean exceeds 48 (half
   of mex's 96 cores). compare.json is computed when missing.

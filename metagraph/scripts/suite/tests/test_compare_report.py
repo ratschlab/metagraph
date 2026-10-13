@@ -140,7 +140,9 @@ def build_run(run_dir):
     write_arm(run_dir, "direct-local", local, samples=samples_local,
               raw_bodies={("M-001", 0): {"patterns": [{"id": "a", "error": {"code": "mismatches_above_cap",
                                                                              "message": "cap 1"}}]}})
-    tr = T0 + 100
+    # direct-remote within 60 s of direct-local (host-warm), the MCP arm 20 s later (warm too), except R-001,
+    # whose MCP execution runs first (the host-cold one, as in paired mode)
+    tr = T0 + 30
     remote = [line("P-001", "direct-remote", 0, tr, 110.0, memory=1000),
               line("P-001", "direct-remote", 1, tr + 2, 100.0),
               line("P-002", "direct-remote", 0, tr + 4, 105.0, http=400, digest="e",
@@ -150,14 +152,14 @@ def build_run(run_dir):
               line("A-999", "mcp", 0, tr, 1.0)]  # a line of another arm in this arm's file: dropped
     write_arm(run_dir, "direct-remote", remote, run_extra={"state": "interrupted"},
               samples=[sample(tr + 1, 30.0, 10 << 30, 7000.0, 220.0, phase="direct-remote")])
-    tm = T0 + 200
+    tm = T0 + 50
     ph = {"submit_ms": 50.0, "queue_ms": 200.0, "backend_ms": 300.0, "terminal_lag_ms": 100.0, "paging_ms": 30.0}
     mcp_checks_fail = [{"check": "status", "outcome": "pass", "detail": "ok"},
                        {"check": "contains_source_context", "outcome": "fail", "detail": "absent"}]
     mcp = [line("P-001", "mcp", 0, tm, 900.0, phases=ph),
            line("P-001", "mcp", 1, tm + 2, 700.0, phases=ph),
            line("P-002", "mcp", 0, tm + 4, 800.0, checks=mcp_checks_fail, outcome="fail"),
-           line("R-001", "mcp", 0, tm + 6, 800.0, checks=[{"check": "status", "outcome": "pass", "detail": ""},
+           line("R-001", "mcp", 0, T0 + 5, 800.0, checks=[{"check": "status", "outcome": "pass", "detail": ""},
                                                           {"check": "contains_source_context",
                                                            "outcome": "not_exposed", "detail": ""}]),
            line("P-003", "mcp", 0, tm + 8, 800.0),  # answered by the service: by design
@@ -198,6 +200,16 @@ class MergeTest(unittest.TestCase):
             self.assertNotIn("capabilities", merged["arms"]["direct-local"])
             self.assertTrue(any("another arm" in w for w in merged["warnings"]))
             self.assertTrue(os.path.exists(os.path.join(d, "manifest.json")))
+            hc = dict((sc.execution_key(r), (r["host_cache"], r["since_prev_s"], r["host_cache_after"]))
+                      for r in rows)
+            self.assertEqual(hc[("P-001", "direct-local", 0)], ("cold", None, None))
+            self.assertEqual(hc[("P-001", "direct-local", 1)][0], "warm")
+            self.assertAlmostEqual(hc[("P-001", "direct-local", 1)][1], 0.991)
+            self.assertEqual(hc[("P-001", "direct-remote", 0)][::2], ("warm", "direct-local"))
+            self.assertEqual(hc[("R-001", "mcp", 0)][0], "cold")
+            self.assertEqual(hc[("R-001", "direct-local", 0)][::2], ("warm", "mcp"))
+            self.assertEqual(hc[("S-001", "mcp", 0)][0], "not_reached")  # refused by the service
+            self.assertEqual(merged["host_cache"]["warm_window_s"], 60.0)
             # idempotent
             merge_run.merge(d)
             self.assertEqual(len(sc.read_jsonl(os.path.join(d, "executions.jsonl"))[0]), len(rows))
@@ -238,6 +250,7 @@ class CompareTest(unittest.TestCase):
 
     def test_direct_agreement(self):
         sc_ = self.comp["scenarios"]
+        self.assertEqual(sc_["P-001"]["direct_agreement"]["checks_compared"], 4)
         self.assertEqual(sc_["P-001"]["direct_agreement"]["class"], "identical")
         self.assertEqual(sc_["P-002"]["direct_agreement"]["class"], "identical")
         self.assertEqual(sc_["R-001"]["direct_agreement"]["class"], "disagree")
@@ -264,6 +277,40 @@ class CompareTest(unittest.TestCase):
         p3 = self.comp["scenarios"]["P-003"]["mcp_agreement"]
         self.assertTrue(p3["direct_verified"])
         self.assertEqual(self.s["mcp_agreement"]["disagree"], 2)
+        # review M2: checks compared per comparison, by-design pairs verified on every side the case has
+        self.assertEqual(self.comp["scenarios"]["R-001"]["mcp_agreement"]["checks_compared"], 1)
+        self.assertEqual(self.comp["scenarios"]["R-001"]["mcp_agreement"]["checks_not_exposed"], 1)
+        s1 = self.comp["scenarios"]["S-001"]["mcp_agreement"]
+        self.assertTrue(s1["mcp_verified"] and s1["verified"])
+        self.assertEqual((self.s["mcp_agreement"]["by_design_verified"],
+                          self.s["mcp_agreement"]["by_design_unverified"]), (3, 0))
+
+    def test_agree_needs_a_compared_check(self):
+        ne = [{"check": "status", "outcome": "not_exposed", "detail": ""},
+              {"check": "contains_source_context", "outcome": "not_exposed", "detail": ""}]
+        d = {"direct-local": {0: line("P-1", "direct-local", 0, T0, 1.0)}}
+        res = cmp.mcp_agreement({0: line("P-1", "mcp", 0, T0, 1.0, checks=ne)}, d, {"mcp": {}}, {}, None)
+        self.assertEqual((res["class"], res["checks_compared"], res["checks_not_exposed"]), ("not_comparable", 0, 2))
+        res = cmp.mcp_agreement({0: line("P-1", "mcp", 0, T0, 1.0, checks=ne, outcome="error")}, d, {"mcp": {}},
+                                {}, None)
+        self.assertEqual(res["class"], "disagree")  # an error on one side only
+        res = cmp.direct_agreement({0: line("P-1", "direct-local", 0, T0, 1.0, checks=ne, digest="a")},
+                                   {0: line("P-1", "direct-remote", 0, T0, 1.0, checks=ne, digest="b")})
+        self.assertEqual(res["class"], "not_comparable")
+
+    def test_service_only_verified(self):
+        d = line("S-1", "direct-local", 0, T0, 1.0)
+        ok = cmp.by_design_class(CASES["case.only"], d, [line("S-1", "mcp", 0, T0, 1.0, outcome="service_by_design",
+                                                              error={"code": "rate_limited"})], None)
+        self.assertEqual((ok["class"], ok["verified"]), ("service_by_design", True))
+        # the service answered what it should have refused: no longer "by design"
+        bad = cmp.by_design_class(CASES["case.only"], d, [line("S-1", "mcp", 0, T0, 1.0)], None)
+        self.assertEqual((bad["class"], bad["side"]), ("disagree", "mcp"))
+        alt = {"id": "q", "agreement": "service_only",
+               "service_answer": {"outcome": "refused_at_submit", "code": "capacity_unavailable | traversal_queue_full"}}
+        ok = cmp.by_design_class(alt, None, [line("S-1", "mcp", 0, T0, 1.0, error={"code": "traversal_queue_full"})],
+                                 None)
+        self.assertTrue(ok["verified"])
 
     def test_by_design_direct_side_and_unknown_case(self):
         sid_line = line("P-1", "direct-local", 0, T0, 1.0, http=200)
@@ -274,7 +321,8 @@ class CompareTest(unittest.TestCase):
                                 {"mcp": {"by_design": "no.such.case"}}, CASES, None)
         self.assertEqual((res["class"], res["side"]), ("disagree", "table"))
         # a list of cases: the first whose pair holds decides
-        res = cmp.mcp_agreement({0: line("P-1", "mcp", 0, T0, 1.0)}, {"direct-local": {0: sid_line}},
+        res = cmp.mcp_agreement({0: line("P-1", "mcp", 0, T0, 1.0, error={"code": "rate_limited"})},
+                                {"direct-local": {0: sid_line}},
                                 {"mcp": {"by_design": ["no.such.case", "case.only"]}}, CASES, None)
         self.assertEqual(res["class"], "service_by_design")
         res = cmp.mcp_agreement({}, {"direct-local": {0: sid_line}}, {"mcp": {"by_design": "case.answered"}},
@@ -299,6 +347,7 @@ class CompareTest(unittest.TestCase):
                                          None)
         self.assertEqual(unverified["class"], "service_by_design")
         self.assertIsNone(unverified["mcp_verified"])
+        self.assertFalse(unverified["verified"])
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
@@ -312,37 +361,45 @@ class CompareTest(unittest.TestCase):
                           ("refused_at_submit", "answered", "clamped", "not_expressible", "relayed"))
 
     def test_overheads(self):
+        # review H1: the front cost pairs host-warm executions only: P-001 local r1 (6 ms, server 3) with
+        # remote r1 (100 ms, server 50); P-002's local execution is only the cold one: unpaired
         fo = self.comp["scenarios"]["P-001"]["front_overhead"]
-        self.assertAlmostEqual(fo["cold_ms"], 101.0)
-        # client side: (110 - 55) - (9 - 4.5)
-        self.assertAlmostEqual(fo["cold_net_ms"], 50.5)
-        self.assertAlmostEqual(fo["warm_net_ms"], 47.0)
-        self.assertEqual(self.s["front_overhead"]["per_area_net"]["P"]["n"], 3)
-        self.assertAlmostEqual(fo["warm_ms"], 94.0)
-        self.assertEqual(self.s["front_overhead"]["all"]["cold_ms"]["n"], 4)
+        self.assertEqual((fo["local_repeat"], fo["remote_repeat"]), (1, 1))
+        self.assertAlmostEqual(fo["wall_ms"], 94.0)
+        self.assertAlmostEqual(fo["net_ms"], 47.0)
+        self.assertAlmostEqual(fo["server_ms"], 47.0)
+        self.assertIsNone(self.comp["scenarios"]["P-002"]["front_overhead"])
+        f = self.s["front_overhead"]
+        # P-001 and R-001 (whose MCP execution took the cold one, so both direct arms ran warm)
+        self.assertEqual(f["warm"]["wall_ms"]["n"], 2)
+        self.assertEqual(f["scenarios_without_warm_pair"], 2)
+        self.assertEqual(f["per_area_net"]["P"]["n"], 1)
+        self.assertEqual(f["cold"]["direct-local"]["wall_ms"]["n"], 8)  # R-001's cold execution was the MCP one
         mo = self.comp["scenarios"]["P-001"]["mcp_overhead"]
         self.assertEqual(mo["repeat"], 1)
-        self.assertAlmostEqual(mo["minus_remote_ms"], 600.0)
-        self.assertAlmostEqual(mo["minus_remote_no_queue_ms"], 400.0)
-        self.assertAlmostEqual(mo["backend_minus_remote_ms"], 200.0)
-        self.assertAlmostEqual(mo["minus_local_ms"], 694.0)
+        self.assertAlmostEqual(mo["minus_remote_ms"], 590.0)      # 700 - remote r0 (the first warm one)
+        self.assertAlmostEqual(mo["minus_remote_no_queue_ms"], 390.0)
+        self.assertAlmostEqual(mo["backend_minus_remote_ms"], 190.0)
+        self.assertAlmostEqual(mo["minus_local_ms"], 694.0)       # 700 - local r1
         self.assertAlmostEqual(mo["backend_minus_local_ms"], 294.0)
-        self.assertEqual(mo["cold_wall_ms"], 900.0)
+        self.assertIsNone(mo["cold_wall_ms"])
+        r1 = self.comp["scenarios"]["R-001"]["mcp_overhead"]
+        self.assertEqual(r1["cold_wall_ms"], 800.0)
+        self.assertNotIn("minus_local_ms", r1)                    # no MCP warm execution
         self.assertEqual(self.s["mcp_phases"]["queue_ms"]["n"], 1)
         # only MCP executions that reached the host (pass / fail) count towards the overhead
-        self.assertEqual(self.s["mcp_overhead"]["minus_local_ms"]["n"], 5)
-        self.assertNotIn("cold_wall_ms", self.s["mcp_overhead"])
-        self.assertEqual(self.s["mcp_cold_wall_ms"]["n"], 5)
+        self.assertEqual(self.s["mcp_overhead"]["minus_local_ms"]["n"], 1)
+        self.assertEqual(self.s["mcp_overhead"]["minus_remote_ms"]["n"], 3)
+        self.assertEqual(self.s["mcp_cold_wall_ms"]["n"], 1)
         self.assertNotIn("mcp_overhead", self.comp["scenarios"]["P-005"])
 
-    def test_cold_warm_and_timing(self):
-        cw = self.comp["scenarios"]["P-001"]["arms"]["direct-local"]["cold_warm"]
-        self.assertEqual((cw["cold_ms"], cw["warm_ms"], cw["delta_ms"]), (9.0, 6.0, -3.0))
-        self.assertEqual(self.s["cold_warm"]["direct-local"]["n"], 1)
-        t = self.s["timing"]["P"]["direct-local"]
-        self.assertEqual(t["warm"]["n"], 1)
-        self.assertEqual(t["cold"]["n"], 5)
-        self.assertIsNotNone(t["server"]["p50"])
+    def test_wall_without_connect(self):
+        new = line("P-1", "direct-remote", 0, T0, 100.0)
+        new["client"] = {"connect_ms": 60.0, "reused": False, "attempts": 1}
+        self.assertEqual(cmp.wall_net(new), 100.0)      # this runner times on an established connection
+        old = line("P-1", "direct-remote", 0, T0, 100.0)
+        old["client"] = {"connect_ms": 60.0}
+        self.assertEqual(cmp.wall_net(old), 40.0)       # an older runner's wall included the connect
 
     def test_resources(self):
         r = self.s["resources"]["P"]["direct-local"]
@@ -370,10 +427,13 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(cmp.aggregate_outcome(["fail", "error"]), "error")
         self.assertEqual(cmp.aggregate_outcome(["pass", "service_by_design"]), "mixed")
         self.assertIsNone(cmp.aggregate_outcome([]))
-        d, u = cmp.compare_checks([{"check": "a", "outcome": "pass"}, {"check": "b", "outcome": "pass"}],
-                                  [{"check": "a", "outcome": "fail"}, {"check": "c", "outcome": "pass"}])
+        d, u, n, ne = cmp.compare_checks([{"check": "a", "outcome": "pass"}, {"check": "b", "outcome": "pass"},
+                                          {"check": "e", "outcome": "not_exposed"}],
+                                         [{"check": "a", "outcome": "fail"}, {"check": "c", "outcome": "pass"},
+                                          {"check": "e", "outcome": "pass"}])
         self.assertEqual(d, [{"check": "a", "a": "pass", "b": "fail"}])
         self.assertEqual(u, ["b", "c"])
+        self.assertEqual((n, ne), (1, 1))
 
     def test_main_writes_compare_json(self):
         self.assertEqual(cmp.main([self.dir, "--by-design", ""]), 0)
@@ -420,6 +480,34 @@ class ReportTest(unittest.TestCase):
         self.assertIn("subset of", text)
         self.assertIn("M-002", text)  # listed as not implemented yet via MCP
         self.assertNotIn("checks stub", text.lower())
+        self.assertIn("| P | direct-local | cold | 5 |", text)
+        self.assertIn("| P | direct-remote | warm | 4 |", text)
+        self.assertIn("warm pairs", text)
+        self.assertIn("3 pair(s) verified", text)
+
+    def test_unverified_verdict_and_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_arm(d, "direct-local", [line("P-1", "direct-local", 0, T0, 1.0, checks=[
+                {"check": "status", "outcome": "pass", "detail": "ok"}])],
+                      run_extra={"checks_module": "stub", "scripts_commit": "0123456789abcdef0123+dirty"})
+            merge_run.merge(d)
+            text = report.build_report(d)
+        self.assertIn("**UNVERIFIED (stub checks", text)
+        self.assertNotIn("PASS", text)
+        self.assertIn("0123456789ab+dirty", text)
+        self.assertEqual(report.short_commit("0123456789abcdef"), "0123456789ab")
+
+    def test_failure_expectation_by_position(self):
+        manifest = {"scenarios": [{"id": "Q-1", "expect": [
+            {"check": "contains_source_context", "args": {"level": 0}},
+            {"check": "contains_source_context", "args": {"level": 2}}]}]}
+        rows = [dict(line("Q-1", "direct-local", 0, T0, 1.0, outcome="fail", checks=[
+            {"check": "status", "outcome": "pass", "detail": "implicit"},
+            {"check": "contains_source_context", "outcome": "pass", "detail": "ok"},
+            {"check": "contains_source_context", "outcome": "fail", "detail": "absent at level 2"}]))]
+        text = report.failures_section(rows, manifest, 10)
+        self.assertIn('expected: \\{"level": 2\\}', text)
+        self.assertNotIn('"level": 0', text)
 
     def test_report_stub_warning_and_quiet_host(self):
         run = sc.read_json(os.path.join(self.dir, "run.json"))

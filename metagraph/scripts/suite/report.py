@@ -109,6 +109,26 @@ def short(text, n=12):
     return "-" if not text else str(text)[:n]
 
 
+def short_commit(commit):
+    """A commit cut to 12 characters, keeping a `+dirty` marker (review L1)."""
+    if not commit:
+        return "-"
+    text = str(commit)
+    dirty = text.endswith("+dirty")
+    return text.replace("+dirty", "")[:12] + ("+dirty" if dirty else "")
+
+
+HOST_CACHE_ORDER = {"cold": 0, "warm": 1, "aged": 2, "not_reached": 3, "unknown": 4}
+HOST_CACHE_LABEL = {"cold": "cold", "warm": "warm", "aged": "aged", "not_reached": "not reached",
+                    "unknown": "unknown"}
+
+
+def orchestrator_session(run):
+    """The orchestrator's last invocation (run_suite.sh), or {}."""
+    sessions = ((run.get("orchestrator") or {}).get("sessions")) or []
+    return sessions[-1] if sessions else {}
+
+
 def load_compare(run_dir, by_design_path=None):
     path = os.path.join(run_dir, "compare.json")
     data = sc.read_json(path)
@@ -140,14 +160,24 @@ def verdict_section(run, comp, rows, samples):
     totals = s.get("totals", {})
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
     states = dict((arm, (info or {}).get("state")) for arm, info in (run.get("arms") or {}).items())
-    incomplete = [arm for arm, st in states.items() if st not in (None, "done")]
+    incomplete = ["%s (%s)" % (arm, st) for arm, st in sorted(states.items())
+                  if st not in (None, "done") and arm != "mcp"]
+    loop = orchestrator_session(run).get("loop") or {}
+    if loop and loop.get("state") not in (None, "done"):
+        incomplete.append("the %s loop (%s)" % (loop.get("mode", "paired"), loop.get("state")))
     dis_direct = s["direct_agreement"].get("disagree", 0)
     dis_mcp = s["mcp_agreement"].get("disagree", 0)
+    modules = sorted(set((info or {}).get("checks_module") for info in (run.get("arms") or {}).values()
+                         if (info or {}).get("checks_module")))
+    stub = "stub" in modules
     if incomplete:
-        verdict = "INCOMPLETE (arm(s) not finished: %s)" % ", ".join(sorted(incomplete))
+        verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
     elif failing or dis_direct or dis_mcp:
         verdict = "FAIL (%d failed or errored execution(s), %d direct and %d MCP disagreement(s))" % (
             failing, dis_direct, dis_mcp)
+    elif stub:
+        # A stub run checked the HTTP status only: never PASS (review L2).
+        verdict = "UNVERIFIED (stub checks: HTTP status only): no failed status, no disagreement between the arms"
     else:
         verdict = "PASS (no failed execution, no disagreement between the arms)"
     lines.append("**%s**" % md(verdict))
@@ -159,12 +189,16 @@ def verdict_section(run, comp, rows, samples):
                      "%d service-side by design." % (md(arm), t.get("executions", 0), o.get("pass", 0),
                                                       o.get("fail", 0), o.get("error", 0),
                                                       o.get("not_implemented_mcp", 0), o.get("service_by_design", 0)))
-    modules = sorted(set((info or {}).get("checks_module") for info in (run.get("arms") or {}).values()
-                         if (info or {}).get("checks_module")))
-    if "stub" in modules:
+    ma = s["mcp_agreement"]
+    if ma.get("compared"):
+        lines.append("- MCP agreement: %d agree, %d not comparable (no check both arms evaluated), %d disagree; "
+                     "service-side by design %d verified, %d unverified." % (
+                         ma.get("agree", 0), ma.get("not_comparable", 0), ma.get("disagree", 0),
+                         ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0)))
+    if stub:
         lines.append("")
-        lines.append("**Checks: the stub ran (HTTP status only); every other expected check reads "
-                     "not_exposed. This run is not a verified run.**")
+        lines.append("**Checks: the stub ran (HTTP status, error code and text only); every other expected check "
+                     "reads not_exposed. This run is not a verified run.**")
     lf = load_figures(samples)
     lines.append("")
     lines.append(load_caveat(lf))
@@ -200,9 +234,28 @@ def environment_section(run, comp, rows, samples):
         ("manifest", "version %s, sha256 %s, %s scenario(s)%s" % (
             md(man.get("manifest_version")), md(short(man.get("computed_sha256") or man.get("content_sha256"), 16)),
             md(man.get("scenarios_total")), "" if man.get("sha_verified", True) else " (content_sha256 MISMATCH)")),
-        ("scripts commit", md(short(run.get("scripts_commit"), 12))),
+        ("scripts commit", md(short_commit(run.get("scripts_commit")))),
         ("generated", md(sc.iso_utc(time.time()))),
     ]
+    orch = orchestrator_session(run)
+    loop = orch.get("loop") or {}
+    if orch:
+        mode = orch.get("mode") or "sequential"
+        desc = {"paired": "paired: per scenario MCP cold, direct-local, direct-remote, MCP warm, one arm at a time",
+                "sequential": "sequential: one arm after the other"}.get(mode, mode)
+        if loop:
+            desc += "; loop %s, %s of %s scenario(s)" % (loop.get("state"), loop.get("completed", "-"),
+                                                         loop.get("scenarios", "-"))
+        kv.append(("mode", md(desc)))
+        if orch.get("mcp_cmd"):
+            kv.append(("MCP runner", "command template `%s`" % ascii_safe(orch["mcp_cmd"]).replace("`", "'")))
+    hcinfo = run.get("host_cache") or comp.get("host_cache") or {}
+    offsets = hcinfo.get("clock_offsets_s") or {}
+    kv.append(("host cache", "cold = a scenario's first execution on the host in this run, warm = another within "
+               "%s s, aged = older (state unknown); mex clock %s" % (
+                   fmt_num(hcinfo.get("warm_window_s", sc.HOST_CACHE_WARM_S), 0),
+                   ("%+.3f s against the laptop (applied to direct-local)" % offsets["direct-local"])
+                   if "direct-local" in offsets else "offset not measured")))
     if comp.get("by_design_table"):
         t = comp["by_design_table"]
         kv.append(("by-design table", "%s case(s), service commit %s, sha256 %s" % (
@@ -276,16 +329,22 @@ def failures_section(rows, manifest, max_failures):
         err = r.get("error") or {}
         if err.get("code") or err.get("text"):
             out.append("- observed error: %s: %s" % (md(err.get("code") or "-"), md(err.get("text") or "", 400)))
+        # The k-th result of a check name answers the k-th expectation of that name (review L3): a scenario may
+        # list a check twice with other arguments, and the checks may add an implicit one of another name.
         expects = {}
         for e in s.get("expect") or []:
             expects.setdefault(e.get("check"), []).append(e.get("args"))
+        seen = {}
         for c in r.get("checks") or []:
+            name = c.get("check")
+            k = seen.get(name, 0)
+            seen[name] = k + 1
             if c.get("outcome") != "fail":
                 continue
-            exp = expects.get(c.get("check"))
-            out.append("- check %s: observed %s" % (md(c.get("check")), md(c.get("detail"), 500)))
-            if exp:
-                out.append("    - expected: %s" % md(json.dumps(exp[0], sort_keys=True), 400))
+            exp = expects.get(name) or []
+            out.append("- check %s: observed %s" % (md(name), md(c.get("detail"), 500)))
+            if k < len(exp):
+                out.append("    - expected: %s" % md(json.dumps(exp[k], sort_keys=True), 400))
         out.append("")
     return "\n".join(out)
 
@@ -298,8 +357,10 @@ def agreement_section(comp):
         out.append("Not compared (only one direct arm ran).\n")
     else:
         out.append("%d scenario(s) compared: %d identical answers (digest), %d with the same check outcomes but "
-                   "different answers, %d disagreeing." % (da["compared"], da["identical"], da["same_checks"],
-                                                          da["disagree"]))
+                   "different answers, %d not comparable (different answers, no check evaluated on both), %d "
+                   "disagreeing; %d check result(s) compared." % (
+                       da["compared"], da["identical"], da["same_checks"], da.get("not_comparable", 0),
+                       da["disagree"], da.get("checks_compared", 0)))
         out.append("")
         rows = []
         for sid in da.get("disagreeing", [])[:100]:
@@ -314,10 +375,16 @@ def agreement_section(comp):
     if not ma.get("compared"):
         out.append("No MCP arm in this run.\n")
         return "\n".join(out)
-    classes = [k for k in ("agree", "disagree", "not_implemented_mcp", "service_by_design", "missing",
-                           "no_direct_reference") if ma.get(k)]
+    classes = [k for k in ("agree", "not_comparable", "disagree", "not_implemented_mcp", "service_by_design",
+                           "missing", "no_direct_reference") if ma.get(k)]
     out.append("%d scenario(s): %s." % (ma["compared"], ", ".join("%d %s" % (ma[k], md(k)) for k in classes)))
     out.append("")
+    out.append("Agreement is decided on the checks both arms evaluated: %d check result(s) compared, %d skipped "
+               "as not exposed via MCP. `agree` needs at least one compared check; a scenario with none is "
+               "`not comparable`. Service-side by design: %d pair(s) verified (each side the table case has was "
+               "checked and held), %d unverified (a side stated nothing to compare, or the MCP runner's own "
+               "mark).\n" % (ma.get("checks_compared", 0), ma.get("checks_not_exposed", 0),
+                              ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0)))
     rows = []
     for sid in comp["order"]:
         a = comp["scenarios"][sid].get("mcp_agreement") or {}
@@ -331,6 +398,14 @@ def agreement_section(comp):
         rows.append([md(sid), md(a.get("case") or "-"), md(a.get("side") or "checks"), md(detail or "-", 200)])
     if rows:
         out.append(table(["scenario", "by-design case", "side", "detail"], rows, align=["l", "l", "l", "l"]))
+    nc = ma.get("not_comparable_scenarios") or []
+    if nc:
+        out.append("Not comparable: %s.\n" % ", ".join(md(x) for x in nc[:200]))
+    unverified = [sid for sid in comp["order"]
+                  if (comp["scenarios"][sid].get("mcp_agreement") or {}).get("class") == "service_by_design"
+                  and not (comp["scenarios"][sid].get("mcp_agreement") or {}).get("verified")]
+    if unverified:
+        out.append("Service-side by design, unverified: %s.\n" % ", ".join(md(x) for x in unverified[:200]))
     nim = [sid for sid in comp["order"]
            if (comp["scenarios"][sid].get("mcp_agreement") or {}).get("class") == "not_implemented_mcp"]
     if nim:
@@ -340,88 +415,106 @@ def agreement_section(comp):
 
 def timing_section(comp):
     s = comp["summary"]
-    out = ["# Timing", "", "Client wall time (ms; request sent to last byte) and the server's own elapsed time "
-           "(ms; `timing.elapsed_ms`, or the sum over patterns).", ""]
+    out = ["# Timing", "",
+           "Client wall time (ms; request sent to last byte on an established connection, the connection set-up "
+           "not included) and the server's own elapsed time (ms; `timing.elapsed_ms`, or the sum over patterns), "
+           "per area, arm and the host's cache state: cold = the scenario's first execution on the host in this "
+           "run (whichever arm ran it), warm = another execution of it within 60 s, aged = older (cache state "
+           "unknown), not reached = an MCP execution the host never saw (refused at submit, not expressible).", ""]
     rows = []
     for area in sorted(s["timing"], key=area_sort_key):
         for arm in comp["arms"]:
             t = s["timing"][area].get(arm)
             if not t:
                 continue
-            a, sv = t["all"], t["server"]
-            rows.append([md(area), md(arm), a["n"], fmt_ms(a["p50"]), fmt_ms(a["p90"]), fmt_ms(a["max"]),
-                         fmt_ms(sv["p50"]), fmt_ms(sv["p90"]), fmt_ms(sv["max"])])
-    out.append(table(["area", "arm", "n", "wall p50", "wall p90", "wall max", "server p50", "server p90",
-                      "server max"], rows))
-    out.append("## Cold vs warm")
-    out.append("")
-    rows = []
-    for area in sorted(s["timing"], key=area_sort_key):
-        for arm in comp["arms"]:
-            t = s["timing"][area].get(arm)
-            if not t or not t["warm"]["n"]:
-                continue
-            rows.append([md(area), md(arm), t["cold"]["n"], fmt_ms(t["cold"]["p50"]), fmt_ms(t["cold"]["p90"]),
-                         t["warm"]["n"], fmt_ms(t["warm"]["p50"]), fmt_ms(t["warm"]["p90"])])
-    out.append(table(["area", "arm", "cold n", "cold p50", "cold p90", "warm n", "warm p50", "warm p90"], rows))
+            for hc, b in sorted((t.get("by_host_cache") or {}).items(), key=lambda kv: HOST_CACHE_ORDER.get(kv[0], 9)):
+                a, sv = b["wall"], b["server"]
+                rows.append([md(area), md(arm), md(HOST_CACHE_LABEL.get(hc, hc)), a["n"], fmt_ms(a["p50"]),
+                             fmt_ms(a["p90"]), fmt_ms(a["max"]), fmt_ms(sv["p50"]), fmt_ms(sv["p90"]),
+                             fmt_ms(sv["max"])])
+    out.append(table(["area", "arm", "host cache", "n", "wall p50", "wall p90", "wall max", "server p50",
+                      "server p90", "server max"], rows))
     rows = []
     for arm, cw in sorted(s["cold_warm"].items()):
         rows.append([md(arm), cw["n"], fmt_ms(cw["delta_ms"]["p50"]), fmt_ms(cw["delta_ms"]["p90"]),
                      fmt_num(cw["ratio"]["p50"], 2), fmt_num(cw["ratio"]["p90"], 2)])
     if rows:
-        out.append("Paired repeats of the same scenario (warm minus cold; warm / cold):\n")
+        out.append("## Cold vs warm")
+        out.append("")
+        out.append("A scenario's host-cold execution and its next host-warm repeat on the same arm (warm minus "
+                   "cold; warm / cold):\n")
         out.append(table(["arm", "pairs", "delta p50", "delta p90", "ratio p50", "ratio p90"], rows))
     return "\n".join(out)
 
 
 def overhead_section(comp):
     s = comp["summary"]
-    out = ["# Overheads", "", "## Front: direct-remote minus direct-local", "",
-           "The laptop's network and the front proxy on dnaloc-new, for the same request. The arms run one after "
-           "the other, so the later arm finds the host's row cache warm: the raw wall difference mixes cache and "
-           "network (and can be negative). The client-side rows compare wall minus the server's own elapsed time "
-           "instead, which leaves the server's part out; they need the answer's timing, so error answers and "
-           "the capabilities documents only count in the raw rows.", ""]
     fo = s["front_overhead"]
+    out = ["# Overheads", "", "## Front: direct-remote minus direct-local", "",
+           "The laptop's network and the front proxy on dnaloc-new, for the same request, on pairs of host-warm "
+           "executions only (both arms answered from a warm row cache), so the difference is not a cache effect. "
+           "Each request is timed on an established connection: the TCP and TLS set-up is recorded apart "
+           "(below) and is not part of the front cost. The client-side row compares wall minus the server's own "
+           "elapsed time on each side; it needs the answer's timing, so error answers and the capabilities "
+           "documents count in the wall row only.", ""]
+    labels = {"net_ms": "client side (wall - server), warm pairs", "wall_ms": "wall, warm pairs",
+              "server_ms": "server elapsed, warm pairs"}
     rows = []
-    labels = {"cold_net_ms": "client side (wall - server), cold", "warm_net_ms": "client side (wall - server), warm",
-              "cold_ms": "raw wall, cold (repeat 0)", "warm_ms": "raw wall, warm (repeat 1)",
-              "server_cold_ms": "server elapsed, cold"}
-    for k in ("cold_net_ms", "warm_net_ms", "cold_ms", "warm_ms", "server_cold_ms"):
-        v = fo["all"].get(k) or {}
+    for k in ("net_ms", "wall_ms", "server_ms"):
+        v = (fo.get("warm") or {}).get(k) or {}
         if v.get("n"):
             rows.append([md(labels[k]), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])])
     out.append(table(["difference (ms)", "n", "p50", "p90", "max"], rows))
+    if fo.get("scenarios_without_warm_pair"):
+        out.append("%d scenario(s) ran on both direct arms without a host-warm execution on each (the first arm "
+                   "had only the cold one); they are not in the front cost.\n" % fo["scenarios_without_warm_pair"])
     net = fo.get("per_area_net") or {}
     rows = []
-    for a, v in sorted(fo["per_area"].items(), key=lambda kv: area_sort_key(kv[0])):
+    for a, v in sorted((fo.get("per_area_wall") or {}).items(), key=lambda kv: area_sort_key(kv[0])):
         if not v["n"]:
             continue
         n_ = net.get(a) or {}
         rows.append([md(a), n_.get("n", 0), fmt_ms(n_.get("p50")), fmt_ms(n_.get("p90")), v["n"],
                      fmt_ms(v["p50"]), fmt_ms(v["p90"])])
     if rows:
-        out.append("Per area, cold:\n")
-        out.append(table(["area", "client-side n", "p50", "p90", "raw n", "raw p50", "raw p90"], rows))
+        out.append("Per area, warm pairs:\n")
+        out.append(table(["area", "client-side n", "p50", "p90", "wall n", "wall p50", "wall p90"], rows))
+    rows = [[md(arm), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])]
+            for arm, v in sorted((fo.get("connect_ms") or {}).items()) if v.get("n")]
+    if rows:
+        out.append("Connection set-up (TCP, and TLS on the public URL), per fresh connection; not in any wall "
+                   "time above (one keep-alive connection per runner invocation, i.e. per scenario and arm in "
+                   "paired mode):\n")
+        out.append(table(["arm", "connections", "connect p50", "connect p90", "connect max"], rows))
+    rows = []
+    for arm, cv in sorted((fo.get("cold") or {}).items()):
+        w, sv = cv.get("wall_ms") or {}, cv.get("server_ms") or {}
+        if w.get("n"):
+            rows.append([md(arm), w["n"], fmt_ms(w["p50"]), fmt_ms(w["p90"]), fmt_ms(sv.get("p50")),
+                         fmt_ms(sv.get("p90"))])
+    if rows:
+        out.append("Cold executions (a scenario's first on the host; the arm that ran it first), reported apart "
+                   "from the warm pairs:\n")
+        out.append(table(["arm", "n", "wall p50", "wall p90", "server p50", "server p90"], rows))
     out.append("## MCP")
     out.append("")
-    if not s["mcp_phases"] and not s["mcp_overhead"]:
+    if not s["mcp_phases"] and not s["mcp_overhead"] and not (s.get("mcp_cold_wall_ms") or {}).get("n"):
         out.append("No MCP phases in this run.\n")
         return "\n".join(out)
     rows = [[md(k), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])]
             for k, v in sorted(s["mcp_phases"].items()) if v["n"]]
-    out.append("Phases of the MCP executions (DESIGN section 5: submit, queue, backend as the service measured it, "
-               "terminal lag, paging):\n")
+    out.append("Phases of the MCP warm executions (DESIGN section 5: submit, queue, backend as the service "
+               "measured it, terminal lag, paging):\n")
     out.append(table(["phase (ms)", "n", "p50", "p90", "max"], rows))
     rows = [[md(k), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])]
             for k, v in sorted(s["mcp_overhead"].items()) if v["n"]]
-    out.append("MCP (warm where repeated) minus the direct arms, with and without the queue; the backend time "
-               "against each direct arm (executions that reached the host only):\n")
+    out.append("MCP warm minus each direct arm's warm execution (both host-warm), with and without the queue; "
+               "the backend time against each direct arm (executions that reached the host only):\n")
     out.append(table(["difference (ms)", "n", "p50", "p90", "max"], rows))
     cw = s.get("mcp_cold_wall_ms") or {}
     if cw.get("n"):
-        out.append("MCP wall time of the first (cold) execution: n %d, p50 %s, p90 %s, max %s ms.\n" % (
-            cw["n"], fmt_ms(cw["p50"]), fmt_ms(cw["p90"]), fmt_ms(cw["max"])))
+        out.append("MCP wall time of the cold execution (the scenario's first on the host), apart: n %d, p50 %s, "
+                   "p90 %s, max %s ms.\n" % (cw["n"], fmt_ms(cw["p50"]), fmt_ms(cw["p90"]), fmt_ms(cw["max"])))
     return "\n".join(out)
 
 
@@ -429,7 +522,11 @@ def resources_section(comp):
     s = comp["summary"]
     out = ["# Resource use per area", "",
            "Samples of `docker stats` every 2 s joined to each execution's time window (start - 1 s to end + 2 s, "
-           "else the nearest sample within 5 s). Peak server memory is the answers' `work.memory_bytes`.", ""]
+           "else the nearest sample within 5 s). The CPU and memory columns are figures of the staging container "
+           "while the suite ran (shared with any other traffic it served), not of the suite's request alone; a "
+           "2 ms request is attributed a 3 s window. Peak server memory is the answers' own "
+           "`work.memory_bytes`. The direct-remote executions join on the laptop's clock against samples stamped "
+           "on mex (the offset is in the environment table).", ""]
     rows = []
     for area in sorted(s["resources"], key=area_sort_key):
         for arm in comp["arms"]:

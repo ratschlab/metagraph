@@ -235,6 +235,118 @@ class Files(unittest.TestCase):
             self.assertEqual(sc.read_json(p)["content_sha256"], sc.scenarios_sha256(scen))
 
 
+T0 = 1791800000.0
+
+
+def hline(sid, arm, repeat, t, wall=100.0, outcome="pass", http=200, error=None):
+    return {"scenario": sid, "arm": arm, "repeat": repeat, "started_utc": sc.iso_utc(t),
+            "ended_utc": sc.iso_utc(t + wall / 1000.0), "wall_ms": wall, "outcome": outcome, "http": http,
+            "error": error}
+
+
+class HostCache(unittest.TestCase):
+    def test_cold_warm_aged_and_not_reached(self):
+        rows = [hline("A", "direct-remote", 0, T0 + 70.0),            # 69.9 s after local: aged
+                hline("A", "direct-local", 0, T0),                     # first on the host: cold
+                hline("A", "direct-local", 1, T0 + 1.0),               # 0.9 s later: warm
+                hline("A", "mcp", 0, T0 + 70.2, outcome="service_by_design"),   # refused by the service
+                hline("A", "mcp", 1, T0 + 80.0),                       # after the remote one: warm
+                hline("B", "mcp", 0, T0 + 2.0, outcome="not_implemented_mcp"),  # never reached the host
+                hline("B", "direct-local", 0, T0 + 3.0),               # so this is B's cold execution
+                hline("C", "direct-local", 0, T0 + 4.0, http=0, error={"code": "transport", "text": "refused"}),
+                hline("C", "direct-remote", 0, T0 + 5.0),
+                {"scenario": "D", "arm": "direct-local", "repeat": 0}]
+        sc.assign_host_cache(rows)
+        got = [(r["scenario"], r["arm"], r["repeat"], r["host_cache"], r["since_prev_s"], r["host_cache_after"])
+               for r in rows]
+        self.assertEqual(got, [
+            ("A", "direct-remote", 0, "aged", 68.9, "direct-local"),
+            ("A", "direct-local", 0, "cold", None, None),
+            ("A", "direct-local", 1, "warm", 0.9, "direct-local"),
+            ("A", "mcp", 0, "not_reached", 0.1, "direct-remote"),
+            ("A", "mcp", 1, "warm", 9.9, "direct-remote"),
+            ("B", "mcp", 0, "not_reached", None, None),
+            ("B", "direct-local", 0, "cold", None, None),
+            ("C", "direct-local", 0, "not_reached", None, None),
+            ("C", "direct-remote", 0, "cold", None, None),
+            ("D", "direct-local", 0, "unknown", None, None)])
+
+    def test_clock_offset(self):
+        # mex's clock 2 s ahead: its line stamped T0 + 2.5 ran at T0 + 0.5 on the laptop, before the remote one
+        rows = [hline("A", "direct-remote", 0, T0 + 1.0), hline("A", "direct-local", 0, T0 + 2.5)]
+        sc.assign_host_cache(rows, {"direct-local": 2.0})
+        self.assertEqual([r["host_cache"] for r in rows], ["warm", "cold"])
+        sc.assign_host_cache(rows)
+        self.assertEqual([r["host_cache"] for r in rows], ["cold", "warm"])
+
+
+class PairedPlan(unittest.TestCase):
+    def test_plan_and_resume(self):
+        scen = [{"id": "C-1", "area": "C"}, {"id": "P-1", "area": "P"},
+                {"id": "L-1", "area": "L", "timing_class": "long"},
+                {"id": "M-1", "area": "M", "mcp": {"not_implemented": "max_mismatches"}},
+                {"id": "D-1", "area": "D", "repeat": 3}]
+        manifest = {"scenarios": scen}
+        with tempfile.TemporaryDirectory() as d:
+            plan = sc.paired_plan(manifest, d, arms=("direct-local", "direct-remote", "mcp"))
+            got = [(p["scenario"], p["direct-local"], p["direct-remote"], p["mcp_cold"], p["mcp_warm"]) for p in plan]
+            self.assertEqual(got, [("C-1", True, True, True, [1]), ("P-1", True, True, True, [1]),
+                                   ("L-1", True, None, None, []), ("M-1", True, True, True, []),
+                                   ("D-1", True, True, True, [1, 2])])
+            # C-1 (index 0) has a warm repeat on the direct arms: one recorded line leaves it to do
+            os.makedirs(os.path.join(d, "arms", "direct-local"))
+            os.makedirs(os.path.join(d, "arms", "mcp"))
+            sc.append_jsonl(os.path.join(d, "arms", "direct-local", "executions.jsonl"),
+                            {"scenario": "C-1", "arm": "direct-local", "repeat": 0})
+            sc.append_jsonl(os.path.join(d, "arms", "direct-local", "executions.jsonl"),
+                            {"scenario": "P-1", "arm": "direct-local", "repeat": 0})
+            sc.append_jsonl(os.path.join(d, "arms", "mcp", "executions.jsonl"),
+                            {"scenario": "D-1", "arm": "mcp", "repeat": 1})
+            plan = dict((p["scenario"], p) for p in sc.paired_plan(manifest, d, arms=("direct-local", "mcp")))
+            self.assertTrue(plan["C-1"]["direct-local"])
+            self.assertFalse(plan["P-1"]["direct-local"])
+            self.assertIsNone(plan["P-1"]["direct-remote"])
+            self.assertEqual(plan["D-1"]["mcp_warm"], [2])
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                mpath = os.path.join(d, "m.json")
+                with open(mpath, "w") as fh:
+                    json.dump(manifest, fh)
+                sc._main(["paired-plan", mpath, d, "", "", "10", "direct-local,mcp"])
+            self.assertEqual(buf.getvalue().splitlines()[:3], ["C-1 1 - 1 1", "P-1 0 - 1 1", "L-1 1 - - -"])
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                sc._main(["beyond-status", mpath, "", ""])
+            self.assertEqual(buf.getvalue().strip(), "")
+
+
+class Lock(unittest.TestCase):
+    def test_etime(self):
+        self.assertEqual(sc.parse_etime("05:07"), 307)
+        self.assertEqual(sc.parse_etime("01:00:00"), 3600)
+        self.assertEqual(sc.parse_etime("2-01:00:01"), 2 * 86400 + 3601)
+        self.assertIsNone(sc.parse_etime(""))
+        self.assertIsNone(sc.parse_etime("x:y"))
+
+    def test_verdict(self):
+        lock = {"pid": 42, "host": "laptop", "started_utc": "t", "started_epoch": 1000.0, "run_id": "R"}
+        alive = lambda pid: True  # noqa: E731
+        dead = lambda pid: False  # noqa: E731
+        self.assertEqual(sc.lock_verdict(lock, "laptop", 2000.0, alive, lambda pid: 1500.0)[0], "live")
+        self.assertEqual(sc.lock_verdict(lock, "laptop", 2000.0, dead, lambda pid: None)[0], "stale")
+        # pid 42 now belongs to a process started 100 s ago, long after the lock: reused
+        self.assertEqual(sc.lock_verdict(lock, "laptop", 2000.0, alive, lambda pid: 100.0)[0], "stale")
+        self.assertEqual(sc.lock_verdict(lock, "other", 2000.0, dead, lambda pid: None)[0], "foreign")
+        self.assertEqual(sc.lock_verdict(None, "laptop", 2000.0, alive, lambda pid: 1.0)[0], "stale")
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            # this process holds a lock taken now, after it started
+            import time
+            sc._main(["lock-check", json.dumps(dict(lock, pid=os.getpid(), host="h", started_epoch=time.time())),
+                      "h"])
+        self.assertTrue(buf.getvalue().startswith("live "), buf.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            sc._main(["clock-offset", "100.0", "103.5", "101.0"])
+        self.assertEqual(buf.getvalue().strip(), "3.000")
+
+
 class ChecksStub(unittest.TestCase):
     def test_status_pass_fail(self):
         scen = {"expect": [{"check": "status", "args": {"http": 400, "code": "invalid_request"}},
