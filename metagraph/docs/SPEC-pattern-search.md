@@ -4404,7 +4404,9 @@ a predicate (else 400 `invalid_request`); `"context"` is accepted with any reque
 absence is; another value is 400 `invalid_request`. Accepted with every mode, strands,
 scope and projection; mode `count` is enough for a motif question (the pass runs in every mode). `stop_at_threshold`
 is allowed: it usually leaves the motif undecided (`untested: "selection"`), but the labels found may decide it
-(§25.4). `limits.predicate_scope` echoes it when the request names it (also `"context"`).
+(§25.4). `limits.predicate_scope` echoes it in an answer with a predicate whose request names it (also `"context"`;
+§8.3); without a predicate the field is a no-op and is not echoed: the answer is the one without it, byte for byte
+(fixture `count_predicate_scope_context`).
 
 ### 25.3 The answer
 
@@ -4509,13 +4511,14 @@ stands for an empty union.
 ### 25.9 What changed
 
 **Additions only** (contract version 1): the request field `predicate_scope` (§4.1, read with any request; with
-`"context"`, or absent, the answer is §19's, `limits.predicate_scope` echoing a named value), `predicate.motif_scope`
-(`predicate_block`), the entry's `motif` (`motif`, `motif_label`) and `work.motif_units`, the capabilities'
-`predicate.scopes`. `predicate_scope` was an unknown field (400 `invalid_request`) before. Fixtures (§11):
-`motif_context`, `motif_either`, `motif_tested_contexts`, `motif_long_patterns`. Tests with independent oracles:
-`PatternMotif.*` (`tests/cli/test_pattern_motif.cpp`: the union scanned from the records' k-mers, two- and
-three-valued evaluators of the request's JSON, sweeps of `max_predicate_work`, the account and a virtual clock;
-the same reads as the context-level pass) and `PatternSupportedRoute.MotifAgainstTheUnion` (through the route).
+`"context"`, or absent, the answer is §19's, `limits.predicate_scope` echoing a named value in an answer with a
+predicate, §8.3), `predicate.motif_scope` (`predicate_block`), the entry's `motif` (`motif`, `motif_label`) and
+`work.motif_units`, the capabilities' `predicate.scopes`. `predicate_scope` was an unknown field (400
+`invalid_request`) before. Fixtures (§11): `motif_context`, `motif_either`, `motif_tested_contexts`,
+`motif_long_patterns`. Tests with independent oracles: `PatternMotif.*` (`tests/cli/test_pattern_motif.cpp`: the
+union scanned from the records' k-mers, two- and three-valued evaluators of the request's JSON, sweeps of
+`max_predicate_work`, the account and a virtual clock; the same reads as the context-level pass) and
+`PatternSupportedRoute.MotifAgainstTheUnion` (through the route).
 
 **`no_instance` (the owner's decision of 2026-10-10)**: `decided_by` gains `"no_instance"` for a pattern with no
 instance on the graph (the raw count, or a long pattern's `counts.anchors`, `exact` 0), which the builds before it
@@ -4627,6 +4630,9 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   order the code implements: a multi-graph request is checked once before any pair is leased or loaded, so a
   malformed body with `in_ram: true` is refused without a load (§24.1, SPEC-labeled-traversal-core.md §10.3),
   unlike `/search`, whose request is parsed per graph after its load.
+- **After the verification of the review's fixes** (2026-10-13). `limits.predicate_scope` is echoed in an answer with
+  a predicate only (§25.2 and §25.9 now say so, as §8.3 did; the validator follows, and the fixture
+  `count_predicate_scope_context` pins `"context"` alone as a no-op: the answer without the field, byte for byte).
 
 ## 28. Changed after the review of 2026-10-12
 

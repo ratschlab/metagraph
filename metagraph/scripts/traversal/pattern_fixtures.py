@@ -854,6 +854,14 @@ FIXTURES = [
          'suffix, by_offset (every offset, zeros included) and by_strand; labels and '
          'occurrences unknown; no results; an absent primer counts exact 0',
          entries(exact(24), exact(24), exact(0))),
+    post('count_predicate_scope_context', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'count', 'predicate_scope': 'context'},
+         200,
+         'predicate_scope "context" named without a predicate (SPEC §25.2): accepted and a no-op, '
+         'the answer of the request without the field byte for byte; limits.predicate_scope is '
+         'echoed in an answer with a predicate only (§8.3), so it is absent here',
+         expect_all(lambda a: check('predicate_scope' not in a['limits'], a['limits']),
+                    entries(exact(24)))),
     post('count_suffix', 'masked',
          {'patterns': [p(NDM_F), p(NDM_F11)], 'mode': 'count', 'scope': 'suffix'}, 200,
          'scope suffix: only offset k - L, absence_scope suffix_only; an exact 11-mer (22 '

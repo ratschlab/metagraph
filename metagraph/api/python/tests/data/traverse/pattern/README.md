@@ -49,6 +49,7 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 - `capabilities_representation_unsupported` (GET /capabilities, 200, hash): a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set
 - `traverse_capabilities_representation_unsupported` (GET /traverse/capabilities, 200, hash): the same hash-graph server on the probe route (the gate block)
 - `count` (POST /pattern, 200, masked): mode count, scope any_offset and strands both by default: exact context counts with suffix, by_offset (every offset, zeros included) and by_strand; labels and occurrences unknown; no results; an absent primer counts exact 0
+- `count_predicate_scope_context` (POST /pattern, 200, masked): predicate_scope "context" named without a predicate (SPEC §25.2): accepted and a no-op, the answer of the request without the field byte for byte; limits.predicate_scope is echoed in an answer with a predicate only (§8.3), so it is absent here
 - `count_suffix` (POST /pattern, 200, masked): scope suffix: only offset k - L, absence_scope suffix_only; an exact 11-mer (22 bits) is admitted in this scope however short
 - `count_forward` (POST /pattern, 200, masked): strands forward: P only, strands ["+"], by_strand {"+"}
 - `count_reverse` (POST /pattern, 200, masked): strands reverse: rc(P) only, strands ["-"]

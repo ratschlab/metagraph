@@ -215,6 +215,15 @@
    "headers": {},
    "shows": "mode count, scope any_offset and strands both by default: exact context counts with suffix, by_offset (every offset, zeros included) and by_strand; labels and occurrences unknown; no results; an absent primer counts exact 0"
   },
+  "count_predicate_scope_context": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "predicate_scope \"context\" named without a predicate (SPEC §25.2): accepted and a no-op, the answer of the request without the field byte for byte; limits.predicate_scope is echoed in an answer with a predicate only (§8.3), so it is absent here"
+  },
   "count_suffix": {
    "server": "masked",
    "method": "POST",

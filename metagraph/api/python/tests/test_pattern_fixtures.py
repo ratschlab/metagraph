@@ -1443,7 +1443,8 @@ class Checker:
         # annotation limits echoed), with the level asked for
         supported = request.get('long_search') == 'supported_paths'
         # with a predicate the account is used in every mode (the annotation limits echoed),
-        # and the selection's limits are echoed (predicate_scope when the request named it)
+        # and the selection's limits are echoed (predicate_scope when the request named it;
+        # without a predicate the field is a no-op and is not echoed, SPEC §8.3)
         annotated = labelled or predicate or supported
         self.keys(limits, [f for f in SCHEMA['limits']
                            if (annotated
@@ -1452,7 +1453,8 @@ class Checker:
                            and ((paths or supported) and labelled or f != 'require_support')
                            and (supported or f != 'supported_paths_level')
                            and (predicate or f not in LIMITS_PREDICATE)
-                           and ('predicate_scope' in request or f != 'predicate_scope')
+                           and (predicate and 'predicate_scope' in request
+                                or f != 'predicate_scope')
                            and (request.get('max_mismatches', 0) > 0 or f != 'max_mismatches')],
                   'limits')
         if request.get('max_mismatches', 0) > 0:
@@ -1461,7 +1463,7 @@ class Checker:
                     'as requested')
             self.ok(all(c['field'] != 'max_mismatches' for c in limits['clamped']),
                     'limits.clamped', 'max_mismatches is never lowered')
-        if 'predicate_scope' in request:
+        if predicate and 'predicate_scope' in request:
             self.ok(limits['predicate_scope'] == request['predicate_scope'],
                     'limits.predicate_scope', 'as requested')
         if supported:
@@ -4698,7 +4700,8 @@ class TestPatternFixtures(unittest.TestCase):
         pattern without an instance decided any other way, or undecided), the labels found out
         of label order, with strands their rows do not give or more contexts than tested, the
         motif's units outside the selection's, the block or the scope missing or where no motif
-        was asked, and the capabilities' scopes."""
+        was asked, limits.predicate_scope echoed without a predicate ("context" alone is a
+        no-op: the answer without the field), and the capabilities' scopes."""
         def motif(i, **fields):
             return lambda a: a['patterns'][i]['motif'].update(fields)
 
@@ -4752,8 +4755,29 @@ class TestPatternFixtures(unittest.TestCase):
              'fields'),
             ('motif_context', lambda a: a['limits'].update(predicate_scope='context'),
              'as requested'),
+            # "context" without a predicate is not echoed (§8.3)
+            ('count_predicate_scope_context',
+             lambda a: a['limits'].update(predicate_scope='context'), 'fields'),
         ]
         self.assertRefusesMutations(cases)
+        # "context" named without a predicate is a no-op (§25.2): the stored answer passes and
+        # is the answer of the same request without the field (the first pattern of `count`)
+        self.check_stored('count_predicate_scope_context')
+        request, answer = self.bodies['count_predicate_scope_context']
+        self.assertEqual('context', request['predicate_scope'])
+        self.assertNotIn('predicate', request)
+        plain_request, plain = self.bodies['count']
+        self.assertNotIn('predicate_scope', plain_request)
+
+        def untimed(v):
+            if isinstance(v, dict):
+                return {k: untimed(x) for k, x in v.items() if k != 'timing'}
+            if isinstance(v, list):
+                return [untimed(x) for x in v]
+            return v
+
+        self.assertEqual(plain['limits'], answer['limits'])
+        self.assertEqual(untimed(plain['patterns'][0]), untimed(answer['patterns'][0]))
         b = copy.deepcopy(self.capabilities_of('masked'))
         b['predicate']['scopes'] = ['context']
         with self.assertRaisesRegex(AssertionError, 'scopes'):
