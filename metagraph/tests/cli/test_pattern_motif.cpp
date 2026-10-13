@@ -1124,73 +1124,127 @@ TEST(PatternMotif, SameReadsAsTheContextPass) {
 }
 
 // The union's entries are charged to the request's account before they are made: at every
-// account size the motif is sound (the union a subset of the decided contexts'), and some size
-// that completes the pass without the motif stops it with the motif ({selection, max_memory}).
-// Mutation tried: the entries not charged: the last expectation fails.
+// account size the motif is sound (the union a subset of the decided contexts'), some size
+// that completes the pass without the motif stops it with the motif ({selection, max_memory}:
+// the union's entries took what a row or the next entry needed), and the motif's own stop,
+// the account refusing its undecided-labels list, is stated as the entry's {output,
+// max_memory} unless an earlier stop of the pass is (then that one: a memory stop the
+// union's entries caused, which the pass without the motif did not have or had as well). The
+// list costs 4 bytes a label, less than the statement every read reserves, so where the pass
+// read to its end its own stop comes first: an unmasked motif stop needs a pass incomplete
+// without a stop -- partial on the first 8 of 120 contexts, 112 labels undecided -- and an
+// account that fits its reads but not the 448 bytes after them. Mutations tried: the entries
+// not charged (no size stops the pass with the motif); the list not charged (no motif stop);
+// its stop stated in phase selection (the unmasked stops fail).
 TEST(PatternMotif, AccountHoldsTheUnion) {
-    // many labels on one motif: 40 columns of one random record each, all with AC
-    std::vector<Record> records;
-    std::mt19937 rng(17);
-    for (size_t c = 0; c < 40; ++c) {
-        std::string s(16, 'A');
-        for (char &x : s) {
-            x = "ACGT"[rng() % 4];
+    // many labels on one motif: |columns| columns of one random record each, all with AC
+    auto make = [](size_t columns) {
+        std::vector<Record> records;
+        std::mt19937 rng(17);
+        for (size_t c = 0; c < columns; ++c) {
+            std::string s(16, 'A');
+            for (char &x : s) {
+                x = "ACGT"[rng() % 4];
+            }
+            s.replace(4, 2, "AC");
+            records.push_back({ "label_with_a_long_name_" + std::to_string(c),
+                                "h" + std::to_string(c), s });
         }
-        s.replace(4, 2, "AC");
-        records.push_back({ "label_with_a_long_name_" + std::to_string(c), "h" + std::to_string(c),
-                            s });
-    }
-    const Index idx = build(kK, records);
-    const Oracle oracle(idx);
-    Json::Value list(Json::arrayValue);
-    for (size_t c = 0; c < 40; ++c) {
-        list.append("label_with_a_long_name_" + std::to_string(c));
-    }
-    Json::Value p;
-    p["none"] = list;
-    Json::StreamWriterBuilder b;
-    b["indentation"] = "";
-    Ask r;
-    r.pattern = "AC";
-    r.predicate = Json::writeString(b, p);
-    const Pass full = run(idx, r);
-    ASSERT_EQ(SelectionPass::COMPLETED, full.answer.pass);
-    ASSERT_EQ(40u, full.answer.motif->present->size());
-    bool stopped_by_motif = false;
-    uint64_t motif_stops = 0, motif_stops_stated = 0;
-    for (uint64_t bytes = 2'000; bytes <= 200'000; bytes += 1'000) {
-        r.max_memory_bytes = bytes;
-        r.motif = false;
-        const Pass off = run(idx, r);
-        r.motif = true;
-        const Pass on = run(idx, r);
-        SCOPED_TRACE("bytes " + std::to_string(bytes));
-        EXPECT_EQ(off.unbound, on.unbound);
-        if (on.unbound)
-            continue;
-        check_motif(oracle, r, on, true);
-        if (on.answer.motif && on.answer.motif->stop
-                && std::string(on.answer.motif->stop) == "max_memory") {
-            // the motif's own stop is the entry's too, unless an earlier one is
-            EXPECT_TRUE(on.answer.stop.has_value());
-            ++motif_stops;
-            if (on.answer.stop && *on.answer.stop
-                    == std::make_pair(std::string("output"), std::string("max_memory"))) {
-                ++motif_stops_stated;
+        Json::Value list(Json::arrayValue);
+        for (size_t c = 0; c < columns; ++c) {
+            list.append("label_with_a_long_name_" + std::to_string(c));
+        }
+        Json::Value p;
+        p["none"] = list;
+        Json::StreamWriterBuilder b;
+        b["indentation"] = "";
+        return std::make_pair(build(kK, records), Json::writeString(b, p));
+    };
+    const auto output = std::make_pair(std::string("output"), std::string("max_memory"));
+    const auto selection = std::make_pair(std::string("selection"), std::string("max_memory"));
+    auto motif_stopped = [](const Pass &p) {
+        return p.answer.motif && p.answer.motif->stop
+                && std::string(p.answer.motif->stop) == "max_memory";
+    };
+    {
+        const auto [idx, predicate] = make(40);
+        const Oracle oracle(idx);
+        Ask r;
+        r.pattern = "AC";
+        r.predicate = predicate;
+        const Pass full = run(idx, r);
+        ASSERT_EQ(SelectionPass::COMPLETED, full.answer.pass);
+        ASSERT_EQ(40u, full.answer.motif->present->size());
+        bool stopped_by_motif = false;
+        uint64_t motif_stops = 0;
+        for (uint64_t bytes = 2'000; bytes <= 200'000; bytes += 1'000) {
+            r.max_memory_bytes = bytes;
+            r.motif = false;
+            const Pass off = run(idx, r);
+            r.motif = true;
+            const Pass on = run(idx, r);
+            SCOPED_TRACE("bytes " + std::to_string(bytes));
+            EXPECT_EQ(off.unbound, on.unbound);
+            if (on.unbound)
+                continue;
+            check_motif(oracle, r, on, true);
+            if (motif_stopped(on)) {
+                ++motif_stops;
+                ASSERT_TRUE(on.answer.stop.has_value());
+                EXPECT_TRUE(*on.answer.stop == output || *on.answer.stop == selection)
+                        << on.answer.stop->first << " " << on.answer.stop->second;
+                if (*on.answer.stop == selection) {
+                    EXPECT_TRUE(!off.answer.stop || *off.answer.stop == selection);
+                }
+            }
+            if (off.answer.pass == SelectionPass::COMPLETED
+                    && on.answer.pass != SelectionPass::COMPLETED) {
+                // the union's entries took what a row or the next entry needed
+                EXPECT_TRUE((on.answer.stop && *on.answer.stop == selection)
+                            || !on.answer.rows_refused.empty());
+                stopped_by_motif = true;
             }
         }
-        if (off.answer.pass == SelectionPass::COMPLETED
-                && on.answer.pass != SelectionPass::COMPLETED) {
-            // the union's entries took what a row or the next entry needed
-            EXPECT_TRUE((on.answer.stop && *on.answer.stop
-                            == std::make_pair(std::string("selection"),
-                                              std::string("max_memory")))
-                        || !on.answer.rows_refused.empty());
-            stopped_by_motif = true;
-        }
+        EXPECT_TRUE(stopped_by_motif);
+        EXPECT_LT(0u, motif_stops);
     }
-    EXPECT_TRUE(stopped_by_motif);
-    std::cerr << "motif stops " << motif_stops << " stated " << motif_stops_stated << std::endl;
+    {
+        const auto [idx, predicate] = make(120);
+        const Oracle oracle(idx);
+        Ask r;
+        r.pattern = "AC";
+        r.predicate = predicate;
+        r.mode = gp::Mode::PARTIAL;
+        r.max_predicate_contexts = 8;
+        // the smallest account the predicate binds in, then every 8 bytes above it
+        uint64_t bound_at = 0;
+        for (uint64_t bytes = 1'000; bytes <= 1'000'000 && !bound_at; bytes += 256) {
+            r.max_memory_bytes = bytes;
+            if (!run(idx, r).unbound)
+                bound_at = bytes;
+        }
+        ASSERT_LT(0u, bound_at);
+        uint64_t unmasked = 0;
+        for (uint64_t bytes = bound_at - 256; bytes < bound_at + 8'192; bytes += 8) {
+            r.max_memory_bytes = bytes;
+            const Pass on = run(idx, r);
+            SCOPED_TRACE("bytes " + std::to_string(bytes));
+            if (on.unbound)
+                continue;
+            check_motif(oracle, r, on, true);
+            if (!motif_stopped(on))
+                continue;
+            ASSERT_TRUE(on.answer.stop.has_value());
+            if (*on.answer.stop == output) {
+                // (the rows the account refused are stated and do not stop partial's pass)
+                EXPECT_GE(8u, on.tested.size());
+                ++unmasked;
+            } else {
+                EXPECT_EQ(selection, *on.answer.stop);
+            }
+        }
+        EXPECT_LT(0u, unmasked);
+    }
 }
 
 // A virtual clock past the work time at each reading in turn: never an exception, a definite
