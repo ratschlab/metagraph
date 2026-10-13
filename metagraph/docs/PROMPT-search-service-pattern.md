@@ -305,9 +305,9 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
   single-graph server).
   Gate each chunk on its own pair: its `graph_summary` entry, or `GET /pattern/capabilities?graph=NAME` (the
   pair's full block with `graph` and `graph_path`; without `graph` a 400). `GET /traverse/capabilities?graph=NAME`
-  carries the same block with `details`. A pair's `available: false` keeps its `unavailable_reason` (item 6);
-  an unmasked chunk (the SRA-like chunks run without a mask, decision #23) answers `counting: "upper_bound"`, its
-  dummy fraction sampled when the server starts.
+  carries that pair's gate block (SPEC §23.2) with `details`. A pair's `available: false` keeps its
+  `unavailable_reason` (item 6); an unmasked chunk (the SRA-like chunks run without a mask, decision #23) answers
+  `counting: "upper_bound"`, its dummy fraction sampled when the server starts.
 - **`in_ram`** (a boolean; another value is a 400, `invalid_request` on `/pattern`) is accepted by `/pattern`,
   `/traverse` and `/resolve` exactly as by `/search`: on a multi-graph server running on mmap the pair is loaded
   into RAM for the request when its files fit `--mem-cap-gb` (one pool, and `/search`'s wait, for all routes'

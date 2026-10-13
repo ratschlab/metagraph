@@ -1840,7 +1840,8 @@ int run_server(Config *config) {
         // change only in their feature_level
         caps["coordinates"] = coordinates_capabilities_json(oracle);
         // the pattern search (SPEC-pattern-search.md §23): here because this is the document a
-        // service's probe reads; the full block with `details`, the route of the full block
+        // service's probe reads; the gate block (the full block's gate fields and caps) with
+        // `details`, the route of the full block
         caps["pattern"] = pattern_traverse_block(pattern_capabilities_json(
                 &index, pattern_limits(*config), /* multi_graph */ false));
         return caps;

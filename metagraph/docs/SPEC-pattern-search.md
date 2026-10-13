@@ -1267,7 +1267,7 @@ It costs no step.
   (`available: null`), `/capabilities` with `ready: false` and the same block; `/traverse/capabilities` answers
   503.
 - On a multi-graph server (§24): the block of one pair on `/pattern/capabilities?graph=NAME[&graph_path=PATH]`
-  (naming it: `graph`, `graph_path`) and on `/traverse/capabilities?graph=NAME` (there with `details`); on
+  (naming it: `graph`, `graph_path`) and its gate block (§23.2) on `/traverse/capabilities?graph=NAME`; on
   `/capabilities` the block without a graph (its graph fields `null`, `available` whether a pair is served),
   beside `graph_summary`, every pair's `available`, `mask`, `counting`, `k`, `graph_mode` and identity. Builds
   before §24 answered `{pattern_contract_version: 1, available: false, unavailable_reason:
@@ -4119,10 +4119,11 @@ the defaults below the caps), the caps `max_annotation_work`, `max_labels`,
   `pattern_traverse_block` is the projection of the full block onto the table's fields, `caps` onto its nine caps,
   with `details`; the fields of the full block only (§23.2's list) are absent there. No field changes its name, type
   or meaning (§1); `GET /pattern/capabilities` and `GET /capabilities` serve the full block as before, the loading
-  form is as before. 901–1,004 bytes less per probe document: `/traverse/capabilities` 4,607–4,720 bytes (the
-  multi-graph server's 4,720; the `pattern` member 1,176–1,210, before 2,077–2,213), `/capabilities` 5,278–5,761
-  and `/pattern/capabilities` 2,354–2,513 unchanged (the `mismatches` object stays in the full block only); the largest, `/traverse/capabilities` of the multi-graph
-  server, 26,907 bytes under the budget of 31,744 (4,837 by the validator's measure; the unmasked server's 4,789).
+  form is as before. 1,239–1,342 bytes less per probe document: `/traverse/capabilities` 4,607–4,720 bytes (the
+  multi-graph server's 4,720; the `pattern` member 1,176–1,210, before 2,415–2,551 with the `mismatches` object),
+  `/capabilities` 5,278–5,761 and `/pattern/capabilities` 2,354–2,513 unchanged (the `mismatches` object stays in
+  the full block only); the largest, `/traverse/capabilities` of the multi-graph server, 26,907 bytes under the
+  budget of 31,744 (4,837 by the validator's measure; the unmasked server's 4,789).
   Every answer to `POST /pattern` is byte-identical (the fixtures of this build: only the seven
   `traverse_capabilities_*` bodies changed); `pattern_capabilities_primary` and `pattern_capabilities_utf8_labels`
   added (above). A client of the probe alone: §23.3.
@@ -4273,8 +4274,8 @@ the other pairs.
   `{"error": "Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and
   graph_path=<path> when the name spans several graphs); GET /capabilities lists the graphs"}`; an unknown or
   repeated parameter: 400.
-- `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's block with
-  `details` (§23).
+- `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's gate block
+  (§23.2) with `details`.
 - `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the
   graph fields and `predicate.access` `null`), with `available` `true` when a pair is served (else `false`, with
   the first pair's reason); the pairs are `graph_summary`'s (§24.4). Its top-level `max_graphs_without_selection`
@@ -4633,12 +4634,16 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
 - **After the verification of the review's fixes** (2026-10-13). `limits.predicate_scope` is echoed in an answer with
   a predicate only (§25.2 and §25.9 now say so, as §8.3 did; the validator follows, and the fixture
   `count_predicate_scope_context` pins `"context"` alone as a no-op: the answer without the field, byte for byte).
+  §23.4's phase-2 figures are those with the `mismatches` object (1,239–1,342 bytes less per probe document, the
+  `pattern` member 2,415–2,551 before); §10.1 and §24.3 call the `/traverse` block of a pair its gate block; §28
+  points to the **Wording** bullet above.
 
 ## 28. Changed after the review of 2026-10-12
 
 The critical review of 2026-10-12 (branch gr/labeled-traversal at 1814fb5b) found the memory of a path search
 unbounded where the stated limitation of increment 4 said so. The fixes below change answers as stated; contract
-version 1 stays (additions only).
+version 1 stays (additions only). The same review's wording fixes (`predicate_scope` needs a predicate as
+`"motif"` only; §24.2's order of checks) are the **Wording** bullet of 2026-10-12 at the end of §27.
 
 **A path search is in the memory account, with or without labels (the owner's decision: bound it by the
 request's memory budget, not by a cap on L; §4.1, §4.2, §7.5, §7.6, §8.7, §8.10, §12.1, §17's stated limits).**
