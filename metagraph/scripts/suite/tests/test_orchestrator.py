@@ -103,7 +103,8 @@ class RunSuiteOffline(SuiteCase):
     def test_paired_order_host_cache_and_mcp_template(self):
         make_manifest(self.mpath, mcp_scenarios())
         with FakeHost() as host:
-            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd())
+            # the status-only scenarios under the stub, chosen explicitly (checks.py sits next to the script)
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub")
             self.assertEqual(p.returncode, 0, p.stderr)
             # the release GET; per direct arm 3 capabilities + 9 executions + 1 closing GET
             self.assertEqual(len(host.log), 1 + 2 * 13)
@@ -149,6 +150,68 @@ class RunSuiteOffline(SuiteCase):
             report = fh.read()
         self.assertIn("paired: per scenario MCP cold", report)
         self.assertIn("| P | mcp | warm |", report)
+
+    def test_real_checks(self):
+        # the orchestrator offline with lane S1's checks.py (the default beside the script): its checks judge the
+        # executions of both direct arms (a pass and a fail on the fake host's answers, the determinism of the
+        # repeats), its evaluate_relation the relation, and the report says which checks ran
+        def with_checks(s, *expect):
+            s["expect"] = s["expect"] + list(expect)
+            return s
+        req = {"patterns": [{"dna": "ACGT" * 8, "id": "a"}], "mode": "count", "time_budget_ms": 1000}
+        scen = [
+            with_checks(scenario("C-1", "C", "GET /capabilities", None),
+                        {"check": "capabilities_doc", "args": {"required": ["release", "server_instance"],
+                                                               "equals": {"ready": True}}}),
+            with_checks(scenario("P-1", "P", "POST /pattern", dict(req)),
+                        {"check": "count_relation", "args": {"value": 1}}),
+            with_checks(scenario("P-3", "P", "POST /pattern", dict(req)),
+                        {"check": "count_relation", "args": {"value": 2}}),
+            with_checks(scenario("R-1", "R", "POST /resolve", {"sequence": "ACGT" * 10, "labels": ["562"]}),
+                        {"check": "answer_fields", "args": {"equals": {"num_kmers": 30}}}),
+            with_checks(scenario("D-1", "D", "POST /resolve", {"sequence": "ACGT" * 10, "labels": ["562"]},
+                                 repeat=3), {"check": "deterministic", "args": {}}),
+        ]
+        m = make_manifest(self.mpath, scen)
+        m["relations"] = [{"id": "REL-same_answer-0001", "type": "same_answer", "a": "P-1", "b": "P-3",
+                           "title": "the same request twice", "args": {}}]
+        with open(self.mpath, "w") as fh:
+            json.dump(m, fh)
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--warm-every", "0")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("checks checks", p.stderr)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+        self.assertEqual(sess["checks"], "checks")
+        run = sc.read_json(os.path.join(run_dir, "run.json"))
+        for arm in ("direct-local", "direct-remote"):
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "arms", arm, "run.json"))["checks_module"], "checks")
+            self.assertEqual(run["arms"][arm]["state"], "done")
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        key = dict((sc.execution_key(r), r) for r in rows)
+        for arm in ("direct-local", "direct-remote"):
+            self.assertEqual(key[("P-1", arm, 0)]["outcome"], "pass")
+            self.assertEqual(key[("P-3", arm, 0)]["outcome"], "fail")
+            fails = [c for c in key[("P-3", arm, 0)]["checks"] if c["outcome"] == "fail"]
+            self.assertEqual([c["check"] for c in fails], ["count_relation"])
+            self.assertIn("expected exact 2", fails[0]["detail"])
+            self.assertEqual(key[("C-1", arm, 0)]["outcome"], "pass")
+            self.assertEqual(key[("R-1", arm, 0)]["outcome"], "pass")
+            # the first repeat has nothing to compare; the later ones compare with the earlier digests
+            self.assertEqual([c["check"] for c in key[("D-1", arm, 0)]["checks"]], ["status"])
+            for r in (1, 2):
+                det = [c for c in key[("D-1", arm, r)]["checks"] if c["check"] == "deterministic"][0]
+                self.assertEqual(det["outcome"], "pass", det["detail"])
+        comp = sc.read_json(os.path.join(run_dir, "compare.json"))
+        self.assertEqual(comp["summary"]["relations"]["implementation"], "checks.evaluate_relation")
+        rel = comp["relations"][0]["arms"]
+        self.assertEqual((rel["direct-local"]["outcome"], rel["direct-remote"]["outcome"]), ("pass", "pass"))
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            report = fh.read()
+        self.assertIn("**FAIL (", report)
+        self.assertIn("check count\\_relation: observed contexts = exact 1, expected exact 2", report)
+        self.assertNotIn("the stub ran", report)
 
     def test_mcp_fail_is_a_result_not_a_stop(self):
         # async: the runner's exit 1 also means a failing scenario; three of them in a row do not stop the loop
@@ -277,11 +340,14 @@ class RunSuiteOffline(SuiteCase):
         scen[1]["expect"].append({"check": "contains_source_context", "args": {"level": 0}})
         make_manifest(self.mpath, scen)
         with FakeHost() as host:
-            p = self.run_suite(host, "--manifest", self.mpath)
+            # the stub chosen explicitly: checks.py sits next to the script
+            p = self.run_suite(host, "--manifest", self.mpath, "--checks", "stub")
             self.assertEqual(p.returncode, 2, p.stderr)
             self.assertIn("contains_source_context", p.stderr)
             self.assertIn("--allow-stub", p.stderr)
-            p = self.run_suite(host, "--manifest", self.mpath, "--allow-stub", "--skip-local")
+            self.assertIn("(--checks stub)", p.stderr)
+            self.assertEqual(host.log, [])
+            p = self.run_suite(host, "--manifest", self.mpath, "--checks", "stub", "--allow-stub", "--skip-local")
             self.assertEqual(p.returncode, 0, p.stderr)
         with open(os.path.join(p.stdout.strip().splitlines()[-1], "report.md")) as fh:
             self.assertIn("UNVERIFIED", fh.read())
@@ -350,7 +416,8 @@ class RunSuiteOffline(SuiteCase):
     def test_sequential_remote_new_and_resume(self):
         make_manifest(self.mpath, basic_scenarios())
         with FakeHost() as host:
-            p1 = self.run_suite(host, "--sequential", "--skip-local", "--manifest", self.mpath)
+            # the stub chosen explicitly (checks.py sits next to the script); --resume keeps the choice
+            p1 = self.run_suite(host, "--sequential", "--skip-local", "--manifest", self.mpath, "--checks", "stub")
             self.assertEqual(p1.returncode, 0, p1.stderr)
             run_dir = p1.stdout.strip().splitlines()[-1]
             self.assertTrue(os.path.basename(run_dir).endswith("_refseq97-b7214d29"), run_dir)
@@ -369,10 +436,11 @@ class RunSuiteOffline(SuiteCase):
             self.assertEqual(len(host.log) - n_requests, 4)
             orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
             self.assertEqual([s["mode"] for s in orch["sessions"]], ["sequential", "sequential"])
+            self.assertEqual([s["checks"] for s in orch["sessions"]], ["stub", "stub"])
             # sequential with the local arm on the (local) mex and a small cap over both arms
             time.sleep(1.1)
             p3 = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--max-requests", "10",
-                                "--warm-every", "0")
+                                "--warm-every", "0", "--checks", "stub")
             self.assertEqual(p3.returncode, 0, p3.stderr)
             self.assertNotEqual(p3.stdout.strip().splitlines()[-1], run_dir)
         with open(os.path.join(run_dir, "report.md")) as fh:

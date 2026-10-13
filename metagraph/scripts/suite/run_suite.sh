@@ -6,7 +6,7 @@
 #                [--mcp-cmd TEMPLATE | --mcp-cmd default | --no-mcp | --mcp-run DIR]
 #                [--areas P,M] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
-#                [--warm-every N] [--allow-stub] [--no-pdf]
+#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf]
 #
 # --paired (the default): per scenario in manifest order, MCP cold (with --mcp-cmd) -> direct-local (one
 # run_direct.py step on mex over one persistent ssh connection) -> direct-remote (a step from here through the
@@ -35,9 +35,10 @@
 # is gone is removed) and refuses to start while any run_direct.py runs under ~/suite-dev, both before any
 # request to the host (a new run's release GET comes after them). --max-requests N
 # caps the direct arms' requests of this invocation in total (closing capabilities GETs included);
-# --smoke defaults it to 40 and the manifest to manifest/suite_smoke_v1.json. checks.py next to this script is
-# used when present (--checks checks); without it the stub runs only for manifests that expect nothing but
-# the HTTP status, unless --allow-stub.
+# --smoke defaults it to 40 and the manifest to manifest/suite_smoke_v1.json. --checks picks the direct arms'
+# checks: auto (the default; --resume keeps the run's choice) runs checks.py when it is next to this script,
+# else the stub; checks requires checks.py; stub runs checks_stub.py even beside checks.py. The stub runs only
+# for manifests that expect nothing but the HTTP status, unless --allow-stub.
 #
 # On mex only ~/suite-dev/ is used (scripts, manifest, runs, LOCK) and docker is only read (docker stats).
 # Environment: SUITE_MEX (srv-metagraph@mex.inf.ethz.ch; local:DIR runs the mex side in DIR, for tests),
@@ -105,7 +106,7 @@ mex_rsync() {
 
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
-MCP_GIVEN=0
+MCP_GIVEN=0; CHECKS_MODE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --manifest) MANIFEST="$2"; shift 2 ;;
@@ -126,6 +127,7 @@ while [[ $# -gt 0 ]]; do
     --max-requests) MAX_REQUESTS="$2"; shift 2 ;;
     --warm-every) WARM_EVERY="$2"; shift 2 ;;
     --allow-stub) ALLOW_STUB=1; shift ;;
+    --checks) CHECKS_MODE="$2"; shift 2 ;;
     --no-pdf) NO_PDF=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown option $1" ;;
@@ -138,6 +140,7 @@ if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ $NO_MCP == 0 || $MCP_GIVEN == 0 ]] || die "--no-mcp and --mcp-cmd exclude each other"
 [[ "$MCP_CMD" != default ]] || MCP_CMD="$DEFAULT_MCP_CMD"
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
+[[ -z "$CHECKS_MODE" || "$CHECKS_MODE" =~ ^(auto|checks|stub)$ ]] || die "--checks takes auto, checks or stub"
 
 # --- the run directory ------------------------------------------------------------------------------------
 if [[ -n "$RESUME" ]]; then
@@ -155,6 +158,14 @@ if [[ -n "$RESUME" ]]; then
     MODE="$("$PY" -c 'import json, sys
 try:
     print(json.load(open(sys.argv[1]))["sessions"][-1].get("mode") or "")
+except (OSError, ValueError, KeyError, IndexError):
+    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+  fi
+  if [[ -z "$CHECKS_MODE" ]]; then
+    # The run's own checks (the last invocation's), so a resume judges its executions alike.
+    CHECKS_MODE="$("$PY" -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["sessions"][-1].get("checks") or "")
 except (OSError, ValueError, KeyError, IndexError):
     print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
   fi
@@ -195,10 +206,15 @@ fi
 MANIFEST="$(cd "$(dirname "$MANIFEST")" && pwd)/$(basename "$MANIFEST")"
 
 # --- the checks (review M3) -----------------------------------------------------------------------------------
-if [[ -f "$HERE/checks.py" ]]; then CHECKS=checks; else CHECKS=stub; fi
+case "${CHECKS_MODE:-auto}" in
+  auto) if [[ -f "$HERE/checks.py" ]]; then CHECKS=checks; else CHECKS=stub; fi ;;
+  checks) [[ -f "$HERE/checks.py" ]] || die "--checks checks: no checks.py next to this script"; CHECKS=checks ;;
+  stub) CHECKS=stub ;;
+esac
 if [[ $CHECKS == stub && $ALLOW_STUB == 0 ]]; then
   BEYOND="$("$PY" "$HERE/suite_common.py" beyond-status "$MANIFEST" "$AREAS" "$LIMIT")"
-  [[ -z "$BEYOND" ]] || die "no checks.py next to this script, and the selected scenarios expect checks the stub cannot evaluate (${BEYOND:0:200}); add lane S1's checks.py, or pass --allow-stub for a run that checks the HTTP status only"
+  if [[ -f "$HERE/checks.py" ]]; then WHY="--checks stub"; else WHY="no checks.py next to this script"; fi
+  [[ -z "$BEYOND" ]] || die "the checks stub runs ($WHY), and the selected scenarios expect checks it cannot evaluate (${BEYOND:0:200}); run lane S1's checks.py, or pass --allow-stub for a run that checks the HTTP status only"
 fi
 
 # --- state for the traps --------------------------------------------------------------------------------------

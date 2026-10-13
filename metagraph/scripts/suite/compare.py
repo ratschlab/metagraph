@@ -774,8 +774,9 @@ def resources(lines, index):
 # ---------------------------------------------------------------------------------------------------------------
 # the comparison
 
-def compare(run_dir, by_design=None):
-    """compare.json's content for a merged run directory; by_design is load_by_design's (cases, info)."""
+def compare(run_dir, by_design=None, relation_evaluator="auto"):
+    """compare.json's content for a merged run directory; by_design is load_by_design's (cases, info);
+    relation_evaluator as evaluate_relations takes it ("auto": checks.py next to this script when present)."""
     run = sc.read_json(os.path.join(run_dir, "run.json"), {}) or {}
     rows, bad = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
     samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
@@ -899,7 +900,8 @@ def compare(run_dir, by_design=None):
     if "disagree_scenarios" in mcp_summary:
         mcp_summary["disagreeing"] = mcp_summary.pop("disagree_scenarios")
 
-    relations, relations_summary = evaluate_relations(manifest, grouped, run_dir, arms_present)
+    relations, relations_summary = evaluate_relations(manifest, grouped, run_dir, arms_present,
+                                                      evaluator=relation_evaluator)
 
     index = SampleIndex(samples)
     resources_out = {}

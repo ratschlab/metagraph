@@ -101,8 +101,8 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 ### Orchestrator
 `run_suite.sh [--manifest M | --smoke] [--paired | --sequential] [--mcp-cmd TEMPLATE | --mcp-run DIR]
 [--areas ...] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR] [--compare RUN_DIR]
-[--by-design PATH] [--pause S] [--max-requests N] [--warm-every N] [--allow-stub] [--no-pdf]`; `--help`
-lists the environment overrides.
+[--by-design PATH] [--pause S] [--max-requests N] [--warm-every N] [--checks auto|checks|stub] [--allow-stub]
+[--no-pdf]`; `--help` lists the environment overrides.
 1. A new run directory `runs/<UTC>_<release-short>/` (the release from one GET /capabilities of the public
    URL, logged, sent only once the lock of item 3 is held and no other runner is on mex: review N4), or the
    one named by `--resume` (then the run's mode and manifest copy unless given).
@@ -111,9 +111,14 @@ lists the environment overrides.
    the midpoint of two laptop readings; python only where date lacks %N: review N8), the MCP command TEMPLATE (never
    an expanded command or an environment value), and the loop's state (`loop`: running / done / capped /
    failed / interrupted, its reason when it stopped early, scenarios, completed, direct requests).
-2. Checks (review M3): `--checks checks` when checks.py is next to the script; otherwise the stub, which is
+2. Checks (review M3; lane S3: chosen with `--checks`): `auto` (the default; `--resume` keeps the run's
+   choice) runs checks.py when it is next to the script, otherwise the stub; `checks` requires checks.py; `stub`
+   runs the stub even beside checks.py (the offline tests of the stub's rules choose it so). The stub is
    refused before anything runs when the selected scenarios expect any check but `status`, unless
-   `--allow-stub`. The whole suite directory (minus runs/, tests/, __pycache__) is rsynced (with --delete) to
+   `--allow-stub`; the runners are passed the choice (`run_direct.py --checks`). The MCP runner judges with
+   checks.py of `--checks-dir` whatever the choice. compare.py evaluates the relations with checks.py's
+   `evaluate_relation` when it is next to it (`compare(..., relation_evaluator=None)` picks the built-in
+   evaluation). The whole suite directory (minus runs/, tests/, __pycache__) is rsynced (with --delete) to
    mex:~/suite-dev/scripts/, so checks.py's sibling modules and data reach mex; the manifest to
    ~/suite-dev/manifest/<run id>.json.
 3. Exclusion (review M4): every invocation takes `~/suite-dev/LOCK` on mex before any request to the host

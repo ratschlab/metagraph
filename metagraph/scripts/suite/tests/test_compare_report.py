@@ -577,10 +577,11 @@ class ReportTest(unittest.TestCase):
                       raw_bodies={("P-a", 0): body(ctx, 1.0), ("P-b", 0): body(ctx, 9.0),
                                   ("P-c", 0): body(ctx[:1], 2.0)})
             merge_run.merge(d)
-            comp = cmp.compare(d, ({}, None))
+            # the built-in evaluation, chosen explicitly (checks.py sits next to compare.py)
+            comp = cmp.compare(d, ({}, None), relation_evaluator=None)
             sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
             text = report.build_report(d)
-        # without checks.py next to compare.py: same_answer built in, the other types not evaluated
+        # the built-in evaluation: same_answer built in, the other types not evaluated
         got = dict((r["id"], (r["arms"].get("direct-local") or {}).get("outcome")) for r in comp["relations"])
         self.assertEqual(got, {"rel-same": "pass", "rel-sub": "not_evaluated", "rel-sub-bad": "not_evaluated",
                                "rel-prefix": "not_evaluated", "rel-odd": "fail", "rel-gone": None})
