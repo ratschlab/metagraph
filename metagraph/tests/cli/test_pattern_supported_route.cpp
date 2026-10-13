@@ -1561,6 +1561,90 @@ TEST(PatternSupportedRoute, HeldPathsAreReleasedWithTheHeldWalks) {
     EXPECT_LT(0u, refused);
 }
 
+// A held walk is charged its model before it is held (SPEC §20.9: 192 + 2L + 8 per predicate
+// label of its support, the descriptor covered twice as the account's other models are): on
+// the graph of all 64 3-mers with one label, count mode under "either" holds the 1,024
+// forward walks of ANNNNN where "context" decides each at once and holds nothing, the same
+// search otherwise (any(shared) is true on every branch: nothing pruned), so the account's
+// peak under "either" is above "context"'s by the held walks less the frames open at the
+// two peaks: at least 1,024 x (2 x 88 + 12 + 8) bytes, the descriptor (88 bytes with
+// libstdc++) twice with the sequence and the label.
+// And the listed walks' selection labels under "either" are admitted before they are
+// copied, as a path decided at completion's are: a 64 KiB name in every selected path under
+// a 1 MiB account ends the list on the account and the answer stays within it. Mutations
+// tried: the descriptor modelled at 64 bytes (the peaks differ by less than the model); the
+// label evidence copied for every selected walk before the listing admits it (the peak and
+// the answer pass the account).
+TEST(PatternSupportedRoute, HeldWalksAndTheirListedLabelsAreCharged) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    {
+        const Index idx = build_rd(3, { { "shared", "h0", record } });
+        Ask r;
+        r.patterns = { "ANNNNN" };
+        r.kind = "iupac";
+        r.mode = "count";
+        r.strands = "forward";
+        r.level = "label_intersection";
+        r.predicate = "{\"any\": [\"shared\"]}";
+        r.max_memory_bytes = 8 << 20;
+        r.predicate_strands = "context";
+        const Json::Value context = answer_of(idx, r)["patterns"][0];
+        r.predicate_strands = "either";
+        const Json::Value either = answer_of(idx, r)["patterns"][0];
+        ASSERT_EQ(1024u, context["counts"]["tested"]["value"].asUInt64()) << compact(context);
+        ASSERT_EQ(1024u, either["counts"]["tested"]["value"].asUInt64()) << compact(either);
+        EXPECT_EQ(0u, either["counts"]["supported_paths"]["branches_pruned_by_predicate"]
+                              .asUInt64());
+        EXPECT_EQ(0u, context["counts"]["supported_paths"]["branches_pruned_by_predicate"]
+                              .asUInt64());
+        EXPECT_LE(context["work"]["memory_bytes"].asUInt64() + 1024u * (2 * 88 + 2 * 6 + 8),
+                  either["work"]["memory_bytes"].asUInt64());
+    }
+    {
+        const std::string long_name(64 * 1024, 'x');
+        const Index idx = build_rd(3, { { long_name, "h0", record } });
+        const std::string body = "{\"patterns\": [{\"iupac\": \"NNNN\"}], \"mode\": \"partial\", "
+                "\"strands\": \"forward\", \"long_search\": \"supported_paths\", "
+                "\"supported_paths_level\": \"label_intersection\", \"predicate\": {\"any\": [\""
+                + long_name + "\"]}, \"predicate_strands\": \"either\", \"output\": {\"labels\": "
+                "\"all\", \"occurrences\": false}, \"max_labels\": 0}";
+        RetrievalHooks hooks;
+        hooks.coord_to_header = idx.cth.get();
+        hooks.max_memory_bytes = 1 << 20;
+        const Json::Value out = process_pattern_request(parse_pattern_body(body), *idx.anno,
+                                                        route_limits(), "rel", nullptr, nullptr,
+                                                        nullptr, &hooks);
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        EXPECT_EQ("exact", e["counts"]["selected"]["relation"].asString());
+        EXPECT_EQ(256u, e["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ("output", e["stop"]["phase"].asString()) << compact(e["stop"]);
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+        EXPECT_EQ("max_memory", e["cut"]["reason"].asString());
+        const size_t listed = e["results"].size();
+        EXPECT_LT(0u, listed);
+        EXPECT_GT(256u, listed);
+        for (const Json::Value &r : e["results"]) {
+            ASSERT_EQ(1u, r["selection_labels"].size());
+            EXPECT_EQ(long_name, r["selection_labels"][0].asString());
+            // every 3-mer is in the record: the mirror walk carries the label too
+            EXPECT_EQ("both", r["selection_strands"][0].asString());
+        }
+        EXPECT_LE(listed * long_name.size(), e["work"]["memory_bytes"].asUInt64());
+        EXPECT_GE(1u << 20, e["work"]["memory_bytes"].asUInt64());
+        EXPECT_GT(1u << 20, compact(out).size());
+    }
+}
+
 // A constant normal form selects without deciding: true is the request without the predicate,
 // false lists nothing (complete); an unbound or spent selection does not start
 TEST(PatternSupportedRoute, ConstantPredicates) {
@@ -1601,7 +1685,9 @@ TEST(PatternSupportedRoute, ConstantPredicates) {
 
 // Every max_annotation_work, every reading of a virtual clock, every account size: the answer
 // is one of the complete answer's prefixes (partial) or withheld (all_or_count), its stop
-// named, its supported paths at_least the ones it lists, never more than the oracle's
+// named, its supported paths at_least the ones it lists, never more than the oracle's, and
+// the account's peak never past the account (also with the walks held and their mirrors read
+// under "either")
 TEST(PatternSupportedRoute, BudgetAndClockSweeps) {
     std::mt19937 rng(5);
     const size_t k = 5;
@@ -1615,13 +1701,21 @@ TEST(PatternSupportedRoute, BudgetAndClockSweeps) {
         full_walks = oracle.walks(p, "both", true, false);
     }
     ASSERT_GE(full_walks.size(), 1u);
-    for (const char *predicate : { "", "{\"none\": [\"zz\", \"c0\"]}" }) {
+    const std::vector<std::pair<std::string, std::string>> variants = {
+        { "", "" }, { "{\"none\": [\"zz\", \"c0\"]}", "" },
+        { "{\"none\": [\"zz\", \"c0\"]}", "either" },
+    };
+    for (const auto &[predicate, predicate_strands] : variants) {
         Ask r;
         r.patterns = { p };
         r.kind = "iupac";
         r.labels = "all";
         r.mode = "partial";
         r.predicate = predicate;
+        r.predicate_strands = predicate_strands;
+        // the mirrors read, not found among the held walks
+        if (!predicate_strands.empty())
+            r.strands = "forward";
         const Json::Value full = answer_of(idx, r)["patterns"][0];
         const uint64_t total = full["work"]["annotation_units"].asUInt64();
         const auto all = result_set(full);
@@ -1673,7 +1767,9 @@ TEST(PatternSupportedRoute, BudgetAndClockSweeps) {
         for (uint64_t bytes = 1 << 12; bytes < (uint64_t(1) << 28); bytes *= 2) {
             Ask q = r;
             q.max_memory_bytes = bytes;
-            check(answer_of(idx, q)["patterns"][0], "memory " + std::to_string(bytes));
+            const Json::Value e = answer_of(idx, q)["patterns"][0];
+            check(e, "memory " + std::to_string(bytes));
+            EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), bytes) << compact(e);
         }
     }
 }

@@ -29,14 +29,15 @@ namespace {
 using node_index = DeBruijnGraph::node_index;
 
 // The memory model of the selection (SPEC §20.9), twice the elements as everywhere in the
-// account: a held walk (its descriptor, its sequence, its support's ids); a listed path's
-// selection labels: the ids and, beside each, the walks carrying it (the selection's list,
-// freed with the pattern), and the text the answer keeps of them, its selection_labels
-// strings (32 + the names' lengths) and its selection_strands (32 + 24 per label), the model
-// of a listed context's (§19.9), which stay with the result object until the request ends as
-// every label built for the answer does (§14.4); a held walk's entry in the index of the held
-// walks by sequence (the mirrors' lookup)
-constexpr uint64_t kHeldBytes = 64;
+// account: a held walk (its descriptor, PathSelection::Held, which the vector of the held
+// walks grows by; its sequence; its support's ids); a listed path's selection labels: the ids
+// and, beside each, the walks carrying it (the selection's list, freed with the pattern), and
+// the text the answer keeps of them, its selection_labels strings (32 + the names' lengths)
+// and its selection_strands (32 + 24 per label), the model of a listed context's (§19.9),
+// which stay with the result object until the request ends as every label built for the
+// answer does (§14.4); a held walk's entry in the index of the held walks by sequence (the
+// mirrors' lookup)
+constexpr uint64_t kHeldBytes = 192;
 constexpr uint64_t kHeldLabelBytes = 8;
 constexpr uint64_t kSelectionLabelsBytes = 64;
 constexpr uint64_t kSelectionLabelBytes = 10;
@@ -132,6 +133,8 @@ uint64_t PathSelection::sink_threshold(const PathSelectionOptions &options) {
 }
 
 void PathSelection::begin_pattern(const PathSelectionOptions &options, size_t length) {
+    static_assert(2 * sizeof(Held) <= kHeldBytes,
+                  "a held walk's charge covers its descriptor twice");
     end_pattern();
     options_ = options;
     length_ = length;
@@ -656,12 +659,48 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     // a mirror the search did not hand over has no support only when the search reached every
     // mirror and held every supported walk
     const bool complete_set = options_.mirrors_searched && searched && !hold_cut_;
-    std::vector<LabelId> mirror, all_labels;
+    std::vector<LabelId> mirror, present, all_labels;
     for (LabelId id = 0; id < bound_.labels().size(); ++id) {
         all_labels.push_back(id);
     }
-    std::vector<std::vector<LabelId>> decided_labels(held_.size());
-    std::vector<std::vector<uint8_t>> decided_rows(held_.size());
+
+    // the selected paths the release lists, in answer order, each listed as it is decided
+    // (partial: the first max_paths selected; all_or_count: all while they are at most
+    // max_paths, none when the engine's stop withholds the release): its selection labels --
+    // the labels of the set it was decided on, and beside each the walks carrying it -- are
+    // admitted before they are copied; |memory|: the account ended the list
+    std::vector<size_t> chosen;
+    std::vector<std::vector<LabelId>> labels;
+    std::vector<std::vector<uint8_t>> rows;
+    std::vector<uint8_t> on;
+    bool memory = false;
+    uint64_t label_bytes = 0;
+    uint64_t label_text = 0;
+    auto lists = [&]() {
+        if (options_.mode == Mode::COUNT || memory)
+            return false;
+        return all_or_count ? searched && selected_ <= options_.max_paths
+                            : chosen.size() < options_.max_paths;
+    };
+    auto list = [&](size_t i, const std::vector<LabelId> &evidence) {
+        if (held_[i].kept == std::numeric_limits<size_t>::max()) {
+            memory = true;
+            return;
+        }
+        if (options_.selection_labels) {
+            const uint64_t names = names_length(bound_.labels(), evidence);
+            const uint64_t bytes = selection_bytes(evidence.size(), names);
+            if (!account.charge(bytes)) {
+                memory = true;
+                return;
+            }
+            label_bytes += bytes;
+            label_text += selection_text_bytes(evidence.size(), names);
+            labels.push_back(evidence);
+            rows.push_back(on);
+        }
+        chosen.push_back(held_[i].kept);
+    };
     for (size_t i = 0; i < held_.size() && !ended; ++i) {
         if (!(i % Budget::kReleaseClockStride) && !budget.check_time()) {
             set_stop("selection", "time");
@@ -671,9 +710,8 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         const std::string rc = reverse_complement_of(h.sequence);
         uint64_t units = 0;
         std::optional<bool> value;
+        // the mirror's support is known (|mirror|)
         bool known = true;
-        // decided on the walk's own support, its mirror unread
-        bool own = false;
         if (rc == h.sequence) {
             mirror = h.support;
         } else if (const Held *m = held_with(rc)) {
@@ -689,41 +727,27 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
             // for the label evidence a projection lists (selection_labels, selection_strands)
             value = bound_.eval3(h.support.data(), h.support.size(), all_labels.data(),
                                  all_labels.size(), &units);
-            own = value && (!*value || !options_.selection_labels);
+            // (an evaluation's units are its own: charged here, the decision's below)
+            a.units += units;
+            units = 0;
+            known = false;
+            const bool own = value && (!*value || !options_.selection_labels);
             if (!own) {
-                a.units += units;
-                units = 0;
-                value.reset();
                 if (!read_mirror(rc, &mirror))
                     break;
+                known = true;
             }
         }
-        if (own) {
-            // (nothing listed of its labels: a rejected walk, or no label evidence asked)
-        } else if (known) {
-            std::vector<LabelId> present;
+        if (known) {
+            present.clear();
             std::set_union(h.support.begin(), h.support.end(), mirror.begin(), mirror.end(),
                            std::back_inserter(present));
             value = bound_.eval(present.data(), present.size(), &units);
-            if (*value && options_.selection_labels) {
-                decided_labels[i] = present;
-                for (LabelId id : present) {
-                    decided_rows[i].push_back(
-                            (std::binary_search(h.support.begin(), h.support.end(), id)
-                                ? PathSelectionAnswer::kOnWalk : 0)
-                            | (std::binary_search(mirror.begin(), mirror.end(), id)
-                                ? PathSelectionAnswer::kOnMirror : 0));
-                }
-            }
-        } else {
-            // the mirror's support is not known (the search stopped before it, or partial held
+        } else if (!value) {
+            // the mirror's support is not known (the search stopped before it, partial held
             // the first walks only): decided only when no mirror support can change it
             value = bound_.eval3(h.support.data(), h.support.size(), all_labels.data(),
                                  all_labels.size(), &units);
-            if (value && *value && options_.selection_labels) {
-                decided_labels[i] = h.support;
-                decided_rows[i].assign(h.support.size(), PathSelectionAnswer::kOnWalk);
-            }
         }
         a.units += units;
         if (!value)
@@ -732,6 +756,18 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         h.selected = *value;
         ++tested_;
         selected_ += *value;
+        if (*value && lists()) {
+            const std::vector<LabelId> &evidence = known ? present : h.support;
+            on.clear();
+            for (LabelId id : evidence) {
+                on.push_back(!known ? PathSelectionAnswer::kOnWalk
+                             : (std::binary_search(h.support.begin(), h.support.end(), id)
+                                    ? PathSelectionAnswer::kOnWalk : 0)
+                               | (std::binary_search(mirror.begin(), mirror.end(), id)
+                                    ? PathSelectionAnswer::kOnMirror : 0));
+            }
+            list(i, evidence);
+        }
     }
     const bool all_decided = std::all_of(held_.begin(), held_.end(),
                                          [](const Held &h) { return h.decided; });
@@ -744,58 +780,22 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     if (options_.mode == Mode::COUNT)
         return done();
 
-    // the selected paths the release lists, in answer order
-    const char *selection_stop = a.stop ? (a.stop->second == "time" ? "time"
-                                           : a.stop->second.c_str()) : nullptr;
-    std::vector<size_t> chosen;
-    std::vector<std::vector<LabelId>> labels;
-    std::vector<std::vector<uint8_t>> rows;
-    bool memory = false;
-    uint64_t label_bytes = 0;
-    uint64_t label_text = 0;
-    auto list = [&](size_t i) {
-        if (held_[i].kept == std::numeric_limits<size_t>::max()) {
-            memory = true;
-            return false;
-        }
-        if (options_.selection_labels) {
-            const uint64_t names = names_length(bound_.labels(), decided_labels[i]);
-            const uint64_t bytes = selection_bytes(decided_labels[i].size(), names);
-            if (!account.charge(bytes)) {
-                memory = true;
-                return false;
-            }
-            label_bytes += bytes;
-            label_text += selection_text_bytes(decided_labels[i].size(), names);
-            labels.push_back(std::move(decided_labels[i]));
-            rows.push_back(std::move(decided_rows[i]));
-        }
-        chosen.push_back(held_[i].kept);
-        return true;
-    };
+    const char *selection_stop = a.stop ? a.stop->second.c_str() : nullptr;
     if (all_or_count) {
         if (!searched) {
-            sink_.retain({});
-            return done();          // the engine's stop withholds it (the route)
-        }
-        if (!completed) {
+            // the engine's stop withholds it (the route)
+        } else if (!completed) {
             a.withheld = selection_stop && std::string_view(selection_stop) == "time"
                     ? "deadline" : selection_stop
                         && std::string_view(selection_stop) == "max_memory" && !indexed
                     ? "predicate_budget" : "annotation_budget";
         } else if (selected_ > options_.max_paths) {
             a.withheld = "selected_above_threshold";
-        } else {
-            for (size_t i = 0; i < held_.size(); ++i) {
-                if (held_[i].selected && !list(i))
-                    break;
-            }
-            if (memory) {
-                a.withheld = "output_budget";
-                set_stop("output", "max_memory");
-            }
+        } else if (memory) {
+            a.withheld = "output_budget";
+            set_stop("output", "max_memory");
         }
-        if (a.withheld) {
+        if (!searched || a.withheld) {
             account.release(label_bytes);
             sink_.retain({});
             return done();
@@ -806,15 +806,6 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         return done();
     }
     // partial: the first max_paths selected among the decided
-    uint64_t selected_decided = 0;
-    for (size_t i = 0; i < held_.size(); ++i) {
-        if (!held_[i].selected)
-            continue;
-        ++selected_decided;
-        if (chosen.size() >= options_.max_paths || memory)
-            continue;
-        list(i);
-    }
     kept_bytes_ += label_bytes;
     release(chosen, labels, rows, label_text);
     if (memory) {
@@ -825,7 +816,7 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
         a.cut = selection_stop;
     } else if (hold_cut_) {
         a.cut = hold_cut_;
-    } else if (selected_decided > a.listed) {
+    } else if (selected_ > a.listed) {
         a.cut = "max_paths";
     }
     a.complete = completed && a.listed == selected_;

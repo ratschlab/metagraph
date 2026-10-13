@@ -242,10 +242,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.4535,
-    "extension_ms": 0.414542,
-    "selection_ms": 0.003708,
-    "support_ms": 0.34316899999999995
+    "elapsed_ms": 0.6095,
+    "extension_ms": 0.519959,
+    "selection_ms": 0.00925,
+    "support_ms": 0.45333299999999976
    },
    "withheld": null,
    "work": {
@@ -256,7 +256,7 @@
     "extension_branches": 0,
     "extension_edges": 43,
     "mask_scans": 0,
-    "memory_bytes": 67123822,
+    "memory_bytes": 67124078,
     "mirror_rows": 0,
     "predicate_lookups": 0,
     "predicate_rows": 0,
@@ -282,6 +282,6 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 0.5265
+  "elapsed_ms": 0.76525
  }
 }

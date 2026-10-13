@@ -3471,7 +3471,7 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`).
 - **`"either"` on a BASIC graph**: the decision of a walk needs its mirror's support, which only the end of the
   search gives, so the supported walks are **held** (at most `max_predicate_contexts`, each charged before it is
-  held: 64 + 2L + 8 per predicate label of its support) and decided after the search, never pruned by the
+  held: 192 + 2L + 8 per predicate label of its support) and decided after the search, never pruned by the
   predicate. The mirror's support is taken from the held walks when the search covered the mirrors (`strands:
   "both"`, or a palindromic pattern: paired by sequence; a mirror the search did not hold has no support), else
   **read only when it decides**: the walk is first evaluated on its own support (its labels sure, every other
