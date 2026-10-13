@@ -44,7 +44,8 @@
 # SUITE_MEX_DIR (suite-dev), SUITE_MEX_PY (python3), SUITE_LOCAL_BASE (http://localhost:42010),
 # SUITE_REMOTE_BASE (the public refseq33m-experimental URL), SUITE_RUNS, PYTHON (python3), SUITE_POLL_S (15),
 # SUITE_SAMPLER (1; 0: no mex sampler besides direct-local's own in sequential mode), SUITE_WAIT_RUNNER_S
-# (150), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>).
+# (150), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
+# macOS's LocalHostName, else the node name).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -339,8 +340,9 @@ lock_json() {
     "$$" "$LOCK_HOST" "$(hostname)" "$LOCK_STARTED_UTC" "$LOCK_STARTED_EPOCH" "$RUN_ID" "$MODE" "$LOCK_TOKEN"
 }
 take_lock() {
-  local json held verdict attempt
-  LOCK_HOST="$(hostname)"
+  local json held verdict attempt brc
+  # A stable id of this machine, not its network name (a DHCP name changes on a VPN reconnect): review N6.
+  LOCK_HOST="$("$PY" "$HERE/suite_common.py" host-id)"
   LOCK_TOKEN="$("$PY" -c 'import uuid; print(uuid.uuid4().hex)')"
   LOCK_STARTED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   LOCK_STARTED_EPOCH="$("$PY" -c 'import time; print("%.3f" % time.time())')"
@@ -355,11 +357,16 @@ take_lock() {
     [[ -n "$held" ]] || continue
     verdict="$("$PY" "$HERE/suite_common.py" lock-check "$held" "$LOCK_HOST")"
     case "$verdict" in
-      stale*) log "removing a stale lock (${verdict#stale })"; mex "rm -f $MEX_DIR/LOCK" || true ;;
+      stale*)
+        # Removed only if it still holds what was judged stale (review N6).
+        log "removing a stale lock (${verdict#stale })"
+        brc=0
+        mex "$("$PY" "$HERE/suite_common.py" lock-break-cmd "$MEX_DIR" "$held")" || brc=$?
+        [[ $brc == 0 ]] || { log "the stale lock was not removed (it changed, or another removal is in progress); retrying"; sleep 1; } ;;
       *) die "the suite lock ~/$MEX_DIR/LOCK on $MEX is ${verdict#* }; another invocation drives the host (remove the file only if that process is gone)" ;;
     esac
   done
-  die "could not take the lock ~/$MEX_DIR/LOCK on $MEX"
+  die "could not take the lock ~/$MEX_DIR/LOCK on $MEX (a directory ~/$MEX_DIR/LOCK.break there is a stale-lock removal in progress, or one left by a cut-off invocation: remove it when no invocation runs)"
 }
 # Puts the run id into this invocation's lock once the run is named (only while the lock is still its own).
 lock_update() {

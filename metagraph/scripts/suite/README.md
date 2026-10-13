@@ -115,8 +115,12 @@ lists the environment overrides.
    ~/suite-dev/manifest/<run id>.json.
 3. Exclusion (review M4): every invocation takes `~/suite-dev/LOCK` on mex before any request to the host
    (an atomic noclobber create holding pid, host, start time, a token; the run id is written in once a new
-   run is named); a lock of a process of this host that is
-   gone, or whose pid now belongs to a younger process, is removed; a live one or another host's is refused.
+   run is named); a lock of a process of this machine that is gone, or whose pid now belongs to a younger
+   process, is removed; a live one or another machine's is refused. The lock names the machine by a stable id (review N6: `SUITE_HOST_ID`, else macOS's
+   LocalHostName from scutil, else the node name; the network name, which a DHCP lease or a VPN reconnect
+   changes, is recorded apart as `hostname`), so this machine's own stale lock is recognised after a
+   reconnect. A stale lock is removed only while it still holds what was judged stale, the compare and the
+   removal inside a mkdir mutex `~/suite-dev/LOCK.break`.
    The lock is released on exit (only if it is still this invocation's). Then any `run_direct.py` under
    ~/suite-dev (pgrep on mex) is waited for (SUITE_WAIT_RUNNER_S, 150 s) and refused if it stays, except a
    sequential --resume attaching to its own direct-local runner. An invocation refused before any arm ran

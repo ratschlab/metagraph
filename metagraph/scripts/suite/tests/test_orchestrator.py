@@ -10,7 +10,6 @@ import os
 import platform
 import shlex
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -179,7 +178,7 @@ class RunSuiteOffline(SuiteCase):
     def test_lock_held_stale_and_foreign(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
         os.makedirs(os.path.join(self.mex, "suite-dev"))
-        host_name = socket.gethostname()
+        host_name = sc.host_id()  # review N6: the lock's host is this machine's stable id
         with FakeHost() as host:
             held = {"pid": os.getpid(), "host": host_name, "started_utc": "t", "started_epoch": time.time(),
                     "run_id": "other", "token": "x"}
@@ -200,12 +199,14 @@ class RunSuiteOffline(SuiteCase):
             self.assertEqual(os.listdir(self.runs) if os.path.exists(self.runs) else [], [])
             dead = subprocess.Popen([sys.executable, "-c", "pass"])
             dead.wait()
+            # this machine's own lock from a crashed invocation, taken under another DHCP name: stale
             with open(self.lock_path(), "w") as fh:
-                json.dump(dict(held, pid=dead.pid), fh)
+                json.dump(dict(held, pid=dead.pid, hostname="staff-net-vpn-dhcp-1.intern.ethz.ch"), fh)
             p = self.run_suite(host, "--manifest", self.mpath)
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertIn("removing a stale lock", p.stderr)
         self.assertFalse(os.path.exists(self.lock_path()))
+        self.assertFalse(os.path.exists(self.lock_path() + ".break"))
 
     def test_refuses_next_to_a_running_runner(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
@@ -415,6 +416,7 @@ class RunSuiteOverSsh(SuiteCase):
         self.assertEqual(sorted(c["control_path"] for c in exits), sorted(paths))
         run_dir = out.strip().splitlines()[-1]
         self.assertIn("(run %s)" % os.path.basename(run_dir), p.stderr)  # the lock names the holder's run
+        self.assertIn("on %s since" % sc.host_id(), p.stderr)    # review N6: and this machine's stable id
         self.assertEqual(host_log_refused, [])                  # review N4: the refused one sent nothing
         rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
         self.assertEqual(sorted((r["arm"], r["outcome"]) for r in rows),

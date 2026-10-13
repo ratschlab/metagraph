@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -380,6 +381,51 @@ class Lock(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             sc._main(["clock-offset", "100.0", "103.5", "101.0"])
         self.assertEqual(buf.getvalue().strip(), "3.000")
+
+
+class LockIdentity(unittest.TestCase):
+    def test_host_id(self):
+        # review N6: the lock names this machine by a stable id, not its DHCP network name
+        self.assertEqual(sc.host_id(env={"SUITE_HOST_ID": "fixed"}, system="Darwin", scutil=lambda: "x"), "fixed")
+        self.assertEqual(sc.host_id(env={}, system="Darwin", scutil=lambda: "mbp-GR-3",
+                                    node="staff-net-vpn-dhcp-1262.intern.ethz.ch"), "mbp-GR-3")
+        self.assertEqual(sc.host_id(env={}, system="Darwin", scutil=lambda: "", node="laptop"), "laptop")
+        self.assertEqual(sc.host_id(env={}, system="Linux", scutil=lambda: "never", node="box"), "box")
+        self.assertTrue(sc.host_id())
+
+    def test_foreign_reason_names_the_network_name(self):
+        lock = {"pid": 7, "host": "mbp-other", "hostname": "dhcp-9.example", "started_utc": "t"}
+        verdict, reason = sc.lock_verdict(lock, "mbp-GR-3", 0.0, lambda pid: True, lambda pid: None)
+        self.assertEqual(verdict, "foreign")
+        self.assertIn("on mbp-other (dhcp-9.example)", reason)
+
+    def test_lock_break_command(self):
+        # the stale lock is removed only while it still holds what was judged stale, inside a mutex
+        held = json.dumps({"pid": 1, "host": "h", "token": "old", "note": "it's $(quoted) `x`"})
+        with tempfile.TemporaryDirectory() as d:
+            lock = os.path.join(d, "LOCK")
+
+            def run():
+                return subprocess.run(["bash", "-c", sc.lock_break_command(d, held)]).returncode
+
+            with open(lock, "w") as fh:
+                fh.write(held + "\n")
+            self.assertEqual(run(), 0)
+            self.assertFalse(os.path.exists(lock))
+            self.assertFalse(os.path.exists(lock + ".break"))
+            with open(lock, "w") as fh:
+                fh.write(json.dumps({"pid": 2, "token": "new"}) + "\n")   # taken by another one since
+            self.assertEqual(run(), 4)
+            self.assertTrue(os.path.exists(lock))
+            os.mkdir(lock + ".break")                                    # another removal in progress
+            with open(lock, "w") as fh:
+                fh.write(held + "\n")
+            self.assertEqual(run(), 3)
+            self.assertTrue(os.path.exists(lock))
+            os.rmdir(lock + ".break")
+            os.unlink(lock)
+            self.assertEqual(run(), 4)                                   # gone already
+            self.assertFalse(os.path.exists(lock + ".break"))
 
 
 class ExecutionOutcome(unittest.TestCase):

@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import shlex
 import sys
 import zlib
 
@@ -598,17 +599,60 @@ def parse_etime(text):
     return days * 86400 + secs
 
 
+def host_id(env=None, system=None, scutil=None, node=None):
+    """A stable id of this machine for the suite lock (review N6): SUITE_HOST_ID when set; on macOS the
+    LocalHostName (`scutil --get LocalHostName`), which a DHCP lease or a VPN reconnect does not change,
+    unlike `hostname` (staff-net-vpn-dhcp-<n>...: a lock left by a crashed invocation would read as another
+    host's, and another machine could later get the same name); else the node name. The arguments replace
+    the environment, platform.system(), the scutil call and the node name (tests)."""
+    import platform
+    env = os.environ if env is None else env
+    if env.get("SUITE_HOST_ID"):
+        return env["SUITE_HOST_ID"]
+    if (system or platform.system()) == "Darwin":
+        name = (scutil or _scutil_local_host_name)()
+        if name:
+            return name
+    return node if node is not None else platform.node()
+
+
+def _scutil_local_host_name():
+    import subprocess
+    try:
+        out = subprocess.run(["scutil", "--get", "LocalHostName"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             universal_newlines=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def lock_break_command(mex_dir, held):
+    """The shell command on mex that removes a stale lock only if its content is still `held` (review N6):
+    the compare and the removal run inside a mkdir mutex (LOCK.break), so two invocations that judged the
+    same lock stale cannot remove a lock one of them has taken since. Exit 0 removed, 3 another removal in
+    progress (or a mutex left by a cut-off one), 4 the lock changed or is gone."""
+    lock = "%s/LOCK" % mex_dir
+    mutex = "%s/LOCK.break" % mex_dir
+    return ('mkdir {m} 2>/dev/null || exit 3; '
+            'if [ "$(cat {l} 2>/dev/null)" = {h} ]; then rm -f {l}; rc=0; else rc=4; fi; '
+            'rmdir {m}; exit $rc').format(m=shlex.quote(mutex), l=shlex.quote(lock), h=shlex.quote(held))
+
+
 def lock_verdict(lock, hostname, now, pid_alive, pid_age_s):
     """('stale' | 'live' | 'foreign', reason) for the lock document of another invocation.
 
     stale: the lock names a process of this host that is gone, or whose pid now belongs to a process younger
     than the lock (the pid was reused); live: that process still runs; foreign: another host's process, which
-    cannot be checked from here. pid_alive / pid_age_s are the facts of this host (callables of the pid)."""
+    cannot be checked from here. `hostname` is this machine's host_id(), which the lock's `host` holds (its
+    `hostname`, the network name, is shown only). pid_alive / pid_age_s are the facts of this host (callables
+    of the pid)."""
     if not isinstance(lock, dict):
         return "stale", "unreadable lock"
     pid = lock.get("pid")
     if lock.get("host") != hostname:
-        return "foreign", "held by pid %s on %s since %s" % (pid, lock.get("host"), lock.get("started_utc"))
+        net = lock.get("hostname")
+        return "foreign", "held by pid %s on %s%s since %s" % (pid, lock.get("host"), (" (%s)" % net) if net else "",
+                                                               lock.get("started_utc"))
     if not isinstance(pid, int) or not pid_alive(pid):
         return "stale", "pid %s on %s is gone" % (pid, hostname)
     age = pid_age_s(pid)
@@ -650,8 +694,10 @@ def _main(argv):
     paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS
                                  print the paired loop's work: 'SID L R MC MW' per scenario (L, R, MC: 1 to
                                  do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -)
-    lock-check LOCK_JSON HOSTNAME
+    lock-check LOCK_JSON HOST_ID
                                  print 'stale|live|foreign REASON' for another invocation's lock
+    host-id                      print this machine's stable id for the lock (host_id())
+    lock-break-cmd MEX_DIR HELD  print the shell command removing the lock only if it still holds HELD
     clock-offset T0 REMOTE T1    print REMOTE - (T0 + T1) / 2 (how far mex's clock is ahead)
     """
     import time
@@ -692,6 +738,12 @@ def _main(argv):
             lock = None
         verdict, reason = lock_verdict(lock, argv[2], time.time(), _pid_alive, _pid_age_s)
         print("%s %s" % (verdict, reason))
+        return 0
+    if argv and argv[0] == "host-id":
+        print(host_id())
+        return 0
+    if len(argv) >= 3 and argv[0] == "lock-break-cmd":
+        print(lock_break_command(argv[1], argv[2]))
         return 0
     if len(argv) >= 4 and argv[0] == "clock-offset":
         try:
