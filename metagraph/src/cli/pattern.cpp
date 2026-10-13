@@ -207,6 +207,9 @@ struct ParsedRequest {
     bool labels_all = false;
     // the request named the labels: output.labels "all" or an annotation field
     bool annotation_named = false;
+    // max_memory_mb on its own: it acts on a label-free path list (§12.1), the other
+    // annotation fields do not
+    bool memory_named = false;
     // the effective annotation limits (used with labels_all in a retrieval mode)
     RetrievalLimits retrieval;
     // long_search "paths": patterns longer than k are extended into paths
@@ -438,11 +441,11 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
 
     // the annotation caps (§5.3): accepted with any projection and mode, used by output.labels
     // "all" in a retrieval mode (elsewhere stated: annotation_not_read)
-    for (const char *key : { "max_labels_per_anchor", "max_annotation_work", "max_memory_mb",
-                             "max_labels", "max_occurrences_per_label",
-                             "allow_unbudgeted_annotation" }) {
+    for (const char *key : { "max_labels_per_anchor", "max_annotation_work", "max_labels",
+                             "max_occurrences_per_label", "allow_unbudgeted_annotation" }) {
         req.annotation_named |= f.has(key);
     }
+    req.memory_named = f.has("max_memory_mb");
     // (with a predicate the account and its access act on the selection in every mode: only
     // these four are a projection's alone)
     for (const char *key : { "max_labels_per_anchor", "max_annotation_work", "max_labels",
@@ -1870,11 +1873,13 @@ Json::Value process_pattern_request(
                 a.results.append(path_json(c, length));
             });
             a.plain_cut = a.results.size() < a.released;
-            // all or nothing: the objects of a withheld or cut list are discarded, their
-            // charge with them
+            // the objects answered stay charged until the request ends (§12.1), as the
+            // labelled descriptors do; all or nothing: the objects of a withheld or cut list
+            // are discarded, their charge with them
+            const uint64_t objects = plain.take();
             if (mode != Mode::PARTIAL && a.result->extraction
                     && (a.plain_cut || a.result->extraction->withheld)) {
-                account.release(plain.take());
+                account.release(objects);
             }
         } else if (!labels) {
             a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
@@ -2671,8 +2676,12 @@ Json::Value process_pattern_request(
             }
             entry["rows_refused"] = std::move(refused);
         }
-        if (!projected && req.annotation_named && !read_labels && !has_predicate
-                && !a.supported && entry.isMember("notes")) {
+        // the entry of a pattern answered by its paths: max_memory_mb bounds the walks and
+        // result objects of a label-free one (§12.1), so named alone it leaves no note there
+        const bool paths_entry = mode != Mode::COUNT && req.long_paths
+                && req.patterns[i].pattern && req.patterns[i].pattern->length() > k;
+        if (!projected && (req.annotation_named || (req.memory_named && !paths_entry))
+                && !read_labels && !has_predicate && !a.supported && entry.isMember("notes")) {
             // the labels were asked for (or bounded) and none are read here: said, not
             // ignored (mode count, or output.labels "none")
             entry["notes"].append(kNoteAnnotationNotRead);

@@ -211,8 +211,8 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   paths a `long_search: "paths"` request keeps and builds without labels, §12.1). An answer that reads no annotation (mode `count`, or
   `output.labels: "none"`, without a predicate) echoes none of them in `limits` (it is the milestone-1 answer)
   and, when the request named one of them or `output.labels: "all"`, carries the note `annotation_not_read` in
-  each answered entry (a predicate answer echoes them in every mode and says `projection_not_read` instead,
-  §19.10).
+  each answered entry (`max_memory_mb` named alone excepted on the path entries it acts on, §8.10; a predicate
+  answer echoes them in every mode and says `projection_not_read` instead, §19.10).
   `require_support` (increment 4) is such an annotation field too.
 - The fields of increments 4 and 5 are opt-ins: a request that names none of them (nor a protein pattern) is
   answered as before them, byte for byte apart from `timing` (§17). `long_search` and `max_paths` are echoed in
@@ -1191,7 +1191,7 @@ It costs no step.
 | `paths_later_increment` | L > k without `long_search: "paths"`: anchors counted, paths neither extended nor extracted (ask with `long_search: "paths"`, §12.1) |
 | `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys. Increment 5b: also an entry whose selection read rows so, without a projection; increment 5s: an entry whose supported-path search read rows so (§20.6) |
 | `record_bounds_unknown` | increment 3: coordinates without a record mapping (`placement: "global"`): occurrences are (`kmer_coord`, `offset`), placed in no record, not deduplicated, not counted (increment 5s: the supported paths' labels, at the `label_intersection` level, §20.8) |
-| `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field (`require_support` included), and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect (`max_memory_mb` excepted on a `long_search: "paths"` entry, whose kept walks and result objects it bounds, §12.1) |
+| `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field (`require_support` included), and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect. `max_memory_mb` acts on a `long_search: "paths"` entry of a pattern longer than k outside mode `count` (its kept walks and result objects, §12.1): named alone, it leaves no note there |
 | `label_intersection_only` | increment 4: the labels of paths where no coordinate is read (placement `none`, `none_canonical`, `not_requested`): every label is `label_intersection`, none can be verified (§12.1); increment 5s: the labels of supported paths searched at the `label_intersection` level where no occurrence is listed (§20.6) |
 | `threshold_upper_bound` | the owner's decision #16, a graph without its mask: a threshold was decided on a count's upper bound U against the request while its lower bound was within the threshold — `all_or_count` withheld `count_above_threshold`, `stop_at_threshold` stopped (`threshold_crossed`, or in `partial` `cut: max_contexts` / `max_anchors`), or the extension was not admitted (`anchors_above_threshold`): the true count may be within the threshold (§7.5) |
 | `no_stop_codon` | the owner's decision #19: a peptide holding `*` read in a genetic code without an unconditional stop codon (tables 27, 28, 31): `*` matches nothing there, so the pattern has no instance; its contexts (L ≤ k, `exact` 0, answered without a search, §7.6) or paths (L > k) are 0 for that reason. A long one's anchors are its anchor windows', which may not reach the `*` (§12.2) |
@@ -3066,8 +3066,9 @@ stop would not skip them.
 
 The engine's own retention for the raw release (24-byte descriptors, up to `max_predicate_contexts`) is outside
 the account, as the label-free descriptors of §7.6 are (a long pattern's kept walks are in it, §12.1). The result
-objects of `output.labels: "none"` are charged while their pattern is answered and released when the next
-pattern's release begins.
+objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`) that a pattern's answer keeps
+stay charged until the request ends (§12.1: the bound is the request's, over all its patterns); those of a withheld
+or cut `all_or_count` list are released with it.
 
 ### 19.10 The answer
 
@@ -4636,7 +4637,13 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   `count_predicate_scope_context` pins `"context"` alone as a no-op: the answer without the field, byte for byte).
   §23.4's phase-2 figures are those with the `mismatches` object (1,239–1,342 bytes less per probe document, the
   `pattern` member 2,415–2,551 before); §10.1 and §24.3 call the `/traverse` block of a pair its gate block; §28
-  points to the **Wording** bullet above.
+  points to the **Wording** bullet above. The result objects of a label-free path list that a pattern's answer keeps
+  stay charged to the request's account until the request ends (§12.1 said so, §19.9 the opposite, and the route
+  released them when the next pattern's release began, a bound per pattern: §28;
+  `PatternPaths.TheMemoryAccountBoundsLabelFreePaths`, two patterns); a `long_search: "paths"` entry of a pattern
+  longer than k outside mode `count`, whose request named `max_memory_mb` and no other annotation field, no longer
+  carries `annotation_not_read` (§4.1, §8.10: the field acts on it;
+  `PatternPaths.MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry`).
 
 ## 28. Changed after the review of 2026-10-12
 
@@ -4657,20 +4664,22 @@ extension begins, stops the extension at the first that does not fit (`stop {ext
 `output_budget`), and frees each walk as the release hands it over; without labels the route admits each path's
 result object (512 + 2k + 3L + 192n, the labelled price) before it is built, from all the account has left, and
 ends the list at the first that does not fit (`partial`: `cut: max_memory`, `stop {output, max_memory}`;
-`all_or_count`: `output_budget`). So a label-free `long_search: "paths"` entry can now carry `stop {extension |
-output, max_memory}`, `cut: max_memory` and `withheld: output_budget`, each with the name and placement of the
-labelled branch's; `work.memory_bytes` is not added to it and `max_memory_mb` is not echoed, so that the answer
-of a request the account holds is byte for byte the one before. The `output_budget` table of §7.5 notes that an
-increment-4 entry withheld after a stop of the extension carries an `at_least` count. The occurrence list of a
-label in `all_or_count` is reserved at no more than the account could still admit (the review's L8: it was
-reserved at the row's full coordinate count before any charge). Tests: `PatternSearch.ExtensionMemoryAccount`
-(the engine: the stop, the cut, the withheld, the half rule, every charge released, nothing charged by `count`),
+`all_or_count`: `output_budget`). The objects a pattern's answer keeps stay charged until the request ends, as the
+labelled descriptors do (§12.1, §19.9: the bound is the request's, so a later pattern finds the account as the
+earlier ones left it; the verification of 2026-10-13 found them released when the next pattern's release began, a
+bound per pattern of up to `max_patterns` × `max_memory_mb`). So a label-free `long_search: "paths"` entry can now
+carry `stop {extension | output, max_memory}`, `cut: max_memory` and `withheld: output_budget`, each with the name
+and placement of the labelled branch's; `work.memory_bytes` is not added to it and `max_memory_mb` is not echoed, so
+that the answer of a request the account holds is byte for byte the one before. The `output_budget` table of §7.5
+notes that an increment-4 entry withheld after a stop of the extension carries an `at_least` count. The occurrence
+list of a label in `all_or_count` is reserved at no more than the account could still admit (the review's L8: it was
+reserved at the row's full coordinate count before any charge). Tests: `PatternSearch.ExtensionMemoryAccount` (the
+engine: the stop, the cut, the withheld, the half rule, every charge released, nothing charged by `count`),
 `PatternPaths.TheMemoryAccountBoundsLabelFreePaths` (the route: byte identity of a request the account holds, the
-route's cut in both modes, the engine's stop in both modes and with labels, the stop ending only its own
-pattern), `PatternPaths.TheMemoryAccountStopsPathRetention` (its pattern now one with few paths, so that the
-test stays the descriptors'). The validator (`test_pattern_fixtures.py`) accepts `stop {extension, max_memory}`
-and `stop {output, max_memory}` on a `long_search: "paths"` entry of any projection. No stored body of the mini
-index changes.
+route's cut in both modes, the engine's stop in both modes and with labels, the stop ending only its own pattern),
+`PatternPaths.TheMemoryAccountStopsPathRetention` (its pattern now one with few paths, so that the test stays the
+descriptors'). The validator (`test_pattern_fixtures.py`) accepts `stop {extension, max_memory}` and `stop {output,
+max_memory}` on a `long_search: "paths"` entry of any projection. No stored body of the mini index changes.
 
 **The selection of supported paths: its stated reasons and its memory (§20.5, §20.7, §20.9).** A selected path
 beyond `max_paths` is never charged its `selection_labels`, so `partial` states `cut: max_paths` with no stop

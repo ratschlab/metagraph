@@ -271,8 +271,8 @@ class Account final : public graph::pattern::MemoryAccount {
  * charged to the account before its result object is built, within an allowance opened when
  * the release begins (what the account has left, or a share of it); the first that does not
  * fit closes the admission, so that none of the pattern's later objects is built. What a
- * release charged stays held until it is taken over (take(): the labelled retrieval's, with
- * the pattern's answer) or the next release begins, which releases it.
+ * release charged stays held until it is taken over (take(): with the pattern's answer,
+ * labelled or not, until the request ends) or the next release begins, which releases it.
  */
 class Admission {
   public:

@@ -1283,6 +1283,81 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
         EXPECT_EQ("stopped", p["counts"]["paths"]["extension"].asString()) << i;
         EXPECT_EQ(kept + 1, p["counts"]["paths"]["value"].asUInt64()) << i;
     }
+
+    // the objects a pattern answered stay charged until the request ends (the bound is the
+    // request's, not each pattern's): an account that holds one pattern's answer whole, and
+    // one more walk, holds the second pattern's walks in its half of what is left but only
+    // the objects that fit beside them, so the second is cut where alone it is not
+    hooks.max_memory_bytes = 2 * paths * walk + paths * object + 2 * walk;
+    const uint64_t second = admitted(hooks.max_memory_bytes - paths * object, paths);
+    ASSERT_GT(second, 0u);
+    ASSERT_LT(second, paths);
+    out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), hooks);
+    EXPECT_EQ(untimed(full["patterns"][0]), untimed(out["patterns"][0]));
+    const Json::Value &t = out["patterns"][1];
+    EXPECT_EQ(second, t["returned"].asUInt64());
+    EXPECT_EQ("max_memory", t["cut"]["reason"].asString());
+    EXPECT_EQ("output", t["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", t["stop"]["reason"].asString());
+    EXPECT_EQ("completed", t["counts"]["paths"]["extension"].asString());
+    EXPECT_EQ(paths, t["counts"]["paths"]["value"].asUInt64());
+    EXPECT_FALSE(t["retrieval_complete"].asBool());
+    for (Json::ArrayIndex i = 0; i < second; ++i) {
+        EXPECT_EQ(f["results"][i], t["results"][i]);
+    }
+    out = run(idx, body(spec + ", " + spec, "", "none"), hooks);
+    EXPECT_EQ(untimed(all["patterns"][0]), untimed(out["patterns"][0]));
+    const Json::Value &u = out["patterns"][1];
+    EXPECT_EQ("output_budget", u["withheld"]["reason"].asString());
+    EXPECT_EQ(0u, u["returned"].asUInt64());
+    EXPECT_EQ("exact", u["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(paths, u["counts"]["paths"]["value"].asUInt64());
+}
+
+// max_memory_mb acts on a label-free path list (its kept walks and result objects), so named
+// alone it leaves no annotation_not_read note on the entry of a pattern answered by its paths;
+// the other annotation fields, a pattern of L <= k and mode count keep the note
+TEST(PatternPaths, MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    auto noted = [](const Json::Value &entry) {
+        for (const Json::Value &note : entry["notes"]) {
+            if (note.asString() == "annotation_not_read") {
+                return true;
+            }
+        }
+        return false;
+    };
+    const std::string two = "{\"iupac\": \"ACNNNNNT\"}, {\"dna\": \"ACGTA\"}";
+    for (const char *mode : { "\"mode\": \"partial\"", "" }) {
+        SCOPED_TRACE(mode);
+        const std::string rest = std::string(mode) + (*mode ? ", " : "");
+        Json::Value out = run(idx, body(two, rest + "\"max_memory_mb\": 1", "none"));
+        ASSERT_EQ(2u, out["patterns"].size());
+        EXPECT_FALSE(out["patterns"][0].isMember("error"));
+        EXPECT_FALSE(noted(out["patterns"][0]));
+        EXPECT_TRUE(noted(out["patterns"][1]));
+        out = run(idx, body(two, rest + "\"max_memory_mb\": 1, \"max_labels\": 1", "none"));
+        EXPECT_TRUE(noted(out["patterns"][0]));
+        EXPECT_TRUE(noted(out["patterns"][1]));
+        out = run(idx, body(two, rest + "\"require_support\": \"record_verified\"", "none"));
+        EXPECT_TRUE(noted(out["patterns"][0]));
+    }
+    Json::Value out = run(idx, body(two, "\"mode\": \"count\", \"max_memory_mb\": 1", "none"));
+    EXPECT_TRUE(noted(out["patterns"][0]));
+    EXPECT_TRUE(noted(out["patterns"][1]));
+    // without the field no entry carries the note
+    out = run(idx, body(two, "\"mode\": \"partial\"", "none"));
+    EXPECT_FALSE(noted(out["patterns"][0]));
+    EXPECT_FALSE(noted(out["patterns"][1]));
 }
 
 // The reads and the output of the paths' labels are work under the deadline (§5.3), as for
