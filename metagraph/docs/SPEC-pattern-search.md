@@ -4661,3 +4661,10 @@ walk where the peak falls while they are held (the fixtures `supported_paths_pre
 `supported_paths_predicate_either`, two walks each: +256), by less where it falls elsewhere
 (`supported_paths_predicate_mirror`, one walk: +96); nothing else of the stored bodies changes. Where the account
 is tight under `"either"` with a projection, the listed walks' charges now precede the later mirror reads.
+
+**A row refused as runs is stated (§20.5, §20.7).** A budgeted row of the supported-path search that the account
+admits and then cannot hold as runs is stated in `rows_refused` as a refused decode is, with what its hits and
+runs need together against what the account had for it (before: `stop {extension, max_memory}` with
+`rows_refused: []`). A budget-aware decode is admitted against a demand that covers its runs, so no shape tried
+reached that refusal; `PatternSupport.MemoryStopsAfterTheAnchorsStateTheirRow` requires every memory stop after
+the anchors to state its row.

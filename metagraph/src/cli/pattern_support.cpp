@@ -467,6 +467,23 @@ const step::RowRuns* PathTracker::row(uint64_t key, std::string_view kmer) {
         env_.units += u;
         work_.units += u;
     };
+    // a budgeted row the account cannot hold is stated (the room for its statement is
+    // reserved below, before the read): |needed| the least the row alone was seen to need,
+    // |available| what the account had for it
+    auto refuse = [&](uint64_t needed, uint64_t available) {
+        const bool stated = env_.account.charge(m.statement());
+        assert(stated);
+        (void)stated;
+        Json::Value v;
+        v["kmer"] = std::string(kmer);
+        v["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(key));
+        v["phase"] = "extension";
+        v["reason"] = "max_memory";
+        v["needed_bytes"] = uint_json(needed);
+        v["available_bytes"] = uint_json(available);
+        rows_refused_.append(std::move(v));
+        stop_ = "max_memory";
+    };
     if (!env_.budget.check_time()) {
         stop_ = "time";
         return nullptr;
@@ -499,19 +516,7 @@ const step::RowRuns* PathTracker::row(uint64_t key, std::string_view kmer) {
             }
             const FetchRefusal &r = m.query->refusal();
             charge(r.units ? r.units : kKeyUnits);
-            const bool stated = env_.account.charge(m.statement());
-            assert(stated);
-            (void)stated;
-            Json::Value v;
-            v["kmer"] = std::string(kmer);
-            v["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(key));
-            v["phase"] = "extension";
-            v["reason"] = "max_memory";
-            const uint64_t need = r.cause == FetchRefusal::DECODE ? r.need : r.demand;
-            v["needed_bytes"] = uint_json(need);
-            v["available_bytes"] = uint_json(r.left);
-            rows_refused_.append(std::move(v));
-            stop_ = "max_memory";
+            refuse(r.cause == FetchRefusal::DECODE ? r.need : r.demand, r.left);
             return nullptr;
         }
         hits_bytes = decode.held();
@@ -546,7 +551,15 @@ const step::RowRuns* PathTracker::row(uint64_t key, std::string_view kmer) {
             + step::RowRuns::model_bytes(chains_, hits.size(), chains_ ? coords : 0);
     if (!env_.account.charge(bound)) {
         env_.account.release(hits_bytes);
-        stop_ = "max_memory";
+        if (env_.budgeted) {
+            // the decode admitted the row's hits and the account cannot hold their runs
+            // beside them: stated as a refused decode is, with what the hits and the runs
+            // need together against what the account had for the row (an unbudgeted read's
+            // refusal is not stated, §14.4: its size is known only after it)
+            refuse(hits_bytes + bound, env_.account.left());
+        } else {
+            stop_ = "max_memory";
+        }
         return nullptr;
     }
     step::RowRuns runs(chains_);

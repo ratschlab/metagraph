@@ -1640,6 +1640,73 @@ TEST(PatternSupport, RefusedRowsStopTheSearch) {
     EXPECT_LT(5u, refused);
 }
 
+// Every memory stop of a budgeted search after the anchors are admitted states its row in
+// rows_refused (SPEC §20.5, §20.7: the room for a row's statement is reserved before its
+// read, and a refused decode or a runs bound the account cannot hold after an admitted decode
+// is stated with it): one column of fifty records, each a distinct random 5-mer and the
+// 11-mer S they all end in (S not periodic, so that no k-mer inside it anchors the pattern),
+// the pattern NNNNN and S: fifty cheap anchor rows, the walks' rows of one or two
+// coordinates, and S's row with fifty coordinates, the graph's terminal node and so an anchor
+// row of the row-diff, refused over a band of accounts. A stop before any row is read is the
+// anchors' 64 bytes each, not a row; the kept paths' allowance cuts the list without a stop
+// at these sizes. (A budget-aware decode is admitted against a demand that covers its runs,
+// so the stops here are refused decodes; the statement of a runs bound refused after an
+// admitted decode shares their code and was not reached by any shape tried.)
+TEST(PatternSupport, MemoryStopsAfterTheAnchorsStateTheirRow) {
+    const std::string shared = "ACCTGAGTCAG";
+    std::mt19937 rng(7);
+    std::set<std::string> prefixes;
+    while (prefixes.size() < 50) {
+        std::string p;
+        for (size_t i = 0; i < 5; ++i) {
+            p += "ACGT"[rng() % 4];
+        }
+        prefixes.insert(p);
+    }
+    std::vector<Record> records;
+    for (const std::string &p : prefixes) {
+        records.push_back({ "a", "a" + std::to_string(records.size()), p + shared });
+    }
+    const Index idx = build_rd(11, records);
+    const std::string text = "NNNNN" + shared;
+    Ask ask;
+    const Outcome full = run_support(idx, text, false, ask);
+    ASSERT_FALSE(full.result.stop) << full.stop;
+    ASSERT_EQ(50u, full.paths.size());
+    ASSERT_EQ(50u, full.work.anchor_rows);
+    uint64_t before_rows = 0, stops = 0, at_shared = 0, unstopped = 0;
+    for (uint64_t mem = 2048; mem < 32768; mem += 16) {
+        SCOPED_TRACE(mem);
+        Ask a = ask;
+        a.max_memory = mem;
+        const Outcome out = run_support(idx, text, false, a);
+        EXPECT_LE(out.peak, mem);
+        check_prefix(full, out);
+        if (!out.result.stop) {
+            ++unstopped;
+            continue;
+        }
+        EXPECT_EQ("max_memory", out.stop);
+        if (out.work.rows == 0 && out.rows_refused.empty()) {
+            ++before_rows;
+            continue;
+        }
+        ++stops;
+        ASSERT_EQ(1u, out.rows_refused.size()) << out.work.rows;
+        const Json::Value &r = out.rows_refused[0];
+        EXPECT_EQ("extension", r["phase"].asString());
+        EXPECT_EQ("max_memory", r["reason"].asString());
+        EXPECT_EQ(idx.k, r["kmer"].asString().size());
+        EXPECT_GT(r["needed_bytes"].asUInt64(), r["available_bytes"].asUInt64());
+        EXPECT_GE(r["available_bytes"].asUInt64(), 0u);
+        at_shared += r["kmer"].asString() == shared;
+    }
+    EXPECT_LT(0u, before_rows);
+    EXPECT_LT(0u, at_shared);
+    EXPECT_LT(at_shared, stops);
+    EXPECT_LT(0u, unstopped);
+}
+
 TEST(PatternSupport, TheRowCacheChangesNoAnswer) {
     // a small account: a small allotment, rows evicted and read again (charged again); the
     // supported paths and their labels are those of a large account
