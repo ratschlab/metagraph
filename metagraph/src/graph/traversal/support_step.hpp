@@ -231,6 +231,11 @@ class RowRuns {
     // what a row of |labels| labels with |runs| runs holds (a bound before it is built: its
     // coordinates for |runs|)
     static uint64_t model_bytes(bool with_coords, size_t labels, size_t runs);
+    // what its vectors have allocated (their capacities), beside the model of bytes()
+    uint64_t capacity_bytes() const {
+        return labels_.capacity() * sizeof(LabelId) + run_begin_.capacity() * sizeof(uint32_t)
+                + runs_.capacity() * sizeof(CoordRun);
+    }
 
   private:
     bool with_coords_;
@@ -260,6 +265,11 @@ struct AnchorChains {
     std::vector<ChainRun> runs;
 
     uint64_t num_chains() const { return chain_begin.empty() ? 0 : chain_begin.back(); }
+    // what its vectors have allocated (their capacities)
+    uint64_t capacity_bytes() const {
+        return run_begin.capacity() * sizeof(uint32_t) + chain_begin.capacity() * sizeof(uint64_t)
+                + runs.capacity() * sizeof(ChainRun);
+    }
 };
 
 /**
@@ -326,7 +336,19 @@ class Frame {
     // chain's lowest coordinate along the walk; appended to |out|, units its runs
     uint64_t starts(size_t i, std::vector<CoordRun> *out) const;
 
+    /**
+     * Lets go of the anchor's chains: the caller's stack calls it for a frame it pops and for
+     * one whose step left no support, so that the anchor's block is shared by the frames
+     * standing on the anchor only and the next anchor reopens it (open() reuses a block no
+     * other frame shares). The buffers keep their capacity for the next step into the frame;
+     * the frame is incomplete until it is opened or stepped into again.
+     */
+    void detach();
+
     uint64_t bytes() const;
+    // what its own buffers have allocated (their capacities; the anchor's chains not counted),
+    // beside the model of bytes()
+    uint64_t capacity_bytes() const;
     // what an anchor frame of |labels| labels and |runs| chain runs holds, its k-mer of k
     // bases with it
     static uint64_t anchor_bytes(Support level, size_t labels, size_t runs, size_t k);

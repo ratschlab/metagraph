@@ -609,6 +609,16 @@ uint64_t Frame::starts(size_t i, std::vector<CoordRun> *out) const {
     return n;
 }
 
+void Frame::detach() {
+    anchor_.reset();
+    complete_ = false;
+}
+
+uint64_t Frame::capacity_bytes() const {
+    return kmer_.capacity() + labels_.capacity() * sizeof(LabelId)
+            + refs_.capacity() * sizeof(LabelRef) + bits_.capacity() * sizeof(uint64_t);
+}
+
 uint64_t Frame::bytes() const {
     if (!depth_)
         return anchor_bytes(level_, labels_.size(), runs_, kmer_.size());

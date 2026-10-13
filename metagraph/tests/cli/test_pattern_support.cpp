@@ -546,6 +546,14 @@ Pattern pattern_of(const std::string &text, bool peptide) {
     return Pattern::parse(peptide ? PatternKind::PROTEIN : PatternKind::IUPAC, text);
 }
 
+// what a tracker's buffers hold (PathTracker::retained), for the messages of the checks
+std::string describe(const PathTracker::Retained &r) {
+    return "chain blocks " + std::to_string(r.chain_blocks) + " (" + std::to_string(r.chain_bytes)
+            + " B), frames " + std::to_string(r.frame_bytes) + " B, row cache "
+            + std::to_string(r.cache_bytes) + " B, transient row "
+            + std::to_string(r.transient_bytes) + " B";
+}
+
 Outcome run_support(const Index &idx, const std::string &text, bool peptide, const Ask &ask) {
     Outcome out;
     LabelOracle oracle(*idx.anno, ask.records ? idx.cth.get() : nullptr);
@@ -573,6 +581,7 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     options.labels = ask.labels;
     options.require_verified = ask.require_verified;
     PathTracker tracker(env, options);
+    const PathTracker::Retained fresh = tracker.retained();
     SupportedPathSink sink(tracker);
     PatternSearch search(graph);
     Request rq;
@@ -589,6 +598,8 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     tracker.begin_pattern(p.length());
     sink.begin_pattern(ask.mode, ask.max_paths);
     out.result = search.count(p, rq, budget);
+    // every frame popped: frame 0's chain block, kept for the next anchor, is the only one left
+    EXPECT_GE(1u, tracker.retained().chain_blocks) << describe(tracker.retained());
     out.x = supported_release(out.result, rq, sink, &out.named);
     if (ask.labels && out.x)
         out.labels = sink.labels_answer(*out.x, out.named, p.length(), Json::Value("g"));
@@ -604,6 +615,8 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     out.rows_refused = tracker.rows_refused();
     sink.end_pattern(out.x ? out.x->returned : 0);
     tracker.end_pattern();
+    // what the account credited at the pattern's end, the tracker no longer holds
+    EXPECT_TRUE(fresh == tracker.retained()) << describe(tracker.retained());
     out.units = units;
     out.peak = account.peak();
     out.held_after = account.held();
@@ -1162,6 +1175,117 @@ TEST(PatternSupport, TheAccountKeepsTheReturnedPathsOnly) {
         }
     }
     EXPECT_LT(20u, returned);
+}
+
+TEST(PatternSupport, TheTrackerHoldsNoMoreThanTheAccount) {
+    // the account credits a frame when it is popped (or found DEAD) and everything the pattern
+    // held at end_pattern; the process lets go of it too. Two anchors of decreasing reach on one
+    // tracker, driven as the engine drives it: anchor 1 walks its record to depth 25 and its
+    // child at depth 26 is DEAD (that k-mer carries no permitted label), anchor 2 walks to
+    // depth 9. No frame popped or found DEAD below the anchor keeps the anchor's chain block,
+    // so that anchor 2 reopens frame 0's block and one block lives at any time; after
+    // end_pattern the tracker holds what a fresh one holds (no chain block, no frame, no row),
+    // and the account nothing. Without a row cache every row is held for its step only (the
+    // transient row) and freed with its charge.
+    const size_t k = 5;
+    const std::string s1 = "CGCCTTTACTTGCTGTGTCCACCCCATCGG";
+    const std::string s2 = "ACTGGCATTTTTAT";
+    // anchor 1's walk and its DEAD child: the k-mer TCGGA, carried by B only
+    const std::string dead = s1 + "A";
+    const Index idx = build_rd(k, { { "A", "a0", s1 }, { "A", "a1", s2 },
+                                    { "B", "b0", dead.substr(dead.size() - k) } });
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    auto nodes_of = [&](const std::string &s) {
+        std::vector<node_index> nodes;
+        graph.map_to_nodes_sequentially(s, [&](node_index v) { nodes.push_back(v); });
+        return nodes;
+    };
+    const std::vector<node_index> n1 = nodes_of(s1), n2 = nodes_of(s2), nd = nodes_of(dead);
+    ASSERT_EQ(s1.size() - k + 1, n1.size());
+    ASSERT_EQ(s2.size() - k + 1, n2.size());
+    ASSERT_EQ(n1.size() + 1, nd.size());
+    // the engine's search state of the k-mer at |depth| of the walk spelling |s|
+    auto state = [&](const std::string &s, const std::vector<node_index> &nodes, size_t depth) {
+        SearchState st;
+        st.node = nodes[depth];
+        st.base_node = nodes[depth];
+        st.stored_reverse_complement = false;
+        st.orientation = Orientation::FORWARD;
+        st.side = Side::RIGHT;
+        st.base = depth ? s[k - 1 + depth] : '\0';
+        st.position = k + depth;
+        st.model = 0;
+        st.depth = depth;
+        st.spelled = std::string_view(s).substr(0, k + depth);
+        return st;
+    };
+    using Verdict = SupportTracker::Verdict;
+    for (uint64_t row_cache : { uint64_t(64) << 20, uint64_t(0) }) {
+        SCOPED_TRACE(row_cache);
+        LabelOracle oracle(*idx.anno, idx.cth.get());
+        retrieval::Account account(uint64_t(1) << 30);
+        Budget budget(1'000'000'000, Deadline(Clock::now(), 1e9, 0));
+        uint64_t units = 0;
+        RetrievalLimits limits;
+        limits.max_annotation_work = std::numeric_limits<uint64_t>::max() / 4;
+        limits.max_memory_bytes = uint64_t(1) << 30;
+        limits.row_cache_bytes = row_cache;
+        PathSupportEnv env { oracle, budget, account, units, limits,
+                             PatternSearch::support(graph).mode, oracle.decode_charged(),
+                             nullptr, {} };
+        PathSupportOptions options;
+        options.level = Support::TRACE;
+        PathTracker tracker(env, options);
+        const PathTracker::Retained fresh = tracker.retained();
+        // after each call: at most one chain block, and no transient row past its step
+        auto check = [&](const std::string &when) {
+            const PathTracker::Retained r = tracker.retained();
+            EXPECT_GE(1u, r.chain_blocks) << when << ": " << describe(r);
+            EXPECT_EQ(fresh.transient_bytes, r.transient_bytes) << when << ": " << describe(r);
+        };
+
+        tracker.begin_pattern(40);
+        const Context a1 { Orientation::FORWARD, 0, n1[0], n1[0], {}, {}, 0 };
+        const Context a2 { Orientation::FORWARD, 0, n2[0], n2[0], {}, {}, 0 };
+        ASSERT_TRUE(tracker.prepare({ a1, a2 }));
+        const uint64_t prepared = account.held();
+        ASSERT_EQ(Verdict::ALIVE, tracker.open(state(s1, n1, 0)));
+        check("anchor 1 opened");
+        for (size_t d = 1; d < n1.size(); ++d) {
+            ASSERT_EQ(Verdict::ALIVE, tracker.push(state(s1, n1, d)));
+            check("anchor 1 at depth " + std::to_string(d));
+        }
+        EXPECT_EQ(1u, tracker.retained().chain_blocks);
+        EXPECT_LT(prepared, account.held());
+        ASSERT_EQ(Verdict::DEAD, tracker.push(state(dead, nd, n1.size())));
+        check("the DEAD child");
+        for (size_t d = 0; d < n1.size(); ++d) {
+            tracker.pop();
+        }
+        check("anchor 1 popped");
+        EXPECT_EQ(prepared, account.held());
+
+        ASSERT_EQ(Verdict::ALIVE, tracker.open(state(s2, n2, 0)));
+        check("anchor 2 opened");
+        EXPECT_EQ(1u, tracker.retained().chain_blocks);
+        for (size_t d = 1; d < n2.size(); ++d) {
+            ASSERT_EQ(Verdict::ALIVE, tracker.push(state(s2, n2, d)));
+            check("anchor 2 at depth " + std::to_string(d));
+        }
+        for (size_t d = 0; d < n2.size(); ++d) {
+            tracker.pop();
+        }
+        check("anchor 2 popped");
+        EXPECT_EQ(prepared, account.held());
+        RecordProperty("retained_before_end_pattern_row_cache_" + std::to_string(row_cache),
+                       describe(tracker.retained()));
+
+        tracker.end_pattern();
+        EXPECT_EQ(0u, account.held());
+        EXPECT_TRUE(fresh == tracker.retained()) << describe(tracker.retained());
+        RecordProperty("retained_after_end_pattern_row_cache_" + std::to_string(row_cache),
+                       describe(tracker.retained()));
+    }
 }
 
 TEST(PatternSupport, DifferentialAgainstTheLabelsOfAllPaths) {

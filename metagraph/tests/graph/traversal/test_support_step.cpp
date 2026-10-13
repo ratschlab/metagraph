@@ -977,6 +977,103 @@ TEST(SupportStep, SurvivalBitsEqualTheRunBasedMerge) {
     EXPECT_GT(bounded, 100u);
 }
 
+// A stack of frames used walk after walk, as the pattern's tracker keeps it: a frame popped
+// above the anchor is detached, so that the next walk reopens frame 0's chain block instead of
+// allocating one beside it (open() reuses a block no other frame shares); every frame of a walk
+// on the reused stack equals the frame of a fresh stack, and a detached frame is incomplete and
+// holds no chains
+TEST(SupportStep, ADetachedFrameLetsGoOfTheAnchorsChains) {
+    const RecordOf none;
+    {
+        Frame f, g, h;
+        RowRuns row(true);
+        const Coord c[] = { 3, 4, 9 };
+        row.add(0, c, 3);
+        f.open(Orientation::SPELLED, Arm::RIGHT, Support::TRACE, "AAA", "AAA", row, none);
+        const AnchorChains *block = f.anchor();
+        f.step('A', "AAA", row, &g);
+        EXPECT_EQ(block, g.anchor());
+        // g still stands on the anchor: the anchor reopened gets a block of its own
+        f.open(Orientation::SPELLED, Arm::RIGHT, Support::TRACE, "AAA", "AAA", row, none);
+        EXPECT_NE(block, f.anchor());
+        EXPECT_EQ(block, g.anchor());
+        block = f.anchor();
+        f.step('A', "AAA", row, &h);
+        h.detach();
+        EXPECT_FALSE(h.complete());
+        EXPECT_EQ(nullptr, h.anchor());
+        EXPECT_THROW(h.step('A', "AAA", row, &g), std::logic_error);
+        // nothing else stands on the anchor: the anchor reopened keeps its block
+        f.open(Orientation::SPELLED, Arm::RIGHT, Support::TRACE, "AAA", "AAA", row, none);
+        EXPECT_EQ(block, f.anchor());
+        EXPECT_EQ(2u, f.total_chain_runs());
+    }
+    std::mt19937 gen(31);
+    size_t reused = 0, compared = 0;
+    for (size_t t = 0; t < 60; ++t) {
+        const size_t k = 3 + gen() % 3;
+        std::vector<std::vector<std::string>> records(1 + gen() % 3);
+        for (auto &label : records) {
+            for (size_t r = 0, nr = 1 + gen() % 3; r < nr; ++r) {
+                label.push_back(random_dna(gen, k + gen() % 30));
+            }
+        }
+        const Records idx(k, records);
+        // the frames of |walk| (a substring of a record: every frame supported) on |frames|
+        auto walk_on = [&](std::vector<Frame> &frames, const std::string &walk) {
+            const size_t n = walk.size() - k + 1;
+            if (frames.size() < n)
+                frames.resize(n);
+            std::string kmer = walk.substr(0, k);
+            RowRuns row = idx.row(kmer, true);
+            frames[0].open(Orientation::SPELLED, Arm::RIGHT, Support::TRACE, kmer, kmer, row,
+                           idx.record_of());
+            for (size_t d = 1; d < n; ++d) {
+                kmer = kmer.substr(1) + walk[k - 1 + d];
+                row = idx.row(kmer, true);
+                frames[d - 1].step(walk[k - 1 + d], kmer, row, &frames[d]);
+            }
+        };
+        std::vector<Frame> stack;
+        for (size_t w = 0; w < 6; ++w) {
+            const std::vector<std::string> &label = records[gen() % records.size()];
+            const std::string &record = label[gen() % label.size()];
+            const size_t len = k + gen() % (record.size() - k + 1);
+            const std::string walk = record.substr(gen() % (record.size() - len + 1), len);
+            const size_t n = walk.size() - k + 1;
+            const AnchorChains *block = stack.empty() ? nullptr : stack[0].anchor();
+            walk_on(stack, walk);
+            if (block) {
+                EXPECT_EQ(block, stack[0].anchor()) << "trial " << t << " walk " << w;
+                ++reused;
+            }
+            std::vector<Frame> fresh;
+            walk_on(fresh, walk);
+            for (size_t d = 0; d < n; ++d) {
+                const Frame &a = stack[d], &b = fresh[d];
+                ASSERT_TRUE(a.complete());
+                ASSERT_EQ(b.labels(), a.labels()) << "trial " << t << " " << walk << " " << d;
+                EXPECT_EQ(b.total_chain_runs(), a.total_chain_runs());
+                EXPECT_EQ(b.bytes(), a.bytes());
+                for (size_t i = 0; i < a.labels().size(); ++i) {
+                    std::vector<CoordRun> sa, sb;
+                    a.starts(i, &sa);
+                    b.starts(i, &sb);
+                    EXPECT_EQ(sb, sa) << "trial " << t << " " << walk << " " << d;
+                    EXPECT_EQ(b.num_alive(i), a.num_alive(i));
+                    ++compared;
+                }
+            }
+            // popped: the frames above the anchor let go of its chains
+            for (size_t d = stack.size(); d-- > 1; ) {
+                stack[d].detach();
+            }
+        }
+    }
+    EXPECT_GT(reused, 250u);
+    EXPECT_GT(compared, 1000u);
+}
+
 // ------------------------------------------------------------------ the API's guards
 
 // A frame takes only the row of the k-mer its orientation names: the spelled k-mer, or its

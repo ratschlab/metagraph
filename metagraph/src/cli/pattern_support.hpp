@@ -180,8 +180,9 @@ class PathTracker final : public graph::pattern::SupportTracker {
 
     // before one pattern's search: the pattern of |length| bases (> k)
     void begin_pattern(size_t length);
-    // after it: frees what the pattern held (its dictionary and the row cache's allotment)
-    // and restores the oracle's path cache
+    // after it: frees what the pattern held (its frames, its rows, its dictionary and the row
+    // cache's allotment), in the account and in the process, and restores the oracle's path
+    // cache
     void end_pattern();
     /**
      * After the pattern's search, before end_pattern, when other reads follow it (the mirror
@@ -247,6 +248,26 @@ class PathTracker final : public graph::pattern::SupportTracker {
     // the statements of the rows the account could not hold (phase "extension")
     const Json::Value& rows_refused() const { return rows_refused_; }
     const PathSupportWork& work() const { return work_; }
+
+    /**
+     * Tests: what the tracker's buffers hold in the process (capacities, not the memory model),
+     * to be compared with what the account holds for them: the chain blocks the frames refer to
+     * (distinct) and their bytes, the frame stack's (its spare frames among it), the row
+     * cache's buckets and the transient row's.
+     */
+    struct Retained {
+        size_t chain_blocks = 0;
+        uint64_t chain_bytes = 0;
+        uint64_t frame_bytes = 0;
+        uint64_t cache_bytes = 0;
+        uint64_t transient_bytes = 0;
+        bool operator==(const Retained &other) const {
+            return chain_blocks == other.chain_blocks && chain_bytes == other.chain_bytes
+                && frame_bytes == other.frame_bytes && cache_bytes == other.cache_bytes
+                && transient_bytes == other.transient_bytes;
+        }
+    };
+    Retained retained() const;
 
     // the row cache's allotment for a pattern starting when the account has |left| bytes left,
     // under the server's |ceiling| (RetrievalLimits::row_cache_bytes): min(ceiling, left / 4)

@@ -90,7 +90,9 @@ struct PathTracker::Impl {
     // a row the allotment cannot keep, held (charged) for the one step that reads it
     step::RowRuns transient;
     uint64_t transient_bytes = 0;
-    // the frames of the DFS: frames[0, depth) are open, each holding frame_bytes[i]
+    // the frames of the DFS: frames[0, depth) are open, each holding frame_bytes[i]; a frame
+    // above them holds no chain block (Frame::detach), but frame 0 keeps its block between two
+    // anchors for the next to reopen
     std::vector<step::Frame> frames;
     std::vector<uint64_t> frame_bytes;
     size_t depth = 0;
@@ -158,14 +160,34 @@ struct PathTracker::Impl {
         }
     }
 
+    // the transient row's charge returned and its buffers freed with it: a row held for one
+    // step was built for that step, nothing of it is reused
     void release_transient() {
+        if (!transient_bytes) {
+            return;
+        }
         env.account.release(transient_bytes);
         transient_bytes = 0;
+        transient = step::RowRuns();
     }
 
+    // an eviction: the rows go, the map's buckets stay for the rows after them
     void clear_cache() {
         cache.clear();
         cache_bytes = 0;
+    }
+
+    // the rows and the map's buckets freed, once the allotment is returned
+    void free_cache() {
+        std::unordered_map<node_index, step::RowRuns>().swap(cache);
+        cache_bytes = 0;
+    }
+
+    // the frames freed with their chain blocks and buffers, and the stack itself, once the
+    // account has credited them
+    void free_frames() {
+        std::vector<step::Frame>().swap(frames);
+        std::vector<uint64_t>().swap(frame_bytes);
     }
 };
 
@@ -239,8 +261,11 @@ void PathTracker::end_pattern() {
         env_.account.release(m.frame_bytes[i]);
     }
     m.depth = 0;
+    // what the account credits, the process lets go of: the frames (frame 0's chain block
+    // among them), the transient row, the row cache
+    m.free_frames();
     m.release_transient();
-    m.clear_cache();
+    m.free_cache();
     if (m.path_cache) {
         env_.oracle.path_cache().clear();
         env_.oracle.path_cache().set_bound(env_.oracle.path_cache_max());
@@ -259,7 +284,7 @@ void PathTracker::release_rows() {
     if (!m.active)
         return;
     m.release_transient();
-    m.clear_cache();
+    m.free_cache();
     if (m.path_cache) {
         env_.oracle.path_cache().clear();
         env_.oracle.path_cache().set_bound(env_.oracle.path_cache_max());
@@ -267,6 +292,27 @@ void PathTracker::release_rows() {
     }
     env_.account.release(m.allotment);
     m.allotment = 0;
+}
+
+PathTracker::Retained PathTracker::retained() const {
+    const Impl &m = *impl_;
+    Retained r;
+    std::set<const step::AnchorChains*> blocks;
+    r.frame_bytes = m.frames.capacity() * sizeof(step::Frame)
+                        + m.frame_bytes.capacity() * sizeof(uint64_t);
+    for (const step::Frame &f : m.frames) {
+        r.frame_bytes += f.capacity_bytes();
+        if (f.anchor() && blocks.insert(f.anchor()).second) {
+            r.chain_bytes += sizeof(step::AnchorChains) + f.anchor()->capacity_bytes();
+        }
+    }
+    r.chain_blocks = blocks.size();
+    r.cache_bytes = m.cache.bucket_count() * sizeof(void*);
+    for (const auto &entry : m.cache) {
+        r.cache_bytes += entry.second.capacity_bytes();
+    }
+    r.transient_bytes = m.transient.capacity_bytes();
+    return r;
 }
 
 // The rows of the anchors, read whole (every label: never truncated) in answer order of their
@@ -679,7 +725,9 @@ SupportTracker::Verdict PathTracker::push(const SearchState &child) {
         const uint64_t units = top.step(child.base, kmer, *r, &next, &m.clock);
         env_.units += units;
         work_.units += units;
+        // a frame left STOPPED or DEAD is never popped: it lets go of the anchor's chains here
         if (m.clock.stopped) {
+            next.detach();
             env_.account.release(price.bytes);
             stop_ = "time";
             return Verdict::STOPPED;
@@ -690,6 +738,7 @@ SupportTracker::Verdict PathTracker::push(const SearchState &child) {
         const bool supported = prune_on_chains_ ? next.total_chain_runs() > 0
                                                 : !next.labels().empty();
         if (!supported) {
+            next.detach();
             env_.account.release(bytes);
             return Verdict::DEAD;
         }
@@ -713,6 +762,12 @@ void PathTracker::pop() {
     env_.account.release(m.frame_bytes[m.depth]);
     m.frames_bytes -= m.frame_bytes[m.depth];
     m.frame_bytes[m.depth] = 0;
+    // below the anchor the popped frame lets go of the anchor's chains with its charge, so that
+    // the next anchor reopens frame 0's block (Frame::open) instead of allocating one beside a
+    // block nothing charges; its buffers stay for the next step into it (no shrink per step)
+    if (m.depth) {
+        m.frames[m.depth].detach();
+    }
 }
 
 SupportTracker::Verdict PathTracker::complete(const PathView &walk) {
