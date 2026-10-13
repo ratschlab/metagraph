@@ -1169,12 +1169,18 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   window found `too_wide`. One chunk stays uninterruptible: at least one row, and no bound on one row's decode
   exists before stage 3c (selected-label decoding) — `deadline_check.max_uninterruptible_ms: null`, which stays
   null once stage 3c-ii's checkpoints bound the operations of a read (decision 3c-N5);
-  `deadline_check.observed_max_uninterruptible_ms` is the longest single piece the server process saw — a read
+  `deadline_check.observed_max_uninterruptible_ms` is the longest single piece the server process saw within
+  the last `deadline_check.observed_window_s` seconds (§10.3) — a read
   or chunk (a whole read far from its deadline included), a **head piece** (the walk between two readings of
   the clock for a stop, its reads excluded, the lookahead's chains between their polls included; feature level
   6, the review of 2026-10-06, W3: only reads were counted before) or a gap between two delivery checks: how
   late a cancel can be seen —, and `usage.observed_max_uninterruptible_ms` the attempt's reads and head pieces:
-  observations, not bounds. Neither counts the mapping of a seed's k-mers, the seed phase's own processing, a
+  observations, not bounds. A piece is noted when the response of the `/traverse` that saw it is written, and
+  counts from then for at least the window and at most a 60th of it longer (the window is kept as the maxima
+  of 61 buckets of a 60th of it each: one minute at the default 3,600 s). *(Staging, 2026-10-13: the maximum
+  was the process's lifetime one; one cold coordinate read of 20.6 s under load stated 20,557 ms until the
+  process restarted, and a ledger that refuses hosts above its allowance refused every attempt there.)*
+  Neither counts the mapping of a seed's k-mers, the seed phase's own processing, a
   derivation's steps or a seed's finalisation (each seed's `timing.deadline.longest_piece` names its longest
   piece of any kind), so neither is a margin a ledger can add (§10.3, the release rule). **Stated limits**: a read
   decoded whole because it was predicted to end before 1/64 of the time left overruns the deadline when its rows
@@ -2617,7 +2623,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     {"algorithm_version": "traverse-0.2", "attempts": {"…": "as the probe's"}, "compression_level": 1,
      "content_encodings": ["gzip", "deflate"],
      "deadline_check": {"chunk_target_ms": 50, "max_uninterruptible_ms": null,
-                        "observed_max_uninterruptible_ms": 37, "rule": "…"},
+                        "observed_max_uninterruptible_ms": 37, "observed_window_s": 3600,
+                        "poll_stride": 8, "rule": "…"},
      "feature_level": 3, "features": ["search", "align", "resolve", "traverse", "attempts"],
      "graphs": null, "mode": "single", "ready": true, "release": "",
      "routes": {"align": "POST /align", "attempt": "GET /traverse/attempt/{attempt_id}",
@@ -2642,11 +2649,17 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
     checkpoints bound index operations, not time — decision 3c-N5, §6.8), `observed_max_uninterruptible_ms`
-    (integer: the longest single uninterruptible piece of any `/traverse` in this process's lifetime — a chunk, a
+    (integer: the longest single uninterruptible piece of any `/traverse` of this process within the last
+    `observed_window_s` seconds — a chunk, a
     read decoded whole far from its deadline, a head piece (from feature level 6: the walk between two readings
     of the clock for a stop, the lookahead's chains between their polls included, W3) or a gap between two
     delivery checks — an observation, which leaves out the mapping of a seed's k-mers, the seed phase's own
-    processing, a derivation's steps and a seed's finalisation, §6.8), `poll_stride` (integer, 8: one in this many
+    processing, a derivation's steps and a seed's finalisation, §6.8; 0 when none was noted in the window),
+    `observed_window_s` (integer, `--traverse-observed-window-s`, an integer in [1, 31 536 000], 3600 by default:
+    the window of that observation — a piece counts from the moment the response of the `/traverse` that saw it
+    was written for at least `observed_window_s` seconds and at most a 60th of it longer, §6.8; it was the
+    process's lifetime before the staging finding of 2026-10-13, so a reader that finds no `observed_window_s`
+    reads a lifetime maximum), `poll_stride` (integer, 8: one in this many
     of a walk's polls — the one before a head — reads the clock for an attempt's walk-until and bound, so a
     walk-until is seen up to `poll_stride` − 1 heads late, §6.8) and `rule` (a reference to §6.8, chunked
     deadlines, which states the rule with the factors 64 and 4, the first chunk of 8 rows, the lookahead's polls
@@ -2675,8 +2688,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     two documents a service's MCP tool returns in one piece have a ceiling of 32 KiB, which the rules' prose
     nearly filled. The numbers a client computes with are fields beside them (`chunk_target_ms`, `poll_stride`,
     `work_check_interval`, `path_cache_mb`, the attempts' and the reserve's numbers). The texts are prose and
-    raise no `feature_level`; nor does `deadline_check.poll_stride`, which is in no `/resolve` or `/traverse`
-    response (as `resolve` and `pattern` are not).
+    raise no `feature_level`; nor do `deadline_check.poll_stride` and `deadline_check.observed_window_s`, which
+    are in no `/resolve` or `/traverse` response (as `resolve` and `pattern` are not).
 
     | field | route | the section |
     |---|---|---|
@@ -3097,14 +3110,16 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null), `tombstone_max_s`,
   `coordinate_account_per_text_byte` and, in
   `deadline_check`,
-  `chunk_target_ms` and `observed_max_uninterruptible_ms` are integers (`allowance_ms` was written 10000.0 before
+  `chunk_target_ms`, `observed_max_uninterruptible_ms` and `observed_window_s` are integers (`allowance_ms` was
+  written 10000.0 before
   feature level 3; `--traverse-attempt-allowance-ms`, `--traverse-clock-skew-ms` and
   `--traverse-chunk-target-ms` take integers in [0, 2⁵³ − 1], anything else is refused at start-up, so that a
   JSON client reads each as written and a ledger can add to it; *review of pass 5, finding 4*:
   `--traverse-attempt-retention-s` and `--traverse-attempt-tombstone-max-s` take integers in [0, 31 536 000] (a
   year) and `--traverse-attempt-retention` in [0, 10 000 000] — a negative, fractional, non-numeric or larger value
   refuses to start, naming the option and its range: `-1` had started, stated 2⁶⁴ − 1 seconds and expired every
-  tombstone at once); `compress_mbps`, `build_mbps`,
+  tombstone at once; `--traverse-observed-window-s` takes integers in [1, 31 536 000] alike); `compress_mbps`,
+  `build_mbps`,
   `account_per_text_byte`, `margin` and the measured rates and ratios (or null) are numbers (a rate may be
   fractional), as are the probe's `max_time_ms` and the time budgets.
   - `POST /traverse` with `attempt_id`: 200 with `usage` (complete, partial, failed seeds, cancelled); 400 with

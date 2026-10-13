@@ -4384,8 +4384,10 @@ class TestPatternRegression(TestingBase):
                     block[path[-1]] = None
             return caps
         def without_poll_stride(caps):
-            # the number of the deadline_check rule, a field beside its reference
+            # the number of the deadline_check rule, a field beside its reference, and the
+            # window of its observation (SPEC-labeled-traversal-core.md §10.3)
             self.assertEqual(8, caps['deadline_check'].pop('poll_stride'))
+            self.assertEqual(3600, caps['deadline_check'].pop('observed_window_s'))
             return caps
         a = without_reworded(without_instance(self.base.get('capabilities').json()))
         b = without_reworded(without_instance(self.new.get('capabilities').json()))

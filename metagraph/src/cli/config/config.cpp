@@ -147,21 +147,26 @@ Config::Config(int argc, char *argv[]) {
         }
         *out = *v;
     };
-    // An integer in [0, |max|]: the attempts' retention settings (atoll would read -1 as
-    // 2^64 - 1 seconds, which the capabilities would state while the conversion to a signed
-    // std::chrono::seconds expired every tombstone at once). |max| keeps every conversion the
-    // registry makes exact (seconds to steady-clock nanoseconds, to Unix-epoch milliseconds)
-    // far from overflowing, so a value is refused at start-up rather than wrapped. Every
-    // refusal names the option's own range (a negative or non-numeric value too)
-    const auto bounded = [&](const char *option, const char *text, uint64_t max, uint64_t *out) {
+    // An integer in [|min|, |max|] (bounded: [0, |max|]): the attempts' retention settings and
+    // the observed window (atoll would read -1 as 2^64 - 1 seconds, which the capabilities
+    // would state while the conversion to a signed std::chrono::seconds expired every
+    // tombstone at once). |max| keeps every conversion the registry makes exact (seconds to
+    // steady-clock nanoseconds, to Unix-epoch milliseconds) far from overflowing, so a value is
+    // refused at start-up rather than wrapped. Every refusal names the option's own range (a
+    // negative or non-numeric value too)
+    const auto in_range = [&](const char *option, const char *text, uint64_t min, uint64_t max,
+                              uint64_t *out) {
         const std::optional<uint64_t> v = exact_integer(text);
-        if (!v || *v > max) {
-            std::cerr << "Error: " << option << " must be an integer in [0, " << max
+        if (!v || *v < min || *v > max) {
+            std::cerr << "Error: " << option << " must be an integer in [" << min << ", " << max
                       << "], got '" << text << "'" << std::endl;
             print_usage_and_exit = true;
             return;
         }
         *out = *v;
+    };
+    const auto bounded = [&](const char *option, const char *text, uint64_t max, uint64_t *out) {
+        in_range(option, text, 0, max, out);
     };
 
     // parse remaining command line items
@@ -480,6 +485,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-max-s")) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionS,
                     &traverse_attempt_tombstone_max_s);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-observed-window-s")) {
+            in_range(argv[i], get_value(i), 1, kMaxAttemptRetentionS,
+                     &traverse_observed_window_s);
             i++;
         } else if (!strcmp(argv[i], "--pattern-min-information-bits")) {
             // a number of bits: stated in the capabilities as given
@@ -1927,6 +1936,7 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones and held attempts are held (else it is refused, 429), in [0, 10000000] [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT] \tthe longest a tombstone, or a finished attempt's id, is held to cover a not_after_ms (+ the clock skew allowance), from the latest cancel, finish or refused copy of the request, in [0, 31536000]; never less than --traverse-attempt-retention-s [86400]\n");
             fprintf(stderr, "\t   --traverse-clock-skew-ms [INT] \tclock skew a ledger adds to not_after_ms, stated in the capabilities [2000]\n");
+            fprintf(stderr, "\t   --traverse-observed-window-s [INT] \tthe capabilities state the longest uninterruptible piece of a /traverse seen within the last this many seconds, in [1, 31536000] [3600]\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT] \tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
             fprintf(stderr, "\t   --traverse-path-cache-mb [INT] \tbound of a /traverse request's row-diff path cache (decoded rows kept so that later reads stop their row-diff paths at them), within the label cache's allotment under a memory budget; 0 = off [128]\n");
             fprintf(stderr, "\t   --traverse-compression-level [INT] \tzlib level (1-9) of the traversal routes' compressed bodies; the other routes use 9 [1]\n");

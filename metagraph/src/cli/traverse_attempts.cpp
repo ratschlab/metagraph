@@ -809,13 +809,66 @@ std::shared_ptr<Attempt> Attempt::make_tombstone(const std::string &id,
 }
 
 
+// ---------------------------------------------------------------- WindowedMaximum
+
+// window / kBuckets rounded up, at least one tick
+static Clock::duration bucket_of(Clock::duration window) {
+    const auto n = static_cast<Clock::rep>(WindowedMaximum::kBuckets);
+    return std::max(Clock::duration(1), (window + Clock::duration(n - 1)) / n);
+}
+
+WindowedMaximum::WindowedMaximum(Clock::duration window, Clock::time_point origin)
+      : bucket_(bucket_of(window)), origin_(origin) {}
+
+uint64_t WindowedMaximum::index_of(Clock::time_point t) const {
+    return t > origin_ ? static_cast<uint64_t>((t - origin_) / bucket_) : 0;
+}
+
+void WindowedMaximum::note(uint64_t value, Clock::time_point t) {
+    if (!value)
+        return;
+    const uint64_t i = index_of(t);
+    std::lock_guard<std::mutex> lock(mutex_);
+    Bucket &b = ring_[i % ring_.size()];
+    if (b.index == i) {
+        b.max = std::max(b.max, value);
+    } else if (b.index < i || !b.max) {
+        b.index = i;
+        b.max = value;
+    }
+    // else the slot holds a bucket kBuckets + 1 or more later: this note's bucket is out of
+    // the window of every time after that one
+}
+
+uint64_t WindowedMaximum::max(Clock::time_point t) const {
+    const uint64_t now = index_of(t);
+    const uint64_t oldest = now > kBuckets ? now - kBuckets : 0;
+    std::lock_guard<std::mutex> lock(mutex_);
+    uint64_t m = 0;
+    for (const Bucket &b : ring_) {
+        if (b.max && b.index >= oldest)
+            m = std::max(m, b.max);
+    }
+    return m;
+}
+
+
 // ---------------------------------------------------------------- AttemptRegistry
 
-AttemptRegistry::AttemptRegistry(AttemptSettings settings)
-      : settings_(std::move(settings)), instance_(random_instance()) {
-    if (!settings_.clock)
-        settings_.clock = [] { return Clock::now(); };
+namespace {
+
+AttemptSettings with_clock(AttemptSettings settings) {
+    if (!settings.clock)
+        settings.clock = [] { return Clock::now(); };
+    return settings;
 }
+
+} // namespace
+
+AttemptRegistry::AttemptRegistry(AttemptSettings settings)
+      : settings_(with_clock(std::move(settings))), instance_(random_instance()),
+        observed_(std::chrono::seconds(std::max<uint64_t>(settings_.observed_window_s, 1)),
+                  settings_.clock()) {}
 
 Clock::time_point AttemptRegistry::now() const { return settings_.clock(); }
 
@@ -845,13 +898,11 @@ uint64_t AttemptRegistry::tombstone_cap_ms() const {
 void AttemptRegistry::note_uninterruptible(double ms) {
     if (!(ms > 0))
         return;
-    const uint64_t us = static_cast<uint64_t>(std::ceil(std::min(ms, 1e12) * 1000));
-    uint64_t seen = max_uninterruptible_us_.load(std::memory_order_relaxed);
-    while (us > seen && !max_uninterruptible_us_.compare_exchange_weak(seen, us)) {}
+    observed_.note(static_cast<uint64_t>(std::ceil(std::min(ms, 1e12) * 1000)), now());
 }
 
 uint64_t AttemptRegistry::observed_max_uninterruptible_ms() const {
-    return (max_uninterruptible_us_.load(std::memory_order_relaxed) + 999) / 1000;
+    return (observed_.max(now()) + 999) / 1000;
 }
 
 void AttemptRegistry::note_build_rate(double mbps) {

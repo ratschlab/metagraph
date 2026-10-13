@@ -1,6 +1,7 @@
 #ifndef __METAGRAPH_CLI_TRAVERSE_ATTEMPTS_HPP__
 #define __METAGRAPH_CLI_TRAVERSE_ATTEMPTS_HPP__
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -133,6 +134,10 @@ struct AttemptSettings {
     uint64_t clock_skew_ms = 2000;
     // the HTTP server's content timeout (s), from which hard_cap_ms is derived: stated
     uint64_t content_timeout_s = 900;
+    // the window of the observed maximum (s; deadline_check.observed_window_s): a long piece
+    // seen once stops counting after it, so that one cold read under load does not state this
+    // host's pieces as that long for the rest of the process (at least 1; 0 counts as 1)
+    uint64_t observed_window_s = 3600;
     // The delivery reserve: the rates (MB/s) at which the response is assumed to be compressed
     // and its results' text built — the latter replaced by the slowest rate measured on the
     // attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the walker's
@@ -476,6 +481,36 @@ class Attempt {
     bool held_ = false;
 };
 
+// The largest value noted within a sliding window of the last |window|: the maxima of
+// kBuckets + 1 consecutive buckets of window / kBuckets each (rounded up to a clock tick), in
+// a ring, so that a value counts at least |window| after it was noted and leaves at most one
+// bucket later; constant memory and time whatever the rate of the notes. Thread-safe: a note
+// whose time was read before a later note's is counted while its bucket is in the window
+class WindowedMaximum {
+  public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr size_t kBuckets = 60;
+    // |origin|: where bucket 0 starts (a time before it counts as |origin|)
+    WindowedMaximum(Clock::duration window, Clock::time_point origin);
+    // 0 is not noted
+    void note(uint64_t value, Clock::time_point t);
+    // the largest value noted within the window that ends at |t| (0: none)
+    uint64_t max(Clock::time_point t) const;
+    Clock::duration bucket() const { return bucket_; }
+
+  private:
+    struct Bucket {
+        uint64_t index = 0;
+        uint64_t max = 0;       // 0: empty
+    };
+    uint64_t index_of(Clock::time_point t) const;
+
+    Clock::duration bucket_;
+    Clock::time_point origin_;
+    mutable std::mutex mutex_;
+    std::array<Bucket, kBuckets + 1> ring_ {};
+};
+
 /**
  * The attempts of one server process: the running ones by attempt_id, and the finished ones
  * (and tombstones) for the retention period. An attempt_id is unique per server process while
@@ -540,9 +575,11 @@ class AttemptRegistry {
                 std::optional<size_t> bytes);
     // the retention rule, stated by 404s and GET /traverse/capabilities
     std::string retention_text() const;
-    // The longest single annotation read — one uninterruptible piece of a deadline — that a
-    // /traverse of this process made (ms; with or without attempt_id): stated as
-    // deadline_check.observed_max_uninterruptible_ms, which is an observation, not a bound
+    // The longest single uninterruptible piece of a deadline — a read or chunk, a head piece,
+    // a gap between two delivery checks — that a /traverse of this process made (ms; with or
+    // without attempt_id), noted when its response was written: stated as
+    // deadline_check.observed_max_uninterruptible_ms, the largest noted within the last
+    // observed_window_s seconds, which is an observation, not a bound
     void note_uninterruptible(double ms);
     uint64_t observed_max_uninterruptible_ms() const;
     // The delivery rates measured on this server's /traverse responses of at least
@@ -596,8 +633,8 @@ class AttemptRegistry {
     // is refused, 429, while it holds that many): what it holds is bounded by the attempts
     // that finish within the cap
     std::set<std::pair<Attempt::Clock::time_point, std::string>> tomb_expiry_;
-    // microseconds, rounded up
-    std::atomic<uint64_t> max_uninterruptible_us_ { 0 };
+    // the observed pieces (microseconds, rounded up) over observed_window_s
+    WindowedMaximum observed_;
     mutable std::mutex rates_mutex_;
     std::deque<double> build_rates_;
     std::deque<double> compress_rates_;

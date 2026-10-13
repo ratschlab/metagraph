@@ -1228,7 +1228,8 @@ delivered, and state the limiting resource and the useful next action — the st
 - **No time bound on one piece is stated:** `max_uninterruptible_ms` is null, and it stays null — checkpoints inside
   reads bound the index operations of a piece, not its wall time, which page faults and scheduling leave open (SPEC
   §6.8, §10.3). The longest piece is stated as an observation: `observed_max_uninterruptible_ms` per process in
-  `deadline_check` (reads, head pieces and the delivery gaps) and per attempt in `usage` (reads and head pieces).
+  `deadline_check` (reads, head pieces and the delivery gaps, the largest of the last `observed_window_s` seconds,
+  3,600 by default) and per attempt in `usage` (reads and head pieces).
   `setup` pieces are in the deadline record only (§19). `deadline_check.rule` names what stays unpolled: a chain's
   key mapping, a read's preparation before its first chunk (its cache lookups and the ordering of its keys: 90–260 ms
   for the 1 to 3.8 million keys of a lookahead in a stress fixture), the lookahead's clearing, the seed phase's own

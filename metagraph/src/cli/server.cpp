@@ -1391,6 +1391,7 @@ int run_server(Config *config) {
     attempt_settings.tombstone_max_s = config->traverse_attempt_tombstone_max_s;
     attempt_settings.clock_skew_ms = config->traverse_clock_skew_ms;
     attempt_settings.content_timeout_s = kContentTimeoutS;
+    attempt_settings.observed_window_s = config->traverse_observed_window_s;
     attempt_settings.delivery_compress_mbps = config->traverse_delivery_compress_mbps;
     attempt_settings.delivery_build_mbps = config->traverse_delivery_build_mbps;
     // until measured longer, the walk is taken to end at most a chunk of a read and 950 ms (the
@@ -1750,8 +1751,8 @@ int run_server(Config *config) {
 
     // How a deadline reaches the walk (both capabilities routes): the time-sized chunks of
     // the annotation reads it may fall into, what stays uninterruptible, the longest single
-    // piece seen, and how often an attempt's poll reads the clock; the rule is the SPEC's
-    // (kDeadlineCheckRule)
+    // piece seen within the last observed_window_s seconds, and how often an attempt's poll
+    // reads the clock; the rule is the SPEC's (kDeadlineCheckRule)
     auto deadline_check_json = [&]() {
         Json::Value d;
         d["chunk_target_ms"] = static_cast<Json::UInt64>(config->traverse_chunk_target_ms);
@@ -1761,6 +1762,7 @@ int run_server(Config *config) {
         d["max_uninterruptible_ms"] = Json::Value();
         d["observed_max_uninterruptible_ms"]
             = static_cast<Json::UInt64>(attempts.observed_max_uninterruptible_ms());
+        d["observed_window_s"] = static_cast<Json::UInt64>(attempts.settings().observed_window_s);
         // one in poll_stride of a walk's polls (the one before a head) reads the clock for an
         // attempt's walk-until and bound, so a walk-until is seen up to poll_stride - 1 heads
         // late (the rule's number, stated as a number)

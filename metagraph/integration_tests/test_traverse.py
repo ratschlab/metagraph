@@ -2321,9 +2321,15 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertTrue(reserve[key] is None or reserve[key] > 0, key)
         dc = c['deadline_check']
         self.assertIsNone(dc['max_uninterruptible_ms'])
-        for key in ('chunk_target_ms', 'observed_max_uninterruptible_ms', 'poll_stride'):
+        for key in ('chunk_target_ms', 'observed_max_uninterruptible_ms', 'observed_window_s',
+                    'poll_stride'):
             self.assertIs(type(dc[key]), int, key)
         self.assertEqual(50, dc['chunk_target_ms'])
+        # the observation's window (--traverse-observed-window-s, 3600 by default)
+        self.assertEqual(3600, dc['observed_window_s'])
+        self.assertEqual({'chunk_target_ms', 'max_uninterruptible_ms',
+                          'observed_max_uninterruptible_ms', 'observed_window_s', 'poll_stride',
+                          'rule'}, set(dc))
         # the library reads both documents
         client = graphlet_lib.TraverseClient(self.host, self.port)
         self.assertEqual('single', client.server_capabilities()['mode'])
@@ -4441,6 +4447,44 @@ class TestTraverseAttempts(TestingBase):
             self.assertEqual((31536000, 10000000, 31536000),
                              (caps['retention_s'], caps['retention_count'],
                               caps['tombstone_max_s']))
+
+    def test_observed_window_is_validated_and_stated(self):
+        """deadline_check.observed_max_uninterruptible_ms is the longest piece noted within
+        the last observed_window_s seconds (--traverse-observed-window-s, an integer in [1,
+        31536000], 3600 by default), stated beside it on both capabilities routes: a long piece
+        stops counting a window (and at most a 60th of it) after the response that saw it, so
+        that one cold read under load no longer states the host's pieces as that long until a
+        restart. A value outside the range refuses to start, naming the option and its
+        range."""
+        for value in ('0', '-1', '31536001', '1.5', 'abc', ''):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', '-i', self.graph, '-a', self.anno, '--port', str(_free_port()),
+                '--address', '127.0.0.1', '--traverse-observed-window-s', value],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+            self.assertNotEqual(0, res.returncode, value)
+            self.assertIn('--traverse-observed-window-s must be an integer in [1, 31536000]',
+                          res.stderr.decode(), value)
+
+        def observed(server):
+            out = []
+            for route in ('capabilities', 'traverse/capabilities'):
+                dc = requests.get(f'{server.url}/{route}', timeout=60).json()['deadline_check']
+                out.append((dc['observed_window_s'], dc['observed_max_uninterruptible_ms']))
+            self.assertEqual(out[0], out[1])
+            return out[0]
+
+        with self._Server(self, '--traverse-observed-window-s', '2') as server:
+            self.assertEqual((2, 0), observed(server))
+            ret = server.post('traverse', self._request(1, radius=200), timeout=120)
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            # noted when the response was written, before the client read it
+            written = time.time()
+            window, seen = observed(server)
+            self.assertEqual(2, window)
+            self.assertGreater(seen, 0)
+            # gone once the window and a bucket (2 s / 60) passed
+            time.sleep(max(0.0, written + 2.2 - time.time()))
+            self.assertEqual((2, 0), observed(server))
 
     def _half_uploaded(self, server, req):
         """Send the header and half the body of |req| on a raw socket: the request is on the

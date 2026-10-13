@@ -169,6 +169,10 @@ class Config {
     // one that cannot start subsequently (stated in the capabilities; the server's own check is
     // strict), ms
     uint64_t traverse_clock_skew_ms = 2000;
+    // the window of the longest uninterruptible piece the capabilities state
+    // (deadline_check.observed_max_uninterruptible_ms over the last observed_window_s
+    // seconds), in [1, kMaxAttemptRetentionS] (refused at start-up beyond it)
+    uint64_t traverse_observed_window_s = 3600;
     // the expected duration of one uninterruptible piece of a /traverse annotation read under
     // a deadline (the reads are decoded in chunks sized from the observed per-row time, the
     // deadline checked between them); 0: one piece per read, not chunked (ms)

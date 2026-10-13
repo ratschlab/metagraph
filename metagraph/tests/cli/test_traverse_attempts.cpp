@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -25,6 +27,7 @@
 #include <json/json.h>
 #include <zlib.h>
 
+#include "cli/config/config.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
@@ -33,6 +36,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/utils/file_utils.hpp"
 
 
 namespace {
@@ -537,6 +541,224 @@ TEST(GraphletAttemptRegistry, CapabilitiesRulesAreSpecReferences) {
                                     [](char c) { return c >= 0x20 && c < 0x7f; }))
                 << path.back();
         }
+    }
+}
+
+// The observed maximum (deadline_check.observed_max_uninterruptible_ms) is the largest piece
+// noted within the last observed_window_s seconds (3600 by default) on the registry's clock: a
+// piece counts at least the window and leaves at most one bucket (a 60th of it) later, so that
+// one long piece does not state the host's pieces as that long for the rest of the process
+// (one cold 20.6 s read under load held a lifetime maximum at 20,557 until a restart)
+TEST(GraphletAttemptRegistry, ObservedMaximumIsOverTheWindow) {
+    FakeClock clock;
+    const AttemptSettings settings = settings_with(&clock);
+    EXPECT_EQ(3600u, settings.observed_window_s);
+    AttemptRegistry registry(settings);
+    constexpr int64_t kMin = 60'000;
+    EXPECT_EQ(0u, registry.observed_max_uninterruptible_ms());
+    // rounded up to whole ms; a piece that is not positive is not noted
+    registry.note_uninterruptible(0.0004);
+    EXPECT_EQ(1u, registry.observed_max_uninterruptible_ms());
+    registry.note_uninterruptible(0);
+    registry.note_uninterruptible(-5);
+    registry.note_uninterruptible(std::nan(""));
+    EXPECT_EQ(1u, registry.observed_max_uninterruptible_ms());
+    // one long piece at 0 min, shorter ones at 10 and 30 min
+    registry.note_uninterruptible(20'556.2);
+    EXPECT_EQ(20'557u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 10 * kMin;
+    registry.note_uninterruptible(37);
+    clock.ms = 30 * kMin;
+    registry.note_uninterruptible(12);
+    EXPECT_EQ(20'557u, registry.observed_max_uninterruptible_ms());
+    // kept the whole window, gone a bucket (a minute) later: then the largest noted since,
+    // each kept in its turn
+    clock.ms = 60 * kMin;
+    EXPECT_EQ(20'557u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 61 * kMin - 1;
+    EXPECT_EQ(20'557u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 61 * kMin;
+    EXPECT_EQ(37u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 71 * kMin - 1;
+    EXPECT_EQ(37u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 71 * kMin;
+    EXPECT_EQ(12u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 91 * kMin;
+    EXPECT_EQ(0u, registry.observed_max_uninterruptible_ms());
+    // a larger piece replaces the maximum at once, a smaller one leaves it
+    registry.note_uninterruptible(5);
+    EXPECT_EQ(5u, registry.observed_max_uninterruptible_ms());
+    registry.note_uninterruptible(9);
+    registry.note_uninterruptible(2);
+    EXPECT_EQ(9u, registry.observed_max_uninterruptible_ms());
+    // a piece noted at the end of its bucket is kept at least the window after it
+    clock.ms = 100 * kMin - 1;
+    registry.note_uninterruptible(4);
+    clock.ms = 160 * kMin - 1;
+    EXPECT_EQ(4u, registry.observed_max_uninterruptible_ms());
+    clock.ms = 160 * kMin;
+    EXPECT_EQ(0u, registry.observed_max_uninterruptible_ms());
+}
+
+// The window is the setting's (--traverse-observed-window-s): 60 s keeps a piece 60 to 61 s,
+// 1 s keeps it 1 s to 1 s + 1/60 s; 0 counts as 1 (the flag refuses it)
+TEST(GraphletAttemptRegistry, ObservedWindowIsTheSettings) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock);
+    settings.observed_window_s = 60;
+    {
+        AttemptRegistry registry(settings);
+        clock.ms = 999;
+        registry.note_uninterruptible(7);
+        clock.ms = 999 + 60'000;
+        EXPECT_EQ(7u, registry.observed_max_uninterruptible_ms());
+        clock.ms = 61'000;
+        EXPECT_EQ(0u, registry.observed_max_uninterruptible_ms());
+    }
+    for (uint64_t window_s : { uint64_t(1), uint64_t(0) }) {
+        clock.ms = 0;
+        settings.observed_window_s = window_s;
+        AttemptRegistry registry(settings);
+        registry.note_uninterruptible(3);
+        clock.ms = 1000;
+        EXPECT_EQ(3u, registry.observed_max_uninterruptible_ms()) << window_s;
+        clock.ms = 1017;
+        EXPECT_EQ(0u, registry.observed_max_uninterruptible_ms()) << window_s;
+    }
+}
+
+// The ring itself: a bucket is a 60th of the window rounded up to a tick (at least one); a
+// note whose time was read before a later note's counts while its bucket is in the window,
+// and one whose bucket's slot already holds a bucket a window later is out of every window
+// that note's time can be in
+TEST(GraphletAttemptRegistry, WindowedMaximumBucketsAndLateNotes) {
+    using std::chrono::seconds;
+    using ns = std::chrono::nanoseconds;
+    const Clock::time_point o = Clock::now();
+    EXPECT_EQ(ns(1'000'000'000), std::chrono::duration_cast<ns>(
+            WindowedMaximum(seconds(60), o).bucket()));
+    EXPECT_EQ(ns(16'666'667), std::chrono::duration_cast<ns>(
+            WindowedMaximum(seconds(1), o).bucket()));
+    EXPECT_EQ(Clock::duration(1), WindowedMaximum(Clock::duration(0), o).bucket());
+    EXPECT_EQ(ns(60'000'000'000), std::chrono::duration_cast<ns>(
+            WindowedMaximum(seconds(3600), o).bucket()));
+
+    WindowedMaximum w(seconds(60), o);
+    w.note(5, o + seconds(30));
+    w.note(8, o + seconds(10));
+    EXPECT_EQ(8u, w.max(o + seconds(30)));
+    EXPECT_EQ(8u, w.max(o + seconds(70)));
+    EXPECT_EQ(5u, w.max(o + seconds(71)));
+    EXPECT_EQ(0u, w.max(o + seconds(91)));
+    // bucket 100 takes slot 39 (100 mod 61): a late note of bucket 39 is dropped
+    w.note(3, o + seconds(100));
+    w.note(9, o + seconds(39));
+    EXPECT_EQ(3u, w.max(o + seconds(100)));
+    // a late note within the window of its slot's bucket is counted
+    w.note(6, o + seconds(99));
+    EXPECT_EQ(6u, w.max(o + seconds(100)));
+    // a time before the origin counts as the origin; 0 is not noted
+    WindowedMaximum v(seconds(60), o);
+    v.note(2, o - seconds(5));
+    v.note(0, o);
+    EXPECT_EQ(2u, v.max(o));
+    EXPECT_EQ(2u, v.max(o + seconds(60)));
+    EXPECT_EQ(0u, v.max(o + seconds(61)));
+}
+
+// Notes and reads from many threads (each /traverse response notes its pieces; the
+// capabilities read the maximum): at a standing clock no note is lost, and while the clock
+// moves no read states more than was noted, and every piece leaves once the window passed
+TEST(GraphletAttemptRegistry, ObservedMaximumUnderConcurrentNotes) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock);
+    settings.observed_window_s = 60;
+    AttemptRegistry registry(settings);
+    constexpr int kThreads = 8;
+    constexpr int kNotes = 20'000;
+    auto run = [&](const std::function<void(int)> &body) {
+        std::vector<std::thread> threads;
+        for (int t = 0; t < kThreads; ++t) {
+            threads.emplace_back(body, t);
+        }
+        for (std::thread &t : threads) {
+            t.join();
+        }
+    };
+    // the clock stands: the largest note of any thread
+    run([&](int t) {
+        for (int i = 0; i < kNotes; ++i) {
+            registry.note_uninterruptible(1 + (i * 7 + t) % 1000);
+        }
+    });
+    EXPECT_EQ(1000u, registry.observed_max_uninterruptible_ms());
+    // the clock moves 10 min in steps of 1 ms to 1 s while the threads note values up to 500
+    // and read: nothing above what was noted (1000 until it leaves); thread 0 moves the clock
+    std::atomic<int> above { 0 };
+    std::atomic<bool> moving { true };
+    run([&](int t) {
+        if (!t) {
+            std::mt19937 rng(7);
+            while (clock.ms.load() < 10 * 60'000) {
+                clock.ms += 1 + rng() % 1000;
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+            }
+            moving = false;
+            return;
+        }
+        std::mt19937 rng(t);
+        while (moving.load()) {
+            registry.note_uninterruptible(1 + rng() % 500);
+            // the clock read before the maximum: the maximum's own reading is no earlier
+            const int64_t before = clock.ms.load();
+            const uint64_t seen = registry.observed_max_uninterruptible_ms();
+            if (seen > 1000 || (before > 2 * 60'000 && seen > 500))
+                above++;
+        }
+    });
+    EXPECT_EQ(0, above.load());
+    // a window later every note has left; notes at a standing clock again lose nothing
+    clock.ms += 62'000;
+    EXPECT_EQ(0u, registry.observed_max_uninterruptible_ms());
+    run([&](int t) {
+        for (int i = 0; i < kNotes; ++i) {
+            registry.note_uninterruptible(1 + (i * 3 + t) % 250);
+        }
+    });
+    EXPECT_EQ(250u, registry.observed_max_uninterruptible_ms());
+}
+
+// --traverse-observed-window-s: an integer in [1, 31536000] (a year, the range of the
+// retention settings), 3600 by default; anything else refuses to start, naming the option and
+// its range. The server passes it to the registry (AttemptSettings::observed_window_s) and
+// states it as deadline_check.observed_window_s (test_traverse.py)
+TEST(GraphletAttemptRegistry, ObservedWindowFlagIsValidated) {
+    auto config_of = [](const std::vector<std::string> &flags) {
+        std::vector<std::string> args = { "metagraph", "server_query" };
+        args.insert(args.end(), flags.begin(), flags.end());
+        for (const char *a : { "-i", "graph.dbg", "-a", "annotation.column.annodbg" }) {
+            args.push_back(a);
+        }
+        std::vector<char*> argv;
+        for (std::string &a : args) {
+            argv.push_back(a.data());
+        }
+        argv.push_back(nullptr);
+        // the Config sets the swap path: the one the other tests use is restored
+        const std::filesystem::path swap = utils::get_swap_path();
+        auto config = std::make_unique<Config>(static_cast<int>(args.size()), argv.data());
+        utils::set_swap_path(swap);
+        return config;
+    };
+    EXPECT_EQ(3600u, config_of({})->traverse_observed_window_s);
+    for (const char *value : { "1", "60", "31536000" }) {
+        EXPECT_EQ(std::stoull(value),
+                  config_of({ "--traverse-observed-window-s", value })->traverse_observed_window_s);
+    }
+    for (const char *value : { "0", "-1", "31536001", "1.5", "x", "", "1e400", "nan", "5 " }) {
+        EXPECT_DEATH(config_of({ "--traverse-observed-window-s", value }),
+                     "--traverse-observed-window-s must be an integer in \\[1, 31536000\\]")
+            << value;
     }
 }
 

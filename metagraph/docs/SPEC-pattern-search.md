@@ -4764,3 +4764,18 @@ loader's line for each), integration
 annotation made unreadable after start-up: `/pattern`'s refused entry, `/traverse`'s and `/resolve`'s 400, a
 malformed body with `in_ram` refused with no load attempted, the server answering afterwards, the released memory
 loading the pair once readable again).
+
+**The observed uninterruptible maximum is over a window (staging, 2026-10-13; SPEC-labeled-traversal-core.md
+§6.8, §10.3).** `deadline_check.observed_max_uninterruptible_ms` of `GET /capabilities` and `GET
+/traverse/capabilities` is the longest uninterruptible piece of a `/traverse` within the last `observed_window_s`
+seconds (`--traverse-observed-window-s`, an integer in [1, 31 536 000], 3600 by default) instead of the process's
+lifetime: one cold coordinate read of 20.6 s under load had stated 20,557 ms until the process restarted, and a
+ledger that refuses hosts whose observation exceeds its allowance refused every attempt there. Its name, type and
+meaning stay; `deadline_check.observed_window_s` is stated beside it (an additive integer field: no feature level,
+contract version 1 stays). The twelve capabilities fixtures (`capabilities`, `capabilities_mask_absent`,
+`capabilities_built_at_load`, `capabilities_multi_graph`, `capabilities_representation_unsupported` and the seven
+`traverse_capabilities*`) gain `"observed_window_s": 3600`; no other stored body changes. Tests:
+`GraphletAttemptRegistry.ObservedMaximumIsOverTheWindow`, `ObservedWindowIsTheSettings`,
+`WindowedMaximumBucketsAndLateNotes`, `ObservedMaximumUnderConcurrentNotes`, `ObservedWindowFlagIsValidated`;
+integration `TestTraverseAttempts.test_observed_window_is_validated_and_stated` (a 2 s window: the piece of one
+`/traverse` stated on both routes, gone 2.2 s later; the flag's refusals).
