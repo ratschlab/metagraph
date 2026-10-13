@@ -1215,13 +1215,15 @@ struct ThresholdSweep {
  * max_contexts, never failing an admitted release (its ranges are retained);
  * stop_at_threshold stops in the pass of level t iff the levels below t as completed plus
  * level t's candidates exceed the cap, and only then, the levels below t as the check left
- * them.
+ * them. |share|: the counted candidates one checked entry stands for (candidates_per_entry).
  */
 void sweep_thresholds_after_the_check(const DeBruijnGraph &unmasked, const std::string &text,
                                       const Request &base, const std::vector<MCtx> &expected,
-                                      const Truth &truth, ThresholdSweep *sweep) {
+                                      const Truth &truth, ThresholdSweep *sweep,
+                                      uint64_t share = 1) {
     const uint8_t m = base.max_mismatches;
-    // per level: its candidates U_t with no check, and those of them unchecked
+    // per level: its candidates U_t with no check, and the entries the check tests for those
+    // of them unchecked
     Request none = base;
     none.max_checked_entries = 0;
     const Result plain = count_of(unmasked, text, none);
@@ -1233,6 +1235,8 @@ void sweep_thresholds_after_the_check(const DeBruijnGraph &unmasked, const std::
         EXPECT_TRUE(true_relation(level, truth.by_level[t])) << "level " << int(t);
         upper[t] = level.relation == Relation::BOUNDS ? level.upper : level.value;
         unchecked[t] = level.relation == Relation::BOUNDS ? level.upper - level.lower : 0;
+        EXPECT_EQ(0u, unchecked[t] % share) << "level " << int(t);
+        unchecked[t] /= share;
     }
     std::set<uint64_t> limits { 0 };
     uint64_t cumulative = 0;
@@ -1355,15 +1359,31 @@ void sweep_thresholds_after_the_check(const DeBruijnGraph &unmasked, const std::
     }
 }
 
+// The counted candidates one entry the check tests stands for (SPEC §7.4: each range of a base
+// search is tested once, and on a wrapped PRIMARY graph an entry can enter both orientations'
+// counts). A wrapped PRIMARY orientation searches its window and the window's reverse
+// complement, which is the other orientation's window: with both strands, or a palindromic
+// pattern (one orientation whose two windows coincide), each entry is counted twice
+uint64_t candidates_per_entry(DeBruijnGraph::Mode mode, const std::string &text,
+                              Strands strands) {
+    return mode == DeBruijnGraph::PRIMARY
+            && (palindromic(read_pattern(text)) || strands == Strands::BOTH) ? 2 : 1;
+}
+
 TEST(PatternMismatch, UnmaskedThresholdsAfterTheCheck) {
-    // random cases without the mask (BASIC and CANONICAL, where the running upper bound is the
-    // final U): the thresholds after the check, every allowance and every boundary cap
+    // random cases without the mask (BASIC, CANONICAL and wrapped PRIMARY at odd k, where the
+    // running upper bound is the final U; at even k a wrapped PRIMARY graph's palindrome scans
+    // are pending and the bound leaves them out, SPEC §21.6): the thresholds after the check,
+    // every allowance and every boundary cap
     ThresholdSweep sweep;
     size_t cases = 0;
+    size_t primary = 0;
     for (uint32_t seed = 8000; seed < 8080; ++seed) {
         Case c = random_case(seed);
-        if (c.mode == DeBruijnGraph::PRIMARY)
+        if (c.mode == DeBruijnGraph::PRIMARY && c.k % 2 == 0) {
             continue;
+        }
+        primary += c.mode == DeBruijnGraph::PRIMARY;
         auto unmasked = unmasked_copy(c);
         SCOPED_TRACE(describe(c));
         const std::vector<MCtx> expected = hamming_walk(*c.graph, c.text, c.request.scope,
@@ -1371,10 +1391,13 @@ TEST(PatternMismatch, UnmaskedThresholdsAfterTheCheck) {
                                                         c.request.max_mismatches);
         const Truth truth = truth_of(expected, c.request.max_mismatches, c.text.size(), c.k,
                                      c.request, c.text);
-        sweep_thresholds_after_the_check(*unmasked, c.text, c.request, expected, truth, &sweep);
+        sweep_thresholds_after_the_check(*unmasked, c.text, c.request, expected, truth, &sweep,
+                                         candidates_per_entry(c.mode, c.text,
+                                                              c.request.strands));
         ++cases;
     }
     EXPECT_LT(40u, cases);
+    EXPECT_LT(5u, primary);
     EXPECT_LT(10u, sweep.stale_windows);
     EXPECT_LT(50u, sweep.releases);
     EXPECT_LT(50u, sweep.stops);
