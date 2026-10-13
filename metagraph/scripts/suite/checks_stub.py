@@ -20,8 +20,11 @@ def _status(answer, args):
     return {"check": "status", "outcome": "pass" if ok else "fail", "detail": detail}
 
 
-def evaluate(scenario, answer, arm):
+def evaluate(scenario, answer, arm, previous=None):
     """[{check, outcome: pass|fail|not_exposed, detail}] for the scenario's `expect` list.
+
+    `previous` (the answer digests of the scenario's earlier repeats on this arm) is accepted as lane S1's
+    checks.py takes it, and not used here.
 
     Without a `status` expectation the answer's status must be 2xx (an implicit check, named `status`).
     """

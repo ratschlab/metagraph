@@ -14,7 +14,7 @@ index_fp, the three capabilities documents, host load at start and end). The ans
 
 Resumable: a second invocation with the same --out skips the executions already recorded (same manifest
 required). SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
-state.json then say `interrupted`. Stdlib only: runs with python3.12 on mex.
+state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run). Stdlib only: runs with python3.12 on mex.
 """
 
 import argparse
@@ -36,6 +36,9 @@ sys.path.insert(0, HERE)
 import suite_common as sc  # noqa: E402
 
 DEFAULT_TIMEOUTS = {"fast": 120.0, "slow": 600.0, "long": 1800.0}
+# Exit codes: 0 done, 130 stopped by a signal, EXIT_REQUEST_CAP stopped at --max-requests (a planned stop: the
+# orchestrator goes on to the report), 1 failed.
+EXIT_REQUEST_CAP = 3
 # The front proxy cuts at ~120 s; a little more lets its own answer (a 504) arrive instead of a client timeout.
 REMOTE_TIMEOUT_CAP_S = 125.0
 CAPABILITY_PATHS = ("/capabilities", "/pattern/capabilities", "/traverse/capabilities")
@@ -103,6 +106,16 @@ def host_load():
             return list(os.getloadavg())
         except (OSError, AttributeError):
             return None
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except (ProcessLookupError, ValueError, TypeError):
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def scripts_commit(explicit):
@@ -236,6 +249,11 @@ class Runner(object):
                          "content_sha256": self.manifest.get("content_sha256"), "computed_sha256": computed,
                          "sha_verified": ok, "index": self.manifest.get("index"),
                          "scenarios_total": len(self.manifest.get("scenarios", []))}
+        state = sc.read_json(self.state_path) or {}
+        if (state.get("state") == "running" and state.get("pid") not in (None, os.getpid())
+                and existing and existing.get("runner_host") == platform.node() and pid_alive(state["pid"])):
+            raise SystemExit("run_direct: %s is in use by a runner still alive (pid %s); stop it or wait"
+                             % (self.out, state["pid"]))
         if existing:
             if existing.get("arm") != self.args.arm:
                 raise SystemExit("run_direct: %s holds the arm %s, not %s; use another --out"
@@ -313,7 +331,7 @@ class Runner(object):
         ident = sc.identity_from_capabilities(docs)
         return docs, statuses, ident
 
-    def execute(self, index, scenario, repeat, cache, after_resume):
+    def execute(self, index, scenario, repeat, cache, after_resume, previous):
         sid = scenario.get("id")
         method, path, body, headers, recorded = build_request(scenario)
         timeout = timeout_for(scenario, self.args.arm, self.timeouts)
@@ -327,7 +345,7 @@ class Runner(object):
             answer = sc.transport_failure(res["error"][0], res["error"][1])
         route = scenario.get("route", "%s %s" % (method, path))
         try:
-            checks = list(self.checks.evaluate(scenario, answer, self.args.arm))
+            checks = list(self.checks.evaluate(scenario, answer, self.args.arm, previous=previous))
             outcome = sc.outcome_from_checks(checks)
         except Exception as exc:  # a check that crashes is an error of this execution, never of the run
             checks = [{"check": "evaluate", "outcome": "fail",
@@ -367,8 +385,11 @@ class Runner(object):
                "--parent-pid", str(os.getpid())]
         log = open(os.path.join(self.out, "sampler.log"), "a")
         # A session of its own: a terminal's Ctrl-C reaches the runner, which then stops the sampler itself.
-        self.sampler = subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                                        start_new_session=True)
+        try:
+            self.sampler = subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                                            start_new_session=True)
+        finally:
+            log.close()  # the sampler holds its own descriptor
 
     def stop_sampler(self):
         if self.sampler is None:
@@ -390,6 +411,12 @@ class Runner(object):
         self.open_run(len(planned), skipped)
         rows, bad = sc.read_jsonl(self.exec_path)
         done = set(sc.execution_key(r) for r in rows)
+        # The answer digests of each scenario's repeats so far, in repeat order: checks.evaluate's `previous`
+        # (lane S1's determinism check compares a repeat with the earlier ones).
+        digests = {}
+        for r in sorted(rows, key=lambda r: (r.get("repeat") or 0)):
+            if r.get("arm") == self.args.arm and r.get("answer_digest"):
+                digests.setdefault(r.get("scenario"), []).append(r["answer_digest"])
         if bad:
             self.run.setdefault("warnings", []).append("%d unparsable line(s) in executions.jsonl ignored" % bad)
         todo = [p for p in planned if (p[1].get("id"), self.args.arm, p[2]) not in done]
@@ -416,7 +443,8 @@ class Runner(object):
                 sid = scenario.get("id")
                 self.write_state("running", len(planned), ndone, sid)
                 after_resume = repeat > 0 and (sid, repeat - 1) not in ran_in_session
-                line = self.execute(index, scenario, repeat, cache, after_resume)
+                line = self.execute(index, scenario, repeat, cache, after_resume, list(digests.get(sid, [])))
+                digests.setdefault(sid, []).append(line["answer_digest"])
                 ran_in_session.add((sid, repeat))
                 ndone += 1
                 if not self.args.quiet:
@@ -506,6 +534,8 @@ def main(argv=None):
     if not args.quiet:
         sys.stdout.write("[%s] %s: %d executed, %d requests, run dir %s\n"
                          % (args.arm, state, runner.executed, runner.requests, runner.out))
+    if state == "interrupted" and (STOP.reason or "").startswith("max_requests"):
+        return EXIT_REQUEST_CAP
     return {"done": 0, "interrupted": 130}.get(state, 1)
 
 

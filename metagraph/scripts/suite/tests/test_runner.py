@@ -158,7 +158,7 @@ class RunnerTest(unittest.TestCase):
         out = os.path.join(self.dir, "run")
         with FakeHost() as host:
             rc = self.run_direct(host.base, out, "--max-requests", "5")
-        self.assertEqual(rc, 130)
+        self.assertEqual(rc, run_direct.EXIT_REQUEST_CAP)
         rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
         self.assertEqual(len(rows), 2)  # 3 capabilities + 2 executions
         run = sc.read_json(os.path.join(out, "run.json"))
@@ -231,7 +231,7 @@ class RunnerTest(unittest.TestCase):
     def test_checks_exception_is_error(self):
         class Boom(object):
             @staticmethod
-            def evaluate(scenario, answer, arm):
+            def evaluate(scenario, answer, arm, previous=None):
                 raise RuntimeError("bad check")
         make_manifest(self.manifest_path, basic_scenarios()[:1])
         args = run_direct.parse_args(["--manifest", self.manifest_path, "--arm", "direct-local", "--base", "x",
@@ -245,6 +245,31 @@ class RunnerTest(unittest.TestCase):
         rows, _ = sc.read_jsonl(os.path.join(self.dir, "run", "executions.jsonl"))
         self.assertEqual(rows[0]["outcome"], "error")
         self.assertIn("bad check", rows[0]["checks"][0]["detail"])
+
+    def test_previous_digests_passed(self):
+        seen = []
+
+        class Recorder(object):
+            @staticmethod
+            def evaluate(scenario, answer, arm, previous=None):
+                seen.append((scenario["id"], list(previous)))
+                return [{"check": "status", "outcome": "pass", "detail": ""}]
+        make_manifest(self.manifest_path, basic_scenarios()[-1:])  # D-1, repeat 3
+        out = os.path.join(self.dir, "run")
+
+        def run(limit_requests):
+            args = run_direct.parse_args(["--manifest", self.manifest_path, "--arm", "direct-local", "--base", "x",
+                                          "--out", out, "--pause", "0", "--quiet", "--warm-every", "0",
+                                          "--max-requests", str(limit_requests)])
+            args.base = host.base
+            run_direct.reset_stop()
+            run_direct.Runner(args, sc.read_json(self.manifest_path), Recorder, "recorder").run_all()
+        with FakeHost() as host:
+            run(5)   # 3 capabilities + repeats 0 and 1
+            run(0)   # resumed: repeat 2 sees the digests recorded in the first session
+        rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+        d = [r["answer_digest"] for r in rows]
+        self.assertEqual(seen, [("D-1", []), ("D-1", [d[0]]), ("D-1", [d[0], d[1]])])
 
     def test_load_checks_fallback(self):
         mod, name = run_direct.load_checks("stub")
