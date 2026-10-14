@@ -1001,7 +1001,7 @@ class StatedReasons(unittest.TestCase):
               "finalize_reserve_ms": 250, "stop_at_threshold": False, "max_predicate_contexts": 50}
 
     def problems(self, counts, withheld=None, cut=None, stop=None, det="full", steps=1000, limits=None,
-                 elapsed=1000.0, req=None, mode=None, index=None, **extra):
+                 elapsed=1000.0, req=None, mode=None, index=None, predicate_echo=None, **extra):
         e = {"id": "w", "mode": mode or ("partial" if cut else "all_or_count"), "counts": counts,
              "withheld": {"reason": withheld} if withheld else None, "cut": {"reason": cut} if cut else None,
              "stop": {"phase": stop[0], "reason": stop[1]} if stop else None, "determinism": det, "results": [],
@@ -1012,6 +1012,8 @@ class StatedReasons(unittest.TestCase):
         body = {"patterns": [e], "limits": lim, "timing": {"elapsed_ms": elapsed}}
         if index is not None:
             body["index"] = index
+        if predicate_echo is not None:
+            body["predicate"] = predicate_echo
         sc = {"route": "POST /pattern", "request": req or {"patterns": [{"dna": "A" * 25, "id": "w"}]}, "truth": {}}
         return checks._pattern_reason_problems(sc, body, 0, e)
 
@@ -1101,9 +1103,16 @@ class StatedReasons(unittest.TestCase):
                  withheld="selected_above_threshold")
         pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
         self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred)
-        # a constant `true` normal form is the unfiltered request under the engine's own max_contexts (§19.6)
-        self.ok({"contexts": self.c("exact", 101), "selected": self.c("exact", 101)}, withheld="count_above_threshold",
-                req=pred, selection={"pass": "constant", "support": "kmer", "access": "rows"})
+        # a constant `true` normal form is the unfiltered request under the engine's own max_contexts (§19.6); the
+        # claim needs both the constant pass and the normal form `true` (a self-contradictory answer cannot make it)
+        constant = {"pass": "constant", "support": "kmer", "access": "rows"}
+        both = {"contexts": self.c("exact", 101), "selected": self.c("exact", 101)}
+        self.ok(both, withheld="count_above_threshold", req=pred, selection=constant,
+                predicate_echo={"normal_form": True})
+        for nf in (False, {"any": ["562"]}, None):
+            self.bad("with a predicate on L <= k", both, withheld="count_above_threshold", req=pred, selection=constant,
+                     predicate_echo={"normal_form": nf})
+        self.bad("with a predicate on L <= k", both, withheld="count_above_threshold", req=pred, selection=constant)
         self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred,
                  selection={"pass": "not_admitted"})
         # discovery_budget: the count the step stop interrupted is not exact (§7.4)

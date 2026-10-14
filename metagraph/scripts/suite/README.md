@@ -1381,30 +1381,31 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   path); so `rows_refused` and `annotation_budget` need the reads, `output_budget`, `cut: max_memory` and a
   `max_memory` stop the account; `anchor_labels_truncated` needs labels all; `predicate_above_threshold`,
   `selected_above_threshold`, `predicate_budget`, `cut: max_predicate_contexts` and a `max_predicate_contexts` stop a
-  predicate; `count_above_threshold` is not stated with a predicate on L <= k, unless its normal form is a constant
-  (`selection.pass: "constant"`: `true` runs the unfiltered request under the engine's own max_contexts, §19.6);
-  `anchors_above_threshold`, `cut: max_paths` and a `max_paths` stop need a path search; `cut: max_annotation_work` a
-  supported-path search (labels all states that stop without a cut, §7.5); a `max_anchors` stop a pattern longer than
-  k (with or without a path search, §7.7), a `max_contexts` stop one of L <= k or a predicate;
-  `paths_later_increment` is not stated with the anchors `exact` 0 (that empty answer is complete); only
-  `all_or_count` withholds, but for `paths_later_increment` and `anchors_above_threshold`. A step or threshold stop
-  leaves the count it interrupted not `exact` (§7.4): `discovery_budget` with an exact primary count fails, and so
-  does a stop_at_threshold stop whose count (max_contexts: the raw contexts in discovery, the selected ones in the
-  selection; max_predicate_contexts: the raw contexts, on supported paths the held walks' paths; max_anchors: the
-  anchors; max_paths: the paths, with a predicate the selected ones) is exact; `threshold_crossed` needs such a stop.
-  On a masked BASIC or CANONICAL graph a discovery stop of max_contexts (no predicate) or max_predicate_contexts (a
-  predicate) on L <= k states its contexts `at_least` above the threshold: the engine stops once the running lower
-  bound, the sum of the counted ranges' lower bounds, passes it, and the halted count states that sum
-  (pattern_search.cpp at fe563f38: threshold_crossed compares running_lower on a masked graph; add_item adds each
-  range's lower(); tally and to_count make the halted offsets `at_least` of exactly those lowers, the scans not
-  having run; between mismatch levels the bound is recomputed before the comparison; ranges counted after the halt
-  only raise it). Not judged without the mask (the running upper bound decides; fixture unmasked_stop_at_threshold
-  states at_least 0) nor on a PRIMARY graph (an even-k wrapped union's lower bound need not be the stated value, §18
-  E2-02). Closed: GPT's P-modes-0005 with every count exact 0 and its threshold stop kept, at_least 2 under
-  max_contexts 3, the stop removed; P-scope-0001 (label-free) with its list removed behind annotation_budget (a
-  refused row or a work stop), output_budget, anchor_labels_truncated, predicate_budget, or discovery_budget with the
-  count left exact. 0 of the 3,567 recorded entries of v3 and v4 (all arms) and none of the engine's stored pattern
-  fixtures states a reason these rules refuse.
+  predicate; `count_above_threshold` is not stated with a predicate on L <= k, unless its normal form is the constant
+  `true` (`selection.pass: "constant"` with `predicate.normal_form: true`: it runs the unfiltered request under the
+  engine's own max_contexts, §19.6; `false` selects nothing and withholds nothing); `anchors_above_threshold`, `cut:
+  max_paths` and a `max_paths` stop need a path search; `cut: max_annotation_work` a supported-path search (labels
+  all states that stop without a cut, §7.5); a `max_anchors` stop a pattern longer than k (with or without a path
+  search, §7.7), a `max_contexts` stop one of L <= k or a predicate; `paths_later_increment` is not stated with the
+  anchors `exact` 0 (that empty answer is complete); only `all_or_count` withholds, but for `paths_later_increment`
+  and `anchors_above_threshold`. A step or threshold stop leaves the count it interrupted not `exact` (§7.4):
+  `discovery_budget` with an exact primary count fails, and so does a stop_at_threshold stop whose count
+  (max_contexts: the raw contexts in discovery, the selected ones in the selection; max_predicate_contexts: the raw
+  contexts, on supported paths the held walks' paths; max_anchors: the anchors; max_paths: the paths, with a
+  predicate the selected ones) is exact; `threshold_crossed` needs such a stop. On a masked BASIC or CANONICAL graph
+  a discovery stop of max_contexts (no predicate) or max_predicate_contexts (a predicate) on L <= k states its
+  contexts `at_least` above the threshold: the engine stops once the running lower bound, the sum of the counted
+  ranges' lower bounds, passes it, and the halted count states that sum (pattern_search.cpp at fe563f38:
+  threshold_crossed compares running_lower on a masked graph; add_item adds each range's lower(); tally and to_count
+  make the halted offsets `at_least` of exactly those lowers, the scans not having run; between mismatch levels the
+  bound is recomputed before the comparison; ranges counted after the halt only raise it). Not judged without the
+  mask (the running upper bound decides; fixture unmasked_stop_at_threshold states at_least 0) nor on a PRIMARY graph
+  (an even-k wrapped union's lower bound need not be the stated value, §18 E2-02). Closed: GPT's P-modes-0005 with
+  every count exact 0 and its threshold stop kept, at_least 2 under max_contexts 3, the stop removed; P-scope-0001
+  (label-free) with its list removed behind annotation_budget (a refused row or a work stop), output_budget,
+  anchor_labels_truncated, predicate_budget, or discovery_budget with the count left exact. 0 of the 3,567 recorded
+  entries of v3 and v4 (all arms) and none of the engine's stored pattern fixtures states a reason these rules
+  refuse.
 - /pattern, a result listed twice (SPEC-pattern-search §7.1, §12.1, §21.4; the invariants): a context is one k-mer at
   an offset in an orientation at one level, (node, kmer, offset, strand), a path its nodes in an orientation, (nodes,
   sequence, strand); each is listed once. The order check accepts equal keys and counts_consistent compares the
