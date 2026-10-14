@@ -701,6 +701,15 @@
    "headers": {},
    "shows": "max_memory_mb named alone beside a pattern of at most k bases (SPEC §8.10): the account holds the paths of NDM-40, which are answered as without it (the entry of `paths`, no note, no work.memory_bytes, max_memory_mb not echoed); NDM-F (L <= k), on which the field does not act, says so: note annotation_not_read"
   },
+  "paths_memory_count": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same request in mode count: nothing is kept or built, so max_memory_mb acts on no entry (SPEC §8.10): both say note annotation_not_read, NDM-40's paths counted as in `paths_count`"
+  },
   "paths_global": {
    "server": "masked_no_map",
    "method": "POST",

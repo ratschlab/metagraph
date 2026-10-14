@@ -191,7 +191,7 @@ GCG12 = 'GCGGCGGCGGCG'
 # object fits beside those 20
 GCG12_N88 = GCG12 + 'N' * 88
 GCG12_N88_PATHS = 47
-MINI_COLUMNS =['1296536', '158836', '287', '470', '546', '562', '573', '615', '72407']
+MINI_COLUMNS = ['1296536', '158836', '287', '470', '546', '562', '573', '615', '72407']
 SELECTIVE = {'and': [{'any': ['562']}, {'none': ['287']}]}
 SELECTIVE_COUNT = 60
 TYPO = '5622'
@@ -1337,6 +1337,15 @@ FIXTURES = [
                                 lambda e: check('memory_bytes' not in e['work'], e['work'])),
                      expect_all(exact(24), complete,
                                 field('notes', ['annotation_not_read']))))),
+    post('paths_memory_count', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(NDM_F, ident='NDM-F')], 'mode': 'count',
+          'long_search': 'paths', 'max_memory_mb': 1}, 200,
+         'the same request in mode count: nothing is kept or built, so max_memory_mb acts on '
+         'no entry (SPEC §8.10): both say note annotation_not_read, NDM-40\'s paths counted as '
+         'in `paths_count`',
+         entries(expect_all(paths_count('exact', 2, 'completed'),
+                            field('notes', ['annotation_not_read'])),
+                 expect_all(exact(24), field('notes', ['annotation_not_read'])))),
     post('paths_global', 'masked_no_map',
          {'patterns': [p(NDM_40)], 'long_search': 'paths', 'output': {'labels': 'all'}}, 200,
          'paths with coordinates but no record mapping (placement global): nothing can be '

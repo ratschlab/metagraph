@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "NDM-40"
+  },
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "mode": "count",
+ "long_search": "paths",
+ "max_memory_mb": 1
+}

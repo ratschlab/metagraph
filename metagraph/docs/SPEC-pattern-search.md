@@ -1488,7 +1488,9 @@ the third's extension stopped by its kept walks, `stop {extension, max_memory}`,
 object that fits beside the 20 walks kept released) and `paths_memory_withheld` (`all_or_count`: the second and
 the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it); and
 `paths_memory_named` (`max_memory_mb` named alone: NDM-40's paths answered as without it, the entry of `paths`;
-NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10).
+NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10) and `paths_memory_count` (the
+same request in mode `count`, where nothing is kept or built: both entries keep `annotation_not_read`, NDM-40's
+paths counted as in `paths_count`).
 
 After the review of 2026-10-10 (§26): `utf8_label_refused`, `utf8_label_count` and `utf8_label_predicate`, on the
 server `utf8_labels` (a BASIC graph at k = 31 of two records written as bytes, A × 40 under the raw header
@@ -4705,12 +4707,13 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   account's peak came after the search
   (`PatternSupportedRoute.TheRowCacheIsGivenBackBeforeTheIndexOfTheHeldWalks`; the index refused, below the route:
   `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`).
-  Fixtures (§11; 174 in all, no stored body changed): `paths_memory`, `paths_memory_withheld` and
-  `paths_memory_named` store the account's stops of a label-free path list (the engine's at a kept walk, the
-  route's at a result object) and `max_memory_mb` named alone, which no stored body held, so that the validator's
-  rules for them (§12.1, §8.10) decide a stored answer. The validator compares §23.2's gate caps (the list in the
-  `caps` row) with its own list, the server's `kPatternGateCaps` and every stored `/traverse` block, as §23.2
-  said it did.
+  Fixtures (§11; 175 in all, no stored body changed): `paths_memory`, `paths_memory_withheld`,
+  `paths_memory_named` and `paths_memory_count` store the account's stops of a label-free path list (the
+  engine's at a kept walk, the route's at a result object) and `max_memory_mb` named alone, inside and outside
+  mode `count`, which no stored body held, so that the validator's rules for them (§12.1, §8.10) decide a stored
+  answer. The validator compares §23.2's gate caps (the list in the `caps` row) with its own list, the server's
+  `kPatternGateCaps` and every stored `/traverse` block, as §23.2 said it did, and reads the server's gate lists
+  without their comments.
 
 ## 28. Changed after the review of 2026-10-12
 

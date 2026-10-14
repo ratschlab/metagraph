@@ -4073,8 +4073,8 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertTrue(pruned and mirrors)
         # label-free paths in the memory account (SPEC §12.1): the engine's stop at a kept walk
         # and the route's cut at a result object, partial and all_or_count; max_memory_mb named
-        # alone acts on a paths entry outside mode count (no annotation_not_read) and not on a
-        # pattern of at most k bases beside it (SPEC §8.10)
+        # alone acts on a paths entry outside mode count (no annotation_not_read), and not on a
+        # pattern of at most k bases beside it nor on any entry in mode count (SPEC §8.10)
         path_memory, path_notes = set(), set()
         for name, f in self.fixtures.items():
             request, answer = self.bodies[name]
@@ -4092,12 +4092,15 @@ class TestPatternFixtures(unittest.TestCase):
                 if longer and e['stop'] and e['stop']['reason'] == 'max_memory':
                     path_memory.add((answer['mode'], e['stop']['phase'],
                                      (e['withheld'] or e['cut'] or {}).get('reason')))
-                if alone and answer['mode'] != 'count':
-                    path_notes.add((longer, 'annotation_not_read' in e['notes']))
+                if alone:
+                    path_notes.add((answer['mode'] == 'count', longer,
+                                    'annotation_not_read' in e['notes']))
         self.assertLessEqual({('partial', 'output', 'max_memory'),
                               ('partial', 'extension', 'max_memory'),
                               ('all_or_count', 'output', 'output_budget')}, path_memory)
-        self.assertEqual({(True, False), (False, True)}, path_notes)
+        # (counted, longer than k, noted): the note everywhere but on a paths entry outside count
+        self.assertEqual({(False, True, False), (False, False, True), (True, True, True),
+                          (True, False, True)}, path_notes)
         self.assertLessEqual({('every_context', None), ('tested_contexts', 'selection'),
                               ('no_instance', None), (None, 'not_started')}, motifs)
         # bounded mismatches (SPEC §21): every max_mismatches, each kind answered within
@@ -4422,8 +4425,10 @@ class TestPatternFixtures(unittest.TestCase):
         named alone, and each rule refuses an answer that breaks it: a labels phase or an
         annotation budget for the stop, a stopped extension stated exact, annotation_not_read on
         a paths entry the field acts on, none on a pattern of at most k bases it does not act
-        on. The paths of a request the account holds are answered as without it."""
-        for name in ('paths_memory', 'paths_memory_withheld', 'paths_memory_named'):
+        on, or none on a paths entry in mode count, where it acts on nothing. The paths of a
+        request the account holds are answered as without it, and counted alike in mode count."""
+        for name in ('paths_memory', 'paths_memory_withheld', 'paths_memory_named',
+                     'paths_memory_count'):
             self.check_stored(name)
         cases = [
             ('paths_memory', lambda a: a['patterns'][1]['stop'].update(phase='placement'),
@@ -4443,6 +4448,8 @@ class TestPatternFixtures(unittest.TestCase):
              'annotation_not_read exactly where'),
             ('paths_memory_named', lambda a: a['patterns'][1].update(notes=[]),
              'annotation_not_read exactly where'),
+            ('paths_memory_count', lambda a: a['patterns'][0].update(notes=[]),
+             'annotation_not_read exactly where'),
         ]
         self.assertRefusesMutations(cases)
 
@@ -4459,6 +4466,15 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(plain_request['patterns'][0], request['patterns'][0])
         self.assertEqual(plain['limits'], answer['limits'])
         self.assertEqual(untimed(plain['patterns'][0]), untimed(answer['patterns'][0]))
+        # in mode count the field acts on nothing: the paths counted as without it, the note added
+        request, answer = self.bodies['paths_memory_count']
+        plain_request, plain = self.bodies['paths_count']
+        self.assertNotIn('max_memory_mb', plain_request)
+        self.assertEqual(plain_request['patterns'][0]['dna'], request['patterns'][0]['dna'])
+        self.assertEqual(plain['limits'], answer['limits'])
+        expected = dict(untimed(plain['patterns'][0]), id=request['patterns'][0]['id'],
+                        notes=['annotation_not_read'])
+        self.assertEqual(expected, untimed(answer['patterns'][0]))
 
     def test_hand_made_bodies_are_the_codes(self):
         """The hand-made bodies are written by the code as stored here: the two 503s, and the
