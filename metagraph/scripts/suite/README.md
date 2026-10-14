@@ -1348,3 +1348,10 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   run it is a warning; `merge_run.py --strict-identity` (run_suite.sh --gate) writes the files and exits 3, and
   gate.py fails on it. The report's environment table shows both hashes and names a mismatch.
 - The async runner vendors suite_common.py: re-vendored, its `verify_manifest` checks the relations hash too.
+
+### The sequential mode's MCP repeats
+- The sequential mode ran the MCP arm's cold pass and the warm pass of repeat 1 only, so a sequential run never
+  recorded MCP repeat 2 of the repeat-3 (D) scenarios that the paired plan gives (suite_common.mcp_repeats; found by
+  VERIFY-A). It runs one pass per warm repeat index of the paired plan (1, then 2 for those scenarios), each followed
+  by the paired loop's rules between steps (mcp_after: a cancelled job's wait; a refusal or three errors stop the
+  further passes). Exit codes are unchanged; the report's plan reconciliation shows a pass that did not run.

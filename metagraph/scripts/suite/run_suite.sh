@@ -835,12 +835,20 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     esac
   fi
   if [[ -n "$MCP_CMD" ]]; then
-    # The MCP arm last: repeat 0 of every scenario, then each warm repeat.
-    local arms="mcp" entry sid l r mc mw rep cold="" warm1=""
+    # The MCP arm last: repeat 0 of every scenario, then one pass per warm repeat index (1, then 2 for the
+    # scenarios the paired plan gives three MCP repeats: suite_common.mcp_repeats), so a sequential run records the
+    # same MCP executions as a paired one.
+    local arms="mcp" entry sid l r mc mw rep cold="" maxrep=0 pass
+    local warm=()
     while IFS= read -r entry; do
       read -r sid l r mc mw <<< "$entry"
       [[ $mc != 1 ]] || cold+="$sid,"
-      [[ ",$mw," != *",1,"* ]] || warm1+="$sid,"
+      if [[ "$mw" != "-" ]]; then
+        for rep in ${mw//,/ }; do
+          warm[$rep]="${warm[$rep]:-}$sid,"
+          (( rep <= maxrep )) || maxrep=$rep
+        done
+      fi
     done < <("$PY" "$HERE/suite_common.py" paired-plan "$MANIFEST" "$RUN_DIR" "$AREAS" "$LIMIT" "$WARM_EVERY" "$arms")
     local go=1
     if [[ -n "$cold" ]]; then
@@ -849,10 +857,13 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
       # the paired loop's rules between the passes: a cancelled job's wait, the stop on a refusal or errors
       mcp_after "${cold%,}" 0 "$rc" || { go=0; log "mcp: no warm pass"; }
     fi
-    if [[ -n "$warm1" && $go == 1 ]]; then
-      rc=0; mcp_step "${warm1%,}" 1 || rc=$?
-      [[ $rc == 0 ]] || log "mcp: the warm pass exited $rc"
-    fi
+    for (( rep = 1; rep <= maxrep; rep++ )); do
+      pass="${warm[$rep]:-}"
+      [[ -n "$pass" && $go == 1 ]] || continue
+      rc=0; mcp_step "${pass%,}" "$rep" || rc=$?
+      [[ $rc == 0 ]] || log "mcp: the warm pass of repeat $rep exited $rc"
+      mcp_after "${pass%,}" "$rep" "$rc" || { go=0; log "mcp: no further warm pass"; }
+    done
   fi
   if [[ -n "$MCP_RUN" ]]; then
     log "mcp: copying $MCP_RUN"
