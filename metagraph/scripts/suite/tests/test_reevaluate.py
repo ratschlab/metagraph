@@ -326,10 +326,39 @@ class Reevaluate(unittest.TestCase):
                                        "the table's answer-triggered case pattern.deadline_ends_task"))
         out, kept = reevaluate.outcome_of(None, "mcp", sc_, {"http": 400, "error": {"code": "x"}},
                                           {"outcome": "service_by_design"}, fail, False, cases)
-        self.assertEqual((out, kept), ("service_by_design", "decided by the runner without the checks"))
+        self.assertEqual((out, kept), ("service_by_design", "decided by the runner without the checks (not "
+                                                            "reproduced by the current table)"))
         # a runner error stays one
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "error"}, fail, False, cases)[0],
                          "error")
+
+    def test_named_cases_replayed(self):
+        # the runner's matcher with the current table: G08's field alternation (Q-motif-0004 named the case, the
+        # runner of the run could not read "predicate_strands | predicate_scope"), the field from the tool error
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        q = scenario("Q-0004", "POST /pattern", [{"check": "status", "args": {"http": 400, "code": "invalid_request"}}],
+                     mcp={"tool": "pattern_search", "arguments": {},
+                          "by_design": ["pattern.predicate_options_without_predicate"]})
+        ans = {"http": 400, "body": None, "error": {"code": "pattern_invalid", "field": "predicate_scope",
+                                                    "text": "predicate_scope says ...: it acts only with a predicate"}}
+        fail = [{"check": "status", "outcome": "fail", "detail": "code 'pattern_invalid'"}]
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", q, ans, {"outcome": "fail"}, fail, False, cases),
+                         ("service_by_design", "the table's named case pattern.predicate_options_without_predicate"))
+        # the runner's reading: a case field against an answer that names none does not match
+        nofield = dict(ans, error={k: v for k, v in ans["error"].items() if k != "field"})
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", q, nofield, {"outcome": "fail"}, fail, False, cases)[0],
+                         "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", q, nofield, {"outcome": "fail"}, fail, False, cases,
+                                               {"code": "pattern_invalid", "field": "predicate_scope"})[0],
+                         "service_by_design")
+        doc = {"calls": [{"payload": {"error": {"code": "pattern_invalid", "field": "predicate_scope"}}}]}
+        self.assertEqual(reevaluate.tool_error(doc, ans), {"code": "pattern_invalid", "field": "predicate_scope"})
+        self.assertIsNone(reevaluate.tool_error(doc, {"error": {"code": "other"}}))
+        # an answered case: no error and a 200; a direct arm is never matched
+        self.assertTrue(cmp.service_answers({"outcome": "answered"}, {"http": 200, "error": None}))
+        self.assertFalse(cmp.service_answers({"outcome": "answered"}, {"http": 400, "error": {"code": "x"}}))
+        self.assertEqual(reevaluate.outcome_of(None, "direct-local", q, ans, {"outcome": "fail"}, fail, False,
+                                               cases)[0], "fail")
 
     def test_merge_without_a_reevaluation(self):
         with self.assertRaises(SystemExit):

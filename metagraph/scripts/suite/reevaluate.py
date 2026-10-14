@@ -13,10 +13,13 @@ and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), t
 backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
-own exception, which a re-evaluation repeats), `not_implemented_mcp`, `service_by_design` (async's table; also an
-MCP answer an answer-triggered case of the table matches, --by-design PATH, default compare.py's: applied before the
-runner's named case), and the MCP runner's host-state rule (an unexpected `uninterruptible_overrun_exceeds_allowance`
-or `resolve_timeout`, compare.MCP_HOST_STATE_CODES, is inconclusive).
+own exception, which a re-evaluation repeats), `not_implemented_mcp`, `service_by_design` (async's table), and the
+MCP runner's host-state rule (an unexpected `uninterruptible_overrun_exceeds_allowance` or `resolve_timeout`,
+compare.MCP_HOST_STATE_CODES, is inconclusive). The MCP runner's matcher is replayed with the current table
+(--by-design PATH, default compare.py's; async's runner at 789fb5f0 is the reference): an MCP answer an
+answer-triggered case matches, else one a case the scenario names matches (its service_answer, the field read from
+the recorded tool error as the runner reads it), is service_by_design with that case; a runner's service_by_design
+mark the current table does not reproduce is kept, and says so.
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
@@ -120,8 +123,8 @@ def arm_lines(path):
     return [keyed[k] for k in order], bad
 
 
-def raw_answer(arm_dir, line):
-    """The recorded normalised answer of an execution line, or None (no raw file, or none kept in it)."""
+def raw_doc(arm_dir, line):
+    """The recorded raw file of an execution line (a dict), or None."""
     raw = line.get("raw")
     if not isinstance(raw, str) or not raw:
         return None
@@ -132,8 +135,29 @@ def raw_answer(arm_dir, line):
         doc = sc.read_gz_json(path)
     except (OSError, ValueError, EOFError):
         return None
-    answer = (doc or {}).get("answer") if isinstance(doc, dict) else None
+    return doc if isinstance(doc, dict) else None
+
+
+def raw_answer(arm_dir, line):
+    """The recorded normalised answer of an execution line, or None (no raw file, or none kept in it)."""
+    answer = (raw_doc(arm_dir, line) or {}).get("answer")
     return answer if isinstance(answer, dict) else None
+
+
+def tool_error(doc, answer):
+    """The MCP tool's own error object behind the answer's error (its field, ...), from the recorded calls' payloads,
+    as async's runner reads it (suite_mcp_runner.py raw_error), else None."""
+    code = ((answer or {}).get("error") or {}).get("code")
+    for call in reversed((doc or {}).get("calls") or []):
+        payload = call.get("payload") if isinstance(call, dict) else None
+        err = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(err, dict) and err.get("code") == code:
+            return err
+        rerr = payload.get("resolve_error") if isinstance(payload, dict) else None
+        detail = rerr.get("detail") if isinstance(rerr, dict) else None
+        if isinstance(detail, dict) and detail.get("code") == code:
+            return detail
+    return None
 
 
 def client_of(arm, line):
@@ -149,22 +173,28 @@ def evaluate_raised(checks):
     return bool(checks) and all(c.get("check") == "evaluate" for c in checks)
 
 
-def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None):
+def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None):
     """The re-evaluated outcome (module docstring) and why it was kept, if it was."""
     recorded = line.get("outcome")
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
     if kept and recorded != "service_by_design":
         return recorded, "decided by the runner without the checks"
     if arm == "mcp" and cases:
-        # an answer-triggered table case (answer_match), as the MCP runner's matcher applies it since async's
-        # 2d1cd9b3 table: the host's answer relayed by design, whatever the scenario names; applied before the
-        # scenario's named cases (lane S5's B6), so it also names the case of an execution the runner marked by one
+        # the MCP runner's matcher replayed with the current table (async's 789fb5f0 runner is the reference): an
+        # answer-triggered case (answer_match: the host's answer relayed by design, whatever the scenario names;
+        # applied first, lane S5's B6), then the scenario's named cases (their service_answer)
+        err = (answer or {}).get("error")
+        if isinstance(err, dict) and isinstance(tool_err, dict) and "field" in tool_err:
+            err = dict(err, field=tool_err.get("field"))
         case = compare.answer_case_of(cases, scenario.get("route") or line.get("route"), (answer or {}).get("http"),
-                                      (answer or {}).get("error"))
+                                      err)
         if case is not None:
             return "service_by_design", "the table's answer-triggered case %s" % case["id"]
+        case = compare.named_case_of(cases, scenario, answer, tool_err)
+        if case is not None:
+            return "service_by_design", "the table's named case %s" % case["id"]
     if kept:
-        return recorded, "decided by the runner without the checks"
+        return recorded, "decided by the runner without the checks (not reproduced by the current table)"
     if raised:
         return ("fail" if arm == "mcp" else "error"), None
     err = (answer or {}).get("error") or {}
@@ -268,7 +298,8 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                 new_checks = [{"check": "evaluate", "outcome": "fail",
                                "detail": "exception in checks.evaluate: %s: %s" % (type(exc).__name__, exc)}]
                 raised = True
-            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases)
+            terr = tool_error(raw_doc(arm_dir, line), answer) if name == "mcp" else None
+            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases, terr)
             diff = changed_checks(line.get("checks"), new_checks)
             entry = entries.get(key) or {"digest": line.get("answer_digest"), "time_limited": line.get("time_limited")}
             row.update({"checks": new_checks, "outcome": outcome, "answer_digest": entry["digest"],
@@ -279,7 +310,7 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                                    "checks_changed": [c["check"] for c in diff]}
             if kept:
                 row["reevaluation"]["kept"] = kept
-            if kept and kept.startswith("the table's answer-triggered case "):
+            if kept and kept.startswith(("the table's answer-triggered case ", "the table's named case ")):
                 row["service_by_design_case"] = kept.rsplit(" ", 1)[-1]
             counts["kept" if kept else "reevaluated"] += 1
             if outcome != line.get("outcome"):

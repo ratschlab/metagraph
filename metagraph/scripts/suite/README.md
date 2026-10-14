@@ -801,9 +801,17 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   codes of body.patterns[].error), text_contains}, mcp {http (a status or a list), code, text_contains, field (as
   above; an MCP answer that names no field does not match)}, as async's runner reads them (`answer_matches`); the
   runner applies the named cases first, the comparator the answer cases first (B6).
-- Not changed: reevaluate.py keeps the runner's verdict on a named case (it does not re-apply named cases), so an
-  MCP execution the runner judged `fail` against a case its matcher could not read (G08's alternation) stays `fail`
-  until the MCP arm runs again with async's fixed matcher; compare.py's class for the scenario changes offline.
+- The runner's matcher replayed (VERIFY-RP G08 point 3; the coordinator's second addendum asks the re-evaluation to
+  reproduce async's own replay). reevaluate.py applies the current table to every recorded MCP answer as async's
+  runner at 789fb5f0 does (`compare.named_cases`, `compare.service_answers`: the named cases with their
+  service_answer, the field read from the recorded tool error as the runner's `raw_error` reads it, a case field
+  against an answer naming none not matching), after the answer-triggered cases (B6): a match is service_by_design
+  with that case; a runner's service_by_design mark the current table does not reproduce is kept and says so. So
+  an execution the runner judged `fail` against a case its matcher could not read (G08's alternation) becomes
+  service_by_design offline.
+- A run recorded before a normaliser fix (G06: a pattern refused in its slot) is re-normalised first with async's
+  `scripts/bench/suite_mcp_renormalise.py RUN --out COPY` (read-only use of its worktree), COPY put in place of a
+  copy's arms/mcp; reevaluate.py itself never re-runs a normaliser.
 
 ### The v4 builder (built later by the integrator)
 `build_manifest.py` now builds manifest version 4 (`manifest/suite_v4.json`, `suite_smoke_v4.json`, the smoke tag

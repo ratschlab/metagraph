@@ -588,6 +588,52 @@ def answer_triggered(cases, route, reps, ref, run_dir, skip=()):
     return None
 
 
+def named_cases(cases, scenario):
+    """The table cases a scenario names, as async's runner reads them (suite_mcp_runner.py ServiceByDesign.named at
+    789fb5f0): mcp.by_design (an id or a list), the scenario's service_by_design, its `sbd:<id>` tags, in that order,
+    then every case listing the scenario's id in scenario_ids."""
+    scenario = scenario or {}
+    ids = []
+    for own in (((scenario.get("mcp") or {}).get("by_design")), scenario.get("service_by_design")):
+        ids += [own] if isinstance(own, str) else [str(x) for x in own or [] if isinstance(x, str)]
+    ids += [t[4:] for t in scenario.get("tags") or [] if isinstance(t, str) and t.startswith("sbd:")]
+    out = [cases[i] for i in dict.fromkeys(ids) if i in (cases or {})]
+    sid = str(scenario.get("id"))
+    out += [c for c in (cases or {}).values() if sid in (c.get("scenario_ids") or []) and c not in out]
+    return out
+
+
+def service_answers(want, answer, tool_error=None):
+    """Whether an MCP answer matches a named case's service_answer, as async's runner reads it (ServiceByDesign.answers
+    at 789fb5f0): answered / clamped: no error and http 200; refused_at_submit / relayed: an error whose code is the
+    case's (`a | b`), whose text contains text_contains, and whose field (the tool's error object's, else the
+    answer's) matches the case's field (alternatives, placeholders; a case field against no field does not match)."""
+    want = want or {}
+    answer = answer or {}
+    outcome = want.get("outcome")
+    err = answer.get("error")
+    if outcome in ("answered", "clamped"):
+        return err is None and answer.get("http") == 200
+    if outcome not in ("refused_at_submit", "relayed") or not isinstance(err, dict):
+        return False
+    if want.get("code") is not None and str(err.get("code")) not in _alternatives(want["code"]):
+        return False
+    if want.get("text_contains") and str(want["text_contains"]) not in str(err.get("text") or ""):
+        return False
+    if want.get("field") is None:
+        return True
+    return _field_matches((tool_error or {}).get("field", err.get("field")), want["field"])
+
+
+def named_case_of(cases, scenario, answer, tool_error=None):
+    """The first case the scenario names whose service_answer the MCP answer matches (the runner's matcher), else
+    None: reevaluate.py replays it on a recorded run with the current table."""
+    for case in named_cases(cases, scenario):
+        if service_answers(case.get("service_answer"), answer, tool_error):
+            return case
+    return None
+
+
 def case_ids(scenario):
     """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
     ids = ((scenario or {}).get("mcp") or {}).get("by_design")
