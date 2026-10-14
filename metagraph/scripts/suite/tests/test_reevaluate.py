@@ -1067,15 +1067,46 @@ class Reevaluate(unittest.TestCase):
                                                                "by_design": ["test.deployment_gate"]})
         self.assertEqual(judge(named, ans, table)[0], "not_implemented_mcp")
         # the real table's case 131 on v4's T-labels-0004 / -0006 (MCP 400 preset_unavailable on
-        # overrides.labels.max_seed_labels): not_implemented_mcp; a field outside overrides.* is not the case
+        # overrides.labels.max_seed_labels, which the scenario sends): not_implemented_mcp; a field outside
+        # overrides.* is not the case
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        t4 = scenario("T-labels-0004", "POST /traverse", STATUS, mcp={"tool": "traverse_fetch", "arguments": {
+            "overrides": {"bounds": {"max_extension_bp": 200},
+                          "labels": {"max_seed_labels": 10000, "seed_label_kind": "header"}}}})
         for sid in ("T-labels-0004", "T-labels-0006"):
             out, info = judge(dict(t4, id=sid), ans, cases)
             self.assertEqual((out, info["service_by_design_case"]), ("not_implemented_mcp",
                                                                     "traverse.advanced_path_disabled"), sid)
+            # the deployment setting it read: the table's service_settings block (the run recorded no live document)
+            self.assertEqual(info["request_evidence"],
+                             {"traverse.advanced_path_disabled": {"service_settings.advanced_enabled": "table"}})
         self.assertEqual(judge(t4, dict(ans, error=dict(ans["error"], field="preset")), cases)[0], "fail")
         self.assertEqual(judge(t4, {"http": 200, "body": {}, "error": None}, cases)[0], "fail")
         self.assertEqual(judge(dict(t4, route="POST /resolve"), ans, cases)[0], "fail")
+        # the case's request (VERIFY-B's mutations): a refusal of a key the scenario never sent, or of a basic
+        # override, is no refusal of the advanced path: the checks judge, the request's note in the detail
+        unsent = dict(t4, mcp={"tool": "traverse_fetch", "arguments": {}})
+        out, info = judge(unsent, ans, cases)
+        self.assertEqual((out, info.get("service_by_design_case")), ("fail", None))
+        self.assertEqual(info["verdict_detail"], 'traverse.advanced_path_disabled: request predicate {"path": '
+                                                 '"{field}", "present": true} does not hold (field '
+                                                 'overrides.labels.max_seed_labels)')
+        basic = dict(ans, error=dict(ans["error"], field="overrides.bounds.max_extension_bp",
+                                     text=text.replace("labels.max_seed_labels", "bounds.max_extension_bp")))
+        out, info = judge(t4, basic, cases)
+        self.assertEqual(out, "fail")
+        self.assertIn('request predicate {"field": "overrides.", "not_in": ["bounds.*"', info["verdict_detail"])
+        # a deployment whose recorded live document enables the advanced path: the case does not apply (judged with
+        # the live value, the mismatch with the table's block recorded)
+        live = cmp.ByDesignCases(cases, cases.blocks, sc.References(cases.blocks, {"service": {
+            "service_settings": {"advanced_enabled": True}}}))
+        out, info = judge(t4, ans, live)
+        self.assertEqual(out, "fail")
+        self.assertEqual(info["request_evidence"],
+                         {"traverse.advanced_path_disabled": {"service_settings.advanced_enabled": "live"}})
+        self.assertEqual(info["request_evidence_mismatches"], [{
+            "namespace": "service", "ref": "service_settings.advanced_enabled", "live": True, "table": False,
+            "case": "traverse.advanced_path_disabled"}])
         # a runner's not_implemented_mcp mark that names its case is replayed with the table (not kept unread): the
         # case reproduces it; a table without the case judges the checks (noted); no table keeps it with its case
         mark = {"outcome": "not_implemented_mcp", "service_by_design_case": "traverse.advanced_path_disabled",
@@ -1095,6 +1126,60 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", t4, ans, {"outcome": "not_implemented_mcp"}, failing,
                                                False, cases), ("not_implemented_mcp",
                                                                "decided by the runner without the checks"))
+
+    def test_request_evidence_on_the_line(self):
+        # a re-evaluated MCP line records the references its matched cases' requests read (request_evidence, the
+        # runner's field), the mark where they came from; a run whose manifest names a case its own arguments do not
+        # satisfy is refused (exit 4), as the runner refuses to start
+        run = os.path.join(self.tmp.name, "req")
+        args = {"database": "refseq33m-experimental", "preset": "walk", "seeds": [{"sequence": "ACGT" * 10}],
+                "overrides": {"labels": {"max_seed_labels": 10000}}}
+        t4 = scenario("T-labels-0004", "POST /traverse", STATUS, mcp={"tool": "traverse_fetch", "arguments": args})
+        err = {"code": "preset_unavailable", "field": "overrides.labels.max_seed_labels",
+               "text": "overrides.labels.max_seed_labels is on the advanced strategy path, which is not enabled on "
+                       "this deployment"}
+        d = os.path.join(run, "arms", "mcp")
+        os.makedirs(os.path.join(d, "raw"))
+        manifest = {"manifest_version": 4, "scenarios": [t4], "relations": []}
+        sc.write_json_atomic(os.path.join(run, "manifest.json"), manifest)
+        sc.write_json_atomic(os.path.join(d, "manifest.json"), manifest)
+        sc.write_json_atomic(os.path.join(d, "run.json"), {"run_id": "R", "arm": "mcp", "state": "done"})
+        raw = sc.raw_name("T-labels-0004", "mcp", 0)
+        sc.write_gz_json(os.path.join(d, raw), {"answer": {"http": 400, "body": None, "error": err}})
+        sc.append_jsonl(os.path.join(d, "executions.jsonl"), {
+            "run_id": "R", "scenario": "T-labels-0004", "area": "T", "arm": "mcp", "repeat": 0, "http": 400,
+            "outcome": "fail", "checks": [], "raw": raw, "error": err, "route": "POST /traverse"})
+        mark = reevaluate.reevaluate(run)
+        row = sc.read_jsonl(os.path.join(d, "executions.reevaluated.jsonl"))[0][0]
+        self.assertEqual((row["outcome"], row["service_by_design_case"]),
+                         ("not_implemented_mcp", "traverse.advanced_path_disabled"))
+        self.assertEqual(row["request_evidence"],
+                         {"traverse.advanced_path_disabled": {"service_settings.advanced_enabled": "table"}})
+        self.assertNotIn("request_evidence_mismatches", row)
+        self.assertEqual(mark["references"]["service"],
+                         {"source": "table", "origin": "the table's service_settings block"})
+        # the runner's live document (run.json service_capabilities) enabling the advanced path: judged with it
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        doc = json.loads(json.dumps(cases.blocks["service"]))
+        doc["service_settings"]["advanced_enabled"] = True
+        sc.write_json_atomic(os.path.join(d, "run.json"), {"run_id": "R", "arm": "mcp", "state": "done",
+                                                           "service_capabilities": {"document": doc, "sha256": "x",
+                                                                                    "read_at": "t", "base": "b"}})
+        mark = reevaluate.reevaluate(run)
+        row = sc.read_jsonl(os.path.join(d, "executions.reevaluated.jsonl"))[0][0]
+        self.assertEqual((row["outcome"], row.get("service_by_design_case")), ("fail", None))
+        self.assertEqual(row["request_evidence"],
+                         {"traverse.advanced_path_disabled": {"service_settings.advanced_enabled": "live"}})
+        self.assertEqual(row["request_evidence_mismatches"][0]["live"], True)
+        self.assertEqual(mark["references"]["mismatches"], [{"namespace": "service", "ref":
+                                                             "service_settings.advanced_enabled", "live": True,
+                                                             "table": False}])
+        # a manifest naming traverse.empty_seeds on a scenario that sends a seed: refused at load
+        bad = dict(t4, mcp=dict(t4["mcp"], by_design=["traverse.empty_seeds"]))
+        sc.write_json_atomic(os.path.join(run, "manifest.json"), dict(manifest, scenarios=[bad]))
+        with contextlib.redirect_stderr(io.StringIO()) as err_out:
+            self.assertEqual(reevaluate.main([run, "--quiet"]), 4)
+        self.assertIn("scenario T-labels-0004 names case traverse.empty_seeds", err_out.getvalue())
 
     def test_by_design_finding_without_a_table(self):
         # B5b-10: with no table a recorded by-design finding (a relayed deadline's budget_respected) is kept, as
@@ -1123,7 +1208,7 @@ class Reevaluate(unittest.TestCase):
         # runner of the run could not read "predicate_strands | predicate_scope"), the field from the tool error
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         q = scenario("Q-0004", "POST /pattern", [{"check": "status", "args": {"http": 400, "code": "invalid_request"}}],
-                     mcp={"tool": "pattern_search", "arguments": {},
+                     mcp={"tool": "pattern_search", "arguments": {"predicate_scope": "motif"},
                           "by_design": ["pattern.predicate_options_without_predicate"]})
         ans = {"http": 400, "body": None, "error": {"code": "pattern_invalid", "field": "predicate_scope",
                                                     "text": "predicate_scope says ...: it acts only with a predicate"}}
@@ -1137,6 +1222,15 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", q, nofield, {"outcome": "fail"}, fail, False, cases,
                                                {"code": "pattern_invalid", "field": "predicate_scope"})[0],
                          "service_by_design")
+        # the case's request: predicate_scope "motif" and no predicate (Q-motif-0004's arguments); a scenario sending
+        # predicate_scope "context" asks the other case (pattern.predicate_options_noop_without_predicate)
+        info = {}
+        other = dict(q, mcp=dict(q["mcp"], arguments={"predicate_scope": "context"}))
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", other, ans, {"outcome": "fail"}, fail, False, cases, None,
+                                               info)[0], "fail")
+        self.assertEqual(info["verdict_detail"], 'pattern.predicate_options_without_predicate: request predicate '
+                                                 '{"equals": "motif", "path": "predicate_scope"} does not hold (field '
+                                                 'predicate_scope)')
         doc = {"calls": [{"payload": {"error": {"code": "pattern_invalid", "field": "predicate_scope"}}}]}
         self.assertEqual(reevaluate.tool_error(doc, ans), {"code": "pattern_invalid", "field": "predicate_scope"})
         self.assertIsNone(reevaluate.tool_error(doc, {"error": {"code": "other"}}))

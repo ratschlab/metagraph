@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SUITE = os.path.dirname(HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 
 import compare as cmp  # noqa: E402
@@ -437,7 +438,7 @@ class CompareTest(unittest.TestCase):
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         self.assertEqual(info["cases"], 131)   # async's vendored table at 31a2e41f (e427d503's edit, case 131)
-        self.assertEqual(info["sha256"], "6b55300b33bf74aea5339c238024634992644585e5efd8d5a504cc96e60a9c65")
+        self.assertEqual(info["sha256"], "e133f6eee21ac511cd556a984d9ccf93924d2012e01bb650d395cb617791dead")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
         entry, = cases["traverse.duplicate_seeds"]["explains_checks"]
@@ -974,7 +975,8 @@ class ReviewFixesTest(unittest.TestCase):
         with self.assertRaises(cmp.TableError):
             cmp.load_by_design(path)
         self.assertEqual(cmp.main([self.dir, "--no-merge", "--by-design", path]), 4)
-        self.assertEqual(cmp.table_problems(list(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[0].values())), [])
+        real = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[0]
+        self.assertEqual(cmp.table_problems(list(real.values()), real.blocks), [])
         # an answer_match without routes never triggers (as the runner)
         case = {"a": dict(base, answer_match={"direct": {}, "mcp": {"http": 400, "code": "x"}})}
         self.assertIsNone(cmp.answer_case_of(case, "POST /pattern", 400, {"code": "x"}))
@@ -1352,7 +1354,8 @@ class ReviewFixesTest(unittest.TestCase):
                 "answer_match": {"routes": ["POST /traverse"], "direct": {"http": 200},
                                  "mcp": {"http": 400, "code": "preset_unavailable", "field": "overrides.<knob path>",
                                          "text_contains": "which is not enabled on this deployment"},
-                                 "direct_mismatch": "disagree", "mcp_outcome": "not_implemented_mcp"}}
+                                 "direct_mismatch": "disagree", "mcp_outcome": "not_implemented_mcp"},
+                "request": [{"path": "{field}", "present": True}]}
         self.assertEqual(cmp.table_problems([base]), [])
         self.assertEqual(cmp.match_mark(base), "not_implemented_mcp")
         self.assertEqual(cmp.match_mark(dict(base, answer_match=dict(base["answer_match"], mcp_outcome=None))),
@@ -1375,7 +1378,8 @@ class ReviewFixesTest(unittest.TestCase):
         # direct arms 200), the case answer-triggered (the scenario names none)
         cases = {"a": base}
         s = {"id": "T-labels-0004", "route": "POST /traverse", "request": {}, "expect": [],
-             "mcp": {"tool": "traverse_fetch", "arguments": {}}}
+             "mcp": {"tool": "traverse_fetch", "arguments": {"overrides": {"labels": {"max_seed_labels": 10000},
+                                                                           "branching": {"max_paths": 2}}}}}
         err = {"code": "preset_unavailable", "field": "overrides.labels.max_seed_labels",
                "text": "overrides.labels.max_seed_labels is on the advanced strategy path, which is not enabled on "
                        "this deployment"}
@@ -1550,6 +1554,313 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertIn("the route search stopped at 2 states",
                       cmp._route_prefix_problem(part["results"][0]["arms"]["right"],
                                                 full["results"][0]["arms"]["right"], "right", 2))
+
+
+class RequestPredicatesTest(unittest.TestCase):
+    """A table case's `request` (the machine-readable scenario_match, applied to named and answer-triggered matches
+    alike), the table's host_capabilities / service_settings blocks, the references' resolution order (the run's
+    recorded live document, else the table's block, else unknown) and the configuration helpers lane G3's gate
+    calls."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        self.cases, self.info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        with open(os.path.join(SUITE, "manifest", "suite_v4.json")) as fh:
+            self.v4 = dict((x["id"], x) for x in json.load(fh)["scenarios"])
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def match(self, sid, err, args=None, cases=None, evidence=None):
+        scen = dict(self.v4[sid])
+        if args is not None:
+            scen = dict(scen, mcp=dict(scen["mcp"], arguments=args))
+        walls = []
+        matched, how = cmp.case_matches(cases or self.cases, scen, {"http": 400, "error": err, "body": None}, None,
+                                        {"outcome": "fail"}, None, walls, None, evidence)
+        return [c["id"] for c in matched], how, walls
+
+    def test_grammar_and_load_validation(self):
+        ok = [{"path": "{field}", "field_prefix": "caps.", "equals": 0}, {"path": "patterns[*].protein", "present": True},
+              {"field": "overrides.", "not_in": ["bounds.*", "direction"]},
+              {"service": "service_settings.advanced_enabled", "equals": False},
+              {"path": "max_mismatches", "gt": {"host": "pattern.mismatches.max.protein"}},
+              {"any": [[{"path": "preset", "absent": True}], [{"path": "preset", "equals": "walk"}]]}]
+        for p in ok:
+            self.assertEqual(cmp.request_problem(p), "", p)
+        bad = [[], {"path": "x"}, {"path": "x", "equals": 1, "present": True}, {"path": "x", "service": "y",
+                                                                                  "equals": 1},
+               {"path": "", "present": True}, {"path": "x", "present": False}, {"path": "x", "in": []},
+               {"path": "x", "gt": "big"}, {"path": "x", "equals": {"other": "p"}},
+               {"path": "x", "field_prefix": "caps.", "equals": 0}, {"field": "{field}", "present": True},
+               {"any": []}, {"any": [[]]}, {"any": [[{"path": "x"}]]}, {"path": "x", "when": 1, "present": True}]
+        for p in bad:
+            self.assertTrue(cmp.request_problem(p), p)
+        blocks = self.cases.blocks
+        base = {"id": "a", "agreement": "by_design", "service_answer": {"outcome": "refused_at_submit", "code": "x"}}
+        trig = dict(base, answer_match={"routes": ["POST /pattern"], "direct": {"http": 200},
+                                        "mcp": {"code": "x"}, "direct_mismatch": "disagree"})
+        # required: an answer-triggered case without a wall_rule, a case whose field names several fields
+        self.assertEqual(cmp.case_request_problems(trig, blocks),
+                         ["request is required for an answer-triggered case without a wall_rule"])
+        walled = dict(trig, answer_match=dict(trig["answer_match"], wall_rule="budget_minus_reserve"))
+        self.assertEqual(cmp.case_request_problems(walled, blocks), [])
+        multi = dict(base, service_answer=dict(base["service_answer"], field="caps.a | caps.b"))
+        self.assertEqual(cmp.case_request_problems(multi, blocks), [
+            "request is required for a case whose field names several request fields (caps.a | caps.b)"])
+        self.assertEqual(cmp.case_request_problems(dict(multi, request=[]), blocks),
+                         ["request must be a non-empty list of predicates"])
+        # every reference must be stated by the table's own block (it decides without a live document)
+        ref = dict(trig, request=[{"path": "x", "gt": {"service": "presets.nope.budgets.time_budget_ms"}}])
+        self.assertEqual(cmp.case_request_problems(ref, blocks), [
+            "request names {'service': 'presets.nope.budgets.time_budget_ms'}, which the table's service_settings "
+            "block does not state"])
+        self.assertTrue(cmp.case_request_problems(dict(ref, request=[{"service": "service_settings.advanced_enabled",
+                                                                      "equals": False}]), {}))
+        path = os.path.join(self.dir, "t.json")
+        sc.write_json_atomic(path, {"cases": [trig]})
+        with self.assertRaises(cmp.TableError):
+            cmp.load_by_design(path)
+        sc.write_json_atomic(path, {"cases": [dict(trig, request=[{"path": "x", "present": True}])],
+                                    "service_settings": []})
+        with self.assertRaisesRegex(cmp.TableError, "service_settings must be an object"):
+            cmp.load_by_design(path)
+
+    def test_real_table_requests(self):
+        # the blocks and the cases that must state a request
+        self.assertEqual(self.info["blocks"], ["host_capabilities", "service_settings"])
+        b = self.cases.blocks
+        self.assertEqual((sc.lookup(b["host"], "pattern.mismatches.max.protein"),
+                          sc.lookup(b["host"], "resolve.time_budget.max_time_ms"),
+                          sc.lookup(b["service"], "service_settings.advanced_enabled"),
+                          sc.lookup(b["service"], "presets.walk.budgets.time_budget_ms"),
+                          sc.lookup(b["service"], "service_settings.resolve.http_timeouts_s.phase_margin")),
+                         ((True, 1), (True, 60000), (True, False), (True, 15000), (True, 25.0)))
+        with_request = sorted(c["id"] for c in self.cases.values() if "request" in c)
+        self.assertEqual(with_request, sorted([
+            "mismatch.above_kind_cap", "pattern.caps_zero", "pattern.path_caps_without_long_search",
+            "pattern.predicate_caps_without_predicate", "pattern.predicate_form_other",
+            "pattern.predicate_options_noop_without_predicate", "pattern.predicate_options_without_predicate",
+            "resolve.time_budget_above_host_max", "resolve.time_budget_unnamed", "traverse.advanced_path_disabled",
+            "traverse.bounds_budget_above_preset_row", "traverse.bounds_knob_above_service_maximum",
+            "traverse.empty_seeds"]))
+        self.assertEqual([c["id"] for c in self.cases.values() if cmp.request_required(c) and "request" not in c],
+                         [])
+        # the stale 20000 is gone: the host's maximum is 60000 on staging
+        with open(cmp.DEFAULT_BY_DESIGN) as fh:
+            raw = fh.read()
+        self.assertNotIn("20,000 on staging", raw)
+        self.assertNotIn("max_time_ms 20000 on staging", raw)
+        # every frozen manifest names only cases its scenarios' own arguments satisfy
+        for name in sorted(os.listdir(os.path.join(SUITE, "manifest"))):
+            with open(os.path.join(SUITE, "manifest", name)) as fh:
+                scenarios = json.load(fh).get("scenarios") or []
+            self.assertEqual(cmp.request_scenario_problems(self.cases, scenarios), [], name)
+
+    def test_named_scenario_must_satisfy_its_case(self):
+        # a manifest scenario naming a case its own arguments do not satisfy is refused at load (a drift): P-caps-0001
+        # with max_anchors 1 still naming pattern.caps_zero; T-end-0001 with a budget inside the walk row
+        scenarios = [dict(self.v4["P-caps-0001"], mcp=dict(self.v4["P-caps-0001"]["mcp"], arguments=dict(
+            self.v4["P-caps-0001"]["mcp"]["arguments"], max_anchors=1)))]
+        problems = cmp.request_scenario_problems(self.cases, scenarios)
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("scenario P-caps-0001 names case pattern.caps_zero, whose request its "
+                                               "own MCP arguments do not satisfy"), problems[0])
+        t = self.v4["T-end-0001"]
+        inside = dict(t, mcp=dict(t["mcp"], arguments=dict(t["mcp"]["arguments"], overrides={
+            "bounds": {"max_extension_bp": 200, "time_budget_ms": 15000}})))
+        self.assertEqual(len(cmp.request_scenario_problems(self.cases, [inside])), 1)
+        with self.assertRaisesRegex(cmp.TableError, "scenario P-caps-0001 names case pattern.caps_zero"):
+            cmp.load_by_design(cmp.DEFAULT_BY_DESIGN, scenarios)
+        self.assertEqual(cmp.request_scenario_problems(self.cases, [self.v4[x] for x in (
+            "P-caps-0001", "P-modes-0006", "L-caps-0001", "L-caps-0002", "T-end-0001", "T-edge-0012", "T-edge-0016",
+            "M-protein-0010", "R-edge-0021", "Q-motif-0004", "Q-motif-0005", "Q-more-0003")]), [])
+        # compare's command line refuses such a run's manifest (exit 4), as the runner refuses to start
+        sc.write_json_atomic(os.path.join(self.dir, "manifest.json"), {"scenarios": scenarios})
+        sc.write_json_atomic(os.path.join(self.dir, "run.json"), {"run_id": "R"})
+        open(os.path.join(self.dir, "executions.jsonl"), "w").close()
+        self.assertEqual(cmp.main([self.dir, "--no-merge"]), 4)
+
+    def test_mutations_no_longer_swallowed(self):
+        # VERIFY-B's finding-2 mutations through the matcher, the real table: each refusal the request did not ask
+        # for no longer matches its case (the checks judge), the legitimate ones still do
+        caps = {"code": "pattern_invalid", "text": "caps.max_contexts: Input should be greater than or equal to 1",
+                "field": "caps.max_contexts"}
+        self.assertEqual(self.match("P-exact-0001", caps)[0], [])                      # max_contexts 10000 sent
+        self.assertEqual(self.match("P-exact-0001", dict(caps, field="caps.max_paths"))[0], [])   # never sent
+        self.assertEqual(self.match("P-caps-0001", dict(caps, field="caps.time_budget_ms"))[0], [])
+        self.assertEqual(self.match("P-caps-0001", dict(caps, field="caps.max_contexts"))[0], [])
+        named, how, walls = self.match("P-caps-0001", dict(caps, field="caps.max_anchors"))
+        self.assertEqual((named, how), (["pattern.caps_zero"], "named"))
+        self.assertEqual(self.match("P-modes-0006", caps)[:2], (["pattern.caps_zero"], "named"))
+        # the advanced path: a basic override, or a key never sent
+        adv = {"code": "preset_unavailable", "field": "overrides.bounds.max_extension_bp",
+               "text": "overrides.bounds.max_extension_bp is on the advanced strategy path, which is not enabled on "
+                       "this deployment"}
+        self.assertEqual(self.match("T-walk-0001", adv)[0], [])
+        unsent = dict(adv, field="overrides.labels.max_seed_labels",
+                      text=adv["text"].replace("bounds.max_extension_bp", "labels.max_seed_labels"))
+        self.assertEqual(self.match("T-walk-0001", unsent)[0], [])
+        ev = cmp.RequestEvidence()
+        self.assertEqual(self.match("T-labels-0004", unsent, evidence=ev)[:2],
+                         (["traverse.advanced_path_disabled"], "answer-triggered"))
+        self.assertEqual(ev.sources, {"traverse.advanced_path_disabled": {"service_settings.advanced_enabled":
+                                                                          "table"}})
+        # empty seeds for a scenario that sent one; a dna pattern within its cap refused as above the kind's cap
+        empty = {"code": "invalid_arguments", "text": "provide `seeds` (a list) or one `sequence` / `sequence_id`"}
+        self.assertEqual(self.match("T-walk-0001", empty)[0], [])
+        self.assertEqual(self.match("T-edge-0016", empty)[:2], (["traverse.empty_seeds"], "named"))
+        kind = {"code": "pattern_out_of_bounds", "field": "max_mismatches",
+                "text": "max_mismatches 2 is above the maximum 1 for protein patterns on the host of database 'x'"}
+        self.assertEqual(self.match("M-protein-0010", kind)[:2], (["mismatch.above_kind_cap"], "named"))
+        dna = dict(kind, text=kind["text"].replace("protein", "dna"))
+        self.assertEqual(self.match("M-planted-0004", dna)[0], [])
+        self.assertEqual(self.match("M-planted-0004", kind)[0], [])    # the request has no protein pattern
+        # the preset row: a refusal of max_extension_bp, or of a budget the request keeps within the row
+        row = {"code": "strategy_out_of_bounds", "field": "bounds.time_budget_ms",
+               "text": "bounds.time_budget_ms = 60000 exceeds its maximum 15000 (the walk preset's budget row)"}
+        self.assertEqual(self.match("T-end-0001", row)[:2], (["traverse.bounds_budget_above_preset_row"], "named"))
+        named, _, walls = self.match("T-end-0001", dict(row, field="bounds.max_extension_bp"))
+        self.assertEqual(named, [])
+        self.assertEqual(self.match("T-end-0001", row, args=dict(self.v4["T-end-0001"]["mcp"]["arguments"],
+                                                                 overrides={"bounds": {"time_budget_ms": 15000}}))[0],
+                         [])
+        named, _, walls = self.match("T-end-0001", dict(row, field="bounds.max_memory_mb"))
+        self.assertEqual(named, [])
+        self.assertTrue(walls[0][1].startswith("traverse.bounds_budget_above_preset_row: request predicate "
+                                               '{"any": '), walls)
+        # trie's row (30000) on a trie request
+        trie = dict(self.v4["T-end-0001"]["mcp"]["arguments"], preset="trie",
+                    overrides={"bounds": {"time_budget_ms": 20000}})
+        self.assertEqual(self.match("T-end-0001", row, args=trie)[0], [])
+        trie["overrides"] = {"bounds": {"time_budget_ms": 40000}}
+        self.assertEqual(self.match("T-end-0001", row, args=trie)[0], ["traverse.bounds_budget_above_preset_row"])
+
+    def test_request_semantics(self):
+        refs = sc.References({"service": {"x": {"cap": 5}}, "host": {"k": 2}})
+        args = {"a": {"b": 3}, "lst": [{"p": 1}, {"q": 2}], "zero": 0, "none": None, "flag": True}
+        scen = {"mcp": {"arguments": args}}
+
+        def holds(pred, field=None):
+            return cmp.request_holds({"id": "c", "request": [pred]}, scen, field, refs)[0]
+        self.assertTrue(holds({"path": "a.b", "equals": 3}))
+        self.assertTrue(holds({"path": "a.b", "lt": {"service": "x.cap"}}))
+        self.assertFalse(holds({"path": "a.b", "gt": {"service": "x.cap"}}))
+        self.assertFalse(holds({"path": "a.b", "gt": {"service": "x.unknown"}}))   # an unknown reference
+        self.assertTrue(holds({"path": "lst[*].q", "present": True}))
+        self.assertTrue(holds({"path": "lst[1].q", "equals": 2}))
+        self.assertTrue(holds({"path": "none", "absent": True}))                    # null is absent
+        self.assertTrue(holds({"path": "missing", "not_in": [1]}))                  # not_in holds on an absent path
+        self.assertFalse(holds({"path": "missing", "in": [1]}))
+        self.assertFalse(holds({"path": "missing", "equals": None}))
+        self.assertFalse(holds({"path": "flag", "equals": 1}))                       # true is not 1
+        self.assertTrue(holds({"path": "{field}", "field_prefix": "caps.", "equals": 0}, "caps.zero"))
+        self.assertFalse(holds({"path": "{field}", "field_prefix": "caps.", "equals": 0}, "other.zero"))
+        self.assertFalse(holds({"path": "{field}", "present": True}, None))
+        self.assertTrue(holds({"path": "{field}", "absent": True}, None))
+        self.assertTrue(holds({"field": "overrides.", "not_in": ["bounds.*", "direction"]}, "overrides.labels.x"))
+        self.assertFalse(holds({"field": "overrides.", "not_in": ["bounds.*"]}, "overrides.bounds.max_steps"))
+        self.assertFalse(holds({"field": "overrides.", "not_in": ["bounds.*"]}, "overrides.bounds"))
+        self.assertFalse(holds({"field": "overrides.", "not_in": ["bounds.*"]}, "preset"))
+        self.assertTrue(holds({"field": "", "in": ["bounds.time_budget_ms"]}, "bounds.time_budget_ms"))
+        self.assertTrue(holds({"host": "k", "ge": 2}))
+        self.assertFalse(holds({"host": "missing", "absent": True}))                # unknown: false
+        self.assertTrue(holds({"any": [[{"path": "zero", "equals": 1}], [{"path": "zero", "equals": 0}]]}))
+        ok, why = cmp.request_holds({"id": "c", "request": [{"path": "zero", "equals": 1}]}, scen, "f", refs)
+        self.assertEqual((ok, why), (False, 'c: request predicate {"equals": 1, "path": "zero"} does not hold '
+                                            '(field f)'))
+        self.assertEqual(cmp.request_holds({"id": "c"}, scen, None, refs), (True, ""))
+
+    def test_reference_resolution_order(self):
+        table = {"service": {"service_settings": {"advanced_enabled": False, "resolve": {"timeout_s": 20.0}}},
+                 "host": {"pattern": {"finalize_reserve_ms": 250}}}
+        refs = sc.References(table)
+        self.assertEqual(refs.resolve("service", "service_settings.advanced_enabled"), (False, "table", None))
+        self.assertEqual(refs.resolve("service", "presets.walk"), (None, "unknown", None))
+        live = sc.References(table, {"service": {"service_settings": {"advanced_enabled": True},
+                                                 "presets": {"walk": {"budgets": {"time_budget_ms": 15000}}}}})
+        self.assertEqual(live.resolve("service", "service_settings.advanced_enabled"), (True, "live", {
+            "namespace": "service", "ref": "service_settings.advanced_enabled", "live": True, "table": False}))
+        self.assertEqual(live.resolve("service", "presets.walk.budgets.time_budget_ms"), (15000, "live", None))
+        # a live document that lacks the path (a service before the block): the table's value
+        self.assertEqual(live.resolve("service", "service_settings.resolve.timeout_s"), (20.0, "table", None))
+        self.assertEqual(sc.References(table, {"service": {"service_settings": {"resolve": {"timeout_s": 20}}}}).resolve(
+            "service", "service_settings.resolve.timeout_s")[2], None)          # 20 and 20.0 are one value
+        # the terms the plausibility rules read, from the default table (the built-in values without it)
+        self.assertEqual(sc.term(None, "resolve_reserve_ms"), 250)
+        self.assertEqual(sc.term(sc.References(), "timeout_s"), 20.0)
+        self.assertEqual(sc.term(sc.References(), "resolve_max_time_ms"), None)
+        res = {"mcp": {"arguments": {"labels": ["562"], "database": "refseq33m-experimental"}}}
+        self.assertEqual(sc.resolve_budget(res), (60000, "the service's default"))
+        self.assertEqual(sc.resolve_budget({"mcp": {"arguments": {"discover": True}}}),
+                         (None, "a discovery without a budget"))
+        self.assertEqual(sc.resolve_client_timeout_s(res), 70.25)
+        self.assertEqual(sc.resolve_client_timeout_s({"mcp": {"arguments": {"time_budget_ms": 500}}}), 20.0)
+        self.assertEqual(sc.resolve_client_timeout_s({"mcp": {"arguments": {"discover": True}}}), 120.0)
+
+    def write_run(self, service=None, host=None, lines=()):
+        d = self.dir
+        os.makedirs(os.path.join(d, "arms", "mcp"), exist_ok=True)
+        run = {"run_id": "R", "arm": "mcp"}
+        if service is not None:
+            run["service_capabilities"] = service
+        sc.write_json_atomic(os.path.join(d, "arms", "mcp", "run.json"), run)
+        merged = {"run_id": "R"}
+        if host is not None:
+            merged["capabilities"] = {"/capabilities": host}
+        sc.write_json_atomic(os.path.join(d, "run.json"), merged)
+        with open(os.path.join(d, "executions.jsonl"), "w") as fh:
+            for x in lines:
+                fh.write(json.dumps(x) + "\n")
+
+    def test_recorded_documents_and_gate_helpers(self):
+        # a run before the runner read the document: the table's blocks, named; the gate's evidence is missing
+        self.write_run(lines=[{"scenario": "T-labels-0004", "arm": "mcp", "repeat": 0, "request_evidence": {
+            "traverse.advanced_path_disabled": {"service_settings.advanced_enabled": "table"}}}])
+        bound = cmp.bind_run(self.cases, self.dir)
+        self.assertEqual(cmp.reference_sources(bound)["service"],
+                         {"source": "table", "origin": "the table's service_settings block"})
+        self.assertEqual(cmp.reference_warnings(bound)[0],
+                         "by-design references resolved from: host table (the table's host_capabilities block); "
+                         "service table (the table's service_settings block)")
+        problems = cmp.gate_configuration_problems(self.dir, self.cases)
+        self.assertEqual(problems, [
+            "configuration evidence missing: the run recorded no live service_settings (run.json "
+            "service_capabilities)",
+            "T-labels-0004 r0 case traverse.advanced_path_disabled read service_settings.advanced_enabled: table"])
+        # the runner's record {document, sha256, read_at, base}: live, a mismatch judged with the live value
+        doc = json.loads(json.dumps(self.cases.blocks["service"]))
+        doc["service_settings"]["advanced_enabled"] = True
+        self.write_run(service={"document": doc, "sha256": "s", "read_at": "t", "base": "b"},
+                       host=self.cases.blocks["host"],
+                       lines=[{"scenario": "T-labels-0004", "arm": "mcp", "repeat": 0, "request_evidence": {
+                           "traverse.advanced_path_disabled": {"service_settings.advanced_enabled": "live"}}}])
+        bound = cmp.bind_run(self.cases, self.dir)
+        self.assertEqual(cmp.reference_sources(bound), {
+            "host": {"source": "live", "origin": "run.json capabilities[/capabilities]"},
+            "service": {"source": "live", "origin": "arms/mcp/run.json service_capabilities"}})
+        self.assertEqual(cmp.reference_mismatches(bound), [{
+            "namespace": "service", "ref": "service_settings.advanced_enabled", "live": True, "table": False}])
+        self.assertIn("configuration mismatch: service service_settings.advanced_enabled is true live, false in the "
+                      "table (judged with the live value)", cmp.reference_warnings(bound))
+        self.assertEqual(cmp.gate_configuration_problems(self.dir, self.cases), [
+            "configuration mismatch: service service_settings.advanced_enabled is true live, false in the table"])
+        ev = cmp.RequestEvidence()
+        unsent = {"code": "preset_unavailable", "field": "overrides.labels.max_seed_labels",
+                  "text": "overrides.labels.max_seed_labels is on the advanced strategy path, which is not enabled on "
+                          "this deployment"}
+        self.assertEqual(self.match("T-labels-0004", unsent, cases=bound, evidence=ev)[0], [])
+        self.assertEqual(ev.mismatches[0]["case"], "traverse.advanced_path_disabled")
+        # the same document: no mismatch, no gate problem
+        self.write_run(service={"document": self.cases.blocks["service"], "sha256": "s", "read_at": "t"},
+                       host=self.cases.blocks["host"])
+        self.assertEqual(cmp.gate_configuration_problems(self.dir, self.cases), [])
+        # a failed read: the error instead of the document
+        self.write_run(service={"error": "HTTP 503"})
+        self.assertEqual(cmp.gate_configuration_problems(self.dir, self.cases), [
+            "configuration evidence missing: the run recorded no live service_settings (run.json "
+            "service_capabilities: HTTP 503)"])
 
 
 class ReportTest(unittest.TestCase):
