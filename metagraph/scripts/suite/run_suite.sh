@@ -671,12 +671,17 @@ PYEOF
 )"
   mkdir -p "$RUN_DIR/arms/mcp"
   log "mcp: $( [[ $2 == 0 ]] && echo cold || echo warm ) repeat $2 of ${1:0:120}"
-  bash -c "$cmd" < /dev/null >&2 || rc=$?
+  # The runner's output on the terminal and in arms/mcp/runner.log, so a runner that crashes leaves its traceback
+  # in the run directory (the expanded command is never written: the template is recorded instead).
+  printf '[run_suite %s] mcp: repeat %s of %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "$1" >> "$RUN_DIR/arms/mcp/runner.log"
+  bash -c "$cmd" < /dev/null 2>&1 | tee -a "$RUN_DIR/arms/mcp/runner.log" >&2 || rc=$?
+  printf '[run_suite %s] mcp: exit %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" >> "$RUN_DIR/arms/mcp/runner.log"
   sleep "$PAUSE"
   return $rc
 }
 
 MCP_ERRORS=0    # MCP executions in a row that ended in error (or that the runner never recorded)
+MCP_MISSING=()  # the MCP executions a runner step did not record, as SCENARIO:rREPEAT
 # After an MCP step of the paired loop (async's rules): stop on the runner's exit 2 / 3 (a start refusal: key
 # file, the queue wait ran out) or 130 (interrupted), or on three executions in a row that ended `error` (a
 # runner-level failure: transport, poll deadline, busy past the retries) or were not recorded; never on `fail`
@@ -684,7 +689,7 @@ MCP_ERRORS=0    # MCP executions in a row that ended in error (or that the runne
 # cancelled may still run on the host briefly: wait until jobs.jsonl shows it terminal or its time budget has
 # passed since the cancellation, so one request is in flight at a time. Returns 1 to stop the loop.
 mcp_after() {  # mcp_after IDS REPEAT RC
-  local rc="$3" res outcomes wait_s o said=0
+  local rc="$3" res outcomes wait_s o said=0 i=0 ids
   case "$rc" in
     2|3) LOOP_REASON="mcp_exit_$rc"; log "error: the MCP runner refused to run (exit $rc): stopping the loop"; return 1 ;;
     130) LOOP_REASON=mcp_interrupted; log "the MCP runner was interrupted (exit 130): stopping the loop"; return 1 ;;
@@ -699,8 +704,11 @@ mcp_after() {  # mcp_after IDS REPEAT RC
     fi
     sleep $(( wait_s < 10 ? wait_s : 10 ))
   done
+  ids=(${1//,/ })
   for o in ${outcomes//,/ }; do
     if [[ $o == error || $o == missing ]]; then MCP_ERRORS=$((MCP_ERRORS + 1)); else MCP_ERRORS=0; fi
+    [[ $o != missing ]] || MCP_MISSING+=("${ids[$i]:-?}:r$2")
+    i=$((i + 1))
   done
   if (( MCP_ERRORS >= 3 )); then
     LOOP_REASON=mcp_errors
@@ -725,8 +733,14 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
     out="$(mex_step "cd $MEX_DIR && $(quote "$MEX_PY" scripts/run_direct.py --arm direct-local --base "$LOCAL_BASE" \
       --out "$ARM_REL" "${LOCAL_ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"}) 2>> $ARM_REL/runner.log")" || rc=$?
   else
+    # its stderr into arms/direct-remote/runner.log, as direct-local's on mex (shown when the step fails)
+    local errf="$RUN_DIR/.remote-step.err"
+    mkdir -p "$RUN_DIR/arms/direct-remote"
     out="$("$PY" "$HERE/run_direct.py" --arm direct-remote --base "$REMOTE_BASE" --out "$RUN_DIR/arms/direct-remote" \
-      "${ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"} < /dev/null)" || rc=$?
+      "${ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"} < /dev/null 2> "$errf")" || rc=$?
+    cat "$errf" >> "$RUN_DIR/arms/direct-remote/runner.log" 2>/dev/null || true
+    if [[ $rc != 0 ]]; then tail -5 "$errf" | sed 's/^/    runner: /' >&2; fi
+    rm -f "$errf"
   fi
   printf '%s\n' "$out" | grep -v '^RUN_DIRECT_STATUS ' | sed '/^$/d; s/^/    /' >&2 || true
   status="$(printf '%s\n' "$out" | sed -n 's/^RUN_DIRECT_STATUS //p' | tail -1)"
@@ -737,17 +751,34 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
 }
 
 FINAL_RC=0
-FAILED_STEPS=()   # the loop's direct steps that exited non-zero, as ARM:SCENARIO:EXIT
+FAILED_STEPS=()   # the steps that failed: ARM:SCENARIO:EXIT (paired), ARM:-:EXIT or STATE (sequential)
 json_list() { local out="" x; for x in "$@"; do out+="\"$x\","; done; printf '[%s]' "${out%,}"; }
-# The loop record of this invocation (orchestrator.json sessions[-1].loop: the report reads its state and reason): a
-# scenario is completed when every step of it succeeded; failed_steps names each step that did not.
+# The loop record of this invocation (orchestrator.json sessions[-1].loop: the report reads its state and reason).
+# Paired: a scenario is completed when every step of it succeeded. Both modes: failed_steps names each step that
+# did not, mcp_missing (the first 50, mcp_missing_count all) the MCP executions a runner step did not record.
 loop_record() {  # loop_record STATE
-  orch_set loop "{\"mode\": \"$MODE\", \"state\": \"$1\", \"reason\": \"${LOOP_REASON:-}\", \"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}, \"direct_requests\": ${USED:-0}, \"failed_steps\": $(json_list ${FAILED_STEPS[@]+"${FAILED_STEPS[@]}"})}"
+  local counts="" missing=()
+  [[ $MODE != paired ]] || counts="\"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}, "
+  missing=(${MCP_MISSING[@]+"${MCP_MISSING[@]:0:50}"})
+  orch_set loop "{\"mode\": \"$MODE\", \"state\": \"$1\", \"reason\": \"${LOOP_REASON:-}\", $counts\"direct_requests\": ${USED:-0}, \"failed_steps\": $(json_list ${FAILED_STEPS[@]+"${FAILED_STEPS[@]}"}), \"mcp_missing\": $(json_list ${missing[@]+"${missing[@]}"}), \"mcp_missing_count\": ${#MCP_MISSING[@]}}"
+}
+# A loop that ran through without recording what it planned (a failed step, an MCP execution the runner did not
+# record) ends incomplete, never done.
+settle_loop_state() {
+  [[ $LOOP_STATE != running ]] || LOOP_STATE=done
+  if [[ $LOOP_STATE == done && ${#FAILED_STEPS[@]} -gt 0 ]]; then LOOP_STATE=incomplete; LOOP_REASON=failed_steps
+  elif [[ $LOOP_STATE == done && ${#MCP_MISSING[@]} -gt 0 ]]; then LOOP_STATE=incomplete; LOOP_REASON=mcp_missing; fi
+  [[ $LOOP_STATE != failed && $LOOP_STATE != incomplete ]] || FINAL_RC=1
+}
+loop_summary() {
+  (( ${#FAILED_STEPS[@]} == 0 )) || printf '; %d failed step(s): %s' "${#FAILED_STEPS[@]}" "${FAILED_STEPS[*]}"
+  (( ${#MCP_MISSING[@]} == 0 )) || printf '; %d MCP execution(s) not recorded by the runner: %s' \
+    "${#MCP_MISSING[@]}" "${MCP_MISSING[*]:0:10}"
 }
 # --- paired mode ----------------------------------------------------------------------------------------------
 run_paired() {
   local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 since_pull=0 runner_live=0 stop=0
-  local step_failed
+  local step_failed nmissing
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -770,6 +801,7 @@ run_paired() {
     read -r sid l r mc mw <<< "$entry"
     heartbeat
     step_failed=0
+    nmissing=${#MCP_MISSING[@]}
     if [[ $mc == 1 ]]; then
       rc=0; mcp_step "$sid" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
@@ -823,13 +855,12 @@ run_paired() {
       LOOP_STATE=failed; LOOP_REASON=failing_steps
       break
     fi
+    (( ${#MCP_MISSING[@]} == nmissing )) || step_failed=1
     [[ $step_failed == 1 ]] || COMPLETED=$((COMPLETED + 1))
     since_pull=$((since_pull + 1))
     if [[ $SKIP_LOCAL == 0 && $since_pull -ge 25 ]]; then pull_local_arm; since_pull=0; fi
   done
-  [[ $LOOP_STATE != running ]] || LOOP_STATE=done
-  # a loop that ran through with a failed step did not record what it planned: incomplete, never done
-  if [[ $LOOP_STATE == done && ${#FAILED_STEPS[@]} -gt 0 ]]; then LOOP_STATE=incomplete; LOOP_REASON=failed_steps; fi
+  settle_loop_state
   [[ $LOOP_STATE != capped ]] || log "paired: stopped at --max-requests $MAX_REQUESTS ($USED direct requests); --resume continues"
   # The closing GET /capabilities of each direct arm (one request kept back for each) and its state over the
   # whole selection; none while a direct-local runner may still be on the host (review N3).
@@ -848,13 +879,16 @@ run_paired() {
   [[ $SKIP_LOCAL == 1 ]] || pull_local_arm
   stop_sampler
   loop_record "$LOOP_STATE"
-  log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s) completed, $USED direct request(s)$( (( ${#FAILED_STEPS[@]} == 0 )) || printf '; %d failed step(s): %s' "${#FAILED_STEPS[@]}" "${FAILED_STEPS[*]}")"
-  [[ $LOOP_STATE != failed && $LOOP_STATE != incomplete ]] || FINAL_RC=1
+  log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s) completed, $USED direct request(s)$(loop_summary)"
 }
 
 # --- sequential mode ------------------------------------------------------------------------------------------
 run_sequential() {
-  local rc state requests
+  local rc state reason requests capped=0
+  LOOP_STARTED=1
+  LOOP_STATE=running
+  LOOP_REASON=""
+  loop_record running
   if [[ $SKIP_LOCAL == 0 ]]; then
     prepare_local_arm
     local cap_args=()
@@ -906,11 +940,18 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     pull_local_arm
     state="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("state"))' \
       "$RUN_DIR/arms/direct-local/state.json" 2>/dev/null || echo unknown)"
+    reason="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("reason") or "")' \
+      "$RUN_DIR/arms/direct-local/state.json" 2>/dev/null || true)"
     requests="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("requests_session") or 0)' \
       "$RUN_DIR/arms/direct-local/state.json" 2>/dev/null || echo 0)"
     USED=$((USED + requests))
     log "direct-local: $state ($requests request(s))"
-    [[ "$state" == "done" ]] || log "direct-local did not finish ($state): see arms/direct-local/runner.log; --resume continues it"
+    if [[ "$state" == interrupted && "$reason" == max_requests* ]]; then
+      capped=1
+    elif [[ "$state" != done ]]; then
+      FAILED_STEPS+=("direct-local:-:$state")
+      log "direct-local did not finish ($state): see arms/direct-local/runner.log; --resume continues it"
+    fi
   fi
   if [[ $SKIP_REMOTE == 0 ]]; then
     local max_s=43200; [[ $SMOKE == 0 ]] || max_s=1800
@@ -920,8 +961,8 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     stop_sampler
     case "$rc" in
       0) log "direct-remote: done" ;;
-      3) log "direct-remote: stopped at --max-requests $MAX_REQUESTS (incomplete; --resume continues it)" ;;
-      *) log "direct-remote: exit $rc (see above)" ;;
+      3) capped=1; log "direct-remote: stopped at --max-requests $MAX_REQUESTS (incomplete; --resume continues it)" ;;
+      *) FAILED_STEPS+=("direct-remote:-:$rc"); log "direct-remote: exit $rc (see above)" ;;
     esac
   fi
   if [[ -n "$MCP_CMD" ]]; then
@@ -945,14 +986,14 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
       rc=0; mcp_step "${cold%,}" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: the cold pass exited $rc"
       # the paired loop's rules between the passes: a cancelled job's wait, the stop on a refusal or errors
-      mcp_after "${cold%,}" 0 "$rc" || { go=0; log "mcp: no warm pass"; }
+      mcp_after "${cold%,}" 0 "$rc" || { go=0; LOOP_STATE=failed; log "mcp: no warm pass"; }
     fi
     for (( rep = 1; rep <= maxrep; rep++ )); do
       pass="${warm[$rep]:-}"
       [[ -n "$pass" && $go == 1 ]] || continue
       rc=0; mcp_step "${pass%,}" "$rep" || rc=$?
       [[ $rc == 0 ]] || log "mcp: the warm pass of repeat $rep exited $rc"
-      mcp_after "${pass%,}" "$rep" "$rc" || { go=0; log "mcp: no further warm pass"; }
+      mcp_after "${pass%,}" "$rep" "$rc" || { go=0; LOOP_STATE=failed; log "mcp: no further warm pass"; }
     done
   fi
   if [[ -n "$MCP_RUN" ]]; then
@@ -960,6 +1001,10 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     mkdir -p "$RUN_DIR/arms/mcp"
     rsync -a "$MCP_RUN/" "$RUN_DIR/arms/mcp/"
   fi
+  [[ $LOOP_STATE != running || $capped == 0 ]] || LOOP_STATE=capped
+  settle_loop_state
+  loop_record "$LOOP_STATE"
+  log "sequential: $LOOP_STATE$( [[ -z "$LOOP_REASON" ]] || printf ' (%s)' "$LOOP_REASON"), $USED direct request(s)$(loop_summary)"
 }
 
 ARMS_STARTED=1

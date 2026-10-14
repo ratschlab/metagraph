@@ -267,6 +267,58 @@ class RunSuiteOffline(SuiteCase):
         sess = sc.read_json(os.path.join(p.stdout.strip().splitlines()[-1], "orchestrator.json"))["sessions"][-1]
         self.assertEqual((sess["loop"]["reason"], sess["loop"]["completed"]), ("mcp_exit_3", 0))
 
+    def test_mcp_runner_crash_is_recorded(self):
+        # a runner that crashes writes no line: its traceback is in arms/mcp/runner.log, the lost executions are named
+        # in the loop record, and a scenario whose MCP execution is lost is not completed; three in a row stop the
+        # loop (failed), fewer leave it incomplete; either way exit 1 and the report INCOMPLETE
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub",
+                               FAKE_MCP_MODE="crash")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+            self.assertEqual((loop["state"], loop["reason"], loop["completed"]), ("failed", "mcp_errors", 0))
+            self.assertEqual((loop["mcp_missing"], loop["mcp_missing_count"]), (["C-1:r0", "C-1:r1", "P-1:r0"], 3))
+            with open(os.path.join(run_dir, "arms", "mcp", "runner.log")) as fh:
+                log = fh.read()
+            self.assertIn("KeyError: 'fake crash'", log)
+            self.assertIn("mcp: repeat 1 of C-1", log)
+            self.assertNotIn(SECRET, log)
+            # one scenario's executions lost (two in a row): the loop runs through, incomplete
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub",
+                               FAKE_MCP_MODE="crash", FAKE_MCP_CRASH_ID="P-1")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+            self.assertEqual((loop["state"], loop["reason"], loop["completed"], loop["scenarios"]),
+                             ("incomplete", "mcp_missing", 5, 6))
+            self.assertEqual(loop["mcp_missing"], ["P-1:r0", "P-1:r1"])
+            self.assertIn("2 MCP execution(s) not recorded by the runner: P-1:r0 P-1:r1", p.stderr)
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertIn("**INCOMPLETE", fh.read())
+
+    def test_sequential_mcp_refusal_fails_the_loop(self):
+        # the sequential mode records its loop too: the MCP runner's refusal (exit 3) of the cold pass stops the MCP
+        # arm, the loop is failed (exit 1), the report INCOMPLETE; a sequential run that ran through reads done
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(),
+                               "--checks", "stub", FAKE_MCP_MODE="exit3")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+            self.assertEqual((loop["mode"], loop["state"], loop["reason"]), ("sequential", "failed", "mcp_exit_3"))
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertIn("**INCOMPLETE", fh.read())
+            time.sleep(1.1)
+            p = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(),
+                               "--checks", "stub")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            loop = sc.read_json(os.path.join(p.stdout.strip().splitlines()[-1], "orchestrator.json"))[
+                "sessions"][-1]["loop"]
+            self.assertEqual((loop["mode"], loop["state"], loop["failed_steps"]), ("sequential", "done", []))
+
     def test_cap_then_resume(self):
         make_manifest(self.mpath, basic_scenarios())
         with FakeHost() as host:

@@ -1852,3 +1852,24 @@ by lane S6c; everything below was open.
   `failed_steps`; the report's verdict reads INCOMPLETE through it) with exit status 1, like a failed loop. No
   retry: a step that failed is resumed like any other (`--resume`).
 
+### The orchestration records what its arms lost (P6-end-to-end-01, the run_suite side)
+- Lane S6c's plan reconciliation already reads a planned execution no arm recorded as INCOMPLETE (the report side
+  of the finding: the sequential mode with the MCP cold pass refused, exit 3, reads INCOMPLETE at 14552938). The
+  orchestration itself did not say so: the sequential mode wrote no loop record and exited 0 whatever its arms did,
+  and the MCP runner's output went to the terminal only, so a runner crash (a traceback, no line) left nothing in
+  the run directory.
+- The sequential mode writes the loop record too (mode `sequential`, no per-scenario counts): `failed` with the
+  MCP rule's reason when the MCP runner refused (exit 2 / 3), was interrupted (130) or ended three executions in a
+  row in error or unrecorded; `capped` when an arm stopped at --max-requests; `incomplete` (reason failed_steps)
+  when direct-local did not finish (`direct-local:-:STATE`) or direct-remote exited otherwise
+  (`direct-remote:-:EXIT`); else `done`. failed and incomplete exit 1 in both modes.
+- The MCP runner's output (stdout and stderr) goes to the terminal and to arms/mcp/runner.log, each step framed by
+  its repeat and ids and its exit status (the template's expansion, which may name files, is not written); the
+  direct-remote runner's stderr goes to arms/direct-remote/runner.log (its last lines shown when the step fails), as
+  direct-local's on mex.
+- mcp_after names every MCP execution a runner step did not record (`mcp_missing`, SCENARIO:rREPEAT, the first 50;
+  `mcp_missing_count`); in the paired loop such a scenario is not completed, and a loop that ran through with one
+  ends `incomplete` (reason mcp_missing) instead of `done`. Tests: tests/fake_mcp.py `crash` (a traceback on stderr,
+  no line; FAKE_MCP_CRASH_ID limits it to one scenario) in the paired loop, and the sequential mode with the cold
+  pass refused.
+

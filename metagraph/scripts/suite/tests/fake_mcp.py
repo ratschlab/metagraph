@@ -8,7 +8,9 @@ itself is never written). No request is made.
 
 FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails its checks (exit 1);
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
-`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal).
+`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal); `crash` writes a traceback
+to stderr and no line for any id (exit 1, a runner defect), only for a call that names FAKE_MCP_CRASH_ID when that
+is set.
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
 identity and `service_capabilities` (the live read of the service's configuration); FAKE_MCP_CAPS `missing` leaves
@@ -34,6 +36,10 @@ def main(argv=None):
     mode = os.environ.get("FAKE_MCP_MODE", "")
     if mode == "exit3":
         return 3
+    if mode == "crash" and os.environ.get("FAKE_MCP_CRASH_ID", args.ids) in args.ids.split(","):
+        sys.stderr.write("Traceback (most recent call last):\n  File \"suite_mcp_runner.py\", line 1, in verdict\n"
+                         "KeyError: 'fake crash'\n")
+        return 1
     os.makedirs(args.out, exist_ok=True)
     manifest = sc.read_json(args.manifest)
     scen = dict((s.get("id"), s) for s in manifest.get("scenarios", []))
