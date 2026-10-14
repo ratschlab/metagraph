@@ -4,9 +4,10 @@
 #
 #   run_suite.sh [--manifest M | --smoke] [--paired | --sequential]
 #                [--mcp-cmd TEMPLATE | --mcp-cmd default | --no-mcp | --mcp-run DIR]
-#                [--areas P,M] [--ids FILE] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
-#                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
-#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf] [--gate POLICY]
+#                [--areas P,M] [--ids FILE] [--limit N] [--skip-local | --local] [--skip-remote | --remote]
+#                [--resume RUN_DIR] [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
+#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub | --no-allow-stub] [--no-pdf]
+#                [--gate POLICY | --no-gate]
 #   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--reeval-mcp-auth anonymous|api_key]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf] [--gate POLICY]
 #
@@ -14,10 +15,11 @@
 # lacks is refused), in manifest order, with --areas / --limit applied on top. --resume without --ids, --areas,
 # --limit or --gate runs the scenarios of the run's whole plan (every invocation's selection: a plain resume after a
 # narrower targeted one finishes the run; a resume that names a narrower selection says so). A resume keeps the
-# last invocation's options unless given again: the mode, --checks, the MCP template, --warm-every, --pause,
-# --skip-local, --skip-remote, --allow-stub, --smoke (its request cap of 40 per invocation and its sampler bound)
-# and --gate (so a plain `--resume RUN_DIR` continues the run as it was started and is gated as it was); not
-# --max-requests, which caps one invocation. Every
+# last invocation's mode, --checks, MCP template, --warm-every and --pause unless given again, and the run's FIRST
+# invocation's flags: --skip-local, --skip-remote, --allow-stub, --smoke (its request cap of 40 per invocation and
+# its sampler bound) and --gate, so a plain `--resume RUN_DIR` continues the run as it was started and is gated as
+# it was; a resume that names one (or its negation --local, --remote, --no-allow-stub, --no-gate) applies it to that
+# invocation only. Not --max-requests, which caps one invocation. Every
 # invocation writes the run's plan, RUN_DIR/plan.json, before any arm runs: each (scenario, arm, repeat) its
 # selection plans (gate.py plan); one that adds executions is added, the run's plan is the union.
 #
@@ -147,6 +149,14 @@ MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN="
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
 MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""; IDS_FILE=""; IDS=""; GATE=""
 WARM_GIVEN=0; RESUME_SELECTION=0; PAUSE_GIVEN=0; GIVEN=""
+# the run's flags this invocation names ('' none; else the option, a negation included): they apply to it only
+LOCAL_SET=""; REMOTE_SET=""; STUB_SET=""; GATE_SET=""
+# set_once VAR OPTION: an option and its negation exclude each other
+set_once() {
+  local cur="${!1}"
+  [[ -z "$cur" || "$cur" == "$2" ]] || die "--$cur and --$2 exclude each other"
+  printf -v "$1" '%s' "$2"
+}
 while [[ $# -gt 0 ]]; do
   # the options this invocation gives (recorded; a resume restores the run's own for the others)
   case "$1" in --*) GIVEN+="${1#--},";; esac
@@ -160,10 +170,13 @@ while [[ $# -gt 0 ]]; do
     --sequential) MODE=sequential; shift ;;
     --areas) AREAS="$2"; shift 2 ;;
     --ids) IDS_FILE="$2"; shift 2 ;;
-    --gate) GATE="$2"; shift 2 ;;
+    --gate) set_once GATE_SET gate; GATE="$2"; shift 2 ;;
+    --no-gate) set_once GATE_SET no-gate; GATE=""; shift ;;
     --limit) LIMIT="$2"; shift 2 ;;
-    --skip-local) SKIP_LOCAL=1; shift ;;
-    --skip-remote) SKIP_REMOTE=1; shift ;;
+    --skip-local) set_once LOCAL_SET skip-local; SKIP_LOCAL=1; shift ;;
+    --local) set_once LOCAL_SET local; SKIP_LOCAL=0; shift ;;
+    --skip-remote) set_once REMOTE_SET skip-remote; SKIP_REMOTE=1; shift ;;
+    --remote) set_once REMOTE_SET remote; SKIP_REMOTE=0; shift ;;
     --mcp-run) MCP_RUN="$2"; shift 2 ;;
     --mcp-cmd) MCP_CMD="$2"; MCP_GIVEN=1; shift 2 ;;
     --no-mcp) NO_MCP=1; MCP_CMD=""; shift ;;
@@ -173,7 +186,8 @@ while [[ $# -gt 0 ]]; do
     --pause) PAUSE="$2"; PAUSE_GIVEN=1; shift 2 ;;
     --max-requests) MAX_REQUESTS="$2"; shift 2 ;;
     --warm-every) WARM_EVERY="$2"; WARM_GIVEN=1; shift 2 ;;
-    --allow-stub) ALLOW_STUB=1; shift ;;
+    --allow-stub) set_once STUB_SET allow-stub; ALLOW_STUB=1; shift ;;
+    --no-allow-stub) set_once STUB_SET no-allow-stub; ALLOW_STUB=0; shift ;;
     --checks) CHECKS_MODE="$2"; shift 2 ;;
     --no-pdf) NO_PDF=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -247,14 +261,16 @@ if [[ -n "$RESUME" ]]; then
   # The run's own options (its last invocation's, orchestrator.json sessions[-1]) for those this one does not give,
   # so a plain resume continues the run as it was started: the same arms, checks, repeats, pace, load cap and gate.
   RESTORED=""
-  last_session() {  # last_session KEY: the value the run's last invocation recorded, '' for none
+  session_value() {  # session_value INDEX KEY: what the run's invocation INDEX (0 the first, -1 the last) recorded
     "$PY" -c 'import json, sys
 try:
-    v = json.load(open(sys.argv[1]))["sessions"][-1].get(sys.argv[2])
+    v = json.load(open(sys.argv[1]))["sessions"][int(sys.argv[2])].get(sys.argv[3])
     print("" if v is None else v)
 except (OSError, ValueError, KeyError, IndexError, AttributeError):
-    print("")' "$RUN_DIR/orchestrator.json" "$1" 2>/dev/null || true
+    print("")' "$RUN_DIR/orchestrator.json" "$1" "$2" 2>/dev/null || true
   }
+  last_session() { session_value -1 "$1"; }
+  first_session() { session_value 0 "$1"; }
   restore() {  # restore NAME VALUE: log what was restored
     RESTORED+="$1 $2, "
   }
@@ -280,19 +296,20 @@ except (OSError, ValueError, KeyError, IndexError, AttributeError):
   if [[ $PAUSE_GIVEN == 0 ]]; then
     v="$(last_session pause_s)"; if [[ -n "$v" ]]; then PAUSE="$v"; restore pause "$v"; fi
   fi
+  # The run's flags are its FIRST invocation's (a resume naming one, or its negation, changes that invocation only,
+  # so one `--resume --skip-local` never drops direct-local from the later resumes).
   for opt in skip_local skip_remote allow_stub smoke; do
-    # flags: restored when the run's last invocation gave them
-    if [[ "$(last_session $opt)" == 1 ]]; then
+    if [[ "$(first_session $opt)" == 1 ]]; then
       case $opt in
-        skip_local) [[ $SKIP_LOCAL == 1 ]] || { SKIP_LOCAL=1; restore skip-local ""; } ;;
-        skip_remote) [[ $SKIP_REMOTE == 1 ]] || { SKIP_REMOTE=1; restore skip-remote ""; } ;;
-        allow_stub) [[ $ALLOW_STUB == 1 ]] || { ALLOW_STUB=1; restore allow-stub ""; } ;;
+        skip_local) [[ -n "$LOCAL_SET" ]] || { SKIP_LOCAL=1; restore skip-local ""; } ;;
+        skip_remote) [[ -n "$REMOTE_SET" ]] || { SKIP_REMOTE=1; restore skip-remote ""; } ;;
+        allow_stub) [[ -n "$STUB_SET" ]] || { ALLOW_STUB=1; restore allow-stub ""; } ;;
         smoke) [[ $SMOKE == 1 ]] || { SMOKE=1; restore smoke ""; } ;;
       esac
     fi
   done
-  if [[ -z "$GATE" ]]; then
-    v="$(last_session gate)"
+  if [[ -z "$GATE_SET" ]]; then
+    v="$(first_session gate)"
     if [[ -n "$v" ]]; then
       [[ -f "$v" ]] || die "the run was gated by $v, which is gone: pass --gate POLICY"
       GATE="$v"; check_gate; restore gate "$GATE"

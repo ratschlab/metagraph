@@ -398,6 +398,49 @@ class RunSuiteOffline(SuiteCase):
         for item in ("smoke", "skip-local", "pause 0.01", "checks stub", "warm_every 0"):
             self.assertIn(item, sessions[1]["restored"])
 
+    def test_flags_come_from_the_first_session(self):
+        # the run's flags are its first invocation's: a resume naming --skip-local skips direct-local for that
+        # invocation only, so the next plain resume runs it and finishes the run; a run started with --skip-remote is
+        # resumed with direct-remote by --remote, and a plain resume after that skips it again
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "10", "--warm-every", "0",
+                               "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", run_dir, "--skip-local")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "run.json"))["arms"]["direct-local"]["state"],
+                             "partial")
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run = sc.read_json(os.path.join(run_dir, "run.json"))
+            self.assertEqual((run["arms"]["direct-local"]["state"], run["arms"]["direct-remote"]["state"]),
+                             ("done", "done"))
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertNotIn("INCOMPLETE", fh.read().split("# Environment")[0])
+            sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+            self.assertEqual([x["skip_local"] for x in sessions], ["0", "1", "0"])
+            self.assertIn("skip-local", sessions[1]["given"])
+            # the negation
+            time.sleep(1.1)
+            p = self.run_suite(host, "--manifest", self.mpath, "--skip-remote", "--warm-every", "0", "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            n = len(host.log)
+            p = self.run_suite(host, "--resume", run_dir, "--remote")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "run.json"))["arms"]["direct-remote"]["state"], "done")
+            n2 = len(host.log)
+            self.assertGreater(n2 - n, 9)                     # direct-remote's executions and its GETs
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(len(host.log) - n2, 1)           # direct-local's closing GET only
+            sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+            self.assertEqual([x["skip_remote"] for x in sessions], ["1", "0", "1"])
+            for pair in (("--skip-local", "--local"), ("--allow-stub", "--no-allow-stub"), ("--remote", "--skip-remote")):
+                p = self.run_suite(host, "--resume", run_dir, *pair)
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn("exclude each other", p.stderr)
+
     def test_narrowed_resume_says_so(self):
         # a resume naming a selection narrower than the run's plan says so and records it; the run stays INCOMPLETE
         make_manifest(self.mpath, basic_scenarios())

@@ -1893,13 +1893,16 @@ by lane S6c; everything below was open.
   command line: a `--skip-local` run resumed plainly ran direct-local too (the arms widened), a smoke run lost its
   request cap of 40 and its 1800 s sampler bound, the pause fell back to 1 s, --allow-stub had to be given again,
   and a gated run resumed plainly was not gated (it exited 0 on a FAIL).
-- A resume keeps every option of the run's last invocation that it does not give: the mode, --checks, the MCP
-  template, --warm-every (as before), --pause, --skip-local, --skip-remote, --allow-stub, --smoke and --gate (the
-  policy must still exist). --max-requests is not kept: it caps one invocation (a capped run is resumed to finish
-  it); a smoke run's default cap of 40 applies to each invocation, its resumes' included. The resume logs "the run's
-  own options: ..." and each session of orchestrator.json records `given` (the options on its command line) and
-  `restored` (those taken from the run). A flag the run was started with cannot be dropped on resume (start a new
-  run for other arms).
+- A resume keeps the options it does not give: the last invocation's mode, --checks, MCP template, --warm-every (as
+  before) and --pause, and the run's FIRST invocation's flags --skip-local, --skip-remote, --allow-stub, --smoke and
+  --gate (the policy must still exist). A resume that names a flag, or its negation (--local, --remote,
+  --no-allow-stub, --no-gate; a flag and its negation exclude each other), applies it to that invocation only and
+  records it in its session: one `--resume --skip-local` does not drop direct-local from the later resumes (taken
+  from the last invocation, it did, and the run could never finish), and `--resume --no-gate` leaves one invocation
+  ungated. --max-requests is not kept: it caps one invocation (a capped run is resumed to finish it); a smoke run's
+  default cap of 40 applies to each invocation, its resumes' included (a larger --max-requests lifts it). The resume
+  logs "the run's own options: ..." and each session of orchestrator.json records `given` (the options on its
+  command line) and `restored` (those taken from the run).
 - A resume that names its own selection (--ids, --areas, --limit, --gate) and leaves out scenarios of the run's
   plan says so ("this invocation's selection leaves out scenarios of the run's plan ...") and records
   `narrower_than_plan` {selected, planned, left_out} in its session; its loop and its arms' states describe its own
