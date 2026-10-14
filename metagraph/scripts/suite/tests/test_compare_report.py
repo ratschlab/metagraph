@@ -1811,6 +1811,61 @@ class RequestPredicatesTest(unittest.TestCase):
                                             '(field f)'))
         self.assertEqual(cmp.request_holds({"id": "c"}, scen, None, refs), (True, ""))
 
+    def test_grammar_pinned(self):
+        # the readings two implementations could differ on, pinned (TABLE-DIFF section 2)
+        refs = sc.References({"service": {"x": {"cap": 5}}})
+        args = {"a": {"b": 3}, "lst": [{"p": 1}, {"q": 2}], "pair": [1, True], "flag": True, "caps": {"z": 0}}
+        scen = {"mcp": {"arguments": args}}
+
+        def holds(pred, field=None):
+            return cmp.request_holds({"id": "c", "request": [pred]}, scen, field, refs)[0]
+        # a refused field equal to its prefix names no key: not "present" (the whole arguments object)
+        self.assertFalse(holds({"path": "{field}", "field_prefix": "caps.", "present": True}, "caps."))
+        self.assertTrue(holds({"path": "{field}", "field_prefix": "caps.", "absent": True}, "caps."))
+        self.assertFalse(holds({"field": "overrides.", "not_in": ["bounds.*"]}, "overrides."))
+        # a substituted field that is no path reads absent
+        self.assertFalse(holds({"path": "{field}", "present": True}, "a..b"))
+        # a list at a path is ONE value; [*] steps into a list's elements, never an object's values
+        self.assertTrue(holds({"path": "lst", "equals": [{"p": 1}, {"q": 2}]}))
+        self.assertFalse(holds({"path": "lst", "equals": {"p": 1}}))
+        self.assertFalse(holds({"path": "lst[*].p", "equals": 2}))
+        self.assertTrue(holds({"path": "lst[*].q", "equals": 2}))
+        self.assertFalse(holds({"path": "a[*]", "present": True}))
+        # JSON equality: true is not 1, also inside lists; numbers by value
+        self.assertFalse(holds({"path": "flag", "equals": 1}))
+        self.assertTrue(holds({"path": "pair", "equals": [1.0, True]}))
+        self.assertFalse(holds({"path": "pair", "equals": [1, 1]}))
+        self.assertFalse(holds({"path": "pair", "in": [[True, 1]]}))
+        self.assertTrue(sc.json_equal({"a": [1, {"b": 2.0}]}, {"a": [1.0, {"b": 2}]}))
+        self.assertFalse(sc.json_equal("1", 1))
+        # load: malformed paths, prefixes and references, equals null, null in a list
+        for bad in ({"path": "a..b", "present": True}, {"path": "a[x]", "present": True},
+                    {"path": "[0]", "present": True}, {"path": "a.{field}x", "present": True},
+                    {"path": "a b", "present": True}, {"path": "{field}", "field_prefix": "caps", "equals": 0},
+                    {"field": "overrides", "not_in": ["x"]}, {"service": "x[*]", "present": True},
+                    {"path": "a", "gt": {"host": "p..q"}}, {"path": "a", "equals": None},
+                    {"path": "a", "in": [1, None]}):
+            self.assertTrue(cmp.request_problem(bad), bad)
+        for good in ({"path": "patterns[*].protein", "present": True}, {"path": "a[0].b", "equals": 1},
+                     {"field": "", "in": ["x"]}, {"path": "overrides.{field}", "present": True},
+                     {"service": "backends.refseq33m-experimental.resolve.time_budget.default_ms", "gt": 0}):
+            self.assertEqual(cmp.request_problem(good), "", good)
+        # placeholders match one or more characters, never the empty string
+        self.assertFalse(cmp._field_matches("overrides.", "overrides.<knob path>"))
+        self.assertTrue(cmp._field_matches("overrides.x", "overrides.<knob path>"))
+        self.assertTrue(cmp._field_matches("predicate.at_least.n", "predicate | predicate.<path of the first fault>"))
+        self.assertFalse(cmp._field_matches("predicate.", "predicate.<path of the first fault>"))
+        # a case both named and answer-triggered whose request holds it back: noted once
+        t = dict(self.v4["T-walk-0001"])
+        t = dict(t, mcp=dict(t["mcp"], by_design=["traverse.advanced_path_disabled"]))
+        self.v4["T-named-adv"] = dict(t, id="T-named-adv")
+        adv = {"code": "preset_unavailable", "field": "overrides.bounds.max_extension_bp",
+               "text": "overrides.bounds.max_extension_bp is on the advanced strategy path, which is not enabled on "
+                       "this deployment"}
+        named, how, walls = self.match("T-named-adv", adv)
+        self.assertEqual(named, [])
+        self.assertEqual([w[2] for w in walls], ["traverse.advanced_path_disabled"])
+
     def test_reference_resolution_order(self):
         table = {"service": {"service_settings": {"advanced_enabled": False, "resolve": {"timeout_s": 20.0}}},
                  "host": {"pattern": {"finalize_reserve_ms": 250}}}

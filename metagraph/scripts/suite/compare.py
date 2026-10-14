@@ -227,15 +227,28 @@ def request_problem(pred, where="request"):
         return "%s: field_prefix (a string) goes with a path that names {field}" % where
     if "{field}" in value and subject != "path":
         return "%s: {field} is bound only in a path" % where
+    if subject == "path" and sc.parse_path(value, field=True) is None:
+        return "%s: path %r does not parse (keys joined by '.', [n] or [*] after a key, {field} a whole key)" % (
+            where, value)
+    if subject in sc.REFERENCE_NAMESPACES and sc.parse_path(value, star=False) is None:
+        return "%s: reference path %r does not parse (keys joined by '.', [n] after a key)" % (where, value)
+    for name, prefix in (("field", value if subject == "field" else None), ("field_prefix", pred.get("field_prefix"))):
+        if prefix and not (prefix.endswith(".") and sc.parse_path(prefix[:-1], star=False) is not None):
+            return "%s: %s %r must be '' or keys each followed by '.'" % (where, name, prefix)
     want = pred[op]
     if op in ("present", "absent") and want is not True:
         return "%s: %s takes true" % (where, op)
-    if op in ("in", "not_in") and (not isinstance(want, list) or not want or any(_is_reference(x) for x in want)):
-        return "%s: %s takes a non-empty list of values" % (where, op)
+    if op in ("in", "not_in") and (not isinstance(want, list) or not want or
+                                   any(_is_reference(x) or x is None for x in want)):
+        return "%s: %s takes a non-empty list of values (no null: a null path is absent)" % (where, op)
+    if op == "equals" and want is None:
+        return "%s: equals null never holds (a null path is absent): use absent" % where
     if op in REQUEST_NUMBER_OPS and not _is_reference(want) and sc._number_or_none(want) is None:
         return "%s: %s takes a number or a reference {\"service\" | \"host\": path}" % (where, op)
     if isinstance(want, dict) and not _is_reference(want):
         return "%s: %s's object is no reference (one key, service or host, a path)" % (where, op)
+    if _is_reference(want) and sc.parse_path(next(iter(want.values())), star=False) is None:
+        return "%s: reference path %r does not parse" % (where, next(iter(want.values())))
     return ""
 
 
@@ -363,15 +376,22 @@ class RequestEvidence(object):
 
 
 def _field_name(field, prefix):
+    """The refused field less |prefix|; None without a field, for one outside the prefix, and for an empty
+    remainder (a field equal to its prefix names no key)."""
     if field is None or not str(field).startswith(prefix or ""):
         return None
-    return str(field)[len(prefix or ""):]
+    return str(field)[len(prefix or ""):] or None
 
 
 def _path_values(obj, path):
-    """The values (not null) at a dotted |path| of |obj|, "[*]" stepping into every element; [] when absent."""
+    """The values (not null) at a dotted |path| of |obj|: a list at the path is ONE value, "[*]" steps into every
+    element of a list (never into an object's values); [] when absent or when the path does not parse (a substituted
+    field that is no path)."""
+    parts = sc.parse_path(path)
+    if parts is None:
+        return []
     vals = [obj]
-    for part in sc.path_parts(path):
+    for part in parts:
         nxt = []
         for v in vals:
             if part == "[*]":
@@ -446,13 +466,13 @@ def request_holds(case, scenario, field, refs=None, evidence=None):
             return not vals
         if op in ("in", "not_in"):
             hit = [v for v in vals if (_names_in(str(v), want) if "field" in p else
-                                        any(sc.same_value(v, w) for w in want))]
+                                        any(sc.json_equal(v, w) for w in want))]
             return bool(hit) if op == "in" else not hit
         known, w = target(want)
         if not known or not vals:
             return False
         if op == "equals":
-            return any(sc.same_value(v, w) for v in vals)
+            return any(sc.json_equal(v, w) for v in vals)
         w = sc._number_or_none(w)
         if w is None:
             return False
@@ -908,13 +928,13 @@ def status_verdict(line):
 
 
 def _field_matches(observed, case_field):
-    """A case's field: alternatives "a | b" (split as its code), each with `<...>` placeholders that match anything,
-    dots included, as async's runner (suite_mcp_runner.py ServiceByDesign._like) matches them: "bounds.<knob>",
-    "predicate<path of the first fault>" (predicate.at_least.n)."""
+    """A case's field: alternatives "a | b" (split as its code), each with `<...>` placeholders that match one or more
+    characters, dots included, never the empty string, as async's runner (suite_mcp_runner.py ServiceByDesign._like)
+    matches them: "overrides.<knob path>", "predicate.<path of the first fault>" (predicate.at_least.n)."""
     if observed is None:
         return False
     for alt in _alternatives(case_field):
-        rx = ".*?".join(re.escape(part) for part in re.split(r"<[^<>]+>", alt))
+        rx = ".+?".join(re.escape(part) for part in re.split(r"<[^<>]+>", alt))
         if re.fullmatch(rx, str(observed), re.S) is not None:
             return True
     return False
@@ -1650,17 +1670,19 @@ def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, 
     err = answer.get("error") if isinstance(answer.get("error"), dict) else {}
     if isinstance(tool_error, dict) and "field" in tool_error:
         err = dict(err, field=tool_error.get("field"))
-    named = []
+    named, held = [], set()
     for c in named_cases(cases, scenario):
         if service_answers(c.get("service_answer"), answer, tool_error):
             ok, why = request_holds(c, scenario, err.get("field"), refs, evidence)
             if ok:
                 named.append(c)
-            elif walls is not None:
-                walls.append(("held_back", why, c.get("id")))
+            else:
+                # the same request holds back the same case answer-triggered: noted once
+                held.add(c.get("id"))
+                if walls is not None:
+                    walls.append(("held_back", why, c.get("id")))
     if named:
         return named, "named"
-    held = set()
     while True:
         case = answer_case_of(cases, (scenario or {}).get("route"), answer.get("http"), err, skip=held)
         if case is None:

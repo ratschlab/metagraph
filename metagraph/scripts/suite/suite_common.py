@@ -451,21 +451,47 @@ REFERENCE_NAMESPACES = ("host", "service")
 REFERENCE_SOURCES = ("live", "table", "unknown")
 # the table's block of each namespace
 REFERENCE_BLOCKS = {"host": "host_capabilities", "service": "service_settings"}
-_PATH_PART = re.compile(r"[^.\[\]]+|\[\*\]|\[[0-9]+\]")
+# A path (a request predicate's subject, a reference): keys joined by "." (a key: any characters but . [ ] { } and
+# whitespace), "[n]" (element n of a list) or "[*]" (every element of a list) after a key, and in a request path the
+# whole-key placeholder "{field}"; nothing else (no empty key, no leading "[", no "a[x]").
+_PATH_KEY = r"[^.\[\]{}\s]+"
+_PATH_STEP = re.compile(r"(%s|\{field\})((?:\[(?:[0-9]+|\*)\])*)" % _PATH_KEY)
+_PATH_INDEX = re.compile(r"\[([0-9]+|\*)\]")
+
+
+def parse_path(path, field=False, star=True):
+    """The steps of a dotted |path| (keys, "[n]", "[*]") by the grammar at _PATH_KEY, or None when it does not
+    parse; "{field}" is a key only with |field|, "[*]" only with |star|."""
+    if not isinstance(path, str) or not path:
+        return None
+    out = []
+    for piece in path.split("."):
+        m = _PATH_STEP.fullmatch(piece)
+        if m is None or (m.group(1) == "{field}" and not field):
+            return None
+        out.append(m.group(1))
+        for idx in _PATH_INDEX.findall(m.group(2)):
+            if idx == "*" and not star:
+                return None
+            out.append("[%s]" % idx)
+    return out
 
 
 def path_parts(path):
-    """The steps of a dotted path: keys, "[n]" (element n of a list), "[*]" (every element)."""
-    return _PATH_PART.findall(str(path))
+    """The steps of a dotted path (parse_path with "[*]"; [] when it does not parse)."""
+    return parse_path(path) or []
 
 
 def lookup(doc, path):
-    """(True, the value) at a dotted |path| of |doc| ("[n]" an element of a list; "[*]" is not a lookup), else
-    (False, None)."""
+    """(True, the value) at a dotted |path| of |doc| ("[n]" an element of a list; a path that does not parse, or
+    names "[*]", is no lookup), else (False, None)."""
+    parts = parse_path(path, star=False)
+    if parts is None:
+        return False, None
     cur = doc
-    for part in path_parts(path):
+    for part in parts:
         if part.startswith("["):
-            if part == "[*]" or not isinstance(cur, list) or int(part[1:-1]) >= len(cur):
+            if not isinstance(cur, list) or int(part[1:-1]) >= len(cur):
                 return False, None
             cur = cur[int(part[1:-1])]
         elif isinstance(cur, dict) and part in cur:
@@ -475,14 +501,25 @@ def lookup(doc, path):
     return True, cur
 
 
-def same_value(a, b):
-    """Whether two configuration values are the same: numbers by value (250 and 250.0 are one), a boolean only as
-    the same boolean (false is not 0), anything else by equality."""
+def json_equal(a, b):
+    """JSON equality: a boolean equals only the same boolean (true is not 1), numbers by value (250 and 250.0 are
+    one; never a numeric string), strings, null, and lists / objects element by element and key by key."""
     if isinstance(a, bool) or isinstance(b, bool):
         return isinstance(a, bool) and isinstance(b, bool) and a == b
-    if _number_or_none(a) is not None and _number_or_none(b) is not None:
-        return float(a) == float(b)
+    if _number_or_none(a) is not None or _number_or_none(b) is not None:
+        return _number_or_none(a) is not None and _number_or_none(b) is not None and float(a) == float(b)
+    if isinstance(a, list) or isinstance(b, list):
+        return isinstance(a, list) and isinstance(b, list) and len(a) == len(b) and \
+            all(json_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) or isinstance(b, dict):
+        return isinstance(a, dict) and isinstance(b, dict) and set(a) == set(b) and \
+            all(json_equal(a[k], b[k]) for k in a)
     return a == b
+
+
+def same_value(a, b):
+    """Whether two configuration values are the same (json_equal)."""
+    return json_equal(a, b)
 
 
 class References(object):
