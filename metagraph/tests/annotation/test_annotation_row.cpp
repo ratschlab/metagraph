@@ -4,7 +4,6 @@
 
 #include "../test_helpers.hpp"
 
-#define private public
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 

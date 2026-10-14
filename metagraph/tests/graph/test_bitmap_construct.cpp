@@ -8,9 +8,6 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
 #include "../test_helpers.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
@@ -259,7 +256,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         common::SortedSet<KMER::WordType> *kmers,
                                         const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
-    kmers->try_reserve(reserved_capacity);
+    kmers->reserve(reserved_capacity);
     using KMER_INT = typename KMER::WordType ;
     kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER_INT>>(
         [reads](kmer::CallString callback) {
@@ -412,7 +409,7 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
 
         DBGBitmap full(2);
         full_constructor.build_graph(&full);
-        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+        ASSERT_EQ(full_constructor.get_k(), full.get_k());
 
         ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
@@ -468,7 +465,7 @@ TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
 
         DBGBitmap full(2);
         full_constructor.build_graph(&full);
-        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+        ASSERT_EQ(full_constructor.get_k(), full.get_k());
 
         ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
@@ -529,7 +526,7 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
         DBGBitmap full(2);
         full_constructor.build_graph(&full);
         ASSERT_EQ(full.num_nodes(), chunk_size);
-        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+        ASSERT_EQ(full_constructor.get_k(), full.get_k());
 
         ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
@@ -590,7 +587,7 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
         DBGBitmap full(2);
         full_constructor.build_graph(&full);
         ASSERT_EQ(full.num_nodes(), chunk_size);
-        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+        ASSERT_EQ(full_constructor.get_k(), full.get_k());
 
         ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
