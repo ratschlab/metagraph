@@ -30,6 +30,12 @@ mark, RUN_DIR/reevaluated.json, under `reevaluation`); scenario_outcome is the r
 without a re-evaluated file keeps its recorded lines (a warning says so); samples.jsonl, jobs.jsonl and
 manifest.json, which no re-evaluation changes, are written only where missing, so every recorded file stays.
 
+A re-normalised MCP arm (async's suite_mcp_renormalise.py rebuilt its answers from the recorded tool payloads after
+the run): run.json `renormalisation` {arm: renormalisation()} states it (the summary's source, time, normaliser and
+counts, the lines' marks, the raw records that keep the recorded answer as answer_recorded); the merge of the recorded
+set warns that those lines' outcomes are stale until a re-evaluation, and the merge of a re-evaluated set copies it
+into `reevaluation.renormalised`, which the report states.
+
 The manifest identity (finding 9 of the outside review): run.json's `manifest_identity` holds the run manifest's
 content_sha256 and relations_sha256 and each arm's (manifest_identity); an arm whose hashes differ, or a run manifest
 whose stated hashes its content does not match, is a warning; with --strict-identity (run_suite.sh --gate) it is an
@@ -227,6 +233,57 @@ def manifest_identity(run_dir, arm_runs):
     return {"manifest": manifest, "arms": arms, "differs": differs}
 
 
+# renormalised.json keys a re-evaluation states (the renormaliser's revision where it records one)
+RENORMALISED_KEYS = ("source", "out", "at", "normaliser_sha256", "digest", "counts", "skipped_by_kind", "commit",
+                     "git_head", "runner_sha256", "client_sha256", "input_sha256")
+
+
+def renormalisation(arm_dir, rows=None):
+    """What a re-normalisation of an arm's answers left in it, or None when there is no trace of one: `summary` (the
+    keys of RENORMALISED_KEYS in renormalised.json, `changed` as 'SCENARIO rREPEAT'), `lines` (the executions marked
+    `renormalised`: rebuilt, changed, skipped, and the changed ones) and `raw` (the raw records the lines name that
+    keep the recorded answer as `answer_recorded`, of those read). The raw records are read for the MCP arm only:
+    the re-normaliser rebuilds MCP answers from their tool payloads, a direct answer has nothing to rebuild from."""
+    summary = sc.read_json(os.path.join(arm_dir, "renormalised.json"))
+    if rows is None:
+        rows, _ = sc.read_jsonl(os.path.join(arm_dir, "executions.jsonl"))
+    lines = {"marked": 0, "rebuilt": 0, "changed": 0, "skipped": 0, "changed_executions": []}
+    for r in rows:
+        mark = r.get("renormalised")
+        if not isinstance(mark, dict):
+            continue
+        lines["marked"] += 1
+        if "skipped" in mark:
+            lines["skipped"] += 1
+            continue
+        lines["rebuilt"] += 1
+        if mark.get("changed"):
+            lines["changed"] += 1
+            lines["changed_executions"].append("%s r%s" % (r.get("scenario"), r.get("repeat")))
+    raw = {"read": 0, "answer_recorded": 0}
+    if os.path.basename(os.path.normpath(arm_dir)) == "mcp":
+        for r in rows:
+            rel = r.get("raw")
+            if not isinstance(rel, str) or not rel:
+                continue
+            path = rel if os.path.isabs(rel) else os.path.join(arm_dir, rel)
+            try:
+                doc = sc.read_gz_json(path)
+            except (OSError, ValueError, EOFError):
+                continue
+            raw["read"] += 1
+            if isinstance(doc, dict) and "answer_recorded" in doc:
+                raw["answer_recorded"] += 1
+    if not isinstance(summary, dict) and not lines["marked"] and not raw["answer_recorded"]:
+        return None
+    out = {"lines": lines, "raw": raw}
+    if isinstance(summary, dict):
+        out["summary"] = dict((k, summary[k]) for k in RENORMALISED_KEYS if k in summary)
+        out["summary"]["changed"] = ["%s r%s" % (c.get("scenario"), c.get("repeat"))
+                                     for c in summary.get("changed") or [] if isinstance(c, dict)]
+    return out
+
+
 def reevaluation_mark(run_dir):
     """RUN_DIR/reevaluated.json (reevaluate.py's mark of the re-evaluated set), or None."""
     return sc.read_json(os.path.join(run_dir, "reevaluated.json"))
@@ -346,6 +403,18 @@ def merge(run_dir, reevaluated=False):
     for name, run in arm_runs.items():
         for w in run.get("warnings", []) or []:
             warnings.append("arms/%s: %s" % (name, w))
+    renormalised = {}
+    for name, path in arm_dirs(run_dir):
+        info = renormalisation(path)
+        if info is None:
+            continue
+        renormalised[name] = info
+        if not reevaluated:
+            warnings.append("arms/%s: its answers were re-normalised after the run (%d of %d line(s) rebuilt, %d "
+                            "changed; %d raw record(s) keep the recorded answer): the outcomes of those lines are the "
+                            "recorded ones, stale until a re-evaluation (run_suite.sh --reevaluate)" % (
+                                name, info["lines"]["rebuilt"], arm_counts.get(name, 0), info["lines"]["changed"],
+                                info["raw"]["answer_recorded"]))
 
     arms_summary = {}
     for name, run in arm_runs.items():
@@ -367,11 +436,14 @@ def merge(run_dir, reevaluated=False):
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
         "outcomes_rederived": rederived,
         "manifest_identity": identity,
+        "renormalisation": renormalised,
         "warnings": warnings,
     }
     if mark is not None:
         merged["reevaluation"] = dict((k, v) for k, v in mark.items() if k != "changes")
         merged["reevaluation"]["changes"] = len(mark.get("changes") or [])
+        if renormalised:
+            merged["reevaluation"]["renormalised"] = renormalised
     sc.write_json_atomic(os.path.join(run_dir, name_of("run.json")), merged)
     return merged
 

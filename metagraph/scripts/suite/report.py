@@ -237,6 +237,11 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None):
         lines.append("- Inconclusive executions by reason: %s." % "; ".join(
             "%s: %s" % (md(arm), ", ".join("%d %s" % (n, md(why)) for why, n in v.items()))
             for arm, v in ibr.items() if v))
+    for arm, info in sorted((((run.get("reevaluation") or {}).get("renormalised")) or {}).items()):
+        lines.append("- arms/%s: its answers were re-normalised before this re-evaluation (%d rebuilt, %d changed; "
+                     "see Re-evaluation): not the answers the run recorded." % (
+                         md(arm), (info.get("lines") or {}).get("rebuilt", 0), (info.get("lines") or {}).get(
+                             "changed", 0)))
     ma = s["mcp_agreement"]
     if ma.get("compared"):
         lines.append("- MCP agreement: %d agree, %d not comparable (no check both arms evaluated), %d disagree; "
@@ -770,9 +775,40 @@ def warm_wall(summary, area, arm):
     return ((t.get("by_host_cache") or {}).get("warm") or {}).get("wall") or {}
 
 
-def reevaluation_section(run_dir, max_items=200):
-    """What a re-evaluation (reevaluate.py's mark, RUN_DIR/reevaluated.json) judged with, and every execution whose
-    outcome or checks it changed."""
+def renormalised_text(arm, info):
+    """One sentence on an arm whose answers were re-normalised before the re-evaluation (merge_run.renormalisation):
+    by what and when where the summary records it, how many answers were rebuilt and changed, which."""
+    summ = info.get("summary") or {}
+    lines = info.get("lines") or {}
+    raw = info.get("raw") or {}
+    counts = summ.get("counts") or {}
+    rev = ", ".join("%s %s" % (md(k), md(short(summ[k], 16))) for k in ("commit", "git_head", "normaliser_sha256",
+                                                                      "runner_sha256", "client_sha256", "input_sha256")
+                    if summ.get(k))
+    changed = summ.get("changed") or lines.get("changed_executions") or []
+    return ("**arms/%s was re-normalised before this re-evaluation** (%s%s%s): %s of %s answer(s) rebuilt from the "
+            "recorded tool payloads, %d changed%s; %s not rebuilt%s; %d of %d raw record(s) read keep the recorded "
+            "answer as `answer_recorded`. The answers judged here are not the ones the run recorded: the recorded arm "
+            "re-evaluated alone gives other totals." % (
+                md(arm),
+                "async's suite_mcp_renormalise.py at %s" % md(summ.get("at")) if summ.get("at") else
+                "no renormalised.json: the lines' and raw records' marks only",
+                ("; " + rev) if rev else ("; its revision not recorded" if summ else ""),
+                ("; digest %s; from %s" % (md(summ.get("digest"), 120), md(summ.get("source"), 160)))
+                if summ.get("source") else "",
+                counts.get("renormalised", lines.get("rebuilt", 0)), counts.get("lines", "?"),
+                counts.get("changed", lines.get("changed", 0)),
+                (" (%s)" % md(", ".join(changed[:40]) + (" ..." if len(changed) > 40 else ""))) if changed else "",
+                counts.get("skipped", lines.get("skipped", 0)),
+                (" (%s)" % md(", ".join("%s %s" % kv for kv in sorted((summ.get("skipped_by_kind") or {}).items()))))
+                if summ.get("skipped_by_kind") else "",
+                raw.get("answer_recorded", 0), raw.get("read", 0)))
+
+
+def reevaluation_section(run_dir, max_items=200, run=None):
+    """What a re-evaluation (reevaluate.py's mark, RUN_DIR/reevaluated.json) judged with, whether an arm's answers
+    were re-normalised before it (run.reevaluated.json `reevaluation.renormalised`, merge_run), and every execution
+    whose outcome or checks it changed: the changed records and, apart, how many changed their outcome."""
     mark = sc.read_json(os.path.join(run_dir, "reevaluated.json")) or {}
     ck = mark.get("checks") or {}
     out = ["# Re-evaluation", ""]
@@ -795,12 +831,18 @@ def reevaluation_section(run_dir, max_items=200):
                      str(c.get("outcome_changed", 0)), str(c.get("checks_changed", 0))])
     out.append(table(["arm", "recorded checks", "runner's commit", "lines", "re-evaluated", "kept", "no answer",
                       "outcome changed", "checks changed"], rows))
+    renorm = ((run or {}).get("reevaluation") or {}).get("renormalised") or {}
+    for arm, info in sorted(renorm.items()):
+        out.append(renormalised_text(arm, info) + "\n")
     changes = mark.get("changes") or []
     if not changes:
         out.append("No outcome and no check changed.\n")
         return "\n".join(out)
-    out.append("%d execution(s) changed%s:" % (len(changes), "" if len(changes) <= max_items else
-                                                 " (the first %d listed; all are in reevaluated.json)" % max_items))
+    moved = sum(1 for ch in changes if ch.get("before") != ch.get("after"))
+    out.append("%d execution record(s) changed: %d changed their outcome, %d only their checks (the outcome "
+               "stayed)%s:" % (len(changes), moved, len(changes) - moved,
+                               "" if len(changes) <= max_items else
+                               " (the first %d listed; all are in reevaluated.json)" % max_items))
     out.append("")
     rows = []
     for ch in changes[:max_items]:
@@ -832,7 +874,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
                                  gate_mod.missing_planned(run_dir, manifest, rows)))
     parts.append(gate_section(run_dir, reevaluated, max_failures))
     if reevaluated:
-        parts.append(reevaluation_section(run_dir, max_failures))
+        parts.append(reevaluation_section(run_dir, max_failures, run))
     parts.append(environment_section(run, comp, rows, samples))
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))

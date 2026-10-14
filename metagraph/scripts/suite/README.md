@@ -1409,3 +1409,35 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   report (a "Deploy gate" section); the exit status is the gate's. `--reevaluate RUN_DIR --gate POLICY` judges the
   re-evaluated set (gate.reevaluated.json) and exits with the gate's status. Without --gate nothing changes: the
   exit status is the orchestration's (a FAIL report exits 0).
+
+### A re-evaluation of re-normalised answers says so (finding 10)
+- reevaluate.py judges the answers a run recorded and never re-runs a normaliser; a normaliser fix (G06: a pattern
+  refused in its slot) reaches a recorded MCP arm only through async's suite_mcp_renormalise.py, which rebuilds the
+  answers from the recorded tool payloads into a copy. Re-evaluating the original v3 arm gives 337 changed records,
+  the re-normalised one the S5e totals (353; MCP 1071 / 2 / 16; 542 agree / 15 disagree): the difference is the 16
+  re-normalised G06 lines (VERIFY-A), and nothing in reevaluated.json or the report said so.
+- merge_run.py records what a re-normalisation left in an arm (`renormalisation(arm_dir)`: renormalised.json's
+  source, time, normaliser sha256, digest rule, counts, changed and skipped executions and, where it records them, the
+  renormaliser's commit and runner / client / input hashes; the lines' `renormalised` marks; the raw records the
+  lines name that keep the recorded answer as `answer_recorded`) in run.json `renormalisation`; a plain merge warns
+  that those lines' outcomes are the recorded ones, stale until a re-evaluation; the merge of the re-evaluated set
+  copies it into run.reevaluated.json `reevaluation.renormalised`. The report's verdict names the arm, and its
+  Re-evaluation section states by what and when it was re-normalised, how many answers were rebuilt and changed
+  (which) and not rebuilt (by kind). (reevaluate.py, lane G2's, may call merge_run.renormalisation to put the same
+  into reevaluated.json itself.)
+- The Re-evaluation section states the changed records and the changed outcomes apart: "353 execution record(s)
+  changed: 334 changed their outcome, 19 only their checks" (the review request's "353 execution outcomes" was
+  imprecise; the report's columns were not).
+- The documented sequence (offline; the recorded run is never written; COPY, RUN, SUITE are paths):
+
+      rsync -a RUN/ COPY/
+      /Users/raetsch/git/services/metagraph-search-service/.venv/bin/python -I -B \
+          /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_renormalise.py COPY/arms/mcp \
+          --out COPY/mcp-renormalised --checks-dir SUITE
+      mv COPY/arms/mcp COPY/mcp.recorded        # outside arms/: merge_run reads every directory under arms/
+      mv COPY/mcp-renormalised COPY/arms/mcp
+      SUITE/run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous   # a run before async's 2a8acbaf
+
+  async's renormaliser (feat/suite-mcp-runner-vendored) rebuilds what its payloads allow and copies the rest
+  (not implemented, documents not kept, runner errors), marking every line; its outcome fields stay stale until the
+  re-evaluation, which the report then states as above.
