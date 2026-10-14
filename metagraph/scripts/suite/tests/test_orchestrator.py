@@ -431,6 +431,45 @@ class RunSuiteOffline(SuiteCase):
         with open(os.path.join(p.stdout.strip().splitlines()[-1], "report.md")) as fh:
             self.assertIn("UNVERIFIED", fh.read())
 
+    def test_resume_waits_for_its_own_runner(self):
+        # a paired step cut off by Ctrl-C leaves its runner on its request in flight: a --resume waits for that runner
+        # of its own run (up to SUITE_WAIT_OWN_RUNNER_S) and then continues, instead of refusing after
+        # SUITE_WAIT_RUNNER_S; another run's runner is still refused, and so is its own one past the wait
+        make_manifest(self.mpath, basic_scenarios())
+
+        def stand_in(run_id, seconds):
+            # a process the runner patterns match: scripts/run_direct.py ... --base BASE ... --run-id RUN_ID
+            return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % seconds,
+                                     "scripts/run_direct.py", "--base", host.base, "--run-id", run_id])
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "8", "--warm-every", "0",
+                               "--checks", "stub")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            run_id = os.path.basename(run_dir)
+            own = stand_in(run_id, 8)    # longer than SUITE_WAIT_RUNNER_S and the first poll's 5 s
+            try:
+                p = self.run_suite(host, "--resume", run_dir, SUITE_WAIT_RUNNER_S="1")
+            finally:
+                own.kill()
+                own.wait()
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("this run's runner still runs", p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]["state"],
+                             "done")
+            for run_of, own_wait, expect in ((run_id, "2", "stop it with kill -INT"),
+                                             ("another-run", "60", "of another invocation")):
+                other = stand_in(run_of, 60)
+                try:
+                    p = self.run_suite(host, "--resume", run_dir, SUITE_WAIT_RUNNER_S="1",
+                                       SUITE_WAIT_OWN_RUNNER_S=own_wait)
+                finally:
+                    other.kill()
+                    other.wait()
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn(expect, p.stderr)
+                self.assertIn("pid(s) %d" % other.pid, p.stderr)
+
     def test_samples_pulled_and_merged(self):
         make_manifest(self.mpath, basic_scenarios()[:2])
         with FakeHost() as host:

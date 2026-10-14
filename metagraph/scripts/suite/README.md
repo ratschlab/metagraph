@@ -1873,3 +1873,14 @@ by lane S6c; everything below was open.
   no line; FAKE_MCP_CRASH_ID limits it to one scenario) in the paired loop, and the sequential mode with the cold
   pass refused.
 
+### A resume waits for its own run's runner (P3-run-measure-report-06)
+- Ctrl-C of a paired run leaves the mex runner of the step in flight on its request (a long-class request may take
+  up to 30 min); the interrupt message promised that "--resume waits for it or attaches to it", but only the
+  sequential mode attaches, and a paired resume refused after SUITE_WAIT_RUNNER_S (150 s) with "... or --resume its
+  run", circular while that runner was its own. A resume now first waits for its own run's runners (the mex runners
+  whose command line names its --run-id, when no other run's runner is there) for up to SUITE_WAIT_OWN_RUNNER_S (1860
+  s: the long class's client timeout and a minute), with a log line every minute, then goes on; only then the
+  check for any runner refuses, naming the pids (another run's runner: wait for it or stop it with kill -INT, which
+  records its request in flight; its own past the wait: stop it with kill -INT, then --resume again). The interrupt
+  message is the mode's: the sequential mode's resume attaches, the paired mode's waits.
+

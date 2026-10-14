@@ -67,7 +67,8 @@
 # SUITE_MEX_DIR (suite-dev), SUITE_MEX_PY (python3), SUITE_LOCAL_BASE (http://localhost:42010),
 # SUITE_REMOTE_BASE (the public refseq33m-experimental URL), SUITE_RUNS, PYTHON (python3), SUITE_POLL_S (15),
 # SUITE_SAMPLER (1; 0: no mex sampler besides direct-local's own in sequential mode), SUITE_WAIT_RUNNER_S
-# (150), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
+# (150), SUITE_WAIT_OWN_RUNNER_S (1860: how long a --resume waits for its own run's runner, the long class's client
+# timeout and a minute), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
 # macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat interval),
 # SUITE_RUNNER_PATTERN (the pgrep pattern of the mex runners; the offline tests narrow it to their own).
 set -euo pipefail
@@ -83,6 +84,7 @@ RUNS="${SUITE_RUNS:-$HERE/runs}"
 POLL_S="${SUITE_POLL_S:-15}"
 SAMPLER="${SUITE_SAMPLER:-${SUITE_REMOTE_SAMPLER:-1}}"
 WAIT_RUNNER_S="${SUITE_WAIT_RUNNER_S:-150}"
+WAIT_OWN_RUNNER_S="${SUITE_WAIT_OWN_RUNNER_S:-1860}"
 CTL_DIR="${SUITE_SSH_CONTROL_DIR:-/tmp/suite-ssh-$(id -u)}"
 # This invocation's own control socket (review N1): a shared one would let another invocation's exit (`-O exit`
 # in its cleanup) end this one's master and with it the ssh step in flight.
@@ -450,6 +452,34 @@ wait_no_runner() {
     waited=$((waited + 5))
   done
 }
+# This run's runners on mex in OWN_PIDS and all of the suite's in RUNNER_PIDS, from one answer ('' for none);
+# returns 1 when mex gave no answer.
+own_runner_pids() {
+  local out
+  out="$(mex "printf 'runners:'; pgrep -u \$(id -u) -f '$RUNNER_PATTERN' | tr '\n' ' '; printf 'own:'; pgrep -u \$(id -u) -f '$RUNNER_PATTERN .*--run-id $RUN_ID' | tr '\n' ' '; echo" || true)"
+  [[ "$out" == *runners:*own:* ]] || return 1
+  OWN_PIDS="$(printf '%s' "${out##*own:}" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
+  out="${out%%own:*}"
+  RUNNER_PIDS="$(printf '%s' "${out##*runners:}" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
+}
+# A resume next to its own run's runner (a paired step cut off by Ctrl-C ends after its request in flight, which
+# may take up to the long class's client timeout): waits for it, with a log line every minute, instead of
+# refusing. 0: no runner of this run, or another's runs too (wait_no_runner judges that); 1: still running after
+# `$1` seconds; 2: mex did not answer.
+wait_own_runner() {
+  local waited=0 next=0
+  while true; do
+    own_runner_pids || return 2
+    [[ -n "$OWN_PIDS" && "$OWN_PIDS" == "$RUNNER_PIDS" ]] || return 0
+    (( waited < $1 )) || return 1
+    if (( waited >= next )); then
+      log "this run's runner still runs on $MEX (pid(s) $OWN_PIDS): it ends after its request in flight; waiting for it ($waited of at most $1 s)"
+      next=$((next + 60))
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
 interrupted() {
   trap - INT TERM
   log "interrupted"
@@ -459,8 +489,12 @@ interrupted() {
     local wrc=0
     wait_no_runner 120 || wrc=$?
     case $wrc in
-      1) log "the mex runner still runs (a long request may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume waits for it or attaches to it" ;;
-      2) log "no answer from $MEX: the mex runner may still run there; --resume waits for it once mex answers" ;;
+      1) if [[ $MODE == sequential ]]; then
+           log "the mex runner still runs (it stops after its request in flight, which may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume attaches to it"
+         else
+           log "the mex runner still runs (it stops after its request in flight, which may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume waits for it (up to $WAIT_OWN_RUNNER_S s), then continues the run"
+         fi ;;
+      2) log "no answer from $MEX: the mex runner may still run there; --resume looks for it once mex answers and waits for it" ;;
     esac
     pull_local_arm
   fi
@@ -534,10 +568,17 @@ print(s.get("pid", "") if s.get("state") == "running" else "")' 2>/dev/null || t
 fi
 if [[ -z "$ATTACH_PID" ]]; then
   WRC=0
+  if [[ -n "$RESUME" ]]; then
+    wait_own_runner "$WAIT_OWN_RUNNER_S" || WRC=$?
+    case $WRC in
+      1) die "this run's runner (pid(s) $OWN_PIDS) still runs on $MEX after $WAIT_OWN_RUNNER_S s: stop it with kill -INT on $MEX (it records its request in flight), then --resume $RUN_DIR again" ;;
+      2) die "no answer from $MEX while checking for this run's runner: refusing to start (an ssh failure never reads as no runner)" ;;
+    esac
+  fi
   wait_no_runner "$WAIT_RUNNER_S" || WRC=$?
   case $WRC in
     0) ;;
-    1) die "a run_direct.py runs under ~/$MEX_DIR on $MEX (an earlier invocation's); wait for it, stop it with kill -INT, or --resume its run" ;;
+    1) die "a run_direct.py of another invocation runs under ~/$MEX_DIR on $MEX (pid(s) $RUNNER_PIDS); wait for it, or stop it with kill -INT on $MEX (it records its request in flight) and --resume that run later" ;;
     *) die "no answer from $MEX while checking for a running run_direct.py: refusing to start (an ssh failure never reads as no runner)" ;;
   esac
 fi
