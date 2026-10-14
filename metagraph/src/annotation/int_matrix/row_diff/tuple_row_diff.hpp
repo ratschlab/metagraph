@@ -33,7 +33,9 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
     TupleRowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
-    std::vector<Row> get_column(Column j) const override;
+    std::vector<Row> get_column(Column column) const override {
+        return get_column_from_rows(*this, column);
+    }
     std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const override;
     // no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
     std::vector<SetBitPositions>
@@ -63,25 +65,6 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
     BaseMatrix diffs_;
 };
 
-
-template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
-    assert(graph_ && "graph must be loaded");
-    assert(diffs_.num_rows() == graph_->max_index());
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    // TODO: implement a more efficient algorithm
-    std::vector<Row> result;
-    graph_->call_nodes([&](auto node) {
-        auto i = graph::AnnotatedDBG::graph_to_anno_index(node);
-        SetBitPositions set_bits = get_rows({ &i, 1 })[0];
-        if (std::binary_search(set_bits.begin(), set_bits.end(), j))
-            result.push_back(i);
-    });
-    return result;
-}
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>

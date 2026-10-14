@@ -1,12 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
@@ -52,6 +54,10 @@ class IRowDiff {
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
   protected:
+    template <std::derived_from<BinaryMatrix> Matrix>
+    std::vector<BinaryMatrix::Row>
+    get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column) const;
+
     // get row-diff paths starting at |row_ids|
     // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
     // groups[g] records indices of row_ids paths traced in group g.
@@ -112,7 +118,9 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     /**
      * Returns the given column.
      */
-    std::vector<Row> get_column(Column column) const override;
+    std::vector<Row> get_column(Column column) const override {
+        return get_column_from_rows(*this, column);
+    }
 
     std::vector<SetBitPositions> get_rows(std::span<const Row> row_ids) const override;
 
@@ -143,24 +151,27 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 };
 
 
-/**
- * Returns the given column.
- */
-template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
+template <std::derived_from<BinaryMatrix> Matrix>
+std::vector<BinaryMatrix::Row>
+IRowDiff::get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column) const {
     assert(graph_ && "graph must be loaded");
-    assert(diffs_.num_rows() == graph_->max_index());
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(matrix.num_rows() == graph_->max_index());
+    assert(anchor_.size() == matrix.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    std::vector<Row> result;
-    // TODO: implement a more efficient algorithm
+    std::vector<BinaryMatrix::Row> result;
+    // Reuse reconstruction paths across a small batch of rows.
+    BatchAccumulator<BinaryMatrix::Row> batch([&](const auto &row_ids) {
+        auto rows = matrix.get_rows(row_ids);
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            if (std::ranges::binary_search(rows[i], column))
+                result.push_back(row_ids[i]);
+        }
+    }, 32 /* rows per batch */);
     graph_->call_nodes([&](auto node) {
-        auto row = graph::AnnotatedDBG::graph_to_anno_index(node);
-        SetBitPositions set_bits = get_rows({ &row, 1 })[0];
-        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
-            result.push_back(row);
+        batch.push(graph::AnnotatedDBG::graph_to_anno_index(node));
     });
+    batch.process_all_buffered();
     return result;
 }
 
