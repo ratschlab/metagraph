@@ -312,9 +312,9 @@ def check_status(sc, ans, a, arm):
                                      else "SPEC-labeled-traversal-core §4.5", (err.get("text") or "")[:200])
         if sc.get("route") == "POST /resolve" and http == 503 and err.get("code") == "deadline" and \
                 _resolve_budget(sc) is None:
-            return FAIL, "http 503 deadline, expected %s: the request names no bounds.time_budget_ms, and the /resolve " \
-                         "deadline is opt-in (SPEC-labeled-traversal-core §4.5: no deadline without the field, " \
-                         "whatever the server's cap) (%s)" % (want, (err.get("text") or "")[:200])
+            return FAIL, "http 503 deadline, expected %s: the request names no bounds.time_budget_ms, and the " \
+                         "/resolve deadline is opt-in (SPEC-labeled-traversal-core §4.5: no deadline without the " \
+                         "field, whatever the server's cap) (%s)" % (want, (err.get("text") or "")[:200])
         return FAIL, "http %s, expected %s (error %s: %s)" % (http, want, err.get("code"), (err.get("text") or "")[:300])
     err = ans.get("error") or {}
     if "code" in a:

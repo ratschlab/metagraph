@@ -258,7 +258,8 @@ class Generic(unittest.TestCase):
         # /pattern keeps its default budget (SPEC-pattern-search §6: default_time_budget_ms): allowed without one
         pat = {"route": "POST /pattern", "request": {"patterns": []}, "truth": {},
                "expect": [{"check": "status", "args": {"http": 200}}]}
-        self.assertTrue(checks.deadline_allowed(pat, checks.normalise_direct(503, b'{"error": "p", "code": "deadline"}')))
+        pdl = checks.normalise_direct(503, b'{"error": "p", "code": "deadline"}')
+        self.assertTrue(checks.deadline_allowed(pat, pdl))
 
     def test_deterministic(self):
         a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})

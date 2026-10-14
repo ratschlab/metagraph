@@ -1157,8 +1157,9 @@ class ReviewFixesTest(unittest.TestCase):
         bad = [(bd(10, 12), ex(6)), (bd(2, 5), ex(6)), (ex(9), al(12)), (ex(9), bd(10, 12)), (al(13), bd(10, 12)),
                (bd(1, 3), bd(10, 12)), (al(99), ex(6)), (ex(5), ex(0)), ({"relation": "at_most", "value": 9}, ex(6)),
                (ex(6), {"relation": "about", "value": 6}), (ex(None), ex(6))]
-        good = [(bd(5, 7), ex(6)), (ex(12), al(12)), (ex(11), bd(10, 12)), (al(12), bd(10, 12)), (bd(1, 10), bd(10, 12)),
-                (al(2), ex(6)), (al(0), al(5)), (ex(6), ex(6)), (unk, ex(6)), (ex(6), unk), (al(3), unk)]
+        good = [(bd(5, 7), ex(6)), (ex(12), al(12)), (ex(11), bd(10, 12)), (al(12), bd(10, 12)),
+                (bd(1, 10), bd(10, 12)), (al(2), ex(6)), (al(0), al(5)), (ex(6), ex(6)), (unk, ex(6)), (ex(6), unk),
+                (al(3), unk)]
         for a, b in bad:
             self.assertTrue(cmp._count_problems({"contexts": a}, {"contexts": b}), (a, b))
         for a, b in good:

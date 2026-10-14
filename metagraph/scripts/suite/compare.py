@@ -750,7 +750,8 @@ def _released_key(row):
 def _released_problems(stopped, complete):
     """The stopped entry's released results that the complete entry does not list although it states
     retrieval_complete (VERIFY-2 item 5's subset rule; SPEC-pattern-search §7.5: then every context is listed)."""
-    if not isinstance(stopped, dict) or not isinstance(complete, dict) or complete.get("retrieval_complete") is not True:
+    if not isinstance(stopped, dict) or not isinstance(complete, dict) or \
+            complete.get("retrieval_complete") is not True:
         return []
     mine = [r for r in stopped.get("results") or [] if isinstance(r, dict)]
     theirs = set(_released_key(r) for r in complete.get("results") or [] if isinstance(r, dict))
@@ -1310,10 +1311,11 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     (check_agreement), the failing check items the matched answered cases explain apart (B-01, B5b-06:
     service_by_design only when nothing else differs; the case is a note); an unmatched execution the MCP runner
     marked service_by_design is, with no table, an unverified by-design part of its own beside the others' check
-    agreement, and with a table judged by its checks like any other (B5b-05, B-06). A case id the scenario names that the table lacks, with no named case
-    matched, is a disagreement (side table). A disagreement anywhere is the class (the first in execution order, the
-    checks last); else a by-design class, verified only when every part held (B-04: other parts that do not agree make
-    it unverified, shown as `other_repeats`); else the checks' class, naming the matched answered cases."""
+    agreement, and with a table judged by its checks like any other (B5b-05, B-06). A case id the scenario names that
+    the table lacks, with no named case matched, is a disagreement (side table). A disagreement anywhere is the class
+    (the first in execution order, the checks last); else a by-design class, verified only when every part held
+    (B-04: other parts that do not agree make it unverified, shown as `other_repeats`); else the checks' class,
+    naming the matched answered cases."""
     mcp = mcp or {}
     cases = cases or {}
     reps = [mcp[k] for k in sorted(mcp)]
