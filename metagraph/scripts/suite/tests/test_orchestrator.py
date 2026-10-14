@@ -96,7 +96,7 @@ class SuiteCase(unittest.TestCase):
                               universal_newlines=True, timeout=300, stdin=subprocess.DEVNULL)
 
     def mcp_cmd(self):
-        return "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest}" % (
+        return "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest} --checks-dir {checks_dir}" % (
             shlex.quote(sys.executable), shlex.quote(os.path.join(HERE, "fake_mcp.py")))
 
     def lock_path(self):

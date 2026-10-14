@@ -42,14 +42,22 @@
 #
 # --mcp-cmd TEMPLATE: the async session's MCP runner (scripts/bench/suite_mcp_runner.py), called per scenario
 # and repeat with {ids} (comma-separated scenario ids), {repeat} (the repeat index to run: 0 cold, >= 1 warm),
-# {repeats} ({repeat} + 1), {out} (RUN_DIR/arms/mcp) and {manifest} (the run's manifest) replaced by
+# {repeats} ({repeat} + 1), {out} (RUN_DIR/arms/mcp), {manifest} (the run's manifest) and {checks_dir} (the run's
+# snapshot RUN_DIR/scripts, below) replaced by
 # shell-quoted values; run with `bash -c` and this environment unchanged. Only the template is recorded,
 # never the expanded command or any environment value. A full run (not --smoke) uses the default template
 # DEFAULT_MCP_CMD below (SUITE_MCP_CMD replaces it, '' for none) unless --mcp-cmd, --no-mcp or --mcp-run is
 # given; --mcp-cmd default asks for it in a smoke run; --resume keeps the run's template. The default runner
 # needs METAGRAPH_ADMIN_KEY_FILE (a file holding the staging admin key) in the environment, e.g.
 #   METAGRAPH_ADMIN_KEY_FILE=/Users/raetsch/tmp/mgss/secrets/staging_admin_key run_suite.sh
-# and judges with checks.py of this directory (--checks-dir).
+# and judges with the run's snapshot (--checks-dir {checks_dir}).
+#
+# The run's snapshot: the run's first invocation copies what judges and runs the arms (suite_common.SNAPSHOT_FILES:
+# run_direct.py, sampler.py, suite_common.py, checks.py, checks_stub.py, service_by_design.json) into
+# RUN_DIR/scripts with their sha256 (SNAPSHOT.json). direct-remote runs from it, it is what goes to mex for
+# direct-local, and the MCP runner gets it as {checks_dir}; a resume keeps it. A change of this directory during
+# the run, or before a resume, changes nothing for the run (a new run, or --reevaluate, judges with it); the
+# runners record the sha256 of the checks they imported, and merge_run.py states every arm judged with others.
 #
 # A run directory is runs/<UTC>_<release-short>/ under this directory (SUITE_RUNS overrides). Every
 # invocation starts a new run directory, except --resume RUN_DIR, which continues that run (its mode unless
@@ -104,7 +112,7 @@ fi
 # The MCP arm of a full run: the async session's runner (search-service scripts/bench/suite_mcp_runner.py, branch
 # feat/suite-mcp-runner), judging with this directory's checks.py; --check-queue pauses while the service queue
 # holds other work (the Logan chunks aside) and needs the admin key from the environment.
-ASYNC_MCP_CMD="/Users/raetsch/git/services/metagraph-search-service/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue --queue-ignore sra-logan-chunks --checks-dir $(printf '%q' "$HERE")"
+ASYNC_MCP_CMD="/Users/raetsch/git/services/metagraph-search-service/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue --queue-ignore sra-logan-chunks --checks-dir {checks_dir}"
 DEFAULT_MCP_CMD="${SUITE_MCP_CMD-$ASYNC_MCP_CMD}"
 # The mex runners of the suite, as pgrep / pkill patterns ([s] keeps the pattern from matching its own shell).
 # SUITE_RUNNER_PATTERN narrows it for the offline tests, whose "mex" is this machine: there a real run's ssh step
@@ -262,8 +270,12 @@ except (OSError, ValueError, KeyError, IndexError, AttributeError):
     WARM_EVERY="$(last_session warm_every)"; WARM_EVERY="${WARM_EVERY:-10}"; restore warm_every "$WARM_EVERY"
   fi
   if [[ $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
-    # The run's own MCP template (the last invocation's), so a resume pairs the same arms.
+    # The run's own MCP template (the last invocation's), so a resume pairs the same arms; a template of before
+    # {checks_dir} that judged with this directory judges with the run's snapshot instead.
     MCP_CMD="$(last_session mcp_cmd)"; restore mcp "$( [[ -n "$MCP_CMD" ]] && echo "its template" || echo none)"
+    OLD_CHECKS_DIR="--checks-dir $(printf '%q' "$HERE")"
+    NEW_CHECKS_DIR='--checks-dir {checks_dir}'
+    if [[ "$MCP_CMD" == *"$OLD_CHECKS_DIR"* ]]; then MCP_CMD="${MCP_CMD//"$OLD_CHECKS_DIR"/$NEW_CHECKS_DIR}"; fi
   fi
   if [[ $PAUSE_GIVEN == 0 ]]; then
     v="$(last_session pause_s)"; if [[ -n "$v" ]]; then PAUSE="$v"; restore pause "$v"; fi
@@ -311,6 +323,7 @@ if [[ -n "$MCP_CMD" ]]; then
   if [[ "$MCP_CMD" == *--check-queue* && -z "${METAGRAPH_ADMIN_KEY_FILE:-}" && -z "${METAGRAPH_ADMIN_KEY:-}" ]]; then
     die "the MCP runner checks the service queue and needs METAGRAPH_ADMIN_KEY_FILE (or METAGRAPH_ADMIN_KEY) in the environment"
   fi
+  [[ "$MCP_CMD" == *"{checks_dir}"* ]] || log "warning: the MCP template names no {checks_dir}: its runner judges with other checks than the run's snapshot (the merge states it, the gate fails on it)"
 fi
 [[ "$MODE" == sequential || -z "$MCP_RUN" ]] || die "--mcp-run reads a finished MCP run: use it with --sequential (or --mcp-cmd)"
 [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || die "no manifest (${MANIFEST:-none}); pass --manifest"
@@ -421,7 +434,8 @@ cleanup() {
     [[ $CREATED_MEX_RUN == 0 ]] || mex "rmdir $MEX_DIR/runs/$RUN_ID/arms $MEX_DIR/runs/$RUN_ID" || true
     if [[ $CREATED_RUN_DIR == 1 ]]; then
       rm -f "$RUN_DIR/manifest.json"
-      rmdir "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
+      for f in "$RUN_DIR/scripts/"*; do [[ ! -f "$f" ]] || rm -f "$f"; done   # this invocation's snapshot
+      rmdir "$RUN_DIR/scripts" "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
     fi
   fi
   release_lock
@@ -632,6 +646,25 @@ DIRTY="$(git -C "$HERE" status --porcelain -- . 2>/dev/null | grep -v '^?? runs/
 [[ -z "$DIRTY" ]] || COMMIT="$COMMIT+dirty"
 log "run directory $RUN_DIR ($MODE)"
 log "manifest $MANIFEST; scripts $COMMIT; checks $CHECKS"
+# The run's snapshot (header): taken by its first invocation (or by the first resume of a run older than it), kept.
+SNAP="$RUN_DIR/scripts"
+SESSIONS_BEFORE="$("$PY" -c 'import json, sys
+try:
+    print(len(json.load(open(sys.argv[1]))["sessions"]))
+except (OSError, ValueError, KeyError, TypeError):
+    print(0)' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo 0)"
+SNAP_STATE="$("$PY" "$HERE/suite_common.py" snapshot "$RUN_DIR" "$HERE" "$COMMIT" "$SESSIONS_BEFORE")" \
+  || die "the run's snapshot of its scripts could not be taken in $SNAP"
+case "$SNAP_STATE" in
+  created*)
+    if [[ $SESSIONS_BEFORE == 0 ]]; then log "scripts: the run's snapshot in $SNAP"
+    else log "scripts: the run's snapshot in $SNAP, taken by this resume (its $SESSIONS_BEFORE earlier invocation(s) judged with the checks of their time)"; fi ;;
+  *)
+    SNAP_CHANGED="$(printf '%s\n' "$SNAP_STATE" | sed -n 's/^changed //p' | tr '\n' ' ')"
+    SNAP_LIVE="$(printf '%s\n' "$SNAP_STATE" | sed -n 's/^live-differs //p' | tr '\n' ' ')"
+    [[ -z "$SNAP_CHANGED" ]] || log "warning: the run's snapshot changed after it was taken (${SNAP_CHANGED% }): the merge states which arms judged with what"
+    [[ -z "$SNAP_LIVE" ]] || log "scripts: ${SNAP_LIVE% } of $HERE differ(s) from the run's snapshot: the run keeps judging with its snapshot (a new run, or --reevaluate, judges with these)" ;;
+esac
 
 ARGS=(--manifest "$MANIFEST" --pause "$PAUSE" --scripts-commit "$COMMIT" --run-id "$RUN_ID" --checks "$CHECKS"
       --warm-every "$WARM_EVERY")
@@ -653,20 +686,28 @@ T_B="$("$PY" -c 'import time; print("%.3f" % time.time())')"
 CLOCK_OFFSET="$("$PY" "$HERE/suite_common.py" clock-offset "$T_A" "$T_MEX" "$T_B")"
 log "mex clock offset ${CLOCK_OFFSET:-unknown} s"
 
-mex_rsync --delete --exclude 'runs/' --exclude 'tests/' --exclude '__pycache__/' --exclude '*.pyc' \
-  "$HERE/" "$(mex_path "$MEX_DIR/scripts/")" || die "rsync of the scripts to $MEX failed"
+mex_rsync --delete --exclude '__pycache__/' --exclude '*.pyc' \
+  "$SNAP/" "$(mex_path "$MEX_DIR/scripts/")" || die "rsync of the run's snapshot to $MEX failed"
 mex_rsync "$MANIFEST" "$(mex_path "$MEX_DIR/manifest/$RUN_ID.json")" || die "rsync of the manifest to $MEX failed"
 
 "$PY" - "$RUN_DIR/orchestrator.json" "$MANIFEST" "$COMMIT" "$SMOKE" "$AREAS" "$LIMIT" "$SKIP_LOCAL" \
     "$SKIP_REMOTE" "$MCP_RUN" "$MCP_CMD" "$COMPARE" "$PAUSE" "$MAX_REQUESTS" "$LOCAL_BASE" "$REMOTE_BASE" "$MEX" \
     "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" "$IDS" "$IDS_FILE" "$GATE" \
-    "$GIVEN" "${RESTORED:-}" <<'PYEOF'
+    "$GIVEN" "${RESTORED:-}" "$SNAP_STATE" <<'PYEOF'
 import json, os, sys, time
 path = sys.argv[1]
 keys = ["manifest", "scripts_commit", "smoke", "areas", "limit", "skip_local", "skip_remote", "mcp_run",
         "mcp_cmd", "compare", "pause_s", "max_requests", "local_base", "remote_base", "mex", "mode", "checks",
-        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate", "given", "restored"]
+        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate", "given", "restored",
+        "snapshot"]
 session = dict(zip(keys, sys.argv[2:]))
+# the run's snapshot: taken by this invocation or kept, and what differed (suite_common.py snapshot)
+lines = session["snapshot"].splitlines()
+session["snapshot"] = {"state": lines[0] if lines else None,
+                       "changed": [x.split(" ", 1)[1] for x in lines if x.startswith("changed ")],
+                       "live_differs": [x.split(" ", 1)[1] for x in lines if x.startswith("live-differs ")],
+                       "mcp_checks_dir": ("snapshot" if "{checks_dir}" in session["mcp_cmd"] else "template")
+                       if session["mcp_cmd"] else None}
 # the options given on the command line, and those a resume took from the run's last invocation
 session["given"] = [x for x in session["given"].split(",") if x]
 session["restored"] = [x.strip() for x in session["restored"].split(",") if x.strip()]
@@ -752,10 +793,11 @@ heartbeat() { [[ -z "$SAMPLER_PID" || -z "$HB_REL" ]] || mex "touch $MEX_DIR/$HB
 # The MCP runner (async's), per scenario ids and repeat; the environment passes through unchanged.
 mcp_step() {  # mcp_step IDS REPEAT
   local cmd rc=0
-  cmd="$("$PY" - "$MCP_CMD" "$1" "$2" "$RUN_DIR/arms/mcp" "$MANIFEST" <<'PYEOF'
+  cmd="$("$PY" - "$MCP_CMD" "$1" "$2" "$RUN_DIR/arms/mcp" "$MANIFEST" "$SNAP" <<'PYEOF'
 import shlex, sys
-template, ids, repeat, out, manifest = sys.argv[1:6]
-values = {"ids": ids, "repeat": repeat, "repeats": str(int(repeat) + 1), "out": out, "manifest": manifest}
+template, ids, repeat, out, manifest, checks_dir = sys.argv[1:7]
+values = {"ids": ids, "repeat": repeat, "repeats": str(int(repeat) + 1), "out": out, "manifest": manifest,
+          "checks_dir": checks_dir}
 for key, value in values.items():
     template = template.replace("{%s}" % key, shlex.quote(value))
 print(template)
@@ -828,7 +870,7 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
     # its stderr into arms/direct-remote/runner.log, as direct-local's on mex (shown when the step fails)
     local errf="$RUN_DIR/.remote-step.err"
     mkdir -p "$RUN_DIR/arms/direct-remote"
-    out="$("$PY" "$HERE/run_direct.py" --arm direct-remote --base "$REMOTE_BASE" --out "$RUN_DIR/arms/direct-remote" \
+    out="$("$PY" "$SNAP/run_direct.py" --arm direct-remote --base "$REMOTE_BASE" --out "$RUN_DIR/arms/direct-remote" \
       "${ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"} < /dev/null 2> "$errf")" || rc=$?
     cat "$errf" >> "$RUN_DIR/arms/direct-remote/runner.log" 2>/dev/null || true
     if [[ $rc != 0 ]]; then tail -5 "$errf" | sed 's/^/    runner: /' >&2; fi

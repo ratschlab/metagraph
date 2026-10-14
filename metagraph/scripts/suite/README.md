@@ -180,19 +180,20 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
    DIR/executions.jsonl and jobs.jsonl, resumable, exit 0 / 1 / 130; 3 without the admin key under
    --check-queue, 2 when the key file is unreadable). Placeholders `{ids}`, `{repeat}` (the repeat index to
    run), `{repeats}` (`{repeat}` + 1, should a runner take a count), `{out}` (RUN_DIR/arms/mcp), `{manifest}`,
-   replaced with shell-quoted values; run with `bash -c` in this environment, unchanged (the runner reads its
-   admin key from there); its output goes to the terminal only. A full run (not --smoke) takes the default
+   `{checks_dir}` (the run's snapshot RUN_DIR/scripts, lane S7r), replaced with shell-quoted values; run with
+   `bash -c` in this environment, unchanged (the runner reads its admin key from there); its output goes to the
+   terminal and to arms/mcp/runner.log (lane S7r). A full run (not --smoke) takes the default
    template `DEFAULT_MCP_CMD` at the top of run_suite.sh, async's runner of branch feat/suite-mcp-runner:
 
        <search-service>/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py \
          --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue \
-         --queue-ignore sra-logan-chunks --checks-dir <this directory>
+         --queue-ignore sra-logan-chunks --checks-dir {checks_dir}
 
    so a full run is `METAGRAPH_ADMIN_KEY_FILE=/Users/raetsch/tmp/mgss/secrets/staging_admin_key
    ./run_suite.sh` (the key file is passed through, never logged; without it the script refuses to start,
    since the runner checks the service queue). `SUITE_MCP_CMD` replaces the default ('' for none), `--no-mcp`
    runs without the MCP arm, `--mcp-cmd default` asks for it in a smoke run, `--resume` keeps the run's
-   template. The runner judges with checks.py of `--checks-dir` (it has no stub fallback).
+   template. The runner judges with checks.py of `--checks-dir`, the run's snapshot (it has no stub fallback).
 7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
    included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
    left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to
@@ -1924,4 +1925,35 @@ by lane S6c; everything below was open.
   invocation's closing step: a deploy during an invocation shows at its end, one between an interrupt and the resume
   at the resume's end. In paired mode the first invocation of a run interrupted before its closing step has no end
   release; its resume's closing step has one.
+
+### The checks are pinned per run (P6-end-to-end-03)
+- Each paired direct-remote step was a fresh process importing checks.py and suite_common.py from this directory,
+  the MCP runner re-read `--checks-dir` (this directory) on every invocation, direct-local used the copy rsynced to
+  mex once at the start, run.json recorded only `checks_module: "checks"`, and merge_run compared manifests only: a
+  checks change landing during a five-hour run (7161cbcc was committed inside the v4 window) would have judged the
+  arms by different rules, silently.
+- **The run's snapshot.** The run's first invocation copies what runs and judges the arms
+  (`suite_common.SNAPSHOT_FILES`: run_direct.py, sampler.py, suite_common.py, checks.py, checks_stub.py,
+  service_by_design.json) into RUN_DIR/scripts, with RUN_DIR/scripts/SNAPSHOT.json (created_utc, source,
+  scripts_commit, sessions_before, the sha256 of each file). direct-remote runs `RUN_DIR/scripts/run_direct.py`, mex
+  gets the snapshot (rsync of RUN_DIR/scripts instead of this whole directory), and the MCP template's new
+  placeholder `{checks_dir}` is the snapshot (the default template passes `--checks-dir {checks_dir}`; a restored
+  template of before with `--checks-dir` this directory is rewritten to it; a template without `{checks_dir}` is
+  warned about at the start). A resume keeps the snapshot and says which files of this directory differ from it; the
+  first resume of a run older than the snapshot takes one then (`sessions_before` the earlier invocations). Each
+  session of orchestrator.json records `snapshot` {state created / kept, changed, live_differs, mcp_checks_dir}.
+- **What judged each arm.** run_direct records per session `checks_sha256`, `suite_common_sha256` and `checks_dir`
+  (of the modules it imported; the stub's file under --checks stub), and the latest at run.json's top. async's runner
+  records `checks_dir` per invocation (and `checks_module.file`); it records no sha256 yet (for async below).
+- **merge_run.checks_identity** (recorded sets; a re-evaluated set is judged with one checks module, the
+  re-evaluation's) compares them with the snapshot: a direct session whose checks or suite_common sha256 is not the
+  snapshot's (the stub's for a stub arm), an MCP invocation whose recorded checks directory is not RUN_ID/scripts (a
+  copy of the run elsewhere keeps that tail) or whose stated sha256 is not the snapshot's, and a snapshot file changed
+  after it was taken are `differs`; a session or invocation stating neither is `unverified` (a session that started
+  before the snapshot says so). Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
+  --strict-identity (exit 3) and for gate.py (kind identity; a run older than the snapshot passes the gate through a
+  re-evaluation). Without a snapshot (a run before lane S7r) only arms stating different sha256 are named. The
+  outcomes merge_run makes stricter with checks.scenario_outcome are the snapshot's checks' for a recorded set.
+- compare.py, report.py and gate.py's property reading still load this directory's checks.py and table for a
+  recorded set (lane S-verdict's files; noted for the integrator).
 

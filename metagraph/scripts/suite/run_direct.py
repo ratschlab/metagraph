@@ -155,6 +155,15 @@ def load_checks(mode):
     return checks_stub, "stub", error
 
 
+def checks_identity(checks):
+    """{checks_sha256, suite_common_sha256, checks_dir}: the files the checks module (lane S1's checks.py or the stub)
+    and suite_common were imported from (None for a module without a file, e.g. a test's)."""
+    path = getattr(checks, "__file__", None)
+    return {"checks_sha256": sc.file_sha256(path) if path else None,
+            "suite_common_sha256": sc.file_sha256(getattr(sc, "__file__", None)),
+            "checks_dir": os.path.dirname(os.path.abspath(path)) if path else None}
+
+
 def accepts_keyword(fn, name):
     """Whether |fn| takes the keyword |name| (a vendored checks.evaluate of before may not take `client`)."""
     try:
@@ -481,6 +490,10 @@ class Runner(object):
             if warning not in self.run.get("warnings", []):
                 self.run.setdefault("warnings", []).append(warning)
         self.session = {"started_utc": sc.iso_utc(time.time()), "host_load_start": host_load(), "state": "running"}
+        # what judged this session's executions: the sha256 of the checks module (or the stub) and of suite_common it
+        # imported, and their directory (run_suite.sh runs the arms from the run's snapshot; merge_run.py compares)
+        self.session.update(checks_identity(self.checks))
+        self.run.update(dict((k, self.session[k]) for k in ("checks_sha256", "suite_common_sha256", "checks_dir")))
         if self.args.only:
             self.session["only"] = self.args.only
         if self.args.finish:

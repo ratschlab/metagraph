@@ -1537,6 +1537,78 @@ def reevaluated_name(name, reevaluated=True):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# the run's snapshot of what judges its arms (P6-end-to-end-03)
+
+SNAPSHOT_DIR = "scripts"
+SNAPSHOT_FILE = "SNAPSHOT.json"
+# What the arms run and judge with: the direct runner and its sampler, the checks (or the stub) and suite_common they
+# import, and the by-design table the MCP runner reads beside its --checks-dir.
+SNAPSHOT_FILES = ("run_direct.py", "sampler.py", "suite_common.py", "checks.py", "checks_stub.py",
+                  "service_by_design.json")
+
+
+def file_sha256(path):
+    """The sha256 of a file's bytes, None when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except (OSError, TypeError):
+        return None
+
+
+def snapshot_dir(run_dir):
+    return os.path.join(run_dir, SNAPSHOT_DIR)
+
+
+def take_snapshot(source, run_dir, commit=None, sessions_before=0, now=None):
+    """Copies SNAPSHOT_FILES (those |source| has) into RUN_DIR/scripts and writes RUN_DIR/scripts/SNAPSHOT.json:
+    {created_utc, source, scripts_commit, sessions_before (the orchestrator sessions of the run before it: a resume of
+    a run older than its snapshot), files: {name: sha256}}. The arms of the run then run and judge with these copies
+    (run_suite.sh), whatever happens to |source| meanwhile."""
+    import shutil
+    import time
+    out = snapshot_dir(run_dir)
+    os.makedirs(out, exist_ok=True)
+    files = {}
+    for name in SNAPSHOT_FILES:
+        src = os.path.join(source, name)
+        if not os.path.isfile(src):
+            continue
+        shutil.copy2(src, os.path.join(out, name))
+        files[name] = file_sha256(os.path.join(out, name))
+    doc = {"created_utc": iso_utc(time.time() if now is None else now), "source": os.path.abspath(source),
+           "scripts_commit": commit, "sessions_before": sessions_before, "files": files}
+    write_json_atomic(os.path.join(out, SNAPSHOT_FILE), doc)
+    return doc
+
+
+def snapshot_state(run_dir, source=None):
+    """(SNAPSHOT.json of the run or None, the names whose snapshot file no longer has its recorded sha256, the names
+    whose file in |source| differs from the snapshot's)."""
+    doc = read_json(os.path.join(snapshot_dir(run_dir), SNAPSHOT_FILE))
+    if not isinstance(doc, dict):
+        return None, [], []
+    files = doc.get("files") or {}
+    changed = sorted(n for n, sha in files.items()
+                     if file_sha256(os.path.join(snapshot_dir(run_dir), n)) != sha)
+    live = []
+    if source:
+        live = sorted(n for n in SNAPSHOT_FILES
+                      if file_sha256(os.path.join(source, n)) != files.get(n))
+    return doc, changed, live
+
+
+def snapshot_pins(path, run_dir):
+    """Whether a checks directory a runner recorded is the run's snapshot: RUN_ID/scripts at its end (an absolute path
+    of the run directory as it was, which a copy of the run elsewhere keeps)."""
+    if not isinstance(path, str) or not path:
+        return False
+    p = os.path.normpath(path)
+    return os.path.basename(p) == SNAPSHOT_DIR and \
+        os.path.basename(os.path.dirname(p)) == os.path.basename(os.path.normpath(run_dir))
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # the suite lock on mex (review M4)
 
 def parse_etime(text):
@@ -1665,6 +1737,9 @@ def _main(argv):
                                  separated, the whole seconds to wait for a cancelled job)
     lock-break-cmd MEX_DIR HELD  print the shell command removing the lock only if it still holds HELD
     clock-offset T0 REMOTE T1    print REMOTE - (T0 + T1) / 2 (how far mex's clock is ahead)
+    snapshot RUN_DIR SOURCE COMMIT SESSIONS_BEFORE
+                                 take the run's snapshot (take_snapshot) unless it has one; print 'created' or
+                                 'kept', then 'changed NAME' / 'live-differs NAME' lines (snapshot_state)
     """
     import time
     if len(argv) >= 2 and argv[0] == "release-short":
@@ -1719,6 +1794,18 @@ def _main(argv):
         return 0
     if len(argv) >= 3 and argv[0] == "lock-break-cmd":
         print(lock_break_command(argv[1], argv[2]))
+        return 0
+    if len(argv) >= 5 and argv[0] == "snapshot":
+        doc, changed, live = snapshot_state(argv[1], argv[2])
+        if doc is None:
+            take_snapshot(argv[2], argv[1], argv[3] or None, int(argv[4] or 0))
+            print("created")
+            return 0
+        print("kept")
+        for name in changed:
+            print("changed %s" % name)
+        for name in live:
+            print("live-differs %s" % name)
         return 0
     if len(argv) >= 4 and argv[0] == "clock-offset":
         try:

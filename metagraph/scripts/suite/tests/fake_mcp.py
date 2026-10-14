@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A stand-in for the async session's MCP runner (scripts/bench/suite_mcp_runner.py) with its per-id CLI, for
-the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M. It appends one execution line
+the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M [--checks-dir DIR]. It appends one execution line
 per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
 scenario so) to DIR/executions.jsonl and its job to DIR/jobs.jsonl, skips what is recorded (resumable), and
 logs each call to DIR/calls.log with whether the environment variable SUITE_TEST_SECRET reached it (the value
@@ -13,8 +13,9 @@ to stderr and no line for any id (exit 1, a runner defect), only for a call that
 is set.
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
-identity and `service_capabilities` (the live read of the service's configuration); FAKE_MCP_CAPS `missing` leaves
-it out, `failed` records a failed read, `mismatch` a live / table mismatch."""
+identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
+out, `failed` records a failed read, `mismatch` a live / table mismatch) and the checks it judges with: `checks_dir`
+(--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}) and `checks_module` {file, stub}."""
 
 import argparse
 import json
@@ -32,6 +33,7 @@ def main(argv=None):
     ap.add_argument("--repeat", type=int, required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--manifest", required=True)
+    ap.add_argument("--checks-dir", default=None)
     args = ap.parse_args(argv)
     mode = os.environ.get("FAKE_MCP_MODE", "")
     if mode == "exit3":
@@ -48,6 +50,9 @@ def main(argv=None):
     ok, computed = sc.verify_manifest(manifest)
     run = {"arm": "mcp", "manifest": {"computed_sha256": computed, "content_sha256": manifest.get("content_sha256"),
                                       "sha_verified": ok}}
+    if args.checks_dir:
+        run.update(checks_dir=args.checks_dir,
+                   checks_module={"file": os.path.join(args.checks_dir, "checks.py"), "stub": False})
     caps = os.environ.get("FAKE_MCP_CAPS", "")
     if caps != "missing":
         doc = {"service_settings": {"advanced_enabled": False}}
