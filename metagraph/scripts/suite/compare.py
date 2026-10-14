@@ -1529,11 +1529,14 @@ def planned_duplicate(a, b, scenario):
 
 
 def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, scenario=None):
-    """Agreement of the two direct arms on every repeat both ran: identical (equal digests), disagree (a check differs,
-    or the outcomes differ other than by timing or a planned 409 duplicate), timing (the outcomes differ only on
-    repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no check compared),
-    same_checks. A repeat whose outcomes differ by a planned 409 duplicate (planned_duplicate, A2-06) is listed
-    under planned_duplicates and reads neither way."""
+    """Agreement of the two direct arms on every repeat both ran, in this order: disagree (a check differs, or the
+    outcomes differ other than by timing or a planned 409 duplicate), identical (equal digests), timing (the
+    outcomes differ only on repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no
+    check compared), same_checks. Equal digests never hide a differing check or an outcome difference no timing
+    explains (two byte-identical 503 bodies, one delivered before its budget and one at it, disagree); equal
+    digests whose outcomes differ by the determinism extension of timing_repeat stay identical. A repeat whose
+    outcomes differ by a planned 409 duplicate (planned_duplicate, A2-06) is listed under planned_duplicates and
+    reads neither way."""
     common = sorted(set(local) & set(remote))
     if not common:
         return None
@@ -1555,10 +1558,10 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
             ok, why = timing_repeat(local[r], remote[r], route, run_dir, checks_mod)
             (timing if ok else untimed).append({"repeat": r, "detail": why})
     outcome_equal = all(local[r].get("outcome") == remote[r].get("outcome") for r in common)
-    if digest_equal:
-        cls = "identical"
-    elif differing or untimed:
+    if differing or untimed:
         cls = "disagree"
+    elif digest_equal:
+        cls = "identical"
     elif timing:
         cls = "timing"
     elif not compared:

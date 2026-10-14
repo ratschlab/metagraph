@@ -1815,3 +1815,21 @@ service_by_design.json at sha256 ab4100c9...
   direct arm and repeat ("direct-local repeat 0: ...": R-budget-0001 / -0002, R-edge-0003, R-twin-0002 / -0003 /
   -0004 / -0005, in both runs), R-twin-0004's naming direct-remote's 200 before direct-local's 503 deadline.
 - 263 tests pass (1 skipped).
+
+## Lane S7v: the verdict findings of the two-day review (2026-10-14)
+The verdict items of the two-day review (~/.cache/metagraph-traverse-reviews/2026-10-14-ultracode/REPORT.md) on
+compare.py, reevaluate.py, report.py and suite_common.py's verdict parts, against 14552938 (lanes G1-G3 merged). Each
+rule below changed because a recorded or probed input read wrong; tests/test_verdict.py holds one test per rule, each
+failing on 14552938.
+
+### The direct arms' class with equal digests
+- `identical` was decided from equal digests before the checks and outcomes were read, so two byte-identical 503
+  bodies, one delivered before its budget (budget_respected fail) and one at it, read identical and were left out of
+  `direct_summary.disagreeing`. The order is now disagree (a check differs, or the outcomes differ other than by timing
+  or a planned 409 duplicate), identical, timing, not_comparable, same_checks. Deviation from the review's suggested
+  order (timing before identical): equal digests whose outcomes differ only by the determinism extension of timing
+  (G27: an earlier repeat was time-limited) stay identical, as test_compare_report pins it; no recorded run has such a
+  pair.
+- v4 moves (the defect's own instances): R-budget-0002 and R-twin-0002, byte-identical 503 deadline bodies on both
+  direct arms, direct-local inconclusive (its deadline within the budget's tolerance), direct-remote a finding
+  (budget_respected: the deadline delivered 9.5 s / 25.5 s after the budget), were identical and are disagree.
