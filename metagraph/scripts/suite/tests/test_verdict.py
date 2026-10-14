@@ -130,5 +130,59 @@ class ReferenceFallbackTest(unittest.TestCase):
         self.assertEqual(depth["S"]["not_compared"], [])
 
 
+class RelayedDeadlineHostCacheTest(unittest.TestCase):
+    """An MCP answer relaying a host deadline reached the host: the next execution is warm, not cold."""
+
+    def rows(self, error, time_limited=""):
+        return [
+            {"arm": "mcp", "scenario": "S", "repeat": 0, "http": 502, "error": error,
+             "mcp_phases": {"backend_ms": None}, "server": {"elapsed_ms": None},
+             "started_utc": "2026-10-14T07:12:57.757Z", "ended_utc": "2026-10-14T07:14:01.239Z",
+             "time_limited": time_limited},
+            {"arm": "direct-local", "scenario": "S", "repeat": 0, "http": 200, "server": {"elapsed_ms": 500},
+             "wall_ms": 600, "started_utc": "2026-10-14T07:14:02.739Z", "ended_utc": "2026-10-14T07:14:03.300Z"},
+            {"arm": "direct-remote", "scenario": "S", "repeat": 0, "http": 200, "server": {"elapsed_ms": 200},
+             "wall_ms": 400, "started_utc": "2026-10-14T07:14:21.000Z", "ended_utc": "2026-10-14T07:14:21.400Z"}]
+
+    def test_relayed_pattern_deadline(self):
+        rows = sc.assign_host_cache(self.rows({"code": "search_failed", "text": "pattern_deadline: pattern: ..."},
+                                              "the host's /pattern 503 deadline relayed by the service"))
+        self.assertEqual([(r["arm"], r["host_cache"], r["since_prev_s"]) for r in rows],
+                         [("mcp", "cold", None), ("direct-local", "warm", 1.5), ("direct-remote", "warm", 17.7)])
+        self.assertTrue(rows[1]["host_cache_after_interrupted"])
+        self.assertNotIn("host_cache_after_interrupted", rows[2])
+        fo = cmp.front_overhead({0: rows[1]}, {0: rows[2]})
+        self.assertIsNotNone(fo)
+        self.assertEqual(fo["after_interrupted"], ["direct-local"])
+
+    def test_each_relay_code(self):
+        for err in ({"code": "traversal_resolve_deadline", "text": "the backend could not build and write it"},
+                    {"code": "resolve_timeout", "text": "the backend did not answer within 30.25 s"},
+                    {"code": "uninterruptible_overrun_exceeds_allowance", "text": "x"}):
+            rows = sc.assign_host_cache(self.rows(err))
+            self.assertEqual((rows[0]["host_cache"], rows[1]["host_cache"]), ("cold", "warm"), err["code"])
+
+    def test_refusal_at_submit_still_not_reached(self):
+        for err in ({"code": "search_failed", "text": "backend unavailable"},
+                    {"code": "pattern_invalid", "text": "pattern_deadline is not a field"}):
+            rows = sc.assign_host_cache(self.rows(err))
+            self.assertEqual((rows[0]["host_cache"], rows[1]["host_cache"]), ("not_reached", "cold"), err)
+            self.assertNotIn("host_cache_after_interrupted", rows[1])
+
+    def test_mcp_overhead_and_service_answer_need_a_backend_timing(self):
+        relay = self.rows({"code": "traversal_resolve_deadline", "text": "t"})[0]
+        self.assertTrue(sc.reached_host(relay))
+        self.assertFalse(sc.backend_timed(relay))
+        self.assertIsNone(cmp.mcp_overhead({0: relay}, {}, {}))
+        self.assertFalse(cmp._service_answered(relay))
+
+    def test_direct_deadline_marks_the_next_execution(self):
+        rows = self.rows({"code": "search_failed", "text": "pattern_deadline: x"})[1:]
+        rows[0].update(http=503, error={"code": "deadline", "text": "nothing written"})
+        sc.assign_host_cache(rows)
+        self.assertEqual(rows[1]["host_cache"], "warm")
+        self.assertTrue(rows[1]["host_cache_after_interrupted"])
+
+
 if __name__ == "__main__":
     unittest.main()

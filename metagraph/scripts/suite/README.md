@@ -1851,3 +1851,21 @@ failing on 14552938.
   the error line's failing items against direct-remote's (M-planted-0016, M-protein-0002 / -0007,
   N-nearmiss-0006 / -0007 / -0013). gate.py's uncompared_properties (require_agreement only; the shipped policy does
   not set it) still reads the reference arm alone, so it is stricter than compare where an item fell back.
+
+### The host cache after a relayed deadline
+- suite_common.reached_host read an MCP execution as reaching the host only with a number in server.elapsed_ms or
+  mcp_phases.backend_ms; a relayed host deadline (502 search_failed "pattern_deadline: ...", 503
+  traversal_resolve_deadline, 504 resolve_timeout, uninterruptible_overrun_exceeds_allowance) states neither,
+  although the host worked 30-60 s, so it read not_reached and the next direct-local execution was labelled cold with
+  since_prev_s null (its server time a median 2.48x the warm remote's, against 24.9x for a truly cold one). Such an
+  answer (`relayed_host_deadline`: those codes, the relayed /pattern deadline's text, or a time_limited naming a relay)
+  reaches the host now. `backend_timed` keeps the old test where a backend timing is what matters: the MCP overheads
+  (a relayed deadline's wall is the deadline's) and whether a line records the service's answer.
+- assign_host_cache adds `host_cache_after_interrupted: true` (present only then) to an execution whose previous host
+  execution of the scenario ended at the host's deadline without its answer (`interrupted_on_host`: a direct 503
+  deadline or a relayed one); compare's front overhead names such arms (`after_interrupted`), its summary counts
+  `warm_pairs_after_interrupted`, and the report's Overheads section states the count (warm by the recent-repeat
+  heuristic, the cache possibly only partly filled).
+- Moves (timing only; no outcome, check, class or verdict): v4 39 MCP lines not_reached -> cold (27) / warm (12), the
+  27 direct-local r0 after them cold -> warm with since_prev_s; 70 lines gain host_cache_after_interrupted; warm
+  pairs 527 -> 537 (32 after an interrupted execution). v3: 10 MCP lines, 8 direct-local r0 cold -> warm.

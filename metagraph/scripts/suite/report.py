@@ -767,6 +767,11 @@ def overhead_section(comp):
         if v.get("n"):
             rows.append([md(labels[k]), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])])
     out.append(table(["difference (ms)", "n", "p50", "p90", "max"], rows))
+    if fo.get("warm_pairs_after_interrupted"):
+        out.append("%d of the warm pairs have an execution that followed one cut at the host's deadline (a direct 503 "
+                   "deadline or a deadline the service relayed: host_cache_after_interrupted); the host had worked on "
+                   "the request, so it reads warm, but its row cache may hold only part of a complete execution's.\n"
+                   % fo["warm_pairs_after_interrupted"])
     if fo.get("scenarios_without_warm_pair"):
         out.append("%d scenario(s) ran on both direct arms without a host-warm execution on each (the first arm "
                    "had only the cold one); they are not in the front cost.\n" % fo["scenarios_without_warm_pair"])

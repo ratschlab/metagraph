@@ -992,9 +992,10 @@ def match_service(service_answer, lines, run_dir):
 
 
 def _service_answered(line):
-    """Whether an MCP line records the service's answer: a 2xx status, or a backend call (sc.reached_host)."""
+    """Whether an MCP line records the service's answer: a 2xx status, or a backend call's timing (sc.backend_timed;
+    a relayed host deadline reached the host but records no answer of the service)."""
     http = line.get("http")
-    return (isinstance(http, int) and not isinstance(http, bool) and 200 <= http < 300) or sc.reached_host(line)
+    return (isinstance(http, int) and not isinstance(http, bool) and 200 <= http < 300) or sc.backend_timed(line)
 
 
 def _direct_side(case, direct_line, run_dir):
@@ -2303,24 +2304,29 @@ def front_overhead(local, remote):
     """direct-remote minus direct-local for one scenario, on a pair of host-warm executions only (review H1):
     the raw wall difference (connection set-up excluded), the client-side difference (wall minus the server's
     elapsed time on each side) and the server elapsed difference (near 0 when both are warm). None without a
-    warm execution on both arms (the scenario's cold execution is reported on its own)."""
+    warm execution on both arms (the scenario's cold execution is reported on its own). `after_interrupted` names
+    the arms whose execution followed one cut at the host's deadline (host_cache_after_interrupted)."""
     lw = first_with(local, "warm")
     rw = first_with(remote, "warm", prefer=lw.get("repeat") if lw else None)
     if lw is None or rw is None:
         return None
-    return {"local_repeat": lw.get("repeat"), "remote_repeat": rw.get("repeat"),
-            "wall_ms": _diff(wall_net(rw), wall_net(lw)),
-            "net_ms": _diff(_client_side(rw), _client_side(lw)),
-            "server_ms": _diff(_server_elapsed(rw), _server_elapsed(lw))}
+    out = {"local_repeat": lw.get("repeat"), "remote_repeat": rw.get("repeat"),
+           "wall_ms": _diff(wall_net(rw), wall_net(lw)),
+           "net_ms": _diff(_client_side(rw), _client_side(lw)),
+           "server_ms": _diff(_server_elapsed(rw), _server_elapsed(lw))}
+    cut = [x.get("arm") for x in (lw, rw) if x.get("host_cache_after_interrupted")]
+    if cut:
+        out["after_interrupted"] = cut
+    return out
 
 
 def mcp_overhead(mcp, local, remote):
     """MCP minus direct (DESIGN §5) on host-warm executions only: the MCP warm execution against each direct
     arm's first warm one, with and without the queue wait, and the service's backend time against both; the
     MCP cold execution's wall time apart."""
-    # Only executions that reached the host measure the MCP path; a refusal at submit or a request the MCP
-    # cannot express says nothing about it.
-    mcp = dict((k, v) for k, v in (mcp or {}).items() if sc.reached_host(v))
+    # Only executions with a backend call's timing measure the MCP path; a refusal at submit, a request the MCP
+    # cannot express or a relayed host deadline (its wall is the deadline's) says nothing about it.
+    mcp = dict((k, v) for k, v in (mcp or {}).items() if sc.backend_timed(v))
     if not mcp:
         return None
     m = first_with(mcp, "warm", prefer=1 if 1 in mcp else None)
@@ -2707,6 +2713,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     front_area = {}
     front_area_net = {}
     front_unpaired = 0
+    front_after_cut = 0
     mcp_vals = {}
     mcp_cold_walls = []
     mcp_phase_vals = {}
@@ -2771,6 +2778,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             if fo is None:
                 front_unpaired += 1
             else:
+                front_after_cut += 1 if fo.get("after_interrupted") else 0
                 for k in front_vals:
                     if fo.get(k) is not None:
                         front_vals[k].append(fo[k])
@@ -2860,6 +2868,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                                "per_area_wall": dict((a, sc.summarise(v)) for a, v in front_area.items()),
                                "per_area_net": dict((a, sc.summarise(v)) for a, v in front_area_net.items()),
                                "scenarios_without_warm_pair": front_unpaired,
+                               "warm_pairs_after_interrupted": front_after_cut,
                                "connect_ms": dict((a, sc.summarise(v)) for a, v in connect_vals.items()),
                                "cold": dict((a, dict((k, sc.summarise(v)) for k, v in cv.items()))
                                             for a, cv in cold_vals.items())},
