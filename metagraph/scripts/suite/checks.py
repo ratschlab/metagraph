@@ -2674,14 +2674,19 @@ _BLOCKED_ENDS = {"edge_reuse", "edge_reuse_rc", "rejoined_seed"}
 _STRUCTURAL_KNOBS = {("branching", "max_label_branches"): 0, ("branching", "max_splits_per_path"): 64,
                      ("branching", "min_successor_labels"): 1, ("branching", "min_successor_fraction"): 0.0,
                      ("bounds", "min_live_labels"): 1}
+# the same knobs under the exhaustive preset (§6.9: unlimited branches and splits, no quorum) and in annotate mode
+# (§5: no lineage to count, the quorum knobs refused)
+_PRESET_KNOBS = {("branching", "max_label_branches"): "unlimited", ("branching", "max_splits_per_path"): "unlimited",
+                 ("branching", "min_successor_labels"): 1, ("branching", "min_successor_fraction"): 0.0,
+                 ("bounds", "min_live_labels"): 1}
 
 
 def _strategy_knob(sc: dict, ans: dict, group: str, name: str) -> Any:
     """The value of strategy.<group>.<name> the walk ran with (SPEC-labeled-traversal-core §5): a clamp's effective
-    value (strategy.clamped), else the request's, else the answer's echo, else the default. The request comes before
-    the echo: a knob a service dropped or rewrote without a clamp is held to what the request asked, never excused
-    by its own echo. The exhaustive preset (§6.9) and annotate mode default the branch allowance and the split limit
-    to "unlimited"."""
+    value (strategy.clamped), else the request's, else the default of the request's exhaustive preset or annotate
+    mode (§6.9), else the answer's echo, else the default (the echo's preset or mode, else §5's). The request comes
+    before the echo: a knob a service dropped or rewrote without a clamp is held to what the request asked, never
+    excused by its own echo, and so is a preset's knob the request implies."""
     body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
     echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
     for c in echo.get("clamped") or []:
@@ -2693,9 +2698,8 @@ def _strategy_knob(sc: dict, ans: dict, group: str, name: str) -> Any:
         g = st.get(group)
         if isinstance(g, dict) and name in g:
             return g[name]
-    if (group, name) in (("branching", "max_label_branches"), ("branching", "max_splits_per_path")) and any(
-            st.get("exhaustive") is True or (st.get("labels") or {}).get("mode") == "annotate" for st in (req, echo)):
-        return "unlimited"
+        if st.get("exhaustive") is True or (st.get("labels") or {}).get("mode") == "annotate":
+            return _PRESET_KNOBS.get((group, name))
     return _STRUCTURAL_KNOBS.get((group, name))
 
 

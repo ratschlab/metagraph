@@ -1352,8 +1352,9 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   `split_limit`: max_splits_per_path finite and a route through that many splits; `edge_reuse`, `edge_reuse_rc`,
   `rejoined_seed`: a blocked event of that reason on the leaf at the path's end ("blocked continuations are
   always reported"). The knobs are the walk's: a stated clamp's effective value, else the request's, else the
-  echo's, else the default (SPEC §5; "unlimited" branches and splits under the exhaustive preset and in annotate
-  mode). The request comes before the echo, so a service that drops or rewrites an override is held to the
+  default of the request's exhaustive preset or annotate mode ("unlimited" branches and splits, no quorum: §5,
+  §6.9), else the echo's, else the default (the echo's preset or mode, else §5's). The request comes before the
+  echo, so a service that drops or rewrites an override, or a preset's knob the request implies, is held to the
   request, not excused by its own echo. A leaf with an end that cannot have happened shows none of its ends:
   walk_in_record fails "a stated stop that cannot have happened". The graphlet reader takes the lineage's values
   from the R records (structural_successors on the label_end events, `end_labels` with the branches at each

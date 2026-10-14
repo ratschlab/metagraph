@@ -2165,6 +2165,13 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(judge(*self.structural_walk(strategy={"branching": {"max_label_branches": "unlimited"}})),
                          ("fail", "fail"))
         self.assertEqual(judge(*self.structural_walk(strategy={"exhaustive": True})), ("fail", "fail"))
+        # the request's preset over the echo: an exhaustive request whose echo says max_label_branches 2 (a service
+        # that rewrote the preset) is held to the preset's unlimited allowance, as is annotate mode
+        for preset in ({"exhaustive": True}, {"labels": {"mode": "annotate"}}):
+            self.assertEqual(judge(*self.structural_walk(strategy=preset, echo={"branching": {
+                "max_label_branches": 2}})), ("fail", "fail"), preset)
+        self.assertEqual(judge(*self.structural_walk(echo={"exhaustive": False, "branching": {
+            "max_label_branches": 2}})), ("pass", "pass"))
         # the quorum and split-limit ends need their knob, in either form of the event
         for end, text in (("minority", None), ("branch", "minority")):
             self.assertEqual(judge(*self.structural_walk(end=end, text=text)), ("fail", "fail"))
