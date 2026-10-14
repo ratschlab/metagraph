@@ -1347,7 +1347,9 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   whose content or relations hash is not the run manifest's (or that does not state one). In an exploratory
   run it is a warning; `merge_run.py --strict-identity` (run_suite.sh --gate) writes the files and exits 3, and
   gate.py fails on it. The report's environment table shows both hashes and names a mismatch.
-- The async runner vendors suite_common.py: re-vendored, its `verify_manifest` checks the relations hash too.
+- The async runner vendors suite_common.py, but its load_manifests compares its own scenarios hash and never calls
+  verify_manifest: a re-vendor changes nothing at runtime; the runner's identity check is its own (the gate checks
+  the arm's manifest copy).
 
 ### The sequential mode's MCP repeats
 - The sequential mode ran the MCP arm's cold pass and the warm pass of repeat 1 only, so a sequential run never
@@ -1386,7 +1388,8 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   whose direct request states no bound, so R-edge-0012/0013, 100 bp refusals whose pair compare verifies, stay) and
   `advanced_path` (traverse_fetch overrides outside the service's basic list `_TRAVERSE_BASIC_OVERRIDES`, a preset
   other than walk / trie, a strategy object: T-labels-0004/0006). It lists the executions each arm must record (v4,
-  MCP: 191 scenarios, 388 executions), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
+  derived exclusions only, without --declared: MCP 191 scenarios, 388 executions; the shipped two-arm policy with the
+  declared file: MCP 189 / 384, direct-local 220 / 253), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
   the prefix_equals relations of the excluded R-budget / R-twin and the N-zero / C-caps relations with a partner
   outside the selection are listed as excluded), the property checks not required (none unless declared, below), and
   pins content_sha256, relations_sha256, index_fp and the by-design table's sha256. gate/policy_v4_rt_mcp.json is
@@ -1504,9 +1507,9 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   configuration, the 23 inconclusive, T-edge-0008's two recorded fails (traverse.duplicate_seeds, the old rule) and its
   MCP disagreement, the 3 label_dict_contains; the as-run copy adds P-iupac-0001 direct-remote r0, planned and not
   recorded (32).
-- The async runner vendors suite_common.py: re-vendored, its verify_manifest checks a stated relations_sha256 and
-  manifest_identity / manifest_problems are available (its load_manifests compares the scenarios' hash only). No
-  verdict rule of the mirror changes. gate.py reads the runner's agreed records (run.json service_capabilities,
+- The async runner vendors suite_common.py; its load_manifests compares the scenarios' hash only and never calls
+  verify_manifest, so a re-vendor changes nothing at runtime (manifest_identity / manifest_problems are there to use).
+  No verdict rule of the mirror changes. gate.py reads the runner's agreed records (run.json service_capabilities,
   the lines' request_evidence) and renormalised.json's commit / runner / client / input hashes where it records them.
 
 ### The two-arm gate and the owner's declared list (the verification of lane S6c, VERIFY-G3)
@@ -1528,34 +1531,45 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   T-edge-0008 not required on the MCP arm. v4 suite errors that block every v4 gate on a quiet host too (triage-v4,
   to be removed with the v5 manifest): T-labels-0004 on direct-local (V02, its modelled memory budget), T-budget-0003
   on both arms (G18, its work units below the seed's cost), T-attempts-0002 repeat 1 on direct-local (V04, the planned
-  409 duplicate), REL-prefix_equals-0001..0004 on direct-local (V05, never testable on this host). The owner reviews
-  the list (lane G3's DECLARED.md) before the policy is pinned.
+  409 duplicate), REL-prefix_equals-0001 / -0003 on direct-local (V05: a stated stop answers the prefix, never
+  testable on this host) and REL-prefix_equals-0002 on direct-local (its own reason: eco's full 10 kb, R-twin-0002,
+  never completed on this host, so the full-twin profile it compares against does not exist). REL-prefix_equals-0004
+  (twin half against full twin, no stated stop) stays required on direct-local: it passes on direct-remote in v3 and
+  v4. The owner reviews the list (lane G3's DECLARED.md) before the policy is pinned.
 - `needs_direct_arm`: a policy without a direct arm excludes on the MCP arm every scenario naming an answered or
-  clamped case with explains_checks (from the manifest and the table), so a clean MCP-only run passes; v4 MCP-only:
-  35 exclusions (R-edge-0009, T-edge-0007, T-edge-0008, C-caps-0001 besides the 31), 187 scenarios, 380 executions.
+  clamped case with explains_checks (from the manifest and the table: the service answers in place of the host's
+  answer), so a clean MCP-only run passes; v4 MCP-only without --declared: 35 exclusions (R-edge-0009, T-edge-0007,
+  T-edge-0008, C-caps-0001 besides the 31), 187 scenarios, 380 executions; with the declared file: 36 exclusions
+  (T-budget-0003 besides), 186 scenarios, 378 executions.
 - The advanced_path rule reads its list of basic override paths from the by-design table (the request predicate
   `overrides.` not_in [...] of traverse.advanced_path_disabled, lane S6b), so the policy and the comparator share one
   list; gate_policy.MCP_BASIC_OVERRIDES (the service's `_TRAVERSE_BASIC_OVERRIDES`) is only the fallback of a table
   without that case. gate/policy_v4_rt_mcp.json is regenerated after merging lanes S6g1 and S6b: the same
   selection, exclusions, required executions and relations; the pin is the merged table (sha256 ab4100c9).
 - v4's two-arm policy: 222 selected; MCP 189 scenarios / 384 executions (31 derived exclusions, the declared
-  C-caps-0001 and T-budget-0003), direct-local 220 / 253; REL-same_answer-0003 required on both arms, the four
-  prefix_equals relations excluded on both.
+  C-caps-0001 and T-budget-0003), direct-local 220 / 253; REL-same_answer-0003 required on both arms,
+  REL-prefix_equals-0004 on direct-local; REL-prefix_equals-0001..0003 excluded on both (on MCP derived, on
+  direct-local declared).
 - The v4 copy (re-evaluated) under it, on this branch with lanes S6g1 and S6b merged: `run_suite.sh --reevaluate v4
-  --gate gate/policy_v4_rt_mcp.json` exits 1 with 44 problems, 0 structural. Configuration and evidence 13 (v4
+  --gate gate/policy_v4_rt_mcp.json` exits 1 with 45 problems, 0 structural (with a caveat: 16 of the
+  load-dependent executions, V06's four 10 kb walks on both arms (12) and V05's four cold direct-local r0 503s, may
+  not complete on a quiet host either; the triage files them under ENVIRONMENT and coverage, the v5 manifest fixes
+  both). Configuration and evidence 13 (v4
   predates the runner's records): no live service_settings recorded; 1,333 of 1,333 MCP invocations without a read;
   11 reference paths the replay read from the table (the nine preset-row budgets on 14 executions,
-  service_settings.advanced_enabled on 4, service_settings.resolve.budget_ceiling_ms on 2). Load-dependent 31,
-  which the strict rule keeps blocking (the same before the merge, when configuration was 1 problem): MCP 19 inconclusive (R-pos-0027 r0 resolve_timeout; N-hard-0021
+  service_settings.advanced_enabled on 4, service_settings.resolve.budget_ceiling_ms on 2). Load-dependent 32,
+  which the strict rule keeps blocking: REL-prefix_equals-0004 inconclusive on direct-local (R-twin-0004's cold r0
+  503), MCP 19 inconclusive (R-pos-0027 r0 resolve_timeout; N-hard-0021
   r0, N-realrep-0002 r0, N-realrep-0025 r0 traversal_resolve_deadline; time-limited checks on T-walk-0004 r0, -0006
   r0 r1, -0012 r0 r1, -0014 r0, -0018 r0 r1, -0022 r0, -0036 r0 r1, T-repeat-0002 r0, T-repeat-0004 r0, T-labels-0003
   r0, N-hard-0022 r0) and direct-local 12 (503 deadlines on R-pos-0027, R-budget-0002, R-twin-0002, R-twin-0004 r0
   and R-budget-0001 r0's finding, a 503 past its budget, triage G22; time-limited walks on T-walk-0006, -0012, -0018,
   -0036, T-repeat-0004, T-labels-0003, T-coords-0003 r0). A clean, complete run built from the same copy (those
-  executions as a quiet host gives them, a capabilities read added; the not-exposed properties and the suite errors
-  left as recorded; on the merged branch the table's service block recorded as the live document and the copy
-  re-evaluated against it, so its references read live) passes this policy (exit 0) and the MCP-only policy derived
-  from the same declared file (exit 0); without the declared entries both fail on exactly the entries above.
+  executions as a quiet host gives them: MCP host states replaced by the scenario's passing repeat, direct-local 503s
+  by direct-remote's answer to the same request; the not-exposed properties and the suite errors left as recorded;
+  the table's service block recorded as the live document and the copy re-evaluated against it, so its references
+  read live) passes this policy (exit 0) and the MCP-only policy derived from the same declared file (exit 0);
+  without the declared entries both fail on exactly the entries above.
 
 ## Lane S6g1: checks that accept wrong answers (2026-10-14)
 
