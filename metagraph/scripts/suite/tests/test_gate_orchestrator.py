@@ -77,7 +77,7 @@ class IdsPlanAndGate(SuiteCase):
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertEqual(len(sc.read_json(os.path.join(run_dir, "plan.json"))["plans"]), 1)
             with open(os.path.join(run_dir, "report.md")) as fh:
-                self.assertNotIn("not recorded", fh.read().split("# Environment")[0])
+                self.assertNotIn("INCOMPLETE", fh.read().split("# Environment")[0])
             # an id the manifest lacks is refused before anything runs
             bad = self.write("bad.txt", "T-1 T-9\n")
             p = self.run_suite(host, "--manifest", self.mpath, "--ids", bad, "--no-mcp", "--checks", "stub")

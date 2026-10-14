@@ -167,9 +167,9 @@ def load_figures(samples):
             "n": len(samples)}
 
 
-def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None):
+def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None):
     """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
-    makes it INCOMPLETE, the MCP arm's included."""
+    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement."""
     s = comp["summary"]
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
@@ -244,10 +244,17 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None):
                              "changed", 0)))
     ma = s["mcp_agreement"]
     if ma.get("compared"):
-        lines.append("- MCP agreement: %d agree, %d not comparable (no check both arms evaluated), %d disagree; "
-                     "service-side by design %d verified, %d unverified." % (
-                         ma.get("agree", 0), ma.get("not_comparable", 0), ma.get("disagree", 0),
-                         ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0)))
+        dc = depth_counts(depth or {})
+        missing_mcp = sum(1 for k in ((missing or ([], None))[0]) if k[1] == "mcp")
+        lines.append("- MCP agreement: %d agree (%d fully checked, %d partial, %d partial with a non-pass aggregate, "
+                     "%d on failure, %d generic checks only, %d refusals; see Agreement), %d not comparable (no check "
+                     "both arms evaluated), %d disagree; service-side by design %d verified, %d unverified; %d not "
+                     "implemented via MCP; %d scenario(s) without an MCP execution, %d planned MCP execution(s) not "
+                     "recorded." % (
+                         ma.get("agree", 0), dc["full"], dc["partial"], dc["partial_non_pass"], dc["on_failure"],
+                         dc["generic_only"], dc["refusal"], ma.get("not_comparable", 0), ma.get("disagree", 0),
+                         ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0),
+                         ma.get("not_implemented_mcp", 0), ma.get("missing", 0), missing_mcp))
     if stub:
         lines.append("")
         lines.append("**Checks: the stub ran (HTTP status, error code and text only); every other expected check "
@@ -294,8 +301,9 @@ def load_caveat(lf):
     if lf["n"] == 0:
         return ("Load: no resource samples in this run (the sampler did not run), so the host load during the "
                 "timings is unknown; read the timings with that caveat.")
+    # the sampler's figures are contextual telemetry of the host, not a control of the load the timings ran under
     busy = (lf["sra_mean"] or 0) > LOAD_CAVEAT_SRA_CPU_PCT or (lf["load_mean"] or 0) > LOAD_CAVEAT_LOAD1
-    figures = "sra_all CPU mean %s %% (max %s %%), host load1 mean %s (max %s) over %d samples" % (
+    figures = "contextual telemetry: sra_all CPU mean %s %% (max %s %%), host load1 mean %s (max %s) over %d samples" % (
         fmt_num(lf["sra_mean"], 0), fmt_num(lf["sra_max"], 0), fmt_num(lf["load_mean"], 1),
         fmt_num(lf["load_max"], 1), lf["n"])
     if busy:
@@ -486,7 +494,82 @@ def failures_section(rows, manifest, max_failures):
     return "\n".join(out)
 
 
-def agreement_section(comp):
+DEPTH_CLASSES = (
+    ("full", "fully checked: every property check compared on every MCP repeat, MCP and reference pass"),
+    ("partial", "partial: a property check not compared (not exposed via MCP, or inconclusive), both pass"),
+    ("partial_non_pass", "partial, and a non-pass aggregate on the MCP or the reference side"),
+    ("on_failure", "on failure: every property check compared, a non-pass aggregate (e.g. both arms fail alike)"),
+    ("generic_only", "generic checks only: the scenario has property checks, none compared"),
+    ("refusal", "refusal: no property check, the generic checks (status, code, text) are the claim"),
+)
+JUDGED = ("pass", "fail", "finding")
+
+
+def agreement_depth(comp, rows, is_property):
+    """How much an MCP `agree` establishes, per scenario (VERIFY-B): compare's agree means the checks both arms
+    evaluated agree, not that the answers are equal or right. Each agreeing scenario's property checks
+    (checks.is_property; the generic ones, e.g. budget_respected which the MCP never sees, do not count) on each MCP
+    repeat against the reference arm's same repeat (else its first): {scenario: {class (DEPTH_CLASSES), not_compared
+    (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
+    where the MCP does not expose them)}}."""
+    by = {}
+    for r in rows:
+        by.setdefault(r.get("scenario"), {}).setdefault(r.get("arm"), {})[r.get("repeat")] = r
+    out = {}
+    for sid, entry in (comp.get("scenarios") or {}).items():
+        ma = entry.get("mcp_agreement") or {}
+        if ma.get("class") != "agree":
+            continue
+        ref = (by.get(sid) or {}).get(ma.get("reference")) or {}
+        mcp = (by.get(sid) or {}).get("mcp") or {}
+        if not ref or not mcp:
+            continue
+        ref0 = ref[min(ref)]
+        has_prop, compared, skipped, hidden = False, set(), set(), set()
+        for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
+            theirs = (ref.get(rep) or ref0).get("checks") or []
+            mine = mcp[rep].get("checks") or []
+            has_prop = has_prop or any(is_property(c.get("check")) for c in mine + theirs)
+            ca, cb = {}, {}
+            for c in mine:
+                ca.setdefault(c.get("check"), []).append(c.get("outcome"))
+            for c in theirs:
+                cb.setdefault(c.get("check"), []).append(c.get("outcome"))
+            for name in set(ca) & set(cb):
+                if not is_property(name):
+                    continue
+                for oa, ob in zip(ca[name], cb[name]):
+                    if oa in JUDGED and ob in JUDGED:
+                        compared.add(name)
+                    else:
+                        skipped.add(name)
+                        if oa == "not_exposed" and ob in ("fail", "finding"):
+                            hidden.add(name)
+        agg_ok = ma.get("mcp_outcome") == "pass" and ma.get("reference_outcome") == "pass"
+        if not has_prop:
+            cls = "refusal"
+        elif not compared:
+            cls = "generic_only"
+        elif skipped and not agg_ok:
+            cls = "partial_non_pass"
+        elif skipped:
+            cls = "partial"
+        elif not agg_ok:
+            cls = "on_failure"
+        else:
+            cls = "full"
+        out[sid] = {"class": cls, "not_compared": sorted(skipped), "reference_fails_hidden": sorted(hidden)}
+    return out
+
+
+def depth_counts(depth):
+    counts = dict((k, 0) for k, _ in DEPTH_CLASSES)
+    for v in depth.values():
+        counts[v["class"]] = counts.get(v["class"], 0) + 1
+    return counts
+
+
+def agreement_section(comp, depth=None):
     s = comp["summary"]
     da = s["direct_agreement"]
     out = ["# Agreement between the arms", "", "## direct-local vs direct-remote", ""]
@@ -532,6 +615,29 @@ def agreement_section(comp):
                "mark).\n" % (ma.get("checks_compared", 0), ma.get("checks_not_exposed", 0),
                               ma.get("checks_inconclusive", 0), ma.get("by_design_verified", 0),
                               ma.get("by_design_unverified", 0)))
+    if depth:
+        counts = depth_counts(depth)
+        out.append("What an `agree` establishes: agreement of the checks both arms evaluated, not equal or right "
+                   "answers (two equally wrong answers agree; a checker defect is shared by every arm). The %d "
+                   "agreeing scenario(s) by how much of their claim was compared (property checks; the generic ones, "
+                   "e.g. budget_respected, which the MCP never sees, do not count):\n" % sum(counts.values()))
+        rows = []
+        for key, label in DEPTH_CLASSES:
+            sids = [sid for sid in comp["order"] if (depth.get(sid) or {}).get("class") == key]
+            if key == "full":
+                shown = "-"
+            else:
+                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(depth[x]["not_compared"])))
+                                            if depth[x]["not_compared"] and key.startswith("partial") else "")
+                                  for x in sids[:60]) + (" ..." if len(sids) > 60 else "")
+            rows.append([md(label), str(len(sids)), shown or "-"])
+        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared)"], rows,
+                         align=["l", "r", "l"]))
+        hidden = [(sid, depth[sid]["reference_fails_hidden"]) for sid in comp["order"]
+                  if (depth.get(sid) or {}).get("reference_fails_hidden")]
+        if hidden:
+            out.append("Agreeing although the reference arm fails a check the MCP does not expose (the MCP cannot "
+                       "show it holds): %s.\n" % "; ".join("%s: %s" % (md(sid), md(", ".join(c))) for sid, c in hidden))
     rows = []
     for sid in comp["order"]:
         a = comp["scenarios"][sid].get("mcp_agreement") or {}
@@ -634,7 +740,8 @@ def overhead_section(comp):
     fo = s["front_overhead"]
     out = ["# Overheads", "", "## Front: direct-remote minus direct-local", "",
            "The laptop's network and the front proxy on dnaloc-new, for the same request, on pairs of host-warm "
-           "executions only (both arms answered from a warm row cache), so the difference is not a cache effect. "
+           "executions only: both executions meet the recent-repeat heuristic (another execution of the scenario "
+           "ended on the host within 60 s before); cache residency and foreign load were not controlled. "
            "Each request is timed on an established connection: the TCP and TLS set-up is recorded apart "
            "(below) and is not part of the front cost. The client-side row compares wall minus the server's own "
            "elapsed time on each side; it needs the answer's timing, so error answers and the capabilities "
@@ -702,8 +809,9 @@ def overhead_section(comp):
 
 def resources_section(comp):
     s = comp["summary"]
-    out = ["# Resource use per area", "",
-           "Samples of `docker stats` every 2 s joined to each execution's time window (start - 1 s to end + 2 s, "
+    out = ["# Resource telemetry per area (contextual)", "",
+           "Contextual telemetry, not a measurement of the suite's requests and not a benchmark: samples of "
+           "`docker stats` every 2 s joined to each execution's time window (start - 1 s to end + 2 s, "
            "else the nearest sample within 5 s). The CPU and memory columns are figures of the staging container "
            "while the suite ran (shared with any other traffic it served), not of the suite's request alone; a "
            "2 ms request is attributed a 3 s window. Peak server memory is the answers' own "
@@ -870,8 +978,10 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
              "subtitle: \"/traverse, /resolve, /pattern on %s\"" % ascii_safe(
                  ((manifest or {}).get("index") or {}).get("database") or "refseq33m-experimental"),
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
+    is_property = gate_mod._is_property_fn(cmp.reevaluation_checks_dir(run_dir) if reevaluated else None)
+    depth = agreement_depth(comp, rows, is_property)
     parts.append(verdict_section(run, comp, rows, samples, reevaluated,
-                                 gate_mod.missing_planned(run_dir, manifest, rows)))
+                                 gate_mod.missing_planned(run_dir, manifest, rows), depth))
     parts.append(gate_section(run_dir, reevaluated, max_failures))
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures, run))
@@ -879,7 +989,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))
     parts.append(findings_section(rows, manifest, max_failures))
-    parts.append(agreement_section(comp))
+    parts.append(agreement_section(comp, depth))
     parts.append(relations_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))

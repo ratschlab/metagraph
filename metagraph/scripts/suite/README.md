@@ -1441,3 +1441,20 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   async's renormaliser (feat/suite-mcp-runner-vendored) rebuilds what its payloads allow and copies the rest
   (not implemented, documents not kept, runner errors), marking every line; its outcome fields stay stale until the
   re-evaluation, which the report then states as above.
+
+### The report's wording
+- The front cost (Overheads) is taken on pairs of host-warm executions: "both executions meet the recent-repeat
+  heuristic (another execution of the scenario ended on the host within 60 s before); cache residency and foreign load
+  were not controlled". It said both arms answered from a warm row cache, so the difference was not a cache effect: the
+  host_cache value is a recency heuristic (suite_common.assign_host_cache), not a measured residency (VERIFY-A).
+- The resource figures are labelled contextual telemetry: the section is "Resource telemetry per area (contextual)",
+  and the load caveat's figures say so; they describe the shared staging container, not the suite's requests.
+- The MCP agreement is split by how much of a scenario's claim was compared (`report.agreement_depth`, VERIFY-B's
+  classes, on property checks; budget_respected, which the MCP never sees, is generic and does not count): fully
+  checked, partial (naming the property checks not compared), partial with a non-pass aggregate, on failure (every
+  property compared, a non-pass aggregate: the arms fail alike), generic checks only, refusal; the verdict line gives
+  these counts beside not comparable, disagree, by design verified / unverified, not implemented, the scenarios
+  without an MCP execution and the planned MCP executions not recorded; an agreeing scenario whose reference fails a
+  check the MCP does not expose is named apart. v3-S5e: 542 agree = 480 / 26 / 16 / 1 (Q-more-0003) / 8 / 11, with
+  T-labels-0004 agreeing while both direct arms fail label_dict_contains; v4: 534 = 479 / 24 / 14 / 0 / 7 / 10.
+- The Re-evaluation section counts the changed records and the changed outcomes apart (above).

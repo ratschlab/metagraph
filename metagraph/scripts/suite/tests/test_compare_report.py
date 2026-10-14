@@ -1475,7 +1475,7 @@ class ReportTest(unittest.TestCase):
         text = report.build_report(self.dir)
         for heading in ("# Verdict", "# Environment", "# Outcomes per area", "# Failures",
                         "# Agreement between the arms", "# Timing", "## Cold vs warm", "# Overheads",
-                        "# Resource use per area"):
+                        "# Resource telemetry per area (contextual)"):
             self.assertIn(heading, text)
         text.encode("ascii")  # ASCII-safe throughout
         self.assertIn("INCOMPLETE", text)  # direct-remote was interrupted
