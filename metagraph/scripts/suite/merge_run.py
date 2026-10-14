@@ -289,7 +289,8 @@ def checks_identity(run_dir, arm_runs):
     states}, differs: sentences (an arm judged with other checks than the snapshot's, the snapshot's own files changed;
     without a snapshot: arms that state different checks), unverified: sentences (an arm or session that states
     neither a sha256 nor, for the MCP runner, a checks directory), errors: what --strict-identity and the gate fail on
-    (differs, and unverified where the run has a snapshot)}."""
+    (differs, and unverified where the run has a snapshot)}; one sentence per arm and kind (a paired run has a session
+    per step)."""
     snap, changed, _ = sc.snapshot_state(run_dir)
     files = (snap or {}).get("files") or {}
     created = sc.parse_utc((snap or {}).get("created_utc"))
@@ -298,24 +299,35 @@ def checks_identity(run_dir, arm_runs):
     for arm in sorted(arm_runs, key=lambda n: (ARM_ORDER.get(n, 9), n)):
         run = arm_runs[arm] if isinstance(arm_runs[arm], dict) else {}
         if arm in sc.DIRECT_ARMS:
-            want_checks = files.get("checks_stub.py" if judged_by_stub(run) else "checks.py")
-            entries = []
-            for i, sess in enumerate(run.get("sessions") or []):
-                cs, ss = sess.get("checks_sha256"), sess.get("suite_common_sha256")
-                entries.append({"session": i, "checks_sha256": cs, "suite_common_sha256": ss})
-                where = "arms/%s session %d" % (arm, i)
-                if not cs:
-                    before = created is not None and (sc.parse_utc(sess.get("started_utc")) or 0.0) < created
-                    unverified.append("%s states no checks sha256 (%s)" % (
-                        where, "it ran before the run's snapshot was taken" if before else "a runner of before the field"))
+            want = {"checks": files.get("checks_stub.py" if judged_by_stub(run) else "checks.py"),
+                    "suite_common": files.get("suite_common.py")}
+            sessions = run.get("sessions") or []
+            unstated, before, other = 0, 0, {}
+            for i, sess in enumerate(sessions):
+                got = {"checks": sess.get("checks_sha256"), "suite_common": sess.get("suite_common_sha256")}
+                if not got["checks"]:
+                    unstated += 1
+                    before += created is not None and (sc.parse_utc(sess.get("started_utc")) or 0.0) < created
                     continue
-                stated.setdefault((cs, ss), []).append(where)
+                stated.setdefault((got["checks"], got["suite_common"]), []).append("arms/%s session %d" % (arm, i))
                 if snap is not None:
-                    for name, got, want in (("checks", cs, want_checks), ("suite_common", ss, files.get("suite_common.py"))):
-                        if got != want:
-                            differs.append("%s judged with %s sha256 %s, the run's snapshot's %s" % (
-                                where, name, str(got)[:12], str(want)[:12]))
-            arms[arm] = entries
+                    for name in ("checks", "suite_common"):
+                        if got[name] != want[name]:
+                            other.setdefault((name, got[name]), []).append(i)
+            arms[arm] = {"sessions": len(sessions), "unstated": unstated,
+                         "checks_sha256": sorted(set(x.get("checks_sha256") for x in sessions
+                                                     if x.get("checks_sha256"))),
+                         "suite_common_sha256": sorted(set(x.get("suite_common_sha256") for x in sessions
+                                                           if x.get("suite_common_sha256")))}
+            if unstated:
+                unverified.append("arms/%s: %d of %d session(s) state no checks sha256 (%s)" % (
+                    arm, unstated, len(sessions), "%d ran before the run's snapshot was taken" % before if before
+                    else "a runner of before the field"))
+            for (name, got), idx in sorted(other.items(), key=lambda kv: kv[1][0]):
+                differs.append("arms/%s: %d of %d session(s) judged with %s sha256 %s (sessions %s), the run's "
+                               "snapshot's %s" % (arm, len(idx), len(sessions), name, str(got)[:12],
+                                                  ", ".join(str(i) for i in idx[:5]) + (" ..." if len(idx) > 5 else ""),
+                                                  str(want[name])[:12]))
         else:
             invs = [x for x in run.get("invocations") or [] if isinstance(x, dict)] or [run]
             entries = []

@@ -137,7 +137,8 @@ class MergeChecksIdentityTest(unittest.TestCase):
         # direct-local imported another checks.py; the MCP runner judged with the live tree, not the snapshot
         merged = merge_run.merge(self.make(direct_sha="0" * 64, mcp_dir="/somewhere/metagraph/scripts/suite"))
         errors = merged["checks_identity"]["errors"]
-        self.assertTrue([e for e in errors if e.startswith("arms/direct-local session 0 judged with checks sha256 000000000000")])
+        self.assertTrue([e for e in errors if e.startswith("arms/direct-local: 1 of 1 session(s) judged with checks "
+                                                           "sha256 000000000000 (sessions 0), the run's snapshot's")])
         self.assertTrue([e for e in errors if e.startswith("arms/mcp: 1 of 1 invocation(s) judged with other checks")])
         self.assertEqual(len([w for w in merged["warnings"] if "judged with" in w]), 3)
         rc, err = self.strict(self.run_dir)
@@ -150,7 +151,7 @@ class MergeChecksIdentityTest(unittest.TestCase):
         merged = merge_run.merge(self.make(direct_sha=None, mcp_dir=None, started=sc.iso_utc(T0 - 3600)))
         ident = merged["checks_identity"]
         self.assertEqual(ident["unverified"], [
-            "arms/direct-local session 0 states no checks sha256 (it ran before the run's snapshot was taken)",
+            "arms/direct-local: 1 of 1 session(s) state no checks sha256 (1 ran before the run's snapshot was taken)",
             "arms/mcp: 1 of 1 invocation(s) state no checks directory or sha256"])
         self.assertEqual(ident["errors"], ident["unverified"])
         rc, err = self.strict(self.run_dir)

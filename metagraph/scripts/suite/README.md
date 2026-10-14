@@ -1949,8 +1949,8 @@ by lane S6c; everything below was open.
   re-evaluation's) compares them with the snapshot: a direct session whose checks or suite_common sha256 is not the
   snapshot's (the stub's for a stub arm), an MCP invocation whose recorded checks directory is not RUN_ID/scripts (a
   copy of the run elsewhere keeps that tail) or whose stated sha256 is not the snapshot's, and a snapshot file changed
-  after it was taken are `differs`; a session or invocation stating neither is `unverified` (a session that started
-  before the snapshot says so). Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
+  after it was taken are `differs`; a session or invocation stating neither is `unverified` (sessions that started
+  before the snapshot are counted apart); one sentence per arm and kind, since a paired run has a session per step. Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
   --strict-identity (exit 3) and for gate.py (kind identity; a run older than the snapshot passes the gate through a
   re-evaluation). Without a snapshot (a run before lane S7r) only arms stating different sha256 are named. The
   outcomes merge_run makes stricter with checks.scenario_outcome are the snapshot's checks' for a recorded set.
