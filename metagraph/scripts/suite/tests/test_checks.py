@@ -1885,6 +1885,16 @@ class TraverseChecks(unittest.TestCase):
         self.assertIn("before the record's base 'S', which no k-mer of the graph holds: a truth gap", d)
         o, d = outcome(sc_s, self.walk({"right": right}, reason="label_lost"), "walk_in_record")
         self.assertEqual(o, "inconclusive")      # also on a complete arm
+        # a resource end stated below complete_to_bp cannot have happened (§6.10: every path that ended before it
+        # ended for a semantic reason): the walk and the invariants fail, at the frontier it is a stated stop
+        capped = dict(status="truncated", trig="time_budget", reason="time_budget")
+        o, d = outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **capped), "walk_in_record")
+        self.assertEqual(o, "fail")
+        self.assertIn("below the arm's complete_to_bp 60", d)
+        self.assertEqual(outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **capped),
+                                 "invariants")[0], "fail")
+        self.assertEqual(outcome(sc, self.walk({"right": right}, **capped), "walk_in_record")[0], "inconclusive")
+        self.assertEqual(outcome(sc, self.walk({"right": right}, **capped), "invariants")[0], "pass")
         sc_l = scen(record[:start - 31] + "N" + record[start - 30:], "left")
         o, d = outcome(sc_l, self.walk({"left": left}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
         self.assertEqual(o, "inconclusive")

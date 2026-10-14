@@ -978,9 +978,23 @@ def _resource_end_problem(r: dict, armo: dict, side: str, reasons: Iterable[str]
         side, named, trig)
 
 
+def _resource_end_below_frontier(armo: dict, side: str, p: dict) -> Optional[str]:
+    """Why path |p| cannot have ended by the resource reason it states, or None: a cap ends walks at the level it
+    trips, at or past the arm's complete_to_bp, and "every path that ended before complete_to_bp ended for the
+    reported semantic reason" (SPEC-labeled-traversal-core §6.10); not judged where the arm states no
+    complete_to_bp."""
+    ends = ({p.get("path_reason")} | set(p.get("end_reasons") or {})) & _RESOURCE_ENDS
+    ctb, L = armo.get("complete_to_bp"), p.get("length_bp")
+    if not ends or not _finite(ctb) or not _finite(L) or L >= ctb:
+        return None
+    return "%s: path %s ended by %s at %d bp, below the arm's complete_to_bp %d (every path that ended before it " \
+           "ended for a semantic reason: §6.10)" % (side, p.get("id"), "/".join(sorted(ends)), L, ctb)
+
+
 def _path_resource_problems(sc: dict, r: dict, i: int) -> List[str]:
     """_resource_end_problem for every path of the requested arms of seed result |r| (its path_reason and the label
-    end reasons it counts: a resource reason censors the path's labels with the same reason, §7.0)."""
+    end reasons it counts: a resource reason censors the path's labels with the same reason, §7.0), and
+    _resource_end_below_frontier."""
     probs: List[str] = []
     for side in _arms_of(sc, i):
         armo = (r.get("arms") or {}).get(side)
@@ -994,6 +1008,9 @@ def _path_resource_problems(sc: dict, r: dict, i: int) -> List[str]:
                 m = _resource_end_problem(r, armo, side, ends)
                 if m:
                     probs.append("seed %d %s (path %s)" % (i, m, p.get("id")))
+            m = _resource_end_below_frontier(armo, side, p)
+            if m:
+                probs.append("seed %d %s" % (i, m))
     return probs
 
 
@@ -3143,7 +3160,9 @@ def check_walk_in_record(sc, ans, a, arm):
                 else:
                     possible |= pe & _STATED_STRUCTURAL_ENDS
         # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
-        unstopped = _resource_end_problem(r, armo, side, ends)
+        unstopped = _resource_end_problem(r, armo, side, ends) or next(
+            (m for m in (_resource_end_below_frontier(armo, side, p) for p, f in following if len(f) == best) if m),
+            None)
         gap = _computed_block(sc, ans, r, i, t, copies[0], side, L) if exact is not None else None
         odd_base = _outside_alphabet(frames, side, following, best)
         if ends & _STATED_STRUCTURAL_ENDS and exact is None and possible:
