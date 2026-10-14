@@ -1392,3 +1392,11 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   stop), output_budget, anchor_labels_truncated, predicate_budget, or discovery_budget with the count left exact.
   0 of the 3,567 recorded entries of v3 and v4 (all arms) and none of the engine's stored pattern fixtures states
   a reason these rules refuse.
+- /pattern, a result listed twice (SPEC-pattern-search §7.1, §12.1, §21.4; the invariants): a context is one
+  k-mer at an offset in an orientation at one level, (node, kmer, offset, strand), a path its nodes in an
+  orientation, (nodes, sequence, strand); each is listed once. The order check accepts equal keys and
+  counts_consistent compares the list's length, so a copy in place of a distinct result passed both. Closed: P-modes-0002 with its
+  second context replaced by a copy of the first, L-long-0006's path list [+, +] (its '-' path dropped), P-scope-0001
+  with its count and partitions doubled and every context listed twice (with every exact count anchored by a
+  complete list, a doubled count can no longer be padded). 0 duplicates among the 358,157 recorded results of v3
+  and v4. A duplicate page boundary of the MCP's paging is the runner's to test (its normaliser).

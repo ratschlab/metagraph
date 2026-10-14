@@ -1947,6 +1947,24 @@ def _pattern_entry_problems(sc: dict, i: int, e: dict, limits: dict, sticky: Opt
             keys.append((0, (r.get("nodes") or [0])[0], _ORIENT_RANK.get(strand, 3), r["sequence"]))
     if keys != sorted(keys):
         probs.append("p%d: results not in answer order" % i)
+    # a context is one k-mer at an offset in an orientation, listed at one level (SPEC-pattern-search §7.1,
+    # §21.4), a path its nodes in an orientation (§12.1): each is listed once, whatever the order says of equal keys
+    # (a copy in place of a distinct result keeps the list's length, which counts_consistent compares)
+    seen: Dict[tuple, int] = {}
+    for j, r in enumerate(res):
+        o = r.get("strand", r.get("orientation"))
+        if "kmer" in r:
+            ident = ("context", r.get("node"), r.get("kmer"), r.get("offset"), o)
+        elif "sequence" in r:
+            ident = ("path", tuple(r.get("nodes") or ()), r.get("sequence"), o)
+        else:
+            continue
+        if ident in seen:
+            probs.append("p%d r%d: the result of r%d listed again (%s %s)" % (
+                i, j, seen[ident], o, ("offset %s of %s" % (r.get("offset"), r.get("kmer"))) if "kmer" in r
+                else "path %s..." % str(r.get("sequence"))[:20]))
+        else:
+            seen[ident] = j
     if e.get("retrieval_complete"):
         name = _primary_count_name(e, req)
         c = counts.get(name)

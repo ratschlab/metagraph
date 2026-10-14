@@ -396,6 +396,43 @@ class PatternChecks(unittest.TestCase):
         bad["patterns"][0]["returned"] += 1
         self.assertEqual(outcome(sc2, ok_answer(bad), "invariants")[0], "fail")
 
+    def test_invariants_refuse_a_result_listed_twice(self):
+        # lane S6g1 (the review of 2026-10-14, finding 5): a copy of a context or path in place of a distinct one
+        # keeps the list's length and order (equal keys sort as equal), so only the identity tells it
+        req = {"mode": "partial", "max_contexts": 2, "patterns": [{"dna": "ACGTACGTAC", "id": "w"}]}
+        sc = {"route": "POST /pattern", "request": req, "truth": {}}
+        k1, k2 = "T" * 21 + "ACGTACGTAC", "G" * 21 + "ACGTACGTAC"
+        r1 = {"kmer": k1, "node": 5, "offset": 21, "instance": "ACGTACGTAC", "strand": "+"}
+        r2 = {"kmer": k2, "node": 9, "offset": 21, "instance": "ACGTACGTAC", "strand": "+"}
+
+        def ans(results):
+            e = {"id": "w", "mode": "partial", "returned": len(results), "results": results, "stop": None,
+                 "withheld": None, "cut": {"reason": "max_contexts"}, "retrieval_complete": False,
+                 "counts": {"contexts": {"relation": "exact", "value": 3, "by_offset": dict(
+                     (str(o), {"relation": "exact", "value": 3 if o == 21 else 0}) for o in range(22))}}}
+            return ok_answer({"patterns": [e], "limits": {"max_contexts": 2}})
+        self.assertEqual(outcome(sc, ans([r1, r2]), "invariants")[0], "pass")
+        self.assertEqual(outcome(sc, ans([r1, r2]), "counts_consistent")[0], "pass")
+        o, d = outcome(sc, ans([r1, dict(r1)]), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("the result of r0 listed again", d)
+        # a path is its nodes in an orientation (L-long-0006 with its '-' path dropped and the '+' path twice)
+        P = "ACGT" * 10
+        lreq = {"mode": "all_or_count", "long_search": "paths", "patterns": [{"dna": P, "id": "w"}]}
+        lsc = {"route": "POST /pattern", "request": lreq, "truth": {}}
+        path = {"sequence": P, "instance": P, "offset": 0, "strand": "+", "nodes": list(range(10))}
+
+        def lans(results):
+            e = {"id": "w", "mode": "all_or_count", "returned": len(results), "results": results, "stop": None,
+                 "withheld": None, "retrieval_complete": True,
+                 "counts": {"anchors": {"relation": "exact", "value": 2},
+                            "paths": {"relation": "exact", "value": len(results)}}}
+            return ok_answer({"patterns": [e], "limits": {"max_paths": 10}})
+        self.assertEqual(outcome(lsc, lans([path]), "invariants")[0], "pass")
+        o, d = outcome(lsc, lans([path, dict(path)]), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("listed again", d)
+
     def test_counts_consistent_refuses(self):
         req, ans = fixture("all_or_count")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}
