@@ -1871,7 +1871,8 @@ failing on 14552938.
   although the host worked 30-60 s, so it read not_reached and the next direct-local execution was labelled cold with
   since_prev_s null (its server time a median 2.48x the warm remote's, against 24.9x for a truly cold one). Such an
   answer (`relayed_host_deadline`: those codes, the relayed /pattern deadline's text, or a time_limited naming a relay)
-  reaches the host now. `backend_timed` keeps the old test where a backend timing is what matters: the MCP overheads
+  reaches the host now, except a resolve_timeout in the write phase (the line's timeout_terms, else its error's
+  timeout_phase: the service may never have delivered the request; the recorded ones are all read timeouts). `backend_timed` keeps the old test where a backend timing is what matters: the MCP overheads
   (a relayed deadline's wall is the deadline's) and whether a line records the service's answer.
 - assign_host_cache adds `host_cache_after_interrupted: true` (present only then) to an execution whose previous host
   execution of the scenario ended at the host's deadline without its answer (`interrupted_on_host`: a direct 503

@@ -351,9 +351,15 @@ def backend_timed(line):
 
 def relayed_host_deadline(line):
     """Whether an MCP execution's answer relays a host deadline (RELAYED_DEADLINE_CODES, the relayed /pattern
-    deadline, or a time_limited naming a relay): the host worked on it, without a timing on record."""
+    deadline, or a time_limited naming a relay): the host worked on it, without a timing on record. A resolve_timeout
+    in the write phase (the line's timeout_terms, else its error's timeout_phase) is none: the service may never have
+    delivered the request."""
     err = line.get("error") if isinstance(line.get("error"), dict) else {}
     code = str(err.get("code") or "")
+    if code == "resolve_timeout":
+        terms = line.get("timeout_terms") if isinstance(line.get("timeout_terms"), dict) else {}
+        if (terms.get("timeout_phase") or err.get("timeout_phase")) == "write":
+            return False
     if code in RELAYED_DEADLINE_CODES:
         return True
     if code == RELAYED_PATTERN_DEADLINE[0] and str(err.get("text") or "").startswith(RELAYED_PATTERN_DEADLINE[1]):

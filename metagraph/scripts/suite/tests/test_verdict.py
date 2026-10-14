@@ -204,6 +204,16 @@ class RelayedDeadlineHostCacheTest(unittest.TestCase):
             rows = sc.assign_host_cache(self.rows(err))
             self.assertEqual((rows[0]["host_cache"], rows[1]["host_cache"]), ("cold", "warm"), err["code"])
 
+    def test_resolve_timeout_in_the_write_phase_did_not_reach(self):
+        write = {"code": "resolve_timeout", "text": "the request could not be written", "timeout_phase": "write"}
+        rows = sc.assign_host_cache(self.rows(write))
+        self.assertEqual((rows[0]["host_cache"], rows[1]["host_cache"]), ("not_reached", "cold"))
+        rows = self.rows({"code": "resolve_timeout", "text": "t"})
+        rows[0]["timeout_terms"] = {"timeout_phase": "write", "bound_s": 10.0}
+        self.assertFalse(sc.reached_host(rows[0]))
+        rows[0]["timeout_terms"] = {"timeout_phase": "read", "bound_s": 30.25}
+        self.assertTrue(sc.reached_host(rows[0]))
+
     def test_refusal_at_submit_still_not_reached(self):
         for err in ({"code": "search_failed", "text": "backend unavailable"},
                     {"code": "pattern_invalid", "text": "pattern_deadline is not a field"}):
