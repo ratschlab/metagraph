@@ -122,8 +122,9 @@ def short_commit(commit):
     return text.replace("+dirty", "")[:12] + ("+dirty" if dirty else "")
 
 
-HOST_CACHE_ORDER = {"cold": 0, "warm": 1, "aged": 2, "not_reached": 3, "unknown": 4}
-HOST_CACHE_LABEL = {"cold": "cold", "warm": "warm", "aged": "aged", "not_reached": "not reached",
+HOST_CACHE_ORDER = {"cold": 0, "warm": 1, cmp.WARM_AFTER_INTERRUPTED: 1.5, "aged": 2, "not_reached": 3, "unknown": 4}
+HOST_CACHE_LABEL = {"cold": "cold", "warm": "warm", cmp.WARM_AFTER_INTERRUPTED: "warm after a cut", "aged": "aged",
+                    "not_reached": "not reached",
                     "unknown": "unknown"}
 
 
@@ -861,7 +862,10 @@ def timing_section(comp):
            "not included) and the server's own elapsed time (ms; `timing.elapsed_ms`, or the sum over patterns), "
            "per area, arm and the host's cache state: cold = the scenario's first execution on the host in this "
            "run (whichever arm ran it), warm = another execution of it within 60 s, aged = older (cache state "
-           "unknown), not reached = an MCP execution the host never saw (refused at submit, not expressible).", ""]
+           "unknown), not reached = an MCP execution the host never saw (refused at submit, not expressible); warm "
+           "after a cut = warm, but the scenario's previous execution ended at the host's deadline "
+           "(host_cache_after_interrupted): counted apart from the warm ones, which the overheads and the cold vs "
+           "warm pairs use.", ""]
     rows = []
     for area in sorted(s["timing"], key=area_sort_key):
         for arm in comp["arms"]:
@@ -910,11 +914,12 @@ def overhead_section(comp):
         if v.get("n"):
             rows.append([md(labels[k]), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])])
     out.append(table(["difference (ms)", "n", "p50", "p90", "max"], rows))
-    if fo.get("warm_pairs_after_interrupted"):
-        out.append("%d of the warm pairs have an execution that followed one cut at the host's deadline (a direct 503 "
-                   "deadline or a deadline the service relayed: host_cache_after_interrupted); the host had worked on "
-                   "the request, so it reads warm, but its row cache may hold only part of a complete execution's.\n"
-                   % fo["warm_pairs_after_interrupted"])
+    if fo.get("warm_pairs_left_out_after_interrupted"):
+        out.append("%d scenario(s) left out of the warm pairs, counted apart: on an arm every warm execution followed "
+                   "one cut at the host's deadline (a direct 503 deadline or a deadline the service relayed: "
+                   "host_cache_after_interrupted); the host had worked on the request, but its row cache may hold "
+                   "only part of a complete execution's (the timing table shows them as warm after a cut).\n"
+                   % fo["warm_pairs_left_out_after_interrupted"])
     if fo.get("scenarios_without_warm_pair"):
         out.append("%d scenario(s) ran on both direct arms without a host-warm execution on each (the first arm "
                    "had only the cold one); they are not in the front cost.\n" % fo["scenarios_without_warm_pair"])

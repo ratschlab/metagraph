@@ -1257,12 +1257,26 @@ def wall_net(line):
     return wall - connect if connect is not None else wall
 
 
+# The timing label of a warm execution that followed one cut at the host's deadline (host_cache_after_interrupted):
+# warm by the recent-repeat heuristic, its row cache possibly only partly filled (a median server time 2.48x the
+# other warm executions' in v4), so the warm statistics leave it out and count it apart.
+WARM_AFTER_INTERRUPTED = "warm_after_interrupted"
+
+
+def timing_cache(line):
+    """The host-cache label the timing statistics key on: host_cache, except WARM_AFTER_INTERRUPTED for a warm
+    execution whose previous host execution of the scenario ended at the host's deadline."""
+    hc = host_cache(line)
+    return WARM_AFTER_INTERRUPTED if hc == "warm" and line.get("host_cache_after_interrupted") else hc
+
+
 def first_with(lines, label, prefer=None):
-    """The arm's first execution (by repeat) with host cache `label`; `prefer` a repeat to take when it has it."""
-    if prefer is not None and prefer in lines and host_cache(lines[prefer]) == label:
+    """The arm's first execution (by repeat) with timing label `label` (timing_cache); `prefer` a repeat to take when
+    it has it."""
+    if prefer is not None and prefer in lines and timing_cache(lines[prefer]) == label:
         return lines[prefer]
     for k in sorted(lines):
-        if host_cache(lines[k]) == label:
+        if timing_cache(lines[k]) == label:
             return lines[k]
     return None
 
@@ -2498,20 +2512,20 @@ def front_overhead(local, remote):
     """direct-remote minus direct-local for one scenario, on a pair of host-warm executions only (review H1):
     the raw wall difference (connection set-up excluded), the client-side difference (wall minus the server's
     elapsed time on each side) and the server elapsed difference (near 0 when both are warm). None without a
-    warm execution on both arms (the scenario's cold execution is reported on its own). `after_interrupted` names
-    the arms whose execution followed one cut at the host's deadline (host_cache_after_interrupted)."""
+    warm execution on both arms (the scenario's cold execution is reported on its own). A warm execution that followed
+    one cut at the host's deadline (timing_cache WARM_AFTER_INTERRUPTED) is no warm execution here."""
     lw = first_with(local, "warm")
     rw = first_with(remote, "warm", prefer=lw.get("repeat") if lw else None)
     if lw is None or rw is None:
         return None
-    out = {"local_repeat": lw.get("repeat"), "remote_repeat": rw.get("repeat"),
-           "wall_ms": _diff(wall_net(rw), wall_net(lw)),
-           "net_ms": _diff(_client_side(rw), _client_side(lw)),
-           "server_ms": _diff(_server_elapsed(rw), _server_elapsed(lw))}
-    cut = [x.get("arm") for x in (lw, rw) if x.get("host_cache_after_interrupted")]
-    if cut:
-        out["after_interrupted"] = cut
-    return out
+    return {"local_repeat": lw.get("repeat"), "remote_repeat": rw.get("repeat"),
+            "wall_ms": _diff(wall_net(rw), wall_net(lw)),
+            "net_ms": _diff(_client_side(rw), _client_side(lw)),
+            "server_ms": _diff(_server_elapsed(rw), _server_elapsed(lw))}
+
+
+def _warm_by_heuristic(lines):
+    return any(host_cache(x) == "warm" for x in (lines or {}).values())
 
 
 def mcp_overhead(mcp, local, remote):
@@ -2554,7 +2568,7 @@ def cold_warm(lines):
         return None
     warm = None
     for k in sorted(lines):
-        if k > (cold.get("repeat") or 0) and host_cache(lines[k]) == "warm":
+        if k > (cold.get("repeat") or 0) and timing_cache(lines[k]) == "warm":
             warm = lines[k]
             break
     if warm is None:
@@ -2936,7 +2950,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             counts["total"] += 1
             tv = timing_vals.setdefault(area, {}).setdefault(arm, {"all": [], "server": [], "by_host_cache": {}})
             for rep, line in lines.items():
-                hc = host_cache(line)
+                hc = timing_cache(line)
                 wall = wall_net(line)
                 tv["all"].append(wall)
                 tv["server"].append(_server_elapsed(line))
@@ -2974,9 +2988,12 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             fo = front_overhead(local, remote)
             entry["front_overhead"] = fo
             if fo is None:
-                front_unpaired += 1
+                # a pair whose warm executions followed a cut one is left out, counted apart from the unpaired
+                if _warm_by_heuristic(local) and _warm_by_heuristic(remote):
+                    front_after_cut += 1
+                else:
+                    front_unpaired += 1
             else:
-                front_after_cut += 1 if fo.get("after_interrupted") else 0
                 for k in front_vals:
                     if fo.get(k) is not None:
                         front_vals[k].append(fo[k])
@@ -3070,7 +3087,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                                "per_area_wall": dict((a, sc.summarise(v)) for a, v in front_area.items()),
                                "per_area_net": dict((a, sc.summarise(v)) for a, v in front_area_net.items()),
                                "scenarios_without_warm_pair": front_unpaired,
-                               "warm_pairs_after_interrupted": front_after_cut,
+                               "warm_pairs_left_out_after_interrupted": front_after_cut,
                                "connect_ms": dict((a, sc.summarise(v)) for a, v in connect_vals.items()),
                                "cold": dict((a, dict((k, sc.summarise(v)) for k, v in cv.items()))
                                             for a, cv in cold_vals.items())},

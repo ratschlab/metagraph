@@ -1876,9 +1876,12 @@ failing on 14552938.
   (a relayed deadline's wall is the deadline's) and whether a line records the service's answer.
 - assign_host_cache adds `host_cache_after_interrupted: true` (present only then) to an execution whose previous host
   execution of the scenario ended at the host's deadline without its answer (`interrupted_on_host`: a direct 503
-  deadline or a relayed one); compare's front overhead names such arms (`after_interrupted`), its summary counts
-  `warm_pairs_after_interrupted`, and the report's Overheads section states the count (warm by the recent-repeat
-  heuristic, the cache possibly only partly filled).
+  deadline or a relayed one). The timing statistics key on `compare.timing_cache`: such a warm execution reads
+  `warm_after_interrupted` ("warm after a cut" in the timing table), counted apart from the warm ones, so the front
+  overhead's warm pairs, the MCP overheads and the cold vs warm pairs leave it out (v4: the 10 direct-local ones
+  have a median server time 2.48x the other warm ones'); compare's summary counts
+  `warm_pairs_left_out_after_interrupted` (scenarios whose warm pair it would have been) apart from the unpaired, and
+  the report's Overheads section states the count (VERIFY-S-VERDICT (4)).
 - Moves (timing only; no outcome, check, class or verdict): v4 39 MCP lines not_reached -> cold (27) / warm (12), the
   27 direct-local r0 after them cold -> warm with since_prev_s; 70 lines gain host_cache_after_interrupted; warm
   pairs 527 -> 537 (32 after an interrupted execution). v3: 10 MCP lines, 8 direct-local r0 cold -> warm.

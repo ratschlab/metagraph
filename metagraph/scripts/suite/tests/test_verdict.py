@@ -193,9 +193,36 @@ class RelayedDeadlineHostCacheTest(unittest.TestCase):
                          [("mcp", "cold", None), ("direct-local", "warm", 1.5), ("direct-remote", "warm", 17.7)])
         self.assertTrue(rows[1]["host_cache_after_interrupted"])
         self.assertNotIn("host_cache_after_interrupted", rows[2])
-        fo = cmp.front_overhead({0: rows[1]}, {0: rows[2]})
-        self.assertIsNotNone(fo)
-        self.assertEqual(fo["after_interrupted"], ["direct-local"])
+        # warm by the heuristic, counted apart from the warm statistics: no front pair of it
+        self.assertEqual(cmp.timing_cache(rows[1]), cmp.WARM_AFTER_INTERRUPTED)
+        self.assertEqual(cmp.timing_cache(rows[2]), "warm")
+        self.assertIsNone(cmp.front_overhead({0: rows[1]}, {0: rows[2]}))
+        later = dict(rows[1], repeat=1, host_cache_after_interrupted=None)
+        later.pop("host_cache_after_interrupted")
+        self.assertEqual(cmp.front_overhead({0: rows[1], 1: later}, {0: rows[2]})["local_repeat"], 1)
+
+    def test_warm_after_a_cut_counted_apart_in_compare(self):
+        import merge_run
+        with tempfile.TemporaryDirectory() as d:
+            S = [scen("P-001", "P")]
+            dead = line("P-001", "direct-local", 0, T0, 9000.0, outcome="inconclusive", http=503,
+                        error={"code": "deadline", "text": "d"},
+                        checks=[st("inconclusive"), st("inconclusive", "contains_source_context")])
+            rows = {"direct-local": [dead, line("P-001", "direct-local", 1, T0 + 10, 50.0)],
+                    "direct-remote": [line("P-001", "direct-remote", 0, T0 + 12, 60.0)]}
+            for arm, lines in rows.items():
+                os.makedirs(os.path.join(d, "arms", arm), exist_ok=True)
+                sc.write_json_atomic(os.path.join(d, "arms", arm, "manifest.json"), {"scenarios": S})
+                write_arm(d, arm, lines)
+            merge_run.merge(d)
+            comp = cmp.compare(d, ({}, None))
+            fo = comp["summary"]["front_overhead"]
+            # direct-local r1 follows the 503 deadline: warm after a cut; direct-remote r0 follows r1: warm
+            self.assertEqual((fo["warm"]["wall_ms"]["n"], fo["warm_pairs_left_out_after_interrupted"],
+                              fo["scenarios_without_warm_pair"]), (0, 1, 0))
+            buckets = comp["summary"]["timing"]["P"]["direct-local"]["by_host_cache"]
+            self.assertEqual(buckets[cmp.WARM_AFTER_INTERRUPTED]["wall"]["n"], 1)
+            self.assertNotIn("warm", buckets)
 
     def test_each_relay_code(self):
         for err in ({"code": "traversal_resolve_deadline", "text": "the backend could not build and write it"},
