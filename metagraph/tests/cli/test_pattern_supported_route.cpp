@@ -2110,6 +2110,81 @@ TEST(PatternSupportedRoute, TheRowCacheIsGivenBackBeforeTheIndexOfTheHeldWalks) 
     }
 }
 
+// The same in all_or_count, which lists the selected walks: the paths it keeps for them (half
+// of the account at most) are larger than the walks held, so the index is refused beside the
+// row cache's allotment only where each held walk is charged for many predicate labels (8 bytes
+// a label). 64 columns carrying the record of all 64 3-mers, ANNNN on both strands at the label
+// level under "either" (the mirrors searched), any() of the 64: 512 walks held, each with its
+// 64 labels, all selected and listed. From below the smallest account that lists them: a
+// selection stopped on the account after the search refused a held walk (none decided,
+// predicate_budget), never the index. Mutation tried: the allotment kept while the index is
+// charged: fails (the index refused in the band: every walk decided on its own support,
+// predicate_budget where the walks can be listed).
+TEST(PatternSupportedRoute, TheRowCacheIsGivenBackBeforeTheIndexWhereAllOrCountLists) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    std::vector<Record> records;
+    Json::Value predicate;
+    for (int i = 0; i < 64; ++i) {
+        const std::string column = "c" + std::to_string(100 + i);
+        records.push_back({ column, column + "_r0", record });
+        predicate["any"].append(column);
+    }
+    const Index idx = build_rd(3, records);
+    Ask r;
+    r.patterns = { "ANNNN" };
+    r.kind = "iupac";
+    r.mode = "all_or_count";
+    r.strands = "both";
+    r.level = "label_intersection";
+    r.predicate = compact(predicate);
+    r.predicate_strands = "either";
+    const Json::Value full = answer_of(idx, r)["patterns"][0];
+    ASSERT_FALSE(full.isMember("error")) << compact(full["error"]);
+    ASSERT_EQ("completed", full["selection"]["pass"].asString()) << compact(full["stop"]);
+    const uint64_t walks = full["counts"]["supported_paths"]["value"].asUInt64();
+    ASSERT_EQ(512u, walks);
+    ASSERT_EQ(walks, full["counts"]["selected"]["value"].asUInt64());
+    ASSERT_EQ(walks, full["results"].size());
+    auto at = [&](uint64_t bytes) {
+        Ask q = r;
+        q.max_memory_bytes = bytes;
+        return answer_of(idx, q)["patterns"][0];
+    };
+    uint64_t completes = 0;
+    for (uint64_t bytes = 1 << 14; bytes <= (1 << 24) && !completes; bytes += 4096) {
+        const Json::Value e = at(bytes);
+        if (e["selection"]["pass"] == "completed" && e["withheld"].isNull()) {
+            completes = bytes;
+            EXPECT_EQ(walks, e["results"].size());
+        }
+    }
+    ASSERT_LT(32768u, completes);
+    uint64_t held_refused = 0;
+    for (uint64_t bytes = completes - 32768; bytes < completes; bytes += 128) {
+        SCOPED_TRACE(bytes);
+        const Json::Value e = at(bytes);
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        if (e["stop"]["phase"] != "selection" || e["stop"]["reason"] != "max_memory"
+                || e["counts"]["supported_paths"]["relation"] != "exact") {
+            continue;
+        }
+        EXPECT_EQ("stopped", e["selection"]["pass"].asString());
+        EXPECT_EQ(0u, e["counts"]["tested"]["value"].asUInt64());
+        EXPECT_EQ("predicate_budget", e["withheld"]["reason"].asString());
+        ++held_refused;
+    }
+    EXPECT_LT(0u, held_refused);
+}
+
 // When the account refuses the index of the held walks by sequence after the search, no mirror
 // is found among the held walks nor read, and every walk is decided on its own support alone,
 // as after a mirror read stopped on the account (SPEC §20.9), instead of none. Driven below the
