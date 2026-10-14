@@ -1815,3 +1815,31 @@ service_by_design.json at sha256 ab4100c9...
   direct arm and repeat ("direct-local repeat 0: ...": R-budget-0001 / -0002, R-edge-0003, R-twin-0002 / -0003 /
   -0004 / -0005, in both runs), R-twin-0004's naming direct-remote's 200 before direct-local's 503 deadline.
 - 263 tests pass (1 skipped).
+
+## Lane S7c: checks that the two-day review found too lenient or too strict (2026-10-14)
+
+The suite findings of the review of 2026-10-14 (ultracode REPORT §3, P1-checks-01..07 and P5-v4-content-01) on
+checks.py, judged against 14552938. The deploy gate is strict, so a false FAIL or a false inconclusive blocks as a
+false pass misleads: each stricter rule below is measured on every recorded answer of v3 and v4 (all arms) and on the
+engine's stored pattern fixtures. The runner vendors checks.py: it takes these rules by re-vendoring.
+
+- /traverse, walk_end (the finding that any resource cap excuses a record route that ended far below it is closed in
+  walk_in_record by lane S6g1): a path that states a resource end below its arm's complete_to_bp cannot have had it
+  (SPEC-labeled-traversal-core §6.10), so walk_end fails "not reached: a stated stop that cannot have happened" where
+  it read inconclusive (the invariants already failed that execution).
+- /pattern, count_relation (SPEC-pattern-search §7.4: at_least means a stop interrupted the count): a count that is
+  at_least, unknown or bounds beside a stop of any reason that can leave it so (every budget of §7.6, §14.4, §19.8,
+  §20.5: max_steps, time, max_annotation_work, max_memory, max_predicate_work; every stop_at_threshold stop) cannot
+  show an exact expectation or a minimum it lies below: inconclusive (the stop's own reason rules first, as before).
+  Before, only max_steps and time counted, so a supported-path search stopped by max_annotation_work or max_memory
+  with supported_paths at_least 0 passed min 1, and paths at_least 3 after {extension, max_memory} failed relation
+  exact. Without a stop, a graph count (contexts, anchors, the paths of a path search, supported_paths) at_least below
+  the minimum fails: nothing can have left it inexact (it passed). The inexactness the SPEC states without a stop
+  stays inconclusive: supported_paths after a predicate's pruning and the paths of a supported-path search after any
+  branch pruned before L (§20.4, §20.9), bounds on a graph without its mask (§7.4), and the counts with relation rules
+  of their own (labels, occurrences, tested, selected: §12.1, §14.6, §19.7). Bounds that straddle a minimum are
+  inconclusive (they passed); an expected exact value an inexact count excludes (at_least above it, bounds around
+  other values) fails also after a stop, one it does not exclude is inconclusive after a stop (it failed). Measured:
+  every inexact count of v3 and v4 without a stop is a supported-path search's after a predicate's pruning (the
+  L-supported scenarios, at_least 1 >= their min 1) or a selection's (bounds, pass stopped); no recorded
+  count_relation outcome moves, two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.

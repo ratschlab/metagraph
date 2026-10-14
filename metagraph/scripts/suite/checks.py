@@ -50,6 +50,11 @@ _NCBIEAA = {   # the tables the suite's peptides use (seqtools.NCBIEAA holds all
 _CODONS = [a + b + c for a in "TCAG" for b in "TCAG" for c in "TCAG"]
 _AMBIG = {"B": "DN", "Z": "EQ", "J": "IL"}
 _BUDGET_STOP_REASONS = {"max_steps", "time"}
+# the stop reasons that can leave a count inexact (SPEC-pattern-search §7.4: at_least "a stop interrupted
+# discovery"; bounds after a stop in a deferred scan): the budgets of every phase (§7.6, §14.4, §19.8, §20.5) and the
+# stop_at_threshold stops (§7.6, §12.1, §19.8, §20.9)
+_INEXACT_STOP_REASONS = {"max_steps", "time", "max_annotation_work", "max_memory", "max_predicate_work",
+                         "max_contexts", "max_anchors", "max_paths", "max_predicate_contexts"}
 _ORIENT_RANK = {"+": 0, "forward": 0, "-": 1, "reverse": 1, "=": 2, "palindromic": 2}
 
 PASS, FAIL, NOT_EXPOSED = "pass", "fail", "not_exposed"
@@ -1094,10 +1099,37 @@ def check_pattern_slot_error(sc, ans, a, arm):
     return PASS, "slot %s" % a["code"]
 
 
+def _stopless_inexact(body: dict, e: dict, req: dict, name: str, rel: str) -> Optional[str]:
+    """Why count |name| of entry |e| may have the inexact relation |rel| with no stop stated, by the SPEC, or None
+    where only a stop leaves it so. A graph count (contexts, anchors, the paths of a path search) is at_least only
+    after a stop (SPEC-pattern-search §7.4, §12.1) and bounds only after a stop in a deferred scan or on a graph
+    without its mask (§7.4); a supported-path search states supported_paths at_least after a predicate's pruning and
+    its paths at_least after any branch pruned before L (§20.4, §20.9); the other counts (labels, occurrences, the
+    selection's tested and selected) are inexact for reasons of their own (§12.1, §14.6, §19.7)."""
+    counts = e.get("counts") or {}
+    if rel == "bounds" and ((body.get("index") or {}).get("counting") == "upper_bound"):
+        return "a graph without its mask (index.counting upper_bound, SPEC-pattern-search §7.4)"
+    if name in ("supported_paths", "paths") and req.get("long_search") == "supported_paths":
+        sp = counts.get("supported_paths") if isinstance(counts.get("supported_paths"), dict) else {}
+        by_predicate = _number(sp.get("branches_pruned_by_predicate")) or 0
+        pruned = _number(sp.get("branches_pruned")) or 0
+        if rel == "at_least" and by_predicate > 0:
+            return "the predicate pruned %d branch(es) of the search (SPEC-pattern-search §20.4, §20.9)" % by_predicate
+        if rel == "at_least" and name == "paths" and pruned > 0:
+            return "%d branch(es) pruned before the pattern's end (SPEC-pattern-search §20.4)" % pruned
+        return None
+    if name in ("contexts", "anchors", "paths", "supported_paths"):
+        return None
+    return "a count of its own relation rules (SPEC-pattern-search §12.1, §14.6, §19.7)"
+
+
 def check_count_relation(sc, ans, a, arm):
-    """A count's relation and value (`relation`, `value`, `min`, `max`; `level` for by_mismatches). A count a
-    budget stop left inexact (relation at_least or unknown under a time or max_steps stop) cannot show an exact
-    expectation: inconclusive, not fail, unless the scenario expects the stop."""
+    """A count's relation and value (`relation`, `value`, `min`, `max`; `level` for by_mismatches). A count a stop
+    left inexact (at_least, unknown or bounds beside a stated stop of a reason that can leave it so,
+    _INEXACT_STOP_REASONS), or one the SPEC states inexact without a stop (_stopless_inexact), cannot show an exact
+    expectation: inconclusive, unless the scenario expects that relation or the bound it states decides (at_least
+    v >= min passes, at_least v > max fails). A graph count at_least or unknown with no stop that can leave it so
+    contradicts the SPEC (§7.4): it fails where it meets an expectation it does not show."""
     e = _entry(ans, a.get("pattern", 0))
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
@@ -1107,34 +1139,55 @@ def check_count_relation(sc, ans, a, arm):
         c = _get(c, "by_mismatches.%d" % a["level"])
     value, rel = _count(c)
     stop = e.get("stop") or {}
-    stopped = stop.get("reason") in _BUDGET_STOP_REASONS and rel in ("at_least", "unknown")
+    inexact = rel in ("at_least", "unknown", "bounds")
+    stopped = inexact and stop.get("reason") in _INEXACT_STOP_REASONS
     if stopped:
         bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
         if bad:
             return FAIL, "%s %s %s after a %s/%s stop that cannot have happened: %s" % (
                 name, rel, value, stop.get("phase"), stop.get("reason"), bad[0])
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    body = _body(ans)
+    cause = ("the stop %s/%s" % (stop.get("phase"), stop.get("reason"))) if stopped else \
+        (_stopless_inexact(body if isinstance(body, dict) else {}, e, req, name, rel) if inexact else None)
     if "relation" in a:
         rels = a["relation"] if isinstance(a["relation"], list) else [a["relation"]]
         if rel not in rels:
-            if stopped:
-                return INCONCLUSIVE, "%s %s %s after a %s/%s stop: not the exact count expected" % (
-                    name, rel, value, stop.get("phase"), stop.get("reason"))
+            if cause:
+                return INCONCLUSIVE, "%s %s %s after %s: not the relation expected (%s)" % (
+                    name, rel, value, cause, rels)
             return FAIL, "%s relation %s (value %s), expected %s" % (name, rel, value, rels)
     lower = c.get("lower", value) if rel == "bounds" else value
-    if "value" in a and (rel != "exact" or value != a["value"]):
-        return FAIL, "%s = %s %s, expected exact %s" % (name, rel, value, a["value"])
+    upper = c.get("upper") if rel == "bounds" else value if rel == "exact" else None
+    if "value" in a:
+        if rel == "exact" and value != a["value"]:
+            return FAIL, "%s = exact %s, expected exact %s" % (name, value, a["value"])
+        if rel != "exact":
+            if (lower is not None and lower > a["value"]) or (upper is not None and upper < a["value"]):
+                return FAIL, "%s = %s %s%s, which excludes the exact %s expected" % (
+                    name, rel, value, " [%s, %s]" % (lower, upper) if rel == "bounds" else "", a["value"])
+            if cause:
+                return INCONCLUSIVE, "%s %s %s after %s: the exact %s expected not shown" % (
+                    name, rel, value, cause, a["value"])
+            return FAIL, "%s = %s %s, expected exact %s" % (name, rel, value, a["value"])
     if "min" in a:
         if rel == "unknown":
-            if stopped:
-                return INCONCLUSIVE, "%s unknown after a %s/%s stop" % (name, stop.get("phase"), stop.get("reason"))
+            if cause:
+                return INCONCLUSIVE, "%s unknown after %s" % (name, cause)
             return FAIL, "%s unknown, expected at least %d" % (name, a["min"])
-        if rel == "at_least" and value is not None and value < a["min"] and stopped:
-            return INCONCLUSIVE, "%s at least %d after a %s/%s stop, %d expected" % (
-                name, value, stop.get("phase"), stop.get("reason"), a["min"])
+        if rel == "at_least" and value is not None and value < a["min"]:
+            if cause:
+                return INCONCLUSIVE, "%s at least %d after %s, %d expected" % (name, value, cause, a["min"])
+            return FAIL, "%s at least %d below the minimum %d, with no stop that leaves the count inexact " \
+                         "(SPEC-pattern-search §7.4: at_least means a stop interrupted it)" % (name, value, a["min"])
         if rel == "exact" and value < a["min"]:
             return FAIL, "%s exact %d below %d" % (name, value, a["min"])
-        if rel == "bounds" and c.get("upper", 0) < a["min"]:
-            return FAIL, "%s bounds upper %s below %d" % (name, c.get("upper"), a["min"])
+        if rel == "bounds":
+            if c.get("upper", 0) < a["min"]:
+                return FAIL, "%s bounds upper %s below %d" % (name, c.get("upper"), a["min"])
+            if lower is not None and lower < a["min"]:
+                return INCONCLUSIVE, "%s bounds [%s, %s] straddle the minimum %d%s" % (
+                    name, lower, c.get("upper"), a["min"], " (after %s)" % cause if cause else "")
     if "max" in a and rel in ("exact", "at_least", "bounds") and lower is not None and lower > a["max"]:
         return FAIL, "%s %s %s above %d" % (name, rel, lower, a["max"])
     return PASS, "%s %s %s" % (name, rel, value)

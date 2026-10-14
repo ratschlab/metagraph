@@ -694,6 +694,62 @@ class MoreChecks(unittest.TestCase):
                                  "count_relation", relation="exact", min=1000)[0], "fail")
         self.assertEqual(outcome(sc, stopped, "count_relation", relation=["exact", "at_least"], min=800)[0], "pass")
 
+    def test_count_relation_after_any_stop_that_leaves_it_inexact(self):
+        # SPEC-pattern-search §7.4: at_least means a stop interrupted the count; every budget of §7.6, §14.4, §19.8
+        # and §20.5 and every stop_at_threshold stop can be that stop (inconclusive below a minimum), no stop cannot
+        def C(rel, v, **kw):
+            return dict({"relation": rel, "value": v}, **kw)
+        sup = self.sc({"long_search": "supported_paths", "mode": "count", "patterns": [{"dna": "ACGT" * 10}]})
+        for reason in ("max_annotation_work", "max_memory"):
+            e = self.entry(stop={"phase": "extension", "reason": reason},
+                           counts={"anchors": C("exact", 2), "supported_paths": C("at_least", 0)})
+            o, d = outcome(sup, e, "count_relation", count="supported_paths", min=1)
+            self.assertEqual(o, "inconclusive", d)
+            self.assertIn("after the stop extension/%s" % reason, d)
+        none = self.entry(stop=None, counts={"anchors": C("exact", 2), "supported_paths": C("at_least", 0)})
+        o, d = outcome(sup, none, "count_relation", count="supported_paths", min=1)
+        self.assertEqual(o, "fail")
+        self.assertIn("with no stop that leaves the count inexact", d)
+        # a predicate's pruning states supported_paths at_least without a stop (§20.4, §20.9), any branch pruned
+        # before L the paths
+        pred = self.sc({"long_search": "supported_paths", "mode": "count", "predicate": {"any": ["1"]},
+                        "patterns": [{"dna": "ACGT" * 10}]})
+        pruned = self.entry(stop=None, counts={"anchors": C("exact", 2), "paths": C("at_least", 0),
+                                               "supported_paths": C("at_least", 0, branches_pruned=2,
+                                                                    branches_pruned_by_predicate=1)})
+        self.assertEqual(outcome(pred, pruned, "count_relation", count="supported_paths", min=1)[0], "inconclusive")
+        self.assertEqual(outcome(pred, pruned, "count_relation", count="paths", min=1)[0], "inconclusive")
+        paths = self.sc({"long_search": "paths", "mode": "count", "patterns": [{"dna": "ACGT" * 10}]})
+        mem = self.entry(stop={"phase": "extension", "reason": "max_memory"},
+                         counts={"anchors": C("exact", 2), "paths": C("at_least", 3)})
+        o, d = outcome(paths, mem, "count_relation", count="paths", relation="exact")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertEqual(outcome(paths, self.entry(stop=None, counts={"anchors": C("exact", 2), "paths": C(
+            "at_least", 3)}), "count_relation", count="paths", relation="exact")[0], "fail")
+        heavy = self.sc({"mode": "count", "patterns": [{"dna": "GCTACACACACC"}]})
+        o, d = outcome(heavy, self.entry(stop=None, counts={"contexts": C("at_least", 3)}), "count_relation", min=20,
+                       relation=["exact", "at_least"])
+        self.assertEqual(o, "fail")
+        steps = self.entry(stop={"phase": "discovery", "reason": "max_steps"}, counts={"contexts": C("at_least", 3)})
+        self.assertEqual(outcome(heavy, steps, "count_relation", min=20)[0], "inconclusive")
+        # a stop_at_threshold stop leaves the count at_least too (§7.4)
+        thr = self.sc({"mode": "count", "stop_at_threshold": True, "max_contexts": 10,
+                       "patterns": [{"dna": "GCTACACACACC"}]})
+        crossed = self.entry(stop={"phase": "discovery", "reason": "max_contexts"}, counts={"contexts": C("at_least", 11)})
+        self.assertEqual(outcome(thr, crossed, "count_relation", min=20)[0], "inconclusive")
+        self.assertEqual(outcome(thr, crossed, "count_relation", min=11)[0], "pass")
+        # bounds decide only where they do not straddle the minimum; a value the bounds exclude fails, also after a
+        # stop
+        scan = self.entry(stop={"phase": "mask_scan", "reason": "max_steps"},
+                          counts={"contexts": C("bounds", 5, lower=5, upper=30)})
+        self.assertEqual(outcome(heavy, scan, "count_relation", min=20)[0], "inconclusive")
+        self.assertEqual(outcome(heavy, scan, "count_relation", min=5)[0], "pass")
+        self.assertEqual(outcome(heavy, scan, "count_relation", min=31)[0], "fail")
+        self.assertEqual(outcome(heavy, scan, "count_relation", value=40)[0], "fail")
+        self.assertEqual(outcome(heavy, scan, "count_relation", value=20)[0], "inconclusive")
+        self.assertEqual(outcome(heavy, steps, "count_relation", value=2)[0], "fail")       # at_least 3 > 2
+        self.assertEqual(outcome(heavy, steps, "count_relation", value=7)[0], "inconclusive")
+
     def test_mirror_needs_a_mirror(self):
         req, ans = fixture("predicate_selection_strands")
         minus = next(r for r in ans["patterns"][0]["results"] if r["strand"] == "-")
