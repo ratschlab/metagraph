@@ -19,14 +19,15 @@
    "not_implemented_mcp": "the scenario is 'not implemented yet via MCP'",
    "service_only": "no host counterpart (service behaviour only)"
   },
-  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`; a direct answer outside `direct` is read by `direct_mismatch` (ADDED 2026-10-14). Load validation (ADDED 2026-10-14, triage-2 B-08; the async runner's ServiceByDesign.problems refuses the table, naming the case): `routes` is required (a non-empty list of routes); answer_match states only routes, direct, mcp, direct_mismatch, wall_rule; a side only http, code, text_contains, field, slot_code; on the mcp side `http` is one integer, `slot_code` is not allowed (a direct-side key: a host 200 body's slot refusal) and `code` is required (ADDED 2026-10-14, peer review R5: an mcp side with only an http would make every answer on the route with that status by design); direct_mismatch is disagree or timing; wall_rule is budget_minus_reserve",
+  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`; a direct answer outside `direct` is read by `direct_mismatch` (ADDED 2026-10-14). Load validation (ADDED 2026-10-14, triage-2 B-08; the async runner's ServiceByDesign.problems refuses the table, naming the case): `routes` is required (a non-empty list of routes); answer_match states only routes, direct, mcp, direct_mismatch, wall_rule, mcp_outcome; a side only http, code, text_contains, field, slot_code; on the mcp side `http` is one integer, `slot_code` is not allowed (a direct-side key: a host 200 body's slot refusal) and `code` is required (ADDED 2026-10-14, peer review R5: an mcp side with only an http would make every answer on the route with that status by design); direct_mismatch is disagree or timing; wall_rule is budget_minus_reserve; mcp_outcome (ADDED 2026-10-14) is service_by_design or not_implemented_mcp, stated only in answer_match (a top-level case key is refused) and never on an answered / clamped case",
   "answer_match.mcp.field": "ADDED 2026-10-14 (optional): the refused argument's field (the MCP error's `field`) as a pattern: `<...>` placeholders match anything, `a | b` lists alternatives (each part stripped), matched like a named case's service_answer.field; an MCP answer that names no field does not match. It tells apart refusals of one code and text whose host answers differ (pattern.caps_zero: a cap of 0 the host answers, against time_budget_ms 0 with the same REST text, which the host refuses)",
   "answer_match.direct.slot_code": "ADDED 2026-10-14 (optional): a pattern slot's error code: the direct answer (a 200) holds a pattern whose slot is refused with it (body.patterns[].error.code; `a | b` lists alternatives), where the service refuses the whole submit (mismatch.above_kind_cap: the host's mismatches_above_cap slot)",
   "answer_match.direct_mismatch": "ADDED 2026-10-14 (triage-2 B-03; stated on every answer_match of the table; the comparator reads it, the MCP runner has no direct arm): what a direct answer outside answer_match.direct means for the pair. \"disagree\": any direct HTTP answer outside the direct side disagrees (pattern.caps_zero, mismatch.above_kind_cap, traverse.empty_seeds: validation or a stale cap, no timing involved). \"timing\": a direct 200 or a direct 503 deadline (code deadline) reads unverified, a timing difference (the same request, the host finished at another time); any other direct answer (e.g. a 4xx refusal) disagrees (pattern.deadline_ends_task). A direct transport error or a missing direct answer is always unverified, whatever the value. The MCP execution's own checks still count: a finding is never erased by the mark (see explains_checks)",
   "answer_match.wall_rule": "ADDED 2026-10-14 (optional; peer review R1, the design lead's threshold; judged on the MCP execution, its mcp_phases and raw calls): \"budget_minus_reserve\" = the answer-triggered case applies only when the MCP execution's service-side wall reaches the request's time_budget_ms less the finalisation reserve (the reserve the MCP answer's error text states, \"finalisation reserve of <N> ms\", else 250 ms: app/pattern/validate.py DEFAULT_FINALIZE_RESERVE_MS): the host sends its deadline at budget - reserve at the earliest, so a relayed deadline before it is no host deadline (a budget bug the case would hide). The wall, in order: mcp_phases.backend_ms (the service-measured backend call); for a pattern search, the deadline-ended task's HTTP try (its diagnostic log's last held-slot line, http 1 fail 1 <s>s: the failed POST's seconds, app/queue/held_span.py; the smallest over such tasks; a task without one, or with more than one try, gives none). The request's time_budget_ms is the MCP arguments' (else the direct request's). A KNOWN wall below the threshold: the case does not apply, matching continues with the other cases and, when none applies, the checks judge. CHANGED 2026-10-14 (rule (c), the design lead): no wall (no backend_ms, no usable slot line) or no threshold (no request budget): plausibility undecidable: the case matched (recorded) and the execution is inconclusive with verdict_detail \"no service-side timing: plausibility undecidable\" or \"no threshold known: plausibility undecidable\", never the checks' fail (a finding still wins). The line's verdict_detail says why. pattern.deadline_ends_task states it",
+  "answer_match.mcp_outcome": "ADDED 2026-10-14 (optional; the design lead, suite_v4's T-labels-0004 / -0006; the async runner reads it, the comparator mirrors it): the outcome class a matched case gives the MCP execution. \"service_by_design\" (the default when absent): the refusal is the service's design (service_by_design; a finding still wins). \"not_implemented_mcp\": the refusal says the request is not implemented via MCP on THIS deployment (a deployment setting gates it): the execution's outcome is not_implemented_mcp, the class a manifest mcp.not_implemented gets, counted there in the run summary; the case is recorded (service_by_design_case, explained_checks []) and verdict_detail names the deployment condition (the case, the refused field and the service's own text); rule (c) (an undecidable wall rule) and the host-state rules do not apply; a check that is a finding still makes it finding. It holds whether the case matched named or answer-triggered (the first matched case decides). Load validation: one of the two values, only inside answer_match (a top-level mcp_outcome is refused), never on an answered / clamped case (the checks decide those). traverse.advanced_path_disabled states not_implemented_mcp",
   "direct_expectation.http": "the host's HTTP status: an integer, or (ADDED 2026-10-14) a list of statuses any one of which holds, e.g. [200, 503] where the host accepts the request and may still overrun its budget (pattern.time_budget_below_minimum); null: not stated",
   "direct_expectation.text_prefix": "ADDED 2026-10-14 (optional): the host's error text starts with it, for a text whose tail varies with the request (resolve.unknown_label names the label); `text` is then null. Compared as is (no digit folding)",
-  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An entry is a check name (it explains every failure of that check) or (ADDED 2026-10-14, peer review R4) an object {\"check\": <name>, \"detail_matches\": <regex>}: it explains a failure of that check only when the check's detail matches the regex completely (Python re.fullmatch with re.S; checks.py joins several violations of one check with \"; \" into one detail, so a detail carrying another violation beside the explained one is not matched). Load validation: a list; an object states check (a non-empty name) and detail_matches (a regex that compiles) and no other key (traverse.duplicate_seeds explains only the merged-seed count message of invariants, \"1 results for 2 seeds (1 distinct)\": as many results as distinct seeds). An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)"
+  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An entry is a check name (it explains every failure of that check) or (ADDED 2026-10-14, peer review R4) an object {\"check\": <name>, \"detail_matches\": <regex>}: it explains a failure of that check only when the check's detail matches the regex completely (Python re.fullmatch with re.S; checks.py joins several violations of one check with \"; \" into one detail, so a detail carrying another violation beside the explained one is not matched). Load validation: a list; an object states check (a non-empty name) and detail_matches (a regex that compiles) and no other key (traverse.duplicate_seeds explains only the merged-seed count message of invariants, \"1 results for 2 seeds (1 distinct)\": as many results as distinct seeds). An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered; not_implemented_mcp where the case's answer_match.mcp_outcome says so), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)"
  },
  "assumptions": [
   "staging settings at their code defaults: PATTERN_DB_BUDGETS_MS empty, PATTERN_DEFAULT_MAX_ANCHORS unset, TRAVERSAL_ADVANCED_ENABLED false, IDEMPOTENCY_REUSE_DONE true, BACKEND_CACHE_MAX_ANSWER_AGE_SECS 604800, PATTERN_MAX_* / TRAVERSAL_* as in app/settings.py",
@@ -4113,6 +4114,58 @@
      "field": "caps.max_contexts | caps.max_anchors | caps.max_paths"
     },
     "direct_mismatch": "disagree"
+   }
+  },
+  {
+   "id": "traverse.advanced_path_disabled",
+   "areas": [
+    "T"
+   ],
+   "scenario_match": "POST /traverse whose traverse_fetch overrides set a strategy key on the advanced strategy path: any key outside the tool's basic overrides (bounds.*, direction, exhaustive, labels.max_labels_per_node, labels.seed_label_kind), e.g. labels.max_seed_labels (suite_v4's T-labels-0004 and T-labels-0006 send 10000; no other scenario of suite_v4 or suite_v3 sends such a key), labels.mode / quorum / extra / change_cost / max_switch_sources, any branching.*, frontier.*, output.* or annotation.* key, or support. DEPENDS ON THE DEPLOYMENT: it applies only where TRAVERSAL_ADVANCED_ENABLED is false (the code default; staging: see assumptions). On a deployment with the advanced strategy path enabled the tool passes the key on, REST validates it against the service maxima (labels.max_seed_labels <= TRAVERSAL_MAX_SEED_LABELS, 10000) and the job runs: the knob is accepted and the case must not apply (its answer_match.mcp, a preset_unavailable refusal naming an overrides.* field, then matches no answer). No client-readable field states the setting (traverse_capabilities: the presets block carries budgets, batch and queue per preset, the gate block enabled / allow_list / feature_levels; catalog's traversal is the probe outcome), so the case is keyed on the refusal itself. A key the host does not know either is traverse.unknown_strategy_key (named; the host refuses it too)",
+   "direct_expectation": {
+    "http": 200,
+    "code": null,
+    "text": null,
+    "behaviour": "the host serves the strategy field (the walk runs); recorded: both direct arms answered http 200 on T-labels-0004 and T-labels-0006 in the v4 run 20261014T061053Z_refseq97-6f945db4 (full-run-v4.log), where the MCP arm got this refusal"
+   },
+   "service_answer": {
+    "tool": "traverse_fetch",
+    "outcome": "refused_at_submit",
+    "http": null,
+    "code": "preset_unavailable",
+    "text_contains": "is on the advanced strategy path, which is not enabled on this deployment",
+    "field": "overrides.<knob path>",
+    "keys": {
+     "preset": "advanced",
+     "hint": "use a preset (walk, trie) with overrides of bounds, direction, exhaustive, labels.max_labels_per_node, labels.seed_label_kind"
+    },
+    "stage": "mcp_local",
+    "detail": "Refused by the tool before any REST call (no job) while TRAVERSAL_ADVANCED_ENABLED is off: \"overrides.<key> is on the advanced strategy path, which is not enabled on this deployment\", field overrides.<key> = the first key outside _TRAVERSE_BASIC_OVERRIDES in the overrides' order (dotted section.key; a non-object section: the section alone). The REST route has no such gate (POST /traverse deep-merges overrides into a public preset, every bounded knob held to the service maxima: presets.SERVICE_BOUNDED lists labels.max_seed_labels), so only the MCP tool refuses. The suite's normaliser infers http 400 for the code (suite_mcp_normalise.inferred_http), which answer_match.mcp states. answer_match.mcp_outcome not_implemented_mcp: the MCP runner records such an execution as not_implemented_mcp (verdict_detail naming the deployment condition), not service_by_design. Added 2026-10-14 for suite_v4's T-labels-0004 / -0006, which name no case; line numbers at service 0e1efdb3"
+   },
+   "agreement": "not_implemented_mcp",
+   "source": [
+    "app/mcp_server.py:7247",
+    "app/mcp_server.py:7259",
+    "app/mcp_server.py:7465",
+    "app/settings.py:1554",
+    "app/traversal/presets.py:152",
+    "app/api/routes_traversal.py:722"
+   ],
+   "answer_match": {
+    "routes": [
+     "POST /traverse"
+    ],
+    "direct": {
+     "http": 200
+    },
+    "mcp": {
+     "http": 400,
+     "code": "preset_unavailable",
+     "text_contains": "is on the advanced strategy path, which is not enabled on this deployment",
+     "field": "overrides.<knob path>"
+    },
+    "direct_mismatch": "disagree",
+    "mcp_outcome": "not_implemented_mcp"
    }
   }
  ]

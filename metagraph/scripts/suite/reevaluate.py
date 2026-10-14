@@ -16,9 +16,9 @@ checks.scenario_outcome of the new checks, except where the runner decided it wi
 own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
 replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at f386a3c0,
 `judge`, is the reference: e334715b with rules 1, 2 and 4 of 62ee4214, 2a8acbaf, f94b079d, rule 4's read floor of
-f52846fb and the explained items of f386a3c0): the cases the scenario
-names whose service_answer the answer matches (the field read from the recorded tool error), else the first
-answer-triggered case it matches whose wall rule holds or cannot be decided; a refused / relayed /
+f52846fb and the explained items of f386a3c0): the cases the scenario names whose service_answer the answer matches
+(the field read from the recorded tool error), else the first answer-triggered case it matches whose wall rule
+holds or cannot be decided; a refused / relayed /
 answer-triggered match is service_by_design, finding when a check is a finding (a by-design mark never erases
 one); an answered / clamped match leaves the outcome to the checks (compare.explained_outcome, triage-2 B-01: fail
 when a failing check item is not one the matched cases explain, else finding, service_by_design when some failing
@@ -37,11 +37,11 @@ budget + reserve + 10 s - 1 s, is no host state whatever the wall: "service read
 s", f52846fb); rule (c): where no threshold or wall is known, for a host state or an answer-triggered case's
 wall_rule, the execution is inconclusive with verdict_detail "no threshold known / no service-side timing:
 plausibility undecidable" (with an API key "; rule 2 skipped: ..."), whatever the checks say on the host-state
-path, B5b-03), then a new exception of the checks (fail). The line
-records verdict_detail (the runner's text: why a wall rule or a host state held or not) and inconclusive_reason as
-async's runner at f386a3c0 does; the runner's recorded client wall (raw `client_wall`, line `client_wall_ms`) and
-timeout statement (`timeout_terms`) are read first and cross-checked against the raw record (a mismatch is a
-warning: on the line's reevaluation.warnings and in the mark).
+path, B5b-03), then a new exception of the checks (fail). The line records verdict_detail (the runner's text: why
+a wall rule or a host state held or not) and inconclusive_reason as async's runner at f386a3c0 does; the runner's
+recorded client wall (raw `client_wall`, line `client_wall_ms`) and timeout statement (`timeout_terms`) are read
+first and cross-checked against the raw record (a mismatch is a warning: on the line's reevaluation.warnings and in
+the mark).
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
@@ -215,14 +215,27 @@ def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, case
     return outcome, kept
 
 
+def _recorded_mark(line, info):
+    """A runner's mark kept without a table to replay it: the line keeps the runner's own record of its case
+    (service_by_design_case, explained_checks, explained_items, verdict_detail) instead of losing it."""
+    for k in ("service_by_design_case", "explained_checks", "explained_items", "verdict_detail"):
+        if k in line:
+            info[k] = line[k]
+
+
 def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info, doc):
     recorded = line.get("outcome")
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
-    if kept and recorded != "service_by_design":
+    # a mark of a matched table case is replayed with the table: service_by_design, and (async's 901893b7) a
+    # not_implemented_mcp that names its case (answer_match.mcp_outcome); the manifest's mcp.not_implemented names none
+    replayed = recorded == "service_by_design" or (
+        arm == "mcp" and recorded == "not_implemented_mcp" and bool(line.get("service_by_design_case")))
+    if kept and not replayed:
         return recorded, "decided by the runner without the checks"
     if arm == "mcp" and not cases and recorded == "finding" and line.get("service_by_design_case"):
         # B5b-10: with no table a by-design finding (a relayed deadline's budget_respected) is the runner's mark as
         # its service_by_design is: kept
+        _recorded_mark(line, info)
         return recorded, "decided by the runner's by-design case %s (a finding the mark never erases); no table " \
                          "to replay it" % line.get("service_by_design_case")
     rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
@@ -236,6 +249,19 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         notes = [d for state, d, _ in walls if state != "undecidable"]
         if matched:
             info["by_design_cases"] = [c.get("id") for c in matched]
+            if compare.match_mark(matched[0], how) == "not_implemented_mcp":
+                # async's 901893b7: the first matched case states that THIS deployment's configuration refuses the
+                # request (answer_match.mcp_outcome): not implemented via MCP here, the case recorded, the runner's
+                # verdict_detail (the wall-rule notes first); neither rule (c) nor a host-state rule applies, and a
+                # finding is never erased
+                cid = matched[0].get("id")
+                info.update(service_by_design_case=cid, explained_checks=[],
+                            verdict_detail=compare.not_implemented_detail(matched[0], answer, tool_err, notes))
+                if _finding(new_checks):
+                    return "finding", "the table's %s case %s (answer_match.mcp_outcome not_implemented_mcp); a " \
+                                      "check is a finding (a mark never erases one)" % (how, cid)
+                return "not_implemented_mcp", "the table's %s case %s (answer_match.mcp_outcome " \
+                                              "not_implemented_mcp)" % (how, cid)
             if walls and walls[-1][0] == "undecidable":
                 # rule (c): the case's answer matched, its wall rule cannot be decided: inconclusive, the case
                 # recorded; a finding is never erased
@@ -260,12 +286,13 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
             if _finding(new_checks):
                 return "finding", "the table's %s case %s; a check is a finding (a by-design mark never erases " \
                                   "one)" % (how, cid)
-            return compare.match_mark(matched[0], how), "the table's %s case %s" % (how, cid)
+            return "service_by_design", "the table's %s case %s" % (how, cid)
     if kept:
         if not cases:
+            if arm == "mcp":
+                _recorded_mark(line, info)
             return recorded, "decided by the runner without the checks (no table to replay its mark)"
-        info["note"] = "the runner's service_by_design mark is not reproduced by the current table: judged by the " \
-                       "checks"
+        info["note"] = "the runner's %s mark is not reproduced by the current table: judged by the checks" % recorded
     if arm == "mcp":
         code, state, detail = sc.host_state_verdict(scenario, line, doc, (answer or {}).get("error"), tool_err,
                                                     warnings)

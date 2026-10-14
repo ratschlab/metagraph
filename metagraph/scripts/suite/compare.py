@@ -66,11 +66,15 @@ class TableError(ValueError):
 
 
 # The table's vocabulary as async's runner validates it at load (suite_mcp_runner.py ServiceByDesign.problems at
-# e334715b, triage-2 B-08: one semantics for the runner and this comparator): what an answer_match may state, what
-# each of its sides may state, the direct_mismatch values, the service_answer outcomes the checks judge.
-ANSWER_MATCH_TOP_KEYS = ("routes", "direct", "mcp", "direct_mismatch", "wall_rule")
+# e334715b, 901893b7 / 31a2e41f: answer_match.mcp_outcome; triage-2 B-08: one semantics for the runner and this
+# comparator): what an answer_match may state, what each of its sides may state, the direct_mismatch values, the
+# mcp_outcome values, the service_answer outcomes the checks judge.
+ANSWER_MATCH_TOP_KEYS = ("routes", "direct", "mcp", "direct_mismatch", "wall_rule", "mcp_outcome")
 ANSWER_MATCH_KEYS = ("http", "code", "text_contains", "field", "slot_code")
 DIRECT_MISMATCH_VALUES = ("disagree", "timing")
+# answer_match.mcp_outcome (async's MCP_OUTCOME_VALUES, 901893b7): the outcome class a matched case gives the MCP
+# execution; service_by_design is the default when absent (match_mark)
+MCP_OUTCOME_VALUES = ("service_by_design", "not_implemented_mcp")
 WALL_RULE_VALUES = sc.WALL_RULE_VALUES
 ANSWERED_OUTCOMES = ("answered", "clamped")
 EXPLAINS_ENTRY_KEYS = ("check", "detail_matches")
@@ -99,12 +103,13 @@ def entry_problem(entry):
 
 
 def table_problems(cases):
-    """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at e334715b,
+    """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at 31a2e41f,
     mirrored): an answer_match without routes (a non-empty list of route strings), a key of it outside
     ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose
     http is not one integer, that states slot_code (a direct-side key) or that states no code (peer review R5), a
-    direct_mismatch outside DIRECT_MISMATCH_VALUES, a wall_rule outside WALL_RULE_VALUES; an explains_checks that is
-    not a list of entries (entry_problem) or sits on a case other than answered / clamped."""
+    direct_mismatch outside DIRECT_MISMATCH_VALUES, a wall_rule outside WALL_RULE_VALUES, an mcp_outcome outside
+    MCP_OUTCOME_VALUES, on an answered / clamped case, or stated as a case key instead of in answer_match; an
+    explains_checks that is not a list of entries (entry_problem) or sits on a case other than answered / clamped."""
     out = []
     for case in cases:
         cid = "case %r" % (case.get("id"),)
@@ -118,6 +123,8 @@ def table_problems(cases):
             if not judged_by_checks(case):
                 out.append("%s: explains_checks on a %s case (only answered / clamped cases leave the outcome to the "
                            "checks)" % (cid, (case.get("service_answer") or {}).get("outcome")))
+        if "mcp_outcome" in case:   # an answer_match key: a top-level one would be read by no matcher
+            out.append("%s: mcp_outcome is an answer_match key (answer_match.mcp_outcome), not a case key" % cid)
         if "answer_match" not in case:
             continue
         am = case["answer_match"]
@@ -152,6 +159,13 @@ def table_problems(cases):
                 cid, am["direct_mismatch"], list(DIRECT_MISMATCH_VALUES)))
         if "wall_rule" in am and am["wall_rule"] not in WALL_RULE_VALUES:
             out.append("%s: answer_match.wall_rule %r is not one of %s" % (cid, am["wall_rule"], list(WALL_RULE_VALUES)))
+        if "mcp_outcome" in am:
+            if am["mcp_outcome"] not in MCP_OUTCOME_VALUES:
+                out.append("%s: answer_match.mcp_outcome %r is not one of %s" % (
+                    cid, am["mcp_outcome"], list(MCP_OUTCOME_VALUES)))
+            if judged_by_checks(case):
+                out.append("%s: answer_match.mcp_outcome on a %s case (the checks decide an answered / clamped case)"
+                           % (cid, (case.get("service_answer") or {}).get("outcome")))
     return out
 
 
@@ -1038,12 +1052,32 @@ def service_answers(want, answer, tool_error=None):
 
 
 def match_mark(case, how=None):
-    """The mark a refused / relayed (named) or answer-triggered (|how|) match gives the MCP execution, as async's
-    runner gives it at f386a3c0: service_by_design (finding when a check is one; the callers decide that). One place
-    for a case's own statement of its mark: async announced answer_match.mcp_outcome ("service_by_design" |
-    "not_implemented_mcp") for an answer-triggered case (addendum 1 to lane S5e); the table at f386a3c0 states none,
-    and load_by_design refuses the key until it is mirrored here."""
-    return "service_by_design"
+    """The outcome class a match of |case| gives the MCP execution (async's ServiceByDesign.mcp_outcome, 901893b7):
+    its answer_match.mcp_outcome, else service_by_design (MCP_OUTCOME_VALUES; the load validation refuses any other
+    value); named or answer-triggered (|how|) alike. not_implemented_mcp: a refusal of THIS deployment's
+    configuration (traverse.advanced_path_disabled): the execution reads not_implemented_mcp, the case recorded,
+    verdict_detail not_implemented_detail; rule (c) and the host-state rules do not apply; a finding still wins."""
+    am = case.get("answer_match") if isinstance(case, dict) else None
+    value = am.get("mcp_outcome") if isinstance(am, dict) else None
+    return str(value) if value in MCP_OUTCOME_VALUES else "service_by_design"
+
+
+# the verdict_detail of an execution a not_implemented_mcp case matched (async's MCP_NOT_IMPLEMENTED_DETAIL, 901893b7)
+MCP_NOT_IMPLEMENTED_DETAIL = ("not implemented via MCP on this deployment (case {case}, answer_match.mcp_outcome "
+                              "not_implemented_mcp): the service refused {field} at submit: {text!r}; on a deployment "
+                              "that enables it the request is accepted and the case does not apply")
+
+
+def not_implemented_detail(case, answer, tool_error, notes=()):
+    """The runner's verdict_detail for a not_implemented_mcp match: the wall-rule notes first, then
+    MCP_NOT_IMPLEMENTED_DETAIL with the case, the refused field (the tool error's `field` when it states the key,
+    else the answer error's; none: "the request") and the answer error's text, joined "; " (judge at 901893b7)."""
+    err = (answer or {}).get("error") or {}
+    err = err if isinstance(err, dict) else {}
+    refused = (tool_error or {}).get("field", err.get("field"))
+    return "; ".join(list(notes) + [MCP_NOT_IMPLEMENTED_DETAIL.format(
+        case=str(case.get("id")), field=refused if refused is not None else "the request",
+        text=str(err.get("text") or ""))])
 
 
 def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None):
@@ -1161,6 +1195,24 @@ def _transport_line(line):
     return not isinstance(http, int) or isinstance(http, bool) or http == 0
 
 
+def not_implemented_class(case, hit, how, direct_lines, direct_ref, run_dir, scenario=None):
+    """The class a case stating answer_match.mcp_outcome not_implemented_mcp (async's 901893b7) gives the MCP
+    executions it matched (|hit|, matched |how|: named or answer-triggered): not_implemented_mcp (the class of a
+    manifest mcp.not_implemented), the case named, `by` mcp_outcome; the pair as the case's match would read it
+    (answer_class for an answer-triggered match, by_design_class for a named one) is kept under `pair` (its class and
+    direct verification), never as service_by_design."""
+    if how == "answer-triggered":
+        pair = answer_class(case, hit, direct_lines, run_dir)
+    else:
+        pair = by_design_class(dict(case, agreement="by_design"), direct_ref, hit, run_dir, scenario)
+    keep = ("class", "side", "verified", "direct_verified", "direct_detail", "direct_mismatch", "mcp_verified",
+            "mcp_detail", "direct_by")
+    return {"class": "not_implemented_mcp", "by": "mcp_outcome", "mcp_outcome": "not_implemented_mcp",
+            "case": case.get("id"), "case_agreement": case.get("agreement"),
+            "service_outcome": (case.get("service_answer") or {}).get("outcome"),
+            "repeats": [r.get("repeat") for r in hit], "pair": dict((k, pair[k]) for k in keep if k in pair)}
+
+
 def answer_class(case, hit, direct_lines, run_dir):
     """The class an answer-triggered case gives the MCP executions it matched (|hit|): service-side by design (`by`
     answer), verified when a direct execution matches its direct side. Every repeat of BOTH direct arms is classified
@@ -1174,8 +1226,7 @@ def answer_class(case, hit, direct_lines, run_dir):
     am = case["answer_match"]
     side = am.get("direct")
     dm = am.get("direct_mismatch")
-    res = {"class": match_mark(case, "answer-triggered"), "by": "answer", "case": case["id"],
-           "case_agreement": case.get("agreement"),
+    res = {"class": "service_by_design", "by": "answer", "case": case["id"], "case_agreement": case.get("agreement"),
            "service_outcome": (case.get("service_answer") or {}).get("outcome"),
            "repeats": [r.get("repeat") for r in hit], "mcp_verified": True}
     lines = [x for arm in ("direct-local", "direct-remote")
@@ -1366,6 +1417,15 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
         walls = []
         matched, how = case_matches(cases, scenario, ans, terr, r, doc, walls)
+        if matched and match_mark(matched[0], how) == "not_implemented_mcp":
+            # async's 901893b7: not implemented via MCP on this deployment (rule (c) does not apply): its own group,
+            # the class not_implemented_mcp (below)
+            key = ("not_implemented", matched[0].get("id"), how)
+            if key not in groups:
+                order.append(key)
+                groups[key] = (matched[0], [])
+            groups[key][1].append(r)
+            continue
         if matched and walls and walls[-1][0] == "undecidable":
             undecided.append(r)   # rule (c): its case's wall rule cannot be decided: neither for nor against
             continue
@@ -1391,7 +1451,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         if not groups and not plain:
             return dict(note, **{"class": "not_comparable", "by": "undecidable plausibility",
                                  "detail": "every MCP execution's plausibility is undecidable (rule (c))"})
-    sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"]
+    sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"
+             or (k[0] == "not_implemented" and k[2] == "answer-triggered")]
     kept = _unexplained_direct(direct_lines, sides, run_dir)
     k_arm, k_ref = _direct_ref(kept)
     k_ref0 = k_ref[min(k_ref)] if k_ref else None
@@ -1403,7 +1464,9 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                       "detail": "case %s is not in the by-design table" % missing[0]})
     for key in order:
         case, hit = groups[key]
-        if key[0] == "answer-triggered":
+        if key[0] == "not_implemented":
+            parts.append(not_implemented_class(case, hit, key[2], direct_lines, k_ref0, run_dir, scenario))
+        elif key[0] == "answer-triggered":
             parts.append(answer_class(case, hit, direct_lines, run_dir))
         else:
             parts.append(by_design_class(case, k_ref0, hit, run_dir, scenario))
@@ -1441,6 +1504,15 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                 if by:
                     rest["direct_by"] = by
         parts.append(rest)
+    nip = [p for p in parts if p.get("mcp_outcome") == "not_implemented_mcp"]
+    if nip:
+        # a case's answer_match.mcp_outcome not_implemented_mcp (async's 901893b7): counted under not_implemented_mcp,
+        # never service_by_design; the other parts are kept beside it
+        out = dict(nip[0])
+        others = [p for p in parts if p is not nip[0]]
+        if others:
+            out["other_repeats"] = others[0] if len(others) == 1 else others
+        return dict(note, **out)
     dis = [p for p in parts if p.get("class") == "disagree"]
     nim = [c for c in named if c.get("agreement") == "not_implemented_mcp"]
     if dis and nim:

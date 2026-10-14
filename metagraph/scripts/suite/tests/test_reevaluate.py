@@ -879,6 +879,131 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(rows[1]["reevaluation"]["explained_items_recorded"], [1])
         self.assertNotIn("explained_items_recorded", rows[2]["reevaluation"])   # a runner before f386a3c0
 
+    def test_mcp_outcome_not_implemented(self):
+        # async's 901893b7 (the runner's tests, mirrored): a matched case stating answer_match.mcp_outcome
+        # not_implemented_mcp makes the execution not_implemented_mcp, the case recorded, explained checks / items [],
+        # verdict_detail naming the deployment condition (the service's own text); service_by_design stays the
+        # default; neither rule (c) nor a host-state code makes it inconclusive; a finding is never erased; a named
+        # match applies it too
+        text = ("overrides.labels.max_seed_labels is on the advanced strategy path, which is not enabled on this "
+                "deployment")
+
+        def case(cid="test.deployment_gate", route="POST /traverse", **am_extra):
+            am = {"routes": [route], "direct": {"http": 200},
+                  "mcp": {"http": 400, "code": "preset_unavailable", "field": "overrides.<knob path>",
+                          "text_contains": "advanced strategy path, which is not enabled on this deployment"},
+                  "direct_mismatch": "disagree", "mcp_outcome": "not_implemented_mcp"}
+            am.update(am_extra)
+            return {"id": cid, "agreement": "not_implemented_mcp", "direct_expectation": {"http": 200},
+                    "service_answer": {"outcome": "refused_at_submit", "code": am["mcp"]["code"],
+                                       "text_contains": am["mcp"]["text_contains"], "field": am["mcp"].get("field")},
+                    "answer_match": dict((k, v) for k, v in am.items() if v is not None)}
+        table = {"test.deployment_gate": case()}
+        t4 = scenario("T-labels-0004", "POST /traverse", STATUS, mcp={"tool": "traverse_fetch", "arguments": {}})
+        ans = {"http": 400, "body": None, "error": {"code": "preset_unavailable", "text": text,
+                                                    "field": "overrides.labels.max_seed_labels"}}
+        failing = [{"check": "status", "outcome": "fail", "detail": "http 400, expected 200"},
+                   {"check": "invariants", "outcome": "fail", "detail": "no answer to check: http 400"}]
+
+        def judge(sc_, ans_, cases, checks=failing, line=None, doc=None, terr=None):
+            info = {}
+            out = reevaluate.outcome_of(None, "mcp", sc_, ans_, line or {"outcome": "fail"}, checks, False, cases,
+                                        terr, info, doc)[0]
+            return out, info
+        out, info = judge(t4, ans, table)
+        self.assertEqual((out, info["service_by_design_case"], info["explained_checks"], info.get("explained_items"),
+                          info.get("inconclusive_reason")),
+                         ("not_implemented_mcp", "test.deployment_gate", [], None, None))
+        self.assertEqual(info["verdict_detail"], cmp.MCP_NOT_IMPLEMENTED_DETAIL.format(
+            case="test.deployment_gate", field="overrides.labels.max_seed_labels", text=text))
+        self.assertEqual(info["verdict_detail"], (
+            "not implemented via MCP on this deployment (case test.deployment_gate, answer_match.mcp_outcome "
+            "not_implemented_mcp): the service refused overrides.labels.max_seed_labels at submit: %r; on a "
+            "deployment that enables it the request is accepted and the case does not apply" % text))
+        # the tool error's field wins when it states the key (None: "the request"), as the runner's
+        self.assertIn("refused overrides.x at submit", judge(t4, ans, table, terr={"code": "preset_unavailable",
+                                                                                    "field": "overrides.x"})[1][
+            "verdict_detail"])
+        nofield = {"n": case("n", mcp={"http": 400, "code": "preset_unavailable", "text_contains": "advanced"})}
+        bare = dict(ans, error={"code": "preset_unavailable", "text": text})
+        self.assertIn("refused the request at submit", judge(t4, bare, nofield)[1]["verdict_detail"])
+        self.assertIn("refused the request at submit", judge(t4, ans, nofield, terr={"code": "preset_unavailable",
+                                                                                     "field": None})[1][
+            "verdict_detail"])
+        # the default class: absent or stated service_by_design
+        for default in (None, "service_by_design"):
+            self.assertEqual(judge(t4, ans, {"c": case("c", mcp_outcome=default)})[0], "service_by_design")
+        # a finding is never erased
+        finding = failing + [{"check": "budget_respected", "outcome": "finding", "detail": "34 s on a 15 s budget"}]
+        out, info = judge(t4, ans, table, finding)
+        self.assertEqual((out, info["service_by_design_case"]), ("finding", "test.deployment_gate"))
+        self.assertIn("not implemented via MCP", info["verdict_detail"])
+        # rule (c) does not apply: a wall-ruled case whose wall is undecidable still gives its class
+        deadline = {"http": 502, "body": None, "error": {"code": "search_failed", "text": "pattern_deadline: pattern: "
+                    "the answer could not be written within time_budget_ms (60000 ms, the finalisation reserve of "
+                    "250 ms included)"}}
+        walled = {"test.walled": case("test.walled", "POST /pattern", wall_rule="budget_minus_reserve",
+                                      mcp={"http": 502, "code": "search_failed", "text_contains": "pattern_deadline"})}
+        pat = scenario("N-1", "POST /pattern", STATUS, mcp={"tool": "pattern_search",
+                                                           "arguments": {"time_budget_ms": 60000}})
+        out, info = judge(pat, deadline, walled)
+        self.assertEqual((out, info["service_by_design_case"], info.get("inconclusive_reason")),
+                         ("not_implemented_mcp", "test.walled", None))
+        self.assertTrue(info["verdict_detail"].startswith("not implemented via MCP on this deployment (case "
+                                                          "test.walled"), info["verdict_detail"])
+        # a known wall below the threshold holds the case back in matching, as before; its note leads the detail of
+        # a later case that matches
+        out, info = judge(pat, deadline, walled, line={"outcome": "fail", "mcp_phases": {"backend_ms": 5.0}})
+        self.assertEqual((out, info.get("service_by_design_case")), ("fail", None))
+        both = dict(walled, **{"test.gate2": case("test.gate2", "POST /pattern",
+                                                  mcp={"http": 502, "code": "search_failed",
+                                                       "text_contains": "pattern_deadline"})})
+        out, info = judge(pat, deadline, both, line={"outcome": "fail", "mcp_phases": {"backend_ms": 5.0}})
+        self.assertEqual((out, info["service_by_design_case"]), ("not_implemented_mcp", "test.gate2"))
+        self.assertTrue(info["verdict_detail"].startswith("test.walled (wall_rule budget_minus_reserve): after 5 ms"))
+        self.assertIn("; not implemented via MCP on this deployment (case test.gate2", info["verdict_detail"])
+        # the host-state rules do not apply
+        timed_out = {"http": 504, "body": None, "error": {"code": "resolve_timeout", "text": "timed out after 30 s"}}
+        gated = {"test.gated_resolve": case("test.gated_resolve", "POST /resolve",
+                                            mcp={"http": 504, "code": "resolve_timeout", "text_contains": "timed"})}
+        res = scenario("R-1", "POST /resolve", STATUS, mcp={"tool": "traverse_resolve", "arguments": {}})
+        job = {"outcome": "fail", "mcp_phases": {"backend_ms": 31000.0}}
+        self.assertEqual(judge(res, timed_out, gated, line=job)[0], "not_implemented_mcp")
+        self.assertEqual(judge(res, timed_out, {"x": case("x")}, line=job)[0], "inconclusive")   # the host state
+        # a named match applies it too (another route)
+        named = scenario("X-1", "GET /elsewhere", STATUS, mcp={"tool": "traverse_fetch",
+                                                               "by_design": ["test.deployment_gate"]})
+        self.assertEqual(judge(named, ans, table)[0], "not_implemented_mcp")
+        # the real table's case 131 on v4's T-labels-0004 / -0006 (MCP 400 preset_unavailable on
+        # overrides.labels.max_seed_labels): not_implemented_mcp; a field outside overrides.* is not the case
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        for sid in ("T-labels-0004", "T-labels-0006"):
+            out, info = judge(dict(t4, id=sid), ans, cases)
+            self.assertEqual((out, info["service_by_design_case"]), ("not_implemented_mcp",
+                                                                    "traverse.advanced_path_disabled"), sid)
+        self.assertEqual(judge(t4, dict(ans, error=dict(ans["error"], field="preset")), cases)[0], "fail")
+        self.assertEqual(judge(t4, {"http": 200, "body": {}, "error": None}, cases)[0], "fail")
+        self.assertEqual(judge(dict(t4, route="POST /resolve"), ans, cases)[0], "fail")
+        # a runner's not_implemented_mcp mark that names its case is replayed with the table (not kept unread): the
+        # case reproduces it; a table without the case judges the checks (noted); no table keeps it with its case
+        mark = {"outcome": "not_implemented_mcp", "service_by_design_case": "traverse.advanced_path_disabled",
+                "explained_checks": [], "explained_items": [], "verdict_detail": "recorded detail"}
+        out, info = judge(t4, ans, cases, line=mark)
+        self.assertEqual((out, info["service_by_design_case"]), ("not_implemented_mcp",
+                                                                "traverse.advanced_path_disabled"))
+        out, info = judge(t4, ans, {"x": case("x", "POST /resolve")}, line=mark)
+        self.assertEqual(out, "fail")
+        self.assertIn("the runner's not_implemented_mcp mark is not reproduced", info["note"])
+        info = {}
+        out, kept = reevaluate.outcome_of(None, "mcp", t4, ans, mark, failing, False, {}, None, info)
+        self.assertEqual((out, info["service_by_design_case"], info["verdict_detail"]),
+                         ("not_implemented_mcp", "traverse.advanced_path_disabled", "recorded detail"))
+        self.assertIn("no table", kept)
+        # the manifest's mcp.not_implemented (no case named) stays the runner's decision
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", t4, ans, {"outcome": "not_implemented_mcp"}, failing,
+                                               False, cases), ("not_implemented_mcp",
+                                                               "decided by the runner without the checks"))
+
     def test_by_design_finding_without_a_table(self):
         # B5b-10: with no table a recorded by-design finding (a relayed deadline's budget_respected) is kept, as
         # the runner's service_by_design mark is; with the table it is replayed (finding: a mark never erases one)

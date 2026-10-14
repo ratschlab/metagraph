@@ -436,8 +436,8 @@ class CompareTest(unittest.TestCase):
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 130)   # async's vendored table at f386a3c0 (e427d503's edit)
-        self.assertEqual(info["sha256"], "e63304709904feee8358f18684425c6ec5965866a1fbc46cf13972e9a060abc7")
+        self.assertEqual(info["cases"], 131)   # async's vendored table at 31a2e41f (e427d503's edit, case 131)
+        self.assertEqual(info["sha256"], "6b55300b33bf74aea5339c238024634992644585e5efd8d5a504cc96e60a9c65")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
         entry, = cases["traverse.duplicate_seeds"]["explains_checks"]
@@ -453,7 +453,15 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
         self.assertEqual(sorted(c["id"] for c in cmp.answer_cases(cases)),
                          ["mismatch.above_kind_cap", "pattern.caps_zero", "pattern.deadline_ends_task",
-                          "traverse.empty_seeds"])
+                          "traverse.advanced_path_disabled", "traverse.empty_seeds"])
+        # 31a2e41f: the deployment-gated refusal reads not_implemented_mcp (answer_match.mcp_outcome); no other case
+        # states the key
+        self.assertEqual([c["id"] for c in cases.values() if cmp.match_mark(c) != "service_by_design"],
+                         ["traverse.advanced_path_disabled"])
+        adv = cases["traverse.advanced_path_disabled"]
+        self.assertEqual((adv["agreement"], adv["answer_match"]["mcp_outcome"], adv["answer_match"]["direct"],
+                          adv["answer_match"]["direct_mismatch"]),
+                         ("not_implemented_mcp", "not_implemented_mcp", {"http": 200}, "disagree"))
         self.assertEqual(cmp.load_by_design(""), ({}, None))
         for case in cases.values():
             self.assertIn(case["agreement"], ("by_design", "not_implemented_mcp", "service_only"))
@@ -1315,6 +1323,77 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertEqual((res["explained_items"], res["explained_items_recorded"]), ({"0": [1]}, {"0": []}))
         res = cmp.mcp_agreement({0: dict(m, explained_items=[1])}, {"direct-local": {0: d}}, s, cases, self.dir)
         self.assertNotIn("explained_items_recorded", res)
+
+    def test_mcp_outcome(self):
+        # async's 901893b7 / 31a2e41f: answer_match.mcp_outcome "service_by_design" (default) | "not_implemented_mcp";
+        # load validation: an answer_match key, one of the two values, never on an answered / clamped case, never a
+        # top-level case key. A match of a not_implemented_mcp case (named or answer-triggered) is counted under
+        # not_implemented_mcp, never service_by_design; the pair's reading is kept under `pair`
+        base = {"id": "a", "agreement": "not_implemented_mcp", "direct_expectation": {"http": 200},
+                "service_answer": {"outcome": "refused_at_submit", "code": "preset_unavailable"},
+                "answer_match": {"routes": ["POST /traverse"], "direct": {"http": 200},
+                                 "mcp": {"http": 400, "code": "preset_unavailable", "field": "overrides.<knob path>",
+                                         "text_contains": "which is not enabled on this deployment"},
+                                 "direct_mismatch": "disagree", "mcp_outcome": "not_implemented_mcp"}}
+        self.assertEqual(cmp.table_problems([base]), [])
+        self.assertEqual(cmp.match_mark(base), "not_implemented_mcp")
+        self.assertEqual(cmp.match_mark(dict(base, answer_match=dict(base["answer_match"], mcp_outcome=None))),
+                         "service_by_design")
+        self.assertEqual(cmp.match_mark({"id": "b"}), "service_by_design")
+        bad = dict(base, answer_match=dict(base["answer_match"], mcp_outcome="maybe"))
+        self.assertEqual(cmp.table_problems([bad]), [
+            "case 'a': answer_match.mcp_outcome 'maybe' is not one of ['service_by_design', 'not_implemented_mcp']"])
+        ans = dict(base, service_answer={"outcome": "answered"}, explains_checks=[])
+        self.assertIn("case 'a': answer_match.mcp_outcome on a answered case (the checks decide an answered / clamped "
+                      "case)", cmp.table_problems([ans]))
+        top = dict(base, mcp_outcome="not_implemented_mcp")
+        self.assertEqual(cmp.table_problems([top]), [
+            "case 'a': mcp_outcome is an answer_match key (answer_match.mcp_outcome), not a case key"])
+        with self.assertRaises(cmp.TableError), tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.json")
+            sc.write_json_atomic(path, {"cases": [top]})
+            cmp.load_by_design(path)
+        # the class: T-labels-0004's shape (v4: MCP 400 preset_unavailable on overrides.labels.max_seed_labels, the
+        # direct arms 200), the case answer-triggered (the scenario names none)
+        cases = {"a": base}
+        s = {"id": "T-labels-0004", "route": "POST /traverse", "request": {}, "expect": [],
+             "mcp": {"tool": "traverse_fetch", "arguments": {}}}
+        err = {"code": "preset_unavailable", "field": "overrides.labels.max_seed_labels",
+               "text": "overrides.labels.max_seed_labels is on the advanced strategy path, which is not enabled on "
+                       "this deployment"}
+        m = self.raw_line("T-labels-0004", "mcp", 0, http=400, error=err, outcome="not_implemented_mcp",
+                          checks=[{"check": "status", "outcome": "fail", "detail": "http 400"}],
+                          service_by_design_case="a")
+        d = self.raw_line("T-labels-0004", "direct-local", 0, checks=[{"check": "status", "outcome": "pass"}])
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["by"], res["case"], res["repeats"]),
+                         ("not_implemented_mcp", "mcp_outcome", "a", [0]))
+        self.assertEqual((res["pair"]["class"], res["pair"]["verified"]), ("service_by_design", True))
+        # a direct answer outside the case's direct side is kept in the pair; the class stays not_implemented_mcp
+        d400 = self.raw_line("T-labels-0004", "direct-local", 0, http=400, error={"code": "x", "text": "y"},
+                             checks=[{"check": "status", "outcome": "fail"}])
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["pair"]["class"], res["pair"]["side"]),
+                         ("not_implemented_mcp", "disagree", "direct"))
+        # named, the same class; with the default mark the case is service_by_design as before
+        named = dict(s, mcp=dict(s["mcp"], by_design=["a"]))
+        self.assertEqual(cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, named, cases, self.dir)["class"],
+                         "not_implemented_mcp")
+        plain = {"a": dict(base, agreement="by_design", answer_match=dict(base["answer_match"],
+                                                                          mcp_outcome="service_by_design"))}
+        res = cmp.mcp_agreement({0: dict(m, outcome="service_by_design")}, {"direct-local": {0: d}}, s, plain,
+                                self.dir)
+        self.assertEqual((res["class"], res["by"], res["verified"]), ("service_by_design", "answer", True))
+        # another knob of overrides matches; a field outside overrides.* does not (the checks compare)
+        other = dict(err, field="overrides.branching.max_paths")
+        m2 = self.raw_line("T-labels-0006", "mcp", 0, http=400, error=other, outcome="not_implemented_mcp",
+                           checks=[{"check": "status", "outcome": "fail"}])
+        self.assertEqual(cmp.mcp_agreement({0: m2}, {"direct-local": {0: d}}, dict(s, id="T-labels-0006"), cases,
+                                           self.dir)["class"], "not_implemented_mcp")
+        m3 = self.raw_line("T-labels-0007", "mcp", 0, http=400, error=dict(err, field="preset"), outcome="fail",
+                           checks=[{"check": "status", "outcome": "fail"}])
+        self.assertEqual(cmp.mcp_agreement({0: m3}, {"direct-local": {0: d}}, dict(s, id="T-labels-0007"), cases,
+                                           self.dir)["class"], "disagree")
 
     def test_planned_duplicate(self):
         # A2-06: T-attempts-0002 runs its attempt per run and arm (run_unique); a repeat that meets its retained id

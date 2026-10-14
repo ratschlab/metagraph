@@ -241,12 +241,13 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
-- `service_by_design.json`: async's table (130 cases), copied byte-identical from the search-service work
-  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show f386a3c0:scripts/bench/vendor_suite/service_by_design.json`,
-  154,062 bytes, sha256 e6330470...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
+- `service_by_design.json`: async's table (131 cases), copied byte-identical from the search-service work
+  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show 31a2e41f:scripts/bench/vendor_suite/service_by_design.json`,
+  159,522 bytes, sha256 6b55300b...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
   splits by value and four answer-triggered cases; lane S5b: `explains_checks` on every answered / clamped case,
   `answer_match.direct_mismatch` on the four answer-triggered ones, validated at load; lane S5e: async's e427d503
-  edit: traverse.duplicate_seeds explains only `([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)`). A
+  edit, traverse.duplicate_seeds explains only `([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)`, and
+  31a2e41f's case 131 traverse.advanced_path_disabled with `answer_match.mcp_outcome` not_implemented_mcp). A
   case's `agreement` `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) ->
   service-side by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
   service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text
@@ -1220,19 +1221,25 @@ smoke 11 scenarios, content_sha256 8e944aeb792da696a544236156c3ea8c8b435f7a53548
 lanes S5c/S5d. run_suite.sh takes v4 by default (`--smoke`: suite_smoke_v4.json); build_manifest.py refuses to overwrite either.
 
 
-## Lane S5e: the mirror of async's final runner f386a3c0 (2026-10-14)
+## Lane S5e: the mirror of async's final runner 31a2e41f (2026-10-14)
 
-The reference is async's runner on feat/suite-mcp-runner-vendored at f386a3c0 (scripts/bench/suite_mcp_runner.py):
+The reference is async's runner on feat/suite-mcp-runner-vendored at 31a2e41f (scripts/bench/suite_mcp_runner.py):
 f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened traverse.duplicate_seeds regex), f52846fb
-(rule 4's read floor) and f386a3c0 (`explained_items` on the line and the raw record).
+(rule 4's read floor), f386a3c0 (`explained_items` on the line and the raw record), 901893b7
+(`answer_match.mcp_outcome`) and 31a2e41f (case 131, traverse.advanced_path_disabled).
 
-- The table: async's f386a3c0 (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show
-  f386a3c0:scripts/bench/vendor_suite/service_by_design.json`, 154,062 bytes, sha256 e6330470..., 130 cases),
-  byte-identical here. Against e334715b's (0fcf7e7d...) only traverse.duplicate_seeds changed: its explains_checks
-  entry is {"check": "invariants", "detail_matches": "([1-9][0-9]*) results for [0-9]+ seeds \\(\\1 distinct\\)"}
-  (fullmatch: as many results as distinct seeds, the checks' wording of lane S5c, B5b-07), and the vocabulary's
-  example reads "1 results for 2 seeds (1 distinct)". Async's vendored checks.py and suite_common.py at f386a3c0
-  equal this branch's at 3daea97a.
+- The table: async's 31a2e41f (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show
+  31a2e41f:scripts/bench/vendor_suite/service_by_design.json`, 159,522 bytes, sha256 6b55300b..., 131 cases),
+  byte-identical here (f386a3c0's, 154,062 bytes, e6330470..., 130 cases, was the lane's first copy, a96c9303).
+  Against e334715b's (0fcf7e7d...): traverse.duplicate_seeds' explains_checks entry is {"check": "invariants",
+  "detail_matches": "([1-9][0-9]*) results for [0-9]+ seeds \\(\\1 distinct\\)"} (e427d503; fullmatch: as many results
+  as distinct seeds, the checks' wording of lane S5c, B5b-07; the vocabulary's example "1 results for 2 seeds (1
+  distinct)"); the vocabulary documents answer_match.mcp_outcome; case 131 traverse.advanced_path_disabled
+  (31a2e41f): refused_at_submit at stage mcp_local, agreement not_implemented_mcp, direct_expectation http 200,
+  answer_match {routes ["POST /traverse"], direct {http 200}, mcp {http 400, code preset_unavailable, text_contains
+  "is on the advanced strategy path, which is not enabled on this deployment", field "overrides.<knob path>"},
+  direct_mismatch disagree, mcp_outcome not_implemented_mcp}. Async's vendored checks.py and suite_common.py at
+  31a2e41f equal this branch's at 3daea97a (the runner keeps its own rules; it does not call the mirror).
 - Rule 4's read floor (f52846fb; `suite_common.read_bound_below_floor`, called by host_state_verdict before the
   least wall, as the runner's host_state_plausible calls it): a resolve_timeout whose statement (the runner's
   recorded `timeout_terms`, else timeout_statement) names timeout_phase "read" with a known budget (the MCP
@@ -1271,3 +1278,20 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   record's first, else the line's, as before; rule 4's bound and its read floor read it. explained_checks /
   explained_items / service_by_design_case on a matched line and in the raw record, verdict_detail and
   inconclusive_reason on the line where set (the raw record: null): read from the line, as before.
+- `answer_match.mcp_outcome` (901893b7; `compare.match_mark`, `compare.not_implemented_detail`): "service_by_design"
+  (the default when absent) or "not_implemented_mcp". The load validation (`compare.table_problems`, as the runner's
+  ServiceByDesign.problems) admits it as an answer_match key with one of the two values and refuses another value, the
+  key on an answered / clamped case and the key at a case's top level. The FIRST matched case decides (named or
+  answer-triggered): with not_implemented_mcp the execution reads not_implemented_mcp (the class a manifest
+  mcp.not_implemented gets), the case recorded (service_by_design_case; explained_checks and explained_items []),
+  verdict_detail "not implemented via MCP on this deployment (case {case}, answer_match.mcp_outcome
+  not_implemented_mcp): the service refused {field} at submit: {text!r}; on a deployment that enables it the request
+  is accepted and the case does not apply" (the runner's MCP_NOT_IMPLEMENTED_DETAIL; field the tool error's `field`
+  when it states the key, else the answer error's, none "the request"; the wall-rule notes first, joined "; "); rule
+  (c) and the host-state rules do not apply; a known wall below a wall rule still keeps that case from matching; a
+  check that is a finding makes it finding. reevaluate.py replays a runner's not_implemented_mcp mark that names its
+  case with the table (the manifest's mcp.not_implemented, which names none, stays the runner's decision): the case
+  reproduces it, a table without it judges the checks (`reevaluation.note`), no table keeps the mark with the
+  runner's own case fields (as a kept service_by_design mark and a by-design finding now keep theirs). compare counts
+  such executions under not_implemented_mcp (`by` mcp_outcome, the case, the repeats; the pair as its match would
+  read it, answer_class or by_design_class, under `pair`), never service_by_design, ahead of any other part.
