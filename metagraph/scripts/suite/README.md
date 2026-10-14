@@ -237,7 +237,9 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
 - MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; per MCP execution as
   async's runner matches it (since lane S5b): the scenario's `mcp.by_design` case(s) in async's table (below), else
   an answer-triggered case of the table (below); the MCP runner's own `not_implemented_mcp` / `service_by_design`
-  outcome where no table is read (lane S5c, B5b-05: with a table such a mark is judged by its checks); else, on the checks both arms evaluated (a check `not_exposed` on either side
+  outcome where no table is read (lane S5c, B5b-05: with a table a service_by_design mark is judged by its checks,
+  and a not_implemented_mcp mark on a scenario the manifest maps to a tool, that neither mcp.not_implemented nor a
+  named not_implemented_mcp case states, is `disagree`, side mcp: lane S7v); else, on the checks both arms evaluated (a check `not_exposed` on either side
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
@@ -1890,3 +1892,14 @@ failing on 14552938.
   replay it", the case, the runner's record and its inconclusive_reason kept) and compare sets it aside as
   undecidable (not_comparable when nothing else is judged; another repeat still decides). With a table nothing
   changes (the case is replayed); the recorded runs are re-evaluated with the table, so nothing moves.
+
+### The runner's not_implemented_mcp mark (for async: how a new mark is announced)
+- An MCP execution the runner marked not_implemented_mcp that no case reproduced made the scenario's class
+  not_implemented_mcp ("by mcp runner") whatever the table said, while the comparator section above said a table
+  judges such a mark. With a table, a mark on a scenario the manifest maps to a tool (`compare.mcp_mapped`) that
+  neither mcp.not_implemented nor a named case of agreement not_implemented_mcp states, and that no case with
+  answer_match.mcp_outcome matched, is `disagree`, side mcp, by mcp runner, the repeats named
+  (`compare.unmatched_not_implemented_mark`; the other repeats are compared as usual). With no table, with such a
+  named case, or on a scenario without an MCP tool, the mark stays the runner's class. The recorded runs have no such
+  mark (their not_implemented_mcp lines are the manifest's or traverse.advanced_path_disabled's), so nothing moves. A
+  new runner mark reaches the comparator through the table (answer_match.mcp_outcome) or the manifest.

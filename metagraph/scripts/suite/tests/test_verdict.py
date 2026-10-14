@@ -289,5 +289,38 @@ class RuleCWithoutTableTest(unittest.TestCase):
                                                None)[0], "fail")
 
 
+class UnmatchedNotImplementedMarkTest(unittest.TestCase):
+    """A runner's not_implemented_mcp mark on a scenario the manifest maps: with a table, unless a case reproduces it,
+    the MCP side disagrees; with no table it stays the runner's class."""
+
+    def test_mark_on_a_mapped_scenario(self):
+        s = scen("P-8", "P")
+        d = {"direct-local": {0: line("P-8", "direct-local", 0, T0, 10.0)}}
+        m = {0: line("P-8", "mcp", 0, T0, 10.0, outcome="not_implemented_mcp", checks=[])}
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        res = cmp.mcp_agreement(m, d, s, cases, None)
+        self.assertEqual((res["class"], res["side"], res["by"]), ("disagree", "mcp", "mcp runner"))
+        self.assertIn("no case of the table reproduces the mark", res["mcp_detail"])
+        self.assertEqual(cmp.mcp_agreement(m, d, s, {}, None)["class"], "not_implemented_mcp")
+        # the manifest's mark, a named not_implemented_mcp case and an unmapped scenario are the plan's
+        nim = scen("P-9", "P", not_implemented="max_mismatches")
+        self.assertEqual(cmp.mcp_agreement(m, d, nim, cases, None)["class"], "not_implemented_mcp")
+        named = scen("P-10", "P", by_design="resolve.not_expressible.bounds_max_query_bp")
+        self.assertEqual(cmp.mcp_agreement(m, d, named, cases, None)["class"], "not_implemented_mcp")
+        unmapped = dict(s)
+        unmapped.pop("mcp")
+        self.assertEqual(cmp.mcp_agreement(m, d, unmapped, cases, None)["class"], "not_implemented_mcp")
+
+    def test_other_repeats_still_compared(self):
+        s = scen("P-8", "P")
+        d = {"direct-local": {0: line("P-8", "direct-local", 0, T0, 10.0)}}
+        ok = line("P-8", "mcp", 1, T0 + 5, 10.0)
+        m = {0: line("P-8", "mcp", 0, T0, 10.0, outcome="not_implemented_mcp", checks=[]), 1: ok}
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        res = cmp.mcp_agreement(m, d, s, cases, None)
+        self.assertEqual(res["class"], "disagree")
+        self.assertEqual(res["repeats"], [0])
+
+
 if __name__ == "__main__":
     unittest.main()

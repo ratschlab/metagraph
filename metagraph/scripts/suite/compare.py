@@ -1872,6 +1872,22 @@ def line_explained_items(line, matched, recorded=None):
     return items
 
 
+def mcp_mapped(scenario):
+    """Whether the manifest maps a scenario to an MCP tool (mcp.tool), so the plan expects the MCP arm to send it."""
+    mcp = (scenario or {}).get("mcp")
+    return isinstance(mcp, dict) and bool(mcp.get("tool"))
+
+
+def unmatched_not_implemented_mark(lines):
+    """The class of MCP executions the runner marked not_implemented_mcp on a scenario the manifest maps (mcp_mapped),
+    where nothing in the plan states the mark (no mcp.not_implemented, no named case whose agreement is
+    not_implemented_mcp, no case with answer_match.mcp_outcome matched): disagree, side mcp, by the runner's mark."""
+    reps = [r.get("repeat") for r in lines]
+    return {"class": "disagree", "side": "mcp", "by": "mcp runner", "repeats": reps, "mcp_verified": False,
+            "mcp_detail": "the MCP runner marked repeat(s) %s not_implemented_mcp; the manifest maps the scenario "
+                          "and no case of the table reproduces the mark" % reps}
+
+
 def runner_rule_c_by_design(line):
     """Whether an MCP execution records the runner's rule (c) on a by-design case: inconclusive, the case recorded
     (service_by_design_case), inconclusive_reason an undecidable plausibility (suite_common.UNDECIDABLE: the case's
@@ -2179,7 +2195,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     decided it), the failing check items the matched answered cases explain apart (B-01, B5b-06:
     service_by_design only when nothing else differs; the case is a note); an unmatched execution the MCP runner
     marked service_by_design is, with no table, an unverified by-design part of its own beside the others' check
-    agreement, and with a table judged by its checks like any other (B5b-05, B-06). A case id the scenario names that
+    agreement, and with a table judged by its checks like any other (B5b-05, B-06); one it marked not_implemented_mcp
+    makes the rest not_implemented_mcp with no table, with a named not_implemented_mcp case, or on a scenario the
+    manifest does not map, and else is a disagreement on the MCP side (unmatched_not_implemented_mark); with no table a rule (c) inconclusive the runner decided on its case
+    (runner_rule_c_by_design) is undecidable. A case id the scenario names that
     the table lacks, with no named case matched, is a disagreement (side table). A disagreement anywhere is the class
     (the first in execution order, the checks last); else a by-design class, verified only when every part held
     (B-04: other parts that do not agree make it unverified, shown as `other_repeats`); else the checks' class,
@@ -2273,10 +2292,17 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         # its own; with a table it is judged by its checks (B-06); every other execution is compared check by check
         marks = [r for r in unmatched if r.get("outcome") == "service_by_design"] if not cases else []
         compared_lines = [r for r in plain if not any(r is x for x in marks)]
-        if any(r.get("outcome") == "not_implemented_mcp" for r in unmatched):
+        nim_marks = [r for r in unmatched if r.get("outcome") == "not_implemented_mcp"]
+        if nim_marks and not (cases and mcp_mapped(scenario)
+                              and not any(c.get("agreement") == "not_implemented_mcp" for c in named)):
             rest = {"class": "not_implemented_mcp", "by": "mcp runner"}
             marks = []
         else:
+            if nim_marks:
+                # with a table, a runner's not_implemented_mcp mark on a scenario the manifest maps that neither the
+                # manifest (mcp.not_implemented, decided above) nor a case the scenario names states is no plan's
+                parts.append(unmatched_not_implemented_mark(nim_marks))
+                compared_lines = [r for r in compared_lines if not any(r is x for x in nim_marks)]
             if marks:
                 parts.append({"class": "service_by_design", "by": "mcp runner", "verified": False,
                               "repeats": [r.get("repeat") for r in marks]})
