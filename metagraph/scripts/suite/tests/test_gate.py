@@ -483,7 +483,34 @@ class JudgeTest(GateCase):
         change = dict(((("D-007", r), {"checks": checks_for("T-001", r)}) for r in (1, 2)))
         v = self.judge(make_run(self.run_dir("b"), self.m, mcp_lines(self.m, change=change)))
         self.assertEqual([p["detail"] for p in self.problems(v, "property")],
-                         ["required property deterministic not evaluated on any repeat"])
+                         ["the expected check deterministic has no result on a passing execution"] * 2)
+
+    def test_generic_checks_are_not_trusted_from_the_outcome(self):
+        # a pass line without its status result, and a refusal passing with no check at all, fail the gate
+        no_status = [c for c in checks_for("T-001", 0) if c["check"] != "status"]
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change={
+            ("T-001", 0): {"checks": no_status}})))
+        self.assertEqual([(p["scenario"], p["repeat"], p["detail"]) for p in self.problems(v, "outcome")],
+                         [("T-001", 0, "the expected check status has no result on a passing execution")])
+        d = make_run(self.run_dir("b"), self.m, mcp_lines(self.m), direct=("direct-local",),
+                     direct_change={("R-003", 0): {"checks": []}})
+        v = gate.judge(d, policy_of(self.m, arms=("mcp", "direct-local")))
+        self.assertIn(("R-003", "direct-local", "the expected check status has no result on a passing execution"),
+                      [(p["scenario"], p["arm"], p["detail"]) for p in v["problems"]])
+        # a generic check not passing on a passing line (status not exposed) blocks too
+        bad = [dict(c, outcome="not_exposed") if c["check"] == "status" else c for c in checks_for("R-002", 1)]
+        v = self.judge(make_run(self.run_dir("c"), self.m, mcp_lines(self.m, change={("R-002", 1): {"checks": bad}})))
+        self.assertIn("status not_exposed", " ".join(p["detail"] for p in self.problems(v, "outcome")))
+
+    def test_property_absent_on_one_repeat_fails(self):
+        # only determinism may be absent, and only on the first repeat (nothing to compare)
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change={
+            ("T-001", 0): {"checks": [c for c in checks_for("T-001", 0) if c["check"] != "answer_fields"]}})))
+        self.assertEqual([(p["scenario"], p["repeat"], p["detail"]) for p in self.problems(v, "property")],
+                         [("T-001", 0, "the expected check answer_fields has no result on a passing execution")])
+        v = self.judge(make_run(self.run_dir("b"), self.m, mcp_lines(self.m, change={
+            ("D-007", 1): {"checks": checks_for("D-007", 0)}})))
+        self.assertEqual([(p["scenario"], p["repeat"]) for p in self.problems(v, "property")], [("D-007", 1)])
 
     def test_mcp_disagreement_fails(self):
         change = {("T-001", 0): {"checks": checks_for("T-001", 0, prop="fail"), "outcome": "fail"}}

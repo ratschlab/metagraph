@@ -1400,7 +1400,9 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   error, finding, ANY inconclusive, not_implemented_mcp on a scenario not excluded, service_by_design by a case the
   scenario does not name, a by-design pair not verified when a direct arm ran it, the MCP side not verified when none
   did); property (a property check the scenario expects not passed on a passing or explained execution, e.g. not
-  exposed, or evaluated on no repeat; a check of later repeats only, determinism, is judged over the repeats);
+  exposed; the line's outcome is not trusted: every check the scenario expects must have a result on each passing
+  line, determinism excepted on the first repeat only, the status must pass and no other generic check may fail or
+  be inconclusive there, so a pass line without its status result or a refusal passing with no check fails);
   disagreement (MCP vs direct when the MCP arm is gated, direct-local vs direct-remote when both are); agreement (with
   --require-agreement: an MCP class other than agree or a verified pair, a required property not compared); relation
   (a required relation not pass on a gated arm); configuration (below); nothing passed. An MCP-only policy needs no

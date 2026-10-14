@@ -247,16 +247,21 @@ def _is_property_fn(checks_dir=None):
     return fn if callable(fn) else (lambda name: name not in GENERIC_CHECKS)
 
 
-def property_results(scenario, line, is_property):
-    """[(check name, occurrence, outcome or None)] of the property checks the scenario expects, the k-th
-    expectation of a name answered by the line's k-th result of that name (None: no result)."""
+# The checks a repeat evaluates only when an earlier one exists (checks.evaluate: determinism has nothing to compare
+# on the first repeat, so it has no result there).
+LATER_REPEATS_ONLY = ("deterministic",)
+
+
+def property_results(scenario, line, is_property, generic=False):
+    """[(check name, occurrence, outcome or None)] of the property checks the scenario expects (every check with
+    |generic|), the k-th expectation of a name answered by the line's k-th result of that name (None: no result)."""
     results = {}
     for c in line.get("checks") or []:
         results.setdefault(c.get("check"), []).append(c)
     seen, out = {}, []
     for e in (scenario or {}).get("expect") or []:
         name = e.get("check") if isinstance(e, dict) else None
-        if not name or not is_property(name):
+        if not name or not (generic or is_property(name)):
             continue
         k = seen.get(name, 0)
         seen[name] = k + 1
@@ -404,7 +409,6 @@ def judge(run_dir, policy, reevaluated=False):
     is_property = _is_property_fn(checks_dir)
     passed = judged = 0
     by_design_mcp_only = 0
-    props = {}   # (scenario, arm) -> {(property, occurrence): the repeats that evaluated it}
     for (sid, arm, rep), r in sorted(recorded.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)),
                                                                         sc.ARMS.index(kv[0][1])
                                                                         if kv[0][1] in sc.ARMS else 9, kv[0][2])):
@@ -429,24 +433,32 @@ def judge(run_dir, policy, reevaluated=False):
             problems.append(_problem("outcome", "outcome %r" % o, sid, arm, rep))
             continue
         if o == "pass" or r.get("explained_checks") or r.get("explained_items"):
-            seen_props = props.setdefault((sid, arm), {})
-            for name, k, out in property_results(s, r, is_property):
-                seen_props.setdefault((name, k), [])
+            # the line's outcome is not trusted: every check the scenario expects has a result here (determinism
+            # not on the first repeat), the status passed, no generic check failed or could not test, and every
+            # property passed unless the policy does not require it or the named answered case explains it
+            for name, k, out in property_results(s, r, is_property, generic=True):
+                prop = is_property(name)
+                label = "%s%s" % (name, (" #%d" % (k + 1)) if k else "")
                 if out is None:
-                    continue   # not evaluated on this repeat (e.g. determinism on repeat 0): judged over the repeats
-                seen_props[(name, k)].append(rep)
-                if out == "pass" or not_required(policy, sid, arm, name):
+                    if name in LATER_REPEATS_ONLY and rep == 0:
+                        continue
+                    if not (prop and not_required(policy, sid, arm, name)):
+                        problems.append(_problem("property" if prop else "outcome", "the expected check %s has no "
+                                                 "result on a passing execution" % label, sid, arm, rep))
+                    continue
+                if out == "pass":
                     continue
                 if out == "fail" and _explained_property(r, name, k) and \
                         r.get("service_by_design_case") in cmp.case_ids(s):
                     continue   # the named answered / clamped case explains it: judged with the pair below
-                problems.append(_problem("property", "required property %s%s %s" % (
-                    name, (" #%d" % (k + 1)) if k else "", out), sid, arm, rep))
-    for (sid, arm), seen_props in sorted(props.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)), kv[0][1])):
-        for (name, k), reps in sorted(seen_props.items()):
-            if not reps and not not_required(policy, sid, arm, name):
-                problems.append(_problem("property", "required property %s%s not evaluated on any repeat" % (
-                    name, (" #%d" % (k + 1)) if k else ""), sid, arm))
+                if prop:
+                    if not not_required(policy, sid, arm, name):
+                        problems.append(_problem("property", "required property %s %s" % (label, out), sid, arm, rep))
+                elif name == "status" or out != "not_exposed":
+                    # a generic check the arm does not expose (the MCP's budget_respected) is no claim; anything
+                    # else that did not pass is
+                    problems.append(_problem("outcome", "generic check %s %s on a passing execution" % (label, out),
+                                             sid, arm, rep))
     for sid in policy["selection"].get("scenarios") or []:
         entry = scomp.get(sid) or {}
         ma = entry.get("mcp_agreement") or {}
