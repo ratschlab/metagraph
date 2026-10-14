@@ -565,7 +565,7 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     """What is wrong with entry i's stated withheld reason, cut reason, stop and time limitation: each must be one
     SPEC-pattern-search §7.5 / §7.6 lists, possible for the request (its mode, whether it reads annotation, has a
     memory account, a predicate, a path search) and must have happened by what the answer shows (README, "Stated
-    reasons"; lane S6g1). Nothing is judged where the answer does not show the quantity (a missing cap, work or
+    reasons" and "Lane S6g1"). Nothing is judged where the answer does not show the quantity (a missing cap, work or
     timing)."""
     probs: List[str] = []
     if not isinstance(e, dict) or "counts" not in e or "error" in e:
@@ -807,7 +807,7 @@ def _threshold_value_problem(sc: dict, body: dict, reason: str, phase: Any, stop
     value is that bound (the engine's threshold_crossed compares the sum of the counted ranges' lower bounds, which
     the halted count states: pattern_search.cpp running_lower, tally). Not judged on a graph without its mask (the
     running upper bound decides, the value is the lower parts only: fixture unmasked_stop_at_threshold, at_least 0)
-    or on a PRIMARY graph (an even-k wrapped union's bound need not be the stated value: §18 E2-02)."""
+    or on a PRIMARY graph (an even-k wrapped union's bound need not be the stated value: §18)."""
     idx = body.get("index") if isinstance(body.get("index"), dict) else {}
     if long_ or phase not in (None, "discovery") or idx.get("counting") == "upper_bound" or \
             idx.get("graph_mode") not in ("basic", "canonical"):
@@ -3117,6 +3117,7 @@ def check_walk_in_record(sc, ans, a, arm):
         # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
         unstopped = _resource_end_problem(r, armo, side, ends)
         gap = _computed_block(sc, ans, r, i, t, copies[0], side, L) if exact is not None else None
+        odd_base = _outside_alphabet(frames, side, following, best)
         if ends & _STATED_STRUCTURAL_ENDS and exact is None and possible:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
                 side, best, sorted(possible)[0], expected))
@@ -3136,13 +3137,12 @@ def check_walk_in_record(sc, ans, a, arm):
             # that ended before complete_to_bp ended for its own stated reason (SPEC-labeled-traversal-core §6.10)
             stopped.append("%s: the record followed for %d of %d bp, stopped by %s" % (
                 side, best, expected, sorted(ends & _RESOURCE_ENDS)[0] if ends & _RESOURCE_ENDS else trig))
-        elif _outside_alphabet(frames, side, following, best):
+        elif odd_base:
             # the record's next base is no base of the graph's alphabet ($ACGT, SPEC-pattern-search §8.2): no k-mer
             # holds it, so the record's route ends there, which the truth's minimum did not count
             searched.append("%s: the record followed for %d of %d bp, ended by %s before the record's base %r, "
                             "which no k-mer of the graph holds: a truth gap" % (
-                                side, best, expected, sorted(ends) or "nothing stated",
-                                _outside_alphabet(frames, side, following, best)))
+                                side, best, expected, sorted(ends) or "nothing stated", odd_base))
         else:
             probs.append("%s: the record followed for only %d of %d bp, the path ended by %s%s" % (
                 side, best, expected, sorted(ends) or "nothing stated", how))

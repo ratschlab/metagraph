@@ -397,8 +397,8 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(outcome(sc2, ok_answer(bad), "invariants")[0], "fail")
 
     def test_invariants_refuse_a_result_listed_twice(self):
-        # lane S6g1 (the review of 2026-10-14, finding 5): a copy of a context or path in place of a distinct one
-        # keeps the list's length and order (equal keys sort as equal), so only the identity tells it
+        # a copy of a context or path in place of a distinct one keeps the list's length and order (equal
+        # keys sort as equal), so only the identity tells it
         req = {"mode": "partial", "max_contexts": 2, "patterns": [{"dna": "ACGTACGTAC", "id": "w"}]}
         sc = {"route": "POST /pattern", "request": req, "truth": {}}
         k1, k2 = "T" * 21 + "ACGTACGTAC", "G" * 21 + "ACGTACGTAC"
@@ -434,9 +434,9 @@ class PatternChecks(unittest.TestCase):
         self.assertIn("listed again", d)
 
     def test_path_record_verified_placement(self):
-        # lane S6g1 (the review of 2026-10-14, finding 6 B): the record's occurrence is placed with the index's
-        # seq_id and the record's length, and every occurrence the label verifies lies in its record
-        # (L-verified-0001: NC_1.1 34701-34740 '+', seq_id 2, 640,681 bp)
+        # the record's occurrence is placed with the index's seq_id and the record's length, and every
+        # occurrence the label verifies lies in its record (L-verified-0001: NC_1.1 34701-34740 '+', seq_id
+        # 2, 640,681 bp)
         t = {"record": "NC_1.1", "taxid": "562", "seq_id": 2, "record_length": 640681, "start": 34700, "length": 40,
              "strand": "+", "window": "ACGT" * 10}
         sc = {"route": "POST /pattern", "truth": t, "request": {"patterns": [{"dna": "ACGT" * 10, "id": "w"}],
@@ -717,8 +717,8 @@ class MoreChecks(unittest.TestCase):
         unstated = copy.deepcopy(late)
         unstated["patterns"][0].update(stop=None, determinism="full")
         self.assertEqual(outcome(sc, ok_answer(unstated), "predicate_either_mirror", label="546")[0], "fail")
-        # a hiding the request cannot have (lane S6g1: anchor labels without labels all; a selection threshold
-        # stop that left the selected count exact) fails the mirror and the selection alike
+        # a hiding the request cannot have (anchor labels without labels all; a selection threshold stop
+        # that left the selected count exact) fails the mirror and the selection alike
         for withheld, extra in (("anchor_labels_truncated", {"anchors_truncated": [{"cap": 2, "total": 9}]}),
                                 ("threshold_crossed", {"stop": {"phase": "selection", "reason": "max_contexts"}})):
             hid = copy.deepcopy(ans)
@@ -1082,8 +1082,8 @@ class StatedReasons(unittest.TestCase):
         self.bad("does not list", ctx("exact", 24), withheld="no_such_reason")
 
     def test_withheld_reasons_need_their_request(self):
-        # lane S6g1 (the review of 2026-10-14, finding 4): a reason the request cannot have, whatever else the
-        # answer states; the label-free short pattern of P-scope-0001 hides its source behind none of them
+        # a reason the request cannot have, whatever else the answer states; the label-free short pattern of
+        # P-scope-0001 hides its source behind none of them
         ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
         refused = [{"row": 1, "phase": "label_discovery", "reason": "max_memory"}]
         self.bad("reads no annotation", ctx("exact", 19), withheld="annotation_budget", rows_refused=refused)
@@ -1128,7 +1128,7 @@ class StatedReasons(unittest.TestCase):
         self.ok(ctx("at_least", 4), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
                 limits=dict(thr, max_contexts=3), index={"graph_mode": "canonical"})   # P-modes-0005
         self.bad("not exact", ctx("exact", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
-                 limits=thr, index=masked)                                             # GPT's exact-zero mutation
+                 limits=thr, index=masked)                                    # P-modes-0005 with its counts exact 0
         self.bad("not exact", ctx("exact", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
                  limits=thr)
         self.bad("not past max_contexts 100", ctx("at_least", 2), withheld="threshold_crossed",
@@ -1552,9 +1552,9 @@ class Relations(unittest.TestCase):
         self.assertEqual(self.ev(rel, self.resolve(50, [[0, 50]], [[0, 50]]), full)[0], "fail")
         self.assertEqual(self.ev(rel, self.resolve(0, [], [], stop=True), full)[0], "inconclusive")   # nothing common
         self.assertEqual(self.ev(rel, checks.normalise_direct(503, b'{"code": "deadline"}'), full)[0], "inconclusive")
-        # lane S6g1 (VERIFY-V4 V05): a's property is its stop (R-budget, resolve_runs prefix_if_stopped): two
-        # complete profiles that agree did not test it; one that disagrees still fails; the continuation keeps its
-        # comparison (REL-prefix_equals-0002 / -0004)
+        # a's property is its stop (R-budget, resolve_runs prefix_if_stopped): two complete profiles that
+        # agree did not test it; one that disagrees still fails; the continuation keeps its comparison
+        # (REL-prefix_equals-0002 / -0004)
         budget = {"route": "POST /resolve", "request": {}, "truth": {},
                   "expect": [{"check": "resolve_runs", "args": {"label": "562", "full": True, "prefix_if_stopped": True}}]}
         rel = self.rel("prefix_equals", labels=["562"], a_from_kmer=0, b_from_kmer=0)
@@ -1665,8 +1665,8 @@ class ResolveChecks(unittest.TestCase):
         bad = copy.deepcopy(a)
         bad["body"]["stop"]["remainder_from_bp"] = 41
         self.assertEqual(outcome(sc, bad, "invariants")[0], "fail")
-        # lane S6g1 (VERIFY-V4 V05): R-budget's property is the stop; a complete answer holds the profile but never
-        # tested the prefix a stop answers (inconclusive), a wrong complete profile still fails; a twin's property
+        # R-budget's property is the stop; a complete answer holds the profile but never tested the prefix a
+        # stop answers (inconclusive), a wrong complete profile still fails; a twin's property
         # (unless_stopped) is the complete profile itself
         complete = self.body([[0, 70]])
         complete["body"].update(limits={"time_budget_ms": 3000, "finalize_reserve_ms": 250}, stop=None)
@@ -1843,9 +1843,10 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, failed, "walk_in_record", if_walked=True)[0], "inconclusive")
 
     def test_walk_judged_by_its_own_end_below_the_frontier(self):
-        # the v4 triage's V03: a cap that truncated the arm stopped the record's route only where the route reaches
-        # complete_to_bp; one that ended before it ended for its own stated reason (SPEC-labeled-traversal-core
-        # §6.10), and where that is the record's base outside A, C, G, T (T-walk-0018's 'S'), the truth's gap
+        # a cap that truncated the arm stopped the record's route only where the route reaches
+        # complete_to_bp; one that ended before it ended for its own stated reason
+        # (SPEC-labeled-traversal-core §6.10), and where that is the record's base outside A, C, G, T
+        # (T-walk-0018's 'S'), the truth's gap
         import random
         rnd = random.Random(17)
         record = "".join(rnd.choice("ACGT") for _ in range(1000))
@@ -2182,8 +2183,8 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(judge(*self.structural_walk(strategy=mlb2, events=False)), ("fail", "fail"))
 
     def test_zero_extension_branch_stop(self):
-        # GPT's mutation of T-derived-0001 (review of 2026-10-14, finding 3): both arms a 0 bp root whose every
-        # label ends `branch` with branches 0 under max_label_branches 2; the dead_end control fails as well
+        # the zero-extension mutation of T-derived-0001: both arms a 0 bp root whose every label ends
+        # `branch` with branches 0 under max_label_branches 2; the dead_end control fails as well
         import random
         rnd = random.Random(5)
         record = "".join(rnd.choice("ACGT") for _ in range(3000))

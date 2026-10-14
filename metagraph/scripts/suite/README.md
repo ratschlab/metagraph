@@ -1431,3 +1431,14 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   every direct R-budget answer of v3 and v4 is a 503 and every MCP one a 400 (the 2,000 bp limit), so no outcome
   moves; R-twin-0004 R0's complete answer judged as R-budget-0002's reads inconclusive (it passed), and so does
   REL-prefix_equals-0003 on it.
+
+### Validation (offline)
+- Mutation probes (lane-g1/scratch/probes/mutations.py: valid recorded answers of v3 and v4, their one-property
+  corruptions, GPT's probe answers, legitimately incomplete answers): 75 probes; at fe563f38 44 of them read
+  other than they must (every corruption above passed or read inconclusive), here all 75 do: every corruption
+  fails, every valid answer passes, every legitimately incomplete one stays inconclusive.
+- Re-evaluation of the recorded runs (v3: lane S5e's reeval-S5e copy; v4: the complete run copy; `run_suite.sh
+  --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, against the same copies re-evaluated at fe563f38): 0
+  outcome changes and 0 check outcome changes of 2,900 (v3) and 2,913 (v4) executions, 0 relation changes, compare
+  summaries identical; detail changes only on T-walk-0018's walk_in_record (v4 L0, R0, M1; v3 R0, M1), as stated
+  above.
