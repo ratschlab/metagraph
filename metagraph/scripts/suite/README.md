@@ -1843,3 +1843,12 @@ by lane S6c; everything below was open.
   stdout reader closed before SIGINT (with and without --quiet), and Ctrl-C of a paired run over tests/fake_ssh.py
   followed by a resume.
 
+### A failed step is recorded (P3-run-measure-report-05)
+- A direct step of the paired loop that exited non-zero only counted towards the stop after three in a row: its
+  scenario still counted as completed and the loop recorded `done N/N` (the v4 log: `python3: No such file or
+  directory`, exit 127 on P-iupac-0001, then "paired: done, 681/681"). The loop record (orchestrator.json
+  sessions[-1].loop, `loop_record`) counts a scenario as completed only when every step of it succeeded, lists
+  `failed_steps` as ARM:SCENARIO:EXIT, and a loop that ran through with a failed step ends `incomplete` (reason
+  `failed_steps`; the report's verdict reads INCOMPLETE through it) with exit status 1, like a failed loop. No
+  retry: a step that failed is resumed like any other (`--resume`).
+

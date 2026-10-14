@@ -292,6 +292,29 @@ class RunSuiteOffline(SuiteCase):
         orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
         self.assertEqual([s["loop"]["state"] for s in orch["sessions"]], ["capped", "done"])
 
+    def test_a_failed_step_is_recorded(self):
+        # a direct step that exits non-zero (here: the interpreter "not found", exit 127, before any request) leaves
+        # its scenario not completed; the loop names the step and reads incomplete (exit 1), never done N/N
+        make_manifest(self.mpath, basic_scenarios())
+        wrapper = os.path.join(self.d, "py")
+        with open(wrapper, "w") as fh:
+            fh.write('#!/bin/bash\ncase " $* " in *run_direct.py*direct-remote*"--only P-1 "*) '
+                     'echo "python3: No such file or directory" >&2; exit 127 ;; esac\nexec %s "$@"\n'
+                     % shlex.quote(sys.executable))
+        os.chmod(wrapper, 0o755)
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--warm-every", "0", "--checks", "stub",
+                               PYTHON=wrapper)
+            self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("1 failed step(s): direct-remote:P-1:127", p.stderr)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+        self.assertEqual((loop["state"], loop["reason"], loop["completed"], loop["scenarios"]),
+                         ("incomplete", "failed_steps", 5, 6))
+        self.assertEqual(loop["failed_steps"], ["direct-remote:P-1:127"])
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            self.assertIn("**INCOMPLETE", fh.read())
+
     def test_lock_held_stale_and_foreign(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
         os.makedirs(os.path.join(self.mex, "suite-dev"))

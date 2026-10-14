@@ -464,7 +464,7 @@ interrupted() {
     esac
     pull_local_arm
   fi
-  [[ $LOOP_STARTED == 0 ]] || orch_set loop "{\"mode\": \"$MODE\", \"state\": \"interrupted\", \"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}}"
+  [[ $LOOP_STARTED == 0 ]] || loop_record interrupted
   cleanup
   [[ -z "$RUN_DIR" || ! -d "$RUN_DIR" ]] || log "resume with: $0 --resume $RUN_DIR"
   exit 130
@@ -737,9 +737,17 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
 }
 
 FINAL_RC=0
+FAILED_STEPS=()   # the loop's direct steps that exited non-zero, as ARM:SCENARIO:EXIT
+json_list() { local out="" x; for x in "$@"; do out+="\"$x\","; done; printf '[%s]' "${out%,}"; }
+# The loop record of this invocation (orchestrator.json sessions[-1].loop: the report reads its state and reason): a
+# scenario is completed when every step of it succeeded; failed_steps names each step that did not.
+loop_record() {  # loop_record STATE
+  orch_set loop "{\"mode\": \"$MODE\", \"state\": \"$1\", \"reason\": \"${LOOP_REASON:-}\", \"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}, \"direct_requests\": ${USED:-0}, \"failed_steps\": $(json_list ${FAILED_STEPS[@]+"${FAILED_STEPS[@]}"})}"
+}
 # --- paired mode ----------------------------------------------------------------------------------------------
 run_paired() {
   local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 since_pull=0 runner_live=0 stop=0
+  local step_failed
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -756,11 +764,12 @@ run_paired() {
   LOOP_STARTED=1
   LOOP_STATE=running
   LOOP_REASON=""
-  orch_set loop "{\"mode\": \"paired\", \"state\": \"running\", \"scenarios\": $N_PLAN, \"completed\": 0}"
+  loop_record running
   log "paired: $N_PLAN scenario(s); arms ${arms%,}"
   for entry in ${plan[@]+"${plan[@]}"}; do
     read -r sid l r mc mw <<< "$entry"
     heartbeat
+    step_failed=0
     if [[ $mc == 1 ]]; then
       rc=0; mcp_step "$sid" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
@@ -771,7 +780,8 @@ run_paired() {
       rc=0; direct_call local --only "$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
       if [[ $rc != 0 ]]; then
-        fails_local=$((fails_local + 1)); log "direct-local: exit $rc on $sid (see arms/direct-local/runner.log)"
+        fails_local=$((fails_local + 1)); step_failed=1; FAILED_STEPS+=("direct-local:$sid:$rc")
+        log "direct-local: exit $rc on $sid (see arms/direct-local/runner.log)"
         # An ssh that failed may have left the step running: never start the next arm next to it, and never read
         # a failing ssh as "the runner is gone" (review N3).
         wrc=0
@@ -793,7 +803,12 @@ run_paired() {
       log "direct-remote: $sid"
       rc=0; direct_call remote --only "$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
-      if [[ $rc != 0 ]]; then fails_remote=$((fails_remote + 1)); log "direct-remote: exit $rc on $sid"; else fails_remote=0; fi
+      if [[ $rc != 0 ]]; then
+        fails_remote=$((fails_remote + 1)); step_failed=1; FAILED_STEPS+=("direct-remote:$sid:$rc")
+        log "direct-remote: exit $rc on $sid"
+      else
+        fails_remote=0
+      fi
     fi
     if [[ "$mw" != "-" ]]; then
       for rep in ${mw//,/ }; do
@@ -808,11 +823,13 @@ run_paired() {
       LOOP_STATE=failed; LOOP_REASON=failing_steps
       break
     fi
-    COMPLETED=$((COMPLETED + 1))
+    [[ $step_failed == 1 ]] || COMPLETED=$((COMPLETED + 1))
     since_pull=$((since_pull + 1))
     if [[ $SKIP_LOCAL == 0 && $since_pull -ge 25 ]]; then pull_local_arm; since_pull=0; fi
   done
   [[ $LOOP_STATE != running ]] || LOOP_STATE=done
+  # a loop that ran through with a failed step did not record what it planned: incomplete, never done
+  if [[ $LOOP_STATE == done && ${#FAILED_STEPS[@]} -gt 0 ]]; then LOOP_STATE=incomplete; LOOP_REASON=failed_steps; fi
   [[ $LOOP_STATE != capped ]] || log "paired: stopped at --max-requests $MAX_REQUESTS ($USED direct requests); --resume continues"
   # The closing GET /capabilities of each direct arm (one request kept back for each) and its state over the
   # whole selection; none while a direct-local runner may still be on the host (review N3).
@@ -830,9 +847,9 @@ run_paired() {
   fi
   [[ $SKIP_LOCAL == 1 ]] || pull_local_arm
   stop_sampler
-  orch_set loop "{\"mode\": \"paired\", \"state\": \"$LOOP_STATE\", \"reason\": \"$LOOP_REASON\", \"scenarios\": $N_PLAN, \"completed\": $COMPLETED, \"direct_requests\": $USED}"
-  log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s), $USED direct request(s)"
-  [[ $LOOP_STATE != failed ]] || FINAL_RC=1
+  loop_record "$LOOP_STATE"
+  log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s) completed, $USED direct request(s)$( (( ${#FAILED_STEPS[@]} == 0 )) || printf '; %d failed step(s): %s' "${#FAILED_STEPS[@]}" "${FAILED_STEPS[*]}")"
+  [[ $LOOP_STATE != failed && $LOOP_STATE != incomplete ]] || FINAL_RC=1
 }
 
 # --- sequential mode ------------------------------------------------------------------------------------------
