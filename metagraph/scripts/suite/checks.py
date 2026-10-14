@@ -267,9 +267,14 @@ def deadline_allowed(sc: dict, ans: dict) -> bool:
     such request may get it in place of its 200 (the README's `machine-dependent`: time budgets give 200 or 503).
     Allowed where the status expectation asks for a 200 and does not itself name the deadline (an http 503, the code
     `deadline` or a text naming it): a scenario that names it is judged as it states. A deadline before its budget
-    fails budget_respected (_budget_503)."""
+    fails budget_respected (_budget_503). /resolve only with a request budget (A2-01 of the review of lane S5b):
+    SPEC-labeled-traversal-core §4.5 makes its deadline opt-in ("a request without bounds.time_budget_ms runs
+    without a deadline ... whatever the server's cap"; capabilities resolve.time_budget.default null), so a 503
+    deadline of a /resolve without bounds.time_budget_ms is a host defect: the status fails it."""
     if sc.get("route") not in ("POST /pattern", "POST /resolve") or ans.get("http") != 503 or \
             (ans.get("error") or {}).get("code") != "deadline":
+        return False
+    if sc.get("route") == "POST /resolve" and _resolve_budget(sc) is None:
         return False
     for exp in sc.get("expect", []):
         if exp.get("check") != "status":
@@ -286,6 +291,14 @@ def deadline_allowed(sc: dict, ans: dict) -> bool:
 pattern_deadline_allowed = deadline_allowed
 
 
+def _resolve_budget(sc: dict) -> Optional[float]:
+    """The bounds.time_budget_ms a /resolve scenario's request names (a number), else None."""
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    bounds = req.get("bounds") if isinstance(req.get("bounds"), dict) else {}
+    v = bounds.get("time_budget_ms")
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
 def check_status(sc, ans, a, arm):
     http = ans.get("http")
     want = a.get("http", 200)
@@ -297,6 +310,11 @@ def check_status(sc, ans, a, arm):
                                  "time budget, which %s allows on any host (%s)" % (
                                      want, "SPEC-pattern-search §6/§7.6" if sc.get("route") == "POST /pattern"
                                      else "SPEC-labeled-traversal-core §4.5", (err.get("text") or "")[:200])
+        if sc.get("route") == "POST /resolve" and http == 503 and err.get("code") == "deadline" and \
+                _resolve_budget(sc) is None:
+            return FAIL, "http 503 deadline, expected %s: the request names no bounds.time_budget_ms, and the /resolve " \
+                         "deadline is opt-in (SPEC-labeled-traversal-core §4.5: no deadline without the field, " \
+                         "whatever the server's cap) (%s)" % (want, (err.get("text") or "")[:200])
         return FAIL, "http %s, expected %s (error %s: %s)" % (http, want, err.get("code"), (err.get("text") or "")[:300])
     err = ans.get("error") or {}
     if "code" in a:
@@ -1475,35 +1493,42 @@ _LATE_503_MIN_MS = 1000.0
 _RESOLVE_FINALIZE_RESERVE_MS = 250.0
 
 
-def _budget_503(sc, ans, client):
+def _budget_503(sc, ans, client, a=None):
     """budget_respected on an allowed 503 `deadline` of /pattern or /resolve: the client's wall time (the runner's
-    `client`) against the budget. FAIL when it came before the budget (/resolve: before the budget less its
+    `client`) against the EFFECTIVE budget, min(the requested budget, the route's cap the builder states in the
+    check's args, cap_ms: /resolve resolve.time_budget.max_time_ms, /pattern caps.time_budget_ms of the capabilities
+    snapshot; a host lowers a larger budget to its cap, SPEC-labeled-traversal-core §4.5, SPEC-pattern-search §4.5;
+    A2-03 of the review of lane S5b). FAIL when it came before that budget (/resolve: before it less its
     finalisation reserve): the SPECs answer it only when the answer cannot be written by the budget, and the deadline
     starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core
     §4.5); FINDING when it came long past it (an unpolled piece of that length, which the SPECs' deadline rule
     answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
     route = sc.get("route", "")
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
-    budget = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
+    asked = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
         _number((req.get("bounds") or {}).get("time_budget_ms")) if route == "POST /resolve" else None
     wall = _number((client or {}).get("wall_ms"))
     code = (ans.get("error") or {}).get("code")
-    if budget is None or wall is None or code != "deadline":
+    if asked is None or wall is None or code != "deadline":
         return INCONCLUSIVE, "not testable: http %s (%s), no client wall time against a budget" % (
             ans.get("http"), code)
+    cap = _number((a or {}).get("cap_ms"))
+    budget = min(asked, cap) if cap is not None else asked
+    named = "%.0f ms budget" % budget if budget == asked else \
+        "%.0f ms budget (the requested %.0f ms lowered to the host's cap)" % (budget, asked)
     late = wall - budget
     floor = budget - (_RESOLVE_FINALIZE_RESERVE_MS if route == "POST /resolve" else 0.0)
     if wall < floor - 1.0:
-        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %.0f ms budget%s: the answer is a 503 "
-                      "only when it cannot be written by the budget, and the client's interval holds the host's" % (
-                          wall, budget, " less its %.0f ms finalisation reserve" % _RESOLVE_FINALIZE_RESERVE_MS
+        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %s%s: the answer is a 503 only when "
+                      "it cannot be written by the budget, and the client's interval holds the host's" % (
+                          wall, named, " less its %.0f ms finalisation reserve" % _RESOLVE_FINALIZE_RESERVE_MS
                           if route == "POST /resolve" else ""))
     if late > max(_LATE_503_MIN_MS, budget):
-        return FINDING, ("503 deadline delivered %.0f ms after the %.0f ms budget (client wall %.0f ms): the deadline "
-                         "is read where the work and the delivery poll it, so an unpolled piece of about that length "
-                         "ran (the wall also holds the network and any wait for a request thread)" % (late, budget, wall))
-    return INCONCLUSIVE, "503 deadline at a client wall time of %.0f ms for a %.0f ms budget (within max(1 s, the " \
-                         "budget) of it): nothing in the body to judge" % (wall, budget)
+        return FINDING, ("503 deadline delivered %.0f ms after the %s (client wall %.0f ms): the deadline is read "
+                         "where the work and the delivery poll it, so an unpolled piece of about that length ran (the "
+                         "wall also holds the network and any wait for a request thread)" % (late, named, wall))
+    return INCONCLUSIVE, "503 deadline at a client wall time of %.0f ms for a %s (within max(1 s, the budget) of " \
+                         "it): nothing in the body to judge" % (wall, named)
 
 
 def _seed_paths_max(sc, r, i):
@@ -1637,7 +1662,7 @@ def check_budget_respected(sc, ans, a, arm, client=None):
         return PASS, "%d walked seed(s) kept the budget %.0f ms by the deadline record%s" % (
             seen, budget, ("; performance: " + "; ".join(facts)) if facts else "")
     if ans.get("http") == 503:
-        return _budget_503(sc, ans, client)
+        return _budget_503(sc, ans, client, a)
     budget = _number((body.get("limits") or {}).get("time_budget_ms"))
     if budget is None:
         named = req.get("time_budget_ms") if route == "POST /pattern" else (req.get("bounds") or {}).get("time_budget_ms")
@@ -2562,10 +2587,20 @@ def _blocked_walk(sc: dict, ans: dict, r: dict, i: int, t: dict, armo: dict, sid
     record from a collapsed repeat's exit (an occurrence of the junction in the flank followed by another base) for
     every base the flank holds. (outcome, detail): pass; inconclusive when d lies before the truth's min_bp (a truth
     gap), when such a route runs past the flank (not verifiable), or when the search stopped at its bound; fail when
-    it runs past the record's end with the record as its only label; None when no copy has such a route."""
+    it runs past the record's end with the record as its only label; None when no copy has such a route. A block
+    whose repeat has no exit inside the truth's flank (A2-04 of the review of lane S5b): a route that spells the
+    record's first d bases, states the block and continues is INCONCLUSIVE (the continuation cannot be verified),
+    one that ends at the block passes, none: None."""
+    unverifiable = None   # a copy whose repeat exit lies outside the flank: the answer when no other copy decides
     for c in copies:
         blk = _computed_block(sc, ans, r, i, t, c, side, L)
-        if blk is None or not blk["exits"]:
+        if blk is None:
+            continue
+        if not blk["exits"]:
+            found = _blocked_without_exit(sc, armo, side, blk, labels, exact)
+            if found is not None and found[0] != INCONCLUSIVE:
+                return found
+            unverifiable = unverifiable or found
             continue
         d, out = blk["d"], blk["out"]
         frames = []
@@ -2593,7 +2628,33 @@ def _blocked_walk(sc: dict, ans: dict, r: dict, i: int, t: dict, armo: dict, sid
                 return FAIL, "%s; %d route(s) continue from a repeat exit past the record's end" % (what, beyond)
             return INCONCLUSIVE, "%s; %d route(s) continue from a repeat exit past the truth's flank (not " \
                                  "verifiable)" % (what, beyond)
-    return None
+    return unverifiable
+
+
+def _blocked_without_exit(sc: dict, armo: dict, side: str, blk: dict, labels: Optional[set],
+                          exact: Optional[dict]) -> Optional[Tuple[str, str]]:
+    """_blocked_walk for a computed block at d whose collapsed repeat has no exit inside the truth's flank (A2-04):
+    the routes that spell the record's first d bases and state the blocked event at d (any parent at a merge, the
+    label rule); one that continues past d leaves from an exit the flank does not hold: INCONCLUSIVE (not
+    verifiable); one that ends at d: PASS; a block before the truth's min_bp: INCONCLUSIVE (a truth gap); none:
+    None (the arm does not follow the record)."""
+    d, out = blk["d"], blk["out"]
+    walk = out[:d]
+    frames = [((lambda n, w=walk: w[:n]) if side == "right" else (lambda n, w=walk: w[:n][::-1]), d, d)]
+    routes, beyond, capped = _record_routes(armo, side, frames, labels=labels, event=(d, blk["char"], blk["reason"]))
+    what = "the record's own continuation blocked at %d bp by %s (computed from the record and the seed)" % (
+        d, blk["reason"])
+    if capped:
+        return INCONCLUSIVE, "%s; the route search stopped at %d states" % (what, _MAX_ROUTE_STATES)
+    if not routes and not beyond:
+        return None
+    if exact is not None and d < exact.get("min_bp", 0):
+        return INCONCLUSIVE, "%s, before the truth's minimum of %d bp: a truth gap" % (what, exact["min_bp"])
+    if beyond:
+        return INCONCLUSIVE, "%s, stated at %d bp; %d route(s) continue from the repeat's exit, which is not in the " \
+                             "truth's flank: not verifiable" % (what, d, beyond)
+    return PASS, "followed for %d bp, then blocked by %s (computed from the record and the seed, stated at %d bp); " \
+                 "the route ends at the block" % (d, blk["reason"], d)
 
 
 def check_walk_in_record(sc, ans, a, arm):
@@ -2992,6 +3053,28 @@ def check_trace_coordinates(sc, ans, a, arm):
     return PASS, "seed at [%d, %d) and the arms adjacent" % (s, e)
 
 
+def _seed_identity(seed: Any) -> str:
+    """A seed's identity as the MCP service merges seeds (app/traversal/planner.py normalize_seeds: the sequence
+    cleaned as resolve.extract_sequence cleans it, whitespace removed and upper-cased, a single FASTA record's header
+    dropped; the explicit labels trimmed and de-duplicated in order, None without labels; a seed_id is no part of
+    it)."""
+    if not isinstance(seed, dict):
+        return json.dumps(seed, sort_keys=True)
+    seq = seed.get("sequence")
+    if isinstance(seq, str):
+        lines = [x.strip() for x in seq.splitlines()]
+        seq = "".join("".join(x for x in lines if not x.startswith(">")).split()).upper()
+    labels = seed.get("labels")
+    if isinstance(labels, list):
+        labels = list(dict.fromkeys(x.strip() if isinstance(x, str) else x for x in labels))
+    return json.dumps([seq, labels], sort_keys=True)
+
+
+def _distinct_seeds(seeds: Sequence[Any]) -> int:
+    """The number of distinct seeds of a request by _seed_identity."""
+    return len(set(_seed_identity(x) for x in seeds or []))
+
+
 def _traverse_invariants(sc, ans, a, arm):
     if ans.get("http") != 200:
         return PASS, "no answer to check (http %s)" % ans.get("http")
@@ -3000,7 +3083,12 @@ def _traverse_invariants(sc, ans, a, arm):
     seeds = sc["request"].get("seeds", [])
     probs = []
     if len(res) != len(seeds):
-        probs.append("%d results for %d seeds" % (len(res), len(seeds)))
+        distinct = _distinct_seeds(seeds)
+        # B5b-07: a request with identical seeds states how many are distinct ("N results for M seeds (D distinct)"):
+        # the service's merge onto the first gives exactly N == D (the table's traverse.duplicate_seeds explains that
+        # only); a lost or a surplus result is no merge
+        probs.append("%d results for %d seeds%s" % (len(res), len(seeds), " (%d distinct)" % distinct
+                                                    if distinct < len(seeds) else ""))
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     echoed = ((body.get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     radius = echoed if isinstance(echoed, int) else maxbp
@@ -3338,7 +3426,7 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "predicate_either_mirror": ((), ("pattern", "label", "min")),
     "motif": ((), ("pattern", "selected", "decided_by_in", "label_present")),
     "clamped": (("field", "requested", "effective"), ("where",)),
-    "budget_respected": ((), ("rule",)),
+    "budget_respected": ((), ("rule", "cap_ms")),
     "counts_consistent": ((), ("pattern",)),
     "invariants": ((), ()),
     "resolve_runs": (("label",), ("full", "prefix_if_stopped", "unless_stopped", "covers", "run_end_in",
@@ -3519,7 +3607,7 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
             continue
         if name not in ("status", "deterministic") and http != 200 and not args.get("any_status"):
             if http in allowed and name == "budget_respected" and http == 503:
-                outcome, detail = _budget_503(scenario, answer, client)
+                outcome, detail = _budget_503(scenario, answer, client, args)
                 out.append({"check": name, "outcome": outcome, "detail": detail, "property": is_property(name)})
             elif http in allowed:
                 out.append({"check": name, "outcome": INCONCLUSIVE,

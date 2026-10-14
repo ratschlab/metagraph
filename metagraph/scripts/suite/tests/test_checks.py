@@ -233,6 +233,33 @@ class Generic(unittest.TestCase):
         self.assertFalse(checks.pattern_deadline_allowed(sc, dl))
         self.assertFalse(checks.deadline_allowed(sc, dl))
 
+    def test_resolve_deadline_is_opt_in(self):
+        # A2-01 (review of lane S5b, VERIFY-REVIEW: SPEC-labeled-traversal-core §4.5 l.224, capabilities
+        # resolve.time_budget.default null): a /resolve without bounds.time_budget_ms has no deadline, so v4's
+        # R-discover-0001 answered 503 deadline (at 5 ms, at 45 s or with no wall) fails; it was inconclusive
+        disc = {"route": "POST /resolve", "request": {"sequence": "ACGT" * 25, "discover": True,
+                                                       "bounds": {"max_query_bp": 2000}}, "truth": {},
+                "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                           {"check": "resolve_discover_contains", "args": {"label": "511145"}}]}
+        rdl = checks.normalise_direct(503, b'{"error": "resolve: the answer could not be built", "code": "deadline"}')
+        self.assertFalse(checks.deadline_allowed(disc, rdl))
+        for client in ({"wall_ms": 5.0}, {"wall_ms": 45000.0}, None):
+            res = checks.evaluate(disc, rdl, "direct-local", client=client)
+            self.assertEqual([r["outcome"] for r in res], ["fail", "fail", "fail"], client)
+            self.assertIn("opt-in", res[0]["detail"])
+            self.assertEqual(checks.scenario_outcome(res), "fail")
+        # a budget in the request: the SPEC's 503 in place of the 200 (judged by budget_respected's wall rule)
+        timed = dict(disc, request=dict(disc["request"], bounds={"time_budget_ms": 20000}),
+                     expect=disc["expect"] + [{"check": "budget_respected", "args": {}}])
+        self.assertTrue(checks.deadline_allowed(timed, rdl))
+        res = checks.evaluate(timed, rdl, "direct-local", client={"wall_ms": 22522.0})
+        self.assertEqual(checks.scenario_outcome(res), "inconclusive")
+        self.assertEqual(checks.evaluate(timed, rdl, "direct-local", client={"wall_ms": 5.0})[3]["outcome"], "fail")
+        # /pattern keeps its default budget (SPEC-pattern-search §6: default_time_budget_ms): allowed without one
+        pat = {"route": "POST /pattern", "request": {"patterns": []}, "truth": {},
+               "expect": [{"check": "status", "args": {"http": 200}}]}
+        self.assertTrue(checks.deadline_allowed(pat, checks.normalise_direct(503, b'{"error": "p", "code": "deadline"}')))
+
     def test_deterministic(self):
         a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})
         d = checks.answer_digest(a)
@@ -753,6 +780,42 @@ class BudgetChecks(unittest.TestCase):
         busy = checks.normalise_direct(503, b'{"error": "loading"}')
         self.assertEqual(checks.evaluate(sc(750), busy, "direct-local", client={"wall_ms": 99999.0})[2]["outcome"],
                          "inconclusive")
+
+    def test_503_against_the_capped_budget(self):
+        # A2-03 (review of lane S5b): R-edge-0021 asks 70,000 ms, the host's cap is 60,000 (resolve.time_budget.
+        # max_time_ms; the host lowers the budget and states the clamp), so a 503 deadline at 60,100 ms is the SPEC's
+        # answer: judged against min(requested, cap) when the builder states the cap (budget_respected cap_ms)
+        def sc(budget, cap, route="POST /resolve"):
+            req = {"sequence": "A" * 100, "labels": ["511145"], "bounds": {"time_budget_ms": budget}} \
+                if route == "POST /resolve" else {"patterns": [{"dna": "A" * 25, "id": "w"}], "time_budget_ms": budget}
+            args = {} if cap is None else {"cap_ms": cap}
+            return {"route": route, "request": req, "truth": {},
+                    "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                               {"check": "budget_respected", "args": args}]}
+        dl = checks.normalise_direct(503, b'{"code": "deadline", "error": "resolve: the answer could not be built '
+                                          b'and written within bounds.time_budget_ms (60000 ms, the finalisation '
+                                          b'reserve of 250 ms included)"}')
+        res = checks.evaluate(sc(70000, 60000), dl, "direct-local", client={"wall_ms": 60100.0})
+        self.assertEqual(res[2]["outcome"], "inconclusive", res[2]["detail"])
+        self.assertIn("60000 ms budget (the requested 70000 ms lowered to the host's cap)", res[2]["detail"])
+        # without the cap (a manifest built before A2-03) the requested budget, as before: a false fail
+        self.assertEqual(checks.evaluate(sc(70000, None), dl, "direct-local",
+                                         client={"wall_ms": 60100.0})[2]["outcome"], "fail")
+        # before the capped budget less the reserve: fail; long past it: a finding; a cap above the request: the
+        # request's budget
+        res = checks.evaluate(sc(70000, 60000), dl, "direct-local", client={"wall_ms": 59000.0})
+        self.assertEqual(res[2]["outcome"], "fail")
+        self.assertIn("less its 250 ms finalisation reserve", res[2]["detail"])
+        self.assertEqual(checks.evaluate(sc(70000, 60000), dl, "direct-local",
+                                         client={"wall_ms": 125000.0})[2]["outcome"], "finding")
+        self.assertEqual(checks.evaluate(sc(20000, 60000), dl, "direct-local",
+                                         client={"wall_ms": 19000.0})[2]["outcome"], "fail")
+        pat = checks.normalise_direct(503, b'{"code": "deadline", "error": "pattern: ..."}')
+        self.assertEqual(checks.evaluate(sc(700000, 600000, "POST /pattern"), pat, "direct-local",
+                                         client={"wall_ms": 600100.0})[2]["outcome"], "inconclusive")
+        self.assertEqual(checks.evaluate(sc(700000, 600000, "POST /pattern"), pat, "direct-local",
+                                         client={"wall_ms": 599000.0})[2]["outcome"], "fail")
+        self.assertEqual(checks.CHECK_ARGS["budget_respected"], ((), ("rule", "cap_ms")))
 
     def test_pattern_and_resolve(self):
         sc = self.sc("POST /pattern", {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 300})
@@ -1789,6 +1852,62 @@ class TraverseChecks(unittest.TestCase):
         o, d = outcome(sc_end, ans_short, "walk_in_record", label_scope="record")
         self.assertEqual(o, "fail", d)
         self.assertIn("past the record's end", d)
+
+    def test_walk_blocked_exit_outside_the_flank(self):
+        # A2-04 (review of lane S5b, probe_w3): the truth's flank ends at 370, the repeat's exit base is 376: the
+        # computed block (0 bp, rejoined_seed) has no exit in the flank; the walk that states it and continues from
+        # the exit cannot be verified past the block: inconclusive (it failed: "no route ... follows the record")
+        sc, ans, record = self.repeat_walk(flank_end=370)
+        t = sc["truth"]
+        blk = checks._computed_block(sc, ans, ans["body"]["results"][0], 0, t,
+                                     {"start": t["start"], "flank": t["flank"], "flank_start": 0}, "right", 40)
+        self.assertEqual((blk["d"], blk["reason"], blk["exits"]), (0, "rejoined_seed", []))
+        o, d = outcome(sc, ans, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertIn("which is not in the truth's flank: not verifiable", d)
+        # the block must still be stated as computed: another reason or char, another depth, or none fails
+        seg = lambda a: a["body"]["results"][0]["arms"]["right"]["segments"][0]  # noqa: E731
+        for change in ({"reason": "edge_reuse"}, {"char": "T" if record[346] != "T" else "A"}, {"at_bp": 1}):
+            bad = copy.deepcopy(ans)
+            seg(bad)["events"][0].update(change)
+            self.assertEqual(outcome(sc, bad, "walk_in_record", label_scope="record")[0], "fail", change)
+        bad = copy.deepcopy(ans)
+        seg(bad)["events"] = seg(bad)["events"][1:]
+        self.assertEqual(outcome(sc, bad, "walk_in_record", label_scope="record")[0], "fail")
+        # a block before the truth's minimum: a truth gap (inconclusive)
+        gap = dict(sc, truth=dict(sc["truth"], walk={"right": {"min_bp": 10}}))
+        o, d = outcome(gap, ans, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertIn("truth gap", d)
+        # the exit inside the flank: verified as before (pass on the full record)
+        self.assertEqual(outcome(self.repeat_walk()[0], ans, "walk_in_record", label_scope="record")[0], "pass")
+
+    def test_duplicate_seed_count(self):
+        # B5b-07 (review of lane S5b): the invariants check states the distinct seeds of a request with identical
+        # seeds (the service's identity: the cleaned sequence and the trimmed, de-duplicated labels), so that the
+        # table explains exactly a merge (N results == N distinct), not a lost or a surplus result
+        seq = "ACGT" * 10
+        def sc(seeds):
+            return {"route": "POST /traverse", "truth": {},
+                    "request": {"seeds": seeds, "strategy": {"direction": "right"}}}
+        def ans(n):
+            return ok_answer({"results": [{"outcome": {"walks": "not_walked"}} for _ in range(n)]})
+        one = {"sequence": seq, "labels": ["NC_1"]}
+        cases = [([one, dict(one)], 1, "1 results for 2 seeds (1 distinct)"),
+                 ([one, {"sequence": seq.lower() + "\n", "labels": [" NC_1 ", "NC_1"]}], 1,
+                  "1 results for 2 seeds (1 distinct)"),
+                 ([one, one, {"sequence": seq, "labels": ["NC_2"]}], 1, "1 results for 3 seeds (2 distinct)"),
+                 ([one, dict(one)], 5, "5 results for 2 seeds (1 distinct)"),
+                 ([one, {"sequence": seq, "labels": ["NC_2"]}], 1, "1 results for 2 seeds"),
+                 ([one, dict(one, seed_id="b")], 1, "1 results for 2 seeds (1 distinct)")]
+        tightened = r"([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)"
+        import re
+        for seeds, n, detail in cases:
+            o, d = outcome(sc(seeds), ans(n), "invariants")
+            self.assertEqual(o, "fail")
+            self.assertEqual(d, detail)
+            self.assertEqual(re.fullmatch(tightened, d, re.S) is not None, detail.startswith("1 results for 2 seeds ("),
+                             detail)
 
     def test_paths_end(self):
         sc = {"route": "POST /traverse", "truth": {},
