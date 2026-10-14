@@ -607,6 +607,36 @@ def same_value(a, b):
     return json_equal(a, b)
 
 
+# The identity of a service configuration document (the MCP runner's record of GET /traverse/capabilities, its
+# run.json service_capabilities and each invocations[].service_capabilities: {document, host_document, sha256,
+# read_at, base, database, mismatches, error}): the sha256 of the canonical JSON of these parts only, agreed with
+# async's runner on 2026-10-14. The rest of the document (probe times, counters) changes between the invocations of
+# one deployment and would read as another deployment. A key the document lacks is null in the view.
+SERVICE_DOCUMENT_KEYS = ("service_settings", "service_maxima", "presets")
+SERVICE_BACKEND_KEYS = ("budgets", "resolve", "effective_maxima", "limits")
+
+
+def service_document_view(document, host_document=None):
+    """{service_settings, service_maxima, presets, backends: {<db>: {budgets, resolve, effective_maxima, limits}},
+    host_document} of a service configuration document and the host document recorded beside it (absent keys null)."""
+    doc = document if isinstance(document, dict) else {}
+    backends = doc.get("backends")
+    view = dict((k, doc.get(k)) for k in SERVICE_DOCUMENT_KEYS)
+    view["backends"] = dict((db, dict((k, b.get(k) if isinstance(b, dict) else None) for k in SERVICE_BACKEND_KEYS))
+                            for db, b in backends.items()) if isinstance(backends, dict) else None
+    view["host_document"] = host_document if isinstance(host_document, dict) else None
+    return view
+
+
+def service_document_sha256(record):
+    """The identity of a service_capabilities record's document: sha256 of canonical_json(service_document_view(its
+    document, its host_document)); None when it records no document (a failed read)."""
+    if not isinstance(record, dict) or not isinstance(record.get("document"), dict):
+        return None
+    view = service_document_view(record["document"], record.get("host_document"))
+    return hashlib.sha256(canonical_json(view)).hexdigest()
+
+
 class References(object):
     """Resolves {"host": path} / {"service": path} references: the live document of the namespace (the run's recorded
     one) when it states the path, else the table's block, else unknown. |table| and |live| map a namespace to a

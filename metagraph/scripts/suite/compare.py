@@ -573,18 +573,25 @@ def _flat_predicates(preds):
 # ---------------------------------------------------------------------------------------------------------------
 # the run's recorded configuration: the live documents the references read first
 
-# the MCP runner's run.json record of GET /traverse/capabilities at run start (async's runner: {document, sha256,
-# read_at, base}, on a failed read the error instead of the document)
+# the MCP runner's run.json record of GET /traverse/capabilities at run start (async's runner: {document,
+# host_document, sha256, read_at, base, database, mismatches}, on a failed read the error instead of the document;
+# each invocations[] the same); host_document has the shape of the host's /capabilities document as the service read
+# it: "pattern" the /pattern/capabilities/<db> capabilities.raw, "resolve" {"time_budget": the host's block as
+# received, document.backends.<db>.budgets.resolve_time_budget}
 SERVICE_CAPABILITIES_KEY = "service_capabilities"
+SERVICE_HOST_DOCUMENT_KEY = "host_document"
 # the host's /capabilities document as the direct runners record it (run.json capabilities)
 HOST_CAPABILITIES_PATH = "/capabilities"
 
 
 def recorded_documents(run_dir):
     """{namespace: {document, origin, read_at, sha256} or None} of a run: "service" the MCP arm's run.json
-    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp), "host" the /capabilities
-    document a direct arm recorded (the merged run.json's capabilities, else arms/<direct>/run.json); None where the
-    run recorded none (a run before async's runner read it, or a failed read: then `error` says why)."""
+    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp; sha256 the recorded one,
+    else suite_common.service_document_sha256), "host" the /capabilities document a direct arm recorded (the merged
+    run.json's capabilities, else arms/<direct>/run.json), else the host document the MCP runner recorded beside the
+    service's (service_capabilities.host_document: an MCP-only run reads the host's references live from it); None
+    where the run recorded none (a run before async's runner read it, or a failed read: then `error` says why). A
+    path the live document lacks reads the table's block, else unknown (suite_common.References)."""
     out = {"service": None, "host": None}
     merged = sc.read_json(os.path.join(run_dir, "run.json"), {}) or {}
     mcp_run = sc.read_json(os.path.join(run_dir, "arms", "mcp", "run.json"), None)
@@ -595,7 +602,8 @@ def recorded_documents(run_dir):
         doc = rec.get("document")
         out["service"] = {"document": doc if isinstance(doc, dict) else None,
                           "origin": "arms/mcp/run.json %s" % SERVICE_CAPABILITIES_KEY,
-                          "read_at": rec.get("read_at"), "sha256": rec.get("sha256"), "base": rec.get("base"),
+                          "read_at": rec.get("read_at"), "sha256": rec.get("sha256") or sc.service_document_sha256(rec),
+                          "base": rec.get("base"),
                           "error": rec.get("error") if not isinstance(doc, dict) else None}
     caps = merged.get("capabilities") if isinstance(merged.get("capabilities"), dict) else None
     origin = "run.json capabilities"
@@ -610,6 +618,10 @@ def recorded_documents(run_dir):
     if caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict):
         out["host"] = {"document": caps[HOST_CAPABILITIES_PATH], "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH),
                        "read_at": None, "sha256": None}
+    elif isinstance(rec, dict) and isinstance(rec.get(SERVICE_HOST_DOCUMENT_KEY), dict):
+        out["host"] = {"document": rec[SERVICE_HOST_DOCUMENT_KEY],
+                       "origin": "arms/mcp/run.json %s.%s" % (SERVICE_CAPABILITIES_KEY, SERVICE_HOST_DOCUMENT_KEY),
+                       "read_at": rec.get("read_at"), "sha256": None}
     return out
 
 
@@ -678,9 +690,10 @@ def reference_warnings(cases):
 def gate_configuration_problems(run_dir, cases=None, reevaluated=False):
     """For lane G3's gate: why a run's configuration evidence does not hold, [] when it does: the run recorded no
     live service_settings ("configuration evidence missing": run.json service_capabilities without a document
-    stating service_settings), a referenced path whose live value differs from the table's (reference_mismatches), an
-    MCP line whose request_evidence read a reference from the table or found it unknown. |cases| load_by_design's
-    (default: the table next to this script)."""
+    stating service_settings), a referenced path whose live value differs from the table's (reference_mismatches:
+    the host's references read from a direct arm's /capabilities, else the MCP runner's host_document:
+    recorded_documents), an MCP line whose request_evidence read a reference from the table or found it unknown.
+    |cases| load_by_design's (default: the table next to this script)."""
     out = []
     if cases is None:
         cases, _ = load_by_design(DEFAULT_BY_DESIGN)

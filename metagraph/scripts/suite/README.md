@@ -1975,3 +1975,30 @@ failing on 14552938.
 - Verdicts: v4 FINDINGS -> FAIL (the 2 direct disagreements above); v3 FAIL unchanged. Both gain the line naming area
   C and the two capabilities routes on mcp where nothing passed. The deploy gate on the v4 copy
   (`--gate gate/policy_v4_rt_mcp.json`, two arms mcp + direct-local): 45 problems before and after, the same list.
+
+### The host's references in an MCP-only run, a service document's identity, the wall rule's name (agreed with async)
+Agreed with the async session on 2026-10-14 (the coordinator's item). The runner records, in run.json
+service_capabilities and in each invocations[].service_capabilities, {document (GET /traverse/capabilities), host_document,
+sha256, read_at, base, database, mismatches, error}; host_document has the shape of the host's /capabilities document:
+"pattern" the /pattern/capabilities/<db> capabilities.raw, "resolve" {"time_budget": document.backends.<db>.budgets.
+resolve_time_budget} (the host's block as received, not backends.<db>.resolve.time_budget, the service's terms).
+- `compare.recorded_documents` (and so bind_run, the references every rule reads, reevaluate's replay and
+  gate_configuration_problems): host = a direct arm's recorded /capabilities when the run has one, else the MCP
+  runner's service_capabilities.host_document, read as live with origin "arms/mcp/run.json
+  service_capabilities.host_document", else the table's host_capabilities block, else unknown; a path the live document
+  lacks reads the table's block, else unknown (suite_common.References). An MCP-only run's host references, and the
+  gate's live / table mismatch check on them, read the service's view of the host instead of the table.
+- A service document's identity (`suite_common.service_document_sha256`, `service_document_view`): sha256 of
+  canonical_json({service_settings, service_maxima, presets, backends: {<db>: {budgets, resolve, effective_maxima,
+  limits}}, host_document}), a key the document lacks null in the view; probe times and counters elsewhere in the
+  document change between the invocations of one deployment and would trip the gate's "spans more than one
+  deployment". gate.py's `_document_sha` (edited for this function only) prefers the recorded sha256, else this view;
+  compare's recorded_documents states the same. The runner vendors suite_common.py and can call the function itself.
+- service_by_design.json, the vocabulary's answer_match.wall_rule entry only: the name budget_minus_reserve is kept,
+  its threshold is B - 1 s (B the request's time_budget_ms) on the failing attempt's own wall, no finalisation
+  reserve subtracted. The table's sha256 is d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61 (was
+  ab4100c9...); gate/policy_v4_rt_mcp.json pins the old one and is regenerated at integration
+  (test_gate's test_shipped_v4_policy_is_regenerated_exactly fails until then, on that sha only).
+- Agreed, no change: request_evidence_mismatches as the field name; the legacy no-budget term.
+- Recorded runs: v3 and v4 record no service_capabilities, so nothing they read moves; their comparison and report
+  name the table's new sha256.

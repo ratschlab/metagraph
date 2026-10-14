@@ -556,5 +556,111 @@ class PlannedMcpArmTest(unittest.TestCase):
             self.assertIn("No MCP arm in this run", text)
 
 
+class HostDocumentTest(unittest.TestCase):
+    """The host's references: a direct arm's recorded /capabilities, else the MCP runner's host_document (live), a
+    path it lacks from the table, else unknown; a service document's identity leaves probe times and counters out."""
+
+    HOST = {"pattern": {"finalize_reserve_ms": 250, "mismatches": {"max": {"dna": 3, "iupac": 3, "protein": 1}}},
+            "resolve": {"time_budget": {"max_time_ms": 60000, "finalize_reserve_ms": 250}}}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        self.cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def service_record(self, host_document=None, **doc_extra):
+        doc = json_copy(self.cases.blocks["service"])
+        doc.update(doc_extra)
+        rec = {"document": doc, "read_at": "t", "base": "b", "database": "refseq33m-experimental", "mismatches": []}
+        if host_document is not None:
+            rec["host_document"] = host_document
+        return rec
+
+    def write(self, rec, direct_host=None):
+        os.makedirs(os.path.join(self.d, "arms", "mcp"), exist_ok=True)
+        sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"),
+                             {"run_id": "R", "arm": "mcp", "service_capabilities": rec})
+        merged = {"run_id": "R"}
+        if direct_host is not None:
+            merged["capabilities"] = {"/capabilities": direct_host}
+        sc.write_json_atomic(os.path.join(self.d, "run.json"), merged)
+
+    def test_mcp_only_run_reads_host_document_live(self):
+        self.write(self.service_record(self.HOST))
+        docs = cmp.recorded_documents(self.d)
+        self.assertEqual(docs["host"]["origin"], "arms/mcp/run.json service_capabilities.host_document")
+        bound = cmp.bind_run(self.cases, self.d)
+        self.assertEqual(cmp.reference_sources(bound)["host"],
+                         {"source": "live", "origin": "arms/mcp/run.json service_capabilities.host_document"})
+        refs = cmp.refs_of(bound)
+        self.assertEqual(refs.resolve("host", "pattern.finalize_reserve_ms"), (250, "live", None))
+        self.assertEqual(refs.resolve("host", "resolve.time_budget.max_time_ms")[:2], (60000, "live"))
+        self.assertEqual(cmp.gate_configuration_problems(self.d, self.cases), [])
+        # a host_document stating another value is a mismatch the gate reads, judged with the live value
+        other = json_copy(self.HOST)
+        other["pattern"]["finalize_reserve_ms"] = 500
+        self.write(self.service_record(other))
+        self.assertIn("configuration mismatch: host pattern.finalize_reserve_ms is 500 live, 250 in the table",
+                      cmp.gate_configuration_problems(self.d, self.cases))
+
+    def test_paired_run_reads_the_direct_arms_copy(self):
+        direct = json_copy(self.HOST)
+        direct["pattern"]["finalize_reserve_ms"] = 300
+        self.write(self.service_record(self.HOST), direct_host=direct)
+        refs = cmp.refs_of(cmp.bind_run(self.cases, self.d))
+        self.assertEqual(refs.resolve("host", "pattern.finalize_reserve_ms")[:2], (300, "live"))
+        self.assertEqual(cmp.recorded_documents(self.d)["host"]["origin"], "run.json capabilities[/capabilities]")
+
+    def test_a_path_the_host_document_lacks(self):
+        self.write(self.service_record({"pattern": {"finalize_reserve_ms": 250}}))
+        refs = cmp.refs_of(cmp.bind_run(self.cases, self.d))
+        self.assertEqual(refs.resolve("host", "pattern.finalize_reserve_ms")[:2], (250, "live"))
+        self.assertEqual(refs.resolve("host", "resolve.time_budget.max_time_ms"), (60000, "table", None))
+        self.assertEqual(refs.resolve("host", "resolve.time_budget.nothing_here"), (None, "unknown", None))
+
+    def test_identity_leaves_probe_times_and_counters_out(self):
+        a = self.service_record(self.HOST, probe={"checked_at": "2026-10-14T10:00:00Z", "count": 3})
+        b = self.service_record(self.HOST, probe={"checked_at": "2026-10-14T12:00:00Z", "count": 9})
+        for rec, when in ((a, "10"), (b, "12")):
+            rec["document"]["backends"] = {"refseq33m-experimental": {
+                "resolve": {"time_budget": {"default_ms": 60000}}, "budgets": {"x": 1},
+                "probe": {"last_ok": "2026-10-14T%s:00:00Z" % when, "failures": int(when)}}}
+        self.assertEqual(sc.service_document_sha256(a), sc.service_document_sha256(b))
+        changed = json_copy(b)
+        changed["document"]["service_settings"]["advanced_enabled"] = True
+        self.assertNotEqual(sc.service_document_sha256(a), sc.service_document_sha256(changed))
+        moved_host = json_copy(b)
+        moved_host["host_document"]["pattern"]["finalize_reserve_ms"] = 300
+        self.assertNotEqual(sc.service_document_sha256(a), sc.service_document_sha256(moved_host))
+        self.assertEqual(set(sc.service_document_view(a["document"], self.HOST)),
+                         {"service_settings", "service_maxima", "presets", "backends", "host_document"})
+        self.assertIsNone(sc.service_document_sha256({"error": "HTTP 503"}))
+        # gate.py: two invocations whose documents differ only there are one deployment; the recorded sha256 wins
+        import gate
+        os.makedirs(os.path.join(self.d, "arms", "mcp"), exist_ok=True)
+        sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"), {
+            "run_id": "R", "arm": "mcp", "service_capabilities": b,
+            "invocations": [{"started_utc": "a", "service_capabilities": a},
+                            {"started_utc": "b", "service_capabilities": b}]})
+        policy = {"arms": ["mcp"], "exclusions": [], "advanced_path": False}
+        spans = lambda: [p for p in gate.configuration_problems(self.d, [], policy)  # noqa: E731
+                         if "spans more than one deployment" in p["detail"]]
+        self.assertEqual(spans(), [])
+        sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"), {
+            "run_id": "R", "arm": "mcp", "service_capabilities": b,
+            "invocations": [{"started_utc": "a", "service_capabilities": a},
+                            {"started_utc": "b", "service_capabilities": changed}]})
+        self.assertEqual(len(spans()), 1)
+        self.assertEqual(gate._document_sha(dict(a, sha256="recorded")), "recorded")
+
+
+def json_copy(obj):
+    import json
+    return json.loads(json.dumps(obj))
+
+
 if __name__ == "__main__":
     unittest.main()
