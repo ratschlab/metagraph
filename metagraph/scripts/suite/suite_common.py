@@ -368,19 +368,22 @@ def _number_or_none(v):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at f94b079d on
+# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at f386a3c0 on
 # feat/suite-mcp-runner-vendored: peer review R1-R3 and rule (c) as of e334715b, then 62ee4214 rule 1, 2a8acbaf rule
-# 2, f94b079d rule 4; host_state_plausible, wall_rule_holds, service_wall, client_wall, client_wall_premature,
-# timeout_statement, resolve_timeout_least), mirrored for the offline re-evaluation and the comparator: the same
-# thresholds, the same calls, the same verdict_detail strings (lane S5d, review-s5c S5c-01..03). Rule (c): where no
-# threshold or no service-side wall is known the plausibility is undecidable, and the execution is inconclusive for
-# that reason (not a host state, not by design, not failed on that ground). Rule 1 (62ee4214): a /resolve deadline on
-# a discovery without a budget is implausible (discovery_without_budget). Rule 2 (2a8acbaf): the client's wall is an
-# upper bound of an unknown service-side wall, for ANONYMOUS MCP calls only (mcp_auth_of: the line's or raw record's
-# `mcp_auth`; unknown on a record before 2a8acbaf unless the re-evaluation was told, reevaluate.py --mcp-auth).
+# 2, f94b079d rule 4, f52846fb rule 4's read floor; host_state_plausible, wall_rule_holds, service_wall, client_wall,
+# client_wall_premature, timeout_statement, read_bound_below_floor, resolve_timeout_least), mirrored for the offline
+# re-evaluation and the comparator: the same thresholds, the same calls, the same verdict_detail strings (lanes S5d,
+# S5e). Rule (c): where no threshold or no service-side wall is known the plausibility is undecidable, and the
+# execution is inconclusive for that reason (not a host state, not by design, not failed on that ground). Rule 1
+# (62ee4214): a /resolve deadline on a discovery without a budget is implausible (discovery_without_budget). Rule 2
+# (2a8acbaf): the client's wall is an upper bound of an unknown service-side wall, for ANONYMOUS MCP calls only
+# (mcp_auth_of: the line's or raw record's `mcp_auth`; unknown on a record before 2a8acbaf unless the re-evaluation
+# was told, reevaluate.py --mcp-auth).
 # Rule 4 (f94b079d): a resolve_timeout is judged against the bound it states (timeout_statement), else the legacy
-# bound. Where the runner recorded what it judged with (raw `client_wall`, line `client_wall_ms`; raw / line
-# `timeout_terms`), the recorded value is read and the recomputed one cross-checked (a mismatch is a warning).
+# bound; f52846fb: a stated READ bound below the service's own floor for a known budget (budget + reserve + 10 s -
+# 1 s) is no host state whatever the wall (read_bound_below_floor). Where the runner recorded what it judged with
+# (raw `client_wall`, line `client_wall_ms`; raw / line `timeout_terms`), the recorded value is read and the
+# recomputed one cross-checked (a mismatch is a warning).
 
 # /resolve's finalisation reserve when the refusal states none (app/traversal/resolve.py DEFAULT_FINALIZE_RESERVE_MS)
 RESOLVE_RESERVE_MS = 250.0
@@ -718,6 +721,33 @@ def timeout_terms(line, doc, error, tool_error, warnings=None):
     return rec
 
 
+def read_bound_below_floor(scenario, error, tool_error, doc=None, line=None, warnings=None):
+    """Rule 4's read floor (the runner's read_bound_below_floor, f52846fb): a resolve_timeout whose statement
+    (timeout_terms: the runner's recorded timeout_terms, else timeout_statement) names timeout_phase "read" with a
+    bound_s below the service's own floor for a budgeted call, budget + reserve + 10,000 - 1000 ms (the service's
+    client_timeout_s gives a budgeted /resolve a read timeout of at least budget + reserve + 10 s), the budget the MCP
+    arguments' time_budget_ms, else the tool error's, the reserve the tool error's finalize_reserve_ms, else 250 ms,
+    is no host state: the service sized its own read timeout too short, whatever the wall (an unknown one included).
+    Returns "service read bound <bound_s> s below its own floor <floor> s" (both %g seconds, the runner's text), else
+    None (another phase, no stated phase, no budget known, or a bound at or above the floor). Write and deadline
+    phases keep bound_s - 1 s (resolve_timeout_least); they fire earlier by design."""
+    te = tool_error if isinstance(tool_error, dict) else {}
+    stated = timeout_terms(line, doc, error, te, warnings)
+    if stated is None or stated.get("timeout_phase") != "read":
+        return None
+    asked = mcp_budget_ms(scenario)
+    budget = asked if asked is not None else _number_or_none(te.get("time_budget_ms"))
+    if budget is None:
+        return None
+    reserve = _number_or_none(te.get("finalize_reserve_ms"))
+    floor_ms = budget + (RESOLVE_RESERVE_MS if reserve is None else reserve) + RESOLVE_MIN_ALLOWANCE_MS \
+        - STATED_TIMEOUT_SLACK_MS
+    bound_s = float(stated["bound_s"])
+    if bound_s * 1000.0 >= floor_ms:
+        return None
+    return "service read bound %g s below its own floor %g s" % (bound_s, floor_ms / 1000.0)
+
+
 def resolve_timeout_least(scenario, error, tool_error, doc=None, line=None, warnings=None):
     """(the least plausible wall of a resolve_timeout, the rule as the runner's reason states it), rule 4 (the
     runner's resolve_timeout_least, f94b079d): when the record states what fired (timeout_terms: the runner's
@@ -786,8 +816,10 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, wa
     service-side wall and rule 2 decided nothing, undecidable_timing: UNDECIDABLE_NO_WALL, + RULE2_SKIPPED_API_KEY
     with an API key; inconclusive) or "not_plausible" (the checks judge: a known wall below the threshold; rule 2,
     an anonymous client wall + 1 s below it; rule 1, a relayed /resolve deadline on a discovery that sent no
-    budget); (None, None, None) for any other answer. traversal_resolve_deadline: discovery_without_budget, then
-    resolve_deadline_least; resolve_timeout: resolve_timeout_least; the wall: service_wall, else rule 2
+    budget; rule 4's read floor, a stated read bound below the service's own floor for a known budget,
+    read_bound_below_floor, whatever the wall); (None, None, None) for any other answer. traversal_resolve_deadline:
+    discovery_without_budget, then resolve_deadline_least; resolve_timeout: read_bound_below_floor, then
+    resolve_timeout_least; the wall: service_wall, else rule 2
     (client_wall_premature); uninterruptible_overrun_exceeds_allowance (the R20 lockout answers at once): no wall
     rule. |warnings| (a list, optional): a recorded client wall or statement the record does not reproduce."""
     err = error if isinstance(error, dict) else (line or {}).get("error")
@@ -807,6 +839,9 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, wa
             return code, "not_plausible", DISCOVERY_NO_DEADLINE
         least, rule = resolve_deadline_least(scenario, tool_error)
     else:
+        below = read_bound_below_floor(scenario, err, tool_error, doc, line, warnings)
+        if below is not None:   # rule 4's read floor: the service's own read timeout was too short, whatever the wall
+            return code, "not_plausible", below
         least, rule = resolve_timeout_least(scenario, err, tool_error, doc, line, warnings)
     wall, which = service_wall(scenario, line, doc)
     if least is None:

@@ -1233,3 +1233,14 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   (fullmatch: as many results as distinct seeds, the checks' wording of lane S5c, B5b-07), and the vocabulary's
   example reads "1 results for 2 seeds (1 distinct)". Async's vendored checks.py and suite_common.py at f386a3c0
   equal this branch's at 3daea97a.
+- Rule 4's read floor (f52846fb; `suite_common.read_bound_below_floor`, called by host_state_verdict before the
+  least wall, as the runner's host_state_plausible calls it): a resolve_timeout whose statement (the runner's
+  recorded `timeout_terms`, else timeout_statement) names timeout_phase "read" with a known budget (the MCP
+  arguments' time_budget_ms, else the tool error's) must state bound_s x 1000 >= budget + reserve (the tool error's
+  finalize_reserve_ms, else 250) + 10,000 - 1000 ms: the service's client_timeout_s gives a budgeted /resolve a read
+  timeout of at least budget + reserve + 10 s. Below it the service sized its own read timeout too short: no host
+  state whatever the wall (a known, a long or an unknown one; rule 2 is not consulted), the checks judge,
+  verdict_detail "service read bound {b} s below its own floor {f} s" (both %g seconds, the runner's `:g`), no
+  inconclusive_reason. Write and deadline phases keep bound_s x 1000 - 1000 ms (they fire earlier by design); no
+  budget known and the legacy path (no stated phase) are unchanged. compare (host_state_line) and merge_run
+  (host_state_inconclusive) read the same rule.

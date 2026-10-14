@@ -722,6 +722,73 @@ class Reevaluate(unittest.TestCase):
                                                job)[0], "inconclusive")
         self.assertIn("the stated bound 5 s (write) - 1000 ms = 4000 ms", info["verdict_detail"])
 
+    def test_resolve_timeout_read_floor(self):
+        # rule 4's read floor (async's f52846fb): a stated READ bound with a known budget (the MCP arguments', else the
+        # tool error's time_budget_ms) below budget + reserve (the tool error's finalize_reserve_ms, else 250) +
+        # 10,000 - 1000 ms is no host state whatever the wall (an unknown one included): the checks judge,
+        # verdict_detail "service read bound {b} s below its own floor {f} s" (%g); write / deadline phases keep
+        # bound_s - 1 s; no budget known and a legacy record are unchanged (the runner's test, mirrored)
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        fail = [{"check": "status", "outcome": "fail", "detail": "http 504"}]
+
+        def res(budget):
+            args = {"labels": ["562"]} if budget is None else {"time_budget_ms": budget}
+            return scenario("R-floor", "POST /resolve", STATUS, mcp={"tool": "traverse_resolve", "arguments": args})
+        to = {"http": 504, "body": None, "error": {"code": "resolve_timeout",
+                                                   "text": "the backend did not answer within 20.25 s"}}
+
+        def stated(phase, bound, **extra):
+            return dict({"code": "resolve_timeout", "timeout_phase": phase, "bound_s": bound,
+                         "elapsed_ms": bound * 1000 + 3.0}, **extra)
+
+        def judge(budget, te, wall_ms, doc=None, line=None):
+            info = {}
+            line = dict(line or {"outcome": "fail"}, mcp_phases={"backend_ms": wall_ms})
+            out = reevaluate.outcome_of(None, "mcp", res(budget), to, line, fail, False, cases, te, info, doc)[0]
+            return out, info.get("verdict_detail"), info.get("inconclusive_reason")
+        # below the floor (20 + 0.25 + 10 - 1 = 29.25 s): the checks judge at a known, a long and an unknown wall
+        below = "service read bound 20.25 s below its own floor 29.25 s"
+        for wall in (20300.0, 45000.0):
+            self.assertEqual(judge(20000, stated("read", 20.25), wall), ("fail", below, None))
+        anon = dict(self.calls(("traverse_resolve", 2000.0, 2020.3, {"error": stated("read", 20.25)})),
+                    mcp_auth="anonymous")
+        self.assertEqual(judge(20000, stated("read", 20.25), None, anon), ("fail", below, None))
+        self.assertEqual(judge(20000, stated("read", 20.25), None), ("fail", below, None))
+        self.assertEqual(sc.host_state_verdict(res(20000), {"mcp_phases": {}}, None, to["error"],
+                                               stated("read", 20.25)), ("resolve_timeout", "not_plausible", below))
+        self.assertEqual(sc.read_bound_below_floor(res(20000), to["error"], stated("read", 29.249)),
+                         "service read bound 29.249 s below its own floor 29.25 s")
+        # at or above the floor the stated bound - 1 s decides
+        for bound in (29.25, 30.25):
+            self.assertIsNone(sc.read_bound_below_floor(res(20000), to["error"], stated("read", bound)))
+            out, detail, why = judge(20000, stated("read", bound), bound * 1000)
+            self.assertEqual((out, why), ("inconclusive", "resolve_timeout"), bound)
+            self.assertIn("the stated bound %g s (read)" % bound, detail)
+        # the reserve the tool error states raises the floor (20 + 2 + 10 - 1 = 31 s)
+        self.assertEqual(judge(20000, stated("read", 30.25, finalize_reserve_ms=2000.0), 30250.0),
+                         ("fail", "service read bound 30.25 s below its own floor 31 s", None))
+        # the tool error's budget when the arguments name none; no budget known: no floor
+        self.assertEqual(judge(None, stated("read", 20.25, time_budget_ms=20000), 20300.0), ("fail", below, None))
+        self.assertEqual(judge(None, stated("read", 20.0), 19000.0)[::2], ("inconclusive", "resolve_timeout"))
+        # write and deadline phases keep bound_s - 1 s on a budgeted call
+        for phase, bound in (("write", 10.0), ("deadline", 15.0)):
+            self.assertIsNone(sc.read_bound_below_floor(res(20000), to["error"], stated(phase, bound)))
+            self.assertEqual(judge(20000, stated(phase, bound), bound * 1000 - 1000)[::2],
+                             ("inconclusive", "resolve_timeout"), phase)
+        # a legacy record (no stated phase) keeps min(10 s, ...) - 1 s
+        self.assertEqual(judge(20000, {"code": "resolve_timeout"}, 9000.0)[::2], ("inconclusive", "resolve_timeout"))
+        # the runner's recorded statement is what the floor reads (the raw record's timeout_terms)
+        rec = {"timeout_phase": "read", "bound_s": 20.25, "elapsed_ms": 20253.0, "source": "tool error"}
+        self.assertEqual(judge(20000, stated("read", 20.25), 20300.0, {"timeout_terms": rec}), ("fail", below, None))
+        self.assertEqual(judge(20000, stated("read", 20.25), 20300.0, None, {"outcome": "fail", "timeout_terms": rec}),
+                         ("fail", below, None))
+        # merge_run (and compare) read the same rule for a line recorded without inconclusive_reason: the answer
+        # error's statement below the floor is no host state, one at the floor is
+        for bound, host in ((20.25, False), (29.25, True)):
+            row = {"arm": "mcp", "outcome": "inconclusive", "mcp_phases": {"backend_ms": 45000.0},
+                   "error": dict(to["error"], timeout_phase="read", bound_s=bound)}
+            self.assertIs(merge_run.host_state_inconclusive(row, res(20000)), host, bound)
+
     def test_by_design_finding_without_a_table(self):
         # B5b-10: with no table a recorded by-design finding (a relayed deadline's budget_respected) is kept, as
         # the runner's service_by_design mark is; with the table it is replayed (finding: a mark never erases one)

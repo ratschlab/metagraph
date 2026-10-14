@@ -27,7 +27,7 @@ direct_expectation (http or a list, code or slot_code, the text with digits igno
 text_contains, each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
 (refused_at_submit / relayed: error.code, text_contains, field with alternatives and placeholders where the MCP
 execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
-Each MCP execution is matched as async's runner matches it (f94b079d; the matcher of e334715b, its wall rule with rule
+Each MCP execution is matched as async's runner matches it (f386a3c0; the matcher of e334715b, its wall rule with rule
 2 of 2a8acbaf): the cases the scenario names first, else an answer-triggered case (answer_match) whose wall rule
 holds or cannot be decided; a stated key this comparator does not know leaves its side unverified. The explained
 check items of an answered / clamped case are computed with the table in hand (S5c-05), never read from a line.
@@ -1036,7 +1036,7 @@ def service_answers(want, answer, tool_error=None):
 
 
 def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None):
-    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (f94b079d): every case
+    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (f386a3c0): every case
     the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
     either refusals or answers, never both, and several named answered cases apply together); else the first
     answer-triggered case (table order) on its route whose MCP side it matches and whose answer_match.wall_rule (if
@@ -1789,7 +1789,7 @@ def resources(lines, index):
 # the comparison
 
 def inconclusive_reason(line, scenario, run_dir, cases=None):
-    """An inconclusive execution's class (async's runner at f94b079d, the line's inconclusive_reason): rule (c)'s
+    """An inconclusive execution's class (async's runner at f386a3c0, the line's inconclusive_reason): rule (c)'s
     text (no service-side timing / no threshold known: plausibility undecidable, without rule 2's API-key note:
     suite_common.undecidable_class), the host-state code, or "checks"
     (the checks decided); for a line recorded without the field the same, read from the raw record: the runner's

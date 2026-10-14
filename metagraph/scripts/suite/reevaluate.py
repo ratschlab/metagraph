@@ -14,8 +14,9 @@ backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
 own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
-replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at f94b079d,
-`judge`, is the reference: e334715b with rules 1, 2 and 4 of 62ee4214, 2a8acbaf, f94b079d): the cases the scenario
+replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at f386a3c0,
+`judge`, is the reference: e334715b with rules 1, 2 and 4 of 62ee4214, 2a8acbaf, f94b079d, rule 4's read floor of
+f52846fb and the explained items of f386a3c0): the cases the scenario
 names whose service_answer the answer matches (the field read from the recorded tool error), else the first
 answer-triggered case it matches whose wall rule holds or cannot be decided; a refused / relayed /
 answer-triggered match is service_by_design, finding when a check is a finding (a by-design mark never erases
@@ -30,14 +31,16 @@ suite_common.host_state_verdict admits is inconclusive; one it rejects is judged
 /resolve deadline on a discovery that sent no budget (rule 1) and an answer the client's own wall proves premature
 (rule 2: ANONYMOUS MCP calls only, the line's or raw record's `mcp_auth`; a record before 2a8acbaf states none and
 rule 2 decides nothing there unless --mcp-auth states the arm's auth, recorded in the mark and on each such line as
-reevaluation.mcp_auth_assumed); a resolve_timeout is judged against the bound it states (rule 4); rule (c): where
-no threshold or wall is known, for a host state or an answer-triggered case's wall_rule, the execution is
-inconclusive with verdict_detail "no threshold known / no service-side timing: plausibility undecidable" (with an
-API key "; rule 2 skipped: ..."), whatever the checks say on the host-state path, B5b-03), then a new exception of
-the checks (fail). The line records verdict_detail (the runner's text: why a wall rule or a host state held or not)
-and inconclusive_reason as async's runner at f94b079d does; the runner's recorded client wall (raw `client_wall`,
-line `client_wall_ms`) and timeout statement (`timeout_terms`) are read first and cross-checked against the raw
-record (a mismatch is a warning: on the line's reevaluation.warnings and in the mark).
+reevaluation.mcp_auth_assumed); a resolve_timeout is judged against the bound it states (rule 4; a stated read
+bound below the service's own floor for a known budget, budget + reserve + 10 s - 1 s, is no host state whatever the
+wall: "service read bound B s below its own floor F s", f52846fb); rule (c): where no threshold or wall is known,
+for a host state or an answer-triggered case's wall_rule, the execution is inconclusive with verdict_detail "no
+threshold known / no service-side timing: plausibility undecidable" (with an API key "; rule 2 skipped: ..."),
+whatever the checks say on the host-state path, B5b-03), then a new exception of the checks (fail). The line
+records verdict_detail (the runner's text: why a wall rule or a host state held or not) and inconclusive_reason as
+async's runner at f386a3c0 does; the runner's recorded client wall (raw `client_wall`, line `client_wall_ms`) and
+timeout statement (`timeout_terms`) are read first and cross-checked against the raw record (a mismatch is a
+warning: on the line's reevaluation.warnings and in the mark).
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
@@ -186,7 +189,7 @@ def _finding(checks):
 
 def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None, info=None,
                doc=None):
-    """The re-evaluated outcome (module docstring; async's judge at f94b079d) and why it was kept (decided without
+    """The re-evaluated outcome (module docstring; async's judge at f386a3c0) and why it was kept (decided without
     the checks), if it was; |info| (a dict) receives what the line records as async's runner records it:
     service_by_design_case and explained_checks (whenever a case matched), verdict_detail (why a wall rule or a host
     state held or not, or rule (c)'s text), inconclusive_reason (an inconclusive outcome's class: rule (c)'s text, the
@@ -223,7 +226,7 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
     notes = []
     warnings = info.setdefault("warnings", [])
     if arm == "mcp" and cases:
-        # async's runner (judge at f94b079d): the named cases first, else an answer-triggered case whose wall rule
+        # async's runner (judge at f386a3c0): the named cases first, else an answer-triggered case whose wall rule
         # holds or cannot be decided (rule (c)); a case a wall holds back (a known one, or rule 2) does not apply
         walls = []
         matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls, warnings)
