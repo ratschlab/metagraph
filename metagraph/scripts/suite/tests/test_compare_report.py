@@ -1376,12 +1376,44 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertEqual((res["class"], res["by"], res["case"], res["repeats"]),
                          ("not_implemented_mcp", "mcp_outcome", "a", [0]))
         self.assertEqual((res["pair"]["class"], res["pair"]["verified"]), ("service_by_design", True))
-        # a direct answer outside the case's direct side is kept in the pair; the class stays not_implemented_mcp
+        # a direct answer outside the case's direct side (direct_mismatch "disagree") is a disagreement on the direct
+        # side, the case and the direct execution named; the MCP execution stays not_implemented_mcp (the agreed
+        # compare decision of 2026-10-14)
         d400 = self.raw_line("T-labels-0004", "direct-local", 0, http=400, error={"code": "x", "text": "y"},
                              checks=[{"check": "status", "outcome": "fail"}])
         res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, s, cases, self.dir)
-        self.assertEqual((res["class"], res["pair"]["class"], res["pair"]["side"]),
-                         ("not_implemented_mcp", "disagree", "direct"))
+        self.assertEqual((res["class"], res["side"], res["case"], res["mcp_outcome"], res["pair"]["class"]),
+                         ("disagree", "direct", "a", "not_implemented_mcp", "disagree"))
+        self.assertIn("direct-local repeat 0: http 400", res["direct_detail"])
+        self.assertIn("the MCP execution(s) [0] read not_implemented_mcp (case a, answer_match.mcp_outcome)",
+                      res["direct_detail"])
+        named_a = dict(s, mcp=dict(s["mcp"], by_design=["a"]))
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, named_a, cases, self.dir)
+        self.assertEqual((res["class"], res["side"], res["case"]), ("disagree", "direct", "a"))
+        self.assertTrue(res["direct_detail"].startswith("direct-local repeat 0: "), res["direct_detail"])
+        # mixed with another repeat the checks compare: the disagreement still decides
+        m_other = self.raw_line("T-labels-0004", "mcp", 1, checks=[{"check": "status", "outcome": "pass"}])
+        res = cmp.mcp_agreement({0: m, 1: m_other}, {"direct-local": {0: d400}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["side"]), ("disagree", "direct"))
+        # direct_mismatch "timing": a direct 200 / 503 deadline outside the side stays unverified, not a disagreement
+        timing = {"a": dict(base, answer_match=dict(base["answer_match"], direct={"http": 503},
+                                                   direct_mismatch="timing"))}
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, s, timing, self.dir)
+        self.assertEqual((res["class"], res["pair"]["class"]), ("not_implemented_mcp", "service_by_design"))
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, s, timing, self.dir)
+        self.assertEqual((res["class"], res["pair"]["class"]), ("not_implemented_mcp", "disagree"))
+        # the report lists it among the disagreements, the case and the MCP line's not_implemented_mcp stated, and
+        # counts it once (disagree, not not_implemented_mcp)
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, s, cases, self.dir)
+        comp = {"order": ["T-labels-0004"], "scenarios": {"T-labels-0004": {"mcp_agreement": res}},
+                "summary": {"direct_agreement": {"compared": 0},
+                            "mcp_agreement": {"compared": 1, "disagree": 1, "disagreeing": ["T-labels-0004"]}}}
+        text = report.agreement_section(comp)
+        row = next(x for x in text.splitlines() if x.startswith("| T-labels-0004"))
+        self.assertIn("| a | direct |", row)
+        self.assertIn("read not_implemented_mcp (case a", row.replace("\\_", "_"))
+        self.assertIn("1 disagree", text)
+        self.assertNotIn("Not implemented yet via MCP", text)
         # named, the same class; with the default mark the case is service_by_design as before
         named = dict(s, mcp=dict(s["mcp"], by_design=["a"]))
         self.assertEqual(cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, named, cases, self.dir)["class"],

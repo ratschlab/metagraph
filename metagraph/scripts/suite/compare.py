@@ -1285,17 +1285,32 @@ def not_implemented_class(case, hit, how, direct_lines, direct_ref, run_dir, sce
     executions it matched (|hit|, matched |how|: named or answer-triggered): not_implemented_mcp (the class of a
     manifest mcp.not_implemented), the case named, `by` mcp_outcome; the pair as the case's match would read it
     (answer_class for an answer-triggered match, by_design_class for a named one) is kept under `pair` (its class and
-    direct verification), never as service_by_design."""
+    direct verification), never as service_by_design. When that pair is a disagreement on the direct side and the
+    case's answer_match.direct_mismatch is "disagree" (a direct answer outside the case's direct side: the host
+    did not serve what the case says it serves), the class is `disagree` (side direct, the case and the direct
+    execution named): the deployment's refusal does not excuse a host answer the case contradicts. The MCP
+    executions themselves stay not_implemented_mcp (`mcp_outcome`; the runner's line and the re-evaluation's are
+    not touched). A "timing" direct_mismatch never disagrees here (answer_class reads it unverified)."""
     if how == "answer-triggered":
         pair = answer_class(case, hit, direct_lines, run_dir)
     else:
         pair = by_design_class(dict(case, agreement="by_design"), direct_ref, hit, run_dir, scenario)
     keep = ("class", "side", "verified", "direct_verified", "direct_detail", "direct_mismatch", "mcp_verified",
             "mcp_detail", "direct_by")
-    return {"class": "not_implemented_mcp", "by": "mcp_outcome", "mcp_outcome": "not_implemented_mcp",
-            "case": case.get("id"), "case_agreement": case.get("agreement"),
-            "service_outcome": (case.get("service_answer") or {}).get("outcome"),
-            "repeats": [r.get("repeat") for r in hit], "pair": dict((k, pair[k]) for k in keep if k in pair)}
+    out = {"class": "not_implemented_mcp", "by": "mcp_outcome", "mcp_outcome": "not_implemented_mcp",
+           "case": case.get("id"), "case_agreement": case.get("agreement"),
+           "service_outcome": (case.get("service_answer") or {}).get("outcome"),
+           "repeats": [r.get("repeat") for r in hit], "pair": dict((k, pair[k]) for k in keep if k in pair)}
+    am = case.get("answer_match") if isinstance(case.get("answer_match"), dict) else {}
+    if pair.get("class") == "disagree" and pair.get("side") == "direct" and am.get("direct_mismatch") == "disagree":
+        detail = str(pair.get("direct_detail") or "")
+        if how != "answer-triggered" and direct_ref is not None:
+            # by_design_class judges the reference direct execution: name it as answer_class names its repeat
+            detail = "%s repeat %s: %s" % (direct_ref.get("arm"), direct_ref.get("repeat"), detail)
+        out.update({"class": "disagree", "side": "direct", "direct_verified": False, "direct_mismatch": "disagree",
+                    "direct_detail": "%s; the MCP execution(s) %s read not_implemented_mcp (case %s, "
+                                     "answer_match.mcp_outcome)" % (detail, out["repeats"], case.get("id"))})
+    return out
 
 
 def answer_class(case, hit, direct_lines, run_dir):
@@ -1592,9 +1607,11 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     nip = [p for p in parts if p.get("mcp_outcome") == "not_implemented_mcp"]
     if nip:
         # a case's answer_match.mcp_outcome not_implemented_mcp (async's 901893b7): counted under not_implemented_mcp,
-        # never service_by_design; the other parts are kept beside it
-        out = dict(nip[0])
-        others = [p for p in parts if p is not nip[0]]
+        # never service_by_design, unless its pair contradicts the case's direct side (not_implemented_class: then a
+        # disagreement, whichever of the case's groups it is in); the other parts are kept beside it
+        first = next((p for p in nip if p.get("class") == "disagree"), nip[0])
+        out = dict(first)
+        others = [p for p in parts if p is not first]
         if others:
             out["other_repeats"] = others[0] if len(others) == 1 else others
         return dict(note, **out)
