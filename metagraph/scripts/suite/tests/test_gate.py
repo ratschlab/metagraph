@@ -195,18 +195,41 @@ class PolicyTest(GateCase):
         self.assertEqual(gate.policy_ids(pol), ["T-001", "R-002", "R-003", "D-007"])
 
     def test_v4_route_policy_counts(self):
-        # the frozen v4: 222 scenarios on the resolve / traverse routes (221 POST + GET /traverse/capabilities), 33 the
-        # MCP cannot express (22 manifest, 9 more by a named not-expressible case, 2 on the advanced path)
+        # the frozen v4: 222 scenarios on the resolve / traverse routes (221 POST + GET /traverse/capabilities), 31 the
+        # MCP cannot express (22 manifest, 7 more by a named not-expressible case, 2 on the advanced path)
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v4.json"))
         pol = gate_policy.build_policy(m, manifest_file="manifest/suite_v4.json")
         c = pol["counts"]
         self.assertEqual(c["selected"], 222)
         self.assertEqual(c["by_area"], {"C": 1, "D": 6, "N": 41, "R": 81, "T": 93})
-        self.assertEqual(c["excluded"], 33)
-        self.assertEqual(c["exclusions_by_rule"], {"manifest_not_implemented": 22, "table_not_expressible": 28,
+        self.assertEqual(c["excluded"], 31)
+        self.assertEqual(c["exclusions_by_rule"], {"manifest_not_implemented": 22, "table_not_expressible": 26,
                                                    "advanced_path": 2})
-        self.assertEqual(c["required"], {"mcp": {"scenarios": 189, "executions": 384}})
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 191, "executions": 388}})
         self.assertEqual([r["relation"] for r in pol["relations"]], ["REL-same_answer-0003"])
+
+    def test_query_cap_not_expressible_is_moot_below_the_cap(self):
+        # the service always sends its own bounds.max_query_bp (2,000 bp with labels, 500 for a discovery): a query
+        # no longer than that cap, whose direct request states no bound, is the same request through the MCP
+        m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v4.json"))
+        pol = gate_policy.build_policy(m, manifest_file="manifest/suite_v4.json")
+        ex = dict((e["scenario"], e) for e in pol["exclusions"])
+        for sid in ("R-edge-0012", "R-edge-0013"):
+            self.assertNotIn(sid, ex)
+        for sid in ("R-budget-0001", "R-budget-0002", "R-edge-0003", "R-twin-0002", "R-twin-0005"):
+            self.assertEqual(ex[sid]["rules"], ["table_not_expressible"], sid)
+        # R-edge-0004 states the bound itself (and the manifest marks it)
+        self.assertIn("table_not_expressible", ex["R-edge-0004"]["rules"])
+        case = {"id": "resolve.not_expressible.bounds_max_query_bp", "agreement": "not_implemented_mcp",
+                "service_answer": {"outcome": "not_expressible", "missing_argument": "bounds.max_query_bp"}}
+        s = scenario("R-010", "POST /resolve", by_design=[case["id"]], tool="traverse_resolve",
+                     arguments={"sequence": "A" * 501, "discover": True})
+        s["request"] = {"sequence": "A" * 501, "discover": {}}
+        self.assertIsNotNone(gate_policy.mcp_exclusion(s, {case["id"]: case}))   # above the discovery cap
+        s["mcp"]["arguments"]["sequence"] = "A" * 500
+        self.assertIsNone(gate_policy.mcp_exclusion(s, {case["id"]: case}))
+        s["request"]["bounds"] = {"max_query_bp": 100}
+        self.assertIsNotNone(gate_policy.mcp_exclusion(s, {case["id"]: case}))   # the direct request states a bound
 
     def test_shipped_v4_policy_is_regenerated_exactly(self):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v4_rt_mcp.json"))

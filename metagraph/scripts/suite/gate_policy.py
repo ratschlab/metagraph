@@ -11,7 +11,9 @@ MCP arm the scenarios it cannot express are explicit exclusions, each derived fr
 table, never from an answer a run received:
   manifest_not_implemented  the manifest's mcp.not_implemented (no MCP call maps the request);
   table_not_expressible     a case the scenario names (mcp.by_design) whose table agreement is not_implemented_mcp
-                            (e.g. resolve.not_expressible.bounds_max_query_bp: the MCP sends another request);
+                            (e.g. resolve.not_expressible.bounds_max_query_bp: the MCP sends another request), unless
+                            the case cannot change this request (not_expressible_moot: a query within the
+                            service's own cap);
   advanced_path             traverse_fetch arguments on the advanced strategy path (an `overrides` key outside the
                             MCP's basic list, a preset other than walk / trie, a `strategy` object), which a deployment
                             without TRAVERSAL_ADVANCED_ENABLED refuses; --advanced-path for one that enables it.
@@ -43,6 +45,25 @@ DEFAULT_ROUTES = ("POST /resolve", "POST /traverse", "GET /traverse/capabilities
 MCP_BASIC_OVERRIDES = {"bounds": None, "direction": None, "exhaustive": None,
                        "labels": ("max_labels_per_node", "seed_label_kind")}
 MCP_BASIC_PRESETS = (None, "walk", "trie")
+# The service always sends its own /resolve query cap as bounds.max_query_bp (app/traversal/resolve.py; app/settings.py
+# TRAVERSAL_RESOLVE_MAX_QUERY_BP 2000, TRAVERSAL_RESOLVE_DISCOVER_MAX_QUERY_BP 500 for a discovery): the case stating
+# bounds.max_query_bp not expressible changes nothing for a query no longer than that cap whose direct request states
+# no bound of its own.
+SERVICE_RESOLVE_MAX_QUERY_BP = {"labels": 2000, "discover": 500}
+
+
+def not_expressible_moot(case, scenario):
+    """Whether a not-expressible case cannot change a scenario's MCP request: today only the resolve query cap
+    (SERVICE_RESOLVE_MAX_QUERY_BP) on a query within it; every other not-expressible case applies."""
+    if (case.get("service_answer") or {}).get("missing_argument") != "bounds.max_query_bp":
+        return False
+    args = (scenario.get("mcp") or {}).get("arguments") or {}
+    request = scenario.get("request") if isinstance(scenario.get("request"), dict) else {}
+    seq = args.get("sequence")
+    if not isinstance(seq, str) or "max_query_bp" in (request.get("bounds") or {}):
+        return False
+    mode = "discover" if args.get("discover") else "labels"
+    return len(seq) <= SERVICE_RESOLVE_MAX_QUERY_BP[mode]
 
 
 def advanced_keys(arguments):
@@ -76,7 +97,7 @@ def mcp_exclusion(scenario, cases, advanced_path=False):
         reasons.append("the manifest marks it not implemented via MCP (%s)" % mcp["not_implemented"])
     for cid in cmp.case_ids(scenario):
         case = cases.get(cid) or {}
-        if case.get("agreement") == "not_implemented_mcp":
+        if case.get("agreement") == "not_implemented_mcp" and not not_expressible_moot(case, scenario):
             rules.append("table_not_expressible")
             reasons.append("it names %s, which the by-design table states not expressible via MCP" % cid)
     if mcp.get("tool") == "traverse_fetch" and not advanced_path:

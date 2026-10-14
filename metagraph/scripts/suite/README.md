@@ -1377,18 +1377,20 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   alone miss the 47 N and D scenarios on those routes). The scenarios an arm cannot express are explicit exclusions
   with rule and reason, derived from the manifest and the by-design table, never from an answer a run received:
   `manifest_not_implemented` (22), `table_not_expressible` (a named case whose table agreement is
-  not_implemented_mcp: 28, 9 of them beyond the manifest's: R-budget-0001/0002, R-edge-0003/0012/0013,
-  R-twin-0002..0005, whose resolve sends bounds.max_query_bp the MCP cannot) and `advanced_path` (traverse_fetch
-  overrides outside the service's basic list `_TRAVERSE_BASIC_OVERRIDES`, a preset other than walk / trie, a
-  strategy object: T-labels-0004/0006). It lists the executions each arm must record (v4, MCP: 189 scenarios, 384
-  executions), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
+  not_implemented_mcp: 26, 7 of them beyond the manifest's: R-budget-0001/0002, R-edge-0003, R-twin-0002..0005,
+  10 kb queries the service refuses at its own bounds.max_query_bp; a case that cannot change the request is moot,
+  `not_expressible_moot`: the query-cap case on a query within the service's cap of 2,000 bp, 500 for a discovery,
+  whose direct request states no bound, so R-edge-0012/0013, 100 bp refusals whose pair compare verifies, stay) and
+  `advanced_path` (traverse_fetch overrides outside the service's basic list `_TRAVERSE_BASIC_OVERRIDES`, a preset
+  other than walk / trie, a strategy object: T-labels-0004/0006). It lists the executions each arm must record (v4,
+  MCP: 191 scenarios, 388 executions), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
   the prefix_equals relations of the excluded R-budget / R-twin and the N-zero / C-caps relations with a partner
   outside the selection are listed as excluded), the property checks not required (none unless --not-required), and
   pins content_sha256, relations_sha256, index_fp and the by-design table's sha256. gate/policy_v4_rt_mcp.json is
   the v4 policy for the MCP arm (`gate_policy.py manifest/suite_v4.json --name v4-rt-mcp --out
   gate/policy_v4_rt_mcp.json`; a test regenerates it and compares). A v5 policy is one command on the v5 manifest,
   which prints the counts (selected by route and area, exclusions by rule with each reason, required executions per
-  arm, relations required and excluded); `--ids-out FILE` writes the ids the policy's arms run (v4, MCP: 189), for
+  arm, relations required and excluded); `--ids-out FILE` writes the ids the policy's arms run (v4, MCP: 191), for
   run_suite.sh --ids or async's runner standalone (`gate.py policy-ids POLICY` prints them comma-separated).
 - **The gate** (`gate.py RUN_DIR POLICY [--reevaluated]`: exit 0 PASS, 1 FAIL, 2 usage; RUN_DIR/gate.json) fails,
   listing every problem by kind, on: identity (either manifest hash not the policy's, a stated hash not verified, an

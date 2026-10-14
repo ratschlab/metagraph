@@ -22,19 +22,19 @@
    "POST /resolve": 118,
    "POST /traverse": 103
   },
-  "excluded": 33,
+  "excluded": 31,
   "exclusions_by_rule": {
    "advanced_path": 2,
    "manifest_not_implemented": 22,
-   "table_not_expressible": 28
+   "table_not_expressible": 26
   },
   "properties_not_required": 0,
   "relations_excluded": 21,
   "relations_required": 1,
   "required": {
    "mcp": {
-    "executions": 384,
-    "scenarios": 189
+    "executions": 388,
+    "scenarios": 191
    }
   },
   "selected": 222
@@ -113,26 +113,6 @@
     "table_not_expressible"
    ],
    "scenario": "R-edge-0004"
-  },
-  {
-   "arms": [
-    "mcp"
-   ],
-   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
-   "rules": [
-    "table_not_expressible"
-   ],
-   "scenario": "R-edge-0012"
-  },
-  {
-   "arms": [
-    "mcp"
-   ],
-   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
-   "rules": [
-    "table_not_expressible"
-   ],
-   "scenario": "R-edge-0013"
   },
   {
    "arms": [
@@ -391,7 +371,7 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-14T12:15:16.684Z",
+ "generated_utc": "2026-10-14T14:50:34.137Z",
  "manifest": {
   "content_sha256": "3a7417d60e4eb5d0e54433c76139df7ed1221ae35bcccf814b7fca2cf913f113",
   "file": "manifest/suite_v4.json",
@@ -991,6 +971,22 @@
     1
    ],
    "scenario": "R-edge-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0013"
   },
   {
    "arm": "mcp",
