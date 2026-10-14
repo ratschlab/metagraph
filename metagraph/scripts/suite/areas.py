@@ -24,7 +24,8 @@ from truth import TRUTH_DIR
 
 # A search the host may not finish within its time budget on a loaded machine (the README's machine-dependent) asks
 # for a 200 too: checks.deadline_allowed allows exactly the SPEC's 503 `deadline` in its place (SPEC-pattern-search
-# §6 / §7.6; A-02 of the review of lane S5: a status of [200, 503] passed any 503, a proxy page or `loading` too).
+# §6 / §7.6, SPEC-labeled-traversal-core §4.5 with a request budget; A-02 of the review of lane S5 and A2-02 of the
+# review of lane S5b: a status of [200, 503] passed any 503, a proxy page or `loading` too; no builder states it).
 OK = {"check": "status", "args": {"http": 200}}
 INV = {"check": "invariants", "args": {}}
 CC = {"check": "counts_consistent", "args": {}}
@@ -157,7 +158,7 @@ def gen_R(ctx: Ctx) -> List[dict]:
         req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=budget)
         t2 = dict(t)
         t2["flank"] = ""
-        exp = [ex("status", http=[200, 503]), INV, ex("resolve_runs", label=rec.column, full=True, prefix_if_stopped=True)]
+        exp = [OK, INV, ex("resolve_runs", label=rec.column, full=True, prefix_if_stopped=True)]
         out.append(scenario(nid(), "R", "10 kb of %s under a %d ms budget: a stated stop answers the prefix, the record's "
                             "own label supporting every k-mer of it" % (key, budget),
                             "POST /resolve", req, t2, exp, timing_class="slow", tags=["budget", "machine-dependent"]))
@@ -447,9 +448,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
                         [ex("status", http=409), ex("answer_fields", equals={"state": "expired"}, any_status=True)],
                         tags=["attempts", "refusal"]))
     req = traverse_request([_tseed(t["window"], [eco.accession])], {"bounds": {"max_extension_bp": 200}})
-    # an id runs once per server process while it is retained (retention_s 3600): a repeat or the second
-    # direct arm within the hour meets the duplicate's 409, which states the attempt
-    req["attempt_id"] = "suite-s1-%s" % t["window"][:16]   # the runner appends "-<run id>" (run_unique, A-10)
+    # an id runs once per server process while it is retained (retention_s 3600): the arm's second repeat meets the
+    # duplicate's 409, which states the attempt
+    req["attempt_id"] = "suite-s1-%s" % t["window"][:16]   # the runner appends "-<run id>-<arm>" (run_unique)
     # the attempt's bound (SPEC-labeled-traversal-core §6.8: seeds, the effective per-seed budget and the server's
     # allowance, capabilities attempts.allowance_ms 10,000; walk_until_ms below seeds x T + allowance)
     out.append(scenario(nid(), "T", "an attempt: the response states its usage and bound (409 duplicate when retained)",
@@ -463,7 +464,10 @@ def gen_T(ctx: Ctx) -> List[dict]:
                          # the duplicate's 409: its attempt's state and usage, no response-level usage (A-10)
                          ex("answer_fields", any_status=True, when_http=409,
                             present=["attempt.state", "attempt.usage"], absent=["usage"])],
-                        tags=["attempts", "retention-dependent", "code-derived"], run_unique=["attempt_id"]))
+                        tags=["attempts", "retention-dependent", "code-derived"], run_unique=["attempt_id"],
+                        # A2-06: each arm runs its own attempt (the runner appends the arm too); r0 runs it, r1 meets
+                        # its retained duplicate (409) and exercises the shape check; the arms compare like for like
+                        repeat=2))
     # T-edge
     nid = _ids("T-edge")
     t = ctx.window(rng, eco, 100, margin=400)
@@ -894,7 +898,7 @@ def gen_P(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "P", "16 patterns under a 300 ms budget: each exact within it or a stated time stop "
                         "(inexact after a discovery stop, sticky), or a 503 deadline", "POST /pattern",
                         pattern_request(pats, time_budget_ms=300), None,
-                        [ex("status", http=[200, 503]), INV, CC, ex("stops_stated", reasons=["time"])],
+                        [OK, INV, CC, ex("stops_stated", reasons=["time"])],
                         tags=["caps", "machine-dependent"]))
     # P-edge
     nid = _ids("P-edge")
@@ -981,7 +985,7 @@ def gen_P(ctx: Ctx) -> List[dict]:
         nsrc = len(source_contexts(t))
         out.append(scenario(nid(), "P", "%d-mer of %s in any_offset scope, count: at least its %d record contexts (heavy)" % (L, rec.key, nsrc),
                             "POST /pattern", pattern_request([_p(t["window"])], mode="count"), t,
-                            [ex("status", http=[200, 503]), INV, ex("count_relation", relation=["exact", "at_least"], min=nsrc)],
+                            [OK, INV, ex("count_relation", relation=["exact", "at_least"], min=nsrc)],
                             timing_class="slow", tags=["positive", "count", "machine-dependent", "heavy"]))
     return out
 
@@ -2387,7 +2391,7 @@ def _gen_N(ctx: Ctx) -> List[dict]:
     req = pattern_request([_p("N" * 12 + t["window"][12:25], "degenerate", kind="iupac")], mode="count")
     out.append(scenario(nid(), "N", "degenerate (12 N + 13 bases, 26 bits): admitted; the 13 bases at every offset are "
                         "costly (200 with its counts, or 503 deadline on a loaded host)", "POST /pattern", req, t,
-                        [ex("status", http=[200, 503]), INV, ex("count_relation", relation=["exact", "at_least"], min=1)],
+                        [OK, INV, ex("count_relation", relation=["exact", "at_least"], min=1)],
                         timing_class="slow", tags=["use-case", "degenerate", "machine-dependent", "heavy"]))
     req = pattern_request([_p("NNNNNNNNNNNNNNNNNNNN" + t["window"][:11], "degenerate2", kind="iupac")], mode="count")
     out.append(scenario(nid(), "N", "too degenerate (20 N + 11 bases, 22 bits): below the floor", "POST /pattern", req, t,
@@ -2546,14 +2550,13 @@ def gen_REL(ctx: Ctx, scenarios: List[dict], caps: Dict[str, dict]) -> List[dict
         lab = rb["request"]["labels"][0]
         full = _twin(rb, "R-twin-%04d" % (2 + 2 * i), "the same 10 kb under the 20,000 ms budget: the profile the stop "
                      "must be a prefix of", resolve_request(seq, labels=[lab]),
-                     [ex("status", http=[200, 503]), INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
-                     tags=["budget"], timing_class="slow")
+                     [OK, INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
+                     tags=["budget", "machine-dependent"], timing_class="slow")
         cont_from = 5000
         cont = _twin(rb, "R-twin-%04d" % (3 + 2 * i), "the same 10 kb from base %d: the continuation" % cont_from,
                      resolve_request(seq[cont_from:], labels=[lab]),
-                     [ex("status", http=[200, 503]), INV,
-                      ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
-                     tags=["budget"], timing_class="slow")
+                     [OK, INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
+                     tags=["budget", "machine-dependent"], timing_class="slow")
         out += [full, cont]
         relation(ctx, "prefix_equals", rb["id"], full["id"], "the stopped resolve equals the full resolve on its prefix",
                  labels=[lab], a_from_kmer=0, b_from_kmer=0)

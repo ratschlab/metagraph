@@ -67,9 +67,10 @@ CONVENTIONS = {
     "mcp.by_design": "case ids of the async session's service-by-design table (service_by_design.json)",
     "mcp.requires_service": "the service increment the MCP mapping needs (I12: max_mismatches)",
     "timing_class": "fast (< ~5 s), slow, long (> 100 s: direct-local only)",
-    "run_unique": "top-level request fields the direct runner makes unique per run (lane S5b, A-10): it appends "
-                  "'-' and the run id (the run directory's name, which the arms of a run share) to each, cut to the "
-                  "id pattern's 128 characters, and records the request it sent; the manifest keeps the base value",
+    "run_unique": "top-level request fields the direct runner makes unique per run and arm (lane S5b, A-10; lane "
+                  "S5c, A2-06): it appends '-', the run id (the run directory's name, which the arms of a run share), "
+                  "'-' and the arm to each, cut to the id pattern's 128 characters, and records the request it sent; "
+                  "the manifest keeps the base value",
 }
 
 
@@ -100,8 +101,9 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     missing = [r.key for r in recs if r.fetch_error]
     ctx = Ctx(recs, seed)
     caps = load_capabilities(capabilities_dir)
-    # the host's substitution caps per kind decide the M-protein scenarios and their by-design naming (G04, G05)
-    manifest_lib.set_host_capabilities(caps["pattern_capabilities"])
+    # the host's substitution caps per kind decide the M-protein scenarios and their by-design naming (G04, G05); the
+    # routes' time-budget caps the effective budget budget_respected states above them (A2-03)
+    manifest_lib.set_host_capabilities(caps["pattern_capabilities"], caps["traverse_capabilities"])
     gens = [("R", areas.gen_R), ("T", areas.gen_T), ("P", areas.gen_P), ("L", areas.gen_L), ("X", areas.gen_X),
             ("M", areas.gen_M), ("Q", areas.gen_Q), ("N", areas.gen_N)]
     scenarios = []
@@ -364,6 +366,13 @@ def frozen_target(path: str) -> str:
     return ""
 
 
+def manifest_path(path: str) -> bool:
+    """Whether |path|, by any spelling (realpath: relative, `..`, a symbolic link to manifest/ or to a file there),
+    names a manifest file of manifest/ (MANIFEST_NAME), existing or not (A2-05 of the review of lane S5b)."""
+    real = os.path.realpath(path)
+    return os.path.dirname(real) == os.path.realpath(MANIFEST_DIR) and bool(MANIFEST_NAME.match(os.path.basename(real)))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v%d.json" % MANIFEST_VERSION))
@@ -375,9 +384,9 @@ def main(argv=None) -> int:
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
     args = ap.parse_args(argv)
     only = set(args.areas.split(",")) if args.areas else None
-    defaults = (ap.get_default("out"), ap.get_default("smoke_out"))
-    if only and (args.out in defaults or args.smoke_out in defaults):
-        raise SystemExit("--areas builds a partial manifest: give --out and --smoke-out outside manifest/")
+    if only and (manifest_path(args.out) or manifest_path(args.smoke_out)):
+        raise SystemExit("--areas builds a partial manifest: give --out and --smoke-out outside manifest/ (not a "
+                         "suite_v*.json / suite_smoke_v*.json there, by any spelling)")
     for path in (args.out, args.smoke_out):
         why = frozen_target(path)
         if why:

@@ -108,6 +108,24 @@ class McpMapping(unittest.TestCase):
         s = ml.scenario("R-2", "R", "t", "POST /resolve", ml.resolve_request("A" * 40, discover={"max_labels": 5}),
                         {}, [ok])
         self.assertFalse(any(e["check"] == "budget_respected" for e in s["expect"]))   # a discovery names none
+        # A2-03: a request above the snapshot's route cap states the cap (budget_respected cap_ms): the effective
+        # budget is min(requested, cap); at or below it nothing changes
+        try:
+            ml.set_host_capabilities({"caps": {"time_budget_ms": 600000}},
+                                     {"resolve": {"time_budget": {"max_time_ms": 60000}}})
+            self.assertEqual(ml.HOST_BUDGET_CAP_MS, {"POST /pattern": 600000, "POST /resolve": 60000})
+            budget = lambda sid, route, req: [e for e in ml.scenario(sid, "R", "t", route, req, {}, [ok])[  # noqa: E731
+                "expect"] if e["check"] == "budget_respected"][0]["args"]
+            self.assertEqual(budget("R-3", "POST /resolve", ml.resolve_request("A" * 40, labels=["1"],
+                                                                                time_budget_ms=70000))["cap_ms"], 60000)
+            self.assertNotIn("cap_ms", budget("R-4", "POST /resolve", ml.resolve_request("A" * 40, labels=["1"],
+                                                                                          time_budget_ms=20000)))
+            self.assertEqual(budget("P-2", "POST /pattern", ml.pattern_request([{"dna": "A" * 25}],
+                                                                               time_budget_ms=700000))["cap_ms"], 600000)
+            self.assertNotIn("cap_ms", budget("P-3", "POST /pattern", ml.pattern_request([{"dna": "A" * 25}])))
+        finally:
+            ml.set_host_capabilities(None)
+        self.assertEqual(ml.HOST_BUDGET_CAP_MS, {})
 
     def test_scenario_levels(self):
         s = ml.scenario("X-1", "P", "t", "POST /pattern", ml.pattern_request([{"dna": "A" * 25}]), {},
@@ -283,6 +301,23 @@ class V4Builder(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 bm.main(["--areas", "M", "--smoke-out", os.path.join(d, "s.json")])
             self.assertIn("--areas", str(ctx.exception))
+            # A2-05: by any spelling of a manifest name of manifest/ (relative, `..`, a symbolic link to the
+            # directory), existing or not; another name there or another directory is a partial build's output
+            spellings = [os.path.relpath(os.path.join(SUITE, "manifest", "suite_v4.json")),
+                         os.path.join(SUITE, "manifest", "..", "manifest", "suite_v4.json"),
+                         os.path.join(link, "suite_smoke_v4.json"), os.path.join(link, ".", "suite_v9.json")]
+            for p in spellings:
+                self.assertTrue(bm.manifest_path(p), p)
+            self.assertFalse(bm.manifest_path(os.path.join(SUITE, "manifest", "scratch.json")))
+            self.assertFalse(bm.manifest_path(os.path.join(d, "suite_v4.json")))
+            from unittest import mock
+            with mock.patch.object(bm, "build", side_effect=AssertionError("reached build")):
+                for p in spellings:
+                    with self.assertRaises(SystemExit) as ctx:
+                        bm.main(["--areas", "M", "--out", p, "--smoke-out", os.path.join(d, "s.json")])
+                    self.assertIn("--areas builds a partial manifest", str(ctx.exception), p)
+                    with self.assertRaises(SystemExit):
+                        bm.main(["--areas", "M", "--out", os.path.join(d, "o.json"), "--smoke-out", p])
         self.assertEqual(bm.frozen_target(os.path.join(SUITE, "manifest", "suite_v99.json")), "")
 
     def test_cap_gate_and_lengths(self):
@@ -332,6 +367,10 @@ class V4Builder(unittest.TestCase):
         self.assertIs(run_direct.run_unique_request(dict(s, run_unique=None), "r"), s["request"])
         _, _, body, _, rec = run_direct.build_request(s, "R1")
         self.assertEqual((json.loads(body)["attempt_id"], rec["body"]["attempt_id"]), ("suite-s1-ACGT-R1",) * 2)
+        # A2-06: per run AND arm, so the second direct arm runs its own attempt (it met the first arm's 409)
+        local = json.loads(run_direct.build_request(s, "R1", "direct-local")[2])["attempt_id"]
+        remote = json.loads(run_direct.build_request(s, "R1", "direct-remote")[2])["attempt_id"]
+        self.assertEqual((local, remote), ("suite-s1-ACGT-R1-direct-local", "suite-s1-ACGT-R1-direct-remote"))
         shape = {"present": ["attempt.state", "attempt.usage"], "absent": ["usage"], "when_http": 409,
                  "any_status": True}
         sc = {"route": "POST /traverse", "request": {}, "expect": [{"check": "status", "args": {"http": [200, 409]}},
@@ -402,6 +441,22 @@ class V4Builder(unittest.TestCase):
             "http": 400, "code": "invalid_request", "text_contains": ["request.predicate.at_least.n"]}}])
         self.assertIn("pattern.predicate_form_other", rq["Q-more-0003"]["mcp"]["by_design"])
         self.assertIn("resolve.unknown_label", rq["R-edge-0008"]["mcp"]["by_design"])
+        # A2-02: the budgeted resolves ask for a 200 and are machine-dependent: a 503 `loading` or a proxy page fails
+        # the status, the SPEC's 503 deadline is the checks' allowance
+        for sid in ("R-budget-0001", "R-budget-0002"):
+            self.assertEqual(rq[sid]["expect"][0], {"check": "status", "args": {"http": 200}}, sid)
+            self.assertIn("machine-dependent", rq[sid]["tags"], sid)
+            for bad in (checks.normalise_direct(503, b'{"code": "loading", "error": "loading"}'),
+                        checks.normalise_direct(503, b"<html>proxy</html>")):
+                self.assertEqual(checks.scenario_outcome(checks.evaluate(rq[sid], bad, "direct-local")), "fail")
+            dl = checks.normalise_direct(503, b'{"code": "deadline", "error": "late"}')
+            budget = rq[sid]["request"]["bounds"]["time_budget_ms"]
+            self.assertEqual(checks.scenario_outcome(checks.evaluate(rq[sid], dl, "direct-local",
+                                                                     client={"wall_ms": budget + 100.0})),
+                             "inconclusive")
+        # A2-03: R-edge-0021 asks 70,000 ms above the snapshot's cap of 60,000: budget_respected states it
+        self.assertEqual([e["args"].get("cap_ms") for e in rq["R-edge-0021"]["expect"]
+                          if e["check"] == "budget_respected"], [60000])
         # A-12 b: the three split cases of async's table each have a scenario
         named = [c for s in rq.values() for c in (s.get("mcp") or {}).get("by_design") or []]
         for case in ("resolve.discover_limit_above_100_host_answers", "resolve.time_budget_above_reserve_below_minimum",

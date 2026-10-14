@@ -62,16 +62,31 @@ ABSENT_LABEL = "NOPE_0000.1"
 # mismatch.above_kind_cap above a kind's cap (G05), and the M builders emit the m = 2 peptides only under a protein cap
 # of at least 2 (G04).
 HOST_MISMATCH_MAX = {"dna": 3, "iupac": 3, "protein": 3}
+# The host's time-budget cap per route from the snapshot (set_host_capabilities): /pattern caps.time_budget_ms,
+# /resolve resolve.time_budget.max_time_ms of /traverse/capabilities. A request above it is lowered to it (SPEC-pattern
+# §4.5, SPEC-labeled-traversal-core §4.5), so budget_respected states it as cap_ms where a request asks more (A2-03)
+HOST_BUDGET_CAP_MS: Dict[str, int] = {}
 
 
-def set_host_capabilities(pattern_caps: Optional[dict]) -> None:
-    """Take the host's per-kind substitution caps from a /pattern/capabilities document (the build's snapshot)."""
+def _int_or_none(v: Any) -> Optional[int]:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def set_host_capabilities(pattern_caps: Optional[dict], traverse_caps: Optional[dict] = None) -> None:
+    """Take the host's per-kind substitution caps from a /pattern/capabilities document and the routes' time-budget
+    caps from it and a /traverse/capabilities document (the build's snapshot)."""
     mx = ((pattern_caps or {}).get("mismatches") or {}).get("max") or {}
     HOST_MISMATCH_MAX.clear()
     HOST_MISMATCH_MAX.update({"dna": 3, "iupac": 3, "protein": 3})
     for kind, v in mx.items():
         if isinstance(v, int) and not isinstance(v, bool):
             HOST_MISMATCH_MAX[kind] = v
+    HOST_BUDGET_CAP_MS.clear()
+    for route, v in (("POST /pattern", ((pattern_caps or {}).get("caps") or {}).get("time_budget_ms")),
+                     ("POST /resolve", (((traverse_caps or {}).get("resolve") or {}).get("time_budget") or {}).get(
+                         "max_time_ms"))):
+        if _int_or_none(v) is not None:
+            HOST_BUDGET_CAP_MS[route] = v
 
 PATTERN_NOT_EXPRESSIBLE = ["max_steps", "max_memory_mb", "min_information_bits", "max_annotation_work",
                            "max_occurrences_per_label", "max_labels_per_anchor", "stop_at_threshold",
@@ -852,8 +867,11 @@ def time_budget_of(route: str, req: Any) -> Optional[Any]:
 
 
 def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dict]:
-    """budget_respected for a scenario that names a time budget and allows a 200 answer."""
-    if time_budget_of(route, req) is None or route not in BUDGET_RULE:
+    """budget_respected for a scenario that names a time budget and allows a 200 answer; with cap_ms, the route's
+    cap of the snapshot (HOST_BUDGET_CAP_MS), where the request asks more: the effective budget an allowed 503 is
+    judged against is min(requested, cap) (A2-03; below the cap the requested budget is the effective one)."""
+    asked = time_budget_of(route, req)
+    if asked is None or route not in BUDGET_RULE:
         return None
     allowed = [200]
     for e in expect:
@@ -862,7 +880,11 @@ def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dic
             allowed = w if isinstance(w, list) else [w]
     if 200 not in allowed:
         return None
-    return {"check": "budget_respected", "args": {"rule": BUDGET_RULE[route]}}
+    args = {"rule": BUDGET_RULE[route]}
+    cap = HOST_BUDGET_CAP_MS.get(route)
+    if cap is not None and isinstance(asked, (int, float)) and not isinstance(asked, bool) and asked > cap:
+        args["cap_ms"] = cap
+    return {"check": "budget_respected", "args": args}
 
 
 # ---------------------------------------------------------------------------------------------- relations
