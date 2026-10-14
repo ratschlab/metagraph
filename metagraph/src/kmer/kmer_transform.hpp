@@ -100,6 +100,8 @@ typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
 }
 
 // Expand each of a byte's four 2-bit characters into a 3-bit field.
+// A raw array avoids GCC's missed optimization for std::array's size_t index.
+// See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=127883.
 static constexpr auto lookup_2_3_storage = [] {
     struct { uint16_t values[256]; } table{};
     for (size_t value = 0; value < 256; ++value) {
