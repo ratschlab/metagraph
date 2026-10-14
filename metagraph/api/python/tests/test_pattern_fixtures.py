@@ -571,6 +571,33 @@ def spec_gate_caps(text):
     return names
 
 
+# a C++ string literal (raw or not), a character literal (a ' after a digit separates digits) or
+# a comment, for strip_cpp_comments
+CPP_TOKEN = re.compile(r'R"([^()\\\s]{0,16})\(.*?\)\1"|"(?:\\.|[^"\\\n])*"'
+                       r'|(?<![0-9A-Fa-f])\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?\*/', re.S)
+CPP_STRING = re.compile(r'"((?:\\.|[^"\\\n])*)"')
+
+
+def strip_cpp_comments(source):
+    """|source| with each comment replaced by a space, its string and character literals kept
+    (a string inside a comment is not code)."""
+    return CPP_TOKEN.sub(lambda m: ' ' if m.group(0)[0] == '/' else m.group(0), source)
+
+
+def cpp_string_array(source, name):
+    """The strings of the C++ array |name| (`const char *[const ]name[] = {...};`) in |source|,
+    in order, its comments left out (a string commented out is not in the list); None when the
+    source has no such array."""
+    m = re.search(r'const char \*(?:const )?' + re.escape(name) + r'\[\] = \{(.*?)\};',
+                  strip_cpp_comments(source), re.S)
+    if m is None:
+        return None
+    body = m.group(1)
+    assert re.fullmatch(r'[\s,]*', CPP_STRING.sub('', body)), \
+        f'{name}: an entry that is not a string literal: {body!r}'
+    return CPP_STRING.findall(body)
+
+
 def predicate_names(p):
     """The names a predicate (or a normal form) lists, in the order of their first appearance."""
     out = []
@@ -3330,19 +3357,19 @@ class TestPatternFixtures(unittest.TestCase):
             for v in values:
                 self.assertIn(f'`{v}`', text, f'the SPEC does not name `{v}`')
 
-    def check_spec_gate_caps(self, text):
+    def check_spec_gate_caps(self, text, source=None):
         """The gate caps SPEC §23.2 lists in |text| (spec_gate_caps) are GATE_CAPS and the
-        server's kPatternGateCaps, in order, and the caps of every stored gate block (GET
+        server's kPatternGateCaps (in |source|, else pattern.cpp where the sources are in the
+        checkout), in order, and the caps of every stored gate block (GET
         /traverse/capabilities)."""
         listed = spec_gate_caps(text)
         self.assertEqual(len(listed), len(set(listed)), 'SPEC §23.2: a gate cap twice')
         self.assertEqual(GATE_CAPS, listed, 'SPEC §23.2: the gate caps')
-        if os.path.isfile(PATTERN_CPP):
+        if source is None and os.path.isfile(PATTERN_CPP):
             with open(PATTERN_CPP, encoding='utf-8') as f:
-                m = re.search(r'const char \*const kPatternGateCaps\[\] = \{(.*?)\};', f.read(),
-                              re.S)
-            self.assertTrue(m, 'kPatternGateCaps')
-            self.assertEqual(listed, re.findall(r'"([a-z_]+)"', m.group(1)),
+                source = f.read()
+        if source is not None:
+            self.assertEqual(listed, cpp_string_array(source, 'kPatternGateCaps'),
                              'SPEC §23.2: the server\'s gate caps')
         probes = [name for name, f in self.fixtures.items()
                   if f['path'].split('?')[0] == '/traverse/capabilities' and f['status'] == 200]
@@ -3610,13 +3637,56 @@ class TestPatternFixtures(unittest.TestCase):
         if not os.path.isfile(PATTERN_CPP):
             self.skipTest('the server sources are not in this checkout')
         with open(PATTERN_CPP, encoding='utf-8') as f:
-            source = f.read()
-        for name, expected in (('kPatternGateKeys', GATE_KEYS), ('kPatternGateCaps', GATE_CAPS)):
-            m = re.search(r'const char \*const ' + name + r'\[\] = \{(.*?)\};', source, re.S)
-            self.assertTrue(m, name)
-            self.assertEqual(expected, re.findall(r'"([a-z_]+)"', m.group(1)), name)
-        self.assertIn('"' + DETAILS + '"', source)
+            self.check_server_gate_lists(f.read())
         self.assertEqual(GATE_KEYS + ['details'], SCHEMA['pattern_gate'])
+
+    def check_server_gate_lists(self, source):
+        """kPatternGateKeys and kPatternGateCaps in |source| (pattern.cpp), their comments left
+        out, are GATE_KEYS and GATE_CAPS in order, and the source names the route of the full
+        block."""
+        for name, expected in (('kPatternGateKeys', GATE_KEYS), ('kPatternGateCaps', GATE_CAPS)):
+            self.assertEqual(expected, cpp_string_array(source, name), name)
+        self.assertIn('"' + DETAILS + '"', source)
+
+    def test_a_gate_list_entry_commented_out_fails(self):
+        """The server's gate lists are read without their comments: pattern.cpp with a gate key
+        or a gate cap commented out (in /* */ or on a // line) fails check_server_gate_lists, and
+        such a cap check_spec_gate_caps; a comment that only names a string passes both."""
+        if not (os.path.isfile(PATTERN_CPP) and os.path.isfile(SPEC)):
+            self.skipTest('the server sources or the SPEC are not in this checkout')
+        with open(PATTERN_CPP, encoding='utf-8') as f:
+            source = f.read()
+        with open(SPEC, encoding='utf-8') as f:
+            spec = f.read()
+        self.check_server_gate_lists(source)
+        self.check_spec_gate_caps(spec, source)
+        arrays = {}
+        for name in ('kPatternGateKeys', 'kPatternGateCaps'):
+            m = re.search(r'const char \*const ' + name + r'\[\] = \{.*?\};', source, re.S)
+            self.assertTrue(m, name)
+            arrays[name] = m.group(0)
+        for name, old, new, fails in (
+                ('kPatternGateCaps', '"max_steps", ', '/* "max_steps", */ ', True),
+                ('kPatternGateCaps', '\n    "min_information_bits", ',
+                 '\n    // "min_information_bits",\n    ', True),
+                ('kPatternGateKeys', '"counting",', '/* "counting", */', True),
+                ('kPatternGateKeys', '\n    "caps",', '\n    // "caps",', True),
+                ('kPatternGateCaps', '\n};', '\n    // "max_labels" is the full block\'s\n};', False),
+                ('kPatternGateCaps', '"max_paths", ', '"max_paths", /* "max_labels", */ ', False)):
+            with self.subTest(name=name, new=new):
+                array = arrays[name]
+                self.assertEqual(1, array.count(old))
+                mutated = source.replace(array, array.replace(old, new))
+                self.assertNotEqual(source, mutated)
+                checks = [lambda: self.check_server_gate_lists(mutated)]
+                if name == 'kPatternGateCaps':
+                    checks.append(lambda: self.check_spec_gate_caps(spec, mutated))
+                for run in checks:
+                    if fails:
+                        with self.assertRaises(AssertionError):
+                            run()
+                    else:
+                        run()
 
     def test_every_probed_server_has_its_full_block(self):
         """The probe's block is the gate block (SPEC §23.2), so the answers of a server are
@@ -4405,9 +4475,8 @@ class TestPatternFixtures(unittest.TestCase):
                          hand_made)
 
         # the graph fields the code sets to null without the graph, read from its source
-        m = re.search(r'const char \*graph_fields\[\] = \{(.*?)\};', pattern_cpp, re.S)
-        self.assertTrue(m, 'pattern_capabilities_json graph_fields')
-        self.assertEqual(list(GRAPH_FIELDS), re.findall(r'"([a-z_]+)"', m.group(1)))
+        self.assertEqual(list(GRAPH_FIELDS), cpp_string_array(pattern_cpp, 'graph_fields'),
+                         'pattern_capabilities_json graph_fields')
         loading = self.bodies['pattern_capabilities_loading'][1]
         loaded = self.bodies['pattern_capabilities'][1]
         self.assertTrue(loaded['available'])
