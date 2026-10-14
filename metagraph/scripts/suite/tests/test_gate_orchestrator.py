@@ -84,6 +84,28 @@ class IdsPlanAndGate(SuiteCase):
             self.assertEqual(p.returncode, 2)
             self.assertIn("T-9", p.stderr)
 
+    def test_plain_resume_keeps_the_union_of_the_selections(self):
+        # a targeted resume (--ids) after a wider run, then a plain resume: the plain one continues the whole run
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--no-mcp", "--checks", "stub", "--skip-remote",
+                               "--ids", self.write("a.txt", "T-1 R-1"), "--warm-every", "0")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            # (a resume restores neither --skip-remote nor --no-mcp: given again)
+            p = self.run_suite(host, "--resume", run_dir, "--ids", self.write("b.txt", "C-1"), "--skip-remote",
+                               "--no-mcp")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            p = self.run_suite(host, "--resume", run_dir, "--skip-remote", "--no-mcp")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+        self.assertEqual([x["ids"] for x in sessions], ["R-1,T-1", "C-1", "C-1,R-1,T-1"])
+        # the third invocation planned nothing new: plan.json holds the two selections' plans
+        plan = sc.read_json(os.path.join(run_dir, "plan.json"))
+        self.assertEqual([x["selection"]["ids"] for x in plan["plans"]], [["R-1", "T-1"], ["C-1"]])
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            self.assertNotIn("INCOMPLETE", fh.read().split("# Environment")[0])
+
     def policy(self, scenarios):
         m = sc.read_json(self.mpath)
         pol = gate_policy.build_policy(m, routes=["POST /resolve", "POST /traverse"], arms=["mcp"], table_path="",

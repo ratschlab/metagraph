@@ -1361,10 +1361,13 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   selection (manifest identity, areas, limit, ids, warm_every, arms, mode) and every (scenario, arm, repeat) it plans,
   the paired loop's plan (plan_executions for a direct arm, mcp_repeats for the MCP arm; the sequential mode runs the
   same). A resume with the same selection adds nothing, one with another selection adds its plan: the run's plan is
-  the union, so a resume never narrows what the run must record. A resume keeps the run's areas, limit, ids and
-  warm_every unless given (before, a resume without --areas widened the selection to the whole manifest and took
-  warm_every 10). A run of before plan.json is reconstructed from orchestrator.json's sessions (persisted before its
-  arms ran too). `--ids FILE` selects scenarios by id (an id the manifest lacks is refused); the ids reach both
+  the union, so a resume never narrows what the run must record (an invocation adding no execution adds no entry). A
+  resume without a selection of its own (--ids, --areas, --limit, --gate) runs every scenario of that union
+  (`gate.py resume-ids`), so a plain resume after a narrower targeted one finishes the run, and keeps the last
+  invocation's warm_every unless given (before lane S6c a resume without --areas widened the selection to the whole
+  manifest and took warm_every 10). A session of orchestrator.json without a plan.json entry (a run started before
+  plan.json) is reconstructed from its selection fields and joins the union; a run with no plan.json at all is
+  reconstructed from orchestrator.json alone (persisted before its arms ran too). `--ids FILE` selects scenarios by id (an id the manifest lacks is refused); the ids reach both
   direct runners, the MCP steps and the plan.
 - **The report** reconciles the plan with the records (`gate.missing_planned`): a planned execution no arm recorded,
   the MCP arm's included, makes the verdict INCOMPLETE ("N planned execution(s) not recorded (mcp n; plan of ...)").

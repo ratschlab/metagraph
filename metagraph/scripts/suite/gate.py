@@ -5,6 +5,7 @@
     gate.py plan RUN_DIR --manifest M --arms A,B [--areas P,M] [--limit N] [--ids LIST] [--warm-every N] [--mode M]
     gate.py ids FILE --manifest M          print FILE's scenario ids, comma-separated in manifest order
     gate.py policy-ids POLICY [--arms A]  print the ids the policy's arms run (its selection less their exclusions)
+    gate.py resume-ids RUN_DIR --manifest M  print the scenarios of the run's whole plan (a plain resume's selection)
 
 Exit status of the judgement: 0 GATE PASS, 1 GATE FAIL, 2 usage (an unreadable policy or run included).
 
@@ -130,13 +131,15 @@ def plan_entry(manifest, areas, limit, ids, warm_every, arms, mode, session=None
 
 
 def write_plan(run_dir, entry):
-    """Adds |entry| to RUN_DIR/plan.json unless the last plan has the same selection and executions; returns
-    whether it was added."""
+    """Adds |entry| to RUN_DIR/plan.json unless the plans there, on the same manifest, already hold every execution
+    it plans (a resume of the run's own selection adds nothing); returns whether it was added."""
     path = os.path.join(run_dir, PLAN_FILE)
     data = sc.read_json(path) or {"plan_version": PLAN_VERSION, "plans": []}
-    last = data["plans"][-1] if data.get("plans") else None
-    same = last is not None and all(last.get(k) == entry.get(k) for k in ("manifest", "selection", "executions"))
-    if same:
+    held = set()
+    for p in data.get("plans") or []:
+        if p.get("manifest") == entry.get("manifest"):
+            held.update(tuple(e) for e in p.get("executions") or [])
+    if data.get("plans") and all(tuple(e) in held for e in entry.get("executions") or []):
         return False
     data["plans"].append(entry)
     sc.write_json_atomic(path, data)
@@ -158,21 +161,35 @@ def session_plan(manifest, session):
 
 def run_plan(run_dir, manifest):
     """(keys, source, plans): the union of every plan of the run as a set of (scenario, arm, repeat), where it
-    comes from ("plan.json", "orchestrator.json (reconstructed)" or None) and plan.json's entries."""
+    comes from ("plan.json", "orchestrator.json (reconstructed)", both, or None) and plan.json's entries. A session
+    of orchestrator.json without an entry in plan.json (a run started before plan.json, resumed after it) is
+    reconstructed and joins the union."""
     data = sc.read_json(os.path.join(run_dir, PLAN_FILE))
-    if isinstance(data, dict) and data.get("plans"):
-        keys = set()
-        for p in data["plans"]:
-            keys.update(tuple(e) for e in p.get("executions") or [])
-        return keys, PLAN_FILE, data["plans"]
+    plans = data.get("plans") or [] if isinstance(data, dict) else []
+    keys, sources = set(), []
+    for p in plans:
+        keys.update(tuple(e) for e in p.get("executions") or [])
+    if plans:
+        sources.append(PLAN_FILE)
     orch = sc.read_json(os.path.join(run_dir, "orchestrator.json")) or {}
     sessions = orch.get("sessions") or []
-    if sessions and isinstance(manifest, dict):
-        keys = set()
-        for s in sessions:
+    covered = set(p.get("session") for p in plans if isinstance(p.get("session"), int))
+    rest = [s for i, s in enumerate(sessions) if i not in covered] if plans else sessions
+    if plans and covered == set() and rest:
+        rest = []   # entries without session numbers (written by hand or by a test): plan.json alone
+    if rest and isinstance(manifest, dict):
+        for s in rest:
             keys.update(session_plan(manifest, s))
-        return keys, "orchestrator.json (reconstructed)", []
-    return set(), None, []
+        sources.append("orchestrator.json (reconstructed)")
+    return keys, " and ".join(sources) or None, plans
+
+
+def resume_ids(run_dir, manifest):
+    """The scenarios of the run's whole plan (run_plan's union), in manifest order: the selection a resume without
+    a selection of its own continues, so a plain resume after a narrower targeted one finishes the run."""
+    keys, _, _ = run_plan(run_dir, manifest)
+    wanted = set(k[0] for k in keys)
+    return [s.get("id") for s in (manifest or {}).get("scenarios", []) if s.get("id") in wanted]
 
 
 def missing_planned(run_dir, manifest, rows):
@@ -684,6 +701,15 @@ def _cmd_ids(argv):
     return 0
 
 
+def _cmd_resume_ids(argv):
+    ap = argparse.ArgumentParser(prog="gate.py resume-ids")
+    ap.add_argument("run_dir")
+    ap.add_argument("--manifest", required=True)
+    a = ap.parse_args(argv)
+    sys.stdout.write(",".join(resume_ids(a.run_dir, sc.read_json(a.manifest))) + "\n")
+    return 0
+
+
 def _cmd_policy_ids(argv):
     ap = argparse.ArgumentParser(prog="gate.py policy-ids")
     ap.add_argument("policy")
@@ -706,6 +732,8 @@ def main(argv=None):
         return _cmd_ids(argv[1:])
     if argv and argv[0] == "policy-ids":
         return _cmd_policy_ids(argv[1:])
+    if argv and argv[0] == "resume-ids":
+        return _cmd_resume_ids(argv[1:])
     ap = argparse.ArgumentParser(description="The strict deploy gate of a suite run (exit 0 PASS, 1 FAIL).")
     ap.add_argument("run_dir")
     ap.add_argument("policy")

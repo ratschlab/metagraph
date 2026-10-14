@@ -11,10 +11,11 @@
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf] [--gate POLICY]
 #
 # --ids FILE: only these scenarios (ids separated by commas, blanks or new lines, '#' comments; an id the manifest
-# lacks is refused), in manifest order, with --areas / --limit applied on top. --resume keeps the run's selection
-# (areas, limit, ids) unless --ids, --areas, --limit or --gate is given, and its --warm-every unless given. Every
+# lacks is refused), in manifest order, with --areas / --limit applied on top. --resume without --ids, --areas,
+# --limit or --gate runs the scenarios of the run's whole plan (every invocation's selection: a plain resume after a
+# narrower targeted one finishes the run), and keeps the last invocation's --warm-every unless given. Every
 # invocation writes the run's plan, RUN_DIR/plan.json, before any arm runs: each (scenario, arm, repeat) its
-# selection plans (gate.py plan); a resume with another selection adds its plan, the run's plan is the union.
+# selection plans (gate.py plan); one that adds executions is added, the run's plan is the union.
 #
 # --gate POLICY (gate.py, a policy of gate_policy.py): the strict deploy gate. Without --ids / --areas / --limit the
 # selection is the policy's (its scenarios less those excluded on every arm this invocation runs); the merge treats
@@ -131,7 +132,7 @@ mex_rsync() {
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
 MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""; IDS_FILE=""; IDS=""; GATE=""
-WARM_GIVEN=0
+WARM_GIVEN=0; RESUME_SELECTION=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reevaluate) REEVALUATE="$2"; shift 2 ;;
@@ -243,18 +244,8 @@ try:
 except (OSError, ValueError, KeyError, IndexError):
     print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
   fi
-  if [[ -z "$IDS_FILE" && -z "$AREAS" && -z "$LIMIT" && -z "$GATE" ]]; then
-    # The run's own selection (the last invocation's areas, limit and ids), so a resume continues it and does not
-    # widen it to the whole manifest (the run's plan would grow by what was never meant to run).
-    SEL="$("$PY" -c 'import json, sys
-try:
-    s = json.load(open(sys.argv[1]))["sessions"][-1]
-    ids = s.get("ids") or ""
-    print("%s|%s|%s" % (s.get("areas") or "", s.get("limit") or "", ids if isinstance(ids, str) else ",".join(ids)))
-except (OSError, ValueError, KeyError, IndexError):
-    print("||")' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo "||")"
-    AREAS="${SEL%%|*}"; SEL="${SEL#*|}"; LIMIT="${SEL%%|*}"; IDS="${SEL#*|}"
-  fi
+  # The run's own selection (the union of every invocation's plan, below) unless this one names its own.
+  [[ -n "$IDS_FILE" || -n "$AREAS" || -n "$LIMIT" || -n "$GATE" ]] || RESUME_SELECTION=1
   if [[ $WARM_GIVEN == 0 ]]; then
     # its warm_every likewise (the repeats it planned)
     WARM_EVERY="$("$PY" -c 'import json, sys
@@ -300,6 +291,10 @@ fi
 MANIFEST="$(cd "$(dirname "$MANIFEST")" && pwd)/$(basename "$MANIFEST")"
 if [[ -n "$IDS_FILE" ]]; then
   IDS="$("$PY" "$HERE/gate.py" ids "$IDS_FILE" --manifest "$MANIFEST")" || die "--ids $IDS_FILE: see above"
+elif [[ $RESUME_SELECTION == 1 ]]; then
+  # every scenario any invocation of the run planned (plan.json, else orchestrator.json's sessions): a plain resume
+  # after a narrower targeted one finishes the run; '' (no plan) is the whole manifest, as before
+  IDS="$("$PY" "$HERE/gate.py" resume-ids "$RUN_DIR" --manifest "$MANIFEST")" || die "the run's plan could not be read"
 elif [[ -n "$GATE" && -z "$AREAS" && -z "$LIMIT" ]]; then
   # the policy's selection, for the arms this invocation runs
   GATE_ARMS=""

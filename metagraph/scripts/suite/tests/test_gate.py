@@ -407,6 +407,26 @@ class PlanTest(GateCase):
         self.assertEqual(keys, {("D-007", a, r) for a in ("direct-remote", "mcp") for r in (0, 1, 2)})
 
 
+class PlanSessionsTest(GateCase):
+    def test_sessions_before_plan_json_join_the_union(self):
+        # session 0 ran before plan.json existed (orchestrator.json only), session 1 wrote its plan entry
+        d = self.run_dir()
+        os.makedirs(d)
+        sc.write_json_atomic(os.path.join(d, "orchestrator.json"), {"sessions": [
+            {"areas": "", "limit": "", "skip_local": "1", "skip_remote": "1", "warm_every": "0", "mcp_cmd": "x",
+             "ids": "D-007"},
+            {"areas": "", "limit": "", "skip_local": "1", "skip_remote": "1", "warm_every": "0", "mcp_cmd": "x",
+             "ids": "T-001"}]})
+        gate.write_plan(d, gate.plan_entry(self.m, None, None, ["T-001"], 0, ["mcp"], "paired", 1))
+        keys, source, _ = gate.run_plan(d, self.m)
+        self.assertEqual(source, "plan.json and orchestrator.json (reconstructed)")
+        self.assertEqual(sorted(set(k[0] for k in keys)), ["D-007", "T-001"])
+        self.assertEqual(gate.resume_ids(d, self.m), ["T-001", "D-007"])
+        # a later plan adding nothing new is not written; one adding an execution is
+        self.assertFalse(gate.write_plan(d, gate.plan_entry(self.m, None, None, ["T-001"], 0, ["mcp"], "paired", 2)))
+        self.assertTrue(gate.write_plan(d, gate.plan_entry(self.m, None, None, ["R-002"], 0, ["mcp"], "paired", 3)))
+
+
 class JudgeTest(GateCase):
     def judge(self, d, **kw):
         return gate.judge(d, policy_of(self.m, **kw))
