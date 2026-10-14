@@ -41,6 +41,10 @@ class AnnotatedSequenceGraph {
     virtual bool label_exists(const Label &label) const;
 
     virtual bool check_compatibility() const;
+    // Whether |annotation| has one row per node of |graph| (of the graph a CanonicalDBG wraps):
+    // check_compatibility of the pair, for a loader to refuse a pair before it builds the index
+    // of it, whose constructor asserts it
+    static bool compatible(const SequenceGraph &graph, const Annotator &annotation);
 
     virtual const SequenceGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }

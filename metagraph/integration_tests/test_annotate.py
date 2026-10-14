@@ -508,6 +508,30 @@ class TestAnnotateHeaderChecks(TestingBase):
         self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
         self.assertIn('sequences: 2 (ok\tonly-a-comment)\n', self._seqs_stats('joined'))
 
+    def test_index_header_coords_refuses_a_header_delimiter(self):
+        """The record mapping names a record by its whole header: --header-delimiter, which
+        splits a --anno-header label into several, is refused beside --index-header-coords
+        (naming both flags, before any file is read, nothing written), not applied to keep
+        the first token."""
+        fasta = self._fasta([(b'NC_1|plasmid', self.SEQ_A), (b'NC_2|chromosome', self.SEQ_B)])
+        graph = self._graph(fasta)
+        res = self._annotate(graph, fasta,
+                             "--anno-filename --index-header-coords --header-delimiter '|'")
+        self.assertNotEqual(res.returncode, 0)
+        err = res.stderr.decode('utf-8', 'replace')
+        self.assertIn('--header-delimiter cannot be used with --index-header-coords', err)
+        self.assertEqual([], [f for f in os.listdir(self.d) if f.startswith('anno')],
+                         'nothing is written')
+        # without it, every record is named by its whole header, so headers that share their
+        # first token are distinct
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords', out='whole')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertIn('sequences: 2 (NC_1|plasmid\tNC_2|chromosome)\n', self._seqs_stats('whole'))
+        fasta = self._fasta([(b'x|a', self.SEQ_A), (b'x|b', self.SEQ_B)], 'shared.fa')
+        res = self._annotate(graph, fasta, '--anno-filename --index-header-coords', out='shared')
+        self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
+        self.assertIn('sequences: 2 (x|a\tx|b)\n', self._seqs_stats('shared'))
+
     def _seqs_stats(self, out):
         res = subprocess.run([f'{METAGRAPH} stats -v {os.path.join(self.d, out)}.seqs'],
                              shell=True, stdout=PIPE, stderr=PIPE)

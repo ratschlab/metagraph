@@ -800,7 +800,8 @@ class TestMultiGraphServer(TestingBase):
         and, once readable again, the pair with in_ram answer, the last proving the release (the
         cap holds one copy of it: a reservation a failed load kept would make it wait). A malformed
         body with in_ram: true naming the pair is refused before any load (SPEC §24.2): the
-        loader's line, which every attempt to load the unreadable file logs, not logged again."""
+        server's line of a failed load, which every attempt to load the unreadable file logs,
+        not logged again."""
         d = os.path.join(self.tempdir.name, 'unreadable')
         pairs = {}
         for name in ('kleb', 'pseudo'):
@@ -820,8 +821,6 @@ class TestMultiGraphServer(TestingBase):
                         os.path.join(d, 'server.log'))
         anno = pairs['kleb'][1]
         failed = f"Cannot load annotation from '{anno}'"
-        # the loader's own error line (a column annotation's), logged by every load attempt
-        attempted = f"Cannot load columns from '{anno}'"
         kleb = self.records['kleb'][0]
         seed = kleb[20000:20100]
         p = {'patterns': [{'dna': kleb[5000:5020]}], 'mode': 'count', 'graphs': ['kleb']}
@@ -860,7 +859,9 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual({'error'}, set(ret.json()))
             self.assertIn(failed, ret.json()['error'])
             log = server.text()
-            self.assertEqual(4, log.count(attempted), log[-3000:])
+            # one line per load attempt: the server's, with the message (the annotation
+            # does not open, so the load fails before any loader or the graph's load starts)
+            self.assertEqual(4, log.count(failed), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
 
             # a malformed body with in_ram naming the pair: refused before any load
@@ -874,7 +875,7 @@ class TestMultiGraphServer(TestingBase):
                     self.assertIn(words, ret.json()['error'])
                     self.assertNotIn(failed, ret.text)
             log = server.text()
-            self.assertEqual(4, log.count(attempted), log[-3000:])
+            self.assertEqual(4, log.count(failed), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
 
             # the server lives: the pair without in_ram, the other pair with it (above the cap)

@@ -1597,14 +1597,16 @@ int run_server(Config *config) {
                 // (its ledger may already have released it), also without usage. Once its
                 // retention and hold are over the id runs again
                 if (auto refused = attempts.start(attempt)) {
+                    // the refusal's body is read with get(): operator[] of a non-const value
+                    // adds a missing member (as null) to the body served
                     if (refused->instance_mismatch || refused->expired) {
                         logger->info("[Server] Attempt {} (request {}): not started, {}",
                                      attempt->ids().attempt_id, request_id,
-                                     refused->body["error"].asString());
+                                     refused->body.get("error", "").asString());
                         throw HttpError(409, std::move(refused->body));
                     }
                     Json::Value body;
-                    if (refused->body["tombstone"].asBool()) {
+                    if (refused->body.get("tombstone", false).asBool()) {
                         // its attempt object states the suppression, judged against this
                         // request's not_after_ms (the tombstone now covers it when it can)
                         body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' was "

@@ -9,10 +9,12 @@
 #include <memory>
 #include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <json/json.h>
@@ -33,6 +35,7 @@
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "common/serialization.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
@@ -1077,6 +1080,14 @@ TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
         fs::permissions(seqs, readable);
     }
 
+    // a truncated record mapping opens, and its load refuses it (cut inside its column count)
+    const std::string seqs_kept = seqs + ".kept";
+    fs::copy_file(seqs, seqs_kept, fs::copy_options::overwrite_existing);
+    fs::resize_file(seqs, 4);
+    EXPECT_EQ("Cannot load the record mapping from '" + seqs + "': could not read contents "
+              "(possibly corrupted or incompatible)", failure(*config));
+    fs::copy_file(seqs_kept, seqs, fs::copy_options::overwrite_existing);
+
     // a truncated annotation, cut inside its label encoder (after its version tag), which the
     // loader checks (a cut inside the matrix is not noticed by every matrix loader)
     const std::string kept = pair.dir + "/anno.kept";
@@ -1136,9 +1147,139 @@ TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
         rd.fork_succ().serialize(out);
     }
     EXPECT_EQ("", failure(*rd_config));
+    // a truncated anchor or fork successor bitmap opens, and its load refuses it (cut inside
+    // its representation tag)
+    const std::vector<std::pair<std::string, std::string>> side_files
+            = { { "anchor", anchor }, { "fork successor bitmap", fork_succ } };
+    for (const auto &[what, file] : side_files) {
+        fs::copy_file(file, file + ".kept", fs::copy_options::overwrite_existing);
+        fs::resize_file(file, 4);
+        EXPECT_EQ("Cannot load " + what + " from '" + file + "': could not read contents "
+                  "(possibly corrupted or incompatible)", failure(*rd_config));
+        fs::copy_file(file + ".kept", file, fs::copy_options::overwrite_existing);
+    }
+    EXPECT_EQ("", failure(*rd_config));
+    // an anchors file of the rrr representation, cut past its tag in its data: refused as
+    // well, its half-read vector never queried (a build with asserts aborts at such a query)
+    {
+        fs::copy_file(anchor, anchor + ".kept", fs::copy_options::overwrite_existing);
+        std::ostringstream rrr;
+        serialize_number(rrr, bit_vector_adaptive::VectorCode::RRR_VECTOR);
+        bit_vector_rrr<>(rd.anchor().to_vector()).serialize(rrr);
+        const std::string serialized = rrr.str();
+        auto write_anchor = [&](size_t length) {
+            std::ofstream out(anchor, std::ios::binary);
+            out.write(serialized.data(), length);
+        };
+        write_anchor(serialized.size());
+        EXPECT_EQ("", failure(*rd_config));
+        write_anchor(8 + (serialized.size() - 8) / 2);
+        EXPECT_EQ("Cannot load anchor from '" + anchor + "': could not read contents "
+                  "(possibly corrupted or incompatible)", failure(*rd_config));
+        fs::copy_file(anchor + ".kept", anchor, fs::copy_options::overwrite_existing);
+    }
+    EXPECT_EQ("", failure(*rd_config));
 
     // every file loadable again: the index loads, with its record mapping
     auto loaded = initialize_annotated_dbg(*config, none);
     ASSERT_TRUE(loaded);
     EXPECT_TRUE(loaded->get_coord_to_header());
+}
+
+// A file of the annotation that cannot be opened -- the annotation, its record mapping, the
+// anchor or the fork successor bitmap of a row_diff annotation -- fails the per-request load
+// before its graph starts loading, with the message its load would throw. The graph here is a
+// FIFO that no one writes to: a load of it waits until a writer comes, and a failure found
+// while the graph loads waits for the graph (the loading thread is joined)
+TEST(MultiGraphInRam, AFileThatCannotBeOpenedFailsBeforeTheGraphLoads) {
+    PatternPreparation none;
+    none.progress = false;
+    // the load's message; "waited for the graph (then: <message>)" when it has not failed after
+    // 20 s: the FIFO is then opened for writing and closed, which ends the graph's load
+    auto failure = [&](const Config &c, const std::string &fifo) {
+        auto load = std::async(std::launch::async, [&c, &none]() {
+            try {
+                initialize_annotated_dbg(c, none);
+            } catch (const std::runtime_error &e) {
+                return std::string(e.what());
+            }
+            return std::string("loaded");
+        });
+        if (load.wait_for(std::chrono::seconds(20)) != std::future_status::ready) {
+            std::ofstream(fifo).close();
+            return "waited for the graph (then: " + load.get() + ")";
+        }
+        return load.get();
+    };
+    auto fifo_beside = [](const std::string &dir) {
+        const std::string fifo = dir + "/fifo" + DBGSuccinct::kExtension;
+        fs::remove(fifo);
+        EXPECT_EQ(0, ::mkfifo(fifo.c_str(), 0600)) << fifo;
+        return fifo;
+    };
+    const std::string unreadable = "Permission denied (missing read permission on this file)";
+    const fs::perms readable = fs::perms::owner_read | fs::perms::owner_write;
+
+    // a coordinate annotation and its record mapping (.seqs), loaded when none is offered
+    PairOnDisk pair = write_pair("unopenable");
+    pair.graph = fifo_beside(pair.dir);
+    auto config = config_of(pair);
+    const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
+    // (root reads a file without permissions)
+    if (::geteuid() != 0) {
+        fs::permissions(pair.annotation, fs::perms::none);
+        EXPECT_EQ("Cannot load annotation from '" + pair.annotation + "': " + unreadable,
+                  failure(*config, pair.graph));
+        fs::permissions(pair.annotation, readable);
+        fs::permissions(seqs, fs::perms::none);
+        EXPECT_EQ("Cannot load the record mapping from '" + seqs + "': " + unreadable,
+                  failure(*config, pair.graph));
+        fs::permissions(seqs, readable);
+    }
+    fs::rename(pair.annotation, pair.annotation + ".away");
+    EXPECT_EQ("Cannot load annotation from '" + pair.annotation + "': No such file or directory",
+              failure(*config, pair.graph));
+    fs::rename(pair.annotation + ".away", pair.annotation);
+
+    // a row_diff annotation: its anchor and fork successor bitmap beside the graph
+    PairOnDisk row_diff;
+    row_diff.dir = test_dump_dir() + "/multigraph_in_ram_unopenable_row_diff";
+    fs::remove_all(row_diff.dir);
+    fs::create_directories(row_diff.dir);
+    std::mt19937 rng(31);
+    auto rd_index = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, { random_seq(120, &rng), random_seq(90, &rng) }, { "A", "B" },
+            DeBruijnGraph::BASIC);
+    rd_index->get_annotator().serialize(row_diff.dir + "/anno");
+    row_diff.annotation = row_diff.dir + "/anno" + annot::RowDiffColumnAnnotator::kExtension;
+    row_diff.graph = fifo_beside(row_diff.dir);
+    const auto &rd = dynamic_cast<const annot::matrix::IRowDiff&>(
+            rd_index->get_annotator().get_matrix());
+    const std::string anchor = row_diff.graph + annot::matrix::kRowDiffAnchorExt;
+    const std::string fork_succ = row_diff.graph + annot::matrix::kRowDiffForkSuccExt;
+    auto rd_config = config_of(row_diff);
+    EXPECT_EQ("Cannot load anchor from '" + anchor + "': No such file or directory",
+              failure(*rd_config, row_diff.graph));
+    {
+        std::ofstream out(anchor, std::ios::binary);
+        rd.anchor().serialize(out);
+    }
+    EXPECT_EQ("Cannot load fork successor bitmap from '" + fork_succ + "': No such file or "
+              "directory", failure(*rd_config, row_diff.graph));
+    if (::geteuid() != 0) {
+        {
+            std::ofstream out(fork_succ, std::ios::binary);
+            rd.fork_succ().serialize(out);
+        }
+        fs::permissions(anchor, fs::perms::none);
+        EXPECT_EQ("Cannot load anchor from '" + anchor + "': " + unreadable,
+                  failure(*rd_config, row_diff.graph));
+        fs::permissions(anchor, readable);
+        fs::permissions(fork_succ, fs::perms::none);
+        EXPECT_EQ("Cannot load fork successor bitmap from '" + fork_succ + "': " + unreadable,
+                  failure(*rd_config, row_diff.graph));
+        fs::permissions(fork_succ, readable);
+    }
+    fs::remove(pair.graph);
+    fs::remove(row_diff.graph);
 }

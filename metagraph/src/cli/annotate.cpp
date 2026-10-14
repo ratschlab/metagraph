@@ -335,7 +335,14 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                                       record, files[i]);
                         exit(1);
                     }
-                    assert(labels.size() == 1 && "each sequence has a single label (header)");
+                    // the header names its record whole (annotate_graph refuses
+                    // --header-delimiter beside --index-header-coords)
+                    if (labels.size() != 1) {
+                        logger->error("Header of record {} in '{}' is split into {} names: a"
+                                      " record of the record mapping (.seqs) is named by its"
+                                      " whole header", record, files[i], labels.size());
+                        exit(1);
+                    }
                     if (sequence.size() < k)
                         return;
                     // a record's reverse complement (--fwd-and-reverse) continues the record's
@@ -575,6 +582,12 @@ int annotate_graph(Config *config) {
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
             logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
                           "only be constructed for annotated filenames (use flag `--anno-filename`)");
+            exit(1);
+        }
+        if (!config->fasta_header_delimiter.empty()) {
+            logger->error("--header-delimiter cannot be used with --index-header-coords: the "
+                          "record mapping (.seqs) names each record by its whole header, which "
+                          "is not split");
             exit(1);
         }
         logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());

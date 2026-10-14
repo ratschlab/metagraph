@@ -805,11 +805,16 @@ bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
-    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get()))
-        return canonical->get_graph().max_index() == annotator_->num_objects();
+    return compatible(*graph_, *annotator_);
+}
 
-    return graph_->max_index() == annotator_->num_objects();
+bool AnnotatedSequenceGraph::compatible(const SequenceGraph &graph,
+                                        const Annotator &annotation) {
+    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(&graph)) {
+        return canonical->get_graph().max_index() == annotation.num_objects();
+    }
+    return graph.max_index() == annotation.num_objects();
 }
 
 } // namespace graph
