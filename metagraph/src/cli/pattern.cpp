@@ -1301,14 +1301,26 @@ std::string withheld_name(Withheld withheld, const std::string &external) {
 // path whose result object did not fit, none built after it; Answered::plain_cut), stated as
 // the labelled retrieval states its descriptors' cut: partial keeps the objects built, cut
 // max_memory; all_or_count returns all or nothing, withheld output_budget; stop {output,
-// max_memory} unless an earlier stop is stated, and the entry is never complete. An entry the
-// engine withheld keeps its withheld (nothing of it was built)
+// max_memory} unless an earlier stop is stated (the extension's), and the entry is never
+// complete. The engine's release goes on after the refusal, reading the clock before every
+// 64th path, so a stop of the phase extraction (its time stop) came after the cut: the cut is
+// the first stop, and an all_or_count list the engine withheld for that stop (deadline) is
+// withheld for the cut. An entry the engine withheld otherwise keeps its withheld (nothing of
+// it was built)
 void put_plain_cut(Json::Value *entry, Mode mode) {
     Json::Value &e = *entry;
-    if (e.isMember("error") || e["withheld"].isObject()) {
+    if (e.isMember("error")) {
         return;
     }
-    if (e["stop"].isNull()) {
+    const Json::Value &stop = static_cast<const Json::Value &>(e)["stop"];
+    const Json::Value &withheld = static_cast<const Json::Value &>(e)["withheld"];
+    const bool later = stop.isNull()
+            || (stop.isObject() && stop.get("phase", "").asString() == "extraction");
+    if (withheld.isObject()
+            && !(later && withheld.get("reason", "").asString() == "deadline")) {
+        return;
+    }
+    if (later) {
         Json::Value s;
         s["phase"] = "output";
         s["reason"] = "max_memory";

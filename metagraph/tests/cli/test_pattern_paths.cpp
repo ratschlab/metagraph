@@ -1314,6 +1314,109 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ(paths, u["counts"]["paths"]["value"].asUInt64());
 }
 
+// The route's memory cut of a label-free path list comes before a time stop the engine's
+// release records after it: the release reads the clock before the first path and before every
+// 64th, and goes on handing over the paths after the route's first refused object (none built
+// from there on), so a deadline at a later reading is the second stop. The first is stated
+// (SPEC §7.6, §12.1): stop {output, max_memory}; partial keeps the objects built (cut
+// max_memory), all_or_count withholds output_budget; the time stop shows only as
+// determinism time_limited. Every reading of a counting clock is made the first one past the
+// work time in turn. Mutation tried: the engine's later stop kept: fails (stop {extraction,
+// time}; all_or_count withheld deadline).
+TEST(PatternPaths, TheRouteCutPrecedesALaterTimeStopOfTheRelease) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const uint64_t walk = pattern::retained_path_bytes(5, 8);
+    const uint64_t object = path_descriptor_bytes(5, 8);
+    const Json::Value full = run(idx, body(spec, "\"mode\": \"partial\"", "none"));
+    const uint64_t paths = full["patterns"][0]["returned"].asUInt64();
+    // more paths than one stride of the release's clock
+    ASSERT_GT(paths, 64u);
+    ASSERT_TRUE(full["patterns"][0]["retrieval_complete"].asBool());
+
+    // every walk fits its half; the route builds the objects that fit beside the walks still
+    // held, fewer than 64, so a reading of the release's clock follows its refusal
+    RetrievalHooks hooks;
+    hooks.max_memory_bytes = 2 * paths * walk + 2 * object;
+    uint64_t built = 0;
+    while (built < paths
+            && (paths - built) * walk + (built + 1) * object <= hooks.max_memory_bytes) {
+        ++built;
+    }
+    ASSERT_LT(0u, built);
+    ASSERT_GT(64u, built);
+
+    auto readings = std::make_shared<uint64_t>(0);
+    auto at = std::make_shared<uint64_t>(UINT64_MAX);
+    auto clock = [readings, at]() {
+        ++*readings;
+        return Clock::time_point() + (*readings >= *at ? std::chrono::hours(1)
+                                                       : std::chrono::hours(0));
+    };
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        SCOPED_TRACE(mode);
+        const std::string rest = "\"mode\": \"" + mode + "\", \"time_budget_ms\": 1000";
+        *readings = 0;
+        *at = UINT64_MAX;
+        const Json::Value cut = run_clocked(idx, body(spec, rest, "none"), hooks, clock);
+        const uint64_t total = *readings;
+        {
+            const Json::Value &e = cut["patterns"][0];
+            EXPECT_EQ("output", e["stop"]["phase"].asString());
+            EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+            EXPECT_EQ("full", e["determinism"].asString());
+        }
+        uint64_t later = 0;
+        for (uint64_t n = 1; n <= total; ++n) {
+            SCOPED_TRACE("reading " + std::to_string(n));
+            *readings = 0;
+            *at = n;
+            const Json::Value out = run_clocked(idx, body(spec, rest, "none"), hooks, clock);
+            const Json::Value &e = out["patterns"][0];
+            ASSERT_FALSE(e.isMember("error")) << e;
+            // the route's cut happened: the list is the objects built (partial) or withheld
+            // for them (all_or_count), and its stop is the first
+            const bool route_cut = mode == "partial"
+                    ? e["cut"]["reason"] == "max_memory"
+                    : e["withheld"]["reason"] == "output_budget";
+            if (!route_cut) {
+                // a time stop before the route's refusal: nothing of the release kept
+                EXPECT_EQ("time", e["stop"]["reason"].asString());
+                EXPECT_EQ("time_limited", e["determinism"].asString());
+                continue;
+            }
+            EXPECT_EQ("output", e["stop"]["phase"].asString());
+            EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+            EXPECT_FALSE(e["retrieval_complete"].asBool());
+            EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+            EXPECT_EQ(paths, e["counts"]["paths"]["value"].asUInt64());
+            if (mode == "partial") {
+                EXPECT_EQ(built, e["returned"].asUInt64());
+                for (Json::ArrayIndex i = 0; i < built; ++i) {
+                    EXPECT_EQ(full["patterns"][0]["results"][i], e["results"][i]);
+                }
+            } else {
+                EXPECT_EQ(0u, e["returned"].asUInt64());
+                EXPECT_EQ(0u, e["results"].size());
+                EXPECT_TRUE(e["cut"].isNull());
+            }
+            if (e["determinism"] == "time_limited")
+                ++later;
+        }
+        // the release's readings after the refusal: one per 64 paths past the first
+        EXPECT_EQ((paths - 1) / 64, later);
+    }
+}
+
 // max_memory_mb acts on a label-free path list (its kept walks and result objects), so named
 // alone it leaves no annotation_not_read note on the entry of a pattern answered by its paths;
 // the other annotation fields, a pattern of L <= k and mode count keep the note

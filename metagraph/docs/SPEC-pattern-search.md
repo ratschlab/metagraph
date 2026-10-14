@@ -4655,6 +4655,12 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   carries `annotation_not_read` (§4.1, §8.10: the field acts on it;
   `PatternPaths.MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry`). §28 states what the half rule costs, and §21.16
   names the count-only continuation of the extension.
+- **After the review of 2026-10-14** (branch at `3daea97a`; contract version 1 stays). A label-free
+  `long_search: "paths"` list that the account ended states the route's cut as its first stop also when the
+  engine's release, which goes on after the refusal and reads the clock every 64 paths, met the work time
+  afterwards: `stop {output, max_memory}` (it stated `{extraction, time}`), `partial` `cut: max_memory` as before,
+  `all_or_count` `withheld: output_budget` with `returned` 0 (it stated `deadline`); `determinism: time_limited`
+  marks the later time stop either way (§7.6, §12.1; `PatternPaths.TheRouteCutPrecedesALaterTimeStopOfTheRelease`).
 
 ## 28. Changed after the review of 2026-10-12
 
