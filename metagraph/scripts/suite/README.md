@@ -1996,5 +1996,7 @@ by lane S6c; everything below was open.
   the sessions without a sha256 as unverified, which is no warning and no error for a run older than the snapshot.
   The re-evaluation does not run run_direct: the `previous` rule changes nothing there until reevaluate.py applies
   suite_common.feeds_previous too.
-- 368 tests pass (1 skipped; 345 at 14552938).
+- 371 tests pass (1 skipped; 345 at 14552938), the follow-up of the lane's verification included (first-session
+  flags and their negations, `tee -i`, the per-invocation sha256 keys); its re-evaluations of v3 / v4 and the gated
+  v4 again move nothing.
 
