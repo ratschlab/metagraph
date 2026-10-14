@@ -1459,7 +1459,10 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   on 42; the 43rd judged T-quorum-0001's MCP answer against a direct request changed to min_live_labels 1, which
   the MCP arm, held to its own overrides (min_live_labels 2), rightly passes; the same change of the MCP overrides
   fails. Its two legitimate answers the lane's first rules failed (a branch end under a quorum knob after a branch
-  taken without a split; count_above_threshold with a constant `true` predicate) pass.
+  taken without a split; count_above_threshold with a constant `true` predicate) pass. Its follow-up probes
+  (lane-g1/verify/fu/probes/fu_mut.py) read as they must: T-walk-0017's MCP answer with the walk preset's
+  max_label_branches lowered to 1 or 0 and echoed fails as a preset mismatch, an MCP override the service did not
+  apply fails as such, and `selection.pass: "constant"` beside a normal form other than `true` claims no exemption.
 - Re-evaluation of the recorded runs (v3: lane S5e's reeval-S5e copy; v4: the complete run copy; `run_suite.sh
   --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, against the same copies re-evaluated at fe563f38): 0
   outcome changes and 0 check outcome changes of 2,900 (v3) and 2,913 (v4) executions, 0 relation changes, compare
