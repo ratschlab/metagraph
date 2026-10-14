@@ -1186,3 +1186,25 @@ it states). Its table is unchanged (0fcf7e7d..., byte-identical here).
   the snapshot. Note 2 (no change): `_budget_503` on a /pattern request without time_budget_ms stays not testable;
   the v4 scenarios without one expect a 400.
 
+### Equality with the runner and validation on the recorded full run (offline)
+- Equality (lane-s5d/equality/): async's judge at f94b079d (a read-only copy, imported) and reevaluate.outcome_of on
+  the same input compared on outcome, case, explained checks, explained items, verdict_detail and
+  inconclusive_reason: every recorded MCP line of the full-run copy (1,282 lines with an answer), as recorded (no
+  mcp_auth) and with the auth stated anonymous: 0 differences, and the re-evaluated lines as written equal the
+  lane's verdict; 90,000 mutated executions (70,000 general, 20,000 timing answers mostly without a service-side
+  wall; mcp_auth absent / anonymous / api_key / another value on the line, the raw record or as the assumption;
+  submits with and without t0, busy retries, several terminal get_status, timed and untimed traverse_results;
+  stated, unstated and invalid timeout phases in the tool, answer and job errors; the runner's recorded client wall
+  and timeout_terms): 0 differences. The fuzz found one before the fix: rule 1 read only traverse_resolve's
+  arguments, the runner any tool's.
+- A fresh copy of the full run (lane-s5d/reeval-S5d: full-run-1-final-copy with lane S5b's re-normalised MCP arm,
+  inputs byte-identical to lane S5c's) re-evaluated with this branch: every outcome, MCP class and direct class
+  equals lane S5c's; the only line-field change is the verdict_detail of the 3 recorded resolve_timeout lines (~30.4
+  s, still host states), now in the runner's words ("min(the write cap 10000 ms, ...) - 1000 ms"). The run states
+  no mcp_auth (it predates 2a8acbaf), so rule 2 decides nothing; re-evaluated with --mcp-auth anonymous
+  (reeval-S5d-anon) nothing changes either: no recorded line has an unknown service-side wall and a client wall
+  provably below its threshold (the one undecidable line, N-realrep-0002 r0, has 22,522 ms >= 19,750 ms).
+- The provisional v4 (lane-s5d/build/, snapshot 6f945db4) is unchanged: content_sha256 3a7417d6..., relations
+  cfba509f..., smoke 8e944aeb..., deterministic under PYTHONHASHSEED 1 and 777, 0 scenarios added, dropped or
+  changed against lane S5c's (run_unique's hashing is run_direct's, not the manifest's).
+
