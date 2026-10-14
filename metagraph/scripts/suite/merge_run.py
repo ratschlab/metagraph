@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Merges the arms of a run directory into the run's top-level files (DESIGN §6).
 
-    merge_run.py RUN_DIR [--reevaluated]
+    merge_run.py RUN_DIR [--reevaluated] [--strict-identity]
 
 Each arm writes RUN_DIR/arms/<arm>/ (run.json, executions.jsonl, samples.jsonl, raw/, and for the MCP arm
 jobs.jsonl); the orchestrator's samplers on mex write RUN_DIR/samples/*.jsonl. This writes
@@ -29,6 +29,11 @@ executions.reevaluated.jsonl into RUN_DIR/executions.reevaluated.jsonl and run.r
 mark, RUN_DIR/reevaluated.json, under `reevaluation`); scenario_outcome is the re-evaluation's checks'; an arm
 without a re-evaluated file keeps its recorded lines (a warning says so); samples.jsonl, jobs.jsonl and
 manifest.json, which no re-evaluation changes, are written only where missing, so every recorded file stays.
+
+The manifest identity (finding 9 of the outside review): run.json's `manifest_identity` holds the run manifest's
+content_sha256 and relations_sha256 and each arm's (manifest_identity); an arm whose hashes differ, or a run manifest
+whose stated hashes its content does not match, is a warning; with --strict-identity (run_suite.sh --gate) it is an
+error: the files are written, then the exit status is 3.
 """
 
 import json
@@ -178,6 +183,50 @@ def write_jsonl(path, rows):
     os.replace(tmp, path)
 
 
+def arm_identity(arm_dir, run):
+    """The manifest identity an arm ran (suite_common.manifest_identity): computed from the manifest copy the arm
+    kept (run_direct and async's runner keep one), else what its run.json states (a relations_sha256 of None: not
+    stated); `source` says which."""
+    copy = sc.read_json(os.path.join(arm_dir, "manifest.json"))
+    if isinstance(copy, dict) and isinstance(copy.get("scenarios"), list):
+        return dict(sc.manifest_identity(copy), source="manifest copy")
+    info = (run or {}).get("manifest") or {}
+    return {"content_sha256": info.get("computed_sha256") or info.get("content_sha256"),
+            "relations_sha256": info.get("computed_relations_sha256") or info.get("relations_sha256"),
+            "source": "run.json"}
+
+
+def manifest_identity(run_dir, arm_runs):
+    """The run's manifest identity against each arm's: {manifest: RUN_DIR/manifest.json's identity and the stated
+    hashes it does not match (problems), arms: {arm: arm_identity}, differs: sentences naming each arm whose
+    content_sha256 or relations_sha256 is not the run manifest's (an arm that states no relations hash is named
+    too: what it ran cannot be shown to be the same)}. Exploratory runs read `differs` as a warning; gate.py as a
+    failure."""
+    top = sc.read_json(os.path.join(run_dir, "manifest.json"))
+    if isinstance(top, dict):
+        manifest = dict(sc.manifest_identity(top), problems=sc.manifest_problems(top))
+    else:
+        manifest = {"content_sha256": None, "relations_sha256": None, "problems": ["no manifest.json in the run"]}
+    arms, differs = {}, []
+    for name in sorted(arm_runs, key=lambda n: (ARM_ORDER.get(n, 9), n)):
+        ident = arm_identity(os.path.join(run_dir, "arms", name), arm_runs[name])
+        arms[name] = ident
+        for key in ("content_sha256", "relations_sha256"):
+            if ident.get(key) is None:
+                if key == "relations_sha256" and manifest.get(key) is not None:
+                    differs.append("arms/%s states no %s (%s)" % (name, key, ident["source"]))
+            elif manifest.get(key) is not None and ident[key] != manifest[key]:
+                differs.append("arms/%s %s %s, the run's manifest %s (%s)" % (
+                    name, key, ident[key][:12], manifest[key][:12], ident["source"]))
+    if manifest.get("content_sha256") is None:
+        # no top-level manifest: the arms against each other
+        for key in ("content_sha256", "relations_sha256"):
+            seen = sorted(set(i[key] for i in arms.values() if i.get(key)))
+            if len(seen) > 1:
+                differs.append("%s %s" % (key, ", ".join(x[:12] for x in seen)))
+    return {"manifest": manifest, "arms": arms, "differs": differs}
+
+
 def reevaluation_mark(run_dir):
     """RUN_DIR/reevaluated.json (reevaluate.py's mark of the re-evaluated set), or None."""
     return sc.read_json(os.path.join(run_dir, "reevaluated.json"))
@@ -281,13 +330,11 @@ def merge(run_dir, reevaluated=False):
 
     direct = [arm_runs[a] for a in ("direct-local", "direct-remote") if a in arm_runs]
     reference = direct[0] if direct else (next(iter(arm_runs.values())) if arm_runs else {})
-    shas = set()
-    for name, run in arm_runs.items():
-        sha = (run.get("manifest") or {}).get("computed_sha256") or (run.get("manifest") or {}).get("content_sha256")
-        if sha:
-            shas.add(sha)
-    if len(shas) > 1:
-        warnings.append("the arms ran different manifests: %s" % ", ".join(sorted(shas)))
+    identity = manifest_identity(run_dir, arm_runs)
+    if identity["differs"]:
+        warnings.append("the arms ran different manifests: %s" % "; ".join(identity["differs"]))
+    for problem in identity["manifest"]["problems"]:
+        warnings.append("manifest.json: %s" % problem)
     instances = set()
     for run in direct:
         for sess in run.get("sessions", []):
@@ -319,6 +366,7 @@ def merge(run_dir, reevaluated=False):
         "host_cache": {"warm_window_s": sc.HOST_CACHE_WARM_S, "clock_offsets_s": offsets},
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
         "outcomes_rederived": rederived,
+        "manifest_identity": identity,
         "warnings": warnings,
     }
     if mark is not None:
@@ -328,10 +376,19 @@ def merge(run_dir, reevaluated=False):
     return merged
 
 
+def identity_errors(merged):
+    """The manifest identity problems of a merged run.json that a gate reads as errors: the arms that ran another
+    manifest than the run's, and the run manifest's stated hashes its content does not match."""
+    ident = merged.get("manifest_identity") or {}
+    return list(ident.get("differs") or []) + ["manifest.json: %s" % p for p in
+                                               ((ident.get("manifest") or {}).get("problems") or [])]
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     reevaluated = "--reevaluated" in argv
-    argv = [a for a in argv if a != "--reevaluated"]
+    strict = "--strict-identity" in argv
+    argv = [a for a in argv if a not in ("--reevaluated", "--strict-identity")]
     if len(argv) != 1 or argv[0].startswith("-"):
         sys.stderr.write(__doc__)
         return 2
@@ -340,6 +397,11 @@ def main(argv=None):
         argv[0], merged["counts"]["executions"], merged["counts"]["samples"], ", ".join(sorted(merged["arms"]))))
     for w in merged["warnings"]:
         sys.stdout.write("warning: %s\n" % w)
+    errors = identity_errors(merged)
+    if strict and errors:
+        for e in errors:
+            sys.stderr.write("merge_run: error: manifest identity: %s\n" % e)
+        return 3
     return 0
 
 

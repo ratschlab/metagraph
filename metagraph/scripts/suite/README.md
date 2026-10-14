@@ -1328,3 +1328,23 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   no inconclusive_reason; compare's class not_implemented_mcp (by mcp_outcome, the pair verified by the direct
   200s); both judges agree on all four lines.
 - 251 tests (SUITE_TRUTH_CACHE=lane S5's truth cache) pass.
+
+## Lane S6c: a strict deploy gate, the run's plan, the manifest identity and an honest report (2026-10-14)
+Lane G3 of the fix phase after the outside review of the suite (GPT, verified by Opus in VERIFY-A / VERIFY-B; the owner
+decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missing run or failure blocks it).
+
+### Manifest identity (finding 9: the frozen content hash did not bind the relations)
+- `suite_common.manifest_identity(manifest)` is the identity of a test plan: content_sha256 of `scenarios` and
+  relations_sha256 of `relations` (of [] when it has none). The relations are judged across the scenarios' answers,
+  so the same scenarios with other relations are another plan. `verify_manifest` fails when a stated relations_sha256
+  does not match the relations (`manifest_problems` names each stated hash its content does not match); a manifest of
+  before relations_sha256 verifies on its scenarios. `suite_common.py manifest-sha FILE --write` writes both hashes.
+- run_direct.py records `computed_relations_sha256` (and the stated `relations_sha256`) in run.json's manifest info,
+  warns on every stated hash that does not verify, and a resume refuses other relations under the same scenarios'
+  hash (an arm of before the field: the relations of the manifest copy it kept decide).
+- merge_run.py writes run.json `manifest_identity`: the run manifest's hashes and the stated ones it does not match,
+  each arm's identity (from the manifest copy the arm kept, else its run.json) and `differs`, one sentence per arm
+  whose content or relations hash is not the run manifest's (or that states no relations hash). In an exploratory
+  run it is a warning; `merge_run.py --strict-identity` (run_suite.sh --gate) writes the files and exits 3, and
+  gate.py fails on it. The report's environment table shows both hashes and names a mismatch.
+- The async runner vendors suite_common.py: re-vendored, its `verify_manifest` checks the relations hash too.

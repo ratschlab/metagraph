@@ -94,10 +94,40 @@ def scenarios_sha256(scenarios):
     return hashlib.sha256(canonical_json(scenarios)).hexdigest()
 
 
+def relations_sha256(relations):
+    """The sha256 of the canonical JSON of a manifest's `relations` (build_manifest's relations_sha256)."""
+    return hashlib.sha256(canonical_json(relations if relations is not None else [])).hexdigest()
+
+
+def manifest_identity(manifest):
+    """The identity of a manifest's test plan, computed from its content: content_sha256 of `scenarios` and
+    relations_sha256 of `relations` (of [] when it states none). The relations are evaluated across the scenarios'
+    answers, so two manifests with the same scenarios but other relations test other things: both hashes must be
+    equal for two arms, a resume or a gate to speak of the same manifest."""
+    manifest = manifest if isinstance(manifest, dict) else {}
+    return {"content_sha256": scenarios_sha256(manifest.get("scenarios", [])),
+            "relations_sha256": relations_sha256(manifest.get("relations", []))}
+
+
+def manifest_problems(manifest):
+    """The stated hashes of a manifest that its content does not match, as sentences ([] when it verifies):
+    content_sha256 always, relations_sha256 where the manifest states one."""
+    ident = manifest_identity(manifest)
+    out = []
+    if ident["content_sha256"] != manifest.get("content_sha256"):
+        out.append("content_sha256 %s does not match the canonical JSON of its scenarios (%s)" % (
+            manifest.get("content_sha256"), ident["content_sha256"]))
+    if "relations_sha256" in manifest and ident["relations_sha256"] != manifest.get("relations_sha256"):
+        out.append("relations_sha256 %s does not match the canonical JSON of its relations (%s)" % (
+            manifest.get("relations_sha256"), ident["relations_sha256"]))
+    return out
+
+
 def verify_manifest(manifest):
-    """(ok, computed): whether content_sha256 matches the canonical JSON of `scenarios`."""
-    computed = scenarios_sha256(manifest.get("scenarios", []))
-    return computed == manifest.get("content_sha256"), computed
+    """(ok, computed): whether content_sha256 matches the canonical JSON of `scenarios` and, where the manifest states
+    relations_sha256, that one the canonical JSON of `relations` (manifest_problems); computed is the scenarios'
+    sha256, the identity the arms' run.json files record as computed_sha256."""
+    return not manifest_problems(manifest), scenarios_sha256(manifest.get("scenarios", []))
 
 
 def parse_route(route):
@@ -1321,7 +1351,8 @@ def _main(argv):
 
     release-short RELEASE        print the run directory's release part
     stamp                        print the run directory's UTC part for now
-    manifest-sha FILE [--write]  print (or write into the file) the manifest's content_sha256
+    manifest-sha FILE [--write]  print the manifest's content_sha256 (--write: write it, and relations_sha256 where
+                                 the manifest has relations, into the file)
     beyond-status MANIFEST AREAS LIMIT
                                  print the expected checks the stub cannot evaluate ('' for none)
     paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS
@@ -1348,6 +1379,8 @@ def _main(argv):
         sha = scenarios_sha256(manifest.get("scenarios", []))
         if "--write" in argv[2:]:
             manifest["content_sha256"] = sha
+            if "relations" in manifest or "relations_sha256" in manifest:
+                manifest["relations_sha256"] = relations_sha256(manifest.get("relations", []))
             write_json_atomic(argv[1], manifest)
         print(sha)
         return 0

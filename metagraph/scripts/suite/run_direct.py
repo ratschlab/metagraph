@@ -394,10 +394,13 @@ class Runner(object):
 
     def open_run(self, planned_count, skipped):
         ok, computed = sc.verify_manifest(self.manifest)
+        relations = sc.manifest_identity(self.manifest)["relations_sha256"]
         existing = sc.read_json(self.run_path)
         manifest_info = {"path": os.path.abspath(self.args.manifest),
                          "manifest_version": self.manifest.get("manifest_version"),
                          "content_sha256": self.manifest.get("content_sha256"), "computed_sha256": computed,
+                         "relations_sha256": self.manifest.get("relations_sha256"),
+                         "computed_relations_sha256": relations,
                          "sha_verified": ok, "index": self.manifest.get("index"),
                          "scenarios_total": len(self.manifest.get("scenarios", []))}
         state = sc.read_json(self.state_path) or {}
@@ -412,7 +415,13 @@ class Runner(object):
             if existing.get("manifest", {}).get("computed_sha256") != computed:
                 raise SystemExit("run_direct: %s was run with another manifest (sha %s); use another --out"
                                  % (self.out, existing.get("manifest", {}).get("computed_sha256")))
+            ran = self.recorded_relations_sha256(existing)
+            if ran is not None and ran != relations:
+                # the same scenarios with other relations: another test plan under the same scenarios' sha
+                raise SystemExit("run_direct: %s was run with other relations (relations sha %s, this manifest's %s); "
+                                 "use another --out" % (self.out, ran, relations))
             self.run = existing
+            self.run.setdefault("manifest", {}).setdefault("computed_relations_sha256", relations)
         else:
             self.run = {"run_id": self.args.run_id or self.default_run_id(), "arm": self.args.arm,
                         "base": self.args.base, "manifest": manifest_info, "sessions": [],
@@ -428,9 +437,8 @@ class Runner(object):
                         "allow_stub": self.args.allow_stub}})
         if self.checks_error:
             self.run["checks_import_error"] = self.checks_error
-        if not ok:
-            warning = ("manifest content_sha256 %s does not match the canonical JSON of its scenarios (%s)"
-                       % (self.manifest.get("content_sha256"), computed))
+        for problem in sc.manifest_problems(self.manifest):
+            warning = "manifest %s" % problem
             if warning not in self.run.get("warnings", []):
                 self.run.setdefault("warnings", []).append(warning)
         self.session = {"started_utc": sc.iso_utc(time.time()), "host_load_start": host_load(), "state": "running"}
@@ -445,6 +453,17 @@ class Runner(object):
         copy = os.path.join(self.out, "manifest.json")
         if not os.path.exists(copy):
             sc.write_json_atomic(copy, self.manifest)
+
+    def recorded_relations_sha256(self, existing):
+        """The relations' sha256 an existing arm ran: its run.json's computed_relations_sha256, else (an arm of
+        before that field) that of the manifest copy the arm kept; None when neither is there."""
+        ran = (existing.get("manifest") or {}).get("computed_relations_sha256")
+        if ran:
+            return ran
+        copy = sc.read_json(os.path.join(self.out, "manifest.json"))
+        if isinstance(copy, dict):
+            return sc.manifest_identity(copy)["relations_sha256"]
+        return None
 
     def save_run(self):
         sc.write_json_atomic(self.run_path, self.run)

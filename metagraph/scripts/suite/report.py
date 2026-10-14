@@ -263,14 +263,24 @@ def environment_section(run, comp, rows, samples):
     man = run.get("manifest") or {}
     instance = run.get("server_instance")
     restarted = any("restarted" in w for w in run.get("warnings", []) or [])
+    ident = run.get("manifest_identity") or {}
+    top = ident.get("manifest") or {}
+    flags = []
+    if not man.get("sha_verified", True) or top.get("problems"):
+        flags.append("a stated hash MISMATCH")
+    if ident.get("differs"):
+        flags.append("the arms ran different manifests")
     kv = [
         ("run id", md(run.get("run_id"))),
         ("release", md(run.get("release"))),
         ("server_instance", md(instance) + (" (RESTARTED during the run)" if restarted else "")),
         ("index_fp", md(short(run.get("index_fp"), 16) + "..." if run.get("index_fp") else "not stated by the host")),
-        ("manifest", "version %s, sha256 %s, %s scenario(s)%s" % (
-            md(man.get("manifest_version")), md(short(man.get("computed_sha256") or man.get("content_sha256"), 16)),
-            md(man.get("scenarios_total")), "" if man.get("sha_verified", True) else " (content_sha256 MISMATCH)")),
+        ("manifest", "version %s, sha256 %s, relations sha256 %s, %s scenario(s)%s" % (
+            md(man.get("manifest_version")),
+            md(short(top.get("content_sha256") or man.get("computed_sha256") or man.get("content_sha256"), 16)),
+            md(short(top.get("relations_sha256") or man.get("computed_relations_sha256")
+                     or man.get("relations_sha256"), 16)),
+            md(man.get("scenarios_total")), (" (%s: see the warnings)" % "; ".join(flags)) if flags else "")),
         ("scripts commit", md(short_commit(run.get("scripts_commit")))),
         ("generated", md(sc.iso_utc(time.time()))),
     ]
