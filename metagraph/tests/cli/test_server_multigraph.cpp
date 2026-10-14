@@ -1078,6 +1078,14 @@ TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
         fs::permissions(seqs, readable);
     }
 
+    // a truncated record mapping opens, and its load refuses it (cut inside its column count)
+    const std::string seqs_kept = seqs + ".kept";
+    fs::copy_file(seqs, seqs_kept, fs::copy_options::overwrite_existing);
+    fs::resize_file(seqs, 4);
+    EXPECT_EQ("Cannot load the record mapping from '" + seqs + "': could not read contents "
+              "(possibly corrupted or incompatible)", failure(*config));
+    fs::copy_file(seqs_kept, seqs, fs::copy_options::overwrite_existing);
+
     // a truncated annotation, cut inside its label encoder (after its version tag), which the
     // loader checks (a cut inside the matrix is not noticed by every matrix loader)
     const std::string kept = pair.dir + "/anno.kept";
@@ -1135,6 +1143,18 @@ TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
     {
         std::ofstream out(fork_succ, std::ios::binary);
         rd.fork_succ().serialize(out);
+    }
+    EXPECT_EQ("", failure(*rd_config));
+    // a truncated anchor or fork successor bitmap opens, and its load refuses it (cut inside
+    // its representation tag)
+    const std::vector<std::pair<std::string, std::string>> side_files
+            = { { "anchor", anchor }, { "fork successor bitmap", fork_succ } };
+    for (const auto &[what, file] : side_files) {
+        fs::copy_file(file, file + ".kept", fs::copy_options::overwrite_existing);
+        fs::resize_file(file, 4);
+        EXPECT_EQ("Cannot load " + what + " from '" + file + "': could not read contents "
+                  "(possibly corrupted or incompatible)", failure(*rd_config));
+        fs::copy_file(file + ".kept", file, fs::copy_options::overwrite_existing);
     }
     EXPECT_EQ("", failure(*rd_config));
 
@@ -1233,6 +1253,10 @@ TEST(MultiGraphInRam, AFileThatCannotBeOpenedFailsBeforeTheGraphLoads) {
         EXPECT_EQ("Cannot load anchor from '" + anchor + "': " + unreadable,
                   failure(*rd_config, row_diff.graph));
         fs::permissions(anchor, readable);
+        fs::permissions(fork_succ, fs::perms::none);
+        EXPECT_EQ("Cannot load fork successor bitmap from '" + fork_succ + "': " + unreadable,
+                  failure(*rd_config, row_diff.graph));
+        fs::permissions(fork_succ, readable);
     }
     fs::remove(pair.graph);
     fs::remove(row_diff.graph);

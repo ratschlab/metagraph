@@ -14,9 +14,10 @@ search service's API side) pays for none of them.
 The readers take the wire as the server writes it and are typed where a release depends on
 a value: an instant is an integer in [0, 2^53 - 1] -- never a bool or a float, which
 Python compares equal to integers (True == 1) --, an instance id a string, a flag a JSON
-bool, and a key whose value is null reads as absent (the duplicate 409 of a level-5 server
-writes `"tombstone": null`). A value of another type reads as None, which no release
-condition accepts.
+bool, and a key whose value is null reads as absent (the server omits `tombstone` from the
+duplicate 409 of a live or finished id; a level-5 server before that change wrote
+`"tombstone": null` there, which is still accepted). A value of another type reads as None,
+which no release condition accepts.
 """
 
 import datetime

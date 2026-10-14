@@ -213,8 +213,8 @@ class TestLevel5Live(unittest.TestCase):
         e = cm.exception
         self.assertEqual(('finished', False, aid), (e.state, e.tombstoned, e.attempt_id))
         # ... and its attempt object, the id's state, is a finished state (LRG-R1), with the
-        # finished attempt's usage (LRG-G4): the server's own "tombstone": null reads as
-        # absent
+        # finished attempt's usage (LRG-G4): the server omits `tombstone` there (a null, as
+        # a server before that change wrote it, reads as absent too)
         self.assertEqual(resp.usage['work_units'], e.usage['work_units'])
         v = release_verdict(e, e.sent, attempts=self.main.doc['attempts'])
         self.assertEqual((True, False, 'finished', ()),

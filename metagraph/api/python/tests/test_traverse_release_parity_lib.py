@@ -512,7 +512,8 @@ class TestReaders(unittest.TestCase):
         self.assertEqual(INST, AttemptConflict(409, 'x', body).server_instance)
         body = {'attempt': {'attempt_id': A, 'state': 'unknown'}, 'tombstone': True}
         self.assertTrue(AttemptConflict(409, 'x', body).tombstoned)
-        # a null in the object is absent (the duplicate 409 writes "tombstone": null)
+        # a null in the object is absent (the server omits the key; one before that change
+        # wrote "tombstone": null in the duplicate 409, which is still accepted)
         body = {'attempt': {'attempt_id': A, 'state': 'unknown', 'tombstone': None,
                             'server_instance': None}, 'tombstone': True,
                 'server_instance': INST}

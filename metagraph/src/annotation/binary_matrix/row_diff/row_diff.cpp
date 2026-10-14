@@ -41,6 +41,20 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
 
 namespace matrix {
 
+namespace {
+
+// |vector| loaded from |in|: a file cut short, whose load throws (a number read short), fails
+// as any other file it cannot load
+bool load_bit_vector(bit_vector *vector, std::istream &in) {
+    try {
+        return vector->load(in);
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+} // namespace
+
 bool IRowDiff::try_load_anchor(const std::string &filename) {
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
@@ -48,7 +62,7 @@ bool IRowDiff::try_load_anchor(const std::string &filename) {
                       utils::file_read_failure_detail(filename));
         return false;
     }
-    if (!anchor_.load(*f)) {
+    if (!load_bit_vector(&anchor_, *f)) {
         logger->error("Cannot load anchor from '{}': {}", filename,
                       utils::file_read_failure_detail(filename));
         return false;
@@ -63,7 +77,7 @@ bool IRowDiff::try_load_fork_succ(const std::string &filename) {
                       utils::file_read_failure_detail(filename));
         return false;
     }
-    if (!fork_succ_.load(*f)) {
+    if (!load_bit_vector(&fork_succ_, *f)) {
         logger->error("Cannot load fork successor bitmap from '{}': {}", filename,
                       utils::file_read_failure_detail(filename));
         return false;

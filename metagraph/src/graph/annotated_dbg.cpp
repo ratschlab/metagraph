@@ -811,9 +811,9 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
 bool AnnotatedSequenceGraph::compatible(const SequenceGraph &graph,
                                         const Annotator &annotation) {
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(&graph))
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(&graph)) {
         return canonical->get_graph().max_index() == annotation.num_objects();
-
+    }
     return graph.max_index() == annotation.num_objects();
 }
 
