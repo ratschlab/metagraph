@@ -368,7 +368,7 @@ def _number_or_none(v):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at f386a3c0 on
+# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at 31a2e41f on
 # feat/suite-mcp-runner-vendored: peer review R1-R3 and rule (c) as of e334715b, then 62ee4214 rule 1, 2a8acbaf rule
 # 2, f94b079d rule 4, f52846fb rule 4's read floor; host_state_plausible, wall_rule_holds, service_wall, client_wall,
 # client_wall_premature, timeout_statement, read_bound_below_floor, resolve_timeout_least), mirrored for the offline

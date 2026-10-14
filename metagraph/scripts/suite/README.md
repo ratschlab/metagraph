@@ -1295,3 +1295,36 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   runner's own case fields (as a kept service_by_design mark and a by-design finding now keep theirs). compare counts
   such executions under not_implemented_mcp (`by` mcp_outcome, the case, the repeats; the pair as its match would
   read it, answer_class or by_design_class, under `pair`), never service_by_design, ahead of any other part.
+
+### Equality with the runner and validation on the recorded full run (offline)
+- Equality (lane-s5e/equality/): async's judge at 31a2e41f (a read-only copy, imported; its table byte-identical to
+  this branch's) and reevaluate.outcome_of on the same input compared on outcome, case, explained checks, explained
+  items (the runner's Verdict.explained_items, cross-checked against its explained_outcome's E), verdict_detail and
+  inconclusive_reason, the explained fields compared as the writers record them (present only on a matched line):
+  every recorded MCP line of two fresh full-run copies (1,282 lines with an answer), as recorded and with the auth
+  stated anonymous: 0 differences, the re-evaluated lines as written equal the lane's verdict and place
+  explained_items after explained_checks; 130,000 mutated executions (seeds 31-35 general, 41-42 timing answers, 51-53
+  rule 4's read floor: stated read / write / deadline bounds just below, at and above budget + reserve + 10 s - 1 s
+  for the arguments' or the tool error's budget and the stated or default reserve, known, long and unknown walls;
+  61-63 mcp_outcome: the real table and, for half of them, synthetic gated cases prepended, i.e. an advanced-path
+  refusal, a wall-ruled pattern deadline, a resolve_timeout and a /resolve deadline code, a stated default mark and
+  a gate without a field, with field variants on the answer and the tool error, named gates, findings and held-back
+  walls; besides lane S5d's mutations, a recorded null mcp_auth beside an assumption and failing items of the cases
+  an answered case explains): 0 differences (3,555 executions decided by the read floor, 5,065 with explained items,
+  3,708 by mcp_outcome not_implemented_mcp). The harness detects each of four planted defects (no read floor, the
+  first explained item only, no mcp_outcome, the detail's field from the answer error only).
+- A fresh copy of the full v3 run (lane-s5e/reeval-S5e and reeval-S5e-anon with --mcp-auth anonymous: full-run-1-final-
+  copy with lane S5b's re-normalised MCP arm, inputs byte-identical to lane S5d's) re-evaluated with this branch and
+  the 31a2e41f table: against lane S5d only T-edge-0008's two MCP lines change, fail -> service_by_design
+  (traverse.duplicate_seeds, E = invariants item 1, "1 results for 2 seeds (1 distinct)"), the pair disagree ->
+  service_by_design verified (MCP fail 4 -> 2, service_by_design 132 -> 134; classes disagree 16 -> 15,
+  by_design_verified 59 -> 60); every other outcome, check list, line field and class is unchanged, the
+  anonymous-auth copy equals the recorded one, and the re-evaluation with f386a3c0's table equals the one with
+  31a2e41f's (the v3 run sends no advanced-path key and no recorded resolve_timeout states a phase).
+- v4's T-labels-0004 / -0006 (lane-s5e/synthetic/run-tlabels: the frozen v4 scenarios, the MCP arm refused as
+  staging refuses them, 400 preset_unavailable on overrides.labels.max_seed_labels; r0 recorded as a runner before
+  901893b7 (fail), r1 as the runner at 31a2e41f records it; the direct arms 200): every MCP line re-evaluates to
+  not_implemented_mcp with case traverse.advanced_path_disabled, explained [] / [], the runner's verdict_detail and
+  no inconclusive_reason; compare's class not_implemented_mcp (by mcp_outcome, the pair verified by the direct
+  200s); both judges agree on all four lines.
+- 251 tests (SUITE_TRUTH_CACHE=lane S5's truth cache) pass.

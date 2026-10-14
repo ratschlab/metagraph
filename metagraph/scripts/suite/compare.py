@@ -21,13 +21,16 @@ timing distributions and resource use (samples joined by time) per area, arm and
 Service-side by design: async's table (service_by_design.json next to this script, from the search-service at
 commit 22d034ba; --by-design overrides) holds cases {id, direct_expectation, service_answer, agreement}. A
 scenario names its cases in `mcp.by_design` (an id or a list). agreement `not_implemented_mcp` makes the
-scenario "not implemented yet via MCP"; `service_only` (no host counterpart) makes it service-side by design;
+scenario "not implemented yet via MCP", and so does a match of a case stating answer_match.mcp_outcome
+not_implemented_mcp (async's 901893b7, named or answer-triggered: not_implemented_class; a refusal of this
+deployment's configuration, e.g. traverse.advanced_path_disabled); `service_only` (no host counterpart) makes it
+service-side by design;
 `by_design` makes it service-side by design when the pair holds: the direct answer matches
 direct_expectation (http or a list, code or slot_code, the text with digits ignored, text_prefix as is,
 text_contains, each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
 (refused_at_submit / relayed: error.code, text_contains, field with alternatives and placeholders where the MCP
 execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
-Each MCP execution is matched as async's runner matches it (f386a3c0; the matcher of e334715b, its wall rule with rule
+Each MCP execution is matched as async's runner matches it (31a2e41f; the matcher of e334715b, its wall rule with rule
 2 of 2a8acbaf): the cases the scenario names first, else an answer-triggered case (answer_match) whose wall rule
 holds or cannot be decided; a stated key this comparator does not know leaves its side unverified. The explained
 check items of an answered / clamped case are computed with the table in hand (S5c-05), as the runner computes its
@@ -1081,7 +1084,7 @@ def not_implemented_detail(case, answer, tool_error, notes=()):
 
 
 def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None):
-    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (f386a3c0): every case
+    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (31a2e41f): every case
     the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
     either refusals or answers, never both, and several named answered cases apply together); else the first
     answer-triggered case (table order) on its route whose MCP side it matches and whose answer_match.wall_rule (if
@@ -1875,7 +1878,7 @@ def resources(lines, index):
 # the comparison
 
 def inconclusive_reason(line, scenario, run_dir, cases=None):
-    """An inconclusive execution's class (async's runner at f386a3c0, the line's inconclusive_reason): rule (c)'s
+    """An inconclusive execution's class (async's runner at 31a2e41f, the line's inconclusive_reason): rule (c)'s
     text (no service-side timing / no threshold known: plausibility undecidable, without rule 2's API-key note:
     suite_common.undecidable_class), the host-state code, or "checks"
     (the checks decided); for a line recorded without the field the same, read from the raw record: the runner's
