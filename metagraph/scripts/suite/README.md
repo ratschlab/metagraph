@@ -1461,3 +1461,28 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   check the MCP does not expose is named apart. v3-S5e: 542 agree = 480 / 26 / 16 / 1 (Q-more-0003) / 8 / 11, with
   T-labels-0004 agreeing while both direct arms fail label_dict_contains; v4: 534 = 479 / 24 / 14 / 0 / 7 / 10.
 - The Re-evaluation section counts the changed records and the changed outcomes apart (above).
+
+### Validation on the recorded runs (offline) and what the async runner sees
+- Fresh copies of the v3 S5e set (lane-s5e/reeval-S5e: the re-normalised MCP arm) and of the complete v4 run
+  (v4-run-copies/20261014T061053Z_refseq97-6f945db4), re-evaluated at fe563f38 and with this lane (`run_suite.sh
+  --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`): 0 differences in outcome, checks, case, explained checks
+  and items, verdict_detail, inconclusive_reason, time_limited and outcome_runner over 2,900 and 2,913 lines, 0 MCP or
+  direct class changes, 0 relation changes, the same summaries and verdict lines, no merge warning added; the plan gap
+  is 0 for both (the as-run v4 copy misses one direct-remote execution, which its verdict already showed). The v3
+  report now states its re-normalised MCP arm (1,128 of 1,330 rebuilt, 16 changed: the G06 lines) and "353 records:
+  334 outcomes, 19 checks only".
+- `run_suite.sh --reevaluate v4-copy --gate gate/policy_v4_rt_mcp.json` exits 1, GATE FAIL with 29 problems: the
+  MCP arm's run.json records no service_capabilities (a runner of before the record); 23 inconclusive MCP executions
+  (R-pos-0027 r0 resolve_timeout; N-hard-0021 r0, N-realrep-0002 r0, N-realrep-0025 r0 traversal_resolve_deadline;
+  checks: T-walk-0004 r0, -0006 r0 r1, -0012 r0 r1, -0014 r0, -0018 r0 r1, -0022 r0, -0036 r0 r1, T-repeat-0002 r0,
+  T-repeat-0004 r0, T-labels-0003 r0, T-budget-0003 r0 r1, N-hard-0022 r0, C-caps-0001 r0 r1); 5 required properties
+  not exposed via MCP (label_dict_contains on T-labels-0003 r1 and T-labels-0005 r0 r1; answer_fields on T-edge-0008
+  r0 r1). Nothing is missing, no identity or relation problem, no disagreement, every by-design pair verified. Judged
+  on its recorded lines (not re-evaluated) it fails on 31: the recorded comparison's older by-design table, the
+  configuration, the 23 inconclusive, T-edge-0008's two recorded fails (traverse.duplicate_seeds, the old rule) and its
+  MCP disagreement, the 3 label_dict_contains; the as-run copy adds P-iupac-0001 direct-remote r0, planned and not
+  recorded (32).
+- The async runner vendors suite_common.py: re-vendored, its verify_manifest checks a stated relations_sha256 and
+  manifest_identity / manifest_problems are available (its load_manifests compares the scenarios' hash only). No
+  verdict rule of the mirror changes. gate.py reads the runner's agreed records (run.json service_capabilities,
+  the lines' request_evidence) and renormalised.json's commit / runner / client / input hashes where it records them.
