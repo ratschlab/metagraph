@@ -14,7 +14,8 @@ arms, every arm's own run.json under `arms`). Re-running it rewrites the same fi
 
 Outcomes (lane S3): every execution judged by lane S1's checks (not the stub) gets the outcome of
 checks.scenario_outcome over its checks when that is stricter than the one its runner recorded (fail > finding >
-inconclusive > pass; a runner's error, not_implemented_mcp or service_by_design is kept), the runner's own under
+inconclusive > pass; a runner's error, not_implemented_mcp or service_by_design is kept, and so is an MCP execution
+the host-state rule made inconclusive: suite_common.MCP_HOST_STATE_CODES), the runner's own under
 `outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
 from the generic ones (an execution whose property checks are all not exposed is inconclusive, not pass).
 
@@ -59,6 +60,14 @@ def judged_by_stub(run):
     return mod == "stub" or (isinstance(mod, dict) and bool(mod.get("stub")))
 
 
+def host_state_inconclusive(row):
+    """An MCP execution the host-state rule made inconclusive (an answer refused with one of
+    suite_common.MCP_HOST_STATE_CODES): its failing checks judge an environmental state, not a result."""
+    err = row.get("error") if isinstance(row.get("error"), dict) else {}
+    return row.get("arm") == "mcp" and row.get("outcome") == "inconclusive" and \
+        str(err.get("code")) in sc.MCP_HOST_STATE_CODES
+
+
 def stricter_outcomes(rows, arm_runs, outcome_fn):
     """Applies checks.scenario_outcome where it is stricter than the runner's outcome (module docstring); returns
     {arm: executions changed}. A re-evaluated line (`reevaluation`) was judged by checks.py whatever its runner
@@ -72,6 +81,8 @@ def stricter_outcomes(rows, arm_runs, outcome_fn):
         if old not in _STRICTNESS or not checks or (
                 judged_by_stub(arm_runs.get(row.get("arm"))) and "reevaluation" not in row):
             continue
+        if host_state_inconclusive(row):
+            continue   # the runner's host-state rule (or the re-evaluation's) decided it, not the checks
         try:
             new = outcome_fn(checks)
         except Exception:

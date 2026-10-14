@@ -665,6 +665,13 @@ class TriageFixesTest(unittest.TestCase):
         res = cmp.by_design_class(job_path, d, [dict(timeout, outcome="fail"), ok], None)
         self.assertEqual((res["class"], res["side"]), ("disagree", "mcp"))
         self.assertIn("resolve_timeout", cmp.MCP_HOST_STATE_CODES)
+        # merge_run keeps the host-state rule's inconclusive (its failing checks judge a host state, not a result)
+        st_fail = [{"check": "status", "outcome": "fail", "detail": "http 504"}]
+        rows = [dict(timeout, checks=st_fail),
+                dict(line("R-1", "mcp", 1, T0, 1.0, outcome="inconclusive", http=400,
+                          error={"code": "other", "text": "x"}), checks=st_fail)]
+        changed = merge_run.stricter_outcomes(rows, {}, lambda c: "fail")
+        self.assertEqual(([r["outcome"] for r in rows], changed), (["inconclusive", "fail"], {"mcp": 1}))
 
     def deadline_cases(self, **am):
         case = {"id": "pattern.deadline_ends_task", "agreement": "by_design",

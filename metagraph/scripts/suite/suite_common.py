@@ -26,6 +26,11 @@ OUTCOMES = ("pass", "fail", "finding", "inconclusive", "not_implemented_mcp", "s
 # `finding` = the host broke a stated bound or SPEC promise without failing the request. Anything else is read
 # as a failure.
 CHECK_OUTCOMES = ("pass", "fail", "not_exposed", "inconclusive", "finding")
+# async's MCP runner (suite_mcp_runner.py HOST_STATE_CODES) and the design lead's rule of 2026-10-13: an MCP answer
+# refused with one of these codes states an environmental host state, not a result: inconclusive (unless the scenario
+# expects the code), whatever the checks say; resolve_timeout: the service's resolve client gave up before the host's
+# overrun answer under load (G23 as VERIFY-RP amends it)
+MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance", "resolve_timeout")
 TIMING_CLASSES = ("fast", "slow", "long")
 
 # Keys left out of the answer digest. `timing` varies by run (DESIGN §8.3); `headers` is transport metadata

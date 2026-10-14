@@ -84,11 +84,10 @@ SERVICE_KEYS = ("outcome", "code", "text_contains", "field")
 SERVICE_NOTES = ("tool", "http", "stage", "detail", "keys", "missing_argument", "reason")
 ANSWER_DIRECT_KEYS = ("http", "code", "slot_code", "text_contains")
 ANSWER_MCP_KEYS = ("http", "code", "text_contains", "field")
-# async's MCP runner (suite_mcp_runner.py HOST_STATE_CODES) and the design lead's rule of 2026-10-13: an MCP answer
-# refused with one of these codes states an environmental host state, not a result: inconclusive (reevaluate.py), and
-# read neither for nor against a named case here. resolve_timeout (G23 as VERIFY-RP amends it): the service's resolve
-# client gave up before the host's overrun answer (an unpolled cold row piece under load, SPEC-core §4.5).
-MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance", "resolve_timeout")
+# the MCP runner's host-state codes (suite_common): inconclusive (reevaluate.py, merge_run.py), and read neither for
+# nor against a named case here. resolve_timeout (G23 as VERIFY-RP amends it): the service's resolve client gave up
+# before the host's overrun answer (an unpolled cold row piece under load, SPEC-core §4.5).
+MCP_HOST_STATE_CODES = sc.MCP_HOST_STATE_CODES
 
 
 def unknown_keys(side, known, notes=()):
