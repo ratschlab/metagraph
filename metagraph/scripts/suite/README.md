@@ -1039,7 +1039,8 @@ The MCP arm reproduces async's replay of its runner at e334715b (inconclusive by
 
 From the review of lane S5b (review-s5b/FINDINGS-A.md A2-01..A2-07, FINDINGS-B.md B5b-01..B5b-10) as its
 VERIFY-REVIEW amends them, and the coordinator's addendum 1 to lane S5c (async's exact rules; the runner's commit
-follows, and each rule is one function here, aligned when it arrives).
+follows, and each rule is one function here, aligned when it arrives: they landed as 62ee4214, 2a8acbaf and
+f94b079d, and lane S5d below aligns the mirror with them).
 
 ### Checks
 - The /resolve deadline is opt-in (A2-01, SPEC-labeled-traversal-core §4.5 l.224; capabilities
@@ -1074,7 +1075,8 @@ follows, and each rule is one function here, aligned when it arrives).
   have started the work: V-03). client wall + 1,000 ms below the threshold: provably premature, R3 implausible (the
   checks judge), R1 the case does not apply; else undecidable as before. Skipped when the runner called the MCP with
   an API key, and the detail says so: PROVISIONAL field `mcp_auth` "api_key" on the line or the raw record (the
-  e334715b runner is anonymous and records nothing); async names the field with its commit.
+  e334715b runner is anonymous and records nothing); async names the field with its commit. (Superseded by lane
+  S5d: rule 2 applies only to a recorded `mcp_auth` "anonymous", with the runner's call choice and texts.)
 - resolve_timeout (addendum 1 item 4): a refusal that states `timeout_phase` (read | write | deadline) and `bound_s`
   (the tool error's, else the answer error's) is a host state at a wall >= bound_s x 1,000 - 1,000 ms, any phase,
   the phase named in the detail; a legacy refusal (no stated phase): min(10,000 ms, max(A, B)) - 1,000 ms (R2's A
@@ -1133,3 +1135,54 @@ cfba509f..., unchanged; smoke 8e944aeb...), deterministic under PYTHONHASHSEED 1
 provisional (695acdd7...) it changes 12 scenarios and nothing else: the 10 statuses of A2-02 (R-twin-0002..0005
 also tagged machine-dependent), R-edge-0021's cap_ms (A2-03) and T-attempts-0002's repeat 2 (A2-06), plus the
 conventions' run_unique text.
+
+## Lane S5d: the verified review of lane S5c, aligned with async's landed runner (2026-10-14)
+
+From review-s5c/FINDINGS.md (S5c-01..05 and three notes), each verified first (lane-s5d/verify/VERIFY.md: every
+finding CONFIRMED on its failing input against this branch at b17832df and async's runner at f94b079d). The
+reference is async's runner on feat/suite-mcp-runner-vendored at f94b079d (scripts/bench/suite_mcp_runner.py):
+e334715b plus 62ee4214 (rule 1, a /resolve deadline on an unbudgeted discovery), 2a8acbaf (rule 2, an anonymous
+client wall bounds an unknown service-side wall) and f94b079d (rule 4, a resolve_timeout judged against the bound
+it states). Its table is unchanged (0fcf7e7d..., byte-identical here).
+
+### What the runner records (and the mirror reads)
+- `mcp_auth` (2a8acbaf; every line and the raw record): "anonymous" | "api_key" (suite_mcp_client.SuiteMcp.mcp_auth:
+  "api_key" when a tools/call would present a key). `client_wall_ms` (pattern_search / traverse_resolve lines) and
+  the raw record's `client_wall` {ms, first_submit_t0, first_submit_call, answer_t1, answer_call, answer_tool}.
+- `timeout_terms` (f94b079d; a resolve_timeout line and every raw record): {timeout_phase, bound_s, elapsed_ms,
+  source}, null when the error states none (the legacy bound).
+- verdict_detail texts: rule 2 "client wall X ms + 1 s slack < threshold Y ms: provably premature" (a wall-ruled
+  case prefixed "<case> (wall_rule budget_minus_reserve): "); with an API key "no service-side timing: plausibility
+  undecidable; rule 2 skipped: the MCP calls present an API key, ..." (inconclusive_reason without the note);
+  rule 4 "the stated bound B s (phase) - 1000 ms" and "min(the write cap 10000 ms, ...) - 1000 ms".
+
+### The mirror (suite_common, reevaluate, compare)
+- S5c-01, rule 2 tri-state: `mcp_auth_of` reads the line's `mcp_auth`, else the raw record's; `client_wall_premature`
+  applies the bound only for "anonymous", skips it with the runner's note for "api_key", and decides nothing for any
+  other value or none (undecidable, as the runner). Every record before 2a8acbaf (the recorded full run) states
+  none: `reevaluate.py --mcp-auth anonymous` (run_suite.sh --reeval-mcp-auth) states the arm's auth for such lines,
+  recorded in the mark (`mcp_auth`: {assumed, recorded counts, assumed_lines}) and on each line it applied to
+  (reevaluation.mcp_auth_assumed, which compare reads too); a recorded mcp_auth always wins.
+- S5c-02, rule 4: `timeout_statement` as the runner's: the first of the tool error, the answer error, the job's
+  stored error (the last traverse_results resolve_error.detail, any code) that states a phase in read | write |
+  deadline AND a positive numeric bound_s in that one object; anything else is legacy.
+- S5c-03, the client wall: `client_wall` as the runner's: the execution's FIRST submit call (its t0 unknown: no
+  wall), the answer call the last timed traverse_results else the last traverse_resolve (traverse_resolve), the
+  FIRST terminal get_status else the last pattern_search (pattern_search), ms to 0.1; the job wall to 0.1 from the
+  runner's ISO reading. The runner's recorded client wall (raw `client_wall`, else line `client_wall_ms`) and
+  `timeout_terms` are read first and cross-checked against the raw record: a mismatch is a warning (the line's
+  reevaluation.warnings, the mark's warnings), the recorded value is used (it is what the runner judged with).
+  verdict_detail and inconclusive_reason are composed as the runner's judge composes them; rule 1 reads the MCP
+  arguments of any tool, as the runner's unbudgeted_discovery (only traverse_resolve has `discover`).
+- S5c-04: run_direct's run_unique id never cuts the arm: a run id too long for the 128 characters is cut and ends in
+  "." + 8 hex of its sha256 (two long run ids stay apart); a base that leaves no room is refused (ValueError).
+- S5c-05: compare computes an answered case's explained items with the table in hand, as the runner computes E per
+  execution; a line that records another list (a re-evaluation with another table) is noted under
+  `explained_items_recorded`, not trusted. merge_run keeps reading a line's own explained_items (its own verdict).
+- Note 3: a planned 409 split on one repeat now says which arm's state was not the plan (repeat 0: an id retained
+  before the first send, e.g. a re-run after --resume; a later repeat: an attempt not retained, e.g. a host restart).
+- Note 1 (no change): `deadline_allowed` keys on the request's bounds.time_budget_ms because the snapshot's
+  resolve.time_budget.default is null (the deadline is opt-in); a service default would need that default read from
+  the snapshot. Note 2 (no change): `_budget_503` on a /pattern request without time_budget_ms stays not testable;
+  the v4 scenarios without one expect a 400.
+
