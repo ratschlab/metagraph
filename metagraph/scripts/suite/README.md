@@ -87,7 +87,8 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   ignored and its execution runs again); another manifest in the same directory is refused, and so is a
   directory whose state.json names a runner still alive on this host.
 - `checks.evaluate(scenario, answer, arm, previous=..., client=...)`: `previous` lists the scenario's earlier
-  repeats on this arm, in repeat order, also across a resume, as `{"digest", "time_limited"}` (lane S3, the
+  repeats on this arm that the host answered (`suite_common.feeds_previous`: an HTTP status and an outcome other
+  than error; lane S7r), in repeat order, also across a resume, as `{"digest", "time_limited"}` (lane S3, the
   verification's L4: the answer digest `suite_common.answer_digest`, which lane S1's determinism check computes
   with the same function, and what made that answer time-limited, `checks.time_limited`, recorded in the
   execution line's `time_limited` and read from the raw answer for a line of before the field), so that a
@@ -1815,3 +1816,20 @@ service_by_design.json at sha256 ab4100c9...
   direct arm and repeat ("direct-local repeat 0: ...": R-budget-0001 / -0002, R-edge-0003, R-twin-0002 / -0003 /
   -0004 / -0005, in both runs), R-twin-0004's naming direct-remote's 200 before direct-local's 503 deadline.
 - 263 tests pass (1 skipped).
+
+## Lane S7r: the runner and the orchestration (the two-day review's S-runner lane, 2026-10-14)
+The findings of the two-day review (2026-10-14-ultracode REPORT.md) on run_direct.py, run_suite.sh and merge_run.py,
+decided against 14552938 (lanes G1-G3 merged): the resume selection's widening and the narrowed verdict were fixed
+by lane S6c; everything below was open.
+
+### An unanswered repeat is no earlier repeat (P3-run-measure-report-01, P6-end-to-end-06)
+- A request that got no HTTP status (a transport failure, a client timeout) is recorded with the digest of its
+  stand-in answer (`suite_common.transport_failure`). run_direct passed it in `previous`, in the session and on a
+  resume, so the next repeat, which the host answered, failed `deterministic` ("differs from 1 earlier repeat(s)"):
+  a false determinism failure charged to the host, and a direct or MCP disagreement. `suite_common.feeds_previous`
+  is the rule: an earlier repeat feeds `previous` only with an HTTP status and an outcome other than `error` (an
+  undecodable body or a runner failure has no digest of the host's answer either). A repeat after an unanswered one
+  compares with the answered ones only; with none, `deterministic` has nothing to compare (left out, as on the first
+  repeat). The rule is async's BENCH-01 for its runner and is reevaluate.py's to apply as well (a mirror rule: the
+  same helper).
+

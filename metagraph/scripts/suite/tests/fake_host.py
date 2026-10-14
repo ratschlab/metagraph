@@ -4,7 +4,8 @@ It serves the routes the runner touches under an optional path prefix (like the 
 /api/refseq33m-experimental): the three capabilities documents, POST /pattern (gzip when asked; 400 for an
 unknown field; a 503 `deadline` after the body's `fake_503_after_s`), /resolve, /traverse, /slow, which sleeps
 for the `sleep_s` of its body, and /timed, a /pattern-shaped answer stopped by its time budget on its first call
-and complete afterwards (a cold repeat that ran into its budget, then a warm one). It speaks HTTP/1.1
+and complete afterwards (a cold repeat that ran into its budget, then a warm one), and /flaky, which sleeps for the
+`sleep_s` of its body on its first call only (a client timeout leaves that one without an answer). It speaks HTTP/1.1
 with keep-alive (`conns` records the client port of every request, so a test sees connection reuse);
 `drop=True` closes every connection silently after its answer, like a server dropping idle connections.
 """
@@ -116,6 +117,11 @@ class Handler(BaseHTTPRequestHandler):
                  "determinism": "time_limited" if first else "full"}
             self._send(200, {"patterns": [e], "limits": {"time_budget_ms": 1000, "finalize_reserve_ms": 250},
                              "timing": {"elapsed_ms": 900.0 if first else 5.0}})
+        elif path == "/flaky":
+            self.calls["/flaky"] = self.calls.get("/flaky", 0) + 1
+            if self.calls["/flaky"] == 1:
+                time.sleep(float((body or {}).get("sleep_s", 1.0)))
+            self._send(200, {"answered": True, "timing": {"elapsed_ms": 1.0}})
         elif path == "/slow":
             time.sleep(float((body or {}).get("sleep_s", 1.0)))
             self._send(200, {"slept": True})

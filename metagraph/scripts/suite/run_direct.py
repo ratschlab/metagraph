@@ -629,11 +629,11 @@ class Runner(object):
         done = set(sc.execution_key(r) for r in rows)
         # The earlier repeats of each scenario so far, in repeat order, as {digest, time_limited}: checks.evaluate's
         # `previous` (lane S1's determinism check compares a repeat with the earlier ones, and a time-limited earlier
-        # repeat need not repeat: SPEC-labeled-traversal-core §6.8, SPEC-pattern-search §7.9). A line of a runner
-        # before the field gets it from its raw answer.
+        # repeat need not repeat: SPEC-labeled-traversal-core §6.8, SPEC-pattern-search §7.9), of the repeats the host
+        # answered (suite_common.feeds_previous). A line of a runner before the field gets it from its raw answer.
         digests = {}
         for r in sorted(rows, key=lambda r: (r.get("repeat") or 0)):
-            if r.get("arm") == self.args.arm and r.get("answer_digest"):
+            if r.get("arm") == self.args.arm and r.get("answer_digest") and sc.feeds_previous(r):
                 digests.setdefault(r.get("scenario"), []).append(self.previous_entry(r))
         if bad:
             self.run.setdefault("warnings", []).append("%d unparsable line(s) in executions.jsonl ignored" % bad)
@@ -671,7 +671,8 @@ class Runner(object):
                 self.write_state("running", len(planned), ndone, sid)
                 after_resume = repeat > 0 and (sid, repeat - 1) not in ran_in_session
                 line = self.execute(index, scenario, repeat, cache, after_resume, list(digests.get(sid, [])))
-                digests.setdefault(sid, []).append(self.previous_entry(line))
+                if sc.feeds_previous(line):
+                    digests.setdefault(sid, []).append(self.previous_entry(line))
                 ran_in_session.add((sid, repeat))
                 ndone += 1
                 if not self.args.quiet:

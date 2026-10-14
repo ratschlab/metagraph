@@ -187,6 +187,17 @@ def execution_key(line):
     return (line.get("scenario"), line.get("arm"), line.get("repeat"))
 
 
+def feeds_previous(line):
+    """Whether a recorded execution is one of the earlier repeats that checks.evaluate's `previous` holds: the host
+    answered it (an HTTP status) and its runner did not end it in `error`. An execution without a status (a transport
+    failure, a client timeout, an MCP call the runner gave up on) or ended in `error` (an undecodable body, a runner
+    failure) has the digest of its stand-in answer, not of the host's: compared, it would fail the next repeat's
+    `deterministic` although the host answered nothing. Both runners (run_direct.py, async's suite_mcp_runner.py) and
+    reevaluate.py apply this rule."""
+    http = line.get("http")
+    return isinstance(http, int) and not isinstance(http, bool) and http > 0 and line.get("outcome") != "error"
+
+
 def beyond_status(scenarios):
     """The expectation names of the scenarios that the checks stub cannot evaluate (anything but `status`)."""
     names = set()

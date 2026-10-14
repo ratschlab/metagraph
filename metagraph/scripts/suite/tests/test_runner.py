@@ -318,6 +318,50 @@ class RunnerTest(unittest.TestCase):
         d = [{"digest": r["answer_digest"], "time_limited": ""} for r in rows]
         self.assertEqual(seen, [("D-1", []), ("D-1", [d[0]]), ("D-1", [d[0], d[1]])])
 
+    def test_unanswered_repeat_is_no_earlier_repeat(self):
+        # an execution the host never answered (no HTTP status: a client timeout, a refused connection) has the digest
+        # of its stand-in answer: it is not passed in `previous`, so the next repeat compares with nothing instead of
+        # failing `deterministic`; in one session and on a resume
+        real, _, _ = run_direct.load_checks("checks")
+        seen = []
+
+        class Spy(object):
+            scenario_outcome = staticmethod(real.scenario_outcome)
+            time_limited = staticmethod(real.time_limited)
+
+            @staticmethod
+            def evaluate(scenario, answer, arm, previous=None, client=None):
+                seen.append((scenario["id"], answer["http"], list(previous or [])))
+                return real.evaluate(scenario, answer, arm, previous=previous, client=client)
+
+        def run(out, base, *extra):
+            args = run_direct.parse_args(["--manifest", self.manifest_path, "--arm", "direct-local", "--base", base,
+                                          "--out", out, "--pause", "0", "--quiet", "--warm-every", "0"] + list(extra))
+            run_direct.reset_stop()
+            return run_direct.Runner(args, sc.read_json(self.manifest_path), Spy, "checks").run_all()
+
+        det = {"check": "deterministic", "args": {}}
+        make_manifest(self.manifest_path, [with_expect(scenario("F-1", "F", "POST /flaky", {"sleep_s": 1.5},
+                                                                repeat=2), det)])
+        with FakeHost() as host:
+            out = os.path.join(self.dir, "one")
+            self.assertEqual(run(out, host.base, "--timeout-fast", "0.5"), "done")
+            out2 = os.path.join(self.dir, "resumed")
+            # r0 against a port nothing listens on (3 capabilities GETs, r0, the closing GET), r1 by a resume
+            self.assertEqual(run(out2, "http://127.0.0.1:9", "--max-requests", "5"), "interrupted")
+            self.assertEqual(run(out2, host.base), "done")
+        self.assertEqual([(s_, h, p) for s_, h, p in seen], [("F-1", 0, []), ("F-1", 200, []), ("F-1", 0, []),
+                                                            ("F-1", 200, [])])
+        for path in (out, out2):
+            rows, _ = sc.read_jsonl(os.path.join(path, "executions.jsonl"))
+            self.assertEqual([(r["repeat"], r["http"], r["outcome"]) for r in rows],
+                             [(0, 0, "error"), (1, 200, "pass")], path)
+            self.assertFalse([c for c in rows[1]["checks"] if c["outcome"] == "fail"], rows[1]["checks"])
+        # an answered repeat still feeds `previous` (the rule: an HTTP status and no runner error)
+        self.assertTrue(sc.feeds_previous({"http": 503, "outcome": "inconclusive"}))
+        self.assertFalse(sc.feeds_previous({"http": 200, "outcome": "error"}))
+        self.assertFalse(sc.feeds_previous({"http": None, "outcome": "not_implemented_mcp"}))
+
     def test_load_checks_fallback(self):
         mod, name, err = run_direct.load_checks("stub")
         self.assertEqual((name, err), ("stub", None))
