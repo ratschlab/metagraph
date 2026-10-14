@@ -1968,3 +1968,15 @@ by lane S6c; everything below was open.
   outcome apart and reads it as a failure; after this merge a merged set holds none, the warning and outcome_runner
   name them.)
 
+### Validation (offline)
+- Copies of v3 (the S5e input set) and v4 re-evaluated (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth
+  anonymous`) with 14552938 and with this lane: no outcome, check outcome, direct or MCP class, verdict line or
+  merged warning moves (v3 FAIL, v4 FINDINGS, as before); both merged sets state one release and no checks identity
+  error (a re-evaluated set is judged with the re-evaluation's checks). The gated re-evaluation of v4 with
+  gate/policy_v4_rt_mcp.json reads the same 45 problems (GATE FAIL) before and after. The recorded v4 merge (not
+  re-evaluated) gives the same 2913 outcomes and host-cache labels; its checks identity has no snapshot and states
+  the sessions without a sha256 as unverified, which is no warning and no error for a run older than the snapshot.
+  The re-evaluation does not run run_direct: the `previous` rule changes nothing there until reevaluate.py applies
+  suite_common.feeds_previous too.
+- 368 tests pass (1 skipped; 345 at 14552938).
+
