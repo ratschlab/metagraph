@@ -1448,9 +1448,14 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
 
 ### Validation (offline)
 - Mutation probes (lane-g1/scratch/probes/mutations.py: valid recorded answers of v3 and v4, their one-property
-  corruptions, GPT's probe answers, legitimately incomplete answers): 75 probes; at fe563f38 44 of them read
+  corruptions, GPT's probe answers, legitimately incomplete answers): 75 probes; at fe563f38 46 of them read
   other than they must (every corruption above passed or read inconclusive), here all 75 do: every corruption
-  fails, every valid answer passes, every legitimately incomplete one stays inconclusive.
+  fails, every valid answer passes, every legitimately incomplete one stays inconclusive. The lane's verification
+  (its probes, lane-g1/verify/probes/my_mut.py, 43 boundary corruptions and legitimate answers) reads as it must
+  on 42; the 43rd judged T-quorum-0001's MCP answer against a direct request changed to min_live_labels 1, which
+  the MCP arm, held to its own overrides (min_live_labels 2), rightly passes; the same change of the MCP overrides
+  fails. Its two legitimate answers the lane's first rules failed (a branch end under a quorum knob after a branch
+  taken without a split; count_above_threshold with a constant `true` predicate) pass.
 - Re-evaluation of the recorded runs (v3: lane S5e's reeval-S5e copy; v4: the complete run copy; `run_suite.sh
   --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, against the same copies re-evaluated at fe563f38): 0
   outcome changes and 0 check outcome changes of 2,900 (v3) and 2,913 (v4) executions, 0 relation changes, compare
