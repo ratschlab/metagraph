@@ -522,8 +522,10 @@ CAPABILITIES_MAX_BYTES = 32 * 1024
 CAPABILITIES_ROOM = 1024
 
 
-def spec_tables(text):
-    """{name: [field, ...]}: the first column of the table after each schema marker."""
+def spec_table_rows(text):
+    """{name: [[cell, ...], ...]}: the rows of the table after each schema marker, past its
+    header and separator, each split into its cells at the unescaped `|` (a type reads
+    `boolean \\| null`)."""
     out = {}
     lines = text.split('\n')
     for i, line in enumerate(lines):
@@ -537,13 +539,36 @@ def spec_tables(text):
         for row in lines[j + 2:]:       # past the header and the separator
             if not row.startswith('|'):
                 break
-            first = row.split('|')[1].strip()
-            name = re.fullmatch(r'`([^`]+)`', first)
-            assert name, f'schema {m.group(1)}: first column {first!r} is not a `field`'
-            rows.append(name.group(1))
+            rows.append([c.strip() for c in re.split(r'(?<!\\)\|', row)[1:-1]])
         assert m.group(1) not in out, f'schema {m.group(1)} twice'
         out[m.group(1)] = rows
     return out
+
+
+def spec_tables(text):
+    """{name: [field, ...]}: the first column of the table after each schema marker."""
+    out = {}
+    for table, rows in spec_table_rows(text).items():
+        out[table] = []
+        for cells in rows:
+            name = re.fullmatch(r'`([^`]+)`', cells[0])
+            assert name, f'schema {table}: first column {cells[0]!r} is not a `field`'
+            out[table].append(name.group(1))
+    return out
+
+
+def spec_gate_caps(text):
+    """The gate caps of SPEC §23.2, in the order listed: the backticked names of the meaning
+    column of the gate block table's `caps` row before its parenthesis (`max_patterns`, ...
+    (§10.2; the other caps are the full block's))."""
+    rows = [cells for cells in spec_table_rows(text).get('pattern_gate', [])
+            if cells[0] == '`caps`']
+    assert len(rows) == 1, f'SPEC §23.2: {len(rows)} `caps` rows in the gate block table'
+    listed = rows[0][-1].split('(')[0]
+    names = re.findall(r'`([^`]+)`', listed)
+    assert names and re.fullmatch(r'(\s*`[^`]+`\s*,)*\s*`[^`]+`\s*', listed), \
+        f'SPEC §23.2: the `caps` row lists no caps before its parenthesis: {listed!r}'
+    return names
 
 
 def predicate_names(p):
@@ -3304,6 +3329,59 @@ class TestPatternFixtures(unittest.TestCase):
                        PLACEMENTS, SUPPORTS, ANNOTATIONS, tuple(ABSENCE_SCOPES.values())):
             for v in values:
                 self.assertIn(f'`{v}`', text, f'the SPEC does not name `{v}`')
+
+    def check_spec_gate_caps(self, text):
+        """The gate caps SPEC §23.2 lists in |text| (spec_gate_caps) are GATE_CAPS and the
+        server's kPatternGateCaps, in order, and the caps of every stored gate block (GET
+        /traverse/capabilities)."""
+        listed = spec_gate_caps(text)
+        self.assertEqual(len(listed), len(set(listed)), 'SPEC §23.2: a gate cap twice')
+        self.assertEqual(GATE_CAPS, listed, 'SPEC §23.2: the gate caps')
+        if os.path.isfile(PATTERN_CPP):
+            with open(PATTERN_CPP, encoding='utf-8') as f:
+                m = re.search(r'const char \*const kPatternGateCaps\[\] = \{(.*?)\};', f.read(),
+                              re.S)
+            self.assertTrue(m, 'kPatternGateCaps')
+            self.assertEqual(listed, re.findall(r'"([a-z_]+)"', m.group(1)),
+                             'SPEC §23.2: the server\'s gate caps')
+        probes = [name for name, f in self.fixtures.items()
+                  if f['path'].split('?')[0] == '/traverse/capabilities' and f['status'] == 200]
+        self.assertTrue(probes, 'no stored gate block')
+        for name in probes:
+            self.assertEqual(sorted(listed), sorted(self.pattern_block(name)['caps']),
+                             f'{name}: SPEC §23.2\'s gate caps')
+
+    def test_spec_names_the_gate_caps(self):
+        """SPEC §23.2 lists the gate caps in the meaning column of its table's `caps` row (prose,
+        so test_spec_names_the_fields, which reads first columns, does not see them); that list
+        is the validator's, the server's and the stored probes'."""
+        if not os.path.isfile(SPEC):
+            self.skipTest('docs/SPEC-pattern-search.md is not in this checkout')
+        with open(SPEC, encoding='utf-8') as f:
+            self.check_spec_gate_caps(f.read())
+
+    def test_a_changed_spec_gate_caps_list_fails(self):
+        """check_spec_gate_caps is not vacuous: the SPEC with its gate caps changed (a cap
+        renamed, left out, added, listed twice, reordered, or moved behind the parenthesis)
+        fails it."""
+        if not os.path.isfile(SPEC):
+            self.skipTest('docs/SPEC-pattern-search.md is not in this checkout')
+        with open(SPEC, encoding='utf-8') as f:
+            text = f.read()
+        lines = text.split('\n')
+        marker = lines.index('<!-- schema: pattern_gate -->')
+        row = next(line for line in lines[marker:] if line.startswith('| `caps` |'))
+        for old, new in (('`max_labels_per_anchor` (', '`max_labels` ('),
+                         ('`max_steps`, ', ''),
+                         ('`max_labels_per_anchor` (', '`max_labels_per_anchor`, `max_labels` ('),
+                         ('`max_labels_per_anchor` (',
+                          '`max_labels_per_anchor`, `max_patterns` ('),
+                         ('`max_paths`, `max_steps`', '`max_steps`, `max_paths`'),
+                         (', `max_labels_per_anchor` (', ' (`max_labels_per_anchor`; ')):
+            with self.subTest(old=old, new=new):
+                self.assertEqual(1, row.count(old))
+                with self.assertRaises(AssertionError):
+                    self.check_spec_gate_caps(text.replace(row, row.replace(old, new)))
 
     def test_files(self):
         listed = set(self.fixtures)
