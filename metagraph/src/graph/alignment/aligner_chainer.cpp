@@ -70,12 +70,8 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                               std::vector<Seed>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column) {
-    fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
-                    fwd_seeds.end());
-    bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
-                    bwd_seeds.end());
+    std::erase_if(fwd_seeds, [](const auto &a) { return a.empty() || a.label_columns.empty(); });
+    std::erase_if(bwd_seeds, [](const auto &a) { return a.empty() || a.label_columns.empty(); });
 
     if (fwd_seeds.empty() && bwd_seeds.empty())
         return { 0, 0 };
@@ -261,9 +257,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             }
         }
 
-        chain_seeds.erase(std::remove_if(chain_seeds.begin(), chain_seeds.end(),
-                                         [](const auto &a) { return a.first.empty(); }),
-                          chain_seeds.end());
+        std::erase_if(chain_seeds, [](const auto &a) { return a.first.empty(); });
         assert(chain_seeds.size());
 
         // Drop coord-redundant seeds: when two consecutive chain seeds share
@@ -291,9 +285,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                 }
             }
         }
-        chain_seeds.erase(std::remove_if(chain_seeds.begin(), chain_seeds.end(),
-                                         [](const auto &a) { return a.first.empty(); }),
-                          chain_seeds.end());
+        std::erase_if(chain_seeds, [](const auto &a) { return a.first.empty(); });
         assert(chain_seeds.size());
 
         for (size_t i = chain_seeds.size() - 1; i > 0; --i) {

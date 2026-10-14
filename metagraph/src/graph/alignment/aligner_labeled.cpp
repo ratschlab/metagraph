@@ -43,36 +43,6 @@ bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, int64_t diff) {
     return false;
 }
 
-template <class AIt, class BIt, class OutIt, class OutIt2, class OutIt3>
-void set_intersection_difference(AIt a_begin, AIt a_end,
-                                 BIt b_begin, BIt b_end,
-                                 OutIt intersection_out,
-                                 OutIt2 diff_out,
-                                 OutIt3 diff_out2) {
-    while (a_begin != a_end || b_begin != b_end) {
-        if (b_begin == b_end) {
-            *diff_out = *a_begin;
-            ++diff_out;
-            ++a_begin;
-        } else if (a_begin == a_end || *a_begin > *b_begin) {
-            *diff_out2 = *b_begin;
-            ++diff_out2;
-            ++b_begin;
-        } else {
-            if (*a_begin == *b_begin) {
-                *intersection_out = *a_begin;
-                ++intersection_out;
-                ++b_begin;
-            } else {
-                *diff_out = *a_begin;
-                ++diff_out;
-            }
-
-            ++a_begin;
-        }
-    }
-}
-
 LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view query)
     : LabeledExtender(aligner.get_graph(), aligner.get_config(),
                       dynamic_cast<const LabeledAligner<>&>(aligner).annotation_buffer_,
@@ -114,11 +84,7 @@ void LabeledExtender::flush() {
             auto parent_real_labels = annotation_buffer_.get_labels(table[parent_i].node);
             assert(parent_real_labels);
             assert(parent_real_labels->size() >= parent_labels.size());
-            Columns diff;
-            std::set_difference(parent_labels.begin(), parent_labels.end(),
-                                parent_real_labels->begin(), parent_real_labels->end(),
-                                std::back_inserter(diff));
-            assert(diff.empty());
+            assert(std::ranges::includes(*parent_real_labels, parent_labels));
         }
 #endif
 
@@ -707,11 +673,9 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
-    auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
+    std::erase_if(seeds, [](const auto &a) {
         return !a.label_encoder || a.label_columns.empty();
     });
-
-    seeds.erase(seed_it, seeds.end());
 
     assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &a) {
         return a.get_query_view().size() >= this->config_.min_seed_length;
