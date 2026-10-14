@@ -181,7 +181,17 @@ NDM_PEP_STOP_X = 'TARMADKLRX'
 # strings); a selective predicate (an E. coli column, not P. aeruginosa's) that keeps 60 of them;
 # a typo; and the server variant's cap on a predicate's names (masked_small_predicate_cap)
 GCG12 = 'GCGGCGGCGGCG'
-MINI_COLUMNS = ['1296536', '158836', '287', '470', '546', '562', '573', '615', '72407']
+# label-free paths in the request's memory account (SPEC §12.1): the GCG repeat and 88 Ns (L =
+# 100, n = 70 k-mers; searched on the forward strand, the reverse orientation's anchor window
+# being all N) has 47 paths on the mini. With max_memory_mb 1 (1,048,576 bytes) a path's result
+# object costs 512 + 2k + 3L + 192n = 14,314 bytes and a walk kept for the release 128 + 8n + L =
+# 788: a first copy's 47 objects fit and stay until the request ends (672,758 bytes); a second
+# copy's list ends at 24, where the 25th object does not fit beside the 23 walks still held; a
+# third copy's walks pass half of the 32,282 bytes then left at the 21st (20 kept), and one
+# object fits beside those 20
+GCG12_N88 = GCG12 + 'N' * 88
+GCG12_N88_PATHS = 47
+MINI_COLUMNS =['1296536', '158836', '287', '470', '546', '562', '573', '615', '72407']
 SELECTIVE = {'and': [{'any': ['562']}, {'none': ['287']}]}
 SELECTIVE_COUNT = 60
 TYPO = '5622'
@@ -1265,6 +1275,68 @@ FIXTURES = [
                             field('stop', {'phase': 'extension', 'reason': 'max_steps'})),
                  expect_all(cut('max_steps'), field('returned', 0), unknown_counts,
                             field('stop', {'phase': 'discovery', 'reason': 'max_steps'})))),
+    # (the three below rest on the memory model of SPEC §12.1, the arithmetic at GCG12_N88;
+    # their expects fail loudly if the account stops elsewhere)
+    post('paths_memory', 'masked',
+         {'patterns': [p(GCG12_N88, 'iupac', ident=f'GCG12-N88-{i}') for i in range(3)],
+          'mode': 'partial', 'strands': 'forward', 'long_search': 'paths', 'max_memory_mb': 1,
+          'output': {'labels': 'none'}}, 200,
+         'label-free paths in the request\'s memory account (max_memory_mb 1, SPEC §12.1): three '
+         'copies of a pattern of 47 paths (L = 100); the first copy\'s result objects fit and stay '
+         'in the account until the request ends, so the second copy\'s list ends where the next '
+         'object does not fit beside the walks still held (24 returned, stop {output, '
+         'max_memory}, cut max_memory, the paths exact) and the third copy\'s kept walks pass '
+         'half of what is left (stop {extension, max_memory}, the paths at_least, extension '
+         'stopped, the one object that fits beside the 20 walks kept released, cut max_memory); '
+         'max_memory_mb named alone acts on these entries (SPEC §8.10): no annotation_not_read, '
+         'no work.memory_bytes, not echoed',
+         expect_all(
+             lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
+             entries(expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'), complete,
+                                field('returned', GCG12_N88_PATHS)),
+                     expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'),
+                                cut('max_memory'), field('returned', 24),
+                                field('stop', {'phase': 'output', 'reason': 'max_memory'})),
+                     expect_all(paths_count('at_least', 21, 'stopped'), cut('max_memory'),
+                                field('returned', 1),
+                                field('stop', {'phase': 'extension', 'reason': 'max_memory'}))),
+             entries(*[expect_all(field('notes', []), field('determinism', 'full'),
+                                  lambda e: check('memory_bytes' not in e['work'], e['work']))]
+                     * 3))),
+    post('paths_memory_withheld', 'masked',
+         {'patterns': [p(GCG12_N88, 'iupac', ident=f'GCG12-N88-{i}') for i in range(3)],
+          'strands': 'forward', 'long_search': 'paths', 'max_memory_mb': 1,
+          'output': {'labels': 'none'}}, 200,
+         'the same in all_or_count: the first copy listed whole, its objects kept; the second\'s '
+         'objects do not all fit: withheld output_budget, stop {output, max_memory}, returned 0, '
+         'the paths exact; its objects are freed with it, so the third finds the account as the '
+         'second did and is answered alike',
+         expect_all(
+             lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
+             entries(expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'), complete,
+                                field('returned', GCG12_N88_PATHS)),
+                     *[expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'),
+                                  withheld('output_budget'), field('returned', 0),
+                                  field('cut', None),
+                                  field('stop', {'phase': 'output', 'reason': 'max_memory'}))]
+                     * 2),
+             entries(*[expect_all(field('notes', []), field('determinism', 'full'),
+                                  lambda e: check('memory_bytes' not in e['work'], e['work']))]
+                     * 3))),
+    post('paths_memory_named', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(NDM_F, ident='NDM-F')],
+          'long_search': 'paths', 'max_memory_mb': 1, 'output': {'labels': 'none'}}, 200,
+         'max_memory_mb named alone beside a pattern of at most k bases (SPEC §8.10): the account '
+         'holds the paths of NDM-40, which are answered as without it (the entry of `paths`, '
+         'no note, no work.memory_bytes, max_memory_mb not echoed); NDM-F (L <= k), on which '
+         'the field does not act, says so: note annotation_not_read',
+         expect_all(
+             lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
+             entries(expect_all(paths_count('exact', 2, 'completed'), complete,
+                                field('returned', 2), field('notes', []),
+                                lambda e: check('memory_bytes' not in e['work'], e['work'])),
+                     expect_all(exact(24), complete,
+                                field('notes', ['annotation_not_read']))))),
     post('paths_global', 'masked_no_map',
          {'patterns': [p(NDM_40)], 'long_search': 'paths', 'output': {'labels': 'all'}}, 200,
          'paths with coordinates but no record mapping (placement global): nothing can be '

@@ -1480,6 +1480,16 @@ occurrences of blaNDM-1; with J; and 14 residues without `long_search`: anchors 
 `4596bb3b`, is answered since §18) and `genetic_code_unknown` (the 400 for table 7). The nine capabilities bodies of the single-graph servers gained the
 fields of §17; no other stored body changed.
 
+After the review of 2026-10-14 (§27): a label-free `long_search: "paths"` list in the request's memory account
+(§12.1, §28), `max_memory_mb` 1, three copies of `GCGGCGGCGGCG` + N × 88 on `+` (47 paths of L = 100 each; a
+result object 14,314 bytes, a kept walk 788): `paths_memory` (`partial`: the first copy whole, its objects kept;
+the second's list ended by the route at 24, `stop {output, max_memory}`, `cut: max_memory`, the paths `exact`;
+the third's extension stopped by its kept walks, `stop {extension, max_memory}`, the paths `at_least` 21, the one
+object that fits beside the 20 walks kept released) and `paths_memory_withheld` (`all_or_count`: the second and
+the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it); and
+`paths_memory_named` (`max_memory_mb` named alone: NDM-40's paths answered as without it, the entry of `paths`;
+NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10).
+
 After the review of 2026-10-10 (§26): `utf8_label_refused`, `utf8_label_count` and `utf8_label_predicate`, on the
 server `utf8_labels` (a BASIC graph at k = 31 of two records written as bytes, A × 40 under the raw header
 `label\xff`, which is not UTF-8, and C × 40 under the valid header `label�`, what a replacement of the bad
@@ -4695,6 +4705,12 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   account's peak came after the search
   (`PatternSupportedRoute.TheRowCacheIsGivenBackBeforeTheIndexOfTheHeldWalks`; the index refused, below the route:
   `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`).
+  Fixtures (§11; 174 in all, no stored body changed): `paths_memory`, `paths_memory_withheld` and
+  `paths_memory_named` store the account's stops of a label-free path list (the engine's at a kept walk, the
+  route's at a result object) and `max_memory_mb` named alone, which no stored body held, so that the validator's
+  rules for them (§12.1, §8.10) decide a stored answer. The validator compares §23.2's gate caps (the list in the
+  `caps` row) with its own list, the server's `kPatternGateCaps` and every stored `/traverse` block, as §23.2
+  said it did.
 
 ## 28. Changed after the review of 2026-10-12
 

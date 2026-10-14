@@ -4001,6 +4001,33 @@ class TestPatternFixtures(unittest.TestCase):
                               ('output', 'max_memory')}, stops)
         self.assertIn('extension', phases)
         self.assertTrue(pruned and mirrors)
+        # label-free paths in the memory account (SPEC §12.1): the engine's stop at a kept walk
+        # and the route's cut at a result object, partial and all_or_count; max_memory_mb named
+        # alone acts on a paths entry outside mode count (no annotation_not_read) and not on a
+        # pattern of at most k bases beside it (SPEC §8.10)
+        path_memory, path_notes = set(), set()
+        for name, f in self.fixtures.items():
+            request, answer = self.bodies[name]
+            if (f['method'] != 'POST' or f['status'] != 200 or 'max_memory_mb' not in request
+                    or request.get('long_search') != 'paths' or 'predicate' in request
+                    or request.get('output', {}).get('labels', 'none') != 'none'):
+                continue
+            alone = not any(x in request for x in LIMITS_LABELS + ['allow_unbudgeted_annotation',
+                                                                   'require_support']
+                            if x != 'max_memory_mb')
+            for e in answer['patterns']:
+                if 'error' in e:
+                    continue
+                longer = e['length'] > answer['index']['k']
+                if longer and e['stop'] and e['stop']['reason'] == 'max_memory':
+                    path_memory.add((answer['mode'], e['stop']['phase'],
+                                     (e['withheld'] or e['cut'] or {}).get('reason')))
+                if alone and answer['mode'] != 'count':
+                    path_notes.add((longer, 'annotation_not_read' in e['notes']))
+        self.assertLessEqual({('partial', 'output', 'max_memory'),
+                              ('partial', 'extension', 'max_memory'),
+                              ('all_or_count', 'output', 'output_budget')}, path_memory)
+        self.assertEqual({(True, False), (False, True)}, path_notes)
         self.assertLessEqual({('every_context', None), ('tested_contexts', 'selection'),
                               ('no_instance', None), (None, 'not_started')}, motifs)
         # bounded mismatches (SPEC §21): every max_mismatches, each kind answered within
@@ -4317,6 +4344,51 @@ class TestPatternFixtures(unittest.TestCase):
              'undecided only when the verification was not done'),
         ]
         self.assertRefusesMutations(cases)
+
+    def test_label_free_path_memory_rules_refuse_what_v1_never_answers(self):
+        """Label-free paths in the memory account (SPEC §12.1, §8.10): the stored answers pass
+        the rules that admit the account's stops on a long_search "paths" entry without labels
+        (the engine's in the extension, the route's in the output) and the note of max_memory_mb
+        named alone, and each rule refuses an answer that breaks it: a labels phase or an
+        annotation budget for the stop, a stopped extension stated exact, annotation_not_read on
+        a paths entry the field acts on, none on a pattern of at most k bases it does not act
+        on. The paths of a request the account holds are answered as without it."""
+        for name in ('paths_memory', 'paths_memory_withheld', 'paths_memory_named'):
+            self.check_stored(name)
+        cases = [
+            ('paths_memory', lambda a: a['patterns'][1]['stop'].update(phase='placement'),
+             'an annotation phase without labels'),
+            ('paths_memory_withheld',
+             lambda a: a['patterns'][1]['stop'].update(phase='label_discovery'),
+             'an annotation phase without labels'),
+            ('paths_memory',
+             lambda a: a['patterns'][2]['stop'].update(reason='max_annotation_work'),
+             'an annotation budget stopping a search that reads none'),
+            ('paths_memory', lambda a: a['patterns'][2]['counts']['paths'].update(
+                relation='exact'), 'for an extension stopped|an exact total has exact parts'),
+            ('paths_memory', lambda a: a['patterns'][1]['notes'].append('annotation_not_read'),
+             'annotation_not_read exactly where'),
+            ('paths_memory_named',
+             lambda a: a['patterns'][0]['notes'].append('annotation_not_read'),
+             'annotation_not_read exactly where'),
+            ('paths_memory_named', lambda a: a['patterns'][1].update(notes=[]),
+             'annotation_not_read exactly where'),
+        ]
+        self.assertRefusesMutations(cases)
+
+        def untimed(v):
+            if isinstance(v, dict):
+                return {k: untimed(x) for k, x in v.items() if k != 'timing'}
+            if isinstance(v, list):
+                return [untimed(x) for x in v]
+            return v
+
+        request, answer = self.bodies['paths_memory_named']
+        plain_request, plain = self.bodies['paths']
+        self.assertNotIn('max_memory_mb', plain_request)
+        self.assertEqual(plain_request['patterns'][0], request['patterns'][0])
+        self.assertEqual(plain['limits'], answer['limits'])
+        self.assertEqual(untimed(plain['patterns'][0]), untimed(answer['patterns'][0]))
 
     def test_hand_made_bodies_are_the_codes(self):
         """The hand-made bodies are written by the code as stored here: the two 503s, and the
