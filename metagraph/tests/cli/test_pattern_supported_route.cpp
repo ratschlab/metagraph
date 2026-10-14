@@ -1396,6 +1396,75 @@ TEST(PatternSupportedRoute, AllOrCountGivesBackItsListWhenALabelChargeIsRefused)
     EXPECT_EQ("max_memory", part.answer.cut.value_or(""));
 }
 
+// The same refusal through the route at the record level (the route's default on an index with
+// coordinates and its record mapping, whose search rows carry coordinates): the graph of all 64
+// 3-mers under a 64 KiB label name and 5,000 coordinates of TTT in a column m (50 records of
+// 102 T); NNNN, any(name), predicate_strands context, output.labels all or predicate_only,
+// occurrences false, max_labels 0, a 1 MiB account that holds count mode's search. all_or_count
+// lists the selected paths with that name until the account refuses one; given back at once,
+// the search reaches TTT's row (last in A < C < G < T order) with the room count mode has and
+// ends as count mode's: withheld output_budget, stop {output, max_memory}, counts.selected
+// exact, counts.supported_paths count mode's (its search completed), no refused row. Mutation
+// tried: the charges kept until finish(): withheld annotation_budget, stop {extension,
+// max_memory}, TTT's row refused, the counts at_least: fails.
+TEST(PatternSupportedRoute, AllOrCountGivesBackItsListBeforeTheSearchReadsOn) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const std::string long_name(64 * 1024, 'x');
+    std::vector<Record> records = { { long_name, "h0", record } };
+    for (size_t i = 0; i < 50; ++i) {
+        records.push_back({ "m", "m" + std::to_string(i), std::string(102, 'T') });
+    }
+    const Index idx = build_rd(3, records);
+    auto answer = [&](const std::string &mode, const std::string &labels) {
+        const std::string body
+                = "{\"patterns\": [{\"iupac\": \"NNNN\"}], \"mode\": \"" + mode + "\", "
+                  "\"strands\": \"forward\", \"long_search\": \"supported_paths\", "
+                  "\"predicate\": {\"any\": [\"" + long_name + "\"]}, \"predicate_strands\": "
+                  "\"context\", \"output\": {\"labels\": \"" + labels + "\", \"occurrences\": "
+                  "false}, \"max_labels\": 0, \"max_paths\": 1000}";
+        RetrievalHooks hooks;
+        hooks.coord_to_header = idx.cth.get();
+        hooks.max_memory_bytes = 1 << 20;
+        return process_pattern_request(parse_pattern_body(body), *idx.anno, route_limits(),
+                                       "rel", nullptr, nullptr, nullptr, &hooks)["patterns"][0];
+    };
+    for (const std::string labels : { "all", "predicate_only" }) {
+        SCOPED_TRACE(labels);
+        const Json::Value count = answer("count", labels);
+        ASSERT_FALSE(count.isMember("error")) << compact(count["error"]);
+        EXPECT_EQ("record_verified", count["selection"]["support"].asString());
+        EXPECT_TRUE(count["stop"].isNull()) << compact(count["stop"]);
+        EXPECT_EQ(0u, count["rows_refused"].size());
+        ASSERT_EQ("exact", count["counts"]["selected"]["relation"].asString());
+        const uint64_t selected = count["counts"]["selected"]["value"].asUInt64();
+        ASSERT_LT(0u, selected);
+        EXPECT_EQ("completed", count["counts"]["supported_paths"]["search"].asString());
+
+        const Json::Value e = answer("all_or_count", labels);
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        EXPECT_EQ("output_budget", e["withheld"]["reason"].asString());
+        EXPECT_EQ("output", e["stop"]["phase"].asString());
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+        EXPECT_EQ(0u, e["rows_refused"].size()) << compact(e["rows_refused"]);
+        EXPECT_EQ("exact", e["counts"]["selected"]["relation"].asString());
+        EXPECT_EQ(selected, e["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ(compact(count["counts"]["supported_paths"]),
+                  compact(e["counts"]["supported_paths"]));
+        EXPECT_EQ(0u, e["results"].size());
+        EXPECT_EQ(0u, e["returned"].asUInt64());
+        EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), 1u << 20);
+    }
+}
+
 // The mirror of a held walk ("either" on a BASIC graph) is read only when it decides (SPEC
 // §20.9). On the graph of all 64 3-mers (one record of every 3-mer in a row) with one label
 // shared on every k-mer, ANNNNN has 1,024 forward walks at the label level, each selected by
