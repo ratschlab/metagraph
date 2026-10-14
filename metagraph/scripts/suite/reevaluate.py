@@ -181,8 +181,9 @@ def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, case
     state held or not, or rule (c)'s text), inconclusive_reason (an inconclusive outcome's class: rule (c)'s text, the
     host-state code, or "checks"); and for the re-evaluation's record by_design_cases, host_state and `note` (a mark
     the table does not reproduce, a matched case the checks decided). |doc| is the execution's raw record (the
-    service-side walls: suite_common.service_wall). One divergence from the runner (the coordinator's addendum 11):
-    an undecidable /resolve host state never swallows a finding of the checks."""
+    service-side walls: suite_common.service_wall; the client's wall as their upper bound:
+    suite_common.client_wall_bound). An undecidable host state is inconclusive whatever the checks say, as in the
+    runner (B5b-03: lane S5b's addendum-11 divergence is dropped)."""
     info = {} if info is None else info
     outcome, kept = _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info,
                                 doc)
@@ -198,13 +199,18 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
     if kept and recorded != "service_by_design":
         return recorded, "decided by the runner without the checks"
+    if arm == "mcp" and not cases and recorded == "finding" and line.get("service_by_design_case"):
+        # B5b-10: with no table a by-design finding (a relayed deadline's budget_respected) is the runner's mark as
+        # its service_by_design is: kept
+        return recorded, "decided by the runner's by-design case %s (a finding the mark never erases); no table " \
+                         "to replay it" % line.get("service_by_design_case")
     rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
     notes = []
     if arm == "mcp" and cases:
         # async's runner (judge at e334715b): the named cases first, else an answer-triggered case whose wall rule
         # holds or cannot be decided (rule (c)); a case a known wall holds back does not apply
-        walls = []
-        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls)
+        walls, client_notes = [], []
+        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls, client_notes)
         notes = [d for state, d, _ in walls if state != "undecidable"]
         if matched:
             info["by_design_cases"] = [c.get("id") for c in matched]
@@ -212,7 +218,8 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
                 # rule (c): the case's answer matched, its wall rule cannot be decided: inconclusive, the case
                 # recorded; a finding is never erased
                 cid, why = matched[0].get("id"), walls[-1][1]
-                info.update(service_by_design_case=cid, explained_checks=[], verdict_detail="; ".join(notes + [why]))
+                info.update(service_by_design_case=cid, explained_checks=[],
+                            verdict_detail="; ".join(notes + client_notes + [why]))
                 if _finding(new_checks):
                     return "finding", "the table's %s case %s, its wall rule undecidable; a check is a finding" % (
                         how, cid)
@@ -238,7 +245,10 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         info["note"] = "the runner's service_by_design mark is not reproduced by the current table: judged by the " \
                        "checks"
     if arm == "mcp":
-        code, state, detail = sc.host_state_verdict(scenario, line, doc, (answer or {}).get("error"), tool_err)
+        client_notes = []
+        code, state, detail = sc.host_state_verdict(scenario, line, doc, (answer or {}).get("error"), tool_err,
+                                                    client_notes)
+        notes += client_notes
         if detail:
             notes.append(detail)
         if notes:
@@ -247,11 +257,8 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
             info.update(host_state=code, inconclusive_reason=code)
             return "inconclusive", "the MCP runner's host-state rule (%s)" % code
         if state == "undecidable":
-            info["host_state"] = code
-            if _finding(new_checks):   # addendum 11: an undecidable host state never swallows a finding
-                return "finding", "the MCP runner's host-state rule (%s): %s (rule (c)); a check is a finding" % (
-                    code, detail)
-            info["inconclusive_reason"] = detail
+            # rule (c), as the runner: inconclusive whatever the checks say (B5b-03)
+            info.update(host_state=code, inconclusive_reason=detail)
             return "inconclusive", "the MCP runner's host-state rule (%s): %s (rule (c))" % (code, detail)
     elif notes:
         info["verdict_detail"] = "; ".join(notes)

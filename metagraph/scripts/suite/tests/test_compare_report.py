@@ -1021,6 +1021,59 @@ class ReviewFixesTest(unittest.TestCase):
                                 cases, self.dir)
         self.assertEqual((res["class"], res["undecidable_repeats"]), ("not_comparable", [0]))
 
+    def test_undecidable_wall_rule_is_no_host_state(self):
+        # B5b-09: a relayed /pattern deadline (code search_failed) whose wall rule is undecidable is no host state:
+        # not_comparable by "undecidable plausibility", its reason replayed for a line recorded without it
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        s = dict(scen("N-1", "N"), request={"time_budget_ms": 60000})
+        st = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
+        err = {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be written"}
+        dead = self.raw_line("N-1", "direct-local", 0, http=503, error={"code": "deadline", "text": "late"},
+                             outcome="inconclusive", checks=[{"check": "status", "outcome": "inconclusive",
+                                                              "detail": ""}])
+        why = "no service-side timing: plausibility undecidable"
+        relay = self.raw_line("N-1", "mcp", 0, http=502, error=err, outcome="inconclusive", checks=st,
+                              inconclusive_reason=why, mcp_phases={})
+        self.assertFalse(cmp.host_state_line(relay, self.dir, s))
+        res = cmp.mcp_agreement({0: relay}, {"direct-local": {0: dead}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["by"], res["undecidable_repeats"]),
+                         ("not_comparable", "undecidable plausibility", [0]))
+        self.assertNotIn("host_state_repeats", res)
+        bare = dict(relay)
+        bare.pop("inconclusive_reason")
+        self.assertEqual(cmp.inconclusive_reason(bare, s, self.dir, cases), why)
+        self.assertEqual(cmp.inconclusive_reason(bare, s, self.dir), "checks")   # no table: the checks
+        # a host-state line keeps its reading
+        r = {"id": "R-1", "route": "POST /resolve", "request": {}, "mcp": {"tool": "traverse_resolve",
+                                                                           "arguments": {"time_budget_ms": 20000}},
+             "expect": [{"check": "status", "args": {"http": 200}}]}
+        rdl = self.raw_line("R-1", "mcp", 0, http=503, outcome="inconclusive", inconclusive_reason=why,
+                            error={"code": "traversal_resolve_deadline", "text": "late"}, mcp_phases={})
+        self.assertTrue(cmp.host_state_line(rdl, self.dir, r))
+
+    def test_client_wall_bound_in_the_comparison(self):
+        # B5b-01: M-planted-0016's relayed deadline after 5 ms by the client's wall (no service-side wall): the
+        # answer-triggered case does not apply, the checks are compared (a disagreement with a passing direct arm)
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        s = dict(scen("M-1", "M"), request={"time_budget_ms": 60000},
+                 mcp={"tool": "pattern_search", "arguments": {"time_budget_ms": 60000}})
+        st = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
+        err = {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be written"}
+        relay = self.raw_line("M-1", "mcp", 0, http=502, error=err, outcome="fail", checks=st, mcp_phases={})
+        doc = {"answer": {"http": 502, "body": None, "error": err},
+               "calls": [{"tool": "pattern_search", "t0": 1000.0, "t1": 1000.002, "timed": True, "payload": {}},
+                         {"tool": "get_status", "t0": 1000.002, "t1": 1000.005, "timed": True,
+                          "payload": {"terminal": True, "state": "failed"}}]}
+        sc.write_gz_json(os.path.join(self.dir, relay["raw"]), doc)
+        ok = self.raw_line("M-1", "direct-local", 0, checks=[{"check": "status", "outcome": "pass", "detail": ""}])
+        res = cmp.mcp_agreement({0: relay}, {"direct-local": {0: ok}}, s, cases, self.dir)
+        self.assertEqual(res["class"], "disagree")
+        doc["calls"][1]["t1"] = 1061.0    # 61 s: not below the threshold: undecidable
+        sc.write_gz_json(os.path.join(self.dir, relay["raw"]), doc)
+        res = cmp.mcp_agreement({0: dict(relay, outcome="inconclusive")}, {"direct-local": {0: ok}}, s, cases,
+                                self.dir)
+        self.assertEqual(res["class"], "not_comparable")
+
     def test_table_of_the_reevaluation(self):
         # B-10: compare --reevaluated reads the table the re-evaluation replayed and warns on another one
         other = os.path.join(self.dir, "other.json")

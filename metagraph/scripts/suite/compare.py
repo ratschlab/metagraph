@@ -437,12 +437,15 @@ def _field_matches(observed, case_field):
 def host_state_line(line, run_dir, scenario=None):
     """Whether an MCP execution is inconclusive by a host state (MCP_HOST_STATE_CODES) that the scenario does not
     expect and whose wall the plausibility rule admits, or cannot decide (rule (c)) (suite_common.host_state_verdict
-    on the raw record's service-side wall; B-09, A-11): it reads neither for nor against a case or the direct arm."""
+    on the raw record's service-side wall; B-09, A-11): it reads neither for nor against a case or the direct arm.
+    Only an answer refused with a host-state code: an answer-triggered case's undecidable wall rule (a relayed
+    /pattern deadline, code search_failed) is no host state (B5b-09; mcp_agreement's undecidable branch)."""
     if line.get("outcome") != "inconclusive":
         return False
+    code = (line.get("error") or {}).get("code") if isinstance(line.get("error"), dict) else None
     why = line.get("inconclusive_reason")
-    if why is not None:
-        return why in sc.UNDECIDABLE or str(why) in MCP_HOST_STATE_CODES
+    if why is not None and code is not None:
+        return str(code) in MCP_HOST_STATE_CODES and (why in sc.UNDECIDABLE or str(why) in MCP_HOST_STATE_CODES)
     ans, terr, doc = mcp_view(line, run_dir, with_doc=True)
     code, state, _ = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error") or mcp_error(line, run_dir), terr)
     return code is not None and state in ("host_state", "undecidable")
@@ -930,7 +933,7 @@ def service_answers(want, answer, tool_error=None):
     return _field_matches((tool_error or {}).get("field", err.get("field")), want["field"])
 
 
-def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None):
+def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, notes=None):
     """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why at e334715b: every case
     the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
     either refusals or answers, never both, and several named answered cases apply together); else the first
@@ -938,7 +941,8 @@ def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, 
     any) holds for the execution or cannot be decided (|line| and its raw record |doc|: suite_common.wall_rule_verdict,
     peer review R1, rule (c); a case a known wall holds back does not apply and matching continues)
     ("answer-triggered"); ([], None). |walls| (a list) receives each wall rule's (state, detail, case id): an
-    undecidable one last, with its case returned."""
+    undecidable one last, with its case returned; |notes| (a list) why the client's wall decided nothing
+    (suite_common.wall_rule_verdict)."""
     if answer is None:
         return [], None
     named = [c for c in named_cases(cases, scenario) if service_answers(c.get("service_answer"), answer, tool_error)]
@@ -955,7 +959,7 @@ def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, 
         rule = case["answer_match"].get("wall_rule")
         if rule is None:
             return [case], "answer-triggered"
-        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc)
+        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc, notes)
         if walls is not None:
             walls.append((state, detail, case.get("id")))
         if state in ("holds", "undecidable"):
@@ -1614,17 +1618,25 @@ def resources(lines, index):
 # ---------------------------------------------------------------------------------------------------------------
 # the comparison
 
-def inconclusive_reason(line, scenario, run_dir):
+def inconclusive_reason(line, scenario, run_dir, cases=None):
     """An inconclusive execution's class (async's runner at e334715b, the line's inconclusive_reason): rule (c)'s
     text (no service-side timing / no threshold known: plausibility undecidable), the host-state code, or "checks"
-    (the checks decided); for a line recorded without the field the same, read from the raw record; None for any
-    other outcome."""
+    (the checks decided); for a line recorded without the field the same, read from the raw record: the runner's
+    order, an answer-triggered case of |cases| whose wall rule is undecidable (B5b-09), else the host-state rule;
+    None for any other outcome."""
     if line.get("outcome") != "inconclusive":
         return None
     if line.get("inconclusive_reason"):
         return str(line["inconclusive_reason"])
     if line.get("arm") == "mcp":
         ans, terr, doc = mcp_view(line, run_dir, with_doc=True)
+        if cases:
+            walls = []
+            matched, _ = case_matches(cases, scenario, ans, terr, line, doc, walls)
+            if matched and walls and walls[-1][0] == "undecidable":
+                return walls[-1][1]
+            if matched:
+                return "checks"
         code, state, detail = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error"), terr)
         if state == "host_state":
             return code
@@ -1785,7 +1797,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             resources_out.setdefault(area, {})[arm] = resources(lines, index)
     by_reason = {}
     for r in rows:
-        why = inconclusive_reason(r, scen_by_id.get(r.get("scenario")), run_dir)
+        why = inconclusive_reason(r, scen_by_id.get(r.get("scenario")), run_dir, cases)
         if why is not None:
             arm_counts = by_reason.setdefault(r.get("arm"), {})
             arm_counts[why] = arm_counts.get(why, 0) + 1

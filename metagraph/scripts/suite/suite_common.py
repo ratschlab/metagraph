@@ -367,22 +367,17 @@ def _number_or_none(v):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def scenario_budget_ms(scenario):
-    """The time budget a scenario's request states (bounds.time_budget_ms, else time_budget_ms), or None."""
-    req = (scenario or {}).get("request")
-    if not isinstance(req, dict):
-        return None
-    bounds = req.get("bounds") if isinstance(req.get("bounds"), dict) else {}
-    budget = _number_or_none(bounds.get("time_budget_ms"))
-    return budget if budget is not None else _number_or_none(req.get("time_budget_ms"))
-
-
 # ---------------------------------------------------------------------------------------------------------------
-# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at 1b33afe8: peer
+# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at e334715b: peer
 # review R1-R3, host_state_plausible, wall_rule_holds, service_wall, resolve_timeout_least), mirrored for the offline
 # re-evaluation and the comparator, with the design lead's rule (c): where no threshold or no service-side wall is
 # known the plausibility is undecidable, and the execution is inconclusive for that reason (not a host state, not by
-# design, not failed on that ground). Each threshold is one function, so a changed bound changes one place.
+# design, not failed on that ground). Lane S5c adds async's rules of the coordinator's addendum 1 to lane S5c (the
+# runner's commit follows; each is one function here, aligned when it arrives): a /resolve deadline on a discovery
+# without a budget is implausible (discovery_without_budget, A2-01), the client's wall is an upper bound of the
+# service-side one where that is unknown (client_wall_bound, B5b-01), and a resolve_timeout is judged against the
+# bound it states (resolve_timeout_least, item 4). Each threshold is one function, so a changed bound changes one
+# place.
 
 # /resolve's finalisation reserve when the refusal states none (app/traversal/resolve.py DEFAULT_FINALIZE_RESERVE_MS)
 RESOLVE_RESERVE_MS = 250.0
@@ -393,6 +388,17 @@ RESOLVE_MIN_ALLOWANCE_MS = 10000.0
 STATED_TIMEOUT = re.compile(r"\bwithin ([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?) s\b")
 # the slack a resolve_timeout's least wall gets (clock and phase differences between the service and the client)
 STATED_TIMEOUT_SLACK_MS = 1000.0
+# the service's write timeout of one send to the host (app/traversal/backend.py, TRAVERSAL_HTTP_WRITE_TIMEOUT_S = 10 s):
+# a resolve_timeout that states no phase may be a write-phase one, so its legacy threshold is capped there (V-04)
+RESOLVE_WRITE_TIMEOUT_MS = 10000.0
+# the phases a resolve_timeout states (the service change of addendum 1 item 4: timeout_phase, bound_s, elapsed_ms)
+RESOLVE_TIMEOUT_PHASES = ("read", "write", "deadline")
+# the slack the client's wall gets as the upper bound of the service-side wall (addendum 1 item 2: an epoch clock
+# step during the execution, VERIFY-REVIEW V-03)
+CLIENT_WALL_SLACK_MS = 1000.0
+WALL_CLIENT = "the client wall from the first submit call's t0 to the answering call's t1"
+# the verdict_detail of a /resolve deadline on a discovery that sent no budget (addendum 1 item 1)
+DISCOVERY_NO_DEADLINE = "a /resolve deadline on a discovery without a budget: no deadline was sent"
 # the host's pattern finalisation reserve when the relayed text states none (SPEC-pattern §10.2: 250 in version 1)
 PATTERN_RESERVE_MS = 250.0
 # the reserve the host's deadline text states ("... (60000 ms, the finalisation reserve of 250 ms included)")
@@ -523,16 +529,27 @@ def service_wall(scenario, line, doc=None):
 
 
 def resolve_timeout_least(scenario, error, tool_error):
-    """(the least plausible wall of a resolve_timeout, the rule as stated), R2: max(A, B) - 1000 ms of whichever is
-    known, A = time_budget_ms (the MCP arguments', else the tool error's) + reserve (the tool error's, else 250 ms)
-    + 10,000 ms, B = the timeout the refusal states ("within <N> s" of its text, else of the tool error's message)
-    x 1000; (None, why) with neither."""
+    """(the least plausible wall of a resolve_timeout, the rule as stated), addendum 1 item 4 (async's rule; the
+    service states the phase that timed out): a refusal stating timeout_phase (read | write | deadline) and bound_s
+    (the bound that fired; the tool error's, else the answer error's): bound_s x 1000 - 1000 ms, any phase, the phase
+    named in the rule. A legacy refusal (no stated phase and bound): min(10,000 ms, max(A, B)) - 1000 ms of whichever
+    of A, B is known (R2, capped by the write phase's 10 s timeout, V-04), A = time_budget_ms (the MCP arguments',
+    else the tool error's) + reserve (the tool error's, else 250 ms) + 10,000 ms, B = the timeout the refusal states
+    ("within <N> s" of its text, else of the tool error's message) x 1000; (None, why) with neither."""
     te = tool_error if isinstance(tool_error, dict) else {}
+    err = error if isinstance(error, dict) else {}
+    phase = te.get("timeout_phase", err.get("timeout_phase"))
+    bound_s = _number_or_none(te.get("bound_s", err.get("bound_s")))
+    if phase is not None and bound_s is not None:
+        least = bound_s * 1000.0 - STATED_TIMEOUT_SLACK_MS
+        return least, "the stated %s-phase bound %g s - 1000 ms%s" % (
+            phase, bound_s, "" if str(phase) in RESOLVE_TIMEOUT_PHASES else " (a phase outside %s)" % (
+                "/".join(RESOLVE_TIMEOUT_PHASES)))
     asked = mcp_budget_ms(scenario)
     budget = asked if asked is not None else _number_or_none(te.get("time_budget_ms"))
     reserve = _number_or_none(te.get("finalize_reserve_ms"))
     reserve = RESOLVE_RESERVE_MS if reserve is None else reserve
-    text = str((error or {}).get("text") or "") if isinstance(error, dict) else ""
+    text = str(err.get("text") or "")
     m = STATED_TIMEOUT.search(text) or STATED_TIMEOUT.search(str(te.get("message") or ""))
     terms = []
     if budget is not None:
@@ -545,13 +562,16 @@ def resolve_timeout_least(scenario, error, tool_error):
         return None, "no time budget known and no stated timeout"
     top = max(t for t, _ in terms)
     named = terms[0][1] if len(terms) == 1 else "max(%s)" % ", ".join(why for _, why in terms)
-    return top - STATED_TIMEOUT_SLACK_MS, "%s - 1000 ms" % named
+    least = min(RESOLVE_WRITE_TIMEOUT_MS, top)
+    return least - STATED_TIMEOUT_SLACK_MS, "min(%g ms (the write phase), %s) - 1000 ms (no stated phase)" % (
+        RESOLVE_WRITE_TIMEOUT_MS, named)
 
 
 def resolve_deadline_least(scenario, tool_error):
     """(the least plausible wall of a relayed /resolve deadline, the rule as stated): time_budget_ms (the tool
     error's, else the MCP arguments') - finalize_reserve_ms (the tool error's, else 250 ms); (None, why) without a
-    budget."""
+    budget (an explicit-labels resolve the service budgeted itself states it in the tool error; else "budget
+    unknown")."""
     te = tool_error if isinstance(tool_error, dict) else {}
     budget = _number_or_none(te.get("time_budget_ms"))
     budget = mcp_budget_ms(scenario) if budget is None else budget
@@ -561,13 +581,81 @@ def resolve_deadline_least(scenario, tool_error):
     return budget - (RESOLVE_RESERVE_MS if reserve is None else reserve), "time_budget_ms - finalize_reserve_ms"
 
 
-def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None):
+def discovery_without_budget(scenario):
+    """Whether a scenario's traverse_resolve names `discover` and no time_budget_ms (addendum 1 item 1, A2-01 of the
+    review of lane S5b): the service sends a /resolve deadline only on request for a discovery (app/traversal/
+    resolve.py plan_budget: a discovery gets none unless asked; only an explicit-labels resolve gets the service's
+    default), and SPEC-labeled-traversal-core §4.5 makes the host's deadline opt-in, so a relayed deadline there is
+    no host state."""
+    if mcp_tool_of(scenario) != "traverse_resolve":
+        return False
+    args = (((scenario or {}).get("mcp") or {}).get("arguments") or {})
+    return bool(args.get("discover")) and args.get("time_budget_ms") is None
+
+
+def mcp_api_key_used(line, doc=None):
+    """Whether the MCP arm called the service with an API key (then a later call may be folded onto an earlier job
+    or search, and the client's wall bounds nothing: client_wall_bound skips it). PROVISIONAL field, until async's
+    runner states how it records the key: `mcp_auth` "api_key" on the line or the raw record (the e334715b runner
+    calls anonymously and records nothing: anonymous)."""
+    for src in (line or {}, doc or {}):
+        if isinstance(src, dict) and str(src.get("mcp_auth") or "").lower() in ("api_key", "key", "authenticated"):
+            return True
+    return False
+
+
+# the calls whose return carries an MCP execution's answer: the submit itself (a refusal, an inline resolve), a
+# search's terminal status, a resolve job's results
+ANSWERING_TOOLS = ("get_status", "traverse_results")
+
+
+def client_wall_bound(scenario, line, doc=None):
+    """(the client's wall in ms as an upper bound of the service-side wall, why) of an MCP execution (addendum 1
+    item 2, B5b-01): the t1 of the call that returned the answer (the last timed submit, terminal get_status or
+    traverse_results call of the raw record) minus the t0 of the execution's FIRST submit call (a busy retry's first
+    call may have started the service's work: idempotency_conflict, V-03). (None, why) when the runner called the MCP
+    with an API key (mcp_api_key_used: rule (2) is skipped) or the raw record holds no such calls."""
+    if mcp_api_key_used(line, doc):
+        return None, "the runner called the MCP with an API key: the client-wall bound is skipped"
+    tool = mcp_tool_of(scenario)
+    calls = [c for c in (doc or {}).get("calls") or [] if isinstance(c, dict)]
+    submits = [c for c in calls if c.get("tool") == tool and _number_or_none(c.get("t0")) is not None]
+    if not tool or not submits:
+        return None, "no client timing on record"
+    t0 = _number_or_none(submits[0].get("t0"))
+    answering = [c for c in calls if c.get("timed", True) is not False and _number_or_none(c.get("t1")) is not None
+                 and (c.get("tool") == tool or (c.get("tool") == "traverse_results") or (
+                     c.get("tool") == "get_status" and isinstance(c.get("payload"), dict)
+                     and c["payload"].get("terminal") is True))]
+    if not answering:
+        return None, "no client timing on record"
+    return (_number_or_none(answering[-1].get("t1")) - t0) * 1000.0, WALL_CLIENT
+
+
+def _client_premature(scenario, line, doc, least, notes):
+    """(True, detail) when the client's wall (client_wall_bound) + CLIENT_WALL_SLACK_MS lies below |least|: the
+    execution is provably premature although its service-side wall is unknown; else (False, None), stating in
+    |notes| (a list, optional) that the bound was skipped for an API key (the one case addendum 1 item 2 has the
+    detail say)."""
+    bound, how = client_wall_bound(scenario, line, doc)
+    if bound is not None and bound + CLIENT_WALL_SLACK_MS < least:
+        return True, "within %.0f ms (%s) + %.0f ms slack" % (bound, how, CLIENT_WALL_SLACK_MS)
+    if notes is not None and mcp_api_key_used(line, doc):
+        notes.append(how)
+    return False, None
+
+
+def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, notes=None):
     """(code, state, detail) of an MCP execution answered with a host-state code (MCP_HOST_STATE_CODES) the scenario
     does not expect: state "host_state" (inconclusive by the runner's host-state rule), "undecidable" (rule (c): no
-    threshold or no service-side wall known; inconclusive, detail UNDECIDABLE_NO_THRESHOLD / UNDECIDABLE_NO_WALL) or
-    "not_plausible" (a known wall below the threshold: the checks judge); (None, None, None) for any other answer.
-    resolve_timeout: resolve_timeout_least; traversal_resolve_deadline: resolve_deadline_least; the wall:
-    service_wall; uninterruptible_overrun_exceeds_allowance (the R20 lockout answers at once): no wall rule."""
+    threshold or no service-side wall known and the client's wall not below the threshold; inconclusive, detail
+    UNDECIDABLE_NO_THRESHOLD / UNDECIDABLE_NO_WALL) or "not_plausible" (the checks judge: a known wall below the
+    threshold; the client's wall + 1 s below it where the service-side wall is unknown, B5b-01; a relayed /resolve
+    deadline on a discovery that sent no budget, A2-01); (None, None, None) for any other answer.
+    traversal_resolve_deadline: discovery_without_budget, then resolve_deadline_least; resolve_timeout:
+    resolve_timeout_least; the wall: service_wall, else client_wall_bound; uninterruptible_overrun_exceeds_allowance
+    (the R20 lockout answers at once): no wall rule. |notes| (a list, optional) receives why the client's wall did
+    not decide an undecidable wall (the runner's verdict_detail)."""
     err = error if isinstance(error, dict) else (line or {}).get("error")
     err = err if isinstance(err, dict) else {}
     code = err.get("code")
@@ -581,6 +669,8 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None):
     if tool_error is None:
         tool_error = tool_error_of(doc, {"error": err})
     if code == "traversal_resolve_deadline":
+        if discovery_without_budget(scenario):
+            return code, "not_plausible", DISCOVERY_NO_DEADLINE
         least, rule = resolve_deadline_least(scenario, tool_error)
     else:
         least, rule = resolve_timeout_least(scenario, err, tool_error)
@@ -588,6 +678,10 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None):
         return code, "undecidable", UNDECIDABLE_NO_THRESHOLD
     wall, which = service_wall(scenario, line, doc)
     if wall is None:
+        premature, how = _client_premature(scenario, line, doc, least, notes)
+        if premature:
+            return code, "not_plausible", "%s %s, before %s = %.0f ms: provably premature, not a host state" % (
+                code, how, rule, least)
         return code, "undecidable", UNDECIDABLE_NO_WALL
     if wall < least:
         return code, "not_plausible", "%s after %.0f ms (%s), before %s = %.0f ms: not a host state" % (
@@ -595,13 +689,15 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None):
     return code, "host_state", "%s after %.0f ms (%s) >= %s = %.0f ms" % (code, wall, which, rule, least)
 
 
-def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None):
+def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None, notes=None):
     """(state, detail) of an answer-triggered case's answer_match.wall_rule for an MCP execution (R1; async's
     wall_rule_holds at e334715b): budget_minus_reserve: the service-side wall (service_wall) >= the request's
     time_budget_ms (request_budget_ms) - the finalisation reserve the answer's error text states, else 250 ms. state
-    "holds", "held_back" (a known wall below the threshold, or an unknown rule: the case does not apply, matching
-    continues) or "undecidable" (rule (c): no request budget, UNDECIDABLE_NO_THRESHOLD, or no service-side wall,
-    UNDECIDABLE_NO_WALL: the case matched, the execution is inconclusive)."""
+    "holds", "held_back" (a known wall below the threshold; the client's wall + 1 s below it where the service-side
+    wall is unknown, B5b-01; an unknown rule: the case does not apply, matching continues) or "undecidable" (rule
+    (c): no request budget, UNDECIDABLE_NO_THRESHOLD, or no service-side wall and the client's not below the
+    threshold, UNDECIDABLE_NO_WALL: the case matched, the execution is inconclusive). |notes| as
+    host_state_verdict's."""
     if rule not in WALL_RULE_VALUES:
         return "held_back", "%s: unknown wall_rule %r: the case does not apply" % (case_id, rule)
     budget = request_budget_ms(scenario)
@@ -614,6 +710,10 @@ def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None):
     terms = "time_budget_ms %g - reserve %g (%s) = %g ms" % (budget, reserve, "stated" if m else "default", least)
     wall, which = service_wall(scenario, line, doc)
     if wall is None:
+        premature, how = _client_premature(scenario, line, doc, least, notes)
+        if premature:
+            return "held_back", "%s (wall_rule %s): %s, before %s: provably premature, the case does not apply" % (
+                case_id, rule, how, terms)
         return "undecidable", UNDECIDABLE_NO_WALL
     if wall < least:
         return "held_back", "%s (wall_rule %s): after %.0f ms (%s), before %s: the case does not apply" % (
