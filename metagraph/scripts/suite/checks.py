@@ -3745,8 +3745,10 @@ def _limitations_naming(r: dict, knob: str) -> List[dict]:
 def check_traverse_stop(sc, ans, a, arm):
     """A stated stop of the knob that was set (SPEC-labeled-traversal-core §7.0): outcome.walks among args.walks;
     with args.resource (time, memory, work: a request budget) a resource_stop of that resource whose `requested` is
-    the request's knob value; with args.cap_reason, every requested arm of a walked seed truncated with that
-    cap_trigger reason; and a limitation naming args.knob (a walk_domain on the arm, or on a failed seed)."""
+    the request's knob value; with args.cap_reason, on a walked seed some requested arm truncated (or pruned) with
+    that cap_trigger reason and every other one either so or complete (§6.7: an arm whose walks all ended for a
+    semantic reason before the cap stays complete, for a per-arm cap and a per-seed stop alike); and a limitation
+    naming args.knob (a walk_domain on the arm, or on a failed seed)."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     walks = (r.get("outcome") or {}).get("walks")
@@ -3765,12 +3767,19 @@ def check_traverse_stop(sc, ans, a, arm):
         if want is not None and _number(rs.get("requested")) != want:
             return FAIL, "resource_stop.requested %r, the request's %s is %r" % (rs.get("requested"), knob, want)
     if a.get("cap_reason") and "arms" in r:
+        capped, ended = [], []
         for side in _arms_of(sc, i):
             armo = r["arms"].get(side) or {}
             trig = (armo.get("cap_trigger") or {}).get("reason")
-            if armo.get("status") == "complete" or trig != a["cap_reason"]:
-                return FAIL, "%s arm status %r, cap_trigger %r, expected truncated by %s" % (
+            if armo.get("status") == "complete":
+                ended.append(side)
+            elif trig == a["cap_reason"] and armo.get("status") in ("truncated", "pruned"):
+                capped.append(side)
+            else:
+                return FAIL, "%s arm status %r, cap_trigger %r, expected truncated by %s or complete" % (
                     side, armo.get("status"), trig, a["cap_reason"])
+        if not capped:
+            return FAIL, "no requested arm truncated by %s (%s complete)" % (a["cap_reason"], "/".join(ended))
     lims = _limitations_naming(r, knob)
     if not lims:
         return FAIL, "no limitation names %s" % knob

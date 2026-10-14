@@ -1897,3 +1897,10 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   1,000 ms: wall 900 or 999 fails (was inconclusive), 1,000 inconclusive, 600 fails as before. Every recorded 503
   deadline of v3 and v4 (R-budget, R-twin, R-pos-0027, the /pattern ones) came at or after its budget (the earliest
   /resolve one 6,064 ms for 3,000): no outcome moves. README lines of lanes S5 and S5b corrected.
+- /traverse, traverse_stop with cap_reason: some requested arm of the walked seed must be truncated (or pruned) by
+  that cap and every other one either so or `complete`; it required every arm truncated by the cap, a false FAIL
+  under direction both, where an arm whose walks all ended for a semantic reason before the cap stays complete
+  (SPEC-labeled-traversal-core §6.7), for a per-arm cap (max_output_bp, max_paths, max_live_paths) and a per-seed
+  stop (max_steps, time_budget, resource_limit) alike. Both arms complete fails ("no requested arm truncated by
+  ..."), an arm truncated by another cap fails as before. Recorded: every traverse_stop answer of v3 and v4
+  (T-budget-0001..0004, T-caps-0001) has each requested arm truncated by the cap; no outcome moves.

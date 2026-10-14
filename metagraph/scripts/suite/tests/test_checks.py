@@ -2800,6 +2800,29 @@ class TraverseChecks(unittest.TestCase):
         unset = res("failed", rs={"resource": "memory", "requested": 2}, lims=["bounds.max_memory_mb"], arms=False)
         self.assertEqual(outcome(sc, unset, "traverse_stop", knob="bounds.max_memory_mb", resource="memory",
                                  walks=["partial", "failed"])[0], "fail")
+        # direction both: an arm whose walks all ended before the cap stays complete (SPEC-labeled-traversal-core
+        # §6.7), for a per-arm cap and a per-seed stop alike; some arm must show the cap
+        both = dict(sc, request={"seeds": [{"sequence": "A" * 40}], "strategy": {"direction": "both", "bounds": {
+            "max_output_bp": 50, "max_steps": 5}}})
+
+        def arm(status, trig, knob):
+            return {"status": status, "complete_to_bp": 5, "cap_trigger": {"reason": trig} if trig else None,
+                    "limitations": [{"kind": "walk_domain", "knob": knob}] if trig else []}
+
+        def two(left, right):
+            return ok_answer({"results": [{"outcome": {"walks": "partial"}, "limitations": [], "resource_stop": None,
+                                           "arms": {"left": left, "right": right}}]})
+        for cap, knob in (("max_output_bp", "bounds.max_output_bp"), ("max_steps", "bounds.max_steps")):
+            args = dict(knob=knob, cap_reason=cap)
+            self.assertEqual(outcome(both, two(arm("complete", None, knob), arm("truncated", cap, knob)),
+                                     "traverse_stop", **args)[0], "pass", cap)
+            self.assertEqual(outcome(both, two(arm("truncated", cap, knob), arm("truncated", cap, knob)),
+                                     "traverse_stop", **args)[0], "pass", cap)
+            o, d = outcome(both, two(arm("complete", None, knob), arm("complete", None, knob)), "traverse_stop", **args)
+            self.assertEqual(o, "fail", cap)
+            self.assertIn("no requested arm truncated by %s" % cap, d)
+            self.assertEqual(outcome(both, two(arm("truncated", "max_paths", knob), arm("truncated", cap, knob)),
+                                     "traverse_stop", **args)[0], "fail", cap)
 
 
     def test_walk_end_and_outcome(self):
