@@ -1833,3 +1833,21 @@ failing on 14552938.
 - v4 moves (the defect's own instances): R-budget-0002 and R-twin-0002, byte-identical 503 deadline bodies on both
   direct arms, direct-local inconclusive (its deadline within the budget's tolerance), direct-remote a finding
   (budget_respected: the deadline delivered 9.5 s / 25.5 s after the budget), were identical and are disagree.
+
+### The MCP arm's reference, per repeat and check item
+- check_agreement compared every MCP execution with one whole direct arm (direct-local whenever it had a line) and
+  skipped every item that arm left inconclusive or not_exposed, so a direct-local 503 under load hid an MCP failure
+  direct-remote had decided (class agree, or not_comparable when every item was skipped). Now the reference item of
+  each check and occurrence is direct-local's unless direct-local left it undecided while the MCP item and
+  direct-remote's item of the same repeat (else its first) are decided: then direct-remote's is taken
+  (`compare.reference_checks`). The scenario's entry records `reference_alternative` and `reference_fallbacks`
+  [{repeat, check, occurrence, arm, arm_repeat}] (only when an item fell back); `reference_outcome` is that of the
+  lines the comparison used (a direct-local execution every compared item of which fell back is left out, the
+  direct-remote executions that gave an item are in; without a fallback it is unchanged). The report's agreement
+  depth reads the same items. The by-design pairs were already judged on every repeat of both direct arms (lane G2).
+- Moves: v4 N-usecase-0008 and R-pos-0027 not_comparable -> agree (direct-local r0 a 503 deadline, direct-remote r0
+  decides 6 / 5 items), T-walk-0004 and T-repeat-0004 one more item compared (walk_in_record from direct-remote);
+  v3 M-planted-0017 not_comparable -> agree, and six v3 scenarios already `disagree` by an MCP runner_error now list
+  the error line's failing items against direct-remote's (M-planted-0016, M-protein-0002 / -0007,
+  N-nearmiss-0006 / -0007 / -0013). gate.py's uncompared_properties (require_agreement only; the shipped policy does
+  not set it) still reads the reference arm alone, so it is stricter than compare where an item fell back.

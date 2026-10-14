@@ -517,7 +517,8 @@ def agreement_depth(comp, rows, is_property):
     """How much an MCP `agree` establishes, per scenario (VERIFY-B): compare's agree means the checks both arms
     evaluated agree, not that the answers are equal or right. Each agreeing scenario's property checks
     (checks.is_property; the generic ones, e.g. budget_respected which the MCP never sees, do not count) on each MCP
-    repeat against the reference arm's same repeat (else its first): {scenario: {class (DEPTH_CLASSES), not_compared
+    repeat against the reference arm's same repeat (else its first; an item compare took from the other direct arm,
+    reference_fallbacks, from that arm's: compare.reference_checks): {scenario: {class (DEPTH_CLASSES), not_compared
     (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
     where the MCP does not expose them)}}."""
     by = {}
@@ -533,10 +534,14 @@ def agreement_depth(comp, rows, is_property):
         if not ref or not mcp:
             continue
         ref0 = ref[min(ref)]
+        # the other direct arm's items where compare took a reference item from it (reference_fallbacks)
+        alt = ((by.get(sid) or {}).get(ma.get("reference_alternative")) or {}) if ma.get("reference_fallbacks") else {}
+        alt0 = alt[min(alt)] if alt else None
         has_prop, compared, skipped, hidden = False, set(), set(), set()
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
-            theirs = (ref.get(rep) or ref0).get("checks") or []
             mine = mcp[rep].get("checks") or []
+            theirs, _ = cmp.reference_checks(mine, (ref.get(rep) or ref0).get("checks") or [],
+                                             (alt.get(rep) or alt0 or {}).get("checks") if alt else None)
             has_prop = has_prop or any(is_property(c.get("check")) for c in mine + theirs)
             ca, cb = {}, {}
             for c in mine:

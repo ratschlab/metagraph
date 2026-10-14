@@ -1946,6 +1946,55 @@ def _direct_ref(direct_lines):
     return None, None
 
 
+def _other_direct(direct_lines, arm):
+    """(the other direct arm, its lines) beside the reference |arm| in |direct_lines|, or (None, None)."""
+    for other in ("direct-local", "direct-remote"):
+        if other != arm and (direct_lines or {}).get(other):
+            return other, direct_lines[other]
+    return None, None
+
+
+# a check item that tested nothing: never compared, and a reference item of this kind falls back to the other arm's
+UNDECIDED_CHECK_OUTCOMES = ("inconclusive", "not_exposed")
+
+
+def _decided(outcome):
+    return outcome is not None and outcome not in UNDECIDED_CHECK_OUTCOMES
+
+
+def reference_checks(mine, primary, alternative=None):
+    """(the reference check items an MCP execution's items |mine| are compared with, the fallbacks): the preferred
+    direct execution's items (|primary|), except an item it left undecided (inconclusive, not_exposed) where the MCP
+    item of the same check and occurrence is decided and the other direct arm's execution (|alternative|) decided it:
+    that one's item is taken instead, so a check one direct arm could not test (an allowed 503 under load) does not
+    hide an MCP result the other arm decided. fallbacks: [(check, occurrence)] taken from |alternative|."""
+    if not alternative:
+        return list(primary or []), []
+    occurrence = lambda checks: dict(((c.get("check"), k), c) for c, k in _with_occurrence(checks))  # noqa: E731
+    own, other = occurrence(mine), occurrence(alternative)
+    out, fallbacks = [], []
+    for c, k in _with_occurrence(primary):
+        key = (c.get("check"), k)
+        alt = other.get(key)
+        if not _decided(c.get("outcome")) and _decided((own.get(key) or {}).get("outcome")) and alt is not None \
+                and _decided(alt.get("outcome")):
+            out.append(alt)
+            fallbacks.append(key)
+        else:
+            out.append(c)
+    return out, fallbacks
+
+
+def _with_occurrence(checks):
+    """[(item, its occurrence among the items of its check name)] in list order."""
+    seen, out = {}, []
+    for c in checks or []:
+        name = c.get("check")
+        out.append((c, seen.get(name, 0)))
+        seen[name] = seen.get(name, 0) + 1
+    return out
+
+
 def _split_items(checks, indices):
     """(the items at |indices|, the others, the (name, occurrence) keys of the former) of a check list."""
     keys, seen, picked, rest = set(), {}, [], []
@@ -1972,20 +2021,39 @@ def _split_by_keys(checks, keys):
     return picked, rest
 
 
-def check_agreement(reps, ref, ref_arm, explained=None):
+def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
     """The per-check agreement of MCP executions with the reference direct arm (DESIGN §1.3; ref: {repeat: line},
     each MCP repeat against the reference's same repeat, else its first): `explained` {repeat: item indices} the
     check ITEMS an answered / clamped case explains on that repeat (E of explained_outcome, B5b-06), compared apart
-    with the reference's items of the same check and occurrence: their differences do not count (B-01). The class:
-    disagree (a differing check outside E, or one side alone errored), service_by_design (only items of E differ),
+    with the reference's items of the same check and occurrence: their differences do not count (B-01). |alt|
+    ({repeat: line} of the other direct arm, |alt_arm|): per repeat and check item, a reference item left undecided
+    falls back to that arm's same repeat, else its first (reference_checks), recorded as `reference_fallbacks`; the
+    reference outcome is then that of the lines the comparison used (a reference execution every compared item of
+    which fell back is left out, the other arm's executions that gave an item are in). The class: disagree (a
+    differing check outside E, or one side alone errored), service_by_design (only items of E differ),
     not_comparable (no check compared), agree."""
     explained = explained or {}
     ref0 = ref[min(ref)]
+    alt0 = alt[min(alt)] if alt else None
     differing, by_design, unmatched = [], [], set()
     compared = not_exposed = inconclusive = 0
+    fallbacks, emptied, kept, alt_used = [], [], [], []
     for r in reps:
-        theirs = (ref.get(r.get("repeat"), ref0) or {}).get("checks") or []
+        primary = ref.get(r.get("repeat"), ref0) or {}
+        second = (alt.get(r.get("repeat"), alt0) or {}) if alt else None
         mine = r.get("checks") or []
+        theirs, fb = reference_checks(mine, primary.get("checks") or [], (second or {}).get("checks"))
+        if fb:
+            fallbacks.extend({"repeat": r.get("repeat"), "check": name, "occurrence": k, "arm": alt_arm,
+                              "arm_repeat": second.get("repeat")} for name, k in fb)
+            alt_used.append(second)
+            # the preferred execution stays a reference line when an item was compared against it
+            own = dict(((c.get("check"), k), c.get("outcome")) for c, k in _with_occurrence(mine))
+            used = any(_decided(c.get("outcome")) and _decided(own.get((c.get("check"), k)))
+                       and (c.get("check"), k) not in fb for c, k in _with_occurrence(primary.get("checks")))
+            (kept if used else emptied).append(primary)
+        else:
+            kept.append(primary)
         e = set(explained.get(r.get("repeat")) or ())
         if e:
             mine_e, mine, keys = _split_items(mine, e)
@@ -2003,7 +2071,12 @@ def check_agreement(reps, ref, ref_arm, explained=None):
             x["repeat"] = r.get("repeat")
         differing.extend(d)
     mcp_out = aggregate_outcome([r.get("outcome") for r in reps])
-    ref_out = aggregate_outcome([x.get("outcome") for x in ref.values()])
+    # the reference arm's executions, less those every compared item of which fell back, and the other arm's that
+    # gave one
+    dropped = [x for x in emptied if not any(x is y for y in kept)]
+    ref_lines = [x for x in ref.values() if not any(x is y for y in dropped)]
+    ref_lines += [x for i, x in enumerate(alt_used) if not any(x is y for y in alt_used[:i])]
+    ref_out = aggregate_outcome([x.get("outcome") for x in ref_lines])
     # Agreement is on the checks both arms evaluated (DESIGN §1.3: a field the MCP does not expose is recorded,
     # not compared), so a direct failure of a check the MCP cannot see is no disagreement; an execution that
     # errored on one side only is. With no check compared at all there is nothing to agree on (review M2).
@@ -2021,6 +2094,8 @@ def check_agreement(reps, ref, ref_arm, explained=None):
            "checks_inconclusive": inconclusive, "checks_unmatched": sorted(unmatched)}
     if by_design:
         out["explained_differences"] = by_design
+    if fallbacks:
+        out.update(reference_alternative=alt_arm, reference_fallbacks=fallbacks)
     return out
 
 
@@ -2051,7 +2126,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     its direct side (answer_class, direct_mismatch, B-03), a refused / relayed / service-only named case its pair
     (by_design_class), against the direct executions no answer-triggered case explains; the executions an answered /
     clamped case matched, and those no case matched, are compared check by check with the reference direct execution
-    (check_agreement), the failing check items the matched answered cases explain apart (B-01, B5b-06:
+    (check_agreement: direct-local's, a check item it left undecided taken from direct-remote's where that one
+    decided it), the failing check items the matched answered cases explain apart (B-01, B5b-06:
     service_by_design only when nothing else differs; the case is a note); an unmatched execution the MCP runner
     marked service_by_design is, with no table, an unverified by-design part of its own beside the others' check
     agreement, and with a table judged by its checks like any other (B5b-05, B-06). A case id the scenario names that
@@ -2124,8 +2200,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"]
     kept = _unexplained_direct(direct_lines, sides, run_dir)
     k_arm, k_ref = _direct_ref(kept)
-    k_ref0 = k_ref[min(k_ref)] if k_ref else None
-    _, ref = _direct_ref(direct_lines)
+    o_arm, o_ref = _other_direct(kept, k_arm)
     parts = []
     missing = [i for i in case_ids(scenario) if i not in cases]
     if missing and not answered and not any(k[0] == "named" for k in order):
@@ -2157,7 +2232,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                 rest = {"class": "no_direct_reference",
                         "mcp_outcome": aggregate_outcome([r.get("outcome") for r in compared_lines])}
             elif compared_lines:
-                rest = check_agreement(compared_lines, k_ref, k_arm, explained)
+                rest = check_agreement(compared_lines, k_ref, k_arm, explained, o_ref, o_arm)
     if rest is not None:
         if answered:
             rest["by_design_notes"] = dict((str(k), v) for k, v in sorted(answered.items()))
