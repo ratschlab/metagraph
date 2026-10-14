@@ -27,9 +27,10 @@ direct_expectation (http or a list, code or slot_code, the text with digits igno
 text_contains, each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
 (refused_at_submit / relayed: error.code, text_contains, field with alternatives and placeholders where the MCP
 execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
-Each MCP execution is matched as async's runner matches it (e334715b): the cases the scenario names first, else an
-answer-triggered case (answer_match) whose wall rule holds or cannot be decided; a stated key this comparator does
-not know leaves its side unverified.
+Each MCP execution is matched as async's runner matches it (f94b079d; the matcher of e334715b, its wall rule with rule
+2 of 2a8acbaf): the cases the scenario names first, else an answer-triggered case (answer_match) whose wall rule
+holds or cannot be decided; a stated key this comparator does not know leaves its side unverified. The explained
+check items of an answered / clamped case are computed with the table in hand (S5c-05), never read from a line.
 """
 
 import argparse
@@ -869,8 +870,15 @@ def planned_duplicate(a, b, scenario):
     if any(x.get("outcome") not in ("pass", "inconclusive") for x in (a, b)):
         return None
     dup = a if a.get("http") == 409 else b
-    return "%s met its run's retained id (409 duplicate, planned: run_unique %s)" % (
-        dup.get("arm"), scenario.get("run_unique"))
+    other = b if dup is a else a
+    # with an id per run and arm both arms answer alike on a repeat; a split says one arm's state was not the plan
+    # (note 3 of the review of lane S5c)
+    why = ("the id was retained before this arm's first send (a re-run after --resume, or an id another arm or run "
+           "shares)") if not dup.get("repeat") else \
+        "%s's attempt of an earlier repeat was not retained (e.g. a host restart between the repeats)" % (
+            other.get("arm"))
+    return "%s met its run's retained id (409 duplicate, planned: run_unique %s); a split on repeat %s: %s" % (
+        dup.get("arm"), scenario.get("run_unique"), dup.get("repeat") or 0, why)
 
 
 def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, scenario=None):
@@ -1027,16 +1035,16 @@ def service_answers(want, answer, tool_error=None):
     return _field_matches((tool_error or {}).get("field", err.get("field")), want["field"])
 
 
-def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, notes=None):
-    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why at e334715b: every case
+def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None):
+    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (f94b079d): every case
     the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
     either refusals or answers, never both, and several named answered cases apply together); else the first
     answer-triggered case (table order) on its route whose MCP side it matches and whose answer_match.wall_rule (if
     any) holds for the execution or cannot be decided (|line| and its raw record |doc|: suite_common.wall_rule_verdict,
-    peer review R1, rule (c); a case a known wall holds back does not apply and matching continues)
+    peer review R1, rule (c), rule 2; a case a wall holds back does not apply and matching continues)
     ("answer-triggered"); ([], None). |walls| (a list) receives each wall rule's (state, detail, case id): an
-    undecidable one last, with its case returned; |notes| (a list) why the client's wall decided nothing
-    (suite_common.wall_rule_verdict)."""
+    undecidable one last, with its case returned; |warnings| (a list) a recorded client wall the raw record's calls
+    do not reproduce (suite_common.client_wall_ms)."""
     if answer is None:
         return [], None
     named = [c for c in named_cases(cases, scenario) if service_answers(c.get("service_answer"), answer, tool_error)]
@@ -1053,7 +1061,7 @@ def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, 
         rule = case["answer_match"].get("wall_rule")
         if rule is None:
             return [case], "answer-triggered"
-        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc, notes)
+        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc, warnings)
         if walls is not None:
             walls.append((state, detail, case.get("id")))
         if state in ("holds", "undecidable"):
@@ -1112,13 +1120,16 @@ def explained_items(checks, entries):
             and any(entry_explains(entry, c) for entry in entries or [])]
 
 
-def line_explained_items(line, matched):
-    """The explained items of an MCP line an answered / clamped case matched: the line's recorded explained_items
-    (the re-evaluation's), else explained_items against the matched cases' union."""
+def line_explained_items(line, matched, recorded=None):
+    """The explained items of an MCP line an answered / clamped case matched: explained_items of its checks against
+    the matched cases' union, computed with the table in hand as the runner computes E per execution (S5c-05 of the
+    review of lane S5c: a line's recorded explained_items, e.g. of a re-evaluation with another table, is not
+    trusted); |recorded| (a dict, optional) receives {repeat: the recorded list} where the line records another."""
+    items = explained_items(line.get("checks") or [], union_of(matched))
     rec = line.get("explained_items")
-    if isinstance(rec, list) and all(isinstance(i, int) and not isinstance(i, bool) for i in rec):
-        return list(rec)
-    return explained_items(line.get("checks") or [], union_of(matched))
+    if recorded is not None and "explained_items" in line and rec != items:
+        recorded[line.get("repeat")] = rec
+    return items
 
 
 def case_ids(scenario):
@@ -1336,7 +1347,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                                  str((mcp_error(x, run_dir) or {}).get("code")) for x in host))})
     # the runner's matcher, per execution
     groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
-    undecided = []
+    undecided, recorded_items = [], {}
     for r in judged:
         ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
         walls = []
@@ -1347,7 +1358,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         if matched and judged_by_checks(matched[0]):
             _, e, noted = answered_verdict(matched, r.get("checks") or [], sc.outcome_from_checks)
             answered[r.get("repeat")] = noted
-            explained[r.get("repeat")] = line_explained_items(r, matched)
+            explained[r.get("repeat")] = line_explained_items(r, matched, recorded_items)
             explained_names[r.get("repeat")] = e
             plain.append(r)
         elif matched:
@@ -1358,6 +1369,9 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             groups[key][1].append(r)
         else:
             plain.append(r)
+    if recorded_items:
+        # S5c-05: the items are the table's; a line that recorded others (another table) is noted, not trusted
+        note["explained_items_recorded"] = dict((str(k), v) for k, v in sorted(recorded_items.items(), key=str))
     if undecided:
         note["undecidable_repeats"] = [r.get("repeat") for r in undecided]
         if not groups and not plain:
@@ -1775,8 +1789,9 @@ def resources(lines, index):
 # the comparison
 
 def inconclusive_reason(line, scenario, run_dir, cases=None):
-    """An inconclusive execution's class (async's runner at e334715b, the line's inconclusive_reason): rule (c)'s
-    text (no service-side timing / no threshold known: plausibility undecidable), the host-state code, or "checks"
+    """An inconclusive execution's class (async's runner at f94b079d, the line's inconclusive_reason): rule (c)'s
+    text (no service-side timing / no threshold known: plausibility undecidable, without rule 2's API-key note:
+    suite_common.undecidable_class), the host-state code, or "checks"
     (the checks decided); for a line recorded without the field the same, read from the raw record: the runner's
     order, an answer-triggered case of |cases| whose wall rule is undecidable (B5b-09), else the host-state rule;
     None for any other outcome."""
@@ -1790,14 +1805,14 @@ def inconclusive_reason(line, scenario, run_dir, cases=None):
             walls = []
             matched, _ = case_matches(cases, scenario, ans, terr, line, doc, walls)
             if matched and walls and walls[-1][0] == "undecidable":
-                return walls[-1][1]
+                return sc.undecidable_class(walls[-1][1])
             if matched:
                 return "checks"
         code, state, detail = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error"), terr)
         if state == "host_state":
             return code
         if state == "undecidable":
-            return detail
+            return sc.undecidable_class(detail)
     return "checks"
 
 

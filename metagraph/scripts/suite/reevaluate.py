@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Re-evaluates a recorded run OFFLINE with the current checks (no request to any host).
 
-    reevaluate.py RUN_DIR [--checks DIR] [--by-design PATH] [--quiet]
+    reevaluate.py RUN_DIR [--checks DIR] [--by-design PATH] [--mcp-auth anonymous|api_key] [--quiet]
 
 For every arm under RUN_DIR/arms/ and every execution line of its executions.jsonl (the last one per scenario,
 arm and repeat, as merge_run keeps it), the raw answer the runner recorded (raw/...json.gz: both runners keep the
@@ -14,8 +14,8 @@ backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
 own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
-replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at e334715b,
-`judge`, is the reference, with the rules of the coordinator's addendum 1 to lane S5c): the cases the scenario
+replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at f94b079d,
+`judge`, is the reference: e334715b with rules 1, 2 and 4 of 62ee4214, 2a8acbaf, f94b079d): the cases the scenario
 names whose service_answer the answer matches (the field read from the recorded tool error), else the first
 answer-triggered case it matches whose wall rule holds or cannot be decided; a refused / relayed /
 answer-triggered match is service_by_design, finding when a check is a finding (a by-design mark never erases
@@ -27,17 +27,23 @@ matched. A runner's service_by_design mark the current table does not reproduce 
 says so; with no table a runner's mark, and a by-design finding (B5b-10), are kept. Then the host-state rule (an
 unexpected compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of
 suite_common.host_state_verdict admits is inconclusive; one it rejects is judged by the checks, and so is a relayed
-/resolve deadline on a discovery that sent no budget and an answer the client's own wall proves premature; rule
-(c): where no threshold or wall is known, for a host state or an answer-triggered case's wall_rule, the execution
-is inconclusive with verdict_detail "no threshold known / no service-side timing: plausibility undecidable",
-whatever the checks say on the host-state path, B5b-03), then a new exception of the checks (fail). The line
-records verdict_detail (why a wall rule or a host state held or not) and inconclusive_reason as async's runner at
-e334715b does.
+/resolve deadline on a discovery that sent no budget (rule 1) and an answer the client's own wall proves premature
+(rule 2: ANONYMOUS MCP calls only, the line's or raw record's `mcp_auth`; a record before 2a8acbaf states none and
+rule 2 decides nothing there unless --mcp-auth states the arm's auth, recorded in the mark and on each such line as
+reevaluation.mcp_auth_assumed); a resolve_timeout is judged against the bound it states (rule 4); rule (c): where
+no threshold or wall is known, for a host state or an answer-triggered case's wall_rule, the execution is
+inconclusive with verdict_detail "no threshold known / no service-side timing: plausibility undecidable" (with an
+API key "; rule 2 skipped: ..."), whatever the checks say on the host-state path, B5b-03), then a new exception of
+the checks (fail). The line records verdict_detail (the runner's text: why a wall rule or a host state held or not)
+and inconclusive_reason as async's runner at f94b079d does; the runner's recorded client wall (raw `client_wall`,
+line `client_wall_ms`) and timeout statement (`timeout_terms`) are read first and cross-checked against the raw
+record (a mismatch is a warning: on the line's reevaluation.warnings and in the mark).
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
       outcome, answer_digest and time_limited replaced, and `reevaluation`: {checks_sha256, outcome_recorded,
-      checks_changed: the checks whose outcome changed, added or dropped})
+      checks_changed: the checks whose outcome changed, added or dropped; mcp_auth_assumed, warnings where they
+      apply})
   RUN_DIR/reevaluated.json   the re-evaluated set's mark: the checks (directory, commit, `+dirty`, sha256 of
       checks.py and suite_common.py), the recorded checks (each arm's run.json), counts, and every execution whose
       outcome or checks changed
@@ -180,18 +186,22 @@ def _finding(checks):
 
 def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None, info=None,
                doc=None):
-    """The re-evaluated outcome (module docstring; async's judge at e334715b) and why it was kept (decided without
+    """The re-evaluated outcome (module docstring; async's judge at f94b079d) and why it was kept (decided without
     the checks), if it was; |info| (a dict) receives what the line records as async's runner records it:
     service_by_design_case and explained_checks (whenever a case matched), verdict_detail (why a wall rule or a host
     state held or not, or rule (c)'s text), inconclusive_reason (an inconclusive outcome's class: rule (c)'s text, the
     host-state code, or "checks"); and for the re-evaluation's record by_design_cases, host_state and `note` (a mark
-    the table does not reproduce, a matched case the checks decided). |doc| is the execution's raw record (the
-    service-side walls: suite_common.service_wall; the client's wall as their upper bound:
-    suite_common.client_wall_bound). An undecidable host state is inconclusive whatever the checks say, as in the
-    runner (B5b-03: lane S5b's addendum-11 divergence is dropped)."""
+    the table does not reproduce, a matched case the checks decided) and `warnings` (a recorded client wall or
+    timeout statement the raw record does not reproduce). |doc| is the execution's raw record (the service-side
+    walls: suite_common.service_wall; rule 2's client wall: suite_common.client_wall_ms, its auth
+    suite_common.mcp_auth_of, which reads |line|'s reevaluation.mcp_auth_assumed where the record states none). An
+    undecidable host state is inconclusive whatever the checks say, as in the runner (B5b-03: lane S5b's
+    addendum-11 divergence is dropped)."""
     info = {} if info is None else info
     outcome, kept = _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info,
                                 doc)
+    if not info.get("warnings"):
+        info.pop("warnings", None)
     if outcome == "inconclusive":
         info.setdefault("inconclusive_reason", "checks")
     else:
@@ -211,11 +221,12 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
                          "to replay it" % line.get("service_by_design_case")
     rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
     notes = []
+    warnings = info.setdefault("warnings", [])
     if arm == "mcp" and cases:
-        # async's runner (judge at e334715b): the named cases first, else an answer-triggered case whose wall rule
-        # holds or cannot be decided (rule (c)); a case a known wall holds back does not apply
-        walls, client_notes = [], []
-        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls, client_notes)
+        # async's runner (judge at f94b079d): the named cases first, else an answer-triggered case whose wall rule
+        # holds or cannot be decided (rule (c)); a case a wall holds back (a known one, or rule 2) does not apply
+        walls = []
+        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls, warnings)
         notes = [d for state, d, _ in walls if state != "undecidable"]
         if matched:
             info["by_design_cases"] = [c.get("id") for c in matched]
@@ -223,12 +234,11 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
                 # rule (c): the case's answer matched, its wall rule cannot be decided: inconclusive, the case
                 # recorded; a finding is never erased
                 cid, why = matched[0].get("id"), walls[-1][1]
-                info.update(service_by_design_case=cid, explained_checks=[],
-                            verdict_detail="; ".join(notes + client_notes + [why]))
+                info.update(service_by_design_case=cid, explained_checks=[], verdict_detail="; ".join(notes + [why]))
                 if _finding(new_checks):
                     return "finding", "the table's %s case %s, its wall rule undecidable; a check is a finding" % (
                         how, cid)
-                info["inconclusive_reason"] = why
+                info["inconclusive_reason"] = sc.undecidable_class(why)
                 return "inconclusive", "the table's %s case %s: %s (rule (c))" % (how, cid, why)
             if compare.judged_by_checks(matched[0]):
                 outcome, explained, noted = compare.answered_verdict(matched, new_checks, rule)
@@ -251,10 +261,8 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         info["note"] = "the runner's service_by_design mark is not reproduced by the current table: judged by the " \
                        "checks"
     if arm == "mcp":
-        client_notes = []
         code, state, detail = sc.host_state_verdict(scenario, line, doc, (answer or {}).get("error"), tool_err,
-                                                    client_notes)
-        notes += client_notes
+                                                    warnings)
         if detail:
             notes.append(detail)
         if notes:
@@ -263,8 +271,9 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
             info.update(host_state=code, inconclusive_reason=code)
             return "inconclusive", "the MCP runner's host-state rule (%s)" % code
         if state == "undecidable":
-            # rule (c), as the runner: inconclusive whatever the checks say (B5b-03)
-            info.update(host_state=code, inconclusive_reason=detail)
+            # rule (c), as the runner: inconclusive whatever the checks say (B5b-03); the class without rule 2's
+            # API-key note
+            info.update(host_state=code, inconclusive_reason=sc.undecidable_class(detail))
             return "inconclusive", "the MCP runner's host-state rule (%s): %s (rule (c))" % (code, detail)
     elif notes:
         info["verdict_detail"] = "; ".join(notes)
@@ -294,8 +303,12 @@ def changed_checks(old, new):
     return out
 
 
-def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
-    """Writes the re-evaluated set (module docstring); returns the mark (reevaluated.json's content)."""
+def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None):
+    """Writes the re-evaluated set (module docstring); returns the mark (reevaluated.json's content). |mcp_auth|
+    ("anonymous" | "api_key", --mcp-auth): what rule 2 assumes for an MCP line whose record states no mcp_auth (a
+    run before async's 2a8acbaf), recorded on each such line (`reevaluation.mcp_auth_assumed`) and in the mark."""
+    if mcp_auth is not None and mcp_auth not in sc.MCP_AUTH_VALUES:
+        raise ValueError("--mcp-auth takes %s, not %r" % (" or ".join(sc.MCP_AUTH_VALUES), mcp_auth))
     checks_dir = os.path.abspath(checks_dir or HERE)
     cases, by_design_info = compare.load_by_design(compare.DEFAULT_BY_DESIGN if by_design is None else by_design)
     checks_mod = load_checks(checks_dir)
@@ -306,7 +319,10 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
     top_manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
     mark = {"run_dir": os.path.abspath(run_dir), "reevaluated_utc": sc.iso_utc(time.time()), "checks": ident,
             "client_passed": {"direct-local": "wall_ms", "direct-remote": "wall_ms", "mcp": "mcp_phases.backend_ms"},
-            "by_design": by_design_info, "recorded": {}, "arms": {}, "changes": [], "warnings": []}
+            "by_design": by_design_info, "recorded": {}, "arms": {}, "changes": [], "warnings": [],
+            # rule 2's auth (async's 2a8acbaf): the MCP lines by the mcp_auth their record states, and the assumption
+            # --mcp-auth made for those that state none (null: none made; they stay unknown, rule 2 decides nothing)
+            "mcp_auth": {"assumed": mcp_auth, "recorded": {}, "assumed_lines": 0}}
     for name, arm_dir in merge_run.arm_dirs(run_dir):
         run = sc.read_json(os.path.join(arm_dir, "run.json"), {}) or {}
         mark["recorded"][name] = {"checks_module": run.get("checks_module"),
@@ -368,8 +384,18 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                 raised = True
             doc = raw_doc(arm_dir, line) if name == "mcp" else None
             terr = tool_error(doc, answer) if name == "mcp" else None
+            judged, assumed = line, None
+            if name == "mcp":
+                auth, _ = sc.mcp_auth_of(line, doc)
+                stated = "unknown" if auth is None else str(auth)
+                mark["mcp_auth"]["recorded"][stated] = mark["mcp_auth"]["recorded"].get(stated, 0) + 1
+                if auth is None and mcp_auth is not None:
+                    # a record before 2a8acbaf: rule 2 reads the stated assumption (suite_common.mcp_auth_of)
+                    assumed = mcp_auth
+                    judged = dict(line, reevaluation={"mcp_auth_assumed": mcp_auth})
+                    mark["mcp_auth"]["assumed_lines"] += 1
             info = {}
-            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases, terr,
+            outcome, kept = outcome_of(checks_mod, name, scenario, answer, judged, new_checks, raised, cases, terr,
                                        info, doc)
             diff = changed_checks(line.get("checks"), new_checks)
             entry = entries.get(key) or {"digest": line.get("answer_digest"), "time_limited": line.get("time_limited")}
@@ -381,6 +407,12 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                                    "checks_changed": [c["check"] for c in diff]}
             if kept:
                 row["reevaluation"]["kept"] = kept
+            if assumed is not None:
+                row["reevaluation"]["mcp_auth_assumed"] = assumed
+            for w in info.get("warnings") or []:
+                # a recorded client wall or timeout statement the raw record does not reproduce (S5c-03)
+                row["reevaluation"].setdefault("warnings", []).append(w)
+                mark["warnings"].append("arms/%s %s r%s: %s" % (name, sid, rep, w))
             # as async's runner records them: the matched case and the failing checks it explains, whenever a case
             # matched (the replay's, not the recorded run's)
             for k in ("service_by_design_case", "explained_checks", "explained_items", "verdict_detail",
@@ -423,6 +455,10 @@ def main(argv=None):
     ap.add_argument("--checks", default=None, help="the directory of the checks.py to judge with (default: here)")
     ap.add_argument("--by-design", default=None,
                     help="the by-design table the MCP runner's verdict is replayed with (default: compare.py's; '' none)")
+    ap.add_argument("--mcp-auth", choices=sc.MCP_AUTH_VALUES, default=None,
+                    help="rule 2's auth for MCP lines whose record states no mcp_auth (runs before async's 2a8acbaf): "
+                         "anonymous lets the client wall bound an unknown service-side wall; recorded in the mark "
+                         "and on each such line (default: none assumed, rule 2 decides nothing there)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     if not os.path.isdir(os.path.join(args.run_dir, "arms")):
@@ -430,7 +466,7 @@ def main(argv=None):
         return 2
     log = None if args.quiet else (lambda m: sys.stdout.write(m + "\n"))
     try:
-        mark = reevaluate(args.run_dir, args.checks, log, args.by_design)
+        mark = reevaluate(args.run_dir, args.checks, log, args.by_design, args.mcp_auth)
     except compare.TableError as exc:
         sys.stderr.write("reevaluate: refusing: %s\n" % exc)
         return 4

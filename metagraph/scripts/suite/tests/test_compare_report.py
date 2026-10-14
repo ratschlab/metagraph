@@ -1052,8 +1052,9 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertTrue(cmp.host_state_line(rdl, self.dir, r))
 
     def test_client_wall_bound_in_the_comparison(self):
-        # B5b-01: M-planted-0016's relayed deadline after 5 ms by the client's wall (no service-side wall): the
-        # answer-triggered case does not apply, the checks are compared (a disagreement with a passing direct arm)
+        # rule 2 (B5b-01, S5c-01): M-planted-0016's relayed deadline after 5 ms by the client's wall (no
+        # service-side wall), ANONYMOUS calls: the answer-triggered case does not apply, the checks are compared (a
+        # disagreement with a passing direct arm); a record that states no mcp_auth: undecidable
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         s = dict(scen("M-1", "M"), request={"time_budget_ms": 60000},
                  mcp={"tool": "pattern_search", "arguments": {"time_budget_ms": 60000}})
@@ -1067,7 +1068,14 @@ class ReviewFixesTest(unittest.TestCase):
         sc.write_gz_json(os.path.join(self.dir, relay["raw"]), doc)
         ok = self.raw_line("M-1", "direct-local", 0, checks=[{"check": "status", "outcome": "pass", "detail": ""}])
         res = cmp.mcp_agreement({0: relay}, {"direct-local": {0: ok}}, s, cases, self.dir)
-        self.assertEqual(res["class"], "disagree")
+        self.assertEqual((res["class"], res["undecidable_repeats"]), ("not_comparable", [0]))
+        for line in (dict(relay, mcp_auth="anonymous"), dict(relay, reevaluation={"mcp_auth_assumed": "anonymous"})):
+            res = cmp.mcp_agreement({0: line}, {"direct-local": {0: ok}}, s, cases, self.dir)
+            self.assertEqual(res["class"], "disagree")
+        doc["mcp_auth"] = "anonymous"
+        sc.write_gz_json(os.path.join(self.dir, relay["raw"]), doc)
+        self.assertEqual(cmp.mcp_agreement({0: relay}, {"direct-local": {0: ok}}, s, cases, self.dir)["class"],
+                         "disagree")
         doc["calls"][1]["t1"] = 1061.0    # 61 s: not below the threshold: undecidable
         sc.write_gz_json(os.path.join(self.dir, relay["raw"]), doc)
         res = cmp.mcp_agreement({0: dict(relay, outcome="inconclusive")}, {"direct-local": {0: ok}}, s, cases,
@@ -1286,10 +1294,16 @@ class ReviewFixesTest(unittest.TestCase):
         m2 = self.raw_line("R-1", "mcp", 0, outcome="service_by_design", checks=mine[:2] + [rr("pass", "")])
         res = cmp.mcp_agreement({0: m2}, {"direct-local": {0: d}}, s, cases, self.dir)
         self.assertEqual((res["class"], res["by"]), ("service_by_design", "explains_checks"))
-        # a line that records the explained items (the re-evaluation's explained_items) is read as recorded
+        # S5c-05: the items are computed with the table in hand; a line that records others (a re-evaluation with
+        # another table) is noted, not trusted
         m3 = dict(m, explained_items=[1, 2])
-        self.assertEqual(cmp.mcp_agreement({0: m3}, {"direct-local": {0: d}}, s, cases, self.dir)["class"],
-                         "service_by_design")
+        res = cmp.mcp_agreement({0: m3}, {"direct-local": {0: d}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["explained_items"]), ("disagree", {"0": [1]}))
+        self.assertEqual(res["explained_items_recorded"], {"0": [1, 2]})
+        res = cmp.mcp_agreement({0: dict(m, explained_items=[])}, {"direct-local": {0: d}}, s, cases, self.dir)
+        self.assertEqual((res["explained_items"], res["explained_items_recorded"]), ({"0": [1]}, {"0": []}))
+        res = cmp.mcp_agreement({0: dict(m, explained_items=[1])}, {"direct-local": {0: d}}, s, cases, self.dir)
+        self.assertNotIn("explained_items_recorded", res)
 
     def test_planned_duplicate(self):
         # A2-06: T-attempts-0002 runs its attempt per run and arm (run_unique); a repeat that meets its retained id
@@ -1306,6 +1320,11 @@ class ReviewFixesTest(unittest.TestCase):
         res = cmp.direct_agreement({0: ok}, {0: dup}, "POST /traverse", self.dir, None, s)
         self.assertEqual(res["class"], "same_checks", res)
         self.assertIn("direct-remote met its run's retained id", res["planned_duplicates"][0]["detail"])
+        # note 3 of the review of lane S5c: with an id per run and arm a split says which arm's state was not planned
+        self.assertIn("a split on repeat 0: the id was retained before this arm's first send",
+                      res["planned_duplicates"][0]["detail"])
+        later = cmp.planned_duplicate(dict(ok, repeat=1), dict(dup, repeat=1), s)
+        self.assertIn("a split on repeat 1: direct-local's attempt of an earlier repeat was not retained", later)
         # not planned: no run_unique, no 409 in the status, or the 409's shape check failed
         self.assertEqual(cmp.direct_agreement({0: ok}, {0: dup}, "POST /traverse", self.dir, None,
                                               dict(s, run_unique=[]))["class"], "disagree")

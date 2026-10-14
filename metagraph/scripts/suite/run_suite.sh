@@ -7,12 +7,14 @@
 #                [--areas P,M] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
 #                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf]
-#   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf]
+#   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--reeval-mcp-auth anonymous|api_key]
+#                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf]
 #
 # --reevaluate RUN_DIR: offline, no lock and no request to any host: judges the run's recorded answers again with
 # checks.py of this directory (or of --reeval-checks DIR) (reevaluate.py), then merge_run / compare / report
 # --reevaluated: executions.reevaluated.jsonl, compare.reevaluated.json, report.reevaluated.md / .pdf beside the
-# recorded files, which stay.
+# recorded files, which stay. --reeval-mcp-auth: reevaluate.py --mcp-auth, the MCP auth rule 2 assumes for lines
+# whose record states none (a run before async's 2a8acbaf); recorded in the re-evaluation's mark.
 #
 # --paired (the default): per scenario in manifest order, MCP cold (with --mcp-cmd) -> direct-local (one
 # run_direct.py step on mex over one persistent ssh connection) -> direct-remote (a step from here through the
@@ -115,11 +117,12 @@ mex_rsync() {
 
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
-MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""
+MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reevaluate) REEVALUATE="$2"; shift 2 ;;
     --reeval-checks) REEVAL_CHECKS="$2"; shift 2 ;;
+    --reeval-mcp-auth) REEVAL_MCP_AUTH="$2"; shift 2 ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --smoke) SMOKE=1; shift ;;
     --paired) MODE=paired; shift ;;
@@ -160,6 +163,7 @@ if [[ -n "$REEVALUATE" ]]; then
   REEVALUATE="$(cd "$REEVALUATE" && pwd)"
   RE_ARGS=("$REEVALUATE")
   [[ -z "$REEVAL_CHECKS" ]] || RE_ARGS+=(--checks "$REEVAL_CHECKS")
+  [[ -z "$REEVAL_MCP_AUTH" ]] || RE_ARGS+=(--mcp-auth "$REEVAL_MCP_AUTH")
   [[ -z "$BY_DESIGN" ]] || RE_ARGS+=(--by-design "$BY_DESIGN")
   "$PY" "$HERE/reevaluate.py" "${RE_ARGS[@]}"
   "$PY" "$HERE/merge_run.py" "$REEVALUATE" --reevaluated
