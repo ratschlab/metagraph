@@ -1917,3 +1917,12 @@ failing on 14552938.
   and a list name them. gate.py already failed such a line ("outcome '...'"). merge_run (lane S-runner) and the
   paired loop's mcp_after (run_suite.sh) still read the value as recorded; their side is lane S-runner's.
 - Recorded runs: every outcome is in the vocabulary; the totals gain `other: 0` and the summary an empty list.
+
+### The load caveat without a measurement
+- load_caveat read a missing sra_all figure as 0 and printed "mex was not under the Logan load" when every sample
+  had failed (docker stats: a missing or renamed container, the daemon down; the sampler's `error`, its figures
+  null), with load1 moderate or null. load_figures counts the samples stating each figure and the failed ones (the
+  first error); with no sra_all figure, or more than 10 % failed samples (LOAD_SAMPLE_ERROR_SHARE), the verdict
+  section says "**Load not measured:** ..." with the figures and the failures, never the positive sentence; a busy
+  host keeps the Load caveat (with the failures named); the resource section names the failed samples. The recorded
+  runs have no failed sample (v3 12,756, v4 8,693, all with sra_all): their sentence is unchanged.

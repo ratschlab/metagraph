@@ -159,12 +159,21 @@ def area_sort_key(area):
 # ---------------------------------------------------------------------------------------------------------------
 # sections
 
+# the share of failed samples (the sampler's `error`: docker stats failed, e.g. a missing container or daemon) above
+# which the load figures do not stand for the run
+LOAD_SAMPLE_ERROR_SHARE = 0.10
+
+
 def load_figures(samples):
+    """The sampler's figures over the run: sra_all CPU and host load1 (mean, max, how many samples state each), the
+    samples, and those that failed (`error`: their figures are null) with the first error."""
     sra = [s.get("sra_all_cpu_pct") for s in samples if cmp._num(s.get("sra_all_cpu_pct")) is not None]
     load = [s.get("host_load1") for s in samples if cmp._num(s.get("host_load1")) is not None]
+    errors = [s.get("error") for s in samples if s.get("error")]
     return {"sra_mean": (sum(sra) / len(sra)) if sra else None, "sra_max": max(sra) if sra else None,
             "load_mean": (sum(load) / len(load)) if load else None, "load_max": max(load) if load else None,
-            "n": len(samples)}
+            "n": len(samples), "n_sra": len(sra), "n_load": len(load), "n_error": len(errors),
+            "first_error": str(errors[0]) if errors else None}
 
 
 def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None):
@@ -317,6 +326,13 @@ def gate_section(run_dir, reevaluated=False, max_items=200):
     return "\n".join(out)
 
 
+def load_errors_text(lf):
+    """'' or how many samples failed, with the first error."""
+    if not lf.get("n_error"):
+        return ""
+    return "%d of %d samples failed (first: %s)" % (lf["n_error"], lf["n"], str(lf.get("first_error"))[:160])
+
+
 def load_caveat(lf):
     if lf["n"] == 0:
         return ("Load: no resource samples in this run (the sampler did not run), so the host load during the "
@@ -326,10 +342,20 @@ def load_caveat(lf):
     figures = "contextual telemetry: sra_all CPU mean %s %% (max %s %%), host load1 mean %s (max %s) over %d samples" % (
         fmt_num(lf["sra_mean"], 0), fmt_num(lf["sra_max"], 0), fmt_num(lf["load_mean"], 1),
         fmt_num(lf["load_max"], 1), lf["n"])
+    errors = load_errors_text(lf)
+    if errors:
+        figures += "; " + errors
     if busy:
         return ("**Load caveat:** the timings were taken while mex carried the Logan load (%s). They are "
                 "labelled as such and are not the timing baseline; the rerun after the Logan backlog drains is."
                 % md(figures))
+    if lf["sra_mean"] is None or lf.get("n_error", 0) > LOAD_SAMPLE_ERROR_SHARE * lf["n"]:
+        # no figure of the sra_all container (or too many failed samples) says nothing about the Logan load: never
+        # the positive sentence
+        return ("**Load not measured:** %s, so whether mex carried the Logan load during the timings is unknown; "
+                "read the timings with that caveat (%s)." % (
+                    "no sample states the sra_all container's CPU" if lf["sra_mean"] is None
+                    else "more than %d %% of the samples failed" % round(100 * LOAD_SAMPLE_ERROR_SHARE), md(figures)))
     return "Load: mex was not under the Logan load during this run (%s)." % md(figures)
 
 
@@ -837,7 +863,7 @@ def overhead_section(comp):
     return "\n".join(out)
 
 
-def resources_section(comp):
+def resources_section(comp, lf=None):
     s = comp["summary"]
     out = ["# Resource telemetry per area (contextual)", "",
            "Contextual telemetry, not a measurement of the suite's requests and not a benchmark: samples of "
@@ -859,6 +885,10 @@ def resources_section(comp):
                          fmt_mib(r["peak_server_memory_bytes"])])
     out.append(table(["area", "arm", "sampled", "peak CPU %", "peak mem GiB", "sra_all CPU %", "load1",
                       "server mem MiB"], rows))
+    errors = load_errors_text(lf or {})
+    if errors:
+        out.append("Failed samples (docker stats did not answer; their figures are null and not in the columns): "
+                   "%s.\n" % md(errors))
     return "\n".join(out)
 
 
@@ -1029,7 +1059,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(relations_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))
-    parts.append(resources_section(comp))
+    parts.append(resources_section(comp, load_figures(samples)))
     if compare_dir:
         # like with like: the earlier run's re-evaluated set where it has one
         old_re = reevaluated and os.path.exists(os.path.join(compare_dir, "reevaluated.json"))

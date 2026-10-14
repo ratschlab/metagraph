@@ -412,5 +412,48 @@ class OutcomeVocabularyTest(unittest.TestCase):
         self.assertTrue(any("outside the vocabulary" in w for w in info["warnings"]))
 
 
+class LoadCaveatTest(unittest.TestCase):
+    """With no sra_all figure (failed samples), the report never asserts that mex was not under the Logan load."""
+
+    def figures(self, sra, load1, error=None, n=100):
+        import report
+        out = []
+        for i in range(n):
+            x = {"t_utc": sc.iso_utc(T0 + i), "sra_all_cpu_pct": sra, "host_load1": load1}
+            if error:
+                x["error"] = error
+            out.append(x)
+        return report, report.load_figures(out)
+
+    def test_error_only_samples(self):
+        for load1 in (7.5, None):
+            report, lf = self.figures(None, load1, "Error response from daemon: No such container: sra_all")
+            text = report.load_caveat(lf)
+            self.assertNotIn("not under the Logan load", text)
+            self.assertIn("**Load not measured:**", text)
+            self.assertIn("100 of 100 samples failed", text)
+            self.assertIn("No such container", report.resources_section(
+                {"summary": {"resources": {}}, "arms": []}, lf))
+
+    def test_valid_low_load_still_says_so(self):
+        report, lf = self.figures(50.0, 7.5)
+        self.assertIn("Load: mex was not under the Logan load", report.load_caveat(lf))
+        self.assertNotIn("Failed samples", report.resources_section({"summary": {"resources": {}}, "arms": []}, lf))
+
+    def test_many_failed_samples_beside_valid_ones(self):
+        import report
+        good = self.figures(50.0, 7.5, n=80)[1]
+        samples = [{"t_utc": sc.iso_utc(T0 + i), "sra_all_cpu_pct": 50.0, "host_load1": 7.5} for i in range(80)] + \
+            [{"t_utc": sc.iso_utc(T0 + 100 + i), "sra_all_cpu_pct": None, "host_load1": None, "error": "timeout"}
+             for i in range(20)]
+        self.assertIn("Load: mex was not under", report.load_caveat(good))
+        text = report.load_caveat(report.load_figures(samples))
+        self.assertIn("**Load not measured:** more than 10 % of the samples failed", text)
+
+    def test_busy_stays_the_caveat(self):
+        report, lf = self.figures(7000.0, 220.0)
+        self.assertIn("**Load caveat:**", report.load_caveat(lf))
+
+
 if __name__ == "__main__":
     unittest.main()
