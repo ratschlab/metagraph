@@ -139,6 +139,28 @@ class ReferenceFallbackTest(unittest.TestCase):
         mine = [st("pass"), st("not_exposed", "invariants"), st("inconclusive", "count_relation")]
         self.assertEqual(cmp.reference_checks(mine, self.INC, self.OK), (self.INC, []))
 
+    def test_no_fallback_to_an_execution_without_an_answer(self):
+        # direct-remote's transport failure fails its items and reads error: it is no reference
+        transport = line("S", "direct-remote", 0, T0 + 5, 10.0, outcome="error", http=0,
+                         checks=[st("fail"), st("fail", "invariants"), st("fail", "count_relation")],
+                         error={"code": "transport", "text": "reset"})
+        direct = {"direct-local": self.direct()["direct-local"], "direct-remote": {0: transport}}
+        ok = {0: line("S", "mcp", 0, T0 + 10, 10.0, checks=list(self.OK))}
+        ma = cmp.mcp_agreement(ok, direct, scen("S", "P"), {}, None)
+        self.assertEqual((ma["class"], ma["reference_outcome"]), ("agree", "inconclusive"))
+        self.assertNotIn("reference_fallbacks", ma)
+        # an MCP runner error beside it: the MCP alone errored
+        err = {0: line("S", "mcp", 0, T0 + 10, 10.0, outcome="error", http=0,
+                       checks=[st("fail"), st("fail", "invariants"), st("fail", "count_relation")],
+                       error={"code": "runner_error", "text": "not terminal"})}
+        ma = cmp.mcp_agreement(err, direct, scen("S", "P"), {}, None)
+        self.assertEqual(ma["class"], "disagree")
+        self.assertEqual(ma["reference_outcome"], "inconclusive")
+        # with every item of direct-local undecided the pair is not comparable, never a disagreement charged to the MCP
+        direct["direct-local"][0]["checks"] = [st("inconclusive"), st("inconclusive", "invariants"),
+                                               st("inconclusive", "count_relation")]
+        self.assertEqual(cmp.mcp_agreement(ok, direct, scen("S", "P"), {}, None)["class"], "not_comparable")
+
     def test_report_depth_reads_the_fallback(self):
         import report
         direct = self.direct()

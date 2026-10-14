@@ -2197,7 +2197,8 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
     check ITEMS an answered / clamped case explains on that repeat (E of explained_outcome, B5b-06), compared apart
     with the reference's items of the same check and occurrence: their differences do not count (B-01). |alt|
     ({repeat: line} of the other direct arm, |alt_arm|): per repeat and check item, a reference item left undecided
-    falls back to that arm's same repeat, else its first (reference_checks), recorded as `reference_fallbacks`; the
+    falls back to that arm's same repeat, else its first (reference_checks), unless that execution has no answer
+    (outcome error, or no HTTP status: a transport failure fails its items), recorded as `reference_fallbacks`; the
     reference outcome is then that of the lines the comparison used (a reference execution every compared item of
     which fell back is left out, the other arm's executions that gave an item are in). The class: disagree (a
     differing check outside E, or one side alone errored), service_by_design (only items of E differ),
@@ -2211,6 +2212,8 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
     for r in reps:
         primary = ref.get(r.get("repeat"), ref0) or {}
         second = (alt.get(r.get("repeat"), alt0) or {}) if alt else None
+        if second is not None and (second.get("outcome") == "error" or _transport_line(second)):
+            second = None   # an execution without an answer (a transport failure, an error) is no reference
         mine = r.get("checks") or []
         theirs, fb = reference_checks(mine, primary.get("checks") or [], (second or {}).get("checks"))
         if fb:

@@ -1852,8 +1852,11 @@ failing on 14552938.
   (`compare.reference_checks`). The scenario's entry records `reference_alternative` and `reference_fallbacks`
   [{repeat, check, occurrence, arm, arm_repeat}] (only when an item fell back); `reference_outcome` is that of the
   lines the comparison used (a direct-local execution every compared item of which fell back is left out, the
-  direct-remote executions that gave an item are in; without a fallback it is unchanged). The report's agreement
-  depth reads the same items. The by-design pairs were already judged on every repeat of both direct arms (lane G2).
+  direct-remote executions that gave an item are in; without a fallback it is unchanged). No item falls back to an
+  execution without an answer (outcome error, or no HTTP status: a transport failure fails its items): the
+  verification of the lane (VERIFY-S-VERDICT (3)) found that an MCP pass beside a direct-local 503 and a
+  direct-remote transport failure read disagree, and an MCP runner error in the same place agree. The report's
+  agreement depth reads the same items. The by-design pairs were already judged on every repeat of both direct arms (lane G2).
 - Moves: v4 N-usecase-0008 and R-pos-0027 not_comparable -> agree (direct-local r0 a 503 deadline, direct-remote r0
   decides 6 / 5 items), T-repeat-0004 one more item compared (walk_in_record from direct-remote); v3
   M-planted-0017 not_comparable -> agree, T-walk-0004 one more item compared, and six v3 scenarios already
