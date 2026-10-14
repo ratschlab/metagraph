@@ -857,6 +857,8 @@ bool PatternRetrieval::admit_path(size_t length) {
     return impl_->admission.admit(path_descriptor_bytes(impl_->oracle.get_k(), length));
 }
 
+uint64_t PatternRetrieval::end_release() { return impl_->admission.take(); }
+
 uint64_t PatternRetrieval::memory_peak() const { return impl_->account.peak(); }
 const RetrievalCounters& PatternRetrieval::counters() const { return impl_->counters; }
 

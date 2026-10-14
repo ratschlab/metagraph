@@ -638,6 +638,13 @@ class PatternRetrieval {
     bool admit_context();
     // the same for one released path of a pattern of |length| bases (path_descriptor_bytes)
     bool admit_path(size_t length);
+    /**
+     * Closes the pattern's release where no labels are read for it (retrieve() and
+     * retrieve_paths() close it otherwise): returns the bytes admit_context() and admit_path()
+     * charged since begin_release, the caller's from here on -- kept with the result objects
+     * the answer keeps, released with those it discards.
+     */
+    uint64_t end_release();
 
     /**
      * Reads the labels of the admitted contexts of one pattern (L <= k, or a long pattern's

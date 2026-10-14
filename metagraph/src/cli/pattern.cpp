@@ -2161,6 +2161,9 @@ Json::Value process_pattern_request(
                                 && sel.chosen.size() == sel.selected.value;
             if (x.withheld || sel.withheld || s.output_withheld) {
                 given.withheld = x.withheld ? *x.withheld : Withheld::DEADLINE;
+                // the objects built are discarded, their charge with them: the projection's
+                // release holds none
+                account.release(retrieval->end_release());
                 collected.clear();
             }
             // a time stop of the output ended the list (cut: time): the projection's release

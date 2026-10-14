@@ -2039,6 +2039,68 @@ TEST(PatternSelection, DeadlineAtEveryReading) {
     }
 }
 
+// all_or_count with a projection, the work time passing at the results' clock reading before
+// the 65th result object: the list is withheld (deadline) and the 64 objects built are
+// discarded with their charge, so that the projection's release holds none of them (an
+// assert-enabled build checks the admission's bookkeeping there). k = 33, one poly-A k-mer
+// carrying 66 contexts of D, all selected by any(c1): partial, at the same reading, returns the
+// first 64 (cut time), which pins the reading. Mutation tried (assert-enabled build): the
+// discarded objects' charge left in the admission: the process aborts.
+TEST(PatternSelection, AllOrCountDeadlineAfter64ResultObjects) {
+    const Index idx = build<annot::RowDiffColumnAnnotator>(
+            33, { { "c1", "c1_r0", std::string(50, 'A') },
+                  { "c2", "c2_r0", std::string(50, 'C') } }, false);
+    for (const std::string labels : { "predicate_only", "all" }) {
+        auto readings = std::make_shared<uint64_t>(0);
+        auto at = std::make_shared<uint64_t>(UINT64_MAX);
+        Ask r;
+        r.patterns = { "D" };
+        r.kind = "iupac";
+        r.records = false;
+        r.predicate = "{\"any\": [\"c1\"]}";
+        r.labels = labels;
+        r.clock = [readings, at]() {
+            ++*readings;
+            return Clock::time_point() + (*readings >= *at ? std::chrono::hours(1)
+                                                           : std::chrono::hours(0));
+        };
+        r.mode = "partial";
+        const Outcome full = run(idx, r);
+        ASSERT_EQ("completed", full.pass);
+        ASSERT_EQ(66u, full.results.size());
+        const uint64_t total = *readings;
+        uint64_t window = 0;
+        for (uint64_t n = 1; n <= total; ++n) {
+            SCOPED_TRACE(labels + " reading " + std::to_string(n));
+            *readings = 0;
+            *at = n;
+            r.mode = "partial";
+            const Outcome part = run(idx, r);
+            if (part.results.size() != 64u || part.cut != "time" || !part.stop
+                    || *part.stop != std::make_pair(std::string("output"),
+                                                    std::string("time"))) {
+                continue;
+            }
+            ++window;
+            *readings = 0;
+            r.mode = "all_or_count";
+            Outcome o;
+            ASSERT_NO_THROW(o = run(idx, r));
+            EXPECT_EQ("deadline", o.withheld);
+            ASSERT_TRUE(o.stop);
+            EXPECT_EQ("output", o.stop->first);
+            EXPECT_EQ("time", o.stop->second);
+            EXPECT_EQ("time_limited", o.determinism);
+            EXPECT_EQ(0u, o.results.size());
+            EXPECT_EQ(0u, o.entry["returned"].asUInt64());
+            EXPECT_EQ("completed", o.pass);
+            EXPECT_EQ("exact", o.selected.relation);
+            EXPECT_EQ(66u, o.selected.value);
+        }
+        EXPECT_EQ(1u, window) << labels;
+    }
+}
+
 // A caller that left is not answered: the pass reads the clock (and so asks the abort
 // predicate) before every row it reads, and the work ends there (Aborted). Mutation tried: the
 // clock before a read removed (the paced read still sees the deadline, not the abort): fails.
