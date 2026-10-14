@@ -1013,9 +1013,9 @@ def resolve_timeout_least(scenario, error, tool_error, doc=None, line=None, warn
     recorded timeout_terms, else timeout_statement), bound_s x 1000 - 1000 ms, any phase, "the stated bound <b> s
     (<phase>) - 1000 ms"; else (a legacy record) min(the write timeout, max(A, B)) - 1000 ms of whichever of A and B
     is known, "min(the write cap 10000 ms, ...) - 1000 ms" (R2's terms, capped by the write phase, which fires
-    first), A = the budget (resolve_budget) + the host's reserve + 10,000 ms, B = the timeout the refusal states
-    ("within <N> s" of the answer error's text, else of the tool error's message) x 1000; (None, why) with
-    neither."""
+    first), A = the budget (resolve_budget) + the host's reserve + 10,000 ms, without a budget the service's client
+    timeout (legacy_unbudgeted_client_timeout_term), B = the timeout the refusal states ("within <N> s" of the answer
+    error's text, else of the tool error's message) x 1000."""
     te = tool_error if isinstance(tool_error, dict) else {}
     stated = timeout_terms(line, doc, error, te, warnings)
     if stated is not None:
@@ -1031,6 +1031,8 @@ def resolve_timeout_least(scenario, error, tool_error, doc=None, line=None, warn
         allowance = max(term(refs, "allowance_s") * 1000.0, RESOLVE_MIN_ALLOWANCE_MS)
         a = budget + reserve + allowance
         terms.append((a, "time_budget_ms %g + reserve %g + allowance %g = %g ms" % (budget, reserve, allowance, a)))
+    else:
+        terms.extend(legacy_unbudgeted_client_timeout_term(scenario, refs))
     if m is not None:
         terms.append((float(m.group(1)) * 1000.0, "the stated timeout %s s" % m.group(1)))
     if not terms:
@@ -1039,6 +1041,16 @@ def resolve_timeout_least(scenario, error, tool_error, doc=None, line=None, warn
     named = terms[0][1] if len(terms) == 1 else "max(%s)" % ", ".join(why for _, why in terms)
     cap = term(refs, "write_timeout_s") * 1000.0
     return min(cap, top) - STATED_TIMEOUT_SLACK_MS, "min(the write cap %g ms, %s) - 1000 ms" % (cap, named)
+
+
+def legacy_unbudgeted_client_timeout_term(scenario, refs=None):
+    """The legacy rule's term for a resolve_timeout with no stated phase and no budget known (a discovery without
+    one, or neither labels nor a budget): [(t in ms, "the client timeout <t> ms")], t the service's client timeout
+    (resolve_client_timeout_s: the mode's base, 20 s / 120 s), so the threshold is min(the write cap, t) - 1 s =
+    9,000 ms instead of the answer's own "within <N> s" - 1 s or rule (c). PENDING the async session's agreement
+    (lane G2, after its verification): it narrows rule (c) for such records."""
+    t_ms = resolve_client_timeout_s(scenario, refs) * 1000.0
+    return [(t_ms, "the client timeout %g ms" % t_ms)]
 
 
 def resolve_deadline_least(scenario, tool_error, refs=None):

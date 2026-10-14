@@ -411,12 +411,19 @@ class Reevaluate(unittest.TestCase):
                          "inconclusive")
         self.assertEqual((info["inconclusive_reason"], info["host_state"]),
                          ("no service-side timing: plausibility undecidable", "resolve_timeout"))
+        # no budget and no stated timeout: the service's client timeout is the term (20 s, the mode's base:
+        # legacy_unbudgeted_client_timeout_term, pending the async session's agreement), so the threshold is
+        # min(10 s, 20 s) - 1 s = 9,000 ms, not rule (c)
         bare = dict(to, error={"code": "resolve_timeout", "text": "the backend did not answer"})
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", scenario("R-0011", "POST /resolve", STATUS), bare,
                                                at(30000.0), fail, False, cases, None, info)[0], "inconclusive")
-        self.assertEqual(info["inconclusive_reason"], "no threshold known: plausibility undecidable")
-        # an unbudgeted one judged against the timeout it states (N s - 1 s)
+        self.assertEqual(info["inconclusive_reason"], "resolve_timeout")
+        self.assertIn(">= min(the write cap 10000 ms, the client timeout 20000 ms) - 1000 ms = 9000 ms",
+                      info["verdict_detail"])
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", scenario("R-0011", "POST /resolve", STATUS), bare,
+                                               at(8000.0), fail, False, cases)[0], "fail")
+        # an unbudgeted one stating its timeout: the larger term, capped by the write phase
         self.assertEqual(reevaluate.outcome_of(None, "mcp", scenario("R-0011", "POST /resolve", STATUS), to,
                                                at(29300.0), fail, False, cases)[0], "inconclusive")
         # B5b-03: an undecidable host state is inconclusive whatever the checks say, as in async's runner (lane S5b's
@@ -783,7 +790,13 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(8000.0), fail, False, cases)[0], "fail")
         bare = scenario("R-0011", "POST /resolve", STATUS)
         short = dict(to, error={"code": "resolve_timeout", "text": "the backend did not answer within 5 s"})
-        self.assertEqual(sc.resolve_timeout_least(bare, short["error"], None)[0], 4000.0)
+        # no budget: the client timeout (20 s) is a term beside the stated 5 s, so a stated "within 0.001 s" or "5 s"
+        # no longer lowers the threshold below min(10 s, t) - 1 s (pending the async session's agreement)
+        self.assertEqual(sc.resolve_timeout_least(bare, short["error"], None), (9000.0, (
+            "min(the write cap 10000 ms, max(the client timeout 20000 ms, the stated timeout 5 s)) - 1000 ms")))
+        tiny = {"code": "resolve_timeout", "text": "the backend did not answer within 0.001 s"}
+        self.assertEqual(sc.resolve_timeout_least(scenario("R-d", "POST /resolve", STATUS, mcp={
+            "tool": "traverse_resolve", "arguments": {"discover": True}}), tiny, None)[0], 9000.0)
         # S5c-02: the statement is validated as the runner's timeout_statement: a phase in read | write | deadline
         # AND a positive numeric bound_s, both in ONE object (the tool error, else the answer error, else the
         # job's stored error); anything else is legacy (backend_ms 8 against the legacy 9,000 ms: a fault)
