@@ -425,13 +425,8 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
 
     // Final assembly: await graph (may already be resolved) and wrap PRIMARY.
     auto graph = graph_future.get();
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        graph = std::make_shared<CanonicalDBG>(graph);
-        logger->trace("Primary graph wrapped into canonical");
-    }
-    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation),
-                                                     false, std::move(coord_to_header));
-    if (!anno_graph->check_compatibility()) {
+    // checked before the index is built: its constructor asserts the pair compatible
+    if (!AnnotatedDBG::compatible(*graph, *annotation)) {
         if (on_failure == LoadFailure::THROW) {
             throw std::runtime_error(fmt::format(
                     "Graph '{}' and annotation '{}' are not compatible", config.infbase,
@@ -440,7 +435,12 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         logger->error("Graph and annotation are not compatible");
         exit(1);
     }
-    return anno_graph;
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        graph = std::make_shared<CanonicalDBG>(graph);
+        logger->trace("Primary graph wrapped into canonical");
+    }
+    return std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation), false,
+                                          std::move(coord_to_header));
 }
 
 } // namespace
