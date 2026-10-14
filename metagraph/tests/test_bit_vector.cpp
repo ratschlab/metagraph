@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <sstream>
 
 #include "test_helpers.hpp"
 
@@ -39,6 +40,27 @@ typedef ::testing::Types<bit_vector_stat,
         BitVectorTypes;
 
 TYPED_TEST_SUITE(BitVectorTest, BitVectorTypes);
+
+TEST(BitVectorDyn, TruncatedHeaderCanBeRetried) {
+    bit_vector_dyn reference{true, false, true, true};
+    std::ostringstream out;
+    reference.serialize(out);
+    const auto valid = out.str();
+
+    // DYNAMIC stores four lengths before the first SPSI node payload.
+    constexpr size_t header_size = 4 * sizeof(uint64_t);
+    for (size_t size = 0; size <= header_size; ++size) {
+        SCOPED_TRACE(size);
+        const auto invalid = size == header_size ? std::string(size, '\0')
+                                                 : valid.substr(0, size);
+        bit_vector_dyn loaded;
+        std::istringstream in(invalid);
+        EXPECT_FALSE(loaded.load(in));
+        std::istringstream retry(valid);
+        ASSERT_TRUE(loaded.load(retry));
+        EXPECT_EQ(reference, loaded);
+    }
+}
 
 
 void test_next_subvector(const bit_vector &vector, uint64_t idx) {

@@ -497,6 +497,8 @@ class BOSS {
     static constexpr size_t kSentinel = '$';
 
   private:
+    friend struct BOSSConstructTestAccess;
+
     const mtg::kmer::KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
