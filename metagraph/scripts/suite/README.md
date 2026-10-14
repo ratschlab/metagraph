@@ -1334,7 +1334,7 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
 The verified findings 2 and 7 of the outside review of the suite (VERIFY-B), the triage's V01, the compare decision
 agreed with the async session, and the amendments of the lane's own verification (VERIFY-G2). The async session's
 runner implements the same matching and plausibility rules from the lane's TABLE-DIFF.md; both read
-service_by_design.json at sha256 f9565038...
+service_by_design.json at sha256 ab4100c9...
 
 ### By-design cases state the request they are about (finding 2)
 - A case may state `request`, the machine-readable form of its scenario_match: a non-empty list of predicates that
