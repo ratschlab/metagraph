@@ -1389,7 +1389,8 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   `advanced_path` (traverse_fetch overrides outside the service's basic list `_TRAVERSE_BASIC_OVERRIDES`, a preset
   other than walk / trie, a strategy object: T-labels-0004/0006). It lists the executions each arm must record (v4,
   derived exclusions only, without --declared: MCP 191 scenarios, 388 executions; the shipped two-arm policy with the
-  declared file: MCP 189 / 384, direct-local 220 / 253), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
+  declared file: MCP 189 / 384, direct-local 220 / 253), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003 on both arms,
+  REL-prefix_equals-0004 on direct-local;
   the prefix_equals relations of the excluded R-budget / R-twin and the N-zero / C-caps relations with a partner
   outside the selection are listed as excluded), the property checks not required (none unless declared, below), and
   pins content_sha256, relations_sha256, index_fp and the by-design table's sha256. gate/policy_v4_rt_mcp.json is
