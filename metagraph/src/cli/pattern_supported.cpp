@@ -633,10 +633,10 @@ PathSelectionAnswer PathSelection::finish(const Result &result) {
     // partial held the first walks only, the account refusing the next one
     if (hold_cut_ && std::string_view(hold_cut_) == "max_memory")
         set_stop("selection", "max_memory");
-    // the mirrors are read by a tracker of their own: the search's row cache, which no later
-    // step reads, gives its allotment back first, so that the mirrors' replaces it
-    if (!options_.mirrors_searched)
-        tracker_.release_rows();
+    // no later step reads the search's row cache (the mirrors are read by a tracker of their
+    // own): its allotment is given back before the held walks' index is charged, so that the
+    // index, and the mirrors' allotment where they are read, find that room
+    tracker_.release_rows();
     // the held walks by sequence: their mirrors are found among them (when the account refuses
     // the index, no mirror is found among them nor read: every walk is decided on its own
     // support alone, as after a mirror read stopped on the account)

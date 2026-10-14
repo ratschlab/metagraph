@@ -3489,8 +3489,10 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   looked up (L units of `max_annotation_work`; `work.predicate_lookups`), a
   k-mer not in the graph giving it no support, and its rows read by a search of its own over that one walk, as
   §20.7 reads (n rows, the first twice at `record_verified`; under `max_annotation_work`, the account and the
-  deadline; `work.mirror_rows`, part of `work.annotation_rows`); the search's row cache is given back to the
-  account before, so the mirrors' allotment replaces it. A walk whose mirror is not known (the search stopped
+  deadline; `work.mirror_rows`, part of `work.annotation_rows`). The search's row cache is given back to the
+  account when the search ends, before the held walks' index by sequence (8 bytes a walk) is charged and any
+  mirror is read, whether or not the mirrors were searched: no later step reads it, so the index finds that room
+  and a mirror read's allotment replaces it. A walk whose mirror is not known (the search stopped
   before it, `partial` held the first walks only, the mirror reads stopped on `max_annotation_work` or the
   account: no mirror is read after such a stop, and every later walk is decided on its own support alone, or the
   account refused the held walks' index by sequence: no mirror is then found among them nor read) is
@@ -4680,6 +4682,15 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   (`counts.supported_paths`, `counts.selected`): it is now `withheld: output_budget` with `stop {output,
   max_memory}`, exact counts and no refused row
   (`PatternSupportedRoute.AllOrCountGivesBackItsListWhenALabelChargeIsRefused`).
+  Under `"either"` with the mirrors searched (`strands: "both"`, or a palindromic pattern), the search's row cache
+  is given back before the held walks' index is charged, as it was when the mirrors are read (§20.9): an account
+  that holds every walk no longer refuses the index for want of the cache's dead allotment, where the answer was
+  `stop {selection, max_memory}`, `selection.pass: "stopped"`, every walk decided on its own support alone
+  (`counts.tested` short of the walks, `counts.selected` bounds) and `all_or_count` `withheld: predicate_budget`:
+  it now completes (exact counts, `all_or_count` listing the selected walks); `work.memory_bytes` is lower where the
+  account's peak came after the search
+  (`PatternSupportedRoute.TheRowCacheIsGivenBackBeforeTheIndexOfTheHeldWalks`; the index refused, below the route:
+  `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`).
 
 ## 28. Changed after the review of 2026-10-12
 
