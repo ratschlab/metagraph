@@ -4663,14 +4663,15 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   of `stop_at_threshold` at the end of level t's work (§21.6) read the ranges whose palindrome scans that work had
   completed as discovery had left them: without the mask it left them out of the running upper bound, with the
   mask it took every candidate of theirs off the union as a possible palindrome. So when the levels 0 … t alone
-  exceeded the threshold through those ranges, the stop came in the work of level t + 1 (`mismatch_level` t + 1,
-  that level `at_least`) or not at all (the counts `exact`, `all_or_count` withholding `count_above_threshold`).
+  exceeded the threshold through those ranges, the stop came in the work of a later level (in its discovery, that
+  level `at_least`, or at its end) or not at all (the counts `exact`, `all_or_count` withholding
+  `count_above_threshold`).
   The comparison now reads those ranges as their scans counted them, each palindromic stored k-mer once, as §21.6
   states. Changed answers, only with `max_mismatches` > 0 on even-k wrapped PRIMARY graphs (the production
   graphs and the mini index have k = 31: no stored fixture changes): with `stop_at_threshold`,
-  `stop` (present where it was absent; `mismatch_level` t instead of t + 1), `counts.contexts` (level t as
-  completed instead of the next level `at_least`, the later levels `unknown`, the totals `at_least`), `work`
-  (less of it), `all_or_count`'s `withheld` (`threshold_crossed` where it was `count_above_threshold`) and,
+  `stop` (present where it was absent; `mismatch_level` t instead of a later level's), `counts.contexts`
+  (level t as completed instead of a later level `at_least`, the later levels `unknown`, the totals `at_least`),
+  `work` (less of it), `all_or_count`'s `withheld` (`threshold_crossed` where it was `count_above_threshold`) and,
   without the mask, the note `threshold_upper_bound` (the running lower bound subtracts the palindromes found
   once the scans have counted them); without `stop_at_threshold` no answer changes (`all_or_count` can free its
   retained ranges a level earlier). Tests: `PatternMismatch.EvenKPrimaryUnmaskedStopsAtTheEndOfThePass`,
