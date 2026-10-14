@@ -195,7 +195,8 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
 7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
    included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
    left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to
-   manifest/suite_smoke_v3.json (lane S3's); without `--manifest` a full run takes manifest/suite_v3.json.
+   manifest/suite_smoke_v4.json; without `--manifest` a full run takes manifest/suite_v4.json (v1-v3 stay for
+   reproducing earlier runs).
    The MCP runner paces its own requests.
 8. Samples (review M5): the mex samplers write ~/suite-dev/runs/<id>/samples/; every invocation pulls the
    whole directory on exit (also after Ctrl-C) and at its start, merge_run deduplicates.
@@ -860,7 +861,7 @@ truth/staging_capabilities/): the frozen v4 is built once the host's capabilitie
 A provisional v4 with the current snapshot (lane S5's directory, not manifest/) differs from suite_v3 in 99
 scenario ids (3 added, 4 dropped, 92 changed; every one mapped to its group), and with the run's capabilities
 (protein cap 1) only in M-protein-0008/0009 (not built) and M-protein-0010 (built). suite_v3.json and
-suite_smoke_v3.json are unchanged; run_suite.sh keeps v3 as its default until the frozen v4 exists.
+suite_smoke_v3.json are unchanged.
 
 ### Validation on the recorded run (offline)
 A copy of the full run's first part (542 scenarios, 2,237 executions; the run of 2026-10-13 on b7214d29 under the
@@ -1207,4 +1208,13 @@ it states). Its table is unchanged (0fcf7e7d..., byte-identical here).
 - The provisional v4 (lane-s5d/build/, snapshot 6f945db4) is unchanged: content_sha256 3a7417d6..., relations
   cfba509f..., smoke 8e944aeb..., deterministic under PYTHONHASHSEED 1 and 777, 0 scenarios added, dropped or
   changed against lane S5c's (run_unique's hashing is run_direct's, not the manifest's).
+
+## The frozen v4 (2026-10-14)
+
+`manifest/suite_v4.json` and `manifest/suite_smoke_v4.json`, built with `SUITE_TRUTH_CACHE=<lane S1's record cache>
+build_manifest.py --no-fetch` from the capabilities snapshot of release refseq97-6f945db4 (truth/staging_capabilities/,
+protein mismatch cap 1; each document's sha256 in the manifest's index): 681 scenarios, content_sha256
+3a7417d60e4eb5d0e54433c76139df7ed1221ae35bcccf814b7fca2cf913f113, relations cfba509f111c1e1ed727035450ee983b69991e02d4933c40bb1a8da59f7c822f;
+smoke 11 scenarios, content_sha256 8e944aeb792da696a544236156c3ea8c8b435f7a53548689ba520cff7b7e0d6e. It equals the provisional v4 of
+lanes S5c/S5d. run_suite.sh takes v4 by default (`--smoke`: suite_smoke_v4.json); build_manifest.py refuses to overwrite either.
 

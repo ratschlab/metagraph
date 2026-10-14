@@ -488,7 +488,7 @@ class FrozenManifests(unittest.TestCase):
     def test_manifests(self):
         found = 0
         for name in ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json", "suite_v3.json",
-                     "suite_smoke_v3.json"):
+                     "suite_smoke_v3.json", "suite_v4.json", "suite_smoke_v4.json"):
             path = os.path.join(SUITE, "manifest", name)
             if not os.path.exists(path):
                 continue
