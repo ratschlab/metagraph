@@ -803,6 +803,19 @@ class MoreChecks(unittest.TestCase):
         self.assertEqual(outcome(heavy, scan, "count_relation", value=20)[0], "inconclusive")
         self.assertEqual(outcome(heavy, steps, "count_relation", value=2)[0], "fail")       # at_least 3 > 2
         self.assertEqual(outcome(heavy, steps, "count_relation", value=7)[0], "inconclusive")
+        # a stop of the labels' reads or the output leaves the graph count as the search made it (§7.5): no excuse
+        # for a graph count, an excuse for the labels' own counts
+        labels = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "GCTACACACACC"}]})
+        out = self.entry(stop={"phase": "output", "reason": "max_memory"}, counts={"contexts": C("at_least", 3),
+                                                                                 "labels": C("at_least", 2)})
+        self.assertEqual(outcome(labels, out, "count_relation", min=20)[0], "fail")
+        self.assertEqual(outcome(labels, out, "count_relation", relation="exact")[0], "fail")
+        self.assertEqual(outcome(labels, out, "count_relation", count="labels", relation="exact")[0], "inconclusive")
+        # a count of relation rules of its own: at_least below a minimum is inconclusive without a stop, an
+        # unexpected relation still fails
+        plain = self.entry(stop=None, counts={"contexts": C("exact", 30), "labels": C("at_least", 2)})
+        self.assertEqual(outcome(labels, plain, "count_relation", count="labels", min=5)[0], "inconclusive")
+        self.assertEqual(outcome(labels, plain, "count_relation", count="labels", relation="exact")[0], "fail")
 
     def test_mirror_needs_a_mirror(self):
         req, ans = fixture("predicate_selection_strands")

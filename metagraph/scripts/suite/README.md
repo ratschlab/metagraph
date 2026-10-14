@@ -1831,18 +1831,24 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   at_least, unknown or bounds beside a stop of any reason that can leave it so (every budget of §7.6, §14.4, §19.8,
   §20.5: max_steps, time, max_annotation_work, max_memory, max_predicate_work; every stop_at_threshold stop) cannot
   show an exact expectation or a minimum it lies below: inconclusive (the stop's own reason rules first, as before).
-  Before, only max_steps and time counted, so a supported-path search stopped by max_annotation_work or max_memory
+  A graph count (contexts, anchors, paths, supported_paths) is not excused by a stop of the labels' reads or the
+  output (label_discovery, placement, output: §7.5, "the graph count is then still the discovery's"). Before, only
+  max_steps and time counted, in any phase, so a supported-path search stopped by max_annotation_work or max_memory
   with supported_paths at_least 0 passed min 1, and paths at_least 3 after {extension, max_memory} failed relation
-  exact. Without a stop, a graph count (contexts, anchors, the paths of a path search, supported_paths) at_least below
-  the minimum fails: nothing can have left it inexact (it passed). The inexactness the SPEC states without a stop
-  stays inconclusive: supported_paths after a predicate's pruning and the paths of a supported-path search after any
-  branch pruned before L (§20.4, §20.9), bounds on a graph without its mask (§7.4), and the counts with relation rules
-  of their own (labels, occurrences, tested, selected: §12.1, §14.6, §19.7). Bounds that straddle a minimum are
-  inconclusive (they passed); an expected exact value an inexact count excludes (at_least above it, bounds around
-  other values) fails also after a stop, one it does not exclude is inconclusive after a stop (it failed). Measured:
-  every inexact count of v3 and v4 without a stop is a supported-path search's after a predicate's pruning (the
-  L-supported scenarios, at_least 1 >= their min 1) or a selection's (bounds, pass stopped); no recorded
-  count_relation outcome moves, two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.
+  exact. Without such a stop, a graph count at_least below the minimum fails: nothing can have left it inexact (it
+  passed). The inexactness the SPEC states without a stop stays inconclusive: supported_paths after a predicate's
+  pruning and the paths of a supported-path search after any branch pruned before L (§20.4, §20.9), bounds on a
+  graph without its mask (§7.4); the counts with relation rules of their own (labels, occurrences, tested, selected:
+  §12.1, §14.6, §19.7) read inconclusive at_least below a minimum (they passed) and keep their other rules. Bounds
+  that straddle a minimum are inconclusive (they passed); an expected exact value an inexact count excludes (at_least
+  above it, bounds around other values) fails also after a stop, one it does not exclude is inconclusive after a
+  stop (it failed). Measured: every inexact count of v3 and v4 without a stop is a supported-path search's after a
+  predicate's pruning (the L-supported scenarios, at_least 1 >= their min 1) or a selection's (bounds, pass
+  stopped), or a label count; every inexact count of v3, v4 and the stored fixtures judged against min = its value
+  + 1 and relation exact fails nowhere the checks of 14552938 did not (stress_count: 0 new failures; of 1,154
+  such hypothetical expectations that move, 676 earlier failures and 478 passes read inconclusive). No recorded
+  count_relation outcome
+  moves; two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.
 - /resolve, resolve_discover_contains and the invariants test the discovery's ranking (SPEC-labeled-traversal-core
   §4.2: the top max_labels by supported k-mers, ties by column id, then seq_id; `labels_truncated` {kept, total,
   min_kept_kmers, max_dropped_kmers, dropped_full_length}). A truncated list without the source label passed as

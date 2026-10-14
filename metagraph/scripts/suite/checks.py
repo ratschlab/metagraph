@@ -1099,37 +1099,42 @@ def check_pattern_slot_error(sc, ans, a, arm):
     return PASS, "slot %s" % a["code"]
 
 
+# the graph counts (SPEC-pattern-search §7.4, §7.7, §12.1, §20.4): at_least only after a stop of the graph search; a
+# stop of the labels' reads or of the output leaves them as the search made them (§7.5: "the graph count is then still
+# the discovery's")
+_GRAPH_COUNTS = ("contexts", "anchors", "paths", "supported_paths")
+_LABEL_PHASES = {"label_discovery", "placement", "output"}
+
+
 def _stopless_inexact(body: dict, e: dict, req: dict, name: str, rel: str) -> Optional[str]:
-    """Why count |name| of entry |e| may have the inexact relation |rel| with no stop stated, by the SPEC, or None
-    where only a stop leaves it so. A graph count (contexts, anchors, the paths of a path search) is at_least only
-    after a stop (SPEC-pattern-search §7.4, §12.1) and bounds only after a stop in a deferred scan or on a graph
-    without its mask (§7.4); a supported-path search states supported_paths at_least after a predicate's pruning and
-    its paths at_least after any branch pruned before L (§20.4, §20.9); the other counts (labels, occurrences, the
-    selection's tested and selected) are inexact for reasons of their own (§12.1, §14.6, §19.7)."""
+    """Why graph count |name| of entry |e| may have the inexact relation |rel| with no stop that leaves it so, by the
+    SPEC, or None: bounds on a graph without its mask (SPEC-pattern-search §7.4); on a supported-path search,
+    supported_paths and paths at_least after a predicate's pruning and paths at_least after any branch pruned before
+    the pattern's end (§20.4, §20.9). Otherwise a graph count is at_least or bounds only after a stop (§7.4, §12.1)."""
     counts = e.get("counts") or {}
     if rel == "bounds" and ((body.get("index") or {}).get("counting") == "upper_bound"):
         return "a graph without its mask (index.counting upper_bound, SPEC-pattern-search §7.4)"
-    if name in ("supported_paths", "paths") and req.get("long_search") == "supported_paths":
+    if name in ("supported_paths", "paths") and req.get("long_search") == "supported_paths" and rel == "at_least":
         sp = counts.get("supported_paths") if isinstance(counts.get("supported_paths"), dict) else {}
         by_predicate = _number(sp.get("branches_pruned_by_predicate")) or 0
         pruned = _number(sp.get("branches_pruned")) or 0
-        if rel == "at_least" and by_predicate > 0:
+        if by_predicate > 0:
             return "the predicate pruned %d branch(es) of the search (SPEC-pattern-search §20.4, §20.9)" % by_predicate
-        if rel == "at_least" and name == "paths" and pruned > 0:
+        if name == "paths" and pruned > 0:
             return "%d branch(es) pruned before the pattern's end (SPEC-pattern-search §20.4)" % pruned
-        return None
-    if name in ("contexts", "anchors", "paths", "supported_paths"):
-        return None
-    return "a count of its own relation rules (SPEC-pattern-search §12.1, §14.6, §19.7)"
+    return None
 
 
 def check_count_relation(sc, ans, a, arm):
     """A count's relation and value (`relation`, `value`, `min`, `max`; `level` for by_mismatches). A count a stop
     left inexact (at_least, unknown or bounds beside a stated stop of a reason that can leave it so,
-    _INEXACT_STOP_REASONS), or one the SPEC states inexact without a stop (_stopless_inexact), cannot show an exact
-    expectation: inconclusive, unless the scenario expects that relation or the bound it states decides (at_least
-    v >= min passes, at_least v > max fails). A graph count at_least or unknown with no stop that can leave it so
-    contradicts the SPEC (§7.4): it fails where it meets an expectation it does not show."""
+    _INEXACT_STOP_REASONS; for a graph count not a stop of the labels' reads or the output, which leave it as the
+    search made it), or a graph count the SPEC states inexact without such a stop (_stopless_inexact), cannot show an
+    exact expectation: inconclusive, unless the scenario expects that relation or the bound it states decides
+    (at_least v >= min passes, at_least v > max fails, a value outside the bounds fails). A graph count at_least
+    below a minimum with nothing that can leave it so contradicts the SPEC (§7.4: at_least means a stop interrupted
+    it) and fails; another count (labels, occurrences, tested, selected) has relation rules of its own (§12.1,
+    §14.6, §19.7): at_least below a minimum is inconclusive there."""
     e = _entry(ans, a.get("pattern", 0))
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
@@ -1139,8 +1144,10 @@ def check_count_relation(sc, ans, a, arm):
         c = _get(c, "by_mismatches.%d" % a["level"])
     value, rel = _count(c)
     stop = e.get("stop") or {}
+    graph = name in _GRAPH_COUNTS
     inexact = rel in ("at_least", "unknown", "bounds")
-    stopped = inexact and stop.get("reason") in _INEXACT_STOP_REASONS
+    stopped = inexact and stop.get("reason") in _INEXACT_STOP_REASONS and not (
+        graph and stop.get("phase") in _LABEL_PHASES)
     if stopped:
         bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
         if bad:
@@ -1149,7 +1156,7 @@ def check_count_relation(sc, ans, a, arm):
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     body = _body(ans)
     cause = ("the stop %s/%s" % (stop.get("phase"), stop.get("reason"))) if stopped else \
-        (_stopless_inexact(body if isinstance(body, dict) else {}, e, req, name, rel) if inexact else None)
+        (_stopless_inexact(body if isinstance(body, dict) else {}, e, req, name, rel) if inexact and graph else None)
     if "relation" in a:
         rels = a["relation"] if isinstance(a["relation"], list) else [a["relation"]]
         if rel not in rels:
@@ -1178,6 +1185,9 @@ def check_count_relation(sc, ans, a, arm):
         if rel == "at_least" and value is not None and value < a["min"]:
             if cause:
                 return INCONCLUSIVE, "%s at least %d after %s, %d expected" % (name, value, cause, a["min"])
+            if not graph:
+                return INCONCLUSIVE, "%s at least %d, %d expected: a count of relation rules of its own " \
+                                     "(SPEC-pattern-search §12.1, §14.6, §19.7)" % (name, value, a["min"])
             return FAIL, "%s at least %d below the minimum %d, with no stop that leaves the count inexact " \
                          "(SPEC-pattern-search §7.4: at_least means a stop interrupted it)" % (name, value, a["min"])
         if rel == "exact" and value < a["min"]:
