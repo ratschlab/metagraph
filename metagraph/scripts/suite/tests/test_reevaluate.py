@@ -92,6 +92,15 @@ EXECS = {
 }
 
 
+def slot_doc(seconds, tries="http 1 fail 1"):
+    """A pattern search's raw record whose deadline-ended task's held-slot line states one failed HTTP try of
+    |seconds| (the failing attempt's own wall the wall rule reads)."""
+    slot = "\u29d7 Slot held for search s %.1fs (att 1, ok, acq 0.1, rel 0.1, %s %.3fs backoff 0.0s, released)" % (
+        seconds, tries, seconds)
+    return {"calls": [{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
+        {"error": "pattern_deadline: late", "diagnostic_log": [slot]}]}}]}
+
+
 def build_run(run_dir):
     manifest = {"manifest_version": 1, "scenarios": SCENARIOS, "relations": []}
     os.makedirs(run_dir)
@@ -298,37 +307,64 @@ class Reevaluate(unittest.TestCase):
                                                              "finalisation reserve of 250 ms included); retry"}}
         fail = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
         at = lambda ms: {"outcome": "fail", "wall_ms": 99999.0, "mcp_phases": {"backend_ms": ms}}  # noqa: E731
+
+        def task(seconds, tries="http 1 fail 1"):
+            # the deadline-ended task's held-slot line: its one failed HTTP try is the failing attempt's own wall
+            slot = "\u29d7 Slot held for search s %.1fs (att 1, ok, acq 0.1, rel 61.1, %s %.3fs backoff 0.0s, " \
+                   "released)" % (seconds, tries, seconds)
+            return {"calls": [{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
+                {"error": "pattern_deadline: late", "diagnostic_log": ["x", slot]}]}}]}
         info = {}
-        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, at(60055.0), fail, False, cases, None, info)
+        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases, None,
+                                          info, task(60.055))
         self.assertEqual((out, kept), ("service_by_design",
                                        "the table's answer-triggered case pattern.deadline_ends_task"))
-        self.assertIn(">= time_budget_ms 60000 - reserve 250 (stated) = 59750 ms", info["verdict_detail"])
-        # R1 (wall_rule budget_minus_reserve): a known wall below budget - reserve holds the case back (the checks
-        # judge); rule (c): no service-side wall, or no request budget: inconclusive, the case recorded
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at(400.0), fail, False, cases)[0], "fail")
+        self.assertIn(">= time_budget_ms 60000 - 1000 ms = 59000 ms", info["verdict_detail"])
+        # R1 (wall_rule budget_minus_reserve): a known wall below the request's budget - 1 s holds the case back (the
+        # checks judge): the engine answers its deadline only once the budget has elapsed
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
+                                               None, None, task(0.4))[0], "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
+                                               None, None, task(59.5))[0], "service_by_design")
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
+                                               None, info, task(58.9))[0], "fail")
+        self.assertIn("before time_budget_ms 60000 - 1000 ms = 59000 ms: the case does not apply",
+                      info["verdict_detail"])
+        # a reserve the answer states above the host's (host_capabilities pattern.finalize_reserve_ms 250) is no
+        # host deadline, however long the wall (a 60,000 ms reserve would have made any wall plausible)
+        big = dict(relayed, error=dict(relayed["error"], text=relayed["error"]["text"].replace(
+            "reserve of 250 ms", "reserve of 60000 ms")))
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, big, {"outcome": "fail"}, fail, False, cases, None,
+                                               info, task(60.055))[0], "fail")
+        self.assertIn("stated finalisation reserve 60000 ms above the host's 250 ms: the case does not apply",
+                      info["verdict_detail"])
+        # the failing attempt's own wall, never mcp_phases.backend_ms (a pattern search's is the sum over its tasks'
+        # calls, a retry's included): with no usable slot line rule (c) holds, whatever backend_ms says
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at(61000.0), fail, False, cases, None,
+                                               info)[0], "inconclusive")
+        self.assertEqual((info["inconclusive_reason"], info["service_by_design_case"]),
+                         ("no service-side timing: plausibility undecidable", "pattern.deadline_ends_task"))
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at(400.0), fail, False, cases)[0],
+                         "inconclusive")
+        # rule (c): no service-side wall, or no request budget: inconclusive, the case recorded
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail", "wall_ms": 61000.0},
                                                fail, False, cases, None, info)[0], "inconclusive")
         self.assertEqual((info["inconclusive_reason"], info["service_by_design_case"]),
                          ("no service-side timing: plausibility undecidable", "pattern.deadline_ends_task"))
         info = {}
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", dict(sc_, request={}), relayed, at(61000.0), fail, False,
-                                               cases, None, info)[0], "inconclusive")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", dict(sc_, request={}), relayed, {"outcome": "fail"},
+                                               fail, False, cases, None, info, task(61.0))[0], "inconclusive")
         self.assertEqual(info["inconclusive_reason"], "no threshold known: plausibility undecidable")
         finding = fail + [{"check": "budget_respected", "outcome": "finding", "detail": ""}]
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, finding, False,
                                                cases)[0], "finding")
-        # the wall of the deadline-ended task's one HTTP try (the diagnostic log's held-slot line)
-        slot = "\u29d7 Slot held for search s 61.0s (att 1, ok, acq 0.1, rel 61.1, http 1 fail 1 60.10s backoff 0.0s, " \
-               "released)"
-        doc = {"calls": [{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
-            {"error": "pattern_deadline: late", "diagnostic_log": ["x", slot]}]}}]}
+        # a task whose slot shows more than one try gives no wall (a sum over a retry)
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
-                                               None, None, doc)[0], "service_by_design")
-        two = dict(doc, calls=[{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
-            {"error": "pattern_deadline: late", "diagnostic_log": [slot.replace("http 1 fail 1", "http 2 fail 1")]}]}}])
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
-                                               None, None, two)[0], "inconclusive")
+                                               None, None, task(61.0, "http 2 fail 1"))[0], "inconclusive")
         # another failed search, a direct arm, another route or no table: judged by the checks
         other = dict(relayed, error={"code": "search_failed", "text": "backend_down"})
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, other, at(61000.0), fail, False, cases)[0], "fail")
@@ -389,15 +425,28 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, line, finding, False, cases, None, info)[0],
                          "inconclusive")
         self.assertEqual(info["inconclusive_reason"], "no service-side timing: plausibility undecidable")
-        # G22: the relayed /resolve deadline: budget (the tool error's, else the request's) - reserve
+        # G22: the relayed /resolve deadline: the budget the service sent (the request's) - the host's reserve
         rdl = {"http": 503, "body": None, "error": {"code": "traversal_resolve_deadline", "text": "the backend could "
                                                     "not build and write its answer within bounds.time_budget_ms "
                                                     "(20000 ms, the finalisation reserve of 250 ms included)"}}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(22522.2), fail, False, cases)[0],
                          "inconclusive")
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(19700.0), fail, False, cases)[0], "fail")
+        # the tool error's budget is checked against the request's, never read: the service refuses a budget above
+        # the host's maximum and never lowers one, so a tool error stating 5000 ms for a request of 20000 ms is a
+        # service fault, not a host state (bounds only from the request, the host and the service settings)
         te = {"code": "traversal_resolve_deadline", "time_budget_ms": 5000, "finalize_reserve_ms": 250}
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(5000.0), fail, False, cases, te)[0],
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(5000.0), fail, False, cases, te, info)[0],
+                         "fail")
+        self.assertEqual(info["verdict_detail"], "the tool error's time_budget_ms 5000 ms is not the request's 20000 ms")
+        te = {"code": "traversal_resolve_deadline", "time_budget_ms": 20000, "finalize_reserve_ms": 19999}
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(5.0), fail, False, cases, te, info)[0],
+                         "fail")
+        self.assertEqual(info["verdict_detail"], "stated finalisation reserve 19999 ms above the host's 250 ms")
+        te = {"code": "traversal_resolve_deadline", "time_budget_ms": 20000, "finalize_reserve_ms": 250}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(19800.0), fail, False, cases, te)[0],
                          "inconclusive")
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, {"outcome": "fail", "wall_ms": 22522.2}, fail,
@@ -449,7 +498,7 @@ class Reevaluate(unittest.TestCase):
         fast = self.calls(("pattern_search", 1000.0, 1000.002), ("get_status", 1000.002, 1000.005, done),
                           ("get_results", 1000.005, 1000.4))
         premature = ("pattern.deadline_ends_task (wall_rule budget_minus_reserve): client wall 5 ms + 1 s slack < "
-                     "threshold 59750 ms: provably premature")
+                     "threshold 59000 ms: provably premature")
         # S5c-01: a record without mcp_auth (every run before 2a8acbaf) is unknown: rule 2 decides nothing
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", pat, relayed, line, fail, False, cases, None, info,
@@ -614,7 +663,7 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(mark["mcp_auth"], {"assumed": "anonymous", "recorded": {"unknown": 1}, "assumed_lines": 1,
                                             "run_json": []})
         self.assertEqual((row["outcome"], row["reevaluation"]["mcp_auth_assumed"]), ("fail", "anonymous"))
-        self.assertIn("client wall 5 ms + 1 s slack < threshold 59750 ms", row["verdict_detail"])
+        self.assertIn("client wall 5 ms + 1 s slack < threshold 59000 ms", row["verdict_detail"])
         direct = sc.read_jsonl(os.path.join(run, "arms", "direct-local", "executions.reevaluated.jsonl"))[0][0]
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         row["raw"] = os.path.join("arms", "mcp", row["raw"])
@@ -654,7 +703,7 @@ class Reevaluate(unittest.TestCase):
     def test_discovery_without_budget(self):
         # A2-01 MCP side with addendum 1 item 1: a relayed /resolve deadline on a discovery that names no
         # time_budget_ms is implausible (the service sends no deadline for a discovery; SPEC-core §4.5 opt-in):
-        # the checks judge (status fails); an explicit-labels resolve without a caller budget is "budget unknown"
+        # the checks judge (status fails); an explicit-labels resolve without a caller budget has the service's default
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         fail = [{"check": "status", "outcome": "fail", "detail": "http 503"}]
         disc = scenario("R-discover-0001", "POST /resolve", STATUS,
@@ -676,18 +725,28 @@ class Reevaluate(unittest.TestCase):
         self.assertFalse(sc.discovery_without_budget(timed))
         self.assertEqual(reevaluate.outcome_of(None, "mcp", timed, rdl, {"outcome": "fail", "mcp_phases": {
             "backend_ms": 20500.0}}, fail, False, cases)[0], "inconclusive")
-        # explicit labels, no caller budget: the stated budget's threshold, else undecidable
+        # explicit labels, no caller budget: the service sends its default (service_settings.resolve
+        # .default_time_budget_ms held to the host's resolve.time_budget.max_time_ms: 60000 ms), so the threshold is
+        # known; a tool error stating another budget is no host state (a relayed no-budget deadline must state the
+        # service's default)
         labels = scenario("R-0001", "POST /resolve", STATUS, mcp={"tool": "traverse_resolve",
                                                                   "arguments": {"labels": ["562"], "sequence": "AC"}})
         self.assertFalse(sc.discovery_without_budget(labels))
+        self.assertEqual(sc.resolve_budget(labels), (60000.0, "the service's default"))
         at = {"outcome": "fail", "mcp_phases": {"backend_ms": 20000.0}}
+        info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", labels, rdl, at, fail, False, cases,
-                                               {"code": "traversal_resolve_deadline", "time_budget_ms": 20000})[0],
-                         "inconclusive")
+                                               {"code": "traversal_resolve_deadline", "time_budget_ms": 20000},
+                                               info)[0], "fail")
+        self.assertEqual(info["verdict_detail"],
+                         "the tool error's time_budget_ms 20000 ms is not the service's default 60000 ms")
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", labels, rdl, at, fail, False, cases, None, info)[0],
-                         "inconclusive")
-        self.assertEqual(info["inconclusive_reason"], "no threshold known: plausibility undecidable")
+                         "fail")
+        self.assertIn("before time_budget_ms - finalize_reserve_ms = 59750 ms: not a host state", info["verdict_detail"])
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", labels, rdl, {"outcome": "fail", "mcp_phases": {
+            "backend_ms": 60010.0}}, fail, False, cases, {"code": "traversal_resolve_deadline",
+                                                          "time_budget_ms": 60000})[0], "inconclusive")
 
     def test_resolve_timeout_stated_phase(self):
         # rule 4 (async's f94b079d): a resolve_timeout that states its phase and bound is a host state at bound_s x
@@ -741,19 +800,32 @@ class Reevaluate(unittest.TestCase):
             "source"], "answer error")
         job = {"calls": [{"tool": "traverse_resolve", "payload": {"job_id": "j"}},
                          {"tool": "traverse_results", "payload": {"resolve_error": {
-                             "status": 504, "detail": {"code": "other", "timeout_phase": "write", "bound_s": 5}}}}]}
+                             "status": 504, "detail": {"code": "other", "timeout_phase": "write", "bound_s": 10}}}}]}
         self.assertEqual(sc.timeout_statement(job, to["error"], None)["source"], "job error")
         info = {}
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(6000.0), fail, False, cases, None, info,
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(9500.0), fail, False, cases, None, info,
                                                job)[0], "inconclusive")
-        self.assertIn("the stated bound 5 s (write) - 1000 ms = 4000 ms", info["verdict_detail"])
+        self.assertIn("the stated bound 10 s (write) - 1000 ms = 9000 ms", info["verdict_detail"])
+        # the write bound is the client's write phase, min(service_settings' write timeout 10 s, t): every budgeted
+        # call has t >= 10 s, so a stated write bound of 5 s (or 0.001 s) is no bound the service applies, whatever
+        # the wall: the checks judge
+        for bound in (5, 0.001):
+            short_write = dict(write, bound_s=bound)
+            info = {}
+            self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(9500.0), fail, False, cases, short_write,
+                                                   info)[0], "fail", bound)
+            self.assertEqual(info["verdict_detail"], "service write bound %g s is not its write cap 10 s" % bound)
+        # within the 1 ms the service rounds the statement to
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(9500.0), fail, False, cases,
+                                               dict(write, bound_s=10.001))[0], "inconclusive")
 
     def test_resolve_timeout_read_floor(self):
-        # rule 4's read floor (async's f52846fb): a stated READ bound with a known budget (the MCP arguments', else the
-        # tool error's time_budget_ms) below budget + reserve (the tool error's finalize_reserve_ms, else 250) +
-        # 10,000 - 1000 ms is no host state whatever the wall (an unknown one included): the checks judge,
-        # verdict_detail "service read bound {b} s below its own floor {f} s" (%g); write / deadline phases keep
-        # bound_s - 1 s; no budget known and a legacy record are unchanged (the runner's test, mirrored)
+        # rule 4's read floor (async's f52846fb): a stated READ bound below the service's own read timeout t - 1 s
+        # (t = max(the mode's base, budget + the host's reserve + 10 s), the budget the request's, an explicit-labels
+        # resolve's without one the service's default) is no host state whatever the wall (an unknown one
+        # included): the checks judge, verdict_detail "service read bound {b} s below its own floor {f} s" (%g);
+        # the bounds come from the request, the host's capabilities and the service's settings, never from the
+        # tool error, whose budget and reserve are checked; a legacy record is unchanged
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         fail = [{"check": "status", "outcome": "fail", "detail": "http 504"}]
 
@@ -790,17 +862,33 @@ class Reevaluate(unittest.TestCase):
             out, detail, why = judge(20000, stated("read", bound), bound * 1000)
             self.assertEqual((out, why), ("inconclusive", "resolve_timeout"), bound)
             self.assertIn("the stated bound %g s (read)" % bound, detail)
-        # the reserve the tool error states raises the floor (20 + 2 + 10 - 1 = 31 s)
+        # a reserve the tool error states is checked against the host's (resolve.time_budget.finalize_reserve_ms
+        # 250, host_capabilities), never read: one above it is no bound the service applied
         self.assertEqual(judge(20000, stated("read", 30.25, finalize_reserve_ms=2000.0), 30250.0),
-                         ("fail", "service read bound 30.25 s below its own floor 31 s", None))
-        # the tool error's budget when the arguments name none; no budget known: no floor
-        self.assertEqual(judge(None, stated("read", 20.25, time_budget_ms=20000), 20300.0), ("fail", below, None))
-        self.assertEqual(judge(None, stated("read", 20.0), 19000.0)[::2], ("inconclusive", "resolve_timeout"))
-        # write and deadline phases keep bound_s - 1 s on a budgeted call
-        for phase, bound in (("write", 10.0), ("deadline", 15.0)):
-            self.assertIsNone(sc.read_bound_below_floor(res(20000), to["error"], stated(phase, bound)))
-            self.assertEqual(judge(20000, stated(phase, bound), bound * 1000 - 1000)[::2],
-                             ("inconclusive", "resolve_timeout"), phase)
+                         ("fail", "stated finalisation reserve 2000 ms above the host's 250 ms", None))
+        # no budget in the arguments: an explicit-labels resolve gets the service's default (60000 ms: t = 70.25 s),
+        # a tool error stating another budget is no host state, and the floor holds whatever the tool error says
+        self.assertEqual(judge(None, stated("read", 20.25, time_budget_ms=20000), 20300.0),
+                         ("fail", "the tool error's time_budget_ms 20000 ms is not the service's default 60000 ms",
+                          None))
+        self.assertEqual(judge(None, stated("read", 20.0), 19000.0),
+                         ("fail", "service read bound 20 s below its own floor 69.25 s", None))
+        self.assertEqual(judge(None, stated("read", 70.25), 70300.0)[::2], ("inconclusive", "resolve_timeout"))
+        # a discovery without a budget: the discovery timeout (service_settings.resolve.discover_timeout_s 120 s)
+        disc = scenario("R-floor", "POST /resolve", STATUS, mcp={"tool": "traverse_resolve",
+                                                                 "arguments": {"discover": True}})
+        self.assertEqual(sc.read_bound_below_floor(disc, to["error"], stated("read", 20.25)),
+                         "service read bound 20.25 s below its own floor 119 s")
+        self.assertIsNone(sc.read_bound_below_floor(disc, to["error"], stated("read", 120.0)))
+        # the write phase: min(the write timeout, t) = 10 s on a budgeted call, then bound_s - 1 s
+        self.assertIsNone(sc.read_bound_below_floor(res(20000), to["error"], stated("write", 10.0)))
+        self.assertEqual(judge(20000, stated("write", 10.0), 9000.0)[::2], ("inconclusive", "resolve_timeout"))
+        # the deadline window: the exchange deadline (t plus each phase's cap) less what preceded the exchange
+        # (acquire, claim) reaches the read floor t - 1 s; a shorter window is no bound the service applied
+        self.assertEqual(judge(20000, stated("deadline", 15.0), 45000.0),
+                         ("fail", "service deadline window 15 s below its own floor 29.25 s", None))
+        self.assertEqual(judge(20000, stated("deadline", 30.0), 29000.0)[::2], ("inconclusive", "resolve_timeout"))
+        self.assertEqual(judge(20000, stated("deadline", 30.0), 28000.0)[0], "fail")
         # a legacy record (no stated phase) keeps min(10 s, ...) - 1 s
         self.assertEqual(judge(20000, {"code": "resolve_timeout"}, 9000.0)[::2], ("inconclusive", "resolve_timeout"))
         # the runner's recorded statement is what the floor reads (the raw record's timeout_terms)
@@ -952,13 +1040,17 @@ class Reevaluate(unittest.TestCase):
         self.assertTrue(info["verdict_detail"].startswith("not implemented via MCP on this deployment (case "
                                                           "test.walled"), info["verdict_detail"])
         # a known wall below the threshold holds the case back in matching, as before; its note leads the detail of
-        # a later case that matches
-        out, info = judge(pat, deadline, walled, line={"outcome": "fail", "mcp_phases": {"backend_ms": 5.0}})
+        # a later case that matches (the failing attempt's own wall: the deadline-ended task's one HTTP try)
+        slot = "\u29d7 Slot held for search s 0.1s (att 1, ok, acq 0.0, rel 0.1, http 1 fail 1 0.005s backoff 0.0s, " \
+               "released)"
+        quick = {"calls": [{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
+            {"error": "pattern_deadline: late", "diagnostic_log": [slot]}]}}]}
+        out, info = judge(pat, deadline, walled, doc=quick)
         self.assertEqual((out, info.get("service_by_design_case")), ("fail", None))
         both = dict(walled, **{"test.gate2": case("test.gate2", "POST /pattern",
                                                   mcp={"http": 502, "code": "search_failed",
                                                        "text_contains": "pattern_deadline"})})
-        out, info = judge(pat, deadline, both, line={"outcome": "fail", "mcp_phases": {"backend_ms": 5.0}})
+        out, info = judge(pat, deadline, both, doc=quick)
         self.assertEqual((out, info["service_by_design_case"]), ("not_implemented_mcp", "test.gate2"))
         self.assertTrue(info["verdict_detail"].startswith("test.walled (wall_rule budget_minus_reserve): after 5 ms"))
         self.assertIn("; not implemented via MCP on this deployment (case test.gate2", info["verdict_detail"])
@@ -1018,7 +1110,8 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(out, "finding")
         self.assertIn("pattern.deadline_ends_task", kept)
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, line, checks, False, cases),
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, line, checks, False, cases, None, None,
+                                               slot_doc(125.0)),
                          ("finding", "the table's answer-triggered case pattern.deadline_ends_task; a check is a "
                                      "finding (a by-design mark never erases one)"))
         # a finding without a case is the checks' (re-evaluated), with or without the table
@@ -1132,12 +1225,13 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at, fail, False, cases),
                          ("service_by_design", "the table's named case x.relayed"))
         unnamed = dict(sc_, mcp={}, request={"time_budget_ms": 60000})
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", unnamed, relayed, at, fail, False, cases),
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", unnamed, relayed, at, fail, False, cases, None, None,
+                                               slot_doc(60.1)),
                          ("service_by_design", "the table's answer-triggered case pattern.deadline_ends_task"))
         # a relayed deadline whose budget_respected is a finding keeps it (Q1 of VERIFY-REVIEW)
         self.assertEqual(reevaluate.outcome_of(None, "mcp", unnamed, relayed, at,
                                                fail + [{"check": "budget_respected", "outcome": "finding"}], False,
-                                               cases)[0], "finding")
+                                               cases, None, None, slot_doc(60.1))[0], "finding")
 
     def test_rows_record_the_case_and_no_table(self):
         # the re-evaluated lines record the matched case and the explained checks (the replay's); '' = no table

@@ -1036,8 +1036,19 @@ class ReviewFixesTest(unittest.TestCase):
         dead = self.raw_line("N-1", "direct-local", 0, http=503, error={"code": "deadline", "text": "late"},
                              outcome="inconclusive", checks=[{"check": "status", "outcome": "inconclusive",
                                                               "detail": ""}])
-        relay = lambda ms: self.raw_line("N-1", "mcp", 0, http=502, error=err, outcome="fail", checks=st,  # noqa: E731
-                                         mcp_phases={"backend_ms": ms} if ms else {})
+        def relay(ms):
+            # the failing attempt's own wall: the deadline-ended task's one HTTP try in the raw record's diagnostic
+            # log (never mcp_phases.backend_ms, a sum over the search's tasks)
+            ln = self.raw_line("N-1", "mcp", 0, http=502, error=err, outcome="fail", checks=st,
+                               mcp_phases={"backend_ms": 99999.0} if ms else {})
+            if ms:
+                slot = "\u29d7 Slot held for search s 1.0s (att 1, ok, acq 0.0, rel 0.1, http 1 fail 1 %.3fs " \
+                       "backoff 0.0s, released)" % (ms / 1000.0)
+                sc.write_gz_json(os.path.join(self.dir, ln["raw"]), {
+                    "answer": {"http": 502, "body": None, "error": err},
+                    "calls": [{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
+                        {"error": "pattern_deadline: late", "diagnostic_log": [slot]}]}}]})
+            return ln
         res = cmp.mcp_agreement({0: relay(60055.0)}, {"direct-local": {0: dead}}, s, cases, self.dir)
         self.assertEqual((res["class"], res["by"], res["verified"]), ("service_by_design", "answer", True))
         ok = self.raw_line("N-1", "direct-local", 0, checks=[{"check": "status", "outcome": "pass", "detail": ""}])
