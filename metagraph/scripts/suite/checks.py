@@ -2735,7 +2735,19 @@ def _finite(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[str]:
+def _arm_index(armo: dict) -> dict:
+    """What _structural_end_problems reads of an arm, built once per arm (every path of a wide trie would otherwise
+    rebuild it: quadratic in the paths): the segments by id, the route split counts (_route_splits) and the runs'
+    branches by (segment, to_bp, label)."""
+    runs: Dict[Tuple[Any, Any], Dict[Any, Any]] = {}
+    for x in armo.get("runs") or []:
+        if isinstance(x, dict):
+            runs.setdefault((x.get("segment"), x.get("to_bp")), {})[x.get("label")] = x.get("branches")
+    return {"segments": {x.get("id"): x for x in armo.get("segments") or [] if isinstance(x, dict)},
+            "splits": _route_splits(armo), "runs": runs}
+
+
+def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Optional[dict] = None) -> List[str]:
     """Why the structural ends stated at path |p|'s leaf cannot have happened, judged from the request, the strategy
     (_strategy_knob) and the arm (SPEC-labeled-traversal-core §6.4, §6.6, §6.7):
     - a structural reason the path counts (end_reasons) has a label_end event of it on its leaf at the path's end
@@ -2750,12 +2762,14 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[s
     - `minority`: a quorum knob set (min_successor_labels >= 2 or min_successor_fraction > 0); `below_min_labels`:
       min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route to the leaf through that many
       splits;
-    - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end."""
+    - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end.
+    |index| is the arm's _arm_index, built here when not given."""
     out: List[str] = []
     chain = p.get("segments") or []
     if not chain:
         return out
-    leaf = next((x for x in armo.get("segments") or [] if isinstance(x, dict) and x.get("id") == chain[-1]), None)
+    index = index if index is not None else _arm_index(armo)
+    leaf = index["segments"].get(chain[-1])
     if leaf is None:
         return out
     L = p.get("length_bp")
@@ -2777,9 +2791,8 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[s
     msf = _strategy_knob(sc, ans, "branching", "min_successor_fraction")
     mll = _strategy_knob(sc, ans, "bounds", "min_live_labels")
     quorum = (_finite(msl) and msl >= 2) or (isinstance(msf, (int, float)) and msf > 0) or (_finite(mll) and mll > 1)
-    amb_n, split_n = _route_splits(armo)(chain[-1])
-    lineage = {x.get("label"): x.get("branches") for x in armo.get("runs") or []
-               if isinstance(x, dict) and x.get("segment") == chain[-1] and x.get("to_bp") == L}
+    amb_n, split_n = index["splits"](chain[-1])
+    lineage = dict(index["runs"].get((chain[-1], L)) or {})
     lineage.update({x.get("label"): x.get("branches") for x in p.get("end_labels") or [] if isinstance(x, dict)})
     for ev in ends:
         what = named(ev)
@@ -3115,11 +3128,12 @@ def check_walk_in_record(sc, ans, a, arm):
         ends = set()
         possible = set()   # the structural ends of the longest routes' leaves that can have happened
         disproved = []     # why a stated structural end of such a leaf cannot have happened
+        index = _arm_index(armo)
         for p, f in following:
             if len(f) == best:
                 pe = _leaf_ends(armo, p)
                 ends |= pe
-                bad = _structural_end_problems(sc, ans, armo, p)
+                bad = _structural_end_problems(sc, ans, armo, p, index)
                 if bad:   # a leaf with an end that cannot have happened shows none of its ends
                     disproved += bad
                 else:
@@ -3516,8 +3530,10 @@ def _traverse_invariants(sc, ans, a, arm):
         # a structural end lies where the request, the strategy and the arm let it happen (§6.4, §6.6)
         for side in _arms_of(sc, i):
             armo = r["arms"].get(side)
+            index = _arm_index(armo) if isinstance(armo, dict) else None
             for p in (armo.get("paths") or []) if isinstance(armo, dict) else []:
-                probs += ["result %d %s %s" % (i, side, m) for m in _structural_end_problems(sc, ans, armo, p)]
+                probs += ["result %d %s %s" % (i, side, m)
+                          for m in _structural_end_problems(sc, ans, armo, p, index)]
     probs += _traverse_reason_problems(sc, ans)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
 

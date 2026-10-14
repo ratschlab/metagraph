@@ -2227,6 +2227,26 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(o, "fail")
         self.assertIn("0 ambiguous split(s)", d)
 
+    def test_structural_ends_index_each_arm_once(self):
+        # the route split table is built once per arm, not per path: a wide trie (max_paths 10,000 leaves) would
+        # otherwise cost time quadratic in its paths
+        calls = []
+        real = checks._route_splits
+
+        def counting(armo):
+            calls.append(id(armo))
+            return real(armo)
+        sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 2}})
+        checks._route_splits = counting
+        try:
+            self.assertEqual(outcome(sc, ans, "invariants")[0], "pass")
+            self.assertEqual(len(calls), 1)          # one arm, three paths
+            del calls[:]
+            self.assertEqual(outcome(sc, ans, "walk_in_record")[0], "pass")
+            self.assertEqual(len(calls), 1)
+        finally:
+            checks._route_splits = real
+
     def test_zero_extension_branch_stop(self):
         # the zero-extension mutation of T-derived-0001: both arms a 0 bp root whose every label ends
         # `branch` with branches 0 under max_label_branches 2; the dead_end control fails as well
