@@ -772,8 +772,8 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   scenario's status expectation asks for a 200 and does not itself name the deadline (an http 503, the code
   `deadline` or a text naming it), such a 503 makes `status` inconclusive and joins evaluate's allowed list, so the
   body's checks read inconclusive and `budget_respected` judges it by the client's wall time (`_budget_503`, against
-  min(the requested budget, the route's cap the builder states as cap_ms): before it, /resolve less its 250 ms
-  reserve, a fail; long past it a finding). A scenario that expects a refusal (no 200), names the deadline itself,
+  min(the requested budget, the route's cap the builder states as cap_ms): before it a fail (lane S7c: on /resolve
+  too, not before it less the 250 ms reserve); long past it a finding). A scenario that expects a refusal (no 200), names the deadline itself,
   or another route or code is judged as it states.
 
 ### Comparator and re-evaluation
@@ -884,8 +884,8 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
 ### Checks
 - A premature deadline (A-01). A 503 `deadline` arrives only when the answer cannot be written by the budget, and the
   deadline starts at the parsed body, inside the client's interval: `_budget_503` (budget_respected on an allowed
-  503) fails one whose client wall time is below the budget less 1 ms (/resolve: below the budget less its fixed
-  finalisation reserve of 250 ms, SPEC-labeled-traversal-core §4.5). A /pattern scenario where the deadline can be
+  503) fails one whose client wall time is below the budget less 1 ms, on /resolve too (lane S7c: the reserve ends
+  the work, not the answer; SPEC-labeled-traversal-core §4.5). A /pattern scenario where the deadline can be
   allowed carries budget_respected (v3: 426), as do the 85 budgeted /resolve scenarios that ask for a 200.
 - The /resolve deadline (G22 as VERIFY-2 item 3 has it). `checks.deadline_allowed` (formerly
   `pattern_deadline_allowed`, kept as an alias) allows a POST /resolve 503 `deadline` as it allows the /pattern one
@@ -1889,3 +1889,11 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   inside the prefix, a minimum already reached), and is inconclusive otherwise (a stop before the first k-mer
   shows nothing). 68 `full` expectations of v4 and 31 others are at risk only beyond 19.75 s of work on at most
   2,000 bp: no recorded /resolve answer of v3 or v4 states a stop, so no outcome moves.
+- /resolve and /pattern, budget_respected on an allowed 503 `deadline` (`_budget_503`): the premature floor is the
+  budget itself on both routes (1 ms slack). It was the budget less /resolve's 250 ms finalisation reserve, so a 503
+  up to 250 ms before the budget read inconclusive; the host throws ResolveDeadline only once the elapsed time
+  reaches the budget (Deadline::respond_expired, elapsed >= budget; the reserve ends the work earlier, not the
+  answer), its clock starting inside the client's interval, so a correct host cannot answer one there. Budget
+  1,000 ms: wall 900 or 999 fails (was inconclusive), 1,000 inconclusive, 600 fails as before. Every recorded 503
+  deadline of v3 and v4 (R-budget, R-twin, R-pos-0027, the /pattern ones) came at or after its budget (the earliest
+  /resolve one 6,064 ms for 3,000): no outcome moves. README lines of lanes S5 and S5b corrected.

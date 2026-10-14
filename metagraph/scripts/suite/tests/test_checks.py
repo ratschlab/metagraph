@@ -206,7 +206,8 @@ class Generic(unittest.TestCase):
         self.assertEqual(checks.evaluate(sc_m, dl, "direct-local", client={"wall_ms": 60012.9})[2]["outcome"],
                          "inconclusive")
         # G22 (VERIFY-2 item 3): a /resolve 503 deadline in place of its 200 is SPEC-core §4.5's answer too, before
-        # the budget less the finalisation reserve (250 ms) it fails
+        # the budget it fails (the host answers it once the elapsed time reaches the budget; the finalisation reserve
+        # ends the work, not the answer)
         rsc = {"route": "POST /resolve", "request": {"query": "A" * 60, "bounds": {"time_budget_ms": 20000}},
                "truth": {}, "expect": [{"check": "status", "args": {"http": 200}},
                                        {"check": "invariants", "args": {}}, {"check": "budget_respected", "args": {}}]}
@@ -215,10 +216,12 @@ class Generic(unittest.TestCase):
         self.assertEqual([r["outcome"] for r in res], ["inconclusive", "inconclusive", "inconclusive"])
         self.assertIn("SPEC-labeled-traversal-core §4.5", res[0]["detail"])
         self.assertEqual(checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 19800.0})[2]["outcome"],
+                         "fail")
+        self.assertEqual(checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 20000.0})[2]["outcome"],
                          "inconclusive")
         res = checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 800.0})
         self.assertEqual(res[2]["outcome"], "fail")
-        self.assertIn("finalisation reserve", res[2]["detail"])
+        self.assertIn("before the 20000 ms budget", res[2]["detail"])
         # another code, another route, or a scenario expecting a refusal: as stated
         res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "loading"}'), "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
@@ -1007,11 +1010,18 @@ class BudgetChecks(unittest.TestCase):
         # without the cap (a manifest built before A2-03) the requested budget, as before: a false fail
         self.assertEqual(checks.evaluate(sc(70000, None), dl, "direct-local",
                                          client={"wall_ms": 60100.0})[2]["outcome"], "fail")
-        # before the capped budget less the reserve: fail; long past it: a finding; a cap above the request: the
-        # request's budget
+        # before the capped budget: fail; long past it: a finding; a cap above the request: the request's budget
         res = checks.evaluate(sc(70000, 60000), dl, "direct-local", client={"wall_ms": 59000.0})
         self.assertEqual(res[2]["outcome"], "fail")
-        self.assertIn("less its 250 ms finalisation reserve", res[2]["detail"])
+        self.assertIn("before the 60000 ms budget (the requested 70000 ms lowered", res[2]["detail"])
+        # the host answers /resolve's 503 only once the elapsed time reaches the budget (Deadline::respond_expired):
+        # its finalisation reserve ends the work earlier, not the answer, so a 503 within it is premature too
+        for wall, want in ((59900.0, "fail"), (59998.0, "fail"), (59999.0, "inconclusive"), (60000.0, "inconclusive")):
+            self.assertEqual(checks.evaluate(sc(70000, 60000), dl, "direct-local",
+                                             client={"wall_ms": wall})[2]["outcome"], want, wall)
+        for wall, want in ((900.0, "fail"), (999.0, "inconclusive"), (1000.0, "inconclusive"), (600.0, "fail")):
+            self.assertEqual(checks.evaluate(sc(1000, None), dl, "direct-local",
+                                             client={"wall_ms": wall})[2]["outcome"], want, wall)
         self.assertEqual(checks.evaluate(sc(70000, 60000), dl, "direct-local",
                                          client={"wall_ms": 125000.0})[2]["outcome"], "finding")
         self.assertEqual(checks.evaluate(sc(20000, 60000), dl, "direct-local",

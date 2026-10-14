@@ -1755,9 +1755,6 @@ _TAIL_PIECES = 2
 # SPEC-labeled-traversal-core §4.5); the client's wall time also holds the network, the front and any wait for a
 # request-pool thread, so a 503 is judged "long past" its budget only beyond max(1 s, the budget again).
 _LATE_503_MIN_MS = 1000.0
-# /resolve's finalisation reserve (SPEC-labeled-traversal-core §4.5, capabilities resolve.finalize_reserve_ms: fixed
-# 250 ms in this build): its work deadline is the budget less the reserve, so a 503 deadline before that is premature
-_RESOLVE_FINALIZE_RESERVE_MS = 250.0
 
 
 def _budget_503(sc, ans, client, a=None):
@@ -1765,11 +1762,12 @@ def _budget_503(sc, ans, client, a=None):
     `client`) against the EFFECTIVE budget, min(the requested budget, the route's cap the builder states in the
     check's args, cap_ms: /resolve resolve.time_budget.max_time_ms, /pattern caps.time_budget_ms of the capabilities
     snapshot; a host lowers a larger budget to its cap, SPEC-labeled-traversal-core §4.5, SPEC-pattern-search §4.5;
-    A2-03 of the review of lane S5b). FAIL when it came before that budget (/resolve: before it less its
-    finalisation reserve): the SPECs answer it only when the answer cannot be written by the budget, and the deadline
-    starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core
-    §4.5); FINDING when it came long past it (an unpolled piece of that length, which the SPECs' deadline rule
-    answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
+    A2-03 of the review of lane S5b). FAIL when it came before that budget, on both routes: the SPECs answer it
+    only when the answer cannot be written by the budget (the host throws it once the elapsed time reaches the
+    budget, Deadline::respond_expired; /resolve's finalisation reserve ends the work earlier, not the answer), and
+    the deadline starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6,
+    SPEC-labeled-traversal-core §4.5); FINDING when it came long past it (an unpolled piece of that length, which the
+    SPECs' deadline rule answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
     route = sc.get("route", "")
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     asked = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
@@ -1784,12 +1782,9 @@ def _budget_503(sc, ans, client, a=None):
     named = "%.0f ms budget" % budget if budget == asked else \
         "%.0f ms budget (the requested %.0f ms lowered to the host's cap)" % (budget, asked)
     late = wall - budget
-    floor = budget - (_RESOLVE_FINALIZE_RESERVE_MS if route == "POST /resolve" else 0.0)
-    if wall < floor - 1.0:
-        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %s%s: the answer is a 503 only when "
-                      "it cannot be written by the budget, and the client's interval holds the host's" % (
-                          wall, named, " less its %.0f ms finalisation reserve" % _RESOLVE_FINALIZE_RESERVE_MS
-                          if route == "POST /resolve" else ""))
+    if wall < budget - 1.0:
+        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %s: the answer is a 503 only when it "
+                      "cannot be written by the budget, and the client's interval holds the host's" % (wall, named))
     if late > max(_LATE_503_MIN_MS, budget):
         return FINDING, ("503 deadline delivered %.0f ms after the %s (client wall %.0f ms): the deadline is read "
                          "where the work and the delivery poll it, so an unpolled piece of about that length ran (the "
