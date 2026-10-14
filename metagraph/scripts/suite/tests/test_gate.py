@@ -226,9 +226,12 @@ class PolicyTest(GateCase):
                                        declared=sc.read_json(os.path.join(SUITE, "gate", "declared_v4_rt.json")))
         c = two["counts"]
         self.assertEqual(c["exclusions_by_rule"], {"manifest_not_implemented": 22, "table_not_expressible": 26,
-                                                   "advanced_path": 2, "declared": 1})
-        self.assertEqual(c["required"], {"mcp": {"scenarios": 190, "executions": 386},
-                                         "direct-local": {"scenarios": 222, "executions": 256}})
+                                                   "advanced_path": 2, "declared": 4})
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 189, "executions": 384},
+                                         "direct-local": {"scenarios": 220, "executions": 253}})
+        self.assertEqual([r["relation"] for r in two["relations"]], ["REL-same_answer-0003"])
+        self.assertEqual(sorted(r["relation"] for r in two["relations_excluded"] if "declared" in (r.get("rules") or ())),
+                         ["REL-prefix_equals-%04d" % i for i in (1, 2, 3, 4)])
         self.assertEqual(sorted((n["scenario"], n["check"]) for n in two["properties"]["not_required"]),
                          [("T-edge-0008", "answer_fields"), ("T-labels-0003", "label_dict_contains"),
                           ("T-labels-0005", "label_dict_contains")])
@@ -362,13 +365,48 @@ class TwoArmAndDeclaredTest(GateCase):
                        pol)
         self.assertTrue(v["passed"], gate.render(v))
 
+    def test_declared_repeat_and_relation_entries(self):
+        # a planned duplicate of one repeat (inconclusive by the scenario's design) and a relation the host cannot
+        # produce, both declared on direct-local: neither is required there, everything else stays
+        decl = self.declared(exclusions=[{"scenario": "D-007", "arms": ["direct-local"], "repeats": [2],
+                                          "reason": "a planned duplicate"}],
+                             relations_excluded=[{"relation": "REL-1", "arms": ["direct-local"],
+                                                  "reason": "never testable on this host"}])
+        pol = policy_of(self.m, arms=("mcp", "direct-local"), declared=decl)
+        req = dict(((i["scenario"], i["arm"]), i["repeats"]) for i in pol["required"])
+        self.assertEqual(req[("D-007", "direct-local")], [0, 1])
+        self.assertEqual(req[("D-007", "mcp")], [0, 1, 2])
+        self.assertEqual([(r["relation"], r["arms"]) for r in pol["relations"]], [("REL-1", ["mcp"])])
+        self.assertIn({"relation": "REL-1", "arms": ["direct-local"], "rules": ["declared"],
+                       "reason": "never testable on this host"}, pol["relations_excluded"])
+        self.assertIn("D-007", gate.policy_ids(pol))
+        text = gate_policy.describe(pol)
+        self.assertIn("declared: D-007 r2 excluded on direct-local: a planned duplicate", text)
+        self.assertIn("declared: REL-1 excluded on direct-local: never testable on this host", text)
+        base = make_run(self.run_dir(), self.m, mcp_lines(self.m), direct=("direct-local",),
+                        direct_change={("D-007", 2): {"outcome": "inconclusive"}})
+        comp = sc.read_json(os.path.join(base, "compare.json"))
+        rel = [r for r in comp["relations"] if r["id"] == "REL-1"][0]
+        rel["arms"]["direct-local"] = {"outcome": "inconclusive", "detail": "no two profiles"}
+        sc.write_json_atomic(os.path.join(base, "compare.json"), comp)
+        v = gate.judge(base, pol)
+        self.assertTrue(v["passed"], gate.render(v))
+        v = gate.judge(make_run(self.run_dir("b"), self.m, mcp_lines(self.m), direct=("direct-local",),
+                                direct_change={("D-007", 1): {"outcome": "inconclusive"}}), pol)
+        self.assertEqual([(p["scenario"], p["arm"], p["repeat"]) for p in self.problems(v, "outcome")],
+                         [("D-007", "direct-local", 1)])
+
     def test_declared_file_is_validated(self):
         for bad, why in ((self.declared(declared_version=2), "declared_version"),
                          (self.declared(exclusions=[{"scenario": "T-001", "arms": ["mcp"]}]), "reason"),
                          (self.declared(exclusions=[{"scenario": "T-999", "arms": ["mcp"], "reason": "x"}]), "T-999"),
                          (self.declared(not_required=[{"scenario": "R-002", "arms": ["mcp"], "check": "bogus",
                                                        "reason": "x"}]), "bogus"),
-                         (self.declared(manifest={"content_sha256": "other"}), "content_sha256")):
+                         (self.declared(manifest={"content_sha256": "other"}), "content_sha256"),
+                         (self.declared(exclusions=[{"scenario": "T-001", "arms": ["mcp"], "repeats": ["1"],
+                                                     "reason": "x"}]), "repeats"),
+                         (self.declared(relations_excluded=[{"relation": "REL-9", "arms": ["mcp"], "reason": "x"}]),
+                          "REL-9")):
             with self.assertRaises(ValueError) as ctx:
                 policy_of(self.m, declared=bad)
             self.assertIn(why, str(ctx.exception))

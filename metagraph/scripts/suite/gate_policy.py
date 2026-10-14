@@ -22,11 +22,12 @@ table, never from an answer a run received:
                             verifies such a pair only against a direct execution.
 The deploy gate runs two arms, mcp and direct-local (paired): direct-local verifies the answered pairs and lets the
 gate catch an MCP vs direct disagreement. Owner-declared entries come from --declared FILE, a versioned JSON file
-beside the policy: {declared_version 1, manifest {content_sha256}, exclusions [{scenario, arms, reason}],
-not_required [{scenario, arms, check, reason}]}; an exclusion has the rule `declared`, a not_required entry exempts a
-property check the scenario expects on those arms (the MCP never exposes it: it stays required on direct-local); each
-entry needs a reason, names a selected scenario and (not_required) a check the scenario expects, and the file names
-the manifest it was written for. No property check is exempt otherwise.
+beside the policy: {declared_version 1, manifest {content_sha256}, exclusions [{scenario, arms, repeats (optional:
+only these repeats), reason}], not_required [{scenario, arms, check, reason}], relations_excluded [{relation, arms,
+reason}]}; an exclusion has the rule `declared`, a not_required entry exempts a property check the scenario expects on
+those arms (the MCP never exposes it: it stays required on direct-local); each entry needs a reason, names a selected
+scenario (a manifest relation) and (not_required) a check the scenario expects, and the file names the manifest it
+was written for. No property check is exempt otherwise.
 A relation is required on an arm when both of its scenarios are selected and neither is excluded there; the others are
 listed with the reason. The policy pins the manifest's content_sha256, relations_sha256 and index_fp and
 the by-design table's sha256 (gate.py fails on another), and lists the executions each arm must record (the paired
@@ -152,7 +153,8 @@ def check_declared(declared, manifest, selected):
     if want != sc.manifest_identity(manifest)["content_sha256"]:
         problems.append("it was written for the manifest content_sha256 %s, not this one" % want)
     scen = dict((s.get("id"), s) for s in manifest.get("scenarios", []))
-    for kind in ("exclusions", "not_required"):
+    rels = set(r.get("id") for r in manifest.get("relations", []) or [])
+    for kind in ("exclusions", "not_required", "relations_excluded"):
         for i, e in enumerate(declared.get(kind) or []):
             where = "%s[%d]" % (kind, i)
             if not isinstance(e, dict):
@@ -160,8 +162,16 @@ def check_declared(declared, manifest, selected):
                 continue
             if not str(e.get("reason") or "").strip():
                 problems.append("%s states no reason" % where)
-            if e.get("scenario") not in selected:
+            if kind == "relations_excluded":
+                if e.get("relation") not in rels:
+                    problems.append("%s: %s is not a relation of the manifest" % (where, e.get("relation")))
+            elif e.get("scenario") not in selected:
                 problems.append("%s: %s is not a selected scenario" % (where, e.get("scenario")))
+            reps = e.get("repeats")
+            if kind == "exclusions" and reps is not None and (
+                    not isinstance(reps, list) or not reps
+                    or any(not isinstance(r, int) or isinstance(r, bool) or r < 0 for r in reps)):
+                problems.append("%s: repeats %r (a list of repeat indices)" % (where, reps))
             arms = e.get("arms")
             if not isinstance(arms, list) or not arms or any(a not in sc.ARMS for a in arms):
                 problems.append("%s: arms %r (one or more of %s)" % (where, arms, ", ".join(sc.ARMS)))
@@ -201,16 +211,26 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
         for d in declared_ex.get(sid) or []:
             on = [a for a in arms if a in d["arms"] and not (a == "mcp" and ex)]
             if on:
-                exclusions.append({"scenario": sid, "arms": on, "rules": ["declared"], "reason": d["reason"]})
+                entry = {"scenario": sid, "arms": on, "rules": ["declared"], "reason": d["reason"]}
+                if d.get("repeats") is not None:
+                    entry["repeats"] = sorted(set(d["repeats"]))
+                exclusions.append(entry)
         for arm in arms:
-            if any(e["scenario"] == sid and arm in e["arms"] for e in exclusions):
+            mine = [e for e in exclusions if e["scenario"] == sid and arm in e["arms"]]
+            if any("repeats" not in e for e in mine):
                 continue
-            reps = gate.planned_executions(manifest, None, None, [sid], warm_every, [arm])
+            off = set(r for e in mine for r in e.get("repeats") or [])
+            reps = [r for _, _, r in gate.planned_executions(manifest, None, None, [sid], warm_every, [arm])
+                    if r not in off]
             if reps:
-                required.append({"scenario": sid, "arm": arm, "repeats": [r for _, _, r in reps]})
+                required.append({"scenario": sid, "arm": arm, "repeats": reps})
     excluded_on = {}
     for ex in exclusions:
-        excluded_on.setdefault(ex["scenario"], set()).update(ex["arms"])
+        if "repeats" not in ex:   # a repeat-level exclusion leaves the scenario's first repeat to the relations
+            excluded_on.setdefault(ex["scenario"], set()).update(ex["arms"])
+    declared_rel = {}
+    for e in (declared or {}).get("relations_excluded") or []:
+        declared_rel.setdefault(e["relation"], []).append(e)
     chosen = set(selected)
     relations, rel_excluded = [], []
     for rel in manifest.get("relations", []) or []:
@@ -222,11 +242,17 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
             continue
         on = [arm for arm in arms if not any(arm in excluded_on.get(x, ()) for x in (a, b))]
         off = [arm for arm in arms if arm not in on]
-        if on:
-            relations.append({"relation": rel.get("id"), "type": rel.get("type"), "a": a, "b": b, "arms": on})
         if off:
             rel_excluded.append({"relation": rel.get("id"), "arms": off, "reason": "%s excluded on %s" % (
                 ", ".join(x for x in (a, b) if set(off) & excluded_on.get(x, set())), ", ".join(off))})
+        for d in declared_rel.get(rel.get("id")) or []:
+            gone = [arm for arm in on if arm in d["arms"]]
+            if gone:
+                on = [arm for arm in on if arm not in gone]
+                rel_excluded.append({"relation": rel.get("id"), "arms": gone, "rules": ["declared"],
+                                     "reason": d["reason"]})
+        if on:
+            relations.append({"relation": rel.get("id"), "type": rel.get("type"), "a": a, "b": b, "arms": on})
     index = manifest.get("index") or {}
     ident = sc.manifest_identity(manifest)
     policy = {
@@ -291,7 +317,9 @@ def describe(policy):
         c["excluded"], ", ".join("%s %d" % kv for kv in sorted(c["exclusions_by_rule"].items())) or "none"))
     for ex in policy["exclusions"]:
         if "declared" in ex["rules"]:
-            out.append("    declared: %s excluded on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
+            out.append("    declared: %s%s excluded on %s: %s" % (
+                ex["scenario"], "".join(" r%d" % r for r in ex.get("repeats") or []), ", ".join(ex["arms"]),
+                ex["reason"]))
         else:
             out.append("    %s on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
     for arm, v in sorted(c["required"].items()):
@@ -300,7 +328,8 @@ def describe(policy):
     for r in policy["relations"]:
         out.append("    required %s (%s %s, %s) on %s" % (r["relation"], r["type"], r["a"], r["b"], ", ".join(r["arms"])))
     for r in policy["relations_excluded"]:
-        out.append("    excluded %s on %s: %s" % (r["relation"], ", ".join(r["arms"]), r["reason"]))
+        out.append("    %s %s excluded on %s: %s" % ("declared:" if "declared" in (r.get("rules") or ()) else "",
+                                                    r["relation"], ", ".join(r["arms"]), r["reason"]))
     out.append("  property checks not required: %d" % c["properties_not_required"])
     for nr in policy["properties"]["not_required"]:
         out.append("    %s%s %s not required on %s: %s" % ("declared: " if "declared" in (nr.get("rules") or ()) else "",

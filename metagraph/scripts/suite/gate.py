@@ -219,10 +219,13 @@ def load_policy(path):
     return policy
 
 
-def excluded(policy, sid, arm):
-    """The policy's exclusion of |sid| on |arm| (a dict), or None."""
+def excluded(policy, sid, arm, repeat=None):
+    """The policy's exclusion of |sid| on |arm| (a dict), or None: of the whole scenario, or with |repeat| also one
+    that excludes only some repeats (a declared entry's `repeats`)."""
     for ex in policy.get("exclusions") or []:
-        if ex.get("scenario") == sid and arm in (ex.get("arms") or sc.ARMS):
+        if ex.get("scenario") != sid or arm not in (ex.get("arms") or sc.ARMS):
+            continue
+        if "repeats" not in ex or (repeat is not None and repeat in ex["repeats"]):
             return ex
     return None
 
@@ -429,7 +432,7 @@ def judge(run_dir, policy, reevaluated=False):
     for (sid, arm, rep), r in sorted(recorded.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)),
                                                                         sc.ARMS.index(kv[0][1])
                                                                         if kv[0][1] in sc.ARMS else 9, kv[0][2])):
-        if sid not in selected or arm not in arms or excluded(policy, sid, arm):
+        if sid not in selected or arm not in arms or excluded(policy, sid, arm, rep):
             continue
         judged += 1
         s = scen.get(sid) or {}

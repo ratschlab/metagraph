@@ -1512,14 +1512,30 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   required on direct-local and are declared not required on the MCP arm.
 - `gate_policy.py --declared FILE` reads the owner's entries, a versioned JSON file beside the policy
   (gate/declared_v4_rt.json: `declared_version` 1, the manifest's content_sha256, `exclusions` [{scenario, arms,
-  reason}], `not_required` [{scenario, arms, check, reason}]). Each entry needs a reason, a selected scenario and (not
-  required) a check the scenario expects; a file for another manifest is refused. An exclusion has the rule
-  `declared`; describe() prints every declared entry with its reason. v4: C-caps-0001 excluded on the MCP arm;
-  label_dict_contains on T-labels-0003 and T-labels-0005 and answer_fields on T-edge-0008 not required on the MCP
-  arm. The owner reviews the list (lane G3's DECLARED.md) before the policy is pinned.
+  repeats (optional), reason}], `not_required` [{scenario, arms, check, reason}], `relations_excluded` [{relation,
+  arms, reason}]). Each entry needs a reason, a selected scenario (a manifest relation) and (not required) a check the
+  scenario expects; a file for another manifest is refused. An exclusion has the rule `declared` (with `repeats`
+  only those repeats); describe() prints every declared entry with its reason. v4, what the MCP surface cannot show:
+  C-caps-0001 excluded on the MCP arm; label_dict_contains on T-labels-0003 and T-labels-0005 and answer_fields on
+  T-edge-0008 not required on the MCP arm. v4 suite errors that block every v4 gate on a quiet host too (triage-v4,
+  to be removed with the v5 manifest): T-labels-0004 on direct-local (V02, its modelled memory budget), T-budget-0003
+  on both arms (G18, its work units below the seed's cost), T-attempts-0002 repeat 1 on direct-local (V04, the planned
+  409 duplicate), REL-prefix_equals-0001..0004 on direct-local (V05, never testable on this host). The owner reviews
+  the list (lane G3's DECLARED.md) before the policy is pinned.
 - `needs_direct_arm`: a policy without a direct arm excludes on the MCP arm every scenario naming an answered or
   clamped case with explains_checks (from the manifest and the table), so a clean MCP-only run passes; v4 MCP-only:
   35 exclusions (R-edge-0009, T-edge-0007, T-edge-0008, C-caps-0001 besides the 31), 187 scenarios, 380 executions.
-- v4's two-arm policy: 222 selected; MCP 190 scenarios / 386 executions (31 derived exclusions and the declared
-  C-caps-0001), direct-local 222 / 256; relations REL-same_answer-0003 on both arms and the four prefix_equals
-  relations on direct-local (their R-budget / R-twin partners are excluded on MCP only).
+- v4's two-arm policy: 222 selected; MCP 189 scenarios / 384 executions (31 derived exclusions, the declared
+  C-caps-0001 and T-budget-0003), direct-local 220 / 253; REL-same_answer-0003 required on both arms, the four
+  prefix_equals relations excluded on both.
+- The v4 copy (re-evaluated) under it: `run_suite.sh --reevaluate v4 --gate gate/policy_v4_rt_mcp.json` exits 1 with
+  32 problems, 0 structural: configuration 1 (the recorded MCP runner read no live capabilities document); load-
+  dependent 31, which the strict rule keeps blocking: MCP 19 inconclusive (R-pos-0027 r0 resolve_timeout; N-hard-0021
+  r0, N-realrep-0002 r0, N-realrep-0025 r0 traversal_resolve_deadline; time-limited checks on T-walk-0004 r0, -0006
+  r0 r1, -0012 r0 r1, -0014 r0, -0018 r0 r1, -0022 r0, -0036 r0 r1, T-repeat-0002 r0, T-repeat-0004 r0, T-labels-0003
+  r0, N-hard-0022 r0) and direct-local 12 (503 deadlines on R-pos-0027, R-budget-0002, R-twin-0002, R-twin-0004 r0
+  and R-budget-0001 r0's finding, a 503 past its budget, triage G22; time-limited walks on T-walk-0006, -0012, -0018,
+  -0036, T-repeat-0004, T-labels-0003, T-coords-0003 r0). A clean, complete run built from the same copy (those
+  executions as a quiet host gives them, a capabilities read added; the not-exposed properties and the suite errors
+  left as recorded) passes this policy (exit 0) and the MCP-only policy derived from the same declared file (exit 0);
+  without the declared entries both fail on exactly the entries above.
