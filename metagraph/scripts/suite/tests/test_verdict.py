@@ -14,7 +14,7 @@ sys.path.insert(0, HERE)
 
 import compare as cmp  # noqa: E402
 import suite_common as sc  # noqa: E402
-from test_compare_report import T0, line, scen  # noqa: E402
+from test_compare_report import T0, line, scen, write_arm  # noqa: E402
 
 
 def st(outcome, name="status", detail=""):
@@ -320,6 +320,96 @@ class UnmatchedNotImplementedMarkTest(unittest.TestCase):
         res = cmp.mcp_agreement(m, d, s, cases, None)
         self.assertEqual(res["class"], "disagree")
         self.assertEqual(res["repeats"], [0])
+
+
+def run_dir_with(d, scenarios, rows_by_arm, orchestrator=None):
+    """A merged and compared run directory: |rows_by_arm| {arm: [lines]}, the manifest of |scenarios|."""
+    import merge_run
+    manifest = {"manifest_version": 1, "content_sha256": sc.scenarios_sha256(scenarios), "scenarios": scenarios}
+    for arm, rows in rows_by_arm.items():
+        os.makedirs(os.path.join(d, "arms", arm), exist_ok=True)
+        sc.write_json_atomic(os.path.join(d, "arms", arm, "manifest.json"), manifest)
+        write_arm(d, arm, rows)
+    if orchestrator is not None:
+        sc.write_json_atomic(os.path.join(d, "orchestrator.json"), orchestrator)
+    merge_run.merge(d)
+    sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, cmp.load_by_design(None)))
+    return d
+
+
+def verdict_of(d):
+    import contextlib
+    import io
+    import report
+    with contextlib.redirect_stdout(io.StringIO()):
+        text = report.build_report(d)
+    return text, text.split("# Verdict", 1)[1].strip().splitlines()[0]
+
+
+class OutcomeVocabularyTest(unittest.TestCase):
+    """An outcome outside the shared vocabulary is counted and read as a failure everywhere, never as a pass."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        self.S = [scen("P-001", "P"), scen("P-002", "P"), scen("P-003", "P")]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def mcp_rows(self, outcome):
+        return [line(x["id"], "mcp", r, T0 + i * 10 + 5 * r, 40.0, outcome=outcome)
+                for i, x in enumerate(self.S) for r in (0, 1)]
+
+    def test_paired_run_fails(self):
+        orch = {"sessions": [{"mode": "paired", "mcp_cmd": "x {ids} {out}", "checks": "checks", "warm_every": "0",
+                              "loop": {"mode": "paired", "state": "done", "scenarios": 3, "completed": 3}}]}
+        direct = dict((arm, [line(x["id"], arm, 0, T0 + i * 10 + k, 20.0) for i, x in enumerate(self.S)])
+                      for k, arm in enumerate(("direct-local", "direct-remote")))
+        run_dir_with(self.d, self.S, dict(direct, mcp=self.mcp_rows("skipped_by_runner")), orch)
+        comp = sc.read_json(os.path.join(self.d, "compare.json"))
+        self.assertEqual(comp["summary"]["totals"]["mcp"]["outcomes"]["other"], 6)
+        self.assertEqual(len(comp["summary"]["outcomes_outside_vocabulary"]), 6)
+        self.assertEqual(comp["scenarios"]["P-001"]["mcp_agreement"]["class"], "disagree")
+        self.assertEqual(comp["scenarios"]["P-001"]["mcp_agreement"]["by"], "outcome")
+        self.assertEqual(comp["summary"]["per_area"]["P"]["mcp"]["other"], 3)
+        text, v = verdict_of(self.d)
+        self.assertTrue(v.startswith("**FAIL"), v)
+        self.assertIn("6 with an outcome outside the vocabulary", v)
+        self.assertIn("read as failures", text)
+
+    def test_mcp_only_run_fails(self):
+        orch = {"sessions": [{"mode": "paired", "mcp_cmd": "x {ids} {out}", "checks": "checks", "warm_every": "0",
+                              "skip_local": "1", "skip_remote": "1"}]}
+        rows = self.mcp_rows("skipped_by_runner")
+        rows[0]["checks"] = [st("fail", detail="http 500")]
+        run_dir_with(self.d, self.S, {"mcp": rows}, orch)
+        _, v = verdict_of(self.d)
+        self.assertTrue(v.startswith("**FAIL"), v)
+
+    def test_a_known_mark_beside_it(self):
+        # one unknown repeat beside a passing one: the aggregate is the unknown outcome, the class a disagreement
+        self.assertEqual(cmp.aggregate_outcome(["pass", "skipped_by_runner"]), "skipped_by_runner")
+        self.assertEqual(cmp.aggregate_outcome(["pass", "error"]), "error")
+        self.assertTrue(sc.outcome_known("service_by_design"))
+        self.assertFalse(sc.outcome_known("skipped_by_runner"))
+        self.assertFalse(sc.outcome_known(None))
+
+    def test_direct_arm_outcome_outside_disagrees(self):
+        a = {0: line("R-1", "direct-local", 0, T0, 10.0, outcome="odd")}
+        b = {0: line("R-1", "direct-remote", 0, T0, 10.0, outcome="odd")}
+        res = cmp.direct_agreement(a, b)
+        self.assertEqual(res["class"], "disagree")
+        self.assertIn("outside the vocabulary", res["outcome_differs"][0]["detail"])
+
+    def test_reevaluate_keeps_it(self):
+        import reevaluate
+        info = {}
+        out, kept = reevaluate.outcome_of(None, "mcp", scen("P-001", "P"), {"http": 200, "body": {}, "error": None},
+                                          {"outcome": "skipped_by_runner"}, [st("pass")], False, {}, None, info)
+        self.assertEqual(out, "skipped_by_runner")
+        self.assertIn("outside the vocabulary", kept)
+        self.assertTrue(any("outside the vocabulary" in w for w in info["warnings"]))
 
 
 if __name__ == "__main__":

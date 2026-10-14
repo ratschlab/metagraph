@@ -174,6 +174,8 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
+    # an outcome outside the vocabulary (a runner's mark not agreed first) is read as a failure, never as a pass
+    other = sum(t["outcomes"].get(cmp.OTHER_OUTCOME, 0) for t in totals.values())
     findings = sum(t["outcomes"].get("finding", 0) for t in totals.values())
     inconclusive = sum(t["outcomes"].get("inconclusive", 0) for t in totals.values())
     passed = sum(t["outcomes"].get("pass", 0) for t in totals.values())
@@ -201,9 +203,10 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     stub = "stub" in modules and not reevaluated
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
-    elif failing or dis_direct or dis_mcp or rel_failed:
-        verdict = "FAIL (%d failed or errored execution(s), %d direct and %d MCP disagreement(s)%s)" % (
-            failing, dis_direct, dis_mcp, (", %d failed relation(s)" % rel_failed) if rel_failed else "")
+    elif failing or other or dis_direct or dis_mcp or rel_failed:
+        verdict = "FAIL (%d failed or errored execution(s)%s, %d direct and %d MCP disagreement(s)%s)" % (
+            failing, (", %d with an outcome outside the vocabulary" % other) if other else "", dis_direct, dis_mcp,
+            (", %d failed relation(s)" % rel_failed) if rel_failed else "")
     elif findings:
         verdict = ("FINDINGS (%d execution(s) where the host broke a stated bound without failing the request; no "
                    "failure, no disagreement)" % findings)
@@ -230,6 +233,15 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
                          md(arm), t.get("executions", 0), o.get("pass", 0), o.get("fail", 0), o.get("error", 0),
                          o.get("finding", 0), o.get("inconclusive", 0), o.get("not_implemented_mcp", 0),
                          o.get("service_by_design", 0)))
+        if o.get(cmp.OTHER_OUTCOME):
+            lines[-1] = lines[-1][:-1] + "; %d with an outcome outside the vocabulary (read as failures)." % (
+                o[cmp.OTHER_OUTCOME])
+    outside = s.get("outcomes_outside_vocabulary") or []
+    if outside:
+        lines.append("- Outcomes outside the vocabulary (%s), read as failures: %s%s." % (
+            md(", ".join(sc.OUTCOMES)), md("; ".join("%s %s r%s %r" % (x.get("arm"), x.get("scenario"), x.get("repeat"),
+                                                                      x.get("outcome")) for x in outside[:20])),
+            " ..." if len(outside) > 20 else ""))
     ibr = s.get("inconclusive_by_reason") or {}
     if any(ibr.values()):
         # an inconclusive execution tested nothing: by its class (undecidable plausibility, a host state, the

@@ -11,7 +11,8 @@ judged again with checks.evaluate of DIR/checks.py (default: this directory), wi
 from their raw answers with the same checks (the recorded digest and time_limited where a raw answer is missing),
 and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), the MCP arm's service-measured
 backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
-checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
+checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: an
+outcome outside the vocabulary (suite_common.outcome_known; a warning, read as a failure downstream), `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
 own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
 replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at 31a2e41f,
@@ -232,6 +233,12 @@ def _recorded_mark(line, info):
 
 def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info, doc):
     recorded = line.get("outcome")
+    if not sc.outcome_known(recorded):
+        # a runner's outcome outside the shared vocabulary is no verdict the checks may replace: kept, and read as
+        # a failure by compare and the report
+        info.setdefault("warnings", []).append("outcome %r outside the vocabulary (%s): kept" % (
+            recorded, ", ".join(sc.OUTCOMES)))
+        return recorded, "an outcome outside the vocabulary (%r): kept, read as a failure" % (recorded,)
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
     # a mark of a matched table case is replayed with the table: service_by_design, and (async's 901893b7) a
     # not_implemented_mcp that names its case (answer_match.mcp_outcome); the manifest's mcp.not_implemented names none

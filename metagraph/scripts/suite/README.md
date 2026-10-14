@@ -1903,3 +1903,17 @@ failing on 14552938.
   named case, or on a scenario without an MCP tool, the mark stays the runner's class. The recorded runs have no such
   mark (their not_implemented_mcp lines are the manifest's or traverse.advanced_path_disabled's), so nothing moves. A
   new runner mark reaches the comparator through the table (answer_match.mcp_outcome) or the manifest.
+
+### Outcomes outside the vocabulary (for async: the shared vocabulary)
+- compare's totals counted only its known outcome keys, merge's stricter rule skips an unknown value and nothing
+  checked a line's outcome against suite_common.OUTCOMES, so six MCP lines with `skipped_by_runner` (or an MCP-only
+  run whose lines read so beside failing checks) gave PASS, against this README's "any other outcome reads as a
+  failure". `suite_common.outcome_known` is the shared test (OUTCOMES: pass, fail, finding, inconclusive,
+  not_implemented_mcp, service_by_design, error). compare: totals and per-area counts gain `other`, the summary lists
+  `outcomes_outside_vocabulary` [{scenario, arm, repeat, outcome}], an MCP execution with such an outcome is a
+  disagreement of its own (side mcp, by outcome; never compared check by check), a direct pair with one disagrees,
+  and aggregate_outcome ranks it worst. reevaluate keeps such an outcome (the checks never replace it) with a
+  warning. report: any `other` makes the verdict FAIL ("N with an outcome outside the vocabulary"), the arm's line
+  and a list name them. gate.py already failed such a line ("outcome '...'"). merge_run (lane S-runner) and the
+  paired loop's mcp_after (run_suite.sh) still read the value as recorded; their side is lane S-runner's.
+- Recorded runs: every outcome is in the vocabulary; the totals gain `other: 0` and the summary an empty list.

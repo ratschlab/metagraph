@@ -43,6 +43,13 @@ DIGEST_DROP_KEYS = frozenset(["timing"])
 CAPABILITY_VOLATILE_PREFIXES = ("measured_", "observed_")
 
 
+def outcome_known(outcome):
+    """Whether an execution line's outcome is in the vocabulary every arm and the comparator share (OUTCOMES). One
+    outside it (a runner's mark not agreed in this vocabulary first) is counted apart and read as a failure by the
+    comparator, the re-evaluation and the report, never as a pass."""
+    return isinstance(outcome, str) and outcome in OUTCOMES
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # time
 

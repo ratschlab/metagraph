@@ -54,8 +54,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_run  # noqa: E402
 import suite_common as sc  # noqa: E402
 
+# the counted outcomes; `other` counts an outcome outside the vocabulary (sc.outcome_known), read as a failure
+OTHER_OUTCOME = "other"
 OUTCOME_KEYS = ("pass", "fail", "error", "finding", "inconclusive", "not_implemented_mcp", "service_by_design",
-                "mixed")
+                "mixed", OTHER_OUTCOME)
 SAMPLE_BEFORE_S = 1.0
 SAMPLE_AFTER_S = 2.0
 SAMPLE_NEAREST_S = 5.0
@@ -1144,13 +1146,17 @@ def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None, refs=N
 # per-scenario joins
 
 def aggregate_outcome(outcomes):
-    """The outcome of a scenario on one arm over its repeats: the common one, else error > fail > finding >
-    inconclusive > mixed (a repeat that could not test its property keeps the scenario from reading pass)."""
+    """The outcome of a scenario on one arm over its repeats: the common one, else an outcome outside the vocabulary
+    (sc.outcome_known; the first) > error > fail > finding > inconclusive > mixed (a repeat that could not test its
+    property keeps the scenario from reading pass)."""
     vals = [o for o in outcomes if o]
     if not vals:
         return None
     if len(set(vals)) == 1:
         return vals[0]
+    unknown = [o for o in vals if not sc.outcome_known(o)]
+    if unknown:
+        return unknown[0]
     for worst in ("error", "fail", "finding", "inconclusive"):
         if worst in vals:
             return worst
@@ -1557,8 +1563,9 @@ def planned_duplicate(a, b, scenario):
 
 
 def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, scenario=None):
-    """Agreement of the two direct arms on every repeat both ran, in this order: disagree (a check differs, or the
-    outcomes differ other than by timing or a planned 409 duplicate), identical (equal digests), timing (the
+    """Agreement of the two direct arms on every repeat both ran, in this order: disagree (a check differs, the
+    outcomes differ other than by timing or a planned 409 duplicate, or an outcome is outside the vocabulary,
+    sc.outcome_known), identical (equal digests), timing (the
     outcomes differ only on repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no
     check compared), same_checks. Equal digests never hide a differing check or an outcome difference no timing
     explains (two byte-identical 503 bodies, one delivered before its budget and one at it, disagree); equal
@@ -1578,6 +1585,11 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
         for x in d:
             x["repeat"] = r
         differing.extend(d)
+        outside = [x for x in (local[r], remote[r]) if not sc.outcome_known(x.get("outcome"))]
+        if outside:
+            untimed.append({"repeat": r, "detail": "; ".join("%s: outcome %r outside the vocabulary" % (
+                x.get("arm"), x.get("outcome")) for x in outside)})
+            continue
         if local[r].get("outcome") != remote[r].get("outcome"):
             dup = planned_duplicate(local[r], remote[r], scenario)
             if dup and not d:
@@ -1870,6 +1882,15 @@ def line_explained_items(line, matched, recorded=None):
     if recorded is not None and "explained_items" in line and rec != items:
         recorded[line.get("repeat")] = rec
     return items
+
+
+def outside_vocabulary_part(lines):
+    """The class of MCP executions whose outcome is outside the vocabulary (sc.outcome_known: a runner's mark not
+    agreed first): disagree, side mcp, by outcome, the repeats and outcomes named; never compared as a pass."""
+    reps = [r.get("repeat") for r in lines]
+    return {"class": "disagree", "side": "mcp", "by": "outcome", "repeats": reps, "mcp_verified": False,
+            "mcp_detail": "repeat(s) %s: outcome %s outside the vocabulary (%s)" % (
+                reps, sorted(set(repr(r.get("outcome")) for r in lines)), ", ".join(sc.OUTCOMES))}
 
 
 def mcp_mapped(scenario):
@@ -2224,6 +2245,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     # the runner's matcher, per execution
     groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
     undecided, recorded_items = [], {}
+    outside = [r for r in judged if not sc.outcome_known(r.get("outcome"))]
+    judged = [r for r in judged if not any(r is x for x in outside)]
     for r in judged:
         if not cases and runner_rule_c_by_design(r):
             undecided.append(r)   # the runner's rule (c) on its case, no table to replay it: neither for nor against
@@ -2262,7 +2285,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         note["explained_items_recorded"] = dict((str(k), v) for k, v in sorted(recorded_items.items(), key=str))
     if undecided:
         note["undecidable_repeats"] = [r.get("repeat") for r in undecided]
-        if not groups and not plain:
+        if not groups and not plain and not outside:
             return dict(note, **{"class": "not_comparable", "by": "undecidable plausibility",
                                  "detail": "every MCP execution's plausibility is undecidable (rule (c))"})
     # the direct answers an answer-triggered case explains (e.g. the host's own 503 deadline) are no reference for
@@ -2273,6 +2296,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     k_arm, k_ref = _direct_ref(kept)
     o_arm, o_ref = _other_direct(kept, k_arm)
     parts = []
+    if outside:
+        parts.append(outside_vocabulary_part(outside))
     missing = [i for i in case_ids(scenario) if i not in cases]
     if missing and not answered and not any(k[0] == "named" for k in order):
         parts.append({"class": "disagree", "case": missing[0], "side": "table",
@@ -2813,7 +2838,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             view["host_cache"] = [host_cache(lines[k]) for k in sorted(lines)]
             entry["arms"][arm] = view
             counts = per_area.setdefault(area, {}).setdefault(arm, dict((k, 0) for k in OUTCOME_KEYS + ("total",)))
-            counts[view["outcome"] if view["outcome"] in counts else "mixed"] += 1
+            agg = view["outcome"]
+            counts[agg if agg in counts else "mixed" if sc.outcome_known(agg) or agg is None else OTHER_OUTCOME] += 1
             counts["total"] += 1
             tv = timing_vals.setdefault(area, {}).setdefault(arm, {"all": [], "server": [], "by_host_cache": {}})
             for rep, line in lines.items():
@@ -2907,11 +2933,15 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         if why is not None:
             arm_counts = by_reason.setdefault(r.get("arm"), {})
             arm_counts[why] = arm_counts.get(why, 0) + 1
+    outside = [{"scenario": r.get("scenario"), "arm": r.get("arm"), "repeat": r.get("repeat"),
+                "outcome": r.get("outcome")} for r in rows if not sc.outcome_known(r.get("outcome"))]
     totals = {}
     for arm in arms_present:
         arm_lines = [r for r in rows if r.get("arm") == arm]
+        outcomes = dict((k, sum(1 for r in arm_lines if r.get("outcome") == k)) for k in OUTCOME_KEYS)
+        outcomes[OTHER_OUTCOME] = sum(1 for r in arm_lines if not sc.outcome_known(r.get("outcome")))
         totals[arm] = {"executions": len(arm_lines),
-                       "outcomes": dict((k, sum(1 for r in arm_lines if r.get("outcome") == k)) for k in OUTCOME_KEYS),
+                       "outcomes": outcomes,
                        "host_cache": dict((k, sum(1 for r in arm_lines if host_cache(r) == k))
                                           for k in sc.HOST_CACHE_VALUES),
                        "wall_ms": sc.summarise([wall_net(r) for r in arm_lines]),
@@ -2936,7 +2966,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         "order": order, "scenarios": scenarios, "relations": relations,
         "summary": {
             "relations": relations_summary,
-            "per_area": per_area, "totals": totals,
+            "per_area": per_area, "totals": totals, "outcomes_outside_vocabulary": outside,
             "direct_agreement": direct_summary, "mcp_agreement": mcp_summary,
             "inconclusive_by_reason": dict((a, dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))))
                                            for a, v in sorted(by_reason.items())),
