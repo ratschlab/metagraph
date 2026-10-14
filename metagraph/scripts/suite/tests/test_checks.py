@@ -1960,6 +1960,31 @@ class ResolveChecks(unittest.TestCase):
         self.assertEqual(outcome(trace, two, "invariants")[0], "pass")         # trace states trace runs, not the rank
 
 
+    def test_discover_stopped_before_an_in_graph_kmer(self):
+        disc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "discover": {"kind": "column",
+                                                                                          "max_labels": 1}},
+                "truth": {}}
+        # a discovery stopped before it read an in-graph k-mer has no profile to rank (§4.5); one that read some
+        # k-mers and lists no source fails as a complete list does
+        budgeted = dict(disc, request=dict(disc["request"], bounds={"time_budget_ms": 3000}))
+        for resolved, graph in ((0, []), (5, [])):
+            stopped = ok_answer({"k": 31, "num_kmers": resolved, "graph_runs": graph, "labels": [],
+                                 "labels_truncated": None, "limits": {"time_budget_ms": 3000, "finalize_reserve_ms": 250},
+                                 "timing": {"elapsed_ms": 2800.0},
+                                 "stop": {"phase": "rows", "reason": "time", "resolved_kmers": resolved,
+                                          "remainder_from_bp": resolved, "resolved_bp": resolved + 30 if resolved else 0,
+                                          "query_kmers": 70, "query_bp": 100}})
+            o, d = outcome(budgeted, stopped, "resolve_discover_contains", label="107806")
+            self.assertEqual(o, "inconclusive", resolved)
+            self.assertIn("no profile to rank", d)
+        some = ok_answer({"k": 31, "num_kmers": 40, "graph_runs": [[0, 40]], "labels_truncated": None, "labels": [
+            {"label": "713600", "kind": "column", "kmers_supported": 40, "runs": [[0, 40]]}],
+            "limits": {"time_budget_ms": 3000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": 2800.0},
+            "stop": {"phase": "rows", "reason": "time", "resolved_kmers": 40, "remainder_from_bp": 40,
+                     "resolved_bp": 70, "query_kmers": 70, "query_bp": 100}})
+        self.assertEqual(outcome(budgeted, some, "resolve_discover_contains", label="107806")[0], "fail")
+
+
 class TraverseChecks(unittest.TestCase):
     MINI = os.path.join(DATA, "real", "mini_refseq")
 

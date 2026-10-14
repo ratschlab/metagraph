@@ -2423,12 +2423,18 @@ def check_resolve_discover_contains(sc, ans, a, arm):
     Such an answer passes, the ranking being all an answer can show (the tie's column ids are not in it); a list that
     keeps a label with fewer k-mers, ranks a dropped label above a kept one or drops none at full support fails, as
     does a complete list without the label. Only more than max_labels labels are truncated, to exactly max_labels
-    (the request's, else the default): a list cut to another size fails, tie or not."""
+    (the request's, else the default): a list cut to another size fails, tie or not. A discovery stopped before it
+    read the row of an in-graph k-mer (SPEC-labeled-traversal-core §4.5: the resolve of a prefix without one) has no
+    profile to rank: inconclusive."""
     body = _body(ans)
     names = [l.get("label") for l in _get(body, "labels")]
     trunc = body.get("labels_truncated")
     if a["label"] in names:
         return PASS, "%s discovered (%d labels%s)" % (a["label"], len(names), ", truncated" if trunc else "")
+    if body.get("stop") and not trunc and not names and _in_graph_kmers(body) == 0:
+        return INCONCLUSIVE, "%s not listed: the discovery stopped before it read an in-graph k-mer (resolved_kmers " \
+                             "%r), so it has no profile to rank" % (
+                                 a["label"], (body["stop"] or {}).get("resolved_kmers"))
     if not trunc:
         return FAIL, "%s not discovered in a complete list of %d labels" % (a["label"], len(names))
     if not isinstance(trunc, dict):
