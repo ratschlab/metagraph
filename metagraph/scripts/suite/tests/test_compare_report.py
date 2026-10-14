@@ -410,10 +410,13 @@ class CompareTest(unittest.TestCase):
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 125)
+        self.assertEqual(info["cases"], 130)   # async's vendored table at 789fb5f0
+        self.assertEqual(info["sha256"], "2fdea36b5d20a5eee5a2a6449d77f50e59470b6ef7091ed5804a7e7ac248a6d4")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
-        self.assertEqual([c["id"] for c in cmp.answer_cases(cases)], ["pattern.deadline_ends_task"])
+        self.assertEqual(sorted(c["id"] for c in cmp.answer_cases(cases)),
+                         ["mismatch.above_kind_cap", "pattern.caps_zero", "pattern.deadline_ends_task",
+                          "traverse.empty_seeds"])
         self.assertEqual(cmp.load_by_design(""), ({}, None))
         for case in cases.values():
             self.assertIn(case["agreement"], ("by_design", "not_implemented_mcp", "service_only"))
@@ -591,8 +594,10 @@ class TriageFixesTest(unittest.TestCase):
                              error={"code": None, "text": "Label not found in the annotation: 'NOPE_0000.1'"})
         self.assertEqual(cmp.match_direct({"http": 400, "text_prefix": "Label not found in the annotation: "},
                                           nope, self.dir)[0], True)
+        self.assertEqual(cmp.match_direct({"text_prefix": "Label not found in the annotation: 'NOPE_0"}, nope,
+                                          self.dir)[0], True)
         self.assertEqual(cmp.match_direct({"text_prefix": "Label not found in the annotation: 'NOPE_9"}, nope,
-                                          self.dir)[0], True)             # digits ignored, as for text
+                                          self.dir)[0], False)            # as is: no digit folding
         self.assertEqual(cmp.match_direct({"text_prefix": "Duplicate label"}, nope, self.dir)[0], False)
         self.assertEqual(cmp.match_direct({"text": "Label not found in the annotation: 'not-a-label-xyz'"}, nope,
                                           self.dir)[0], False)            # the whole text: label-specific

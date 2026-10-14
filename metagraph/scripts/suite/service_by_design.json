@@ -18,7 +18,11 @@
    "not_implemented_mcp": "the scenario is 'not implemented yet via MCP'",
    "service_only": "no host counterpart (service behaviour only)"
   },
-  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`, unverified otherwise"
+  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`, unverified otherwise",
+  "answer_match.mcp.field": "ADDED 2026-10-14 (optional): the refused argument's field (the MCP error's `field`) as a pattern: `<...>` placeholders match anything, `a | b` lists alternatives (each part stripped), matched like a named case's service_answer.field; an MCP answer that names no field does not match. It tells apart refusals of one code and text whose host answers differ (pattern.caps_zero: a cap of 0 the host answers, against time_budget_ms 0 with the same REST text, which the host refuses)",
+  "answer_match.direct.slot_code": "ADDED 2026-10-14 (optional): a pattern slot's error code: the direct answer (a 200) holds a pattern whose slot is refused with it (body.patterns[].error.code; `a | b` lists alternatives), where the service refuses the whole submit (mismatch.above_kind_cap: the host's mismatches_above_cap slot)",
+  "direct_expectation.http": "the host's HTTP status: an integer, or (ADDED 2026-10-14) a list of statuses any one of which holds, e.g. [200, 503] where the host accepts the request and may still overrun its budget (pattern.time_budget_below_minimum); null: not stated",
+  "direct_expectation.text_prefix": "ADDED 2026-10-14 (optional): the host's error text starts with it, for a text whose tail varies with the request (resolve.unknown_label names the label); `text` is then null. Compared as is (no digit folding)"
  },
  "assumptions": [
   "staging settings at their code defaults: PATTERN_DB_BUDGETS_MS empty, PATTERN_DEFAULT_MAX_ANCHORS unset, TRAVERSAL_ADVANCED_ENABLED false, IDEMPOTENCY_REUSE_DONE true, BACKEND_CACHE_MAX_ANSWER_AGE_SECS 604800, PATTERN_MAX_* / TRAVERSAL_* as in app/settings.py",
@@ -205,10 +209,10 @@
    ],
    "scenario_match": "POST /pattern with a pattern longer than 1,000 characters (bases, or residues for protein)",
    "direct_expectation": {
-    "http": null,
+    "http": 200,
     "code": null,
     "text": null,
-    "behaviour": "the host judges the length by its own rules (with long_search paths a longer pattern is extended, without it answered as anchors); no host text for a length cap is quoted in the service's sources"
+    "behaviour": "answered: the host has no length cap (SPEC-pattern-search §4.2); with long_search paths a pattern longer than k is extended into its paths (recorded L-long-0003, 2,000 bp, both direct arms: 200, 1 path exact), without it answered as anchors; filled 2026-10-14 (triage-1 G11)"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -362,10 +366,10 @@
    ],
    "scenario_match": "POST /pattern with a pattern in lower or mixed case (dna, iupac or protein)",
    "direct_expectation": {
-    "http": null,
+    "http": 200,
     "code": null,
     "text": null,
-    "behaviour": "the host's handling of lower case is not stated in the service's sources (design §3 P-edge lists it as a scenario)"
+    "behaviour": "answered: the host reads a pattern in any case (SPEC-pattern-search §4.2), as the service's upper-cased one (recorded P-edge-0004, both direct arms: 200, the same 17 contexts as the MCP answer); filled 2026-10-14 (triage-1 G11)"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -390,10 +394,10 @@
    ],
    "scenario_match": "POST /pattern where two patterns carry the same id",
    "direct_expectation": {
-    "http": null,
+    "http": 200,
     "code": null,
     "text": null,
-    "behaviour": "not covered by the fixtures; host behaviour not quoted in the service's sources"
+    "behaviour": "answered: the host only echoes ids (SPEC-pattern-search §4.2: no uniqueness), every pattern answered (recorded P-edge-0006, both direct arms: 200, both 'same' answered); filled 2026-10-14 (triage-1 G11)"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -479,10 +483,11 @@
    ],
    "scenario_match": "POST /pattern with a pattern object naming two of dna / iupac / protein (or none)",
    "direct_expectation": {
-    "http": null,
-    "code": null,
-    "text": null,
-    "behaviour": "host text not quoted in the service's sources"
+    "http": 400,
+    "code": "invalid_request",
+    "text": "request.patterns[0]: expected exactly one of 'dna', 'iupac'",
+    "text_source": "recorded: P-edge-0011 (dna + iupac), both direct arms of run 20261013T165714Z_refseq97-b7214d29",
+    "behaviour": "the host refuses, naming the pattern's path (the index folds with the digits); a request that names a protein pattern is told \"...: expected exactly one of 'dna', 'iupac', 'protein'\" (engine pattern.cpp:335); filled 2026-10-14 (triage-1 G11)"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -628,13 +633,15 @@
    "areas": [
     "P"
    ],
-   "scenario_match": "POST /pattern with time_budget_ms below 500 (the host's finalize_reserve_ms 250 + 250)",
+   "scenario_match": "POST /pattern with time_budget_ms below 500 (the host's finalize_reserve_ms 250 + 250); the direct expectation is that of 251..499 ms, a budget above the host's reserve (the only range recorded)",
    "direct_expectation": {
-    "http": null,
+    "http": [
+     200,
+     503
+    ],
     "code": null,
-    "text": "pattern: the answer could not be written within time_budget_ms (251 ms, the finalisation reserve of 250 ms included): nothing partial is sent",
-    "text_source": "tests/data/pattern/deadline_503/answer.json",
-    "behaviour": "251..499 ms: the host accepts the budget (may answer 503 deadline, as the fixture with 251 ms); <= 250 ms (not above its reserve): the host refuses (text not quoted in the service's sources)"
+    "text": null,
+    "behaviour": "251..499 ms (corrected 2026-10-14, triage-1 G09): the host accepts the budget (SPEC-pattern-search §4.1: time_budget_ms > finalize_reserve_ms) and answers 200, every pattern exact within it or with a stated time stop (recorded P-caps-0004, 16 patterns at 300 ms, both direct arms: 200, p0 stop {extraction, time}, p1..p15 stop {discovery, time}), or 503 deadline when the answer cannot be written in time (the fixture tests/data/pattern/deadline_503 at 251 ms: \"pattern: the answer could not be written within time_budget_ms (251 ms, the finalisation reserve of 250 ms included): nothing partial is sent\"). <= 250 ms (not above the reserve): the host refuses 400 (not recorded; split the case when a scenario sends one)"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -789,10 +796,11 @@
    ],
    "scenario_match": "POST /pattern with output.occurrences and labels none",
    "direct_expectation": {
-    "http": null,
-    "code": null,
-    "text": null,
-    "behaviour": "not covered by the fixtures; host behaviour not quoted"
+    "http": 400,
+    "code": "invalid_request",
+    "text": "request.output.occurrences: true needs output.labels \"all\" (occurrences are placed per label)",
+    "text_source": "recorded: P-edge-0010, both direct arms of run 20261013T165714Z_refseq97-b7214d29",
+    "behaviour": "the host refuses; filled 2026-10-14 (triage-1 G11)"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -1736,12 +1744,13 @@
    "areas": [
     "Q"
    ],
-   "scenario_match": "POST /pattern with predicate_strands or predicate_scope but no predicate",
+   "scenario_match": "POST /pattern with predicate_scope \"motif\" but no predicate (predicate_strands may be sent too); split by value on 2026-10-14 (triage-1 G08): predicate_strands, or predicate_scope \"context\", without a predicate is pattern.predicate_options_noop_without_predicate",
    "direct_expectation": {
-    "http": null,
-    "code": null,
-    "text": null,
-    "behaviour": "not covered by the fixtures; host behaviour not quoted"
+    "http": 400,
+    "code": "invalid_request",
+    "text": "request.predicate_scope: \"motif\" asks the request's predicate of each pattern: it needs a predicate (request.predicate)",
+    "text_source": "recorded: Q-motif-0004, both direct arms of run 20261013T165714Z_refseq97-b7214d29",
+    "behaviour": "the host refuses (SPEC-pattern-search §4.1: \"motif\" needs a predicate, else 400 invalid_request); a refusal on both sides"
    },
    "service_answer": {
     "tool": "pattern_search",
@@ -1751,7 +1760,35 @@
     "text_contains": "it acts only with a predicate",
     "field": "predicate_strands | predicate_scope",
     "stage": "rest_validator",
-    "detail": "Row 4b."
+    "detail": "Row 4b. The field is predicate_scope, or predicate_strands when that is sent too (checked first; app/pattern/validate.py _check_predicate)"
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/pattern/validate.py:784",
+    "app/pattern/validate.py:789"
+   ]
+  },
+  {
+   "id": "pattern.predicate_options_noop_without_predicate",
+   "areas": [
+    "Q"
+   ],
+   "scenario_match": "POST /pattern with predicate_strands (any value), or predicate_scope \"context\", but no predicate and no predicate_scope \"motif\" (split from pattern.predicate_options_without_predicate on 2026-10-14, triage-1 G08)",
+   "direct_expectation": {
+    "http": 200,
+    "code": null,
+    "text": null,
+    "behaviour": "answered: a no-op (SPEC-pattern-search §4.1: predicate_strands is \"accepted with any request; it acts only with a predicate\", predicate_scope \"context\" \"is accepted with any request and acts only with a predicate\"); not recorded in run 20261013T165714Z"
+   },
+   "service_answer": {
+    "tool": "pattern_search",
+    "outcome": "refused_at_submit",
+    "http": 400,
+    "code": "pattern_invalid",
+    "text_contains": "it acts only with a predicate",
+    "field": "predicate_strands | predicate_scope",
+    "stage": "rest_validator",
+    "detail": "Row 4b: the service refuses an option that would act on nothing; field predicate_strands (checked first) or predicate_scope"
    },
    "agreement": "by_design",
    "source": [
@@ -2090,7 +2127,22 @@
    "source": [
     "app/pattern/validate.py:1014",
     "app/pattern/validate.py:996"
-   ]
+   ],
+   "answer_match": {
+    "routes": [
+     "POST /pattern"
+    ],
+    "direct": {
+     "http": 200,
+     "slot_code": "mismatches_above_cap"
+    },
+    "mcp": {
+     "http": 400,
+     "code": "pattern_out_of_bounds",
+     "text_contains": "patterns on the host of database",
+     "field": "max_mismatches"
+    }
+   }
   },
   {
    "id": "mismatch.long_pattern_without_long_search",
@@ -2413,10 +2465,10 @@
    ],
    "scenario_match": "POST /resolve with N or any IUPAC code in the sequence",
    "direct_expectation": {
-    "http": 400,
+    "http": 200,
     "code": null,
     "text": null,
-    "behaviour": "the host refuses (design §3 R-edge, 'exact text'); its text is not quoted in the service's sources"
+    "behaviour": "answered (corrected 2026-10-14, triage-1 G09; the design's §3 R-edge 'refused' was wrong): /resolve has no alphabet refusal (SPEC-labeled-traversal-core §4.1/§4.2; 'N is invalid' is §6.1, /traverse seeds), so every k-mer holding the N or IUPAC character is absent from the graph: recorded R-edge-0005 (N at 50) and R-edge-0006 (R at 50), both direct arms: 200, graph_runs [[0, 20], [51, 70]], the label's 39 of 70 k-mers"
    },
    "service_answer": {
     "tool": "traverse_resolve",
@@ -2468,9 +2520,10 @@
    "direct_expectation": {
     "http": 400,
     "code": null,
-    "text": "Label not found in the annotation: 'not-a-label-xyz'",
+    "text": null,
+    "text_prefix": "Label not found in the annotation: ",
     "text_source": "tests/data/traverse/real/resolve/README.md",
-    "behaviour": "body {\"error\": ...}, no code"
+    "behaviour": "body {\"error\": ...}, no code; the text names the label (\"Label not found in the annotation: 'not-a-label-xyz'\" in the fixture, \"... 'NOPE_0000.1'\" recorded for R-edge-0008 on both direct arms): compared by its prefix (text_prefix, 2026-10-14, triage-1 G10)"
    },
    "service_answer": {
     "tool": "traverse_resolve",
@@ -2528,10 +2581,10 @@
    ],
    "scenario_match": "POST /resolve with more than 1,000 explicit labels",
    "direct_expectation": {
-    "http": 400,
+    "http": 200,
     "code": null,
     "text": null,
-    "behaviour": "the host refuses 1,001 labels (design §3 R-edge); text not quoted"
+    "behaviour": "answered (corrected 2026-10-14, triage-1 G09): the host has no cap on explicit labels (SPEC-labeled-traversal-core §4.5: their resolution is linear in their bytes 'and no server limit caps their number'); recorded R-edge-0010, both direct arms: 200 with 1,001 label profiles"
    },
    "service_answer": {
     "tool": "traverse_resolve",
@@ -2613,10 +2666,11 @@
    ],
    "scenario_match": "POST /resolve with neither labels nor discover (or labels: [])",
    "direct_expectation": {
-    "http": null,
+    "http": 400,
     "code": null,
-    "text": null,
-    "behaviour": "host behaviour not quoted in the service's sources"
+    "text": "request: specify exactly one of 'labels' or 'discover'",
+    "text_source": "recorded: R-edge-0013, both direct arms of run 20261013T165714Z_refseq97-b7214d29",
+    "behaviour": "the host refuses (body {\"error\": ...}, no code; engine traverse.cpp:491); filled 2026-10-14 (triage-1 G11). labels: [] is not recorded"
    },
    "service_answer": {
     "tool": "traverse_resolve",
@@ -2664,12 +2718,44 @@
    "areas": [
     "R"
    ],
-   "scenario_match": "POST /resolve with discover.max_labels above 100 (or below 1)",
+   "scenario_match": "POST /resolve with discover.max_labels below 1 (0); the id is older than the split by value of 2026-10-14 (triage-1 G11) and names the case suite_v3's R-edge-0022 sends: above 100 is resolve.discover_limit_above_100_host_answers",
    "direct_expectation": {
+    "http": 400,
+    "code": null,
+    "text": "request.discover.max_labels: out of range [1, 18446744073709551615]",
+    "text_source": "recorded: R-edge-0022 (max_labels 0), both direct arms of run 20261013T165714Z_refseq97-b7214d29",
+    "behaviour": "the host refuses a value outside its range [1, 2^64 - 1], naming the field (engine json_helpers.hpp:89); body {\"error\": ...}, no code"
+   },
+   "service_answer": {
+    "tool": "traverse_resolve",
+    "outcome": "refused_at_submit",
     "http": null,
+    "code": "invalid_arguments",
+    "text_contains": "`limit` must be an integer in 1..100",
+    "keys": {
+     "max_limit": 100
+    },
+    "stage": "mcp_local",
+    "detail": "The tool's argument is limit (REST: discover.max_labels, 400 resolve_invalid_discover). The service always sends discover {max_labels (default 20), kind (default column)}."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/mcp_server.py:7046",
+    "app/traversal/resolve.py:496",
+    "app/settings.py:1457"
+   ]
+  },
+  {
+   "id": "resolve.discover_limit_above_100_host_answers",
+   "areas": [
+    "R"
+   ],
+   "scenario_match": "POST /resolve with discover.max_labels above 100 (the service's limit; the host takes up to 2^64 - 1); split from resolve.discover_limit_above_100 on 2026-10-14 (triage-1 G11)",
+   "direct_expectation": {
+    "http": 200,
     "code": null,
     "text": null,
-    "behaviour": "the host's own discovery limit is not quoted in the service's sources"
+    "behaviour": "answered: the host lists up to max_labels discovered labels (its range [1, 2^64 - 1]); not recorded (a costly discovery may still end 503 deadline on its budget, SPEC-labeled-traversal-core §4.5)"
    },
    "service_answer": {
     "tool": "traverse_resolve",
@@ -2730,12 +2816,49 @@
    "areas": [
     "R"
    ],
-   "scenario_match": "POST /resolve with bounds.time_budget_ms below 500 (reserve 250 + 250)",
+   "scenario_match": "POST /resolve with bounds.time_budget_ms not above the host's finalisation reserve (<= 250 ms; the service refuses every budget below 500 ms); split by value on 2026-10-14 (triage-1 G11): 251..499 ms is resolve.time_budget_above_reserve_below_minimum",
    "direct_expectation": {
-    "http": null,
+    "http": 400,
+    "code": null,
+    "text": "request.bounds.time_budget_ms: expected more than the finalisation reserve of 250 ms",
+    "text_source": "recorded: R-edge-0020 (250 ms), both direct arms of run 20261013T165714Z_refseq97-b7214d29",
+    "behaviour": "the host refuses a budget not above its reserve, naming the field (SPEC-labeled-traversal-core §4.5); body {\"error\": ...}, no code"
+   },
+   "service_answer": {
+    "tool": "traverse_resolve",
+    "outcome": "refused_at_submit",
+    "http": 400,
+    "code": "resolve_time_budget_out_of_bounds",
+    "text_contains": "ms is below the minimum 500 ms for database",
+    "field": "time_budget_ms",
+    "keys": {
+     "requested": "<n>",
+     "min": 500
+    },
+    "stage": "route",
+    "detail": "0 or a negative value: invalid_arguments from the tool."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/traversal/resolve.py:426",
+    "app/traversal/resolve.py:402",
+    "app/mcp_server.py:7025"
+   ]
+  },
+  {
+   "id": "resolve.time_budget_above_reserve_below_minimum",
+   "areas": [
+    "R"
+   ],
+   "scenario_match": "POST /resolve with bounds.time_budget_ms 251..499 (above the host's finalisation reserve 250, below the service's minimum 500); split from resolve.time_budget_below_minimum on 2026-10-14 (triage-1 G11)",
+   "direct_expectation": {
+    "http": [
+     200,
+     503
+    ],
     "code": null,
     "text": null,
-    "behaviour": "251..499 ms accepted by the host; <= 250 refused (text not quoted)"
+    "behaviour": "the host accepts the budget (SPEC-labeled-traversal-core §4.5: a budget above the reserve) and answers, or 503 deadline when the answer cannot be built and written in time; not recorded"
    },
    "service_answer": {
     "tool": "traverse_resolve",
@@ -3099,16 +3222,58 @@
    ]
   },
   {
+   "id": "traverse.empty_seeds",
+   "areas": [
+    "T"
+   ],
+   "scenario_match": "POST /traverse with seeds: [] (or no seeds, no sequence and no sequence_id)",
+   "direct_expectation": {
+    "http": 400,
+    "code": null,
+    "text": "request.seeds: expected a non-empty array",
+    "text_source": "recorded: T-edge-0016, both direct arms of run 20261013T165714Z_refseq97-b7214d29 (engine traverse.cpp:246)",
+    "behaviour": "the host refuses an empty seed list (body {\"error\": ...}, no code)"
+   },
+   "service_answer": {
+    "tool": "traverse_fetch",
+    "outcome": "refused_at_submit",
+    "http": null,
+    "code": "invalid_arguments",
+    "text_contains": "provide `seeds`",
+    "stage": "mcp_local",
+    "detail": "Refused by the tool before any REST call (no job created): \"provide `seeds` (a list) or one `sequence` / `sequence_id`\" (a list given but empty reads as none given). Added 2026-10-14 (triage-1 G19); the answer_match applies it to suite_v3's T-edge-0016, which names no case"
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/mcp_server.py:7176",
+    "app/mcp_server.py:7180"
+   ],
+   "answer_match": {
+    "routes": [
+     "POST /traverse"
+    ],
+    "direct": {
+     "http": 400,
+     "text_contains": "request.seeds: expected a non-empty array"
+    },
+    "mcp": {
+     "code": "invalid_arguments",
+     "text_contains": "provide `seeds` (a list)"
+    }
+   }
+  },
+  {
    "id": "traverse.empty_seed_labels",
    "areas": [
     "T"
    ],
    "scenario_match": "POST /traverse with a seed whose explicit labels list is empty",
    "direct_expectation": {
-    "http": 200,
+    "http": 400,
     "code": null,
-    "text": null,
-    "behaviour": "the host reads [] as 'nothing permitted' (planner docstring)"
+    "text": "request.seeds[0].labels: expected a non-empty array of labels; omit the field to derive the permitted set from the seed",
+    "text_source": "recorded: T-edge-0013, both direct arms of run 20261013T165714Z_refseq97-b7214d29 (engine traverse.cpp:259)",
+    "behaviour": "the host refuses an explicitly empty list, naming the field (SPEC-labeled-traversal-core §5); corrected 2026-10-14 (triage-1 G20): the 200 'nothing permitted' came from a stale planner docstring"
    },
    "service_answer": {
     "tool": "traverse_fetch",
@@ -3117,7 +3282,7 @@
     "code": "seed_invalid",
     "text_contains": "an explicitly empty labels list permits nothing",
     "stage": "rest_planner",
-    "detail": ""
+    "detail": "A refusal on both sides; the service's message: \"seeds[<i>]: an explicitly empty labels list permits nothing; omit labels to derive the seed's carriers\""
    },
    "agreement": "by_design",
    "source": [
@@ -3826,6 +3991,54 @@
      "http": 502,
      "code": "search_failed",
      "text_contains": "pattern_deadline"
+    }
+   }
+  },
+  {
+   "id": "pattern.caps_zero",
+   "areas": [
+    "P",
+    "L"
+   ],
+   "scenario_match": "POST /pattern with max_contexts, max_anchors or max_paths 0 (caps the host takes as an integer >= 0), no earlier refusal applying",
+   "direct_expectation": {
+    "http": 200,
+    "code": null,
+    "text": null,
+    "behaviour": "answered (SPEC-pattern-search §4.1: max_contexts, max_anchors and max_paths are integers >= 0): max_contexts 0 in partial cuts every context (cut {reason: max_contexts}, results []), in all_or_count withholds a non-empty list (count_above_threshold); max_anchors 0 admits no extension of a pattern longer than k (withheld anchors_above_threshold, counts.paths.extension not_admitted); max_paths 0 cuts (partial, cut max_paths) or withholds (all_or_count, count_above_threshold) the paths. Recorded on both direct arms of run 20261013T165714Z: P-modes-0006, P-caps-0001, L-caps-0001, L-caps-0002"
+   },
+   "service_answer": {
+    "tool": "pattern_search",
+    "outcome": "refused_at_submit",
+    "http": 400,
+    "code": "pattern_invalid",
+    "text_contains": "Input should be greater than or equal to 1",
+    "field": "caps.<cap>",
+    "stage": "rest_model",
+    "detail": "The REST model takes every cap as an integer >= 1 (pydantic ge=1), mapped to 400 pattern_invalid with the field caps.<cap> and the text \"caps.<cap>: Input should be greater than or equal to 1\" (the table's pattern_refusal_order: rest_model 'caps >= 1'). The service does not offer the answers a cap of 0 asks: max_anchors 0 is the anchor-only answer of a long pattern (pattern-search DESIGN §3.1: 'anchors', the anchor-only answer, is not offered; caps.max_anchors >= 1), and max_contexts 0 / max_paths 0 add only a cut or withheld to what mode count answers. time_budget_ms 0 is refused with the same code and text (field caps.time_budget_ms) but the host refuses it too (a budget not above its finalisation reserve): pattern.time_budget_below_minimum, not this case; answer_match.mcp names the fields. max_predicate_contexts and max_labels (>= 0 on the host) are refused alike; not listed in answer_match: not recorded"
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/pattern/request.py:118",
+    "app/pattern/request.py:132",
+    "app/pattern/request.py:139",
+    "app/api/routes_pattern.py:241",
+    "app/pattern/worker.py:277",
+    "dev-notes/2026-10/pattern-search/DESIGN.md:144",
+    "dev-notes/2026-10/pattern-search/DESIGN.md:851"
+   ],
+   "answer_match": {
+    "routes": [
+     "POST /pattern"
+    ],
+    "direct": {
+     "http": 200
+    },
+    "mcp": {
+     "http": 400,
+     "code": "pattern_invalid",
+     "text_contains": "Input should be greater than or equal to 1",
+     "field": "caps.max_contexts | caps.max_anchors | caps.max_paths"
     }
    }
   }

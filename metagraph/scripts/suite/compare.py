@@ -23,8 +23,8 @@ commit 22d034ba; --by-design overrides) holds cases {id, direct_expectation, ser
 scenario names its cases in `mcp.by_design` (an id or a list). agreement `not_implemented_mcp` makes the
 scenario "not implemented yet via MCP"; `service_only` (no host counterpart) makes it service-side by design;
 `by_design` makes it service-side by design when the pair holds: the direct answer matches
-direct_expectation (http or a list, code or slot_code, the text or text_prefix with digits ignored, text_contains,
-each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
+direct_expectation (http or a list, code or slot_code, the text with digits ignored, text_prefix as is,
+text_contains, each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
 (refused_at_submit / relayed: error.code, text_contains, field with alternatives and placeholders where the MCP
 execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
 An answer-triggered case (answer_match) is applied before the named cases, which judge the rest of the MCP
@@ -166,7 +166,7 @@ def mcp_error(line, run_dir):
 def _direct_problems(side, http, top, slots, texts):
     """(problems, number of stated keys compared) of a direct answer against a case's direct side: http (a status or
     a list), code (a top-level or a pattern slot's; alternatives "a | b"), slot_code (a pattern slot's only), text
-    (whole, digits ignored), text_prefix (digits ignored), text_contains (a string or a list)."""
+    (whole, digits ignored), text_prefix (as is), text_contains (a string or a list)."""
     problems, compared = [], 0
     if side.get("http") is not None:
         compared += 1
@@ -186,9 +186,8 @@ def _direct_problems(side, http, top, slots, texts):
         if not any(_digits_free(t) == want for t in texts):
             problems.append("text %r, the case expects %r" % (sorted(texts)[:1], side["text"]))
     if side.get("text_prefix") is not None:
-        compared += 1
-        want = _digits_free(side["text_prefix"])
-        if not any(_digits_free(t).startswith(want) for t in texts):
+        compared += 1   # as is, no digit folding (async's table vocabulary, 2026-10-14)
+        if not any(t.startswith(side["text_prefix"]) for t in texts):
             problems.append("text %r, the case expects the prefix %r" % (sorted(texts)[:1], side["text_prefix"]))
     if side.get("text_contains") is not None:
         compared += 1
@@ -515,8 +514,10 @@ def answer_cases(cases):
 
 def answer_side_matches(side, http, codes, texts, field=None, slot_codes=None, known=None):
     """Whether one side of an answer_match holds for an answer (its status, error codes, texts, the MCP error's
-    field, the pattern slots' codes): True or False; None when the side states a key outside |known| (default: the
-    union of both sides' keys), which is never ignored silently. A side that states nothing never matches."""
+    field, the pattern slots' codes), as async's runner reads it (suite_mcp_runner.py ServiceByDesign.answer_matches
+    at 789fb5f0: a field the answer does not name does not match; slot_code the codes of body.patterns[].error):
+    True or False; None when the side states a key outside |known| (default: the union of both sides' keys), which
+    is never ignored silently. A side that states nothing never matches."""
     if not isinstance(side, dict):
         return False
     known = known or tuple(sorted(set(ANSWER_DIRECT_KEYS) | set(ANSWER_MCP_KEYS)))

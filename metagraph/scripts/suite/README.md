@@ -240,9 +240,10 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
-- `service_by_design.json`: async's table (125 cases), copied byte-identical from the search-service work
-  (vendored branch 8ccf4243 for case 125 and `answer_match`; `service_commit` inside 22d034ba; sha256
-  08218b9e...). A case's `agreement`
+- `service_by_design.json`: async's table (130 cases), copied byte-identical from the search-service work
+  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show 789fb5f0:scripts/bench/vendor_suite/service_by_design.json`,
+  146,755 bytes, sha256 2fdea36b...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
+  splits by value and four answer-triggered cases). A case's `agreement`
   `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) -> service-side
   by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
   service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text
@@ -765,6 +766,12 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   (no 200), names the deadline itself, or another route or code is judged as it states.
 
 ### Comparator and re-evaluation
+- The table: async's 789fb5f0 (130 cases, sha256 2fdea36b...), byte-identical, with the triage's corrections (G09,
+  G10, G11, G19, G20), the splits by value (the old id keeps the value suite_v3 sends; new:
+  pattern.predicate_options_noop_without_predicate, resolve.time_budget_above_reserve_below_minimum,
+  resolve.discover_limit_above_100_host_answers) and the new cases pattern.caps_zero and traverse.empty_seeds;
+  answer_match on pattern.deadline_ends_task, mismatch.above_kind_cap, pattern.caps_zero and traverse.empty_seeds.
+  Async's runner (wt-suite2 scripts/bench/suite_mcp_runner.py, ServiceByDesign) is the reference reading of it.
 - Field alternatives and placeholders (G08, G07 as VERIFY-RP has it). A case's `field` may list alternatives
   `a | b`, split as its code is (outside `<...>`), and a `<...>` placeholder matches anything, dots included, as
   async's runner (`ServiceByDesign._like`) reads it: `predicate<path of the first fault>` matches
@@ -772,8 +779,8 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   the execution's outcome with its own reading, so the comparator follows it).
 - The host side of a case (G09, G10; async's additions). `direct_expectation` may state `http` as a status or a list
   (a budget that gives 200 or 503), `code` (a top-level or a pattern slot's, `a | b`), `slot_code` (a pattern
-  slot's only), `text` (whole, digits ignored), `text_prefix` (digits ignored: a label-agnostic text such as
-  "Label not found in the annotation: ") and `text_contains`; `text_source` and `behaviour` are descriptive. A
+  slot's only), `text` (whole, digits ignored), `text_prefix` (as is, no digit folding, as the table's vocabulary
+  states: a label-agnostic text such as "Label not found in the annotation: ") and `text_contains`; `text_source` and `behaviour` are descriptive. A
   case whose host side states nothing (G11) has its direct side judged by the scenario's own `status` check on the
   reference direct execution: pass verified, fail a disagreement (side direct), anything else unverified.
 - Keys a newer table may state. A side's key the comparator neither matches nor knows as descriptive is never
@@ -790,8 +797,10 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   executions the answer case does not explain either (a direct answer of its direct side, such as the host's own
   503 deadline, says nothing about the rest's pair); a disagreement of the rest is the class, with `answer_case`.
   reevaluate.py applies the answer case before keeping a runner's named-case mark, so the execution names the
-  answer case. answer_match sides: direct {http (a status or a list), code (top-level or slot), slot_code,
-  text_contains}, mcp {http (a status or a list), code, text_contains, field (as above)}.
+  answer case. answer_match sides: direct {http (a status or a list), code (top-level or slot), slot_code (the
+  codes of body.patterns[].error), text_contains}, mcp {http (a status or a list), code, text_contains, field (as
+  above; an MCP answer that names no field does not match)}, as async's runner reads them (`answer_matches`); the
+  runner applies the named cases first, the comparator the answer cases first (B6).
 - Not changed: reevaluate.py keeps the runner's verdict on a named case (it does not re-apply named cases), so an
   MCP execution the runner judged `fail` against a case its matcher could not read (G08's alternation) stays `fail`
   until the MCP arm runs again with async's fixed matcher; compare.py's class for the scenario changes offline.
