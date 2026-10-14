@@ -367,6 +367,52 @@ class RunSuiteOffline(SuiteCase):
         with open(os.path.join(run_dir, "report.md")) as fh:
             self.assertIn("**INCOMPLETE", fh.read())
 
+    def test_resume_keeps_the_runs_options(self):
+        # a plain resume continues the run as it was started: a smoke run's request cap (40 per invocation), its
+        # arms (--skip-local), its pause; the session records what was given and what was restored
+        make_manifest(self.mpath, [scenario("S-%03d" % i, "S", "POST /slow", {"sleep_s": 0}) for i in range(100)])
+        base = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf"]
+
+        def run(*args):
+            return subprocess.run(base + list(args), env=self.env(host), stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, universal_newlines=True, timeout=300,
+                                  stdin=subprocess.DEVNULL)
+        with FakeHost() as host:
+            p = run("--smoke", "--skip-local", "--manifest", self.mpath, "--warm-every", "0", "--checks", "stub",
+                    "--pause", "0.01")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            n = len(host.log)
+            self.assertEqual(n, 1 + 40)        # the release GET and the smoke cap
+            p = run("--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(len(host.log) - n, 40)
+        self.assertIn("the run's own options:", p.stderr)
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(set(r["arm"] for r in rows), {"direct-remote"})
+        sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+        self.assertEqual([(x["smoke"], x["max_requests"], x["skip_local"], x["pause_s"]) for x in sessions],
+                         [("1", "40", "1", "0.01")] * 2)
+        self.assertEqual([x["loop"]["state"] for x in sessions], ["capped", "capped"])
+        self.assertEqual(sessions[1]["given"], ["no-pdf", "resume"])
+        for item in ("smoke", "skip-local", "pause 0.01", "checks stub", "warm_every 0"):
+            self.assertIn(item, sessions[1]["restored"])
+
+    def test_narrowed_resume_says_so(self):
+        # a resume naming a selection narrower than the run's plan says so and records it; the run stays INCOMPLETE
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "10", "--warm-every", "0",
+                               "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", run_dir, "--areas", "P", "--limit", "1")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("leaves out scenarios of the run's plan", p.stderr)
+        sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+        self.assertEqual(sess["narrower_than_plan"], {"selected": 1, "planned": 6, "left_out": 5})
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            self.assertIn("**INCOMPLETE", fh.read())
+
     def test_lock_held_stale_and_foreign(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
         os.makedirs(os.path.join(self.mex, "suite-dev"))
@@ -524,7 +570,7 @@ class RunSuiteOffline(SuiteCase):
             run_dir = [os.path.join(self.runs, x) for x in os.listdir(self.runs)][0]
             sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
             self.assertEqual(sess["loop"]["state"], "interrupted")
-            p = self.run_suite(host, "--resume", run_dir, "--warm-every", "0")
+            p = self.run_suite(host, "--resume", run_dir)    # its --warm-every 0 is the run's own
             self.assertEqual(p.returncode, 0, p.stderr)
         rows, bad = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
         self.assertEqual(bad, 0)
@@ -547,8 +593,8 @@ class RunSuiteOffline(SuiteCase):
             self.assertTrue(all(r["arm"] == "direct-remote" for r in rows))
             self.assertTrue(rows[0]["raw"].startswith("arms/direct-remote/raw/"))
             n_requests = len(host.log)
-            # --resume keeps the run's mode: nothing new runs (only the capabilities GETs)
-            p2 = self.run_suite(host, "--resume", run_dir, "--skip-local")
+            # --resume keeps the run's mode and arms (--skip-local): nothing new runs (only the capabilities GETs)
+            p2 = self.run_suite(host, "--resume", run_dir)
             self.assertEqual(p2.returncode, 0, p2.stderr)
             self.assertEqual(p2.stdout.strip().splitlines()[-1], run_dir)
             self.assertEqual(len(host.log) - n_requests, 4)
@@ -713,7 +759,7 @@ class RunSuiteOverSsh(SuiteCase):
                 self.assertIn("INCOMPLETE", fh.read())
             self.assertTrue(os.path.exists(self.lock_path()))      # left behind: mex did not answer
             os.unlink(down)
-            p = self.run_suite(host, "--resume", run_dir, "--warm-every", "0")
+            p = self.run_suite(host, "--resume", run_dir)
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertIn("removing a stale lock", p.stderr)
         rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))

@@ -13,7 +13,11 @@
 # --ids FILE: only these scenarios (ids separated by commas, blanks or new lines, '#' comments; an id the manifest
 # lacks is refused), in manifest order, with --areas / --limit applied on top. --resume without --ids, --areas,
 # --limit or --gate runs the scenarios of the run's whole plan (every invocation's selection: a plain resume after a
-# narrower targeted one finishes the run), and keeps the last invocation's --warm-every unless given. Every
+# narrower targeted one finishes the run; a resume that names a narrower selection says so). A resume keeps the
+# last invocation's options unless given again: the mode, --checks, the MCP template, --warm-every, --pause,
+# --skip-local, --skip-remote, --allow-stub, --smoke (its request cap of 40 per invocation and its sampler bound)
+# and --gate (so a plain `--resume RUN_DIR` continues the run as it was started and is gated as it was); not
+# --max-requests, which caps one invocation. Every
 # invocation writes the run's plan, RUN_DIR/plan.json, before any arm runs: each (scenario, arm, repeat) its
 # selection plans (gate.py plan); one that adds executions is added, the run's plan is the union.
 #
@@ -134,8 +138,10 @@ mex_rsync() {
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
 MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""; IDS_FILE=""; IDS=""; GATE=""
-WARM_GIVEN=0; RESUME_SELECTION=0
+WARM_GIVEN=0; RESUME_SELECTION=0; PAUSE_GIVEN=0; GIVEN=""
 while [[ $# -gt 0 ]]; do
+  # the options this invocation gives (recorded; a resume restores the run's own for the others)
+  case "$1" in --*) GIVEN+="${1#--},";; esac
   case "$1" in
     --reevaluate) REEVALUATE="$2"; shift 2 ;;
     --reeval-checks) REEVAL_CHECKS="$2"; shift 2 ;;
@@ -156,7 +162,7 @@ while [[ $# -gt 0 ]]; do
     --compare) COMPARE="$2"; shift 2 ;;
     --resume) RESUME="$2"; shift 2 ;;
     --by-design) BY_DESIGN="$2"; shift 2 ;;
-    --pause) PAUSE="$2"; shift 2 ;;
+    --pause) PAUSE="$2"; PAUSE_GIVEN=1; shift 2 ;;
     --max-requests) MAX_REQUESTS="$2"; shift 2 ;;
     --warm-every) WARM_EVERY="$2"; WARM_GIVEN=1; shift 2 ;;
     --allow-stub) ALLOW_STUB=1; shift ;;
@@ -166,8 +172,6 @@ while [[ $# -gt 0 ]]; do
     *) usage >&2; die "unknown option $1" ;;
   esac
 done
-# The smoke load rule: at most ~40 requests per smoke run.
-if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ -z "$MCP_RUN" || -d "$MCP_RUN" ]] || die "--mcp-run $MCP_RUN is not a directory"
 [[ -z "$MCP_RUN" || -z "$MCP_CMD" ]] || die "--mcp-run and --mcp-cmd exclude each other"
 [[ $NO_MCP == 0 || $MCP_GIVEN == 0 ]] || die "--no-mcp and --mcp-cmd exclude each other"
@@ -175,11 +179,12 @@ if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
 [[ -z "$CHECKS_MODE" || "$CHECKS_MODE" =~ ^(auto|checks|stub)$ ]] || die "--checks takes auto, checks or stub"
 [[ -z "$IDS_FILE" || -f "$IDS_FILE" ]] || die "--ids $IDS_FILE is not a file"
-if [[ -n "$GATE" ]]; then
+check_gate() {
   [[ -f "$GATE" ]] || die "--gate $GATE is not a file"
   GATE="$(cd "$(dirname "$GATE")" && pwd)/$(basename "$GATE")"
   "$PY" "$HERE/gate.py" policy-ids "$GATE" > /dev/null || die "--gate $GATE is not a gate policy"
-fi
+}
+[[ -z "$GATE" ]] || check_gate
 
 # --- the offline re-evaluation of a recorded run (lane S4): no lock, no ssh, no request to any host ----------
 if [[ -n "$REEVALUATE" ]]; then
@@ -231,40 +236,57 @@ if [[ -n "$RESUME" ]]; then
       if [[ -f "$cand" ]]; then MANIFEST="$cand"; break; fi
     done
   fi
-  if [[ -z "$MODE" ]]; then
-    MODE="$("$PY" -c 'import json, sys
+  # The run's own options (its last invocation's, orchestrator.json sessions[-1]) for those this one does not give,
+  # so a plain resume continues the run as it was started: the same arms, checks, repeats, pace, load cap and gate.
+  RESTORED=""
+  last_session() {  # last_session KEY: the value the run's last invocation recorded, '' for none
+    "$PY" -c 'import json, sys
 try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("mode") or "")
-except (OSError, ValueError, KeyError, IndexError):
-    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
-  fi
+    v = json.load(open(sys.argv[1]))["sessions"][-1].get(sys.argv[2])
+    print("" if v is None else v)
+except (OSError, ValueError, KeyError, IndexError, AttributeError):
+    print("")' "$RUN_DIR/orchestrator.json" "$1" 2>/dev/null || true
+  }
+  restore() {  # restore NAME VALUE: log what was restored
+    RESTORED+="$1 $2, "
+  }
+  if [[ -z "$MODE" ]]; then MODE="$(last_session mode)"; [[ -z "$MODE" ]] || restore mode "$MODE"; fi
   if [[ -z "$CHECKS_MODE" ]]; then
-    # The run's own checks (the last invocation's), so a resume judges its executions alike.
-    CHECKS_MODE="$("$PY" -c 'import json, sys
-try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("checks") or "")
-except (OSError, ValueError, KeyError, IndexError):
-    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+    # the run's own checks, so a resume judges its executions alike
+    CHECKS_MODE="$(last_session checks)"; [[ -z "$CHECKS_MODE" ]] || restore checks "$CHECKS_MODE"
   fi
   # The run's own selection (the union of every invocation's plan, below) unless this one names its own.
   [[ -n "$IDS_FILE" || -n "$AREAS" || -n "$LIMIT" || -n "$GATE" ]] || RESUME_SELECTION=1
   if [[ $WARM_GIVEN == 0 ]]; then
     # its warm_every likewise (the repeats it planned)
-    WARM_EVERY="$("$PY" -c 'import json, sys
-try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("warm_every") or 10)
-except (OSError, ValueError, KeyError, IndexError):
-    print(10)' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo 10)"
+    WARM_EVERY="$(last_session warm_every)"; WARM_EVERY="${WARM_EVERY:-10}"; restore warm_every "$WARM_EVERY"
   fi
   if [[ $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
     # The run's own MCP template (the last invocation's), so a resume pairs the same arms.
-    MCP_CMD="$("$PY" -c 'import json, sys
-try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("mcp_cmd") or "")
-except (OSError, ValueError, KeyError, IndexError):
-    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+    MCP_CMD="$(last_session mcp_cmd)"; restore mcp "$( [[ -n "$MCP_CMD" ]] && echo "its template" || echo none)"
   fi
-  log "resuming $RUN_ID"
+  if [[ $PAUSE_GIVEN == 0 ]]; then
+    v="$(last_session pause_s)"; if [[ -n "$v" ]]; then PAUSE="$v"; restore pause "$v"; fi
+  fi
+  for opt in skip_local skip_remote allow_stub smoke; do
+    # flags: restored when the run's last invocation gave them
+    if [[ "$(last_session $opt)" == 1 ]]; then
+      case $opt in
+        skip_local) [[ $SKIP_LOCAL == 1 ]] || { SKIP_LOCAL=1; restore skip-local ""; } ;;
+        skip_remote) [[ $SKIP_REMOTE == 1 ]] || { SKIP_REMOTE=1; restore skip-remote ""; } ;;
+        allow_stub) [[ $ALLOW_STUB == 1 ]] || { ALLOW_STUB=1; restore allow-stub ""; } ;;
+        smoke) [[ $SMOKE == 1 ]] || { SMOKE=1; restore smoke ""; } ;;
+      esac
+    fi
+  done
+  if [[ -z "$GATE" ]]; then
+    v="$(last_session gate)"
+    if [[ -n "$v" ]]; then
+      [[ -f "$v" ]] || die "the run was gated by $v, which is gone: pass --gate POLICY"
+      GATE="$v"; check_gate; restore gate "$GATE"
+    fi
+  fi
+  log "resuming $RUN_ID$( [[ -z "$RESTORED" ]] || printf '; the run'"'"'s own options: %s' "${RESTORED%, }")"
 else
   if [[ -z "$MANIFEST" ]]; then
     if [[ $SMOKE == 1 ]]; then MANIFEST="$HERE/manifest/suite_smoke_v4.json"; else MANIFEST="$HERE/manifest/suite_v4.json"; fi
@@ -275,6 +297,8 @@ else
 fi
 MODE="${MODE:-paired}"
 [[ "$MODE" == paired || "$MODE" == sequential ]] || die "unknown mode $MODE"
+# The smoke load rule: at most ~40 requests per smoke invocation (a resumed smoke run's included).
+if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 if [[ -z "$RESUME" && $SMOKE == 0 && $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
   MCP_CMD="$DEFAULT_MCP_CMD"   # a full run includes the MCP arm
 fi
@@ -635,13 +659,17 @@ mex_rsync "$MANIFEST" "$(mex_path "$MEX_DIR/manifest/$RUN_ID.json")" || die "rsy
 
 "$PY" - "$RUN_DIR/orchestrator.json" "$MANIFEST" "$COMMIT" "$SMOKE" "$AREAS" "$LIMIT" "$SKIP_LOCAL" \
     "$SKIP_REMOTE" "$MCP_RUN" "$MCP_CMD" "$COMPARE" "$PAUSE" "$MAX_REQUESTS" "$LOCAL_BASE" "$REMOTE_BASE" "$MEX" \
-    "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" "$IDS" "$IDS_FILE" "$GATE" <<'PYEOF'
+    "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" "$IDS" "$IDS_FILE" "$GATE" \
+    "$GIVEN" "${RESTORED:-}" <<'PYEOF'
 import json, os, sys, time
 path = sys.argv[1]
 keys = ["manifest", "scripts_commit", "smoke", "areas", "limit", "skip_local", "skip_remote", "mcp_run",
         "mcp_cmd", "compare", "pause_s", "max_requests", "local_base", "remote_base", "mex", "mode", "checks",
-        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate"]
+        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate", "given", "restored"]
 session = dict(zip(keys, sys.argv[2:]))
+# the options given on the command line, and those a resume took from the run's last invocation
+session["given"] = [x for x in session["given"].split(",") if x]
+session["restored"] = [x.strip() for x in session["restored"].split(",") if x.strip()]
 try:
     session["mex_clock_offset_s"] = float(session["mex_clock_offset_s"])
 except ValueError:
@@ -666,6 +694,29 @@ SESSION_N="$("$PY" -c 'import json, sys; print(len(json.load(open(sys.argv[1]))[
 "$PY" "$HERE/gate.py" plan "$RUN_DIR" --manifest "$MANIFEST" --arms "${PLAN_ARMS%,}" --areas "$AREAS" --limit "$LIMIT" \
   --ids "$IDS" --warm-every "$WARM_EVERY" --mode "$MODE" --session "$SESSION_N" >&2 \
   || die "the run's plan could not be written"
+if [[ -n "$RESUME" && $RESUME_SELECTION == 0 ]]; then
+  # A resume that names its own selection: say when it leaves out scenarios of the run's plan (the run then stays
+  # INCOMPLETE until a resume runs them; the report checks the whole plan).
+  NARROW="$("$PY" - "$HERE" "$RUN_DIR" "$MANIFEST" "$AREAS" "$LIMIT" "$IDS" <<'PYEOF' || true
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import gate, suite_common as sc
+run_dir, manifest = sys.argv[2], sc.read_json(sys.argv[3])
+areas = [a for a in sys.argv[4].split(",") if a] or None
+limit = int(sys.argv[5]) if sys.argv[5] else None
+ids = [i for i in sys.argv[6].split(",") if i] or None
+selected = set(s.get("id") for _, s in sc.select_scenarios(manifest, areas, limit, ids))
+planned = gate.resume_ids(run_dir, manifest)
+out = [i for i in planned if i not in selected]
+if out:
+    print(json.dumps({"selected": len(selected), "planned": len(planned), "left_out": len(out)}))
+PYEOF
+)"
+  if [[ -n "$NARROW" ]]; then
+    orch_set narrower_than_plan "$NARROW"
+    log "this invocation's selection leaves out scenarios of the run's plan ($NARROW): they are not run now, and the run reads INCOMPLETE while any of them is not recorded; a plain --resume $RUN_DIR runs the run's whole plan"
+  fi
+fi
 
 # The direct-local arm's directory on mex: pushed back when only the local copy survived, else pulled (a resume
 # plans from it).

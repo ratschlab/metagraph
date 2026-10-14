@@ -1884,3 +1884,25 @@ by lane S6c; everything below was open.
   records its request in flight; its own past the wait: stop it with kill -INT, then --resume again). The interrupt
   message is the mode's: the sequential mode's resume attaches, the paired mode's waits.
 
+### A resume continues the run as it was started (P3-run-measure-report-04, P6-end-to-end-05)
+- Lane S6c fixed the selection: a plain resume runs the union of every invocation's plan (it no longer widens to the
+  whole manifest), and a narrowed resume's report reads INCOMPLETE against that union (the probe of 14552938: a
+  `--limit 1` run resumed plainly adds no scenario; a capped run resumed with `--areas P --limit 1` reads
+  `INCOMPLETE (... 12 planned execution(s) not recorded ...)`). The other options still came from the resume's
+  command line: a `--skip-local` run resumed plainly ran direct-local too (the arms widened), a smoke run lost its
+  request cap of 40 and its 1800 s sampler bound, the pause fell back to 1 s, --allow-stub had to be given again,
+  and a gated run resumed plainly was not gated (it exited 0 on a FAIL).
+- A resume keeps every option of the run's last invocation that it does not give: the mode, --checks, the MCP
+  template, --warm-every (as before), --pause, --skip-local, --skip-remote, --allow-stub, --smoke and --gate (the
+  policy must still exist). --max-requests is not kept: it caps one invocation (a capped run is resumed to finish
+  it); a smoke run's default cap of 40 applies to each invocation, its resumes' included. The resume logs "the run's
+  own options: ..." and each session of orchestrator.json records `given` (the options on its command line) and
+  `restored` (those taken from the run). A flag the run was started with cannot be dropped on resume (start a new
+  run for other arms).
+- A resume that names its own selection (--ids, --areas, --limit, --gate) and leaves out scenarios of the run's
+  plan says so ("this invocation's selection leaves out scenarios of the run's plan ...") and records
+  `narrower_than_plan` {selected, planned, left_out} in its session; its loop and its arms' states describe its own
+  selection, the report's verdict the run's plan (INCOMPLETE while any planned execution is missing).
+- The tests no longer pass the run's own options again on resume (--warm-every, --skip-local, --skip-remote,
+  --no-mcp), so they exercise the restore.
+
