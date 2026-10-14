@@ -711,6 +711,13 @@ def depth_counts(depth):
     return counts
 
 
+def outcomes_text(value):
+    """A check's outcomes on one execution (compare.check_outcomes: a list, one per occurrence) as text."""
+    if isinstance(value, list):
+        return "/".join(str(x) for x in value) or "none"
+    return "none" if value is None else str(value)
+
+
 def agreement_section(comp, depth=None, mcp_planned_missing=0):
     s = comp["summary"]
     da = s["direct_agreement"]
@@ -738,7 +745,8 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0):
                        "wall, deterministic the arm's earlier repeats; each arm's own finding or failure counts in its "
                        "totals, not as a disagreement of the answers): %s.\n" % "; ".join(
                            "%s %s" % (md(sid), "; ".join("r%s %s" % (x.get("repeat"), ", ".join(
-                               "%s local %s remote %s" % (md(c["check"]), md(c["local"]), md(c["remote"]))
+                               "%s local %s remote %s" % (md(c["check"]), md(outcomes_text(c["local"])),
+                                                          md(outcomes_text(c["remote"])))
                                for c in x.get("checks") or []))
                                for x in (comp["scenarios"][sid].get("direct_agreement") or {}).get(
                                    "execution_differs") or [])) for sid in ed[:100]))
@@ -864,7 +872,7 @@ def timing_section(comp):
            "run (whichever arm ran it), warm = another execution of it within 60 s, aged = older (cache state "
            "unknown), not reached = an MCP execution the host never saw (refused at submit, not expressible); warm "
            "after a cut = warm, but the scenario's previous execution ended at the host's deadline "
-           "(host_cache_after_interrupted): counted apart from the warm ones, which the overheads and the cold vs "
+           "(`host_cache_after_interrupted`): counted apart from the warm ones, which the overheads and the cold vs "
            "warm pairs use.", ""]
     rows = []
     for area in sorted(s["timing"], key=area_sort_key):
@@ -917,7 +925,7 @@ def overhead_section(comp):
     if fo.get("warm_pairs_left_out_after_interrupted"):
         out.append("%d scenario(s) left out of the warm pairs, counted apart: on an arm every warm execution followed "
                    "one cut at the host's deadline (a direct 503 deadline or a deadline the service relayed: "
-                   "host_cache_after_interrupted); the host had worked on the request, but its row cache may hold "
+                   "`host_cache_after_interrupted`); the host had worked on the request, but its row cache may hold "
                    "only part of a complete execution's (the timing table shows them as warm after a cut).\n"
                    % fo["warm_pairs_left_out_after_interrupted"])
     if fo.get("scenarios_without_warm_pair"):

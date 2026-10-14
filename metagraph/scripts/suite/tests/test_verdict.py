@@ -56,6 +56,18 @@ class DirectIdenticalTest(unittest.TestCase):
                          [{"check": "budget_respected", "local": ["inconclusive"], "remote": ["finding"]}])
         self.assertNotIn("outcome_differs", res)
 
+    def test_report_names_the_execution_difference(self):
+        import report
+        local, remote = self.pair("finding")
+        remote[0]["outcome"] = "finding"
+        da = cmp.direct_agreement(local, remote)
+        comp = {"summary": {"direct_agreement": {"compared": 1, "identical": 1, "same_checks": 0, "disagree": 0,
+                                                 "execution_differs": ["R-1"]},
+                            "mcp_agreement": {}},
+                "scenarios": {"R-1": {"direct_agreement": da}}, "order": ["R-1"]}
+        text = report.agreement_section(comp)
+        self.assertIn("R-1 r0 budget\\_respected local inconclusive remote finding", text)
+
     def test_equal_digests_with_another_check_differing_disagree(self):
         # equal digests, a check of the answer differing (e.g. arms judged by different checks): a disagreement
         local, remote = self.pair("inconclusive")
