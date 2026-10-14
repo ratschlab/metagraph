@@ -773,8 +773,8 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   `deadline` or a text naming it), such a 503 makes `status` inconclusive and joins evaluate's allowed list, so the
   body's checks read inconclusive and `budget_respected` judges it by the client's wall time (`_budget_503`, against
   min(the requested budget, the route's cap the builder states as cap_ms): before it a fail (lane S7c: on /resolve
-  too, not before it less the 250 ms reserve); long past it a finding). A scenario that expects a refusal (no 200), names the deadline itself,
-  or another route or code is judged as it states.
+  too, not before it less the 250 ms reserve); long past it a finding). A scenario that expects a refusal (no 200),
+  names the deadline itself, or another route or code is judged as it states.
 
 ### Comparator and re-evaluation
 - The table: async's 789fb5f0 (130 cases, sha256 2fdea36b...), byte-identical, with the triage's corrections (G09,
@@ -1847,8 +1847,7 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   stopped), or a label count; every inexact count of v3, v4 and the stored fixtures judged against min = its value
   + 1 and relation exact fails nowhere the checks of 14552938 did not (stress_count: 0 new failures; of 1,154
   such hypothetical expectations that move, 676 earlier failures and 478 passes read inconclusive). No recorded
-  count_relation outcome
-  moves; two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.
+  count_relation outcome moves; two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.
 - /resolve, resolve_discover_contains and the invariants test the discovery's ranking (SPEC-labeled-traversal-core
   §4.2: the top max_labels by supported k-mers, ties by column id, then seq_id; `labels_truncated` {kept, total,
   min_kept_kmers, max_dropped_kmers, dropped_full_length}). A truncated list without the source label passed as
@@ -1910,3 +1909,21 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   stop (max_steps, time_budget, resource_limit) alike. Both arms complete fails ("no requested arm truncated by
   ..."), an arm truncated by another cap fails as before. Recorded: every traverse_stop answer of v3 and v4
   (T-budget-0001..0004, T-caps-0001) has each requested arm truncated by the cap; no outcome moves.
+
+### Validation (offline)
+- The findings' failing inputs with their controls (lane-s-checks/scratch/probes/findings.py, 37 probes): at
+  14552938 15 read as they must, here all 37. The tests that state these rules (four new, four extended or
+  corrected, among them test_error_answer_skips_other_checks, which asserted the 250 ms floor) fail at 14552938
+  (8 of 76 in test_checks) and pass here.
+- Every recorded answer of v3 and v4 (5,716 answers, all arms) judged by the checks of 14552938 and these, check by
+  check: no outcome moves. Every inexact count of v3, v4 and the stored pattern fixtures judged against a minimum
+  one above it and relation exact (stress_count.py): no failure the checks of 14552938 did not give.
+- Re-evaluation of the recorded runs (v3: lane S5e's reeval-S5e copy; v4: the complete run copy; `run_suite.sh
+  --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, against the same copies re-evaluated at 14552938): 0
+  outcome changes and 0 check outcome changes of 2,900 (v3) and 2,913 (v4) executions, 0 relation changes (66 per
+  run), compare.reevaluated.json identical (summary and every scenario entry), the report identical but its
+  timestamps and the checks' provenance; the v4 deploy gate (gate/policy_v4_rt_mcp.json on the re-evaluated set)
+  states the same 45 problems. Detail changes only: R-discover-0001's resolve_discover_contains (direct-local and
+  direct-remote r0, MCP r0 and r1, both runs) names the tie, and count_relation's inconclusive on M-planted-0017
+  (v3 MCP r0) and M-planted-0016 (v4 MCP r0) names the relation expected.
+- 349 tests pass (1 skipped).

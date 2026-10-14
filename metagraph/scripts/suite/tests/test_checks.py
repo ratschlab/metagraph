@@ -671,7 +671,8 @@ class MoreChecks(unittest.TestCase):
         sc = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "A" * 31}]})
         for st in ({"phase": "output", "reason": "time"}, {"phase": "output", "reason": "max_memory"},
                    {"phase": "label_discovery", "reason": "max_annotation_work"},
-                   {"phase": "placement", "reason": "max_memory"}, {"phase": "selection", "reason": "max_predicate_work"}):
+                   {"phase": "placement", "reason": "max_memory"},
+                   {"phase": "selection", "reason": "max_predicate_work"}):
             noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
             plain = self.entry(notes=[], stop=st, counts={})
             self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "pass", st)
@@ -789,7 +790,8 @@ class MoreChecks(unittest.TestCase):
         # a stop_at_threshold stop leaves the count at_least too (§7.4)
         thr = self.sc({"mode": "count", "stop_at_threshold": True, "max_contexts": 10,
                        "patterns": [{"dna": "GCTACACACACC"}]})
-        crossed = self.entry(stop={"phase": "discovery", "reason": "max_contexts"}, counts={"contexts": C("at_least", 11)})
+        crossed = self.entry(stop={"phase": "discovery", "reason": "max_contexts"},
+                             counts={"contexts": C("at_least", 11)})
         self.assertEqual(outcome(thr, crossed, "count_relation", min=20)[0], "inconclusive")
         self.assertEqual(outcome(thr, crossed, "count_relation", min=11)[0], "pass")
         # bounds decide only where they do not straddle the minimum; a value the bounds exclude fails, also after a
@@ -1861,7 +1863,8 @@ class ResolveChecks(unittest.TestCase):
                            ({"runs": [[0, 20], [25, 70]]}, "inconclusive"), ({"runs": [[0, 20], [30, 70]]}, "fail"),
                            ({"kmers": 60}, "inconclusive"), ({"kmers": 30}, "fail"), ({"kmers": 70}, "fail"),
                            ({"max_kmers": 30}, "fail"), ({"max_kmers": 50}, "inconclusive"),
-                           ({"min_kmers": 30}, "pass"), ({"min_kmers": 66}, "fail"), ({"min_kmers": 50}, "inconclusive"),
+                           ({"min_kmers": 30}, "pass"), ({"min_kmers": 66}, "fail"),
+                           ({"min_kmers": 50}, "inconclusive"),
                            ({"covers": [0, 20], "kmers": 60}, "inconclusive")):
             self.assertEqual(outcome(sc, holed, "resolve_runs", label="562", **args)[0], want, args)
         self.assertEqual(outcome(sc, prefix, "resolve_runs", label="562", run_end_in=[30, 50])[0], "inconclusive")

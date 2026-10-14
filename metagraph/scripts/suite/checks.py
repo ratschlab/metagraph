@@ -1325,9 +1325,10 @@ def check_low_complexity_note(sc, ans, a, arm):
         return PASS, "no note (a budget stop, and sdust does not flag the pattern)"
     if kind == "selection" and not has and a["expected"]:
         return INCONCLUSIVE, "a supported-path search's selection stop %s/%s, which can come from the search's own " \
-                             "refusal of a held walk: the note may be left out" % (stop.get("phase"), stop.get("reason"))
-    later = " beside a later phase's stop %s/%s" % (stop.get("phase"), stop.get("reason")) if stop.get("phase") not in (
-        None, "discovery", "mask_scan", "extraction", "extension") else ""
+                             "refusal of a held walk: the note may be left out" % (
+                                 stop.get("phase"), stop.get("reason"))
+    later = " beside a later phase's stop %s/%s" % (stop.get("phase"), stop.get("reason")) if \
+        stop.get("phase") is not None and stop.get("phase") not in _ENGINE_PHASES else ""
     if has == bool(a["expected"]):
         return PASS, "note %s, as sdust says%s" % ("present" if has else "absent", later)
     try:
@@ -2478,7 +2479,8 @@ def _discovery_problems(req: dict, body: dict) -> List[str]:
         probs.append("labels_truncated max_dropped_kmers %s above min_kept_kmers %s: not truncated by support" % (
             trunc["max_dropped_kmers"], trunc["min_kept_kmers"]))
     if v["min_kept_kmers"] > full:
-        probs.append("labels_truncated min_kept_kmers %s above the %d in-graph k-mers" % (trunc["min_kept_kmers"], full))
+        probs.append("labels_truncated min_kept_kmers %s above the %d in-graph k-mers" % (
+            trunc["min_kept_kmers"], full))
     if not 0 <= v["dropped_full_length"] <= v["total"] - v["kept"] or (
             v["dropped_full_length"] > 0 and v["max_dropped_kmers"] != full):
         probs.append("labels_truncated dropped_full_length %s with max_dropped_kmers %s, %d in-graph k-mers, %s "
