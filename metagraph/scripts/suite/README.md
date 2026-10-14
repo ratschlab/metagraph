@@ -855,3 +855,13 @@ scenario ids (3 added, 4 dropped, 92 changed; every one mapped to its group), an
 (protein cap 1) only in M-protein-0008/0009 (not built) and M-protein-0010 (built). suite_v3.json and
 suite_smoke_v3.json are unchanged; run_suite.sh keeps v3 as its default until the frozen v4 exists.
 
+### Validation on the recorded run (offline)
+A copy of the full run's first part (542 scenarios, 2,237 executions; the run of 2026-10-13 on b7214d29 under the
+Logan load), its MCP arm re-normalised with async's suite_mcp_renormalise.py (864 of 1,045 executions rebuilt,
+exactly the 12 of G06 changed), re-evaluated with this branch (`run_suite.sh --reevaluate`), against the recorded
+re-evaluation reeval-B (checks of 4ff45cc5): 90 execution outcomes and 35 MCP classes change, every one in a verified
+group. Fails: direct-local 32 -> 8, direct-remote 28 -> 9 (G21: 29 direct 503 deadlines now inconclusive; G13, G16),
+MCP 49 -> 2 (G06 12, the table's cases replayed G02/G05/G08/G19 18, G23 1, G13/G16 16); MCP disagreements 42 -> 15,
+unverified by-design pairs 8 -> 0. What is left waits for the v4 manifest (G04, G07, G10, G12, G14, G15, G17) or a
+re-run of the MCP arm on the fixed service (G01), or is the load (G21, G22, G24).
+
