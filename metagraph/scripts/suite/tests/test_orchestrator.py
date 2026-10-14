@@ -319,6 +319,33 @@ class RunSuiteOffline(SuiteCase):
                 "sessions"][-1]["loop"]
             self.assertEqual((loop["mode"], loop["state"], loop["failed_steps"]), ("sequential", "done", []))
 
+    def test_ctrl_c_during_an_mcp_step(self):
+        # Ctrl-C reaches the MCP runner and the tee that keeps its output: the runner stops and writes its last line,
+        # which reaches runner.log (tee ignores SIGINT) instead of meeting a closed pipe
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                   "--mcp-cmd", self.mcp_cmd(), "--checks", "stub"]
+            proc = subprocess.Popen(cmd, env=self.env(host, FAKE_MCP_MODE="sigint"), stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, universal_newlines=True, start_new_session=True,
+                                    stdin=subprocess.DEVNULL)
+
+            def calls_log():
+                runs = os.listdir(self.runs) if os.path.isdir(self.runs) else []
+                return [os.path.join(self.runs, x, "arms", "mcp", "calls.log") for x in runs
+                        if os.path.exists(os.path.join(self.runs, x, "arms", "mcp", "calls.log"))]
+            deadline = time.time() + 60
+            while time.time() < deadline and not calls_log():
+                time.sleep(0.05)
+            time.sleep(0.5)
+            os.killpg(proc.pid, signal.SIGINT)   # a terminal's Ctrl-C reaches the whole foreground group
+            out, err = proc.communicate(timeout=120)
+        self.assertEqual(proc.returncode, 130, err)
+        with open(calls_log()[0]) as fh:
+            self.assertEqual(fh.read().splitlines()[1:], ["final print ok"])
+        with open(os.path.join(os.path.dirname(calls_log()[0]), "runner.log")) as fh:
+            self.assertIn("done: interrupted on C-1", fh.read())
+
     def test_cap_then_resume(self):
         make_manifest(self.mpath, basic_scenarios())
         with FakeHost() as host:

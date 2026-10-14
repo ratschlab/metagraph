@@ -823,9 +823,11 @@ PYEOF
   mkdir -p "$RUN_DIR/arms/mcp"
   log "mcp: $( [[ $2 == 0 ]] && echo cold || echo warm ) repeat $2 of ${1:0:120}"
   # The runner's output on the terminal and in arms/mcp/runner.log, so a runner that crashes leaves its traceback
-  # in the run directory (the expanded command is never written: the template is recorded instead).
+  # in the run directory (the expanded command is never written: the template is recorded instead). tee ignores
+  # SIGINT (-i): on Ctrl-C the runner stops after its execution in flight and writes its last lines, which a tee
+  # killed by the same Ctrl-C would turn into a BrokenPipeError and exit 1 instead of 130.
   printf '[run_suite %s] mcp: repeat %s of %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "$1" >> "$RUN_DIR/arms/mcp/runner.log"
-  bash -c "$cmd" < /dev/null 2>&1 | tee -a "$RUN_DIR/arms/mcp/runner.log" >&2 || rc=$?
+  bash -c "$cmd" < /dev/null 2>&1 | tee -i -a "$RUN_DIR/arms/mcp/runner.log" >&2 || rc=$?
   printf '[run_suite %s] mcp: exit %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" >> "$RUN_DIR/arms/mcp/runner.log"
   sleep "$PAUSE"
   return $rc

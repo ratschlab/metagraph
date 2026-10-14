@@ -10,7 +10,9 @@ FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
 `canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal); `crash` writes a traceback
 to stderr and no line for any id (exit 1, a runner defect), only for a call that names FAKE_MCP_CRASH_ID when that
-is set; `unknown` records the outcome `skipped_by_runner`, outside the shared vocabulary (exit 0).
+is set; `unknown` records the outcome `skipped_by_runner`, outside the shared vocabulary (exit 0); `sigint` waits
+up to 30 s on each call and, interrupted (Ctrl-C), prints a last line on stdout as async's runner does and notes in
+calls.log whether that print worked (exit 130) or met a closed pipe (exit 1).
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
 identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
@@ -67,6 +69,18 @@ def main(argv=None):
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])
     with open(os.path.join(args.out, "calls.log"), "a") as fh:
         fh.write("%s %d env=%s\n" % (args.ids, args.repeat, "yes" if os.environ.get("SUITE_TEST_SECRET") else "no"))
+    if mode == "sigint":
+        try:
+            time.sleep(30)
+        except KeyboardInterrupt:
+            try:
+                print("done: interrupted on %s" % args.ids, flush=True)
+                note, rc = "final print ok", 130
+            except BrokenPipeError:
+                note, rc = "final print raised BrokenPipeError", 1
+            with open(os.path.join(args.out, "calls.log"), "a") as fh:
+                fh.write(note + "\n")
+            return rc
     bad = 0
     for sid in [i for i in args.ids.split(",") if i]:
         if (sid, "mcp", args.repeat) in done:
