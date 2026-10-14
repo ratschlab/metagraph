@@ -1022,13 +1022,26 @@ def _direct_lines(direct):
     return out
 
 
+# the direct answers of a loaded host rather than of the request: a 503 (the deadline, or busy) or a 429
+LOAD_HTTP = (429, 503)
+
+
+def _host_answers_200(case):
+    """Whether a case's direct side states the host's ordinary answer, http 200 (one status or a list holding it)."""
+    want = (case.get("direct_expectation") or {}).get("http")
+    return 200 in (want if isinstance(want, list) else [want])
+
+
 def _direct_sides(case, direct, run_dir):
     """(True / False / None, detail, by) of a case's direct side on EVERY direct execution of |direct|
     (_direct_lines), as answer_class reads every repeat of both arms: a repeat that contradicts the side wins over
     the ones that hold ("<arm> repeat <r>: <why>", the others counted; a named case's side states the host's answer,
-    so any other HTTP answer, a 503 deadline included, contradicts it, as on the reference execution before); a
-    direct execution without an HTTP answer (transport) reads neither way; one that holds verifies (the first one's
-    detail); else unverified."""
+    so any other HTTP answer, a 503 deadline included, contradicts it, as on the reference execution before), a
+    contradiction by another status named before one by a 503 / 429 (LOAD_HTTP). For a case whose host answers 200
+    a 503 (deadline or busy) or 429 contradicts only when no direct execution holds the side: with one that holds,
+    it is the host's load on that execution, set aside (a load-caused 503 on one arm must not turn a verified pair
+    into a disagreement). A direct execution without an HTTP answer (transport) reads neither way; one that holds
+    verifies (the first one's detail); else unverified."""
     lines = _direct_lines(direct)
     if not lines:
         return _direct_side(case, None, run_dir)
@@ -1038,12 +1051,16 @@ def _direct_sides(case, direct, run_dir):
             continue
         ok, detail, by = _direct_side(case, x, run_dir)
         (held if ok is True else bad if ok is False else unknown).append((x, detail, by))
-    if bad:
-        x, detail, by = bad[0]
+    load = [b for b in bad if b[0].get("http") in LOAD_HTTP]
+    hard = [b for b in bad if not any(b is y for y in load)]
+    counted = hard if (held and load and _host_answers_200(case)) else hard + load
+    if counted:
+        x, detail, by = counted[0]
         more = "; %d other direct repeat(s) match" % len(held) if held else ""
         return False, "%s repeat %s: %s%s" % (x.get("arm"), x.get("repeat"), detail, more), by
     if held:
-        return True, held[0][1], held[0][2]
+        aside = "; %d direct repeat(s) answering 503 / 429 set aside (another matches)" % len(load) if load else ""
+        return True, held[0][1] + aside, held[0][2]
     if unknown:
         return None, unknown[0][1], unknown[0][2]
     return None, "no direct answer to compare (transport errors only)", None

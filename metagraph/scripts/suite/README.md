@@ -1413,7 +1413,12 @@ service_by_design.json at sha256 ab4100c9...
   disagreement is the direct side of a case the scenario names; a check-level disagreement, an MCP side or a fault on
   any repeat stays a disagreement.
 - A named case's direct side is judged on every repeat of both direct arms, as an answer-triggered case's is (the
-  arm and repeat of a contradiction named; a transport error reads neither way).
+  arm and repeat of a contradiction named, a contradiction by another status before one by a 503 / 429; a transport
+  error reads neither way). For a case whose host answers 200, a 503 (deadline or busy) or 429 on a direct execution
+  is the host's load and is set aside when another direct execution holds the side; it contradicts only when none
+  does (a load-caused 503 on one arm would otherwise turn a verified pair into a disagreement that blocks a deploy
+  under the strict gate). A 400 side keeps every 503 a contradiction: R-budget-0001 / -0002 and R-twin-0002 stay
+  not_implemented_mcp by table.
 - The direct arms' timing content rule tests every route of the stopped walk (any parent at a merge) as a prefix of a
   route of the complete walk, not the displayed first-parent paths (T-labels-0003 of the v4 run, SPEC-labeled-
   traversal-core §7.1), bounded by the checks' route-state limit.
@@ -1423,5 +1428,7 @@ service_by_design.json at sha256 ab4100c9...
   anonymous) against fe563f38: no outcome, matched case, check or MCP class moves; v4 T-labels-0003's direct pair reads
   timing (was the run's only direct disagreement). The deadline_ends_task lines state the new threshold (v3 6, v4 35
   lines); 22 lines per run gain request_evidence (T-labels-0004 / -0006 stay not_implemented_mcp, the setting read from
-  the table's block). The verification's amendments move nothing further.
-- 262 tests pass (1 skipped).
+  the table's block). The verification's amendments move no verdict; seven compare disagreement texts now name the
+  direct arm and repeat ("direct-local repeat 0: ...": R-budget-0001 / -0002, R-edge-0003, R-twin-0002 / -0003 /
+  -0004 / -0005, in both runs), R-twin-0004's naming direct-remote's 200 before direct-local's 503 deadline.
+- 263 tests pass (1 skipped).
