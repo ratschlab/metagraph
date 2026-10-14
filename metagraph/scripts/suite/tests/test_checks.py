@@ -1231,14 +1231,20 @@ class StatedReasons(unittest.TestCase):
         self.bad("a max_steps stop after 999 steps", ctx, stop=("discovery", "max_steps"), steps=999, mode="count")
         self.ok(ctx, stop=("discovery", "max_contexts"), limits={"stop_at_threshold": True}, mode="count")
         self.bad("without stop_at_threshold", ctx, stop=("discovery", "max_contexts"), mode="count")
-        self.ok(ctx, stop=("label_discovery", "max_annotation_work"), mode="count",
-                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}})
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        self.ok(ctx, stop=("label_discovery", "max_annotation_work"), mode="partial", req=labels)
         self.bad("reads no annotation", ctx, stop=("label_discovery", "max_annotation_work"), mode="count")
+        # mode count reads no annotation whatever the projection (§14.1) and is the label-free path (§7.6)
+        self.bad("reads no annotation", ctx, stop=("label_discovery", "max_annotation_work"), mode="count",
+                 req=labels)
+        self.bad("reads no annotation", ctx, mode="count", req=labels, rows_refused=[{"row": 1}])
         self.ok(ctx, stop=("selection", "max_predicate_work"), mode="count",
                 req={"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}})
         self.bad("without a predicate", ctx, stop=("selection", "max_predicate_work"), mode="count")
-        self.ok(ctx, stop=("output", "max_memory"), mode="count",
-                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}})
+        self.ok(ctx, stop=("output", "max_memory"), mode="partial", req=labels)
+        self.bad("without a memory account", ctx, stop=("output", "max_memory"), mode="count", req=labels)
+        self.ok(ctx, stop=("selection", "max_memory"), mode="count",
+                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}})
         self.ok({"anchors": self.c("exact", 2), "paths": self.c("at_least", 1)}, stop=("extension", "max_memory"),
                 mode="count", req={"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"})
         self.bad("without a memory account", ctx, stop=("output", "max_memory"), mode="count")

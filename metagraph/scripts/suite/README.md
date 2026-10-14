@@ -1369,12 +1369,13 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   §14, §19.6-§19.8, §20.5, §20.9; `_pattern_reason_problems`, which the invariants and every check that turns a
   missing result into inconclusive read: contains_source_context, source_absent, source_label, source_placement,
   path_spells, path_record_verified, path_absent, predicate_selected, predicate_either_mirror). Besides "Stated
-  reasons": a request reads annotation only with labels all, a supported-path search or a predicate, and has a memory
-  account only with labels all, a predicate or a path search (§7.6 "Memory"); so `rows_refused` and
-  `annotation_budget` need the reads, `output_budget`, `cut: max_memory` and a `max_memory` stop the account;
-  `anchor_labels_truncated` needs labels all; `predicate_above_threshold`, `selected_above_threshold`,
-  `predicate_budget`, `cut: max_predicate_contexts` and a `max_predicate_contexts` stop a predicate;
-  `count_above_threshold` is not stated with a predicate on L <= k, unless its normal form is a constant
+  reasons": a request reads annotation only with labels all in a retrieval mode (§14.1: mode count reads none
+  whatever the projection), a supported-path search or a predicate (in every mode), and has a memory account only
+  with labels all in a retrieval mode, a predicate or a path search (§7.6 "Memory": mode count is the label-free
+  path); so `rows_refused` and `annotation_budget` need the reads, `output_budget`, `cut: max_memory` and a
+  `max_memory` stop the account; `anchor_labels_truncated` needs labels all; `predicate_above_threshold`,
+  `selected_above_threshold`, `predicate_budget`, `cut: max_predicate_contexts` and a `max_predicate_contexts` stop a
+  predicate; `count_above_threshold` is not stated with a predicate on L <= k, unless its normal form is a constant
   (`selection.pass: "constant"`: `true` runs the unfiltered request under the engine's own max_contexts, §19.6);
   `anchors_above_threshold`, `cut: max_paths` and a `max_paths` stop need a path search; `cut: max_annotation_work` a
   supported-path search (labels all states that stop without a cut, §7.5); a `max_anchors` stop a pattern longer than

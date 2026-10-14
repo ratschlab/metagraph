@@ -593,16 +593,20 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     steps_sum = sum(steps) if steps and all(isinstance(v, int) for v in steps) else None
     steps_short = max_steps is not None and steps_sum is not None and steps_sum < max_steps
     where = "p%d" % i
-    # what the request reads and holds: annotation rows are read only with labels all (§14.1), a supported-path
-    # search (§20.3) or a predicate (§19.6); the label-free path has a memory account only for a path search, labels
-    # all and a predicate add one (§7.6 "Memory", §14.4, §19.9)
+    # what the request reads and holds: annotation rows are read only with labels all in a retrieval mode (§14.1:
+    # mode count reads none whatever the projection), a supported-path search (§20.3) or a predicate (§19.6, in
+    # every mode); the label-free path (mode count, or labels none) has a memory account only for a path search, and
+    # labels all in a retrieval mode and a predicate add one (§7.6 "Memory", §14.4, §19.9)
     mode = e.get("mode", req.get("mode", "all_or_count"))
     ls = req.get("long_search")
     path_search = long_ and ls in ("paths", "supported_paths")
-    reads_annotation = labels == "all" or (long_ and ls == "supported_paths") or predicate
-    memory_account = labels == "all" or predicate or path_search
-    nothing_read = "a request that reads no annotation (labels %r, no predicate, long_search %r)" % (labels, ls)
-    no_account = "a request without a memory account (labels %r, no predicate, no path search: §7.6)" % labels
+    labels_read = labels == "all" and mode != "count"
+    reads_annotation = labels_read or (long_ and ls == "supported_paths") or predicate
+    memory_account = labels_read or predicate or path_search
+    nothing_read = "a request that reads no annotation (labels %r in mode %s, no predicate, long_search %r)" % (
+        labels, mode, ls)
+    no_account = "a request without a memory account (labels %r in mode %s, no predicate, no path search: " \
+                 "§7.6)" % (labels, mode)
     if e.get("rows_refused") and not reads_annotation:
         probs.append("%s: rows_refused on %s" % (where, nothing_read))
 
@@ -766,8 +770,8 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     elif sr == "max_memory" and not memory_account:
         probs.append("%s: a max_memory stop of %s" % (where, no_account))
     elif sr == "max_annotation_work":
-        if labels != "all" and req.get("long_search") != "supported_paths" and not predicate:
-            probs.append("%s: a max_annotation_work stop of a search that reads no annotation" % where)
+        if not reads_annotation:
+            probs.append("%s: a max_annotation_work stop of %s" % (where, nothing_read))
     elif sr == "max_predicate_work":
         if not predicate:
             probs.append("%s: a max_predicate_work stop without a predicate" % where)
