@@ -1,0 +1,696 @@
+#!/usr/bin/env python3
+"""The strict deploy gate of a suite run, and the run's persisted plan.
+
+    gate.py RUN_DIR POLICY [--reevaluated] [--out FILE] [--max-lines N]
+    gate.py plan RUN_DIR --manifest M --arms A,B [--areas P,M] [--limit N] [--ids LIST] [--warm-every N] [--mode M]
+    gate.py ids FILE --manifest M          print FILE's scenario ids, comma-separated in manifest order
+    gate.py policy-ids POLICY [--arms A]  print the ids the policy's arms run (its selection less their exclusions)
+
+Exit status of the judgement: 0 GATE PASS, 1 GATE FAIL, 2 usage (an unreadable policy or run included).
+
+The plan. run_suite.sh writes RUN_DIR/plan.json before any arm runs: per invocation the selection (manifest identity,
+areas, limit, ids, warm_every, arms, mode) and every (scenario, arm, repeat) it plans, the paired loop's plan
+(suite_common.plan_executions for a direct arm, suite_common.mcp_repeats for the MCP arm; sequential mode runs the
+same executions). An invocation whose plan equals the last one adds nothing; another selection on --resume is added,
+and the run's plan is the union of all of them: a resume never narrows what the run has to record. A run of before
+plan.json is reconstructed from orchestrator.json's sessions (the same selection fields, persisted before its arms
+ran); without either, the policy's required executions are the plan.
+
+The policy (gate_policy.py writes it from a manifest, the by-design table and the service's MCP surface): the
+manifest identity (content_sha256 and relations_sha256, index_fp), the selected scenarios (by route), the arms the
+gate requires, the scenarios an arm cannot express as explicit exclusions (each with its rule and reason, never
+inferred from an answer), the executions required per arm, the relations required per arm, the property checks
+explicitly not required (none by default) and whether the MCP arm must agree with a direct arm.
+
+GATE PASS only when every one of these holds (each failure is listed, grouped by kind):
+- identity: the run manifest's content_sha256 and relations_sha256 are the policy's, its stated hashes verify, every
+  arm ran it (merge_run.manifest_identity), every plan of the run names it, an index_fp the run states is the
+  policy's, and the comparison read the by-design table the policy's exclusions were derived from;
+- missing: every planned execution and every execution the policy requires is recorded;
+- outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
+  the owner's strict gate), not_implemented_mcp (what the MCP cannot express is excluded in the policy), or
+  service_by_design for a case the scenario does not name in the manifest, or a by-design pair not verified (the
+  pair verified when a direct arm ran the scenario, the MCP side verified when none did);
+- property: on a passing execution every property check the scenario expects (checks.is_property) passed, unless the
+  policy lists it as not required for that scenario and arm; with require_agreement every required property was
+  compared with the direct reference;
+- disagreement: no MCP disagreement (MCP a policy arm) and no direct disagreement (both direct arms policy arms) in the
+  selection; with require_agreement the MCP class is agree or a verified by-design pair;
+- relation: every relation the policy requires passed on each of its arms;
+- configuration (the MCP arm a policy arm): arms/mcp/run.json records service_capabilities, a successful read of the
+  live GET /traverse/capabilities with no mismatch against the by-design table, and no MCP line resolved a
+  configuration reference from the table or not at all (request_evidence "table" / "unknown");
+- something passed.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import compare as cmp  # noqa: E402
+import merge_run  # noqa: E402
+import suite_common as sc  # noqa: E402
+
+PLAN_FILE = "plan.json"
+PLAN_VERSION = 1
+POLICY_VERSIONS = (1,)
+# A gate problem's kinds, in the order they are listed.
+KINDS = ("identity", "configuration", "missing", "outcome", "property", "disagreement", "agreement", "relation",
+         "nothing_passed")
+# The check names of checks.GENERIC_CHECKS, for a checks.py that does not load: every other check is a property.
+GENERIC_CHECKS = frozenset({"status", "invariants", "counts_consistent", "budget_respected"})
+# request_evidence sources that are no evidence of the deployment under the gate.
+NOT_LIVE_EVIDENCE = ("table", "unknown")
+# the outcomes a by-design or excluded execution may have besides pass
+OUTCOME_BLOCKS = ("fail", "error", "finding", "inconclusive", "not_implemented_mcp")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# selection and plan
+
+def read_ids(path, manifest):
+    """The scenario ids of FILE (separated by commas, blanks or new lines; '#' starts a comment), in manifest order.
+    An id the manifest lacks is refused (ValueError naming them): a typo must never drop a scenario silently."""
+    with open(path) as fh:
+        text = "\n".join(line.split("#", 1)[0] for line in fh)
+    wanted = [t for t in text.replace(",", " ").split() if t]
+    known = [s.get("id") for s in (manifest or {}).get("scenarios", [])]
+    unknown = sorted(set(wanted) - set(known))
+    if unknown:
+        raise ValueError("%d id(s) not in the manifest: %s" % (len(unknown), ", ".join(unknown[:20])))
+    if not wanted:
+        raise ValueError("no scenario id in %s" % path)
+    keep = set(wanted)
+    return [sid for sid in known if sid in keep]
+
+
+def planned_executions(manifest, areas=None, limit=None, ids=None, warm_every=10, arms=sc.ARMS):
+    """[(scenario, arm, repeat)] a selection plans, in manifest order: the paired loop's executions (a direct arm:
+    suite_common.plan_executions, the long class not on direct-remote; the MCP arm: suite_common.mcp_repeats)."""
+    out = []
+    for index, scenario in sc.select_scenarios(manifest, areas, limit, ids):
+        sid = scenario.get("id")
+        for arm in sc.ARMS:
+            if arm not in arms:
+                continue
+            if arm == "mcp":
+                reps = sc.mcp_repeats(index, scenario, warm_every)
+            else:
+                reps = [p[2] for p in sc.plan_executions([(index, scenario)], arm, warm_every)[0]]
+            out.extend((sid, arm, r) for r in reps)
+    return out
+
+
+def _split(text):
+    return [x.strip() for x in str(text or "").split(",") if x.strip()]
+
+
+def _int_or(text, default):
+    try:
+        return int(str(text).strip()) if str(text if text is not None else "").strip() else default
+    except ValueError:
+        return default
+
+
+def plan_entry(manifest, areas, limit, ids, warm_every, arms, mode, session=None):
+    executions = planned_executions(manifest, areas, limit, ids, warm_every, arms)
+    counts = {}
+    for _, arm, _ in executions:
+        counts[arm] = counts.get(arm, 0) + 1
+    return {"written_utc": sc.iso_utc(time.time()), "session": session, "mode": mode,
+            "manifest": sc.manifest_identity(manifest),
+            "selection": {"areas": areas, "limit": limit, "ids": ids, "warm_every": warm_every, "arms": list(arms)},
+            "counts": {"scenarios": len(set(e[0] for e in executions)), "executions": counts},
+            "executions": [list(e) for e in executions]}
+
+
+def write_plan(run_dir, entry):
+    """Adds |entry| to RUN_DIR/plan.json unless the last plan has the same selection and executions; returns
+    whether it was added."""
+    path = os.path.join(run_dir, PLAN_FILE)
+    data = sc.read_json(path) or {"plan_version": PLAN_VERSION, "plans": []}
+    last = data["plans"][-1] if data.get("plans") else None
+    same = last is not None and all(last.get(k) == entry.get(k) for k in ("manifest", "selection", "executions"))
+    if same:
+        return False
+    data["plans"].append(entry)
+    sc.write_json_atomic(path, data)
+    return True
+
+
+def session_plan(manifest, session):
+    """The executions an orchestrator.json session planned (for a run of before plan.json): its areas, limit, ids,
+    warm_every and arms (the direct arms it did not skip; the MCP arm with an MCP command or a copied MCP run)."""
+    arms = [arm for arm, skip in (("direct-local", "skip_local"), ("direct-remote", "skip_remote"))
+            if str(session.get(skip) or "0") != "1"]
+    if session.get("mcp_cmd") or session.get("mcp_run"):
+        arms.append("mcp")
+    ids = session.get("ids")
+    ids = ids if isinstance(ids, list) else (_split(ids) or None)
+    return planned_executions(manifest, _split(session.get("areas")) or None, _int_or(session.get("limit"), None),
+                              ids, _int_or(session.get("warm_every"), 10), arms)
+
+
+def run_plan(run_dir, manifest):
+    """(keys, source, plans): the union of every plan of the run as a set of (scenario, arm, repeat), where it
+    comes from ("plan.json", "orchestrator.json (reconstructed)" or None) and plan.json's entries."""
+    data = sc.read_json(os.path.join(run_dir, PLAN_FILE))
+    if isinstance(data, dict) and data.get("plans"):
+        keys = set()
+        for p in data["plans"]:
+            keys.update(tuple(e) for e in p.get("executions") or [])
+        return keys, PLAN_FILE, data["plans"]
+    orch = sc.read_json(os.path.join(run_dir, "orchestrator.json")) or {}
+    sessions = orch.get("sessions") or []
+    if sessions and isinstance(manifest, dict):
+        keys = set()
+        for s in sessions:
+            keys.update(session_plan(manifest, s))
+        return keys, "orchestrator.json (reconstructed)", []
+    return set(), None, []
+
+
+def missing_planned(run_dir, manifest, rows):
+    """([(scenario, arm, repeat)] planned and not recorded, sorted in manifest order; the plan's source)."""
+    keys, source, _ = run_plan(run_dir, manifest)
+    recorded = set(sc.execution_key(r) for r in rows)
+    pos = dict((s.get("id"), i) for i, s in enumerate((manifest or {}).get("scenarios", [])))
+    arm_pos = dict((a, i) for i, a in enumerate(sc.ARMS))
+    missing = sorted((k for k in keys if k not in recorded),
+                     key=lambda k: (pos.get(k[0], len(pos)), arm_pos.get(k[1], 9), k[2]))
+    return missing, source
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the policy
+
+def load_policy(path):
+    policy = sc.read_json(path)
+    if not isinstance(policy, dict):
+        raise ValueError("%s is not a JSON object" % path)
+    if policy.get("policy_version") not in POLICY_VERSIONS:
+        raise ValueError("%s: policy_version %r is not one of %s" % (path, policy.get("policy_version"),
+                                                                    POLICY_VERSIONS))
+    for key in ("manifest", "selection", "arms", "required"):
+        if key not in policy:
+            raise ValueError("%s: no %s" % (path, key))
+    return policy
+
+
+def excluded(policy, sid, arm):
+    """The policy's exclusion of |sid| on |arm| (a dict), or None."""
+    for ex in policy.get("exclusions") or []:
+        if ex.get("scenario") == sid and arm in (ex.get("arms") or sc.ARMS):
+            return ex
+    return None
+
+
+def policy_ids(policy, arms=None):
+    """The scenarios the policy's arms (or |arms|) run, in the policy's order: the selection less the scenarios
+    excluded on every one of those arms."""
+    arms = arms or policy.get("arms") or []
+    return [sid for sid in policy["selection"].get("scenarios") or []
+            if any(excluded(policy, sid, a) is None for a in arms)]
+
+
+def required_keys(policy):
+    """{(scenario, arm, repeat)} the policy requires."""
+    out = set()
+    for item in policy.get("required") or []:
+        for r in item.get("repeats") or []:
+            out.add((item.get("scenario"), item.get("arm"), r))
+    return out
+
+
+def not_required(policy, sid, arm, check):
+    for nr in (policy.get("properties") or {}).get("not_required") or []:
+        if nr.get("check") == check and nr.get("scenario") in (sid, "*") and arm in (nr.get("arms") or sc.ARMS):
+            return nr
+    return None
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the judgement
+
+def _problem(kind, detail, scenario=None, arm=None, repeat=None):
+    return {"kind": kind, "scenario": scenario, "arm": arm, "repeat": repeat, "detail": detail}
+
+
+def _is_property_fn(checks_dir=None):
+    mod = cmp.load_checks_module(checks_dir)
+    fn = getattr(mod, "is_property", None) if mod is not None else None
+    return fn if callable(fn) else (lambda name: name not in GENERIC_CHECKS)
+
+
+def property_results(scenario, line, is_property):
+    """[(check name, occurrence, outcome or None)] of the property checks the scenario expects, the k-th
+    expectation of a name answered by the line's k-th result of that name (None: no result)."""
+    results = {}
+    for c in line.get("checks") or []:
+        results.setdefault(c.get("check"), []).append(c)
+    seen, out = {}, []
+    for e in (scenario or {}).get("expect") or []:
+        name = e.get("check") if isinstance(e, dict) else None
+        if not name or not is_property(name):
+            continue
+        k = seen.get(name, 0)
+        seen[name] = k + 1
+        got = results.get(name) or []
+        out.append((name, k, got[k].get("outcome") if k < len(got) else None))
+    return out
+
+
+def _explained_property(line, name, k):
+    """Whether the line's answered / clamped case explains the k-th item of check |name| (explained_items: indices
+    into the line's checks)."""
+    items = line.get("explained_items")
+    if isinstance(items, list) and items:
+        seen = {}
+        for i, c in enumerate(line.get("checks") or []):
+            n = seen.get(c.get("check"), 0)
+            seen[c.get("check")] = n + 1
+            if c.get("check") == name and n == k:
+                return i in items
+        return False
+    return name in (line.get("explained_checks") or ())
+
+
+def configuration_problems(run_dir, rows, policy_arms, selected):
+    """The MCP service's configuration evidence (the async runner's records agreed on 2026-10-14):
+    arms/mcp/run.json service_capabilities (a live read of GET /traverse/capabilities: a document or the read's
+    error, and the live / table mismatches on referenced keys), and each MCP line's request_evidence
+    {case: {reference path: live | table | unknown}}."""
+    if "mcp" not in policy_arms:
+        return []
+    out = []
+    run = sc.read_json(os.path.join(run_dir, "arms", "mcp", "run.json")) or {}
+    reads = []
+    if "service_capabilities" in run:
+        reads.append(("run.json", run.get("service_capabilities")))
+    for i, inv in enumerate(run.get("invocations") or []):
+        if isinstance(inv, dict) and "service_capabilities" in inv:
+            reads.append(("invocation %d" % i, inv.get("service_capabilities")))
+    if not reads:
+        out.append(_problem("configuration", "arms/mcp/run.json records no service_capabilities: the live "
+                                             "configuration of the service under the gate was not read (a runner of "
+                                             "before the record, or no MCP run)", arm="mcp"))
+    for where, sc_doc in reads:
+        if not isinstance(sc_doc, dict):
+            out.append(_problem("configuration", "%s: service_capabilities is %r, not a read" % (where, sc_doc),
+                                arm="mcp"))
+            continue
+        if sc_doc.get("error") or not isinstance(sc_doc.get("document"), dict):
+            out.append(_problem("configuration", "%s: the read of the live capabilities failed (%s)" % (
+                where, str(sc_doc.get("error") or "no document")[:200]), arm="mcp"))
+        for m in sc_doc.get("mismatches") or []:
+            out.append(_problem("configuration", "%s: live / table mismatch: %s" % (
+                where, json.dumps(m, sort_keys=True)[:300] if not isinstance(m, str) else m[:300]), arm="mcp"))
+    for r in rows:
+        if r.get("arm") != "mcp" or r.get("scenario") not in selected:
+            continue
+        ev = r.get("request_evidence")
+        if not isinstance(ev, dict):
+            continue
+        for case, refs in sorted(ev.items()):
+            for path, source in sorted((refs or {}).items()) if isinstance(refs, dict) else []:
+                if source in NOT_LIVE_EVIDENCE or source != "live":
+                    out.append(_problem("configuration", "case %s resolved %s from %s, not from the live document" % (
+                        case, path, source), r.get("scenario"), "mcp", r.get("repeat")))
+    return out
+
+
+def judge(run_dir, policy, reevaluated=False):
+    """The gate's verdict on a merged (and compared) run directory: {passed, problems, notes, counts}."""
+    problems, notes = [], []
+    name_of = lambda n: sc.reevaluated_name(n, reevaluated)  # noqa: E731
+    manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
+    rows, bad = sc.read_jsonl(os.path.join(run_dir, name_of("executions.jsonl")))
+    if not isinstance(manifest, dict):
+        problems.append(_problem("identity", "the run has no manifest.json"))
+        manifest = {}
+    if not rows:
+        problems.append(_problem("missing", "the run has no merged %s (merge_run.py)" % name_of("executions.jsonl")))
+    if bad:
+        problems.append(_problem("missing", "%d unparsable line(s) in %s" % (bad, name_of("executions.jsonl"))))
+    scen = dict((s.get("id"), s) for s in manifest.get("scenarios", []) if isinstance(s, dict))
+    want = policy["manifest"]
+
+    # identity
+    ident = sc.manifest_identity(manifest)
+    for key in ("content_sha256", "relations_sha256"):
+        if ident[key] != want.get(key):
+            problems.append(_problem("identity", "the run manifest's %s %s is not the policy's %s" % (
+                key, ident[key][:16], str(want.get(key))[:16])))
+    for p in sc.manifest_problems(manifest) if manifest else []:
+        problems.append(_problem("identity", "the run manifest: %s" % p))
+    arm_runs = dict((name, sc.read_json(os.path.join(path, "run.json"), {}) or {})
+                    for name, path in merge_run.arm_dirs(run_dir))
+    for d in merge_run.manifest_identity(run_dir, arm_runs)["differs"]:
+        problems.append(_problem("identity", d))
+    planned, plan_source, plans = run_plan(run_dir, manifest)
+    for i, p in enumerate(plans):
+        if p.get("manifest") != {"content_sha256": want.get("content_sha256"),
+                                 "relations_sha256": want.get("relations_sha256")}:
+            problems.append(_problem("identity", "plan %d of plan.json names another manifest (%s)" % (
+                i, json.dumps(p.get("manifest"), sort_keys=True))))
+    index_fp = want.get("index_fp")
+    stated = sorted(set(r.get("index_fp") for r in arm_runs.values() if r.get("index_fp")))
+    if index_fp and stated and stated != [index_fp]:
+        problems.append(_problem("identity", "the host states index_fp %s, the policy pins %s" % (
+            ", ".join(s[:16] for s in stated), index_fp[:16])))
+    elif index_fp and not stated:
+        notes.append("no arm states the host's index_fp (not compared with the policy's)")
+
+    arms = list(policy.get("arms") or [])
+    selected = set(policy["selection"].get("scenarios") or [])
+    problems.extend(configuration_problems(run_dir, rows, arms, selected))
+
+    # completeness
+    recorded = dict((sc.execution_key(r), r) for r in rows)
+    need = required_keys(policy)
+    if plan_source is None:
+        notes.append("no plan recorded (no plan.json, no orchestrator.json): the policy's executions are the plan")
+    else:
+        notes.append("plan: %d execution(s) from %s" % (len(planned), plan_source))
+        outside = sorted(k for k in need if k not in planned)
+        if outside:
+            problems.append(_problem("missing", "the run did not plan %d execution(s) the policy requires (e.g. %s)"
+                                     % (len(outside), ", ".join("%s %s r%s" % k for k in outside[:5]))))
+    pos = dict((sid, i) for i, sid in enumerate(policy["selection"].get("scenarios") or []))
+    for k in sorted((planned | need) - set(recorded),
+                    key=lambda k: (pos.get(k[0], len(pos)), sc.ARMS.index(k[1]) if k[1] in sc.ARMS else 9, k[2])):
+        problems.append(_problem("missing", "planned, not recorded" if k in planned else "required, not recorded",
+                                 k[0], k[1], k[2]))
+
+    # outcomes and properties of the policy's arms over the selection
+    comp = None
+    try:
+        comp = load_compare(run_dir, reevaluated)
+    except SystemExit as e:
+        problems.append(_problem("agreement", "compare.py refused: %s" % e))
+    scomp = (comp or {}).get("scenarios") or {}
+    pinned = (policy.get("by_design_table") or {}).get("sha256")
+    used = ((comp or {}).get("by_design_table") or {}).get("sha256")
+    if pinned and used != pinned:
+        problems.append(_problem("identity", "the comparison read the by-design table sha256 %s, the policy was derived "
+                                             "from %s (regenerate the policy with gate_policy.py, or compare with "
+                                             "that table)" % (str(used)[:16], pinned[:16])))
+    checks_dir = cmp.reevaluation_checks_dir(run_dir) if reevaluated else None
+    is_property = _is_property_fn(checks_dir)
+    passed = judged = 0
+    by_design_mcp_only = 0
+    props = {}   # (scenario, arm) -> {(property, occurrence): the repeats that evaluated it}
+    for (sid, arm, rep), r in sorted(recorded.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)),
+                                                                        sc.ARMS.index(kv[0][1])
+                                                                        if kv[0][1] in sc.ARMS else 9, kv[0][2])):
+        if sid not in selected or arm not in arms or excluded(policy, sid, arm):
+            continue
+        judged += 1
+        s = scen.get(sid) or {}
+        o = r.get("outcome")
+        if o == "pass":
+            passed += 1
+        elif o in OUTCOME_BLOCKS:
+            why = r.get("inconclusive_reason") or r.get("service_by_design_case") or ""
+            problems.append(_problem("outcome", o + (" (%s)" % why if why else ""), sid, arm, rep))
+            continue
+        elif o == "service_by_design":
+            case = r.get("service_by_design_case")
+            if case not in cmp.case_ids(s):
+                problems.append(_problem("outcome", "service_by_design by case %s, which the scenario does not name "
+                                                    "(mcp.by_design %s)" % (case, cmp.case_ids(s)), sid, arm, rep))
+                continue
+        else:
+            problems.append(_problem("outcome", "outcome %r" % o, sid, arm, rep))
+            continue
+        if o == "pass" or r.get("explained_checks") or r.get("explained_items"):
+            seen_props = props.setdefault((sid, arm), {})
+            for name, k, out in property_results(s, r, is_property):
+                seen_props.setdefault((name, k), [])
+                if out is None:
+                    continue   # not evaluated on this repeat (e.g. determinism on repeat 0): judged over the repeats
+                seen_props[(name, k)].append(rep)
+                if out == "pass" or not_required(policy, sid, arm, name):
+                    continue
+                if out == "fail" and _explained_property(r, name, k) and \
+                        r.get("service_by_design_case") in cmp.case_ids(s):
+                    continue   # the named answered / clamped case explains it: judged with the pair below
+                problems.append(_problem("property", "required property %s%s %s" % (
+                    name, (" #%d" % (k + 1)) if k else "", out), sid, arm, rep))
+    for (sid, arm), seen_props in sorted(props.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)), kv[0][1])):
+        for (name, k), reps in sorted(seen_props.items()):
+            if not reps and not not_required(policy, sid, arm, name):
+                problems.append(_problem("property", "required property %s%s not evaluated on any repeat" % (
+                    name, (" #%d" % (k + 1)) if k else ""), sid, arm))
+    for sid in policy["selection"].get("scenarios") or []:
+        entry = scomp.get(sid) or {}
+        ma = entry.get("mcp_agreement") or {}
+        if "mcp" in arms and not excluded(policy, sid, "mcp") and ma:
+            direct_ran = any((k[0] == sid and k[1] in sc.DIRECT_ARMS) for k in recorded)
+            mcp_sbd = any(r.get("outcome") == "service_by_design" or r.get("explained_checks")
+                          or r.get("explained_items") for (s_, a_, _), r in recorded.items() if s_ == sid and a_ == "mcp")
+            cls = ma.get("class")
+            if cls == "disagree":
+                problems.append(_problem("disagreement", "MCP disagrees (%s)" % _describe_agreement(ma), sid, "mcp"))
+            elif mcp_sbd or cls == "service_by_design":
+                if direct_ran and ma.get("verified") is not True:
+                    problems.append(_problem("outcome", "by-design pair not verified (%s)" % _describe_agreement(ma),
+                                             sid, "mcp"))
+                elif not direct_ran and ma.get("mcp_verified") is not True:
+                    problems.append(_problem("outcome", "by-design case not verified on the MCP side (%s)"
+                                             % _describe_agreement(ma), sid, "mcp"))
+                elif not direct_ran:
+                    by_design_mcp_only += 1
+            if policy.get("require_agreement"):
+                if cls not in ("agree", "service_by_design") or (cls == "service_by_design"
+                                                                 and ma.get("verified") is not True):
+                    if cls != "disagree":
+                        problems.append(_problem("agreement", "MCP class %s: not compared with a direct arm (%s)" % (
+                            cls, _describe_agreement(ma)), sid, "mcp"))
+                elif cls == "agree":
+                    for name in uncompared_properties(sid, recorded, ma.get("reference"), scen.get(sid), is_property):
+                        if not not_required(policy, sid, "mcp", name):
+                            problems.append(_problem("agreement", "required property %s not compared with %s" % (
+                                name, ma.get("reference")), sid, "mcp"))
+        da = entry.get("direct_agreement") or {}
+        if all(a in arms for a in sc.DIRECT_ARMS) and da:
+            if da.get("class") == "disagree":
+                problems.append(_problem("disagreement", "direct-local and direct-remote disagree: %s" % (
+                    da.get("outcome_differs") or "; ".join("%s %s vs %s" % (d.get("check"), d.get("a"), d.get("b"))
+                                                           for d in da.get("differing_checks") or [])[:300]), sid))
+            elif policy.get("require_agreement") and da.get("class") not in ("identical", "same_checks"):
+                problems.append(_problem("agreement", "direct arms %s" % da.get("class"), sid))
+    if by_design_mcp_only:
+        notes.append("%d by-design scenario(s) verified on the MCP side only (no direct arm ran them)"
+                     % by_design_mcp_only)
+
+    # relations
+    rels = dict((x.get("id"), x) for x in (comp or {}).get("relations") or [])
+    for item in policy.get("relations") or []:
+        rid = item.get("relation")
+        for arm in item.get("arms") or []:
+            if arm not in arms:
+                continue
+            got = ((rels.get(rid) or {}).get("arms") or {}).get(arm) or {}
+            if got.get("outcome") != "pass":
+                problems.append(_problem("relation", "%s on %s: %s%s" % (
+                    rid, arm, got.get("outcome") or "not evaluated",
+                    (": %s" % str(got.get("detail"))[:200]) if got.get("detail") else ""), arm=arm))
+    if not passed:
+        problems.append(_problem("nothing_passed", "no execution of the policy's arms and selection passed"))
+    order = dict((k, i) for i, k in enumerate(KINDS))
+    problems.sort(key=lambda p: order.get(p["kind"], len(order)))
+    return {"passed": not problems, "problems": problems, "notes": notes,
+            "counts": {"judged": judged, "passed": passed, "planned": len(planned), "required": len(need),
+                       "recorded": len(recorded)},
+            "policy": {"name": policy.get("name"), "policy_version": policy.get("policy_version"),
+                       "sha256": policy_sha256(policy)},
+            "run_dir": os.path.abspath(run_dir), "reevaluated": reevaluated, "judged_utc": sc.iso_utc(time.time())}
+
+
+def uncompared_properties(sid, recorded, ref_arm, scenario, is_property):
+    """The property checks of an agreeing scenario not compared with the reference arm: on some MCP repeat one side
+    evaluated it and the other did not (not exposed, inconclusive, no result), or no repeat compared it at all (each
+    MCP repeat against the reference's same repeat, else its first; a check of later repeats only, determinism, is
+    compared where both have it)."""
+    if not ref_arm:
+        return []
+    ref = dict((k[2], r) for k, r in recorded.items() if k[0] == sid and k[1] == ref_arm)
+    if not ref:
+        return []
+    ref0 = ref[min(ref)]
+    judged = ("pass", "fail", "finding")
+    compared, skipped, order = set(), set(), []
+    for k, r in sorted(recorded.items(), key=lambda kv: kv[0][2]):
+        if k[0] != sid or k[1] != "mcp":
+            continue
+        theirs = dict(((n, i), o) for n, i, o in property_results(scenario, ref.get(k[2], ref0), is_property))
+        for name, i, o in property_results(scenario, r, is_property):
+            if (name, i) not in order:
+                order.append((name, i))
+            t = theirs.get((name, i))
+            if o in judged and t in judged:
+                compared.add((name, i))
+            elif o is not None or t is not None:
+                skipped.add((name, i))   # one side evaluated it, the other could not (not exposed, inconclusive)
+    out = []
+    for key in order:
+        if (key in skipped or key not in compared) and key[0] not in out:
+            out.append(key[0])
+    return out
+
+
+def _describe_agreement(ma):
+    keys = ("case", "by", "side", "verified", "mcp_verified", "direct_verified")
+    text = ", ".join("%s %s" % (k, ma.get(k)) for k in keys if ma.get(k) is not None)
+    detail = ma.get("detail") or ma.get("direct_detail") or ma.get("mcp_detail")
+    return (text + ("; " + str(detail)[:200] if detail else "")) or "-"
+
+
+def load_compare(run_dir, reevaluated=False):
+    path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
+    data = sc.read_json(path)
+    if data is None:
+        table, warnings = cmp.table_for(run_dir, None, reevaluated)
+        data = cmp.compare(run_dir, cmp.load_by_design(table), reevaluated=reevaluated, warnings=warnings)
+        sc.write_json_atomic(path, data)
+    return data
+
+
+def policy_sha256(policy):
+    return hashlib.sha256(sc.canonical_json(policy)).hexdigest()
+
+
+def render(verdict, max_lines=400):
+    """The gate's verdict as text: the headline, then the problems grouped by kind, then the notes."""
+    probs = verdict["problems"]
+    c = verdict["counts"]
+    pol = verdict["policy"]
+    head = "GATE %s: %s (policy %s v%s sha256 %s; %d execution(s) judged, %d passed; %d planned, %d required)" % (
+        "PASS" if verdict["passed"] else "FAIL",
+        "every planned and required execution recorded, nothing blocks" if verdict["passed"]
+        else "%d problem(s)" % len(probs), pol.get("name"), pol.get("policy_version"), (pol.get("sha256") or "")[:12],
+        c["judged"], c["passed"], c["planned"], c["required"])
+    out = [head]
+    by_kind = {}
+    for p in probs:
+        by_kind.setdefault(p["kind"], []).append(p)
+    shown = 0
+    for kind in KINDS:
+        items = by_kind.get(kind) or []
+        if not items:
+            continue
+        out.append("  %s: %d" % (kind, len(items)))
+        for p in items:
+            if shown >= max_lines:
+                break
+            where = " ".join(x for x in (p.get("scenario"), p.get("arm"),
+                                         ("r%s" % p["repeat"]) if p.get("repeat") is not None else None) if x)
+            out.append("    %s%s" % ((where + ": ") if where else "", p["detail"]))
+            shown += 1
+    if shown < len(probs):
+        out.append("  ... %d more (all in the gate's JSON)" % (len(probs) - shown))
+    for n in verdict["notes"]:
+        out.append("  note: %s" % n)
+    return "\n".join(out) + "\n"
+
+
+def gate_file(reevaluated):
+    return sc.reevaluated_name("gate.json", reevaluated)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# command line
+
+def _cmd_plan(argv):
+    ap = argparse.ArgumentParser(prog="gate.py plan")
+    ap.add_argument("run_dir")
+    ap.add_argument("--manifest", required=True)
+    ap.add_argument("--arms", required=True)
+    ap.add_argument("--areas", default="")
+    ap.add_argument("--limit", default="")
+    ap.add_argument("--ids", default="", help="comma-separated scenario ids")
+    ap.add_argument("--warm-every", default="10")
+    ap.add_argument("--mode", default="paired")
+    ap.add_argument("--session", type=int, default=None)
+    a = ap.parse_args(argv)
+    manifest = sc.read_json(a.manifest)
+    if not isinstance(manifest, dict):
+        sys.stderr.write("gate.py plan: %s is not a manifest\n" % a.manifest)
+        return 2
+    entry = plan_entry(manifest, _split(a.areas) or None, _int_or(a.limit, None), _split(a.ids) or None,
+                       _int_or(a.warm_every, 10), _split(a.arms), a.mode, a.session)
+    added = write_plan(a.run_dir, entry)
+    sys.stdout.write("plan %s: %d scenario(s), %s%s\n" % (
+        "written" if added else "unchanged", entry["counts"]["scenarios"],
+        ", ".join("%s %d" % kv for kv in sorted(entry["counts"]["executions"].items())) or "no execution",
+        "" if added else " (the run's last plan)"))
+    return 0
+
+
+def _cmd_ids(argv):
+    ap = argparse.ArgumentParser(prog="gate.py ids")
+    ap.add_argument("file")
+    ap.add_argument("--manifest", required=True)
+    a = ap.parse_args(argv)
+    try:
+        ids = read_ids(a.file, sc.read_json(a.manifest))
+    except (OSError, ValueError) as e:
+        sys.stderr.write("gate.py ids: %s\n" % e)
+        return 2
+    sys.stdout.write(",".join(ids) + "\n")
+    return 0
+
+
+def _cmd_policy_ids(argv):
+    ap = argparse.ArgumentParser(prog="gate.py policy-ids")
+    ap.add_argument("policy")
+    ap.add_argument("--arms", default="")
+    a = ap.parse_args(argv)
+    try:
+        policy = load_policy(a.policy)
+    except (OSError, ValueError) as e:
+        sys.stderr.write("gate.py policy-ids: %s\n" % e)
+        return 2
+    sys.stdout.write(",".join(policy_ids(policy, _split(a.arms) or None)) + "\n")
+    return 0
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "plan":
+        return _cmd_plan(argv[1:])
+    if argv and argv[0] == "ids":
+        return _cmd_ids(argv[1:])
+    if argv and argv[0] == "policy-ids":
+        return _cmd_policy_ids(argv[1:])
+    ap = argparse.ArgumentParser(description="The strict deploy gate of a suite run (exit 0 PASS, 1 FAIL).")
+    ap.add_argument("run_dir")
+    ap.add_argument("policy")
+    ap.add_argument("--reevaluated", action="store_true", help="judge the run's re-evaluated set")
+    ap.add_argument("--out", default=None, help="the verdict's JSON (default RUN_DIR/gate.json, "
+                                                "gate.reevaluated.json with --reevaluated)")
+    ap.add_argument("--max-lines", type=int, default=400)
+    a = ap.parse_args(argv)
+    try:
+        policy = load_policy(a.policy)
+    except (OSError, ValueError) as e:
+        sys.stderr.write("gate.py: the policy: %s\n" % e)
+        return 2
+    if not os.path.isdir(a.run_dir):
+        sys.stderr.write("gate.py: %s is not a run directory\n" % a.run_dir)
+        return 2
+    verdict = judge(a.run_dir, policy, a.reevaluated)
+    verdict["policy"]["path"] = os.path.abspath(a.policy)
+    sc.write_json_atomic(a.out or os.path.join(a.run_dir, gate_file(a.reevaluated)), verdict)
+    sys.stdout.write(render(verdict, a.max_lines))
+    return 0 if verdict["passed"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

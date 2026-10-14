@@ -4,11 +4,24 @@
 #
 #   run_suite.sh [--manifest M | --smoke] [--paired | --sequential]
 #                [--mcp-cmd TEMPLATE | --mcp-cmd default | --no-mcp | --mcp-run DIR]
-#                [--areas P,M] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
+#                [--areas P,M] [--ids FILE] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
-#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf]
+#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf] [--gate POLICY]
 #   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--reeval-mcp-auth anonymous|api_key]
-#                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf]
+#                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf] [--gate POLICY]
+#
+# --ids FILE: only these scenarios (ids separated by commas, blanks or new lines, '#' comments; an id the manifest
+# lacks is refused), in manifest order, with --areas / --limit applied on top. --resume keeps the run's selection
+# (areas, limit, ids) unless --ids, --areas, --limit or --gate is given, and its --warm-every unless given. Every
+# invocation writes the run's plan, RUN_DIR/plan.json, before any arm runs: each (scenario, arm, repeat) its
+# selection plans (gate.py plan); a resume with another selection adds its plan, the run's plan is the union.
+#
+# --gate POLICY (gate.py, a policy of gate_policy.py): the strict deploy gate. Without --ids / --areas / --limit the
+# selection is the policy's (its scenarios less those excluded on every arm this invocation runs); the merge treats
+# differing manifest identities as an error (merge_run.py --strict-identity), gate.py judges the run after the
+# comparison (RUN_DIR/gate.json, which the report shows) and the exit status is the gate's: 0 PASS, 1 FAIL (2: the
+# policy unreadable). With --reevaluate it judges the re-evaluated set (gate.reevaluated.json). Without --gate the
+# exit status is the orchestration's, as before: a FAIL in the report still exits 0.
 #
 # --reevaluate RUN_DIR: offline, no lock and no request to any host: judges the run's recorded answers again with
 # checks.py of this directory (or of --reeval-checks DIR) (reevaluate.py), then merge_run / compare / report
@@ -117,7 +130,8 @@ mex_rsync() {
 
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
-MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""
+MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""; IDS_FILE=""; IDS=""; GATE=""
+WARM_GIVEN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reevaluate) REEVALUATE="$2"; shift 2 ;;
@@ -128,6 +142,8 @@ while [[ $# -gt 0 ]]; do
     --paired) MODE=paired; shift ;;
     --sequential) MODE=sequential; shift ;;
     --areas) AREAS="$2"; shift 2 ;;
+    --ids) IDS_FILE="$2"; shift 2 ;;
+    --gate) GATE="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --skip-local) SKIP_LOCAL=1; shift ;;
     --skip-remote) SKIP_REMOTE=1; shift ;;
@@ -139,7 +155,7 @@ while [[ $# -gt 0 ]]; do
     --by-design) BY_DESIGN="$2"; shift 2 ;;
     --pause) PAUSE="$2"; shift 2 ;;
     --max-requests) MAX_REQUESTS="$2"; shift 2 ;;
-    --warm-every) WARM_EVERY="$2"; shift 2 ;;
+    --warm-every) WARM_EVERY="$2"; WARM_GIVEN=1; shift 2 ;;
     --allow-stub) ALLOW_STUB=1; shift ;;
     --checks) CHECKS_MODE="$2"; shift 2 ;;
     --no-pdf) NO_PDF=1; shift ;;
@@ -155,6 +171,12 @@ if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ "$MCP_CMD" != default ]] || MCP_CMD="$DEFAULT_MCP_CMD"
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
 [[ -z "$CHECKS_MODE" || "$CHECKS_MODE" =~ ^(auto|checks|stub)$ ]] || die "--checks takes auto, checks or stub"
+[[ -z "$IDS_FILE" || -f "$IDS_FILE" ]] || die "--ids $IDS_FILE is not a file"
+if [[ -n "$GATE" ]]; then
+  [[ -f "$GATE" ]] || die "--gate $GATE is not a file"
+  GATE="$(cd "$(dirname "$GATE")" && pwd)/$(basename "$GATE")"
+  "$PY" "$HERE/gate.py" policy-ids "$GATE" > /dev/null || die "--gate $GATE is not a gate policy"
+fi
 
 # --- the offline re-evaluation of a recorded run (lane S4): no lock, no ssh, no request to any host ----------
 if [[ -n "$REEVALUATE" ]]; then
@@ -166,16 +188,31 @@ if [[ -n "$REEVALUATE" ]]; then
   [[ -z "$REEVAL_MCP_AUTH" ]] || RE_ARGS+=(--mcp-auth "$REEVAL_MCP_AUTH")
   [[ -z "$BY_DESIGN" ]] || RE_ARGS+=(--by-design "$BY_DESIGN")
   "$PY" "$HERE/reevaluate.py" "${RE_ARGS[@]}"
-  "$PY" "$HERE/merge_run.py" "$REEVALUATE" --reevaluated
+  MERGE_RC=0
+  if [[ -n "$GATE" ]]; then
+    "$PY" "$HERE/merge_run.py" "$REEVALUATE" --reevaluated --strict-identity || MERGE_RC=$?
+    [[ $MERGE_RC == 0 || $MERGE_RC == 3 ]] || exit "$MERGE_RC"
+  else
+    "$PY" "$HERE/merge_run.py" "$REEVALUATE" --reevaluated
+  fi
   CMP_ARGS=("$REEVALUATE" --no-merge --reevaluated)
   [[ -z "$BY_DESIGN" ]] || CMP_ARGS+=(--by-design "$BY_DESIGN")
   "$PY" "$HERE/compare.py" "${CMP_ARGS[@]}"
+  GATE_RC=0
+  if [[ -n "$GATE" ]]; then
+    "$PY" "$HERE/gate.py" "$REEVALUATE" "$GATE" --reevaluated >&2 || GATE_RC=$?
+    [[ $MERGE_RC == 0 || $GATE_RC != 0 ]] || GATE_RC=1
+  fi
   REP_ARGS=("$REEVALUATE" --reevaluated)
   [[ -z "$COMPARE" ]] || REP_ARGS+=(--compare "$COMPARE")
   [[ $NO_PDF == 0 ]] || REP_ARGS+=(--no-pdf)
   "$PY" "$HERE/report.py" "${REP_ARGS[@]}" || log "report: the PDF was not produced (see above); report.reevaluated.md is there"
   log "re-evaluated: $REEVALUATE"
   printf '%s\n' "$REEVALUATE"
+  if [[ -n "$GATE" ]]; then
+    log "gate: $( [[ $GATE_RC == 0 ]] && echo PASS || echo "FAIL (exit $GATE_RC)" ) (gate.reevaluated.json)"
+    exit "$GATE_RC"
+  fi
   exit 0
 fi
 
@@ -205,6 +242,26 @@ try:
     print(json.load(open(sys.argv[1]))["sessions"][-1].get("checks") or "")
 except (OSError, ValueError, KeyError, IndexError):
     print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+  fi
+  if [[ -z "$IDS_FILE" && -z "$AREAS" && -z "$LIMIT" && -z "$GATE" ]]; then
+    # The run's own selection (the last invocation's areas, limit and ids), so a resume continues it and does not
+    # widen it to the whole manifest (the run's plan would grow by what was never meant to run).
+    SEL="$("$PY" -c 'import json, sys
+try:
+    s = json.load(open(sys.argv[1]))["sessions"][-1]
+    ids = s.get("ids") or ""
+    print("%s|%s|%s" % (s.get("areas") or "", s.get("limit") or "", ids if isinstance(ids, str) else ",".join(ids)))
+except (OSError, ValueError, KeyError, IndexError):
+    print("||")' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo "||")"
+    AREAS="${SEL%%|*}"; SEL="${SEL#*|}"; LIMIT="${SEL%%|*}"; IDS="${SEL#*|}"
+  fi
+  if [[ $WARM_GIVEN == 0 ]]; then
+    # its warm_every likewise (the repeats it planned)
+    WARM_EVERY="$("$PY" -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["sessions"][-1].get("warm_every") or 10)
+except (OSError, ValueError, KeyError, IndexError):
+    print(10)' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo 10)"
   fi
   if [[ $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
     # The run's own MCP template (the last invocation's), so a resume pairs the same arms.
@@ -241,6 +298,17 @@ fi
 [[ "$MODE" == sequential || -z "$MCP_RUN" ]] || die "--mcp-run reads a finished MCP run: use it with --sequential (or --mcp-cmd)"
 [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || die "no manifest (${MANIFEST:-none}); pass --manifest"
 MANIFEST="$(cd "$(dirname "$MANIFEST")" && pwd)/$(basename "$MANIFEST")"
+if [[ -n "$IDS_FILE" ]]; then
+  IDS="$("$PY" "$HERE/gate.py" ids "$IDS_FILE" --manifest "$MANIFEST")" || die "--ids $IDS_FILE: see above"
+elif [[ -n "$GATE" && -z "$AREAS" && -z "$LIMIT" ]]; then
+  # the policy's selection, for the arms this invocation runs
+  GATE_ARMS=""
+  [[ $SKIP_LOCAL == 1 ]] || GATE_ARMS+="direct-local,"
+  [[ $SKIP_REMOTE == 1 ]] || GATE_ARMS+="direct-remote,"
+  [[ -z "$MCP_CMD" && -z "$MCP_RUN" ]] || GATE_ARMS+="mcp,"
+  IDS="$("$PY" "$HERE/gate.py" policy-ids "$GATE" --arms "${GATE_ARMS%,}")" || die "--gate $GATE: see above"
+  [[ -n "$IDS" ]] || die "--gate $GATE selects no scenario for the arms ${GATE_ARMS%,}"
+fi
 
 # --- the checks (review M3) -----------------------------------------------------------------------------------
 case "${CHECKS_MODE:-auto}" in
@@ -249,7 +317,7 @@ case "${CHECKS_MODE:-auto}" in
   stub) CHECKS=stub ;;
 esac
 if [[ $CHECKS == stub && $ALLOW_STUB == 0 ]]; then
-  BEYOND="$("$PY" "$HERE/suite_common.py" beyond-status "$MANIFEST" "$AREAS" "$LIMIT")"
+  BEYOND="$("$PY" "$HERE/suite_common.py" beyond-status "$MANIFEST" "$AREAS" "$LIMIT" "$IDS")"
   if [[ -f "$HERE/checks.py" ]]; then WHY="--checks stub"; else WHY="no checks.py next to this script"; fi
   [[ -z "$BEYOND" ]] || die "the checks stub runs ($WHY), and the selected scenarios expect checks it cannot evaluate (${BEYOND:0:200}); run lane S1's checks.py, or pass --allow-stub for a run that checks the HTTP status only"
 fi
@@ -508,6 +576,7 @@ log "manifest $MANIFEST; scripts $COMMIT; checks $CHECKS"
 ARGS=(--manifest "$MANIFEST" --pause "$PAUSE" --scripts-commit "$COMMIT" --run-id "$RUN_ID" --checks "$CHECKS"
       --warm-every "$WARM_EVERY")
 [[ -z "$AREAS" ]] || ARGS+=(--areas "$AREAS")
+[[ -z "$IDS" ]] || ARGS+=(--ids "$IDS")
 [[ -z "$LIMIT" ]] || ARGS+=(--limit "$LIMIT")
 [[ $ALLOW_STUB == 0 ]] || ARGS+=(--allow-stub)
 LOCAL_ARGS=("${ARGS[@]}")
@@ -530,12 +599,12 @@ mex_rsync "$MANIFEST" "$(mex_path "$MEX_DIR/manifest/$RUN_ID.json")" || die "rsy
 
 "$PY" - "$RUN_DIR/orchestrator.json" "$MANIFEST" "$COMMIT" "$SMOKE" "$AREAS" "$LIMIT" "$SKIP_LOCAL" \
     "$SKIP_REMOTE" "$MCP_RUN" "$MCP_CMD" "$COMPARE" "$PAUSE" "$MAX_REQUESTS" "$LOCAL_BASE" "$REMOTE_BASE" "$MEX" \
-    "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" <<'PYEOF'
+    "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" "$IDS" "$IDS_FILE" "$GATE" <<'PYEOF'
 import json, os, sys, time
 path = sys.argv[1]
 keys = ["manifest", "scripts_commit", "smoke", "areas", "limit", "skip_local", "skip_remote", "mcp_run",
         "mcp_cmd", "compare", "pause_s", "max_requests", "local_base", "remote_base", "mex", "mode", "checks",
-        "allow_stub", "warm_every", "mex_clock_offset_s", "host"]
+        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate"]
 session = dict(zip(keys, sys.argv[2:]))
 try:
     session["mex_clock_offset_s"] = float(session["mex_clock_offset_s"])
@@ -552,6 +621,15 @@ with open(path + ".tmp", "w") as fh:
 os.replace(path + ".tmp", path)
 PYEOF
 pull_samples
+# The run's plan before any arm runs (gate.py plan): what this invocation's selection must record.
+PLAN_ARMS=""
+[[ $SKIP_LOCAL == 1 ]] || PLAN_ARMS+="direct-local,"
+[[ $SKIP_REMOTE == 1 ]] || PLAN_ARMS+="direct-remote,"
+[[ -z "$MCP_CMD" && -z "$MCP_RUN" ]] || PLAN_ARMS+="mcp,"
+SESSION_N="$("$PY" -c 'import json, sys; print(len(json.load(open(sys.argv[1]))["sessions"]) - 1)' "$RUN_DIR/orchestrator.json")"
+"$PY" "$HERE/gate.py" plan "$RUN_DIR" --manifest "$MANIFEST" --arms "${PLAN_ARMS%,}" --areas "$AREAS" --limit "$LIMIT" \
+  --ids "$IDS" --warm-every "$WARM_EVERY" --mode "$MODE" --session "$SESSION_N" >&2 \
+  || die "the run's plan could not be written"
 
 # The direct-local arm's directory on mex: pushed back when only the local copy survived, else pulled (a resume
 # plans from it).
@@ -674,7 +752,7 @@ run_paired() {
   [[ $SKIP_LOCAL == 1 ]] || prepare_local_arm
   local plan=()
   while IFS= read -r entry; do plan+=("$entry"); done < <("$PY" "$HERE/suite_common.py" paired-plan "$MANIFEST" \
-    "$RUN_DIR" "$AREAS" "$LIMIT" "$WARM_EVERY" "$arms")
+    "$RUN_DIR" "$AREAS" "$LIMIT" "$WARM_EVERY" "$arms" "$IDS")
   N_PLAN=${#plan[@]}
   COMPLETED=0
   local max_s=86400; [[ $SMOKE == 0 ]] || max_s=1800
@@ -849,7 +927,7 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
           (( rep <= maxrep )) || maxrep=$rep
         done
       fi
-    done < <("$PY" "$HERE/suite_common.py" paired-plan "$MANIFEST" "$RUN_DIR" "$AREAS" "$LIMIT" "$WARM_EVERY" "$arms")
+    done < <("$PY" "$HERE/suite_common.py" paired-plan "$MANIFEST" "$RUN_DIR" "$AREAS" "$LIMIT" "$WARM_EVERY" "$arms" "$IDS")
     local go=1
     if [[ -n "$cold" ]]; then
       rc=0; mcp_step "${cold%,}" 0 || rc=$?
@@ -876,15 +954,30 @@ ARMS_STARTED=1
 if [[ $MODE == paired ]]; then run_paired; else run_sequential; fi
 cleanup
 
-# --- merge, compare, report -----------------------------------------------------------------------------------
-"$PY" "$HERE/merge_run.py" "$RUN_DIR"
+# --- merge, compare, gate, report -----------------------------------------------------------------------------
+MERGE_RC=0
+if [[ -n "$GATE" ]]; then
+  "$PY" "$HERE/merge_run.py" "$RUN_DIR" --strict-identity || MERGE_RC=$?
+  [[ $MERGE_RC == 0 || $MERGE_RC == 3 ]] || exit "$MERGE_RC"
+else
+  "$PY" "$HERE/merge_run.py" "$RUN_DIR"
+fi
 CMP_ARGS=("$RUN_DIR" --no-merge)
 [[ -z "$BY_DESIGN" ]] || CMP_ARGS+=(--by-design "$BY_DESIGN")
 "$PY" "$HERE/compare.py" "${CMP_ARGS[@]}"
+GATE_RC=0
+if [[ -n "$GATE" ]]; then
+  "$PY" "$HERE/gate.py" "$RUN_DIR" "$GATE" >&2 || GATE_RC=$?
+  [[ $MERGE_RC == 0 || $GATE_RC != 0 ]] || GATE_RC=1
+fi
 REP_ARGS=("$RUN_DIR")
 [[ -z "$COMPARE" ]] || REP_ARGS+=(--compare "$COMPARE")
 [[ $NO_PDF == 0 ]] || REP_ARGS+=(--no-pdf)
 "$PY" "$HERE/report.py" "${REP_ARGS[@]}" || log "report: the PDF was not produced (see above); report.md is there"
 log "done: $RUN_DIR"
 printf '%s\n' "$RUN_DIR"
+if [[ -n "$GATE" ]]; then
+  log "gate: $( [[ $GATE_RC == 0 ]] && echo PASS || echo "FAIL (exit $GATE_RC)" ) (gate.json)"
+  exit "$GATE_RC"
+fi
 exit "$FINAL_RC"

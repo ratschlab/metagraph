@@ -11,6 +11,7 @@ SUITE = os.path.dirname(HERE)
 sys.path.insert(0, SUITE)
 sys.path.insert(0, HERE)
 
+import gate_policy  # noqa: E402
 import suite_common as sc  # noqa: E402
 from fake_host import FakeHost  # noqa: E402
 from test_orchestrator import SuiteCase, mcp_scenarios  # noqa: E402
@@ -42,6 +43,92 @@ class SequentialMcpRepeats(SuiteCase):
         # one pass per repeat index: cold, then warm 1 of five scenarios, then warm 2 of D-1 alone
         self.assertEqual([c[1] for c in calls], ["0", "1", "2"])
         self.assertEqual(calls[2][0], "D-1")
+
+
+
+class IdsPlanAndGate(SuiteCase):
+    def write(self, name, text):
+        path = os.path.join(self.d, name)
+        with open(path, "w") as fh:
+            fh.write(text)
+        return path
+
+    def test_ids_selection_and_persisted_plan(self):
+        make_manifest(self.mpath, mcp_scenarios())
+        ids = self.write("ids.txt", "# two of them\nT-1\nR-1\n")
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub",
+                               "--ids", ids, "--warm-every", "0")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+            self.assertEqual(sorted(set(r["scenario"] for r in rows)), ["R-1", "T-1"])
+            plan = sc.read_json(os.path.join(run_dir, "plan.json"))
+            self.assertEqual(len(plan["plans"]), 1)
+            self.assertEqual(plan["plans"][0]["selection"]["ids"], ["R-1", "T-1"])
+            self.assertEqual(plan["plans"][0]["counts"]["executions"],
+                             {"direct-local": 2, "direct-remote": 2, "mcp": 4})
+            self.assertEqual(sorted(tuple(e) for e in plan["plans"][0]["executions"]),
+                             sorted(sc.execution_key(r) for r in rows))
+            sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+            self.assertEqual(sess["ids"], "R-1,T-1")
+            # a resume keeps the ids (no wider plan), and adds no plan entry for the same selection
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(len(sc.read_json(os.path.join(run_dir, "plan.json"))["plans"]), 1)
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertNotIn("not recorded", fh.read().split("# Environment")[0])
+            # an id the manifest lacks is refused before anything runs
+            bad = self.write("bad.txt", "T-1 T-9\n")
+            p = self.run_suite(host, "--manifest", self.mpath, "--ids", bad, "--no-mcp", "--checks", "stub")
+            self.assertEqual(p.returncode, 2)
+            self.assertIn("T-9", p.stderr)
+
+    def policy(self, scenarios):
+        m = sc.read_json(self.mpath)
+        pol = gate_policy.build_policy(m, routes=["POST /resolve", "POST /traverse"], arms=["mcp"], table_path="",
+                                       warm_every=10)
+        path = os.path.join(self.d, "policy.json")
+        sc.write_json_atomic(path, pol)
+        return path
+
+    def test_gate_exit_status(self):
+        make_manifest(self.mpath, mcp_scenarios())
+        pol = self.policy(mcp_scenarios())
+        with FakeHost() as host:
+            # MCP only, the policy's selection (R-1, T-1, D-1): the gate passes, exit 0
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
+                               "--skip-remote", "--gate", pol, "--by-design", "")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            self.assertIn("GATE PASS", p.stderr)
+            self.assertTrue(sc.read_json(os.path.join(run_dir, "gate.json"))["passed"])
+            self.assertEqual(sorted(set(k[0] for k in mcp_keys(run_dir))), ["D-1", "R-1", "T-1"])
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertIn("**GATE PASS**", fh.read())
+            # the same with a failed read of the service's configuration: the gate fails, exit 1
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
+                               "--skip-remote", "--gate", pol, "--by-design", "", FAKE_MCP_CAPS="failed")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertIn("read of the live capabilities failed", p.stderr)
+            failed_dir = p.stdout.strip().splitlines()[-1]
+            # every execution failing: exit 1 with --gate, 0 without (the exploratory exit status is unchanged)
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
+                               "--skip-remote", "--gate", pol, "--by-design", "", FAKE_MCP_MODE="fail")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
+                               "--skip-remote", "--ids", self.write("ids2", "R-1"), "--by-design", "",
+                               FAKE_MCP_MODE="fail")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            # the offline path judges a recorded run again: --reevaluate --gate exits with the gate's status
+            p = self.run_suite(host, "--reevaluate", run_dir, "--gate", pol, "--by-design", "")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertTrue(os.path.exists(os.path.join(run_dir, "gate.reevaluated.json")))
+            p = self.run_suite(host, "--reevaluate", failed_dir, "--gate", pol, "--by-design", "")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            # a policy that is none
+            p = self.run_suite(host, "--manifest", self.mpath, "--gate", self.write("x.json", "{}"))
+            self.assertEqual(p.returncode, 2)
 
 
 if __name__ == "__main__":

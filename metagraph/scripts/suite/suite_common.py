@@ -209,17 +209,18 @@ def mcp_repeats(index, scenario, warm_every=10):
     return list(range(max(2, repeat_count(index, scenario, warm_every))))
 
 
-def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=("direct-local", "direct-remote")):
-    """The paired loop's work per scenario, in manifest order: [{scenario, direct-local, direct-remote,
-    mcp_cold, mcp_warm}] where a direct arm's value is True (executions left), False (all recorded) or None
-    (the arm does not run it), mcp_cold likewise, and mcp_warm the warm repeat indices left. Recorded
-    executions are read from RUN_DIR/arms/<arm>/executions.jsonl."""
+def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=("direct-local", "direct-remote"),
+                ids=None):
+    """The paired loop's work per scenario of the selection (select_scenarios: areas, limit, ids), in manifest order:
+    [{scenario, direct-local, direct-remote, mcp_cold, mcp_warm}] where a direct arm's value is True (executions
+    left), False (all recorded) or None (the arm does not run it), mcp_cold likewise, and mcp_warm the warm repeat
+    indices left. Recorded executions are read from RUN_DIR/arms/<arm>/executions.jsonl."""
     recorded = {}
     for arm in ARMS:
         rows, _ = read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
         recorded[arm] = set(execution_key(r) for r in rows if r.get("arm") == arm)
     out = []
-    for index, scenario in select_scenarios(manifest, areas, limit):
+    for index, scenario in select_scenarios(manifest, areas, limit, ids):
         sid = scenario.get("id")
         item = {"scenario": sid, "mcp_cold": None, "mcp_warm": []}
         for arm in DIRECT_ARMS:
@@ -1353,9 +1354,9 @@ def _main(argv):
     stamp                        print the run directory's UTC part for now
     manifest-sha FILE [--write]  print the manifest's content_sha256 (--write: write it, and relations_sha256 where
                                  the manifest has relations, into the file)
-    beyond-status MANIFEST AREAS LIMIT
+    beyond-status MANIFEST AREAS LIMIT [IDS]
                                  print the expected checks the stub cannot evaluate ('' for none)
-    paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS
+    paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS [IDS]
                                  print the paired loop's work: 'SID L R MC MW' per scenario (L, R, MC: 1 to
                                  do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -)
     lock-check LOCK_JSON HOST_ID
@@ -1387,15 +1388,17 @@ def _main(argv):
     if len(argv) >= 2 and argv[0] == "beyond-status":
         areas = [a for a in (argv[2] if len(argv) > 2 else "").split(",") if a] or None
         limit = int(argv[3]) if len(argv) > 3 and argv[3] else None
-        selected = select_scenarios(read_json(argv[1]), areas, limit)
+        ids = [i for i in (argv[4] if len(argv) > 4 else "").split(",") if i] or None
+        selected = select_scenarios(read_json(argv[1]), areas, limit, ids)
         print(",".join(beyond_status([sc_ for _, sc_ in selected])))
         return 0
     if len(argv) >= 7 and argv[0] == "paired-plan":
         areas = [a for a in argv[3].split(",") if a] or None
         limit = int(argv[4]) if argv[4] else None
         arms = [a for a in argv[6].split(",") if a]
+        ids = [i for i in (argv[7] if len(argv) > 7 else "").split(",") if i] or None
         flag = lambda v: "-" if v is None else ("1" if v else "0")  # noqa: E731
-        for item in paired_plan(read_json(argv[1]), argv[2], areas, limit, int(argv[5]), arms):
+        for item in paired_plan(read_json(argv[1]), argv[2], areas, limit, int(argv[5]), arms, ids):
             print("%s %s %s %s %s" % (item["scenario"], flag(item["direct-local"]), flag(item["direct-remote"]),
                                       flag(item["mcp_cold"]),
                                       ",".join(str(r) for r in item["mcp_warm"]) or "-"))

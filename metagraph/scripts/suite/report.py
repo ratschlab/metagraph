@@ -25,6 +25,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import compare as cmp  # noqa: E402
+import gate as gate_mod  # noqa: E402
 import suite_common as sc  # noqa: E402
 
 ARM_LABEL = {"direct-local": "direct-local", "direct-remote": "direct-remote", "mcp": "mcp"}
@@ -166,7 +167,9 @@ def load_figures(samples):
             "n": len(samples)}
 
 
-def verdict_section(run, comp, rows, samples, reevaluated=False):
+def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None):
+    """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
+    makes it INCOMPLETE, the MCP arm's included."""
     s = comp["summary"]
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
@@ -178,6 +181,14 @@ def verdict_section(run, comp, rows, samples, reevaluated=False):
     states = dict((arm, (info or {}).get("state")) for arm, info in (run.get("arms") or {}).items())
     incomplete = ["%s (%s)" % (arm, st) for arm, st in sorted(states.items())
                   if st not in (None, "done") and arm != "mcp"]
+    keys, source = missing or ([], None)
+    if keys:
+        # the run's plan reconciled with its records: an execution planned and never recorded is never a pass
+        per_arm = {}
+        for _, arm, _ in keys:
+            per_arm[arm] = per_arm.get(arm, 0) + 1
+        incomplete.append("%d planned execution(s) not recorded (%s; plan of %s)" % (
+            len(keys), ", ".join("%s %d" % kv for kv in sorted(per_arm.items())), source))
     loop = orchestrator_session(run).get("loop") or {}
     if loop and loop.get("state") not in (None, "done"):
         incomplete.append("the %s loop (%s%s)" % (loop.get("mode", "paired"), loop.get("state"),
@@ -241,6 +252,37 @@ def verdict_section(run, comp, rows, samples, reevaluated=False):
     lines.append(load_caveat(lf))
     lines.append("")
     return "\n".join(lines)
+
+
+def gate_section(run_dir, reevaluated=False, max_items=200):
+    """The deploy gate's verdict (gate.py's RUN_DIR/gate.json or gate.reevaluated.json) when the run was gated:
+    its headline and every problem grouped by kind; '' when it was not."""
+    verdict = sc.read_json(os.path.join(run_dir, gate_mod.gate_file(reevaluated)))
+    if not isinstance(verdict, dict) or "problems" not in verdict:
+        return ""
+    probs = verdict.get("problems") or []
+    pol = verdict.get("policy") or {}
+    by_kind = {}
+    for p in probs:
+        by_kind[p.get("kind")] = by_kind.get(p.get("kind"), 0) + 1
+    out = ["# Deploy gate", "",
+           "**GATE %s** (policy %s v%s, sha256 %s, judged %s): %s." % (
+               "PASS" if verdict.get("passed") else "FAIL", md(pol.get("name")), md(pol.get("policy_version")),
+               md(short(pol.get("sha256"))), md(verdict.get("judged_utc")),
+               "every planned and required execution recorded, nothing blocks" if verdict.get("passed") else
+               "%d problem(s): %s" % (len(probs), ", ".join("%s %d" % (md(k), n) for k, n in sorted(
+                   by_kind.items(), key=lambda kv: gate_mod.KINDS.index(kv[0]) if kv[0] in gate_mod.KINDS else 99)))),
+           ""]
+    rows = []
+    for p in probs[:max_items]:
+        rows.append([md(p.get("kind")), md(p.get("scenario") or "-"), md(p.get("arm") or "-"),
+                     md("-" if p.get("repeat") is None else p.get("repeat")), md(p.get("detail"), 240)])
+    if rows:
+        out.append(table(["kind", "scenario", "arm", "rep", "detail"], rows, align=["l", "l", "l", "l", "l"]))
+    for n in verdict.get("notes") or []:
+        out.append("- %s" % md(n, 300))
+    out.append("")
+    return "\n".join(out)
 
 
 def load_caveat(lf):
@@ -786,7 +828,9 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
              "subtitle: \"/traverse, /resolve, /pattern on %s\"" % ascii_safe(
                  ((manifest or {}).get("index") or {}).get("database") or "refseq33m-experimental"),
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
-    parts.append(verdict_section(run, comp, rows, samples, reevaluated))
+    parts.append(verdict_section(run, comp, rows, samples, reevaluated,
+                                 gate_mod.missing_planned(run_dir, manifest, rows)))
+    parts.append(gate_section(run_dir, reevaluated, max_failures))
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures))
     parts.append(environment_section(run, comp, rows, samples))

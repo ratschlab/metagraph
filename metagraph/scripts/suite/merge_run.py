@@ -199,7 +199,7 @@ def arm_identity(arm_dir, run):
 def manifest_identity(run_dir, arm_runs):
     """The run's manifest identity against each arm's: {manifest: RUN_DIR/manifest.json's identity and the stated
     hashes it does not match (problems), arms: {arm: arm_identity}, differs: sentences naming each arm whose
-    content_sha256 or relations_sha256 is not the run manifest's (an arm that states no relations hash is named
+    content_sha256 or relations_sha256 is not the run manifest's (an arm that does not state one is named
     too: what it ran cannot be shown to be the same)}. Exploratory runs read `differs` as a warning; gate.py as a
     failure."""
     top = sc.read_json(os.path.join(run_dir, "manifest.json"))
@@ -213,7 +213,7 @@ def manifest_identity(run_dir, arm_runs):
         arms[name] = ident
         for key in ("content_sha256", "relations_sha256"):
             if ident.get(key) is None:
-                if key == "relations_sha256" and manifest.get(key) is not None:
+                if manifest.get(key) is not None:
                     differs.append("arms/%s states no %s (%s)" % (name, key, ident["source"]))
             elif manifest.get(key) is not None and ident[key] != manifest[key]:
                 differs.append("arms/%s %s %s, the run's manifest %s (%s)" % (

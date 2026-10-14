@@ -1344,7 +1344,7 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   hash (an arm of before the field: the relations of the manifest copy it kept decide).
 - merge_run.py writes run.json `manifest_identity`: the run manifest's hashes and the stated ones it does not match,
   each arm's identity (from the manifest copy the arm kept, else its run.json) and `differs`, one sentence per arm
-  whose content or relations hash is not the run manifest's (or that states no relations hash). In an exploratory
+  whose content or relations hash is not the run manifest's (or that does not state one). In an exploratory
   run it is a warning; `merge_run.py --strict-identity` (run_suite.sh --gate) writes the files and exits 3, and
   gate.py fails on it. The report's environment table shows both hashes and names a mismatch.
 - The async runner vendors suite_common.py: re-vendored, its `verify_manifest` checks the relations hash too.
@@ -1355,3 +1355,57 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   VERIFY-A). It runs one pass per warm repeat index of the paired plan (1, then 2 for those scenarios), each followed
   by the paired loop's rules between steps (mcp_after: a cancelled job's wait; a refusal or three errors stop the
   further passes). Exit codes are unchanged; the report's plan reconciliation shows a pass that did not run.
+
+### The run's plan and the strict deploy gate (finding 1: completeness and gate success were not enforced)
+- **The plan.** run_suite.sh writes RUN_DIR/plan.json before any arm runs (`gate.py plan`): per invocation its
+  selection (manifest identity, areas, limit, ids, warm_every, arms, mode) and every (scenario, arm, repeat) it plans,
+  the paired loop's plan (plan_executions for a direct arm, mcp_repeats for the MCP arm; the sequential mode runs the
+  same). A resume with the same selection adds nothing, one with another selection adds its plan: the run's plan is
+  the union, so a resume never narrows what the run must record. A resume keeps the run's areas, limit, ids and
+  warm_every unless given (before, a resume without --areas widened the selection to the whole manifest and took
+  warm_every 10). A run of before plan.json is reconstructed from orchestrator.json's sessions (persisted before its
+  arms ran too). `--ids FILE` selects scenarios by id (an id the manifest lacks is refused); the ids reach both
+  direct runners, the MCP steps and the plan.
+- **The report** reconciles the plan with the records (`gate.missing_planned`): a planned execution no arm recorded,
+  the MCP arm's included, makes the verdict INCOMPLETE ("N planned execution(s) not recorded (mcp n; plan of ...)").
+  Before, only the direct arms' state was read, the MCP arm was excluded and compare iterated the observed scenarios,
+  so a missing MCP execution or a scenario absent from every arm read PASS. A complete selective MCP-only run still
+  reads PASS (it fulfils its plan).
+- **The policy** (`gate_policy.py MANIFEST [--routes] [--arms] [--require-agreement] [--not-required FILE]
+  [--advanced-path] --out POLICY`, versioned `policy_version` 1) selects by ROUTE: POST /resolve, POST /traverse and
+  GET /traverse/capabilities by default, i.e. 222 scenarios of v4 (81 R + 93 T + 41 N + 6 D + C-caps-0001; areas R/T
+  alone miss the 47 N and D scenarios on those routes). The scenarios an arm cannot express are explicit exclusions
+  with rule and reason, derived from the manifest and the by-design table, never from an answer a run received:
+  `manifest_not_implemented` (22), `table_not_expressible` (a named case whose table agreement is
+  not_implemented_mcp: 28, 9 of them beyond the manifest's: R-budget-0001/0002, R-edge-0003/0012/0013,
+  R-twin-0002..0005, whose resolve sends bounds.max_query_bp the MCP cannot) and `advanced_path` (traverse_fetch
+  overrides outside the service's basic list `_TRAVERSE_BASIC_OVERRIDES`, a preset other than walk / trie, a
+  strategy object: T-labels-0004/0006). It lists the executions each arm must record (v4, MCP: 189 scenarios, 384
+  executions), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
+  the prefix_equals relations of the excluded R-budget / R-twin and the N-zero / C-caps relations with a partner
+  outside the selection are listed as excluded), the property checks not required (none unless --not-required), and
+  pins content_sha256, relations_sha256, index_fp and the by-design table's sha256. gate/policy_v4_rt_mcp.json is
+  the v4 policy for the MCP arm (`gate_policy.py manifest/suite_v4.json --name v4-rt-mcp --out
+  gate/policy_v4_rt_mcp.json`; a test regenerates it and compares). A v5 policy is one command on the v5 manifest.
+- **The gate** (`gate.py RUN_DIR POLICY [--reevaluated]`: exit 0 PASS, 1 FAIL, 2 usage; RUN_DIR/gate.json) fails,
+  listing every problem by kind, on: identity (either manifest hash not the policy's, a stated hash not verified, an
+  arm or a plan on another manifest, another index_fp, another by-design table); missing (a planned or required
+  execution not recorded, or a required one the run did not plan); outcome (on the policy's arms and selection: fail,
+  error, finding, ANY inconclusive, not_implemented_mcp on a scenario not excluded, service_by_design by a case the
+  scenario does not name, a by-design pair not verified when a direct arm ran it, the MCP side not verified when none
+  did); property (a property check the scenario expects not passed on a passing or explained execution, e.g. not
+  exposed, or evaluated on no repeat; a check of later repeats only, determinism, is judged over the repeats);
+  disagreement (MCP vs direct when the MCP arm is gated, direct-local vs direct-remote when both are); agreement (with
+  --require-agreement: an MCP class other than agree or a verified pair, a required property not compared); relation
+  (a required relation not pass on a gated arm); configuration (below); nothing passed. An intentionally MCP-only
+  selection needs no direct arm: its by-design scenarios are verified on the MCP side and say so in a note.
+- **Configuration evidence** (agreed with async's runner on 2026-10-14): with the MCP arm gated, arms/mcp/run.json
+  must record `service_capabilities` (the runner's read of the live GET /traverse/capabilities: a document, no
+  error) with no `mismatches` against the by-design table, and no MCP line may record `request_evidence` with a
+  source other than "live" (a reference resolved from the table or not at all is no evidence of the deployment under
+  the gate). gate.py reads these fields directly; lane G2's resolution helpers do not exist on this branch.
+- **run_suite.sh --gate POLICY**: without --ids / --areas / --limit the selection is the policy's (less what is
+  excluded on every arm the invocation runs); merge_run.py --strict-identity, then compare, then gate.py, then the
+  report (a "Deploy gate" section); the exit status is the gate's. `--reevaluate RUN_DIR --gate POLICY` judges the
+  re-evaluated set (gate.reevaluated.json) and exits with the gate's status. Without --gate nothing changes: the
+  exit status is the orchestration's (a FAIL report exits 0).

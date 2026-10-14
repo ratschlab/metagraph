@@ -8,7 +8,11 @@ itself is never written). No request is made.
 
 FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails its checks (exit 1);
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
-`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal)."""
+`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal).
+
+Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
+identity and `service_capabilities` (the live read of the service's configuration); FAKE_MCP_CAPS `missing` leaves
+it out, `failed` records a failed read, `mismatch` a live / table mismatch."""
 
 import argparse
 import json
@@ -31,7 +35,23 @@ def main(argv=None):
     if mode == "exit3":
         return 3
     os.makedirs(args.out, exist_ok=True)
-    scen = dict((s.get("id"), s) for s in sc.read_json(args.manifest).get("scenarios", []))
+    manifest = sc.read_json(args.manifest)
+    scen = dict((s.get("id"), s) for s in manifest.get("scenarios", []))
+    if not os.path.exists(os.path.join(args.out, "manifest.json")):
+        sc.write_json_atomic(os.path.join(args.out, "manifest.json"), manifest)
+    ok, computed = sc.verify_manifest(manifest)
+    run = {"arm": "mcp", "manifest": {"computed_sha256": computed, "content_sha256": manifest.get("content_sha256"),
+                                      "sha_verified": ok}}
+    caps = os.environ.get("FAKE_MCP_CAPS", "")
+    if caps != "missing":
+        doc = {"service_settings": {"advanced_enabled": False}}
+        run["service_capabilities"] = {"document": None if caps == "failed" else doc, "sha256": "fake",
+                                       "read_at": sc.iso_utc(time.time()), "base": "fake",
+                                       "mismatches": [{"path": "service_settings.advanced_enabled", "live": True,
+                                                       "table": False}] if caps == "mismatch" else []}
+        if caps == "failed":
+            run["service_capabilities"]["error"] = "fake: connection refused"
+    sc.write_json_atomic(os.path.join(args.out, "run.json"), run)
     path = os.path.join(args.out, "executions.jsonl")
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])
     with open(os.path.join(args.out, "calls.log"), "a") as fh:
