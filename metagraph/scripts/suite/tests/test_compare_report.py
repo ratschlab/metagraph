@@ -3,6 +3,7 @@ outcome counts, direct agreement, the MCP outcome classes with async's by-design
 warm, the resource join, the report's sections and escaping, --compare, and (when pandoc and xelatex are
 installed) the PDF."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -176,7 +177,9 @@ def build_run(run_dir):
            line("P-004", "mcp", 0, tm + 10, 800.0, outcome="service_by_design", reached=False,
                 error={"code": "pattern_invalid", "text": "more than 64 per search (PATTERN_MAX_PATTERNS_PER_SEARCH)",
                        "field": "patterns"}),
-           line("M-001", "mcp", 0, tm + 12, 800.0, error={"code": "pattern_unsupported", "text": "no"}),
+           line("M-001", "mcp", 0, tm + 12, 800.0, error={"code": "pattern_unsupported", "text": "no"}, http=400,
+                checks=[{"check": "status", "outcome": "fail", "detail": "http 400, expected 200"},
+                        {"check": "contains_source_context", "outcome": "fail", "detail": "no answer"}]),
            line("P-005", "mcp", 0, tm + 14, 1.0, outcome="not_implemented_mcp"),
            line("S-001", "mcp", 0, tm + 16, 50.0, outcome="service_by_design", reached=False,
                 error={"code": "rate_limited", "text": "slow down"})]
@@ -248,6 +251,14 @@ class CompareTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def lines(self, sid):
+        rows, _ = sc.read_jsonl(os.path.join(self.dir, "executions.jsonl"))
+        out = {}
+        for r in rows:
+            if r["scenario"] == sid:
+                out.setdefault(r["arm"], {})[r["repeat"]] = r
+        return out
+
     def test_order_and_counts(self):
         self.assertEqual(self.comp["order"][:3], ["P-001", "P-002", "R-001"])
         self.assertEqual(self.comp["arms"], ["direct-local", "direct-remote", "mcp"])
@@ -275,17 +286,21 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(cls["P-001"], "agree")
         self.assertEqual(cls["P-002"], "disagree")       # checks differ
         self.assertEqual(cls["R-001"], "agree")          # direct-local fails the check, MCP does not expose it
-        self.assertEqual(cls["P-003"], "service_by_design")  # answered; host text matched with digits ignored
+        self.assertEqual(cls["P-003"], "agree")  # answered (B-01): a note, the checks decide
         self.assertEqual(cls["P-004"], "service_by_design")  # refused_at_submit, code/text/field match
-        self.assertEqual(cls["M-001"], "disagree")       # wrong service code
+        self.assertEqual(cls["M-001"], "disagree")       # wrong service code: no case matched, its checks fail
         self.assertEqual(cls["P-005"], "not_implemented_mcp")
         self.assertEqual(cls["M-002"], "not_implemented_mcp")  # by the manifest, no MCP line
         self.assertEqual(cls["S-001"], "service_by_design")    # service_only
         m1 = self.comp["scenarios"]["M-001"]["mcp_agreement"]
-        self.assertEqual(m1["side"], "mcp")
-        self.assertTrue(m1["direct_verified"])  # the slot code of the raw answer matched
+        self.assertEqual([d["check"] for d in m1["differing_checks"]], ["contains_source_context", "status"])
+        # the case's pair is still judged where the refusal matches: the slot code of the raw answer
+        ok = cmp.by_design_class(CASES["case.slot"], self.lines("M-001")["direct-local"][0],
+                                 [dict(self.lines("M-001")["mcp"][0], error={"code": "pattern_out_of_bounds"}, raw=None)],
+                                 self.dir)
+        self.assertEqual((ok["class"], ok["direct_verified"]), ("service_by_design", True))
         p3 = self.comp["scenarios"]["P-003"]["mcp_agreement"]
-        self.assertTrue(p3["direct_verified"])
+        self.assertEqual(p3["by_design_notes"], {"0": "case.answered"})
         self.assertEqual(self.s["mcp_agreement"]["disagree"], 2)
         # review M2: checks compared per comparison, by-design pairs verified on every side the case has
         self.assertEqual(self.comp["scenarios"]["R-001"]["mcp_agreement"]["checks_compared"], 1)
@@ -293,7 +308,7 @@ class CompareTest(unittest.TestCase):
         s1 = self.comp["scenarios"]["S-001"]["mcp_agreement"]
         self.assertTrue(s1["mcp_verified"] and s1["verified"])
         self.assertEqual((self.s["mcp_agreement"]["by_design_verified"],
-                          self.s["mcp_agreement"]["by_design_unverified"]), (3, 0))
+                          self.s["mcp_agreement"]["by_design_unverified"]), (2, 0))
 
     def test_agree_needs_a_compared_check(self):
         ne = [{"check": "status", "outcome": "not_exposed", "detail": ""},
@@ -353,11 +368,22 @@ class CompareTest(unittest.TestCase):
         bad = cmp.by_design_class(case, d, [line("R-1", "mcp", 0, T0, 1.0,
                                                  error={"code": "backend_fault", "text": "HTTP 500: boom"})], None)
         self.assertEqual(bad["class"], "disagree")
-        unverified = cmp.by_design_class(case, d, [line("R-1", "mcp", 0, T0, 1.0, outcome="service_by_design")],
-                                         None)
-        self.assertEqual(unverified["class"], "service_by_design")
-        self.assertIsNone(unverified["mcp_verified"])
-        self.assertFalse(unverified["verified"])
+        # B-02: each line decided as the runner's matcher decides it: a runner's mark on an answer without the
+        # relayed error does not hold the pair
+        marked = cmp.by_design_class(case, d, [line("R-1", "mcp", 0, T0, 1.0, outcome="service_by_design")], None)
+        self.assertEqual((marked["class"], marked["side"]), ("disagree", "mcp"))
+        # a missing text or field no longer passes (compare read them only where the line had them)
+        bounds = {"outcome": "refused_at_submit", "code": "traversal_invalid", "text_contains": "above the preset",
+                  "field": "strategy.bounds.<knob>"}
+        nofield = line("T-1", "mcp", 0, T0, 1.0, http=400,
+                       error={"code": "traversal_invalid", "text": "time_budget_ms above the preset's row"})
+        self.assertFalse(cmp.match_service(bounds, [nofield], None)[0])
+        notext = line("T-1", "mcp", 0, T0, 1.0, http=400,
+                      error={"code": "traversal_invalid", "field": "strategy.bounds.time_budget_ms"})
+        self.assertFalse(cmp.match_service(bounds, [notext], None)[0])
+        both = line("T-1", "mcp", 0, T0, 1.0, http=400, error={"code": "traversal_invalid", "text": "x above the preset",
+                                                               "field": "strategy.bounds.time_budget_ms"})
+        self.assertTrue(cmp.match_service(bounds, [both], None)[0])
 
     def test_answer_triggered_case(self):
         case = {"id": "pattern.deadline_ends_task", "agreement": "by_design",
@@ -659,8 +685,8 @@ class TriageFixesTest(unittest.TestCase):
         res = cmp.by_design_class(job_path, d, [timeout, ok], None)
         self.assertEqual((res["class"], res["verified"], res["host_state_repeats"]), ("service_by_design", True, [0]))
         res = cmp.by_design_class(job_path, d, [timeout], None)
-        self.assertEqual((res["class"], res["verified"], res["mcp_verified"]), ("service_by_design", False, None))
-        self.assertIn("resolve_timeout", res["mcp_detail"])
+        self.assertEqual(res["class"], "not_comparable")   # B-09: no execution reads for or against the case
+        self.assertIn("resolve_timeout", res["detail"])
         # judged when it is not inconclusive (a runner of before the rule recorded it as fail)
         res = cmp.by_design_class(job_path, d, [dict(timeout, outcome="fail"), ok], None)
         self.assertEqual((res["class"], res["side"]), ("disagree", "mcp"))
@@ -702,26 +728,30 @@ class TriageFixesTest(unittest.TestCase):
         # before lane S5 the named case judged the relayed deadline too and read a disagreement
         self.assertEqual(cmp.by_design_class(CASES["case.slot"], dead, [relayed, refused], self.dir)["class"], "disagree")
         # a rest that disagrees with the named case is the class, naming the answer case
-        wrong = dict(refused, error={"code": "pattern_invalid", "text": "x"})
+        wrong = dict(refused, error={"code": "pattern_invalid", "text": "x"}, outcome="fail",
+                     checks=[{"check": "status", "outcome": "fail", "detail": "http 400"},
+                             {"check": "contains_source_context", "outcome": "fail", "detail": "no answer"}])
         res = cmp.mcp_agreement({0: relayed, 1: wrong}, {"direct-local": {0: dead, 1: slot}}, s, cases, self.dir)
-        self.assertEqual((res["class"], res["case"], res["answer_case"], res["answer_case_repeats"]),
-                         ("disagree", "case.slot", case["id"], [0]))
+        self.assertEqual((res["class"], res["answer_case"], res["answer_case_repeats"],
+                          [d["check"] for d in res["differing_checks"]]),
+                         ("disagree", case["id"], [0], ["contains_source_context", "status"]))
         # every MCP execution taken out: no rest to judge
         res = cmp.mcp_agreement({0: relayed}, {"direct-local": {0: dead}}, s, cases, self.dir)
         self.assertEqual((res["class"], res["verified"]), ("service_by_design", True))
         self.assertNotIn("other_repeats", res)
         # the rest is judged against the direct executions the answer case does not explain: with only the host's
-        # deadline on record, the named case's direct side is unverified, not a disagreement
+        # deadline on record, the named case's direct side is unverified, not a disagreement; and the whole is not
+        # verified then (B-04: VERIFY-REVIEW's reading of this very assertion, which read verified True before)
         res = cmp.mcp_agreement({0: relayed, 1: refused}, {"direct-local": {0: dead}}, s, cases, self.dir)
         self.assertEqual((res["class"], res["verified"], res["other_repeats"]["class"],
                           res["other_repeats"]["verified"], res["other_repeats"]["direct_detail"]),
-                         ("service_by_design", True, "service_by_design", False, "no direct execution"))
+                         ("service_by_design", False, "service_by_design", False, "no direct execution"))
 
     def test_answer_match_keys(self):
         # B7 and async's addendum: the mcp side's field and http lists, the direct side's slot_code; a stated key the
         # comparator does not know: the mcp side never triggers, the direct side is unverified, named
         cases, case = self.deadline_cases(
-            mcp={"http": [400, 502], "code": "pattern_invalid | pattern_out_of_bounds", "field": "caps.<cap>"},
+            mcp={"http": 400, "code": "pattern_invalid | pattern_out_of_bounds", "field": "caps.<cap>"},
             direct={"http": [200, 503], "slot_code": "mismatches_above_cap"})
         s = scen("P-1", "P")
         m = line("P-1", "mcp", 0, T0, 1.0, outcome="fail", http=400,
@@ -737,7 +767,7 @@ class TriageFixesTest(unittest.TestCase):
         other_field = dict(m, error=dict(m["error"], field="max_mismatches"))
         self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 400, other_field["error"]))
         self.assertIs(cmp.answer_case_of(cases, "POST /pattern", 400, m["error"]), case)
-        self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 409, m["error"]))  # http not in the list
+        self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 409, m["error"]))  # another http
         # unknown keys
         cases_u, _ = self.deadline_cases(mcp={"http": 400, "code": "pattern_invalid", "text_regex": "caps"})
         self.assertIsNone(cmp.answer_case_of(cases_u, "POST /pattern", 400, m["error"]))
@@ -750,6 +780,278 @@ class TriageFixesTest(unittest.TestCase):
         # a field on the direct side, or a slot_code on the mcp side, is a key that side does not have
         cases_f, _ = self.deadline_cases(mcp={"http": 400, "code": "pattern_invalid", "slot_code": "x"})
         self.assertIsNone(cmp.answer_case_of(cases_f, "POST /pattern", 400, m["error"]))
+
+
+class ReviewFixesTest(unittest.TestCase):
+    """Lane S5b: the verified review of lane S5 (B-01..B-11) and the triage's second part (item 5: the timing class),
+    with async's agreed semantics (explains_checks, direct_mismatch, the table's load validation)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        os.makedirs(os.path.join(self.dir, "raw"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def raw_line(self, sid, arm, repeat, http=200, body=None, error=None, outcome="pass", checks=None, **extra):
+        ln = line(sid, arm, repeat, T0, 10.0, outcome=outcome, http=http, error=error, checks=checks,
+                  digest=extra.pop("digest", "d"))
+        ln.update(extra)
+        sc.write_gz_json(os.path.join(self.dir, ln["raw"]), {"answer": {"http": http, "body": body, "error": error}})
+        return ln
+
+    CASES = {"job": {"id": "job", "agreement": "by_design", "direct_expectation": {"http": 200},
+                     "service_answer": {"outcome": "answered"}, "explains_checks": []},
+             "dup": {"id": "dup", "agreement": "by_design", "direct_expectation": {"http": 400},
+                     "service_answer": {"outcome": "answered"}, "explains_checks": ["status"]},
+             "short": {"id": "short", "agreement": "by_design", "direct_expectation": {"http": 400},
+                       "service_answer": {"outcome": "refused_at_submit", "code": "sequence_too_short"}}}
+
+    def resolve(self, names):
+        return {"id": "R-1", "route": "POST /resolve", "request": {}, "mcp": {"tool": "traverse_resolve",
+                                                                           "by_design": names},
+                "expect": [{"check": "status", "args": {"http": 400}}]}
+
+    def test_answered_cases_compare_the_checks(self):
+        # B-01: an answered / clamped case is a note; the checks are compared, its explained checks apart
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+        runs = lambda o: {"check": "resolve_runs", "outcome": o, "detail": ""}  # noqa: E731
+        d200 = self.raw_line("R-1", "direct-local", 0, checks=[st("pass"), runs("pass")])
+        # P1: /resolve content failing on the MCP arm, job_path named: a disagreement, no longer by design
+        m = self.raw_line("R-1", "mcp", 0, outcome="fail", checks=[st("pass"), runs("fail")])
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d200}}, self.resolve("job"), self.CASES, self.dir)
+        self.assertEqual((res["class"], res["by_design_notes"]), ("disagree", {"0": "job"}))
+        ok = self.raw_line("R-1", "mcp", 0, checks=[st("pass"), runs("pass")])
+        res = cmp.mcp_agreement({0: ok}, {"direct-local": {0: d200}}, self.resolve("job"), self.CASES, self.dir)
+        self.assertEqual(res["class"], "agree")
+        # the service answers what the host refuses: status explained by dup, nothing else differs
+        d400 = self.raw_line("R-1", "direct-local", 0, http=400, error={"code": None, "text": "duplicate labels"},
+                             checks=[st("pass"), runs("inconclusive")])
+        m = self.raw_line("R-1", "mcp", 0, outcome="service_by_design", checks=[st("fail"), runs("pass")])
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, self.resolve(["job", "dup"]), self.CASES,
+                                self.dir)
+        self.assertEqual((res["class"], res["by"], res["case"], res["verified"]),
+                         ("service_by_design", "explains_checks", "dup", True))
+        self.assertEqual([d["check"] for d in res["explained_differences"]], ["status"])
+        # P4 (R-edge-0008): the MCP relays the host's refusal; job_path does not apply; both status checks pass
+        rel = self.raw_line("R-1", "mcp", 0, http=400, outcome="pass", checks=[st("pass")],
+                            error={"code": "resolve_rejected", "text": "HTTP 400: too short"})
+        d = self.raw_line("R-1", "direct-local", 0, http=400, checks=[st("pass")], error={"text": "too short"})
+        res = cmp.mcp_agreement({0: rel}, {"direct-local": {0: d}}, self.resolve("job"), self.CASES, self.dir)
+        self.assertEqual(res["class"], "agree")
+        # P2: a refusal case named after job_path; the service answers instead of refusing: a disagreement
+        m = self.raw_line("R-1", "mcp", 0, outcome="fail", checks=[st("fail")])
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, self.resolve(["job", "short"]), self.CASES, self.dir)
+        self.assertEqual((res["class"], [x["check"] for x in res["differing_checks"]]), ("disagree", ["status"]))
+        refused = self.raw_line("R-1", "mcp", 0, http=400, outcome="service_by_design", checks=[st("fail")],
+                                error={"code": "sequence_too_short", "text": "short"})
+        res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: d}}, self.resolve(["job", "short"]), self.CASES,
+                                self.dir)
+        self.assertEqual((res["class"], res["case"], res["verified"]), ("service_by_design", "short", True))
+
+    def answer_case(self, direct, dm, http=None):
+        case = {"id": "a", "agreement": "by_design", "direct_expectation": {},
+                "service_answer": {"outcome": "refused_at_submit", "code": "pattern_out_of_bounds"},
+                "answer_match": {"routes": ["POST /pattern"], "direct": direct,
+                                 "mcp": {"http": http or 400, "code": "pattern_out_of_bounds"}}}
+        if dm is not None:
+            case["answer_match"]["direct_mismatch"] = dm
+        return {"a": case}
+
+    def test_direct_mismatch(self):
+        # B-03 (async's a3692e2c): what a direct answer outside the case's direct side means
+        s = scen("M-1", "M")
+        m = self.raw_line("M-1", "mcp", 0, http=400, outcome="service_by_design",
+                          error={"code": "pattern_out_of_bounds", "text": "above the cap"})
+        stale = self.raw_line("M-1", "direct-local", 0, http=200, body={"patterns": [{"id": "w"}]})
+        dead = self.raw_line("M-1", "direct-local", 1, http=503, error={"code": "deadline", "text": "late"})
+        refusal = self.raw_line("M-1", "direct-local", 2, http=400, error={"code": "invalid_request", "text": "x"})
+        transport = self.raw_line("M-1", "direct-local", 3, http=0, error={"code": "transport", "text": "reset"})
+        slot = {"http": 200, "slot_code": "mismatches_above_cap"}
+        cls = lambda dm, d: cmp.mcp_agreement({0: m}, {"direct-local": d}, s, self.answer_case(slot, dm), self.dir)  # noqa: E731
+        # disagree: any direct HTTP answer outside the direct side (a stale cap: the host answers the slot)
+        res = cls("disagree", {0: stale})
+        self.assertEqual((res["class"], res["side"], res["direct_mismatch"]), ("disagree", "direct", "disagree"))
+        self.assertEqual(cls("disagree", {1: dead})["class"], "disagree")
+        # timing: a direct 200 or 503 deadline is unverified, a 4xx disagrees
+        res = cls("timing", {0: stale})
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", False))
+        self.assertEqual(cls("timing", {1: dead})["class"], "service_by_design")
+        self.assertEqual(cls("timing", {2: refusal})["class"], "disagree")
+        # a transport error or no direct answer: unverified whatever the value; no direct_mismatch: unverified
+        for dm in ("disagree", "timing", None):
+            self.assertEqual(cls(dm, {3: transport})["class"], "service_by_design", dm)
+            self.assertEqual(cmp.mcp_agreement({0: m}, {}, s, self.answer_case(slot, dm), self.dir)["class"],
+                             "service_by_design", dm)
+        self.assertEqual(cls(None, {0: stale})["class"], "service_by_design")
+        # the direct side matched: verified
+        good = self.raw_line("M-1", "direct-local", 4, http=200,
+                             body={"patterns": [{"error": {"code": "mismatches_above_cap", "message": "cap 1"}}]})
+        res = cls("disagree", {4: good})
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", True))
+
+    def test_table_validation_and_routes(self):
+        # B-08 (async's 48dcbc1d): the table forms the runner refuses at load are refused here too
+        base = {"id": "a", "agreement": "by_design", "service_answer": {"outcome": "refused_at_submit"}}
+        bad = {"no routes": {"answer_match": {"direct": {}, "mcp": {"http": 400}}},
+               "mcp http list": {"answer_match": {"routes": ["POST /pattern"], "direct": {}, "mcp": {"http": [400, 502]}}},
+               "mcp slot_code": {"answer_match": {"routes": ["POST /pattern"], "direct": {}, "mcp": {"slot_code": "x"}}},
+               "unknown key": {"answer_match": {"routes": ["POST /pattern"], "direct": {}, "mcp": {}, "when": 1}},
+               "unknown side key": {"answer_match": {"routes": ["POST /pattern"], "direct": {"text_regex": "x"},
+                                                     "mcp": {}}},
+               "direct_mismatch": {"answer_match": {"routes": ["POST /pattern"], "direct": {}, "mcp": {},
+                                                    "direct_mismatch": "unverified"}},
+               "explains on a refusal": {"explains_checks": ["status"]},
+               "explains not a list": {"service_answer": {"outcome": "answered"}, "explains_checks": "status"}}
+        for what, extra in bad.items():
+            self.assertTrue(cmp.table_problems([dict(base, **extra)]), what)
+        self.assertEqual(cmp.table_problems([dict(base, service_answer={"outcome": "clamped"},
+                                                  explains_checks=["cut"])]), [])
+        path = os.path.join(self.dir, "t.json")
+        sc.write_json_atomic(path, {"cases": [dict(base, **bad["mcp http list"])]})
+        with self.assertRaises(cmp.TableError):
+            cmp.load_by_design(path)
+        self.assertEqual(cmp.main([self.dir, "--no-merge", "--by-design", path]), 4)
+        self.assertEqual(cmp.table_problems(list(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[0].values())), [])
+        # an answer_match without routes never triggers (as the runner)
+        case = {"a": dict(base, answer_match={"direct": {}, "mcp": {"http": 400, "code": "x"}})}
+        self.assertIsNone(cmp.answer_case_of(case, "POST /pattern", 400, {"code": "x"}))
+        # the MCP side's http is one status (equality); slot_code is not read there
+        self.assertFalse(cmp.answer_side_matches({"http": [400]}, 400, {"x"}, [], known=cmp.ANSWER_MCP_KEYS,
+                                                 http_list=False))
+        self.assertIsNone(cmp.answer_side_matches({"http": 400, "slot_code": "x"}, 400, set(), [],
+                                                  known=cmp.ANSWER_MCP_KEYS, http_list=False))
+
+    def test_known_keys_first(self):
+        # B-05: a known key that does not hold is a mismatch whatever unknown key is stated beside it
+        d = self.raw_line("P-1", "direct-local", 0, http=500, error={"code": "internal", "text": "boom"})
+        self.assertEqual(cmp.match_direct({"http": 400, "code": "invalid_request", "text_regex": "x"}, d, self.dir)[0],
+                         False)
+        self.assertIsNone(cmp.match_direct({"http": 500, "text_regex": "x"}, d, self.dir)[0])
+        m = self.raw_line("P-1", "mcp", 0, http=400, error={"code": "totally_other", "text": "y"})
+        self.assertFalse(cmp.match_service({"outcome": "refused_at_submit", "code": "pattern_invalid",
+                                            "text_regex": "x"}, [m], self.dir)[0])
+
+    def test_host_states(self):
+        # B-09: all MCP executions host-state inconclusive: not comparable; a code the scenario expects is no host
+        # state; A-11: an implausible one (before the budget) is judged
+        s = {"id": "R-1", "route": "POST /resolve", "request": {"bounds": {"time_budget_ms": 20000}}, "mcp": {},
+             "expect": [{"check": "status", "args": {"http": 200}}]}
+        d = self.raw_line("R-1", "direct-local", 0)
+        to = self.raw_line("R-1", "mcp", 0, http=504, outcome="inconclusive",
+                           error={"code": "resolve_timeout", "text": "the backend did not answer within 30.25 s"},
+                           checks=[{"check": "status", "outcome": "fail", "detail": "http 504"}], wall_ms=30979.5)
+        self.assertTrue(cmp.host_state_line(to, self.dir, s))
+        res = cmp.mcp_agreement({0: to}, {"direct-local": {0: d}}, s, {}, self.dir)
+        self.assertEqual((res["class"], res["host_state_repeats"]), ("not_comparable", [0]))
+        expects = dict(s, expect=[{"check": "status", "args": {"http": 504, "code": "resolve_timeout"}}])
+        self.assertFalse(cmp.host_state_line(to, self.dir, expects))
+        early = dict(to, wall_ms=800.0)
+        self.assertFalse(cmp.host_state_line(early, self.dir, s))
+        self.assertEqual(cmp.mcp_agreement({0: early}, {"direct-local": {0: d}}, s, {}, self.dir)["class"],
+                         "disagree")
+        # G22: the relayed /resolve deadline is a host state at budget - reserve or later
+        rdl = dict(to, error={"code": "traversal_resolve_deadline", "text": "within bounds.time_budget_ms (20000 ms"},
+                   wall_ms=22522.2)
+        self.assertTrue(cmp.host_state_line(rdl, None, s))
+        self.assertFalse(cmp.host_state_line(dict(rdl, wall_ms=5000.0), None, s))
+
+    def test_table_of_the_reevaluation(self):
+        # B-10: compare --reevaluated reads the table the re-evaluation replayed and warns on another one
+        other = os.path.join(self.dir, "other.json")
+        with open(cmp.DEFAULT_BY_DESIGN, "rb") as fh:
+            data = fh.read()
+        with open(other, "wb") as fh:
+            fh.write(data)
+        sha = hashlib.sha256(data).hexdigest()
+        sc.write_json_atomic(os.path.join(self.dir, "reevaluated.json"), {"by_design": {"path": other, "sha256": sha}})
+        self.assertEqual(cmp.table_for(self.dir, None, True), (other, []))
+        path, warnings = cmp.table_for(self.dir, cmp.DEFAULT_BY_DESIGN, True)
+        self.assertEqual((path, warnings), (cmp.DEFAULT_BY_DESIGN, []))   # the same bytes
+        sc.write_json_atomic(other, {"cases": []})
+        path, warnings = cmp.table_for(self.dir, None, True)
+        self.assertEqual(path, other)
+        self.assertIn("differs from the one the re-evaluation replayed", warnings[0])
+        self.assertEqual(cmp.table_for(self.dir, "", True)[0], "")
+        self.assertEqual(cmp.table_for(self.dir, None, False), (cmp.DEFAULT_BY_DESIGN, []))
+
+    def pattern_body(self, counts, cut=None):
+        return {"patterns": [{"id": "pn", "counts": {"contexts": counts}, "cut": cut}]}
+
+    def test_timing_class(self):
+        # VERIFY-2 item 5: a stated time stop on one direct side only, consistent with the complete answer
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+        rel = lambda o: {"check": "count_relation", "outcome": o, "detail": ""}  # noqa: E731
+        exact6 = {"relation": "exact", "value": 6, "by_mismatches": {"1": {"relation": "exact", "value": 6}}}
+        least2 = {"relation": "at_least", "value": 2, "by_mismatches": {"1": {"relation": "at_least", "value": 2}}}
+        complete = self.raw_line("N-1", "direct-remote", 0, body=self.pattern_body(exact6), checks=[st("pass"),
+                                                                                                    rel("pass")],
+                                 digest="b")
+        stopped = self.raw_line("N-1", "direct-local", 0, body=self.pattern_body(least2, {"reason": "time"}),
+                                outcome="inconclusive", checks=[st("pass"), rel("inconclusive")], digest="a",
+                                time_limited="pattern 0 time-limited")
+        res = cmp.direct_agreement({0: stopped}, {0: complete}, "POST /pattern", self.dir)
+        self.assertEqual(res["class"], "timing", res)
+        self.assertIn("pattern 0 time-limited", res["timing_repeats"][0]["detail"])
+        # the stopped answer contradicts the complete one (at_least 99 > exact 6): a disagreement
+        bad = self.raw_line("N-1", "direct-local", 1, body=self.pattern_body(dict(least2, value=99)),
+                            outcome="inconclusive", checks=[st("pass"), rel("inconclusive")], digest="a",
+                            time_limited="pattern 0 time-limited")
+        complete1 = dict(complete, repeat=1, raw=complete["raw"])
+        res = cmp.direct_agreement({1: bad}, {1: complete1}, "POST /pattern", self.dir)
+        self.assertEqual(res["class"], "disagree")
+        self.assertIn("at_least 99 > exact 6", res["outcome_differs"][0]["detail"])
+        # a 503 deadline carries no content; a finding or a fail on the stopped side is no timing
+        dead = self.raw_line("N-1", "direct-local", 2, http=503, error={"code": "deadline", "text": "late"},
+                             outcome="inconclusive", checks=[st("inconclusive"), rel("inconclusive")], digest="c")
+        complete2 = dict(complete, repeat=2)
+        self.assertEqual(cmp.direct_agreement({2: dead}, {2: complete2}, "POST /pattern", self.dir)["class"], "timing")
+        finding = dict(dead, outcome="finding", checks=[st("inconclusive"), {"check": "budget_respected",
+                                                                             "outcome": "finding", "detail": ""}])
+        self.assertEqual(cmp.direct_agreement({2: finding}, {2: complete2}, "POST /pattern", self.dir)["class"],
+                         "disagree")
+        # both stopped, or neither: no timing
+        both = dict(complete2, time_limited="pattern 0 time-limited")   # outcome pass: both state a stop
+        self.assertEqual(cmp.direct_agreement({2: dead}, {2: both}, "POST /pattern", self.dir)["class"], "disagree")
+        # the extension for G27: r1 inconclusive only by its determinism check after a time-limited r0, same answer
+        det = {"check": "deterministic", "outcome": "inconclusive",
+               "detail": "no earlier repeat without a time limitation (a 503 deadline): nothing to compare"}
+        l1 = self.raw_line("D-1", "direct-local", 1, outcome="inconclusive", checks=[st("pass"), det], digest="x")
+        r1 = self.raw_line("D-1", "direct-remote", 1, checks=[st("pass"), dict(det, outcome="pass")], digest="x")
+        self.assertEqual(cmp.direct_agreement({1: l1}, {1: r1}, "POST /pattern", self.dir)["class"], "identical")
+        r1b = dict(r1, answer_digest="y")
+        self.assertEqual(cmp.direct_agreement({1: l1}, {1: r1b}, "POST /pattern", self.dir)["class"], "disagree")
+        l1["answer_digest"], r1["answer_digest"] = "x", "x"
+        l1b = dict(l1, answer_digest="x")
+        r1c = dict(r1, answer_digest="x")
+        both_r = {0: dict(r1c, repeat=0, answer_digest="z"), 1: r1c}
+        both_l = {0: dict(l1b, repeat=0, answer_digest="z", outcome="pass", checks=[st("pass")]), 1: l1b}
+        res = cmp.direct_agreement(both_l, both_r, "POST /pattern", self.dir)
+        self.assertEqual(res["class"], "identical")
+
+    def test_timing_class_traverse(self):
+        # a stopped walk's paths are prefixes of the complete walk's
+        import checks
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+        def walk(seq, reason):
+            arm = {"status": "complete", "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": len(seq),
+                                                        "sequence": seq}],
+                   "paths": [{"id": 0, "segments": [0], "length_bp": len(seq), "path_reason": reason}]}
+            return {"results": [{"outcome": {"walks": "complete"}, "arms": {"right": arm}}]}
+        full = "ACGT" * 250
+        complete = self.raw_line("T-1", "direct-remote", 0, body=walk(full, "max_extension_bp"),
+                                 checks=[st("pass")], digest="b")
+        stopped = self.raw_line("T-1", "direct-local", 0, body=walk(full[:978], "time_budget"), outcome="inconclusive",
+                                checks=[st("pass")], digest="a", time_limited="seed 0 right arm stopped by time_budget")
+        res = cmp.direct_agreement({0: stopped}, {0: complete}, "POST /traverse", self.dir, checks)
+        self.assertEqual(res["class"], "timing", res)
+        off = self.raw_line("T-1", "direct-local", 1, body=walk("T" + full[1:978], "time_budget"),
+                            outcome="inconclusive", checks=[st("pass")], digest="a",
+                            time_limited="seed 0 right arm stopped by time_budget")
+        res = cmp.direct_agreement({1: off}, {1: dict(complete, repeat=1)}, "POST /traverse", self.dir, checks)
+        self.assertEqual(res["class"], "disagree")
+        self.assertIn("no prefix", res["outcome_differs"][0]["detail"])
 
 
 class ReportTest(unittest.TestCase):
@@ -794,7 +1096,7 @@ class ReportTest(unittest.TestCase):
         self.assertIn("| server n |", text)
         self.assertIn("| P | direct-remote | warm | 4 |", text)
         self.assertIn("warm pairs", text)
-        self.assertIn("3 pair(s) verified", text)
+        self.assertIn("2 pair(s) verified", text)
 
     def test_findings_and_inconclusive(self):
         manifest = {"scenarios": [

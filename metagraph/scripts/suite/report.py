@@ -144,8 +144,8 @@ def load_compare(run_dir, by_design_path=None, reevaluated=False):
     path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
     data = sc.read_json(path)
     if data is None:
-        data = cmp.compare(run_dir, cmp.load_by_design(by_design_path or cmp.DEFAULT_BY_DESIGN),
-                           reevaluated=reevaluated)
+        table, warnings = cmp.table_for(run_dir, by_design_path, reevaluated)
+        data = cmp.compare(run_dir, cmp.load_by_design(table), reevaluated=reevaluated, warnings=warnings)
         sc.write_json_atomic(path, data)
     return data
 
@@ -301,7 +301,7 @@ def environment_section(run, comp, rows, samples):
                        md(info.get("runner_host") or "-"), fmt_num(load_s[0] if load_s else None, 1),
                        fmt_num(load_e[0] if load_e else None, 1))))
     lines.append(table(["", "value"], [[k, v] for k, v in kv], align=["l", "l"]))
-    warnings = run.get("warnings") or []
+    warnings = (run.get("warnings") or []) + (comp.get("warnings") or [])
     if warnings:
         lines.append("Warnings:\n")
         for w in warnings:
@@ -431,10 +431,18 @@ def agreement_section(comp):
     else:
         out.append("%d scenario(s) compared: %d identical answers (digest), %d with the same check outcomes but "
                    "different answers, %d not comparable (different answers, no check evaluated on both), %d "
-                   "disagreeing; %d check result(s) compared." % (
+                   "differing by timing alone, %d disagreeing; %d check result(s) compared." % (
                        da["compared"], da["identical"], da["same_checks"], da.get("not_comparable", 0),
-                       da["disagree"], da.get("checks_compared", 0)))
+                       da.get("timing", 0), da["disagree"], da.get("checks_compared", 0)))
         out.append("")
+        if da.get("timing"):
+            out.append("Timing (counted apart, not a disagreement): only one arm's own answer states a time limitation "
+                       "(a stop by time, a 503 deadline), that arm reads inconclusive, no check both evaluated differs "
+                       "and the stopped answer is consistent with the complete one (exact counts equal, at_least <= "
+                       "exact, a stopped path a prefix of a complete one), or a repeat's determinism check had only "
+                       "a time-limited earlier repeat. A systematic speed gap between the arms shows here: %s." % (
+                           ", ".join(md(x) for x in da.get("timing_scenarios", [])[:100])))
+            out.append("")
         rows = []
         for sid in da.get("disagreeing", [])[:100]:
             a = comp["scenarios"][sid].get("direct_agreement") or {}

@@ -13,13 +13,18 @@ and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), t
 backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
-own exception, which a re-evaluation repeats), `not_implemented_mcp`, `service_by_design` (async's table), and the
-MCP runner's host-state rule (an unexpected `uninterruptible_overrun_exceeds_allowance` or `resolve_timeout`,
-compare.MCP_HOST_STATE_CODES, is inconclusive). The MCP runner's matcher is replayed with the current table
-(--by-design PATH, default compare.py's; async's runner at 789fb5f0 is the reference): an MCP answer an
-answer-triggered case matches, else one a case the scenario names matches (its service_answer, the field read from
-the recorded tool error as the runner reads it), is service_by_design with that case; a runner's service_by_design
-mark the current table does not reproduce is kept, and says so.
+own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
+replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at 48dcbc1d,
+`judge`, is the reference): the cases the scenario names whose service_answer the answer matches (the field read
+from the recorded tool error), else the first answer-triggered case it matches; a refused / relayed /
+answer-triggered match is service_by_design, finding when a check is a finding (a by-design mark never erases one);
+an answered / clamped match leaves the outcome to the checks (compare.explained_outcome, triage-2 B-01: fail when a
+failing check is not one the matched cases explain, else finding, service_by_design when some failing check is
+explained, else the checks' outcome); the line records the case (`service_by_design_case`) and the explained
+checks (`explained_checks`) whenever a case matched. A runner's service_by_design mark the current table does not
+reproduce is judged by the checks (B-06), and says so. Then the host-state rule (an unexpected
+compare.MCP_HOST_STATE_CODES answer the plausibility rule of suite_common.mcp_host_state admits is inconclusive;
+one it rejects is judged by the checks, and says why), then a new exception of the checks (fail).
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
@@ -144,20 +149,8 @@ def raw_answer(arm_dir, line):
     return answer if isinstance(answer, dict) else None
 
 
-def tool_error(doc, answer):
-    """The MCP tool's own error object behind the answer's error (its field, ...), from the recorded calls' payloads,
-    as async's runner reads it (suite_mcp_runner.py raw_error), else None."""
-    code = ((answer or {}).get("error") or {}).get("code")
-    for call in reversed((doc or {}).get("calls") or []):
-        payload = call.get("payload") if isinstance(call, dict) else None
-        err = payload.get("error") if isinstance(payload, dict) else None
-        if isinstance(err, dict) and err.get("code") == code:
-            return err
-        rerr = payload.get("resolve_error") if isinstance(payload, dict) else None
-        detail = rerr.get("detail") if isinstance(rerr, dict) else None
-        if isinstance(detail, dict) and detail.get("code") == code:
-            return detail
-    return None
+# the MCP tool's own error object behind an answer's error (compare.tool_error: the runner's raw_error)
+tool_error = compare.tool_error
 
 
 def client_of(arm, line):
@@ -173,35 +166,54 @@ def evaluate_raised(checks):
     return bool(checks) and all(c.get("check") == "evaluate" for c in checks)
 
 
-def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None):
-    """The re-evaluated outcome (module docstring) and why it was kept, if it was."""
+def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None, info=None):
+    """The re-evaluated outcome (module docstring) and why it was kept (decided without the checks), if it was;
+    |info| (a dict) receives what the line records: service_by_design_case, explained_checks, by_design_cases,
+    host_state, and `note` (a matched case the checks decided, a mark the table does not reproduce, a host state the
+    plausibility rule rejects)."""
+    info = {} if info is None else info
+    notes = []
     recorded = line.get("outcome")
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
     if kept and recorded != "service_by_design":
         return recorded, "decided by the runner without the checks"
+    rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
     if arm == "mcp" and cases:
-        # the MCP runner's matcher replayed with the current table (async's 789fb5f0 runner is the reference): an
-        # answer-triggered case (answer_match: the host's answer relayed by design, whatever the scenario names;
-        # applied first, lane S5's B6), then the scenario's named cases (their service_answer)
-        err = (answer or {}).get("error")
-        if isinstance(err, dict) and isinstance(tool_err, dict) and "field" in tool_err:
-            err = dict(err, field=tool_err.get("field"))
-        case = compare.answer_case_of(cases, scenario.get("route") or line.get("route"), (answer or {}).get("http"),
-                                      err)
-        if case is not None:
-            return "service_by_design", "the table's answer-triggered case %s" % case["id"]
-        case = compare.named_case_of(cases, scenario, answer, tool_err)
-        if case is not None:
-            return "service_by_design", "the table's named case %s" % case["id"]
+        # async's runner (judge at 48dcbc1d): the named cases first, else an answer-triggered case
+        matched, how = compare.case_matches(cases, scenario, answer, tool_err)
+        if matched:
+            info["by_design_cases"] = [c.get("id") for c in matched]
+            if compare.judged_by_checks(matched[0]):
+                union = list(dict.fromkeys(x for c in matched for x in compare.explains(c)))
+                outcome, explained = compare.explained_outcome(new_checks, union, rule)
+                noted = next((c for c in matched if set(compare.explains(c)) & set(explained)), matched[0])
+                info.update(service_by_design_case=noted.get("id"), explained_checks=explained)
+                info["note"] = "the table's %s case %s (%s): judged by the checks%s" % (
+                    how, noted.get("id"), (noted.get("service_answer") or {}).get("outcome"),
+                    ", %s explained" % explained if explained else "")
+                return outcome, None
+            cid = matched[0].get("id")
+            info.update(service_by_design_case=cid, explained_checks=[])
+            if any(str(c.get("outcome")) == "finding" for c in new_checks):
+                return "finding", "the table's %s case %s; a check is a finding (a by-design mark never erases " \
+                                  "one)" % (how, cid)
+            return "service_by_design", "the table's %s case %s" % (how, cid)
     if kept:
-        return recorded, "decided by the runner without the checks (not reproduced by the current table)"
+        if not cases:
+            return recorded, "decided by the runner without the checks (no table to replay its mark)"
+        notes.append("the runner's service_by_design mark is not reproduced by the current table: judged by the "
+                     "checks")
+    if arm == "mcp":
+        code, problem = sc.mcp_host_state(scenario, line, (answer or {}).get("error"), tool_err)
+        if code and problem is None:
+            info["host_state"] = code
+            return "inconclusive", "the MCP runner's host-state rule (%s)" % code
+        if code:
+            notes.append("not the host state %s: %s" % (code, problem))
+    if notes:
+        info["note"] = "; ".join(notes)
     if raised:
         return ("fail" if arm == "mcp" else "error"), None
-    err = (answer or {}).get("error") or {}
-    if arm == "mcp" and err and str(err.get("code")) in MCP_HOST_STATE_CODES and \
-            str(err.get("code")) not in json.dumps(scenario.get("expect") or []):
-        return "inconclusive", "the MCP runner's host-state rule (%s)" % err.get("code")
-    rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
     return rule(new_checks), None
 
 
@@ -229,7 +241,7 @@ def changed_checks(old, new):
 def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
     """Writes the re-evaluated set (module docstring); returns the mark (reevaluated.json's content)."""
     checks_dir = os.path.abspath(checks_dir or HERE)
-    cases, by_design_info = compare.load_by_design(by_design or compare.DEFAULT_BY_DESIGN)
+    cases, by_design_info = compare.load_by_design(compare.DEFAULT_BY_DESIGN if by_design is None else by_design)
     checks_mod = load_checks(checks_dir)
     ident = checks_identity(checks_dir)
     takes = inspect.signature(checks_mod.evaluate).parameters
@@ -299,7 +311,9 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                                "detail": "exception in checks.evaluate: %s: %s" % (type(exc).__name__, exc)}]
                 raised = True
             terr = tool_error(raw_doc(arm_dir, line), answer) if name == "mcp" else None
-            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases, terr)
+            info = {}
+            outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases, terr,
+                                       info)
             diff = changed_checks(line.get("checks"), new_checks)
             entry = entries.get(key) or {"digest": line.get("answer_digest"), "time_limited": line.get("time_limited")}
             row.update({"checks": new_checks, "outcome": outcome, "answer_digest": entry["digest"],
@@ -310,8 +324,15 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                                    "checks_changed": [c["check"] for c in diff]}
             if kept:
                 row["reevaluation"]["kept"] = kept
-            if kept and kept.startswith(("the table's answer-triggered case ", "the table's named case ")):
-                row["service_by_design_case"] = kept.rsplit(" ", 1)[-1]
+            if info.get("note"):
+                row["reevaluation"]["note"] = info["note"]
+            # as async's runner records them: the matched case and the failing checks it explains, whenever a case
+            # matched (the replay's, not the recorded run's)
+            for k in ("service_by_design_case", "explained_checks"):
+                row.pop(k, None)
+            if "service_by_design_case" in info:
+                row["service_by_design_case"] = info["service_by_design_case"]
+                row["explained_checks"] = info.get("explained_checks") or []
             counts["kept" if kept else "reevaluated"] += 1
             if outcome != line.get("outcome"):
                 counts["outcome_changed"] += 1
@@ -337,14 +358,18 @@ def main(argv=None):
     ap.add_argument("run_dir")
     ap.add_argument("--checks", default=None, help="the directory of the checks.py to judge with (default: here)")
     ap.add_argument("--by-design", default=None,
-                    help="the by-design table whose answer-triggered cases apply (default: compare.py's)")
+                    help="the by-design table the MCP runner's verdict is replayed with (default: compare.py's; '' none)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     if not os.path.isdir(os.path.join(args.run_dir, "arms")):
         sys.stderr.write("reevaluate: %s has no arms/ directory\n" % args.run_dir)
         return 2
     log = None if args.quiet else (lambda m: sys.stdout.write(m + "\n"))
-    mark = reevaluate(args.run_dir, args.checks, log, args.by_design)
+    try:
+        mark = reevaluate(args.run_dir, args.checks, log, args.by_design)
+    except compare.TableError as exc:
+        sys.stderr.write("reevaluate: refusing: %s\n" % exc)
+        return 4
     if not args.quiet:
         sys.stdout.write("checks %s (sha256 %s)\n" % (mark["checks"]["commit_label"] or mark["checks"]["dir"],
                                                        (mark["checks"]["checks_sha256"] or "")[:16]))

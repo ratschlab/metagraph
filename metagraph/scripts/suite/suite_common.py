@@ -28,9 +28,15 @@ OUTCOMES = ("pass", "fail", "finding", "inconclusive", "not_implemented_mcp", "s
 CHECK_OUTCOMES = ("pass", "fail", "not_exposed", "inconclusive", "finding")
 # async's MCP runner (suite_mcp_runner.py HOST_STATE_CODES) and the design lead's rule of 2026-10-13: an MCP answer
 # refused with one of these codes states an environmental host state, not a result: inconclusive (unless the scenario
-# expects the code), whatever the checks say; resolve_timeout: the service's resolve client gave up before the host's
-# overrun answer under load (G23 as VERIFY-RP amends it)
-MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance", "resolve_timeout")
+# expects the code, or the plausibility rule of mcp_host_state rejects it), whatever the checks say; resolve_timeout:
+# the service's resolve client gave up before the host's overrun answer under load (G23 as VERIFY-RP amends it);
+# traversal_resolve_deadline: the host's /resolve 503 deadline the service relays (G22, VERIFY-2 item 3: the request's
+# budget under load, SPEC-labeled-traversal-core §4.5, not a result)
+MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance", "resolve_timeout", "traversal_resolve_deadline")
+# the plausibility rules' margins (A-11, VERIFY-2 item 3): the service's resolve client waits the request's budget plus
+# 250 ms before resolve_timeout; /resolve's fixed finalisation reserve (capabilities resolve.finalize_reserve_ms)
+RESOLVE_TIMEOUT_MARGIN_MS = 250.0
+RESOLVE_FINALIZE_RESERVE_MS = 250.0
 TIMING_CLASSES = ("fast", "slow", "long")
 
 # Keys left out of the answer digest. `timing` varies by run (DESIGN §8.3); `headers` is transport metadata
@@ -359,6 +365,79 @@ def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
             stop = end if end is not None else start
             last[sid] = (max(stop, prev[0]) if prev else stop, r.get("arm"))
     return rows
+
+
+def _number_or_none(v):
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def scenario_budget_ms(scenario):
+    """The time budget a scenario's request states (bounds.time_budget_ms, else time_budget_ms), or None."""
+    req = (scenario or {}).get("request")
+    if not isinstance(req, dict):
+        return None
+    bounds = req.get("bounds") if isinstance(req.get("bounds"), dict) else {}
+    budget = _number_or_none(bounds.get("time_budget_ms"))
+    return budget if budget is not None else _number_or_none(req.get("time_budget_ms"))
+
+
+def mcp_host_state(scenario, line, error=None, tool_error=None):
+    """(code, problem) of an MCP execution answered with a host-state code (MCP_HOST_STATE_CODES) the scenario does
+    not expect: problem None when the rule applies (the execution is inconclusive), else why the answer cannot be that
+    host state (it is judged by its checks); (None, None) for any other answer. The plausibility rules (A-11,
+    VERIFY-2 item 3, the coordinator's addendum), on the service-measured backend time (mcp_phases.backend_ms) where
+    the line has it, else the call's wall time:
+    - resolve_timeout: the service's resolve client gave up only after the request's budget plus 250 ms (a scenario
+      stating no budget: after the wait its text states, "did not answer within 30.25 s");
+    - traversal_resolve_deadline: the host's 503 deadline came at the earliest at the budget (the relay's, its text's,
+      else the request's) less the finalisation reserve (the relay's, else 250 ms);
+    - uninterruptible_overrun_exceeds_allowance (the overrun lockout answers at once by design): no wall rule."""
+    err = error if isinstance(error, dict) else (line or {}).get("error")
+    err = err if isinstance(err, dict) else {}
+    code = err.get("code")
+    if code is None or str(code) not in MCP_HOST_STATE_CODES:
+        return None, None
+    code = str(code)
+    if code in json.dumps((scenario or {}).get("expect") or []):
+        return None, None   # the scenario expects the code: its checks judge it
+    if code == "uninterruptible_overrun_exceeds_allowance":
+        return code, None
+    line = line or {}
+    wall = _number_or_none((line.get("mcp_phases") or {}).get("backend_ms"))
+    what = "the backend time"
+    if wall is None:
+        wall, what = _number_or_none(line.get("wall_ms")), "the call's wall time"
+    if wall is None:
+        return code, "no time of the call to check %s against" % code
+    te = tool_error if isinstance(tool_error, dict) else {}
+    text = str(err.get("text") or "")
+    if code == "resolve_timeout":
+        budget = scenario_budget_ms(scenario)
+        if budget is not None:
+            if wall >= budget + RESOLVE_TIMEOUT_MARGIN_MS:
+                return code, None
+            return code, "resolve_timeout after %.0f ms (%s), before the request's budget %.0f ms plus %.0f ms: the " \
+                         "service's resolve client cannot have waited for the host" % (
+                             wall, what, budget, RESOLVE_TIMEOUT_MARGIN_MS)
+        m = re.search(r"within ([0-9]+(?:\.[0-9]+)?) s", text)
+        if m and wall >= float(m.group(1)) * 1000.0:
+            return code, None
+        return code, "resolve_timeout after %.0f ms (%s), and neither a request budget nor a stated wait it reached" % (
+            wall, what)
+    m = re.search(r"time_budget_ms \(([0-9]+(?:\.[0-9]+)?) ms", text)
+    budget = _number_or_none(te.get("time_budget_ms"))
+    if budget is None and m:
+        budget = float(m.group(1))
+    if budget is None:
+        budget = scenario_budget_ms(scenario)
+    reserve = _number_or_none(te.get("finalize_reserve_ms"))
+    reserve = RESOLVE_FINALIZE_RESERVE_MS if reserve is None else reserve
+    if budget is None:
+        return code, "no budget stated to check the relayed deadline against"
+    if wall >= budget - reserve:
+        return code, None
+    return code, "the relayed /resolve deadline after %.0f ms (%s), before the budget %.0f ms less its %.0f ms " \
+                 "finalisation reserve: not SPEC-labeled-traversal-core §4.5's deadline" % (wall, what, budget, reserve)
 
 
 def raw_name(scenario_id, arm, repeat):
