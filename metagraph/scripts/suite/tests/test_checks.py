@@ -396,6 +396,74 @@ class PatternChecks(unittest.TestCase):
         bad["patterns"][0]["returned"] += 1
         self.assertEqual(outcome(sc2, ok_answer(bad), "invariants")[0], "fail")
 
+    def test_invariants_refuse_a_result_listed_twice(self):
+        # a copy of a context or path in place of a distinct one keeps the list's length and order (equal
+        # keys sort as equal), so only the identity tells it
+        req = {"mode": "partial", "max_contexts": 2, "patterns": [{"dna": "ACGTACGTAC", "id": "w"}]}
+        sc = {"route": "POST /pattern", "request": req, "truth": {}}
+        k1, k2 = "T" * 21 + "ACGTACGTAC", "G" * 21 + "ACGTACGTAC"
+        r1 = {"kmer": k1, "node": 5, "offset": 21, "instance": "ACGTACGTAC", "strand": "+"}
+        r2 = {"kmer": k2, "node": 9, "offset": 21, "instance": "ACGTACGTAC", "strand": "+"}
+
+        def ans(results):
+            e = {"id": "w", "mode": "partial", "returned": len(results), "results": results, "stop": None,
+                 "withheld": None, "cut": {"reason": "max_contexts"}, "retrieval_complete": False,
+                 "counts": {"contexts": {"relation": "exact", "value": 3, "by_offset": dict(
+                     (str(o), {"relation": "exact", "value": 3 if o == 21 else 0}) for o in range(22))}}}
+            return ok_answer({"patterns": [e], "limits": {"max_contexts": 2}})
+        self.assertEqual(outcome(sc, ans([r1, r2]), "invariants")[0], "pass")
+        self.assertEqual(outcome(sc, ans([r1, r2]), "counts_consistent")[0], "pass")
+        o, d = outcome(sc, ans([r1, dict(r1)]), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("the result of r0 listed again", d)
+        # a path is its nodes in an orientation (L-long-0006 with its '-' path dropped and the '+' path twice)
+        P = "ACGT" * 10
+        lreq = {"mode": "all_or_count", "long_search": "paths", "patterns": [{"dna": P, "id": "w"}]}
+        lsc = {"route": "POST /pattern", "request": lreq, "truth": {}}
+        path = {"sequence": P, "instance": P, "offset": 0, "strand": "+", "nodes": list(range(10))}
+
+        def lans(results):
+            e = {"id": "w", "mode": "all_or_count", "returned": len(results), "results": results, "stop": None,
+                 "withheld": None, "retrieval_complete": True,
+                 "counts": {"anchors": {"relation": "exact", "value": 2},
+                            "paths": {"relation": "exact", "value": len(results)}}}
+            return ok_answer({"patterns": [e], "limits": {"max_paths": 10}})
+        self.assertEqual(outcome(lsc, lans([path]), "invariants")[0], "pass")
+        o, d = outcome(lsc, lans([path, dict(path)]), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("listed again", d)
+
+    def test_path_record_verified_placement(self):
+        # the record's occurrence is placed with the index's seq_id and the record's length, and every
+        # occurrence the label verifies lies in its record (L-verified-0001: NC_1.1 34701-34740 '+', seq_id
+        # 2, 640,681 bp)
+        t = {"record": "NC_1.1", "taxid": "562", "seq_id": 2, "record_length": 640681, "start": 34700, "length": 40,
+             "strand": "+", "window": "ACGT" * 10}
+        sc = {"route": "POST /pattern", "truth": t, "request": {"patterns": [{"dna": "ACGT" * 10, "id": "w"}],
+                                                                "long_search": "paths", "output": {"labels": "all"}}}
+
+        def ans(other=None, **occ):
+            o = {"record": "NC_1.1", "seq_id": 2, "strand": "+", "nt_coords": "34701-34740", "nt_length": 640681}
+            o.update(occ)
+            path = {"sequence": "ACGT" * 10, "strand": "+", "labels": [
+                {"column": "562", "support": "record_verified", "occurrence_list": [o] + ([other] if other else [])}]}
+            return ok_answer({"patterns": [{"id": "w", "counts": {"paths": {"relation": "exact", "value": 1}},
+                                            "results": [path], "returned": 1}]})
+        self.assertEqual(outcome(sc, ans(), "path_record_verified")[0], "pass")
+        for bad in ({"nt_length": 1}, {"seq_id": 999999999}, {"nt_length": 1, "seq_id": 999999999},
+                    {"nt_length": 640681 + 1000}):
+            self.assertEqual(outcome(sc, ans(**bad), "path_record_verified")[0], "fail", bad)
+        other = {"record": "NC_2.1", "seq_id": 7, "strand": "-", "nt_coords": "901-940", "nt_length": 5000}
+        self.assertEqual(outcome(sc, ans(other=other), "path_record_verified")[0], "pass")
+        o, d = outcome(sc, ans(other=dict(other, nt_length=900)), "path_record_verified")
+        self.assertEqual(o, "fail")
+        self.assertIn("outside its record of nt_length 900", d)
+        self.assertEqual(outcome(sc, ans(other=dict(other, nt_coords="940-901")), "path_record_verified")[0], "fail")
+        # source_placement places a context's record occurrence by the same rule
+        self.assertIsNone(checks._occurrence_problem({"record": "NC_1.1", "seq_id": 2, "nt_coords": "34701-34740",
+                                                      "nt_length": 640681}, t))
+        self.assertIn("outside its record", checks._coords_problem({"nt_coords": "0-39", "nt_length": 100}))
+
     def test_counts_consistent_refuses(self):
         req, ans = fixture("all_or_count")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}
@@ -649,6 +717,17 @@ class MoreChecks(unittest.TestCase):
         unstated = copy.deepcopy(late)
         unstated["patterns"][0].update(stop=None, determinism="full")
         self.assertEqual(outcome(sc, ok_answer(unstated), "predicate_either_mirror", label="546")[0], "fail")
+        # a hiding the request cannot have (anchor labels without labels all; a selection threshold stop
+        # that left the selected count exact) fails the mirror and the selection alike
+        for withheld, extra in (("anchor_labels_truncated", {"anchors_truncated": [{"cap": 2, "total": 9}]}),
+                                ("threshold_crossed", {"stop": {"phase": "selection", "reason": "max_contexts"}})):
+            hid = copy.deepcopy(ans)
+            hid["patterns"][0].update(results=[], returned=0, retrieval_complete=False,
+                                      withheld={"reason": withheld}, **extra)
+            hid.setdefault("limits", {})["stop_at_threshold"] = True
+            self.assertEqual(outcome(sc, ok_answer(hid), "predicate_either_mirror", label="546")[0], "fail", withheld)
+            self.assertEqual(outcome(sc, ok_answer(hid), "predicate_selected", selected=True, label="546")[0],
+                             "fail", withheld)
         refused = copy.deepcopy(ans)
         refused["patterns"][0] = {"id": "w", "error": {"code": "predicate_too_large"}}
         self.assertEqual(outcome(sc, ok_answer(refused), "predicate_either_mirror", label="546")[0], "fail")
@@ -922,7 +1001,7 @@ class StatedReasons(unittest.TestCase):
               "finalize_reserve_ms": 250, "stop_at_threshold": False, "max_predicate_contexts": 50}
 
     def problems(self, counts, withheld=None, cut=None, stop=None, det="full", steps=1000, limits=None,
-                 elapsed=1000.0, req=None, mode=None, **extra):
+                 elapsed=1000.0, req=None, mode=None, index=None, predicate_echo=None, **extra):
         e = {"id": "w", "mode": mode or ("partial" if cut else "all_or_count"), "counts": counts,
              "withheld": {"reason": withheld} if withheld else None, "cut": {"reason": cut} if cut else None,
              "stop": {"phase": stop[0], "reason": stop[1]} if stop else None, "determinism": det, "results": [],
@@ -931,6 +1010,10 @@ class StatedReasons(unittest.TestCase):
         lim = dict(self.LIMITS)
         lim.update(limits or {})
         body = {"patterns": [e], "limits": lim, "timing": {"elapsed_ms": elapsed}}
+        if index is not None:
+            body["index"] = index
+        if predicate_echo is not None:
+            body["predicate"] = predicate_echo
         sc = {"route": "POST /pattern", "request": req or {"patterns": [{"dna": "A" * 25, "id": "w"}]}, "truth": {}}
         return checks._pattern_reason_problems(sc, body, 0, e)
 
@@ -984,10 +1067,11 @@ class StatedReasons(unittest.TestCase):
                 req=labels)
         self.ok(ctx("exact", 24), withheld="annotation_budget", rows_refused=[{"row": 1}], req=labels)
         self.bad("without an annotation stop", ctx("exact", 24), withheld="annotation_budget", req=labels)
-        self.ok(ctx("exact", 24), withheld="anchor_labels_truncated", anchors_truncated=[{"cap": 2, "total": 9}])
-        self.bad("without anchors_truncated", ctx("exact", 24), withheld="anchor_labels_truncated")
-        self.ok(ctx("exact", 24), withheld="output_budget", stop=("output", "max_memory"))
-        self.bad("without a memory stop", ctx("exact", 24), withheld="output_budget")
+        self.ok(ctx("exact", 24), withheld="anchor_labels_truncated", anchors_truncated=[{"cap": 2, "total": 9}],
+                req=labels)
+        self.bad("without anchors_truncated", ctx("exact", 24), withheld="anchor_labels_truncated", req=labels)
+        self.ok(ctx("exact", 24), withheld="output_budget", stop=("output", "max_memory"), req=labels)
+        self.bad("without a memory stop", ctx("exact", 24), withheld="output_budget", req=labels)
         pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
         self.ok(ctx("exact", 60), withheld="predicate_above_threshold", req=pred)
         self.bad("not above max_predicate_contexts 50", ctx("exact", 10), withheld="predicate_above_threshold", req=pred)
@@ -999,6 +1083,116 @@ class StatedReasons(unittest.TestCase):
         self.bad("without a predicate stop", ctx("exact", 24), withheld="predicate_budget", req=pred)
         self.bad("does not list", ctx("exact", 24), withheld="no_such_reason")
 
+    def test_withheld_reasons_need_their_request(self):
+        # a reason the request cannot have, whatever else the answer states; the label-free short pattern of
+        # P-scope-0001 hides its source behind none of them
+        ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
+        refused = [{"row": 1, "phase": "label_discovery", "reason": "max_memory"}]
+        self.bad("reads no annotation", ctx("exact", 19), withheld="annotation_budget", rows_refused=refused)
+        self.bad("reads no annotation", ctx("exact", 19), withheld="annotation_budget",
+                 stop=("label_discovery", "max_annotation_work"))
+        self.bad("reads no annotation", ctx("exact", 19), rows_refused=refused)
+        self.bad("without labels all", ctx("exact", 19), withheld="anchor_labels_truncated",
+                 anchors_truncated=[{"cap": 2, "total": 9}])
+        self.bad("without a memory account", ctx("exact", 19), withheld="output_budget",
+                 stop=("output", "max_memory"))
+        self.bad("without a predicate", ctx("exact", 19), withheld="predicate_budget",
+                 stop=("selection", "max_predicate_work"))
+        self.bad("without a predicate", ctx("exact", 60), withheld="predicate_above_threshold")
+        self.bad("without a predicate", {"contexts": self.c("exact", 500), "selected": self.c("exact", 101)},
+                 withheld="selected_above_threshold")
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred)
+        # a constant `true` normal form is the unfiltered request under the engine's own max_contexts (§19.6); the
+        # claim needs both the constant pass and the normal form `true` (a self-contradictory answer cannot make it)
+        constant = {"pass": "constant", "support": "kmer", "access": "rows"}
+        both = {"contexts": self.c("exact", 101), "selected": self.c("exact", 101)}
+        self.ok(both, withheld="count_above_threshold", req=pred, selection=constant,
+                predicate_echo={"normal_form": True})
+        for nf in (False, {"any": ["562"]}, None):
+            self.bad("with a predicate on L <= k", both, withheld="count_above_threshold", req=pred, selection=constant,
+                     predicate_echo={"normal_form": nf})
+        self.bad("with a predicate on L <= k", both, withheld="count_above_threshold", req=pred, selection=constant)
+        self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred,
+                 selection={"pass": "not_admitted"})
+        # discovery_budget: the count the step stop interrupted is not exact (§7.4)
+        self.bad("not exact", ctx("exact", 19), withheld="discovery_budget", stop=("discovery", "max_steps"))
+        self.ok(ctx("bounds", 2, lower=2, upper=24), withheld="discovery_budget", stop=("mask_scan", "max_steps"))
+        # only all_or_count withholds (patterns longer than k: also partial's anchors_above_threshold)
+        self.bad("in mode partial", ctx("unknown"), withheld="deadline", stop=("discovery", "time"),
+                 det="time_limited", elapsed=59900.0, mode="partial")
+        long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 1001), "paths": self.c("unknown")}, withheld="anchors_above_threshold",
+                req=long_req, mode="partial")
+        # paths_later_increment needs anchors to extend; anchors_above_threshold a path search
+        self.bad("anchors exact 0", {"anchors": self.c("exact", 0), "paths": self.c("exact", 0)},
+                 withheld="paths_later_increment", req={"patterns": [{"dna": "A" * 40, "id": "w"}]})
+        self.bad("without a path search", {"anchors": self.c("exact", 1001), "paths": self.c("unknown")},
+                 withheld="anchors_above_threshold", req={"patterns": [{"dna": "A" * 40, "id": "w"}]})
+
+    def test_threshold_stops(self):
+        # a stop_at_threshold stop leaves the count it interrupted not exact (§7.4) and, on a masked BASIC or
+        # CANONICAL graph, past its threshold: discovery stops once the running lower bound passes it, and the
+        # at_least value is that bound (pattern_search.cpp threshold_crossed / running_lower / tally)
+        ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
+        thr = {"stop_at_threshold": True}
+        masked = {"graph_mode": "basic"}
+        self.ok(ctx("at_least", 101), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr,
+                index=masked)
+        self.ok(ctx("at_least", 4), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                limits=dict(thr, max_contexts=3), index={"graph_mode": "canonical"})   # P-modes-0005
+        self.bad("not exact", ctx("exact", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                 limits=thr, index=masked)                                    # P-modes-0005 with its counts exact 0
+        self.bad("not exact", ctx("exact", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                 limits=thr)
+        self.bad("not past max_contexts 100", ctx("at_least", 2), withheld="threshold_crossed",
+                 stop=("discovery", "max_contexts"), limits=thr, index=masked)
+        self.bad("not past max_contexts 100", ctx("at_least", 100), cut="max_contexts",
+                 stop=("discovery", "max_contexts"), limits=thr, index=masked)
+        # the value rule is not judged where the bound need not be the value
+        self.ok(ctx("at_least", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr,
+                index={"graph_mode": "basic", "counting": "upper_bound"})   # fixture unmasked_stop_at_threshold
+        self.ok(ctx("at_least", 2), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr,
+                index={"graph_mode": "primary"})                            # an even-k wrapped PRIMARY union
+        self.ok(ctx("at_least", 2), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr)
+        self.bad("without a stop_at_threshold stop", ctx("at_least", 101), withheld="threshold_crossed", limits=thr)
+        self.bad("without a stop_at_threshold stop", ctx("at_least", 101), withheld="threshold_crossed",
+                 stop=("discovery", "max_steps"), limits=thr)
+        # with a predicate: the raw discovery's stop at max_predicate_contexts, the selection's at max_contexts
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        self.ok({"contexts": self.c("at_least", 51), "selected": self.c("unknown")}, withheld="threshold_crossed",
+                stop=("discovery", "max_predicate_contexts"), limits=thr, req=pred, index=masked)
+        self.bad("not past max_predicate_contexts 50", {"contexts": self.c("at_least", 50),
+                                                        "selected": self.c("unknown")},
+                 withheld="threshold_crossed", stop=("discovery", "max_predicate_contexts"), limits=thr, req=pred,
+                 index=masked)
+        self.ok({"contexts": self.c("exact", 500), "selected": self.c("bounds", 101, lower=101, upper=300)},
+                withheld="threshold_crossed", stop=("selection", "max_contexts"), limits=thr, req=pred, index=masked)
+        self.bad("not exact", {"contexts": self.c("exact", 500), "selected": self.c("exact", 101)},
+                 withheld="threshold_crossed", stop=("selection", "max_contexts"), limits=thr, req=pred)
+        # a constant normal form runs the engine's own threshold in discovery: the raw count, never the selected
+        self.ok({"contexts": self.c("at_least", 101), "selected": self.c("exact", 0)}, withheld="threshold_crossed",
+                stop=("discovery", "max_contexts"), limits=thr, req=pred, index=masked)
+        self.bad("without a predicate", ctx("at_least", 101), stop=("discovery", "max_predicate_contexts"),
+                 limits=thr, mode="count")
+        # max_anchors: the threshold of a pattern longer than k, with or without a path search (§7.7, §12.1)
+        anchors_only = {"patterns": [{"dna": "A" * 40, "id": "w"}]}
+        self.ok({"anchors": self.c("at_least", 1001), "paths": self.c("unknown")}, withheld="paths_later_increment",
+                stop=("discovery", "max_anchors"), limits=thr, req=anchors_only)
+        self.bad("not exact", {"anchors": self.c("exact", 2), "paths": self.c("unknown")},
+                 withheld="paths_later_increment", stop=("discovery", "max_anchors"), limits=thr, req=anchors_only)
+        self.bad("L <= k", ctx("at_least", 101), stop=("discovery", "max_anchors"), limits=thr, mode="count")
+        # max_paths: the extension's threshold, a path search only; its paths at_least (§12.1)
+        long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("at_least", 11)}, withheld="threshold_crossed",
+                stop=("extension", "max_paths"), limits=thr, req=long_req)
+        self.bad("not exact", {"anchors": self.c("exact", 2), "paths": self.c("exact", 11)},
+                 withheld="threshold_crossed", stop=("extension", "max_paths"), limits=thr, req=long_req)
+        self.bad("without a path search", {"anchors": self.c("exact", 2), "paths": self.c("at_least", 11)},
+                 withheld="threshold_crossed", stop=("extension", "max_paths"), limits=thr, req=anchors_only)
+        self.bad("longer than k", {"anchors": self.c("at_least", 2), "paths": self.c("unknown")},
+                 stop=("discovery", "max_contexts"), limits=thr, req=long_req, mode="count")
+
     def test_cut_reasons(self):
         ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
         self.ok(ctx("exact", 101), cut="max_contexts")
@@ -1008,8 +1202,14 @@ class StatedReasons(unittest.TestCase):
         self.ok(ctx("at_least", 0), cut="time", stop=("discovery", "time"), det="time_limited", elapsed=59900.0)
         self.ok(ctx("at_least", 9), cut="time", stop=("discovery", "max_steps"), det="time_limited", elapsed=59900.0)
         self.bad("without a time stop", ctx("exact", 9), cut="time")
-        self.ok(ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"))
-        self.bad("without a memory stop", ctx("exact", 2000), cut="max_memory")
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        self.ok(ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"), req=labels)
+        self.bad("without a memory stop", ctx("exact", 2000), cut="max_memory", req=labels)
+        self.bad("without a memory account", ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"))
+        self.bad("without a predicate", ctx("exact", 1828), cut="max_predicate_contexts")
+        self.bad("without a path search", ctx("exact", 11), cut="max_paths")
+        self.bad("without a supported-path search", ctx("exact", 24), cut="max_annotation_work",
+                 stop=("label_discovery", "max_annotation_work"), req=labels)
         long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
         self.ok({"anchors": self.c("exact", 2), "paths": self.c("exact", 11)}, cut="max_paths", req=long_req)
         self.bad("within max_paths 10", {"anchors": self.c("exact", 2), "paths": self.c("exact", 3)}, cut="max_paths",
@@ -1040,13 +1240,23 @@ class StatedReasons(unittest.TestCase):
         self.bad("a max_steps stop after 999 steps", ctx, stop=("discovery", "max_steps"), steps=999, mode="count")
         self.ok(ctx, stop=("discovery", "max_contexts"), limits={"stop_at_threshold": True}, mode="count")
         self.bad("without stop_at_threshold", ctx, stop=("discovery", "max_contexts"), mode="count")
-        self.ok(ctx, stop=("label_discovery", "max_annotation_work"), mode="count",
-                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}})
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        self.ok(ctx, stop=("label_discovery", "max_annotation_work"), mode="partial", req=labels)
         self.bad("reads no annotation", ctx, stop=("label_discovery", "max_annotation_work"), mode="count")
+        # mode count reads no annotation whatever the projection (§14.1) and is the label-free path (§7.6)
+        self.bad("reads no annotation", ctx, stop=("label_discovery", "max_annotation_work"), mode="count",
+                 req=labels)
+        self.bad("reads no annotation", ctx, mode="count", req=labels, rows_refused=[{"row": 1}])
         self.ok(ctx, stop=("selection", "max_predicate_work"), mode="count",
                 req={"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}})
         self.bad("without a predicate", ctx, stop=("selection", "max_predicate_work"), mode="count")
-        self.ok(ctx, stop=("output", "max_memory"), mode="count")
+        self.ok(ctx, stop=("output", "max_memory"), mode="partial", req=labels)
+        self.bad("without a memory account", ctx, stop=("output", "max_memory"), mode="count", req=labels)
+        self.ok(ctx, stop=("selection", "max_memory"), mode="count",
+                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}})
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("at_least", 1)}, stop=("extension", "max_memory"),
+                mode="count", req={"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"})
+        self.bad("without a memory account", ctx, stop=("output", "max_memory"), mode="count")
         self.bad("does not list", ctx, stop=("discovery", "no_such_reason"), mode="count")
         # a low-complexity diagnostic the work time cut (stop null, determinism time_limited)
         self.ok({"contexts": self.c("exact", 3)}, det="time_limited", elapsed=59900.0, mode="count")
@@ -1362,6 +1572,18 @@ class Relations(unittest.TestCase):
         self.assertEqual(self.ev(rel, self.resolve(50, [[0, 50]], [[0, 50]]), full)[0], "fail")
         self.assertEqual(self.ev(rel, self.resolve(0, [], [], stop=True), full)[0], "inconclusive")   # nothing common
         self.assertEqual(self.ev(rel, checks.normalise_direct(503, b'{"code": "deadline"}'), full)[0], "inconclusive")
+        # a's property is its stop (R-budget, resolve_runs prefix_if_stopped): two complete profiles that
+        # agree did not test it; one that disagrees still fails; the continuation keeps its comparison
+        # (REL-prefix_equals-0002 / -0004)
+        budget = {"route": "POST /resolve", "request": {}, "truth": {},
+                  "expect": [{"check": "resolve_runs", "args": {"label": "562", "full": True, "prefix_if_stopped": True}}]}
+        rel = self.rel("prefix_equals", labels=["562"], a_from_kmer=0, b_from_kmer=0)
+        self.assertEqual(self.ev(rel, stopped, full, sa=budget)[0], "pass")
+        o, d = self.ev(rel, full, full, sa=budget)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("no stop happened on a: the prefix property was not tested", d)
+        self.assertEqual(self.ev(rel, self.resolve(100, [[0, 100]], [[0, 41], [60, 100]]), full, sa=budget)[0], "fail")
+        self.assertEqual(self.ev(rel, full, full)[0], "pass")
 
     def test_zero_equals_absent(self):
         q = "ACGT" * 7 + "ACG"
@@ -1463,6 +1685,17 @@ class ResolveChecks(unittest.TestCase):
         bad = copy.deepcopy(a)
         bad["body"]["stop"]["remainder_from_bp"] = 41
         self.assertEqual(outcome(sc, bad, "invariants")[0], "fail")
+        # R-budget's property is the stop; a complete answer holds the profile but never tested the prefix a
+        # stop answers (inconclusive), a wrong complete profile still fails; a twin's property
+        # (unless_stopped) is the complete profile itself
+        complete = self.body([[0, 70]])
+        complete["body"].update(limits={"time_budget_ms": 3000, "finalize_reserve_ms": 250}, stop=None)
+        o, d = outcome(sc, complete, "resolve_runs", label="562", full=True, prefix_if_stopped=True)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("no stop happened: the prefix property was not tested", d)
+        holed = self.body([[0, 30]])
+        self.assertEqual(outcome(sc, holed, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "fail")
+        self.assertEqual(outcome(sc, complete, "resolve_runs", label="562", full=True, unless_stopped=True)[0], "pass")
         empty = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [], "labels": [
             {"label": "562", "kind": "column", "kmers_supported": 0, "runs": []}]})
         self.assertEqual(outcome(sc, empty, "resolve_absent")[0], "pass")
@@ -1628,6 +1861,55 @@ class TraverseChecks(unittest.TestCase):
         failed = ok_answer({"results": [{"outcome": {"walks": "failed"}, "error": "x"}]})
         self.assertEqual(outcome(sc, failed, "walk_in_record")[0], "fail")
         self.assertEqual(outcome(sc, failed, "walk_in_record", if_walked=True)[0], "inconclusive")
+
+    def test_walk_judged_by_its_own_end_below_the_frontier(self):
+        # a cap that truncated the arm stopped the record's route only where the route reaches
+        # complete_to_bp; one that ended before it ended for its own stated reason
+        # (SPEC-labeled-traversal-core §6.10), and where that is the record's base outside A, C, G, T
+        # (T-walk-0018's 'S'), the truth's gap
+        import random
+        rnd = random.Random(17)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+
+        def scen(rec, direction):
+            t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+                 "strand": "+", "window": rec[start:start + L], "flank": rec, "flank_start": 0}
+            return {"route": "POST /traverse", "truth": t, "request": {
+                "seeds": [{"sequence": t["window"]}],
+                "strategy": {"direction": direction, "bounds": {"max_extension_bp": 100, "time_budget_ms": 15000}}}}
+        right, left = record[start + L:start + L + 30], record[start - 30:start]
+        stopped = dict(status="truncated", trig="time_budget", reason="label_lost")
+        sc = scen(record, "right")
+        o, d = outcome(sc, self.walk({"right": right}, **stopped), "walk_in_record")
+        self.assertEqual(o, "inconclusive")      # the route reaches complete_to_bp (30): the cap may have ended it
+        self.assertIn("stopped by time_budget", d)
+        o, d = outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
+        self.assertEqual(o, "fail")
+        self.assertIn("the record followed for only 30 of 100 bp, the path ended by ['label_lost']", d)
+        # the record's next base an IUPAC code: no k-mer holds it, the route ends there (a truth gap)
+        sc_s = scen(record[:start + L + 30] + "S" + record[start + L + 31:], "right")
+        o, d = outcome(sc_s, self.walk({"right": right}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("before the record's base 'S', which no k-mer of the graph holds: a truth gap", d)
+        o, d = outcome(sc_s, self.walk({"right": right}, reason="label_lost"), "walk_in_record")
+        self.assertEqual(o, "inconclusive")      # also on a complete arm
+        # a resource end stated below complete_to_bp cannot have happened (§6.10: every path that ended before it
+        # ended for a semantic reason): the walk and the invariants fail, at the frontier it is a stated stop
+        capped = dict(status="truncated", trig="time_budget", reason="time_budget")
+        o, d = outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **capped), "walk_in_record")
+        self.assertEqual(o, "fail")
+        self.assertIn("below the arm's complete_to_bp 60", d)
+        self.assertEqual(outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **capped),
+                                 "invariants")[0], "fail")
+        self.assertEqual(outcome(sc, self.walk({"right": right}, **capped), "walk_in_record")[0], "inconclusive")
+        self.assertEqual(outcome(sc, self.walk({"right": right}, **capped), "invariants")[0], "pass")
+        sc_l = scen(record[:start - 31] + "N" + record[start - 30:], "left")
+        o, d = outcome(sc_l, self.walk({"left": left}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("'N'", d)
+        self.assertEqual(outcome(scen(record, "left"), self.walk({"left": left}, extra={"complete_to_bp": 60},
+                                                                 **stopped), "walk_in_record")[0], "fail")
 
     def merged_walk(self, record, start, L, other):
         """A right arm whose displayed path (first parents) passes a merge through another record's allele |other| at
@@ -1828,6 +2110,319 @@ class TraverseChecks(unittest.TestCase):
                                                                               "bounds": {"max_extension_bp": 100}}}}
         return sc, ans, record
 
+    def structural_walk(self, end="branch", branches=2, text=None, blocked=True, kinds=("ambiguous", "ambiguous"),
+                        strategy=None, echo=None, events=True):
+        """(scenario, answer): a right arm whose route along the record passes two splits (|kinds|) at 10 and 20 bp
+        and ends at 30 bp by the label end |end| (a label_end event, with |text| beside it; the lineage's |branches|
+        in end_labels; a blocked event of a re-entry when |blocked|); each split's other child is one base off the
+        record, ended dead_end. The request's strategy adds |strategy|, the answer's echo is |echo|."""
+        import random
+        rnd = random.Random(11)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        st = {"direction": "right", "bounds": {"max_extension_bp": 100}}
+        for group, knobs in (strategy or {}).items():
+            if isinstance(knobs, dict):
+                st.setdefault(group, {}).update(knobs)
+            else:
+                st[group] = knobs
+        sc = {"route": "POST /traverse", "request": {"seeds": [{"sequence": t["window"]}], "strategy": st},
+              "truth": t}
+        cont = record[start + L:start + L + 100]
+        off = lambda b: "A" if b != "A" else "C"  # noqa: E731
+        ev = {"at_bp": 30, "type": "label_end", "label": 0, "reason": end, "structural_successors": 2}
+        if text:
+            ev["text"] = text
+        leaf_events = [ev]
+        if end in ("edge_reuse", "edge_reuse_rc", "rejoined_seed") and blocked:
+            leaf_events.insert(0, {"at_bp": 30, "type": "blocked", "char": cont[30], "reason": end})
+        segs = [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 10, "sequence": cont[:10], "events": []},
+                {"id": 1, "parents": [0], "from_bp": 10, "length_bp": 10, "sequence": cont[10:20], "events": []},
+                {"id": 2, "parents": [0], "from_bp": 10, "length_bp": 1, "sequence": off(cont[10]),
+                 "events": [{"at_bp": 11, "type": "label_end", "label": 0, "reason": "dead_end",
+                             "structural_successors": 0}]},
+                {"id": 3, "parents": [1], "from_bp": 20, "length_bp": 10, "sequence": cont[20:30],
+                 "events": leaf_events if events else []},
+                {"id": 4, "parents": [1], "from_bp": 20, "length_bp": 1, "sequence": off(cont[20]),
+                 "events": [{"at_bp": 21, "type": "label_end", "label": 0, "reason": "dead_end",
+                             "structural_successors": 0}]}]
+        counted = "branch" if end in checks._QUORUM_ENDS or text else end
+        arm = {"status": "complete", "complete_to_bp": 100, "segments": segs,
+               "splits": [{"at_bp": 10, "segment": 0, "children": [1, 2], "kind": kinds[0]},
+                          {"at_bp": 20, "segment": 1, "children": [3, 4], "kind": kinds[1]}],
+               "paths": [{"id": 0, "segments": [0, 1, 3], "length_bp": 30, "end_reasons": {counted: 1},
+                          "end_labels": [{"label": 0, "branches": branches, "loss": 0.0}]},
+                         {"id": 1, "segments": [0, 1, 4], "length_bp": 21, "end_reasons": {"dead_end": 1},
+                          "end_labels": [{"label": 0, "branches": branches, "loss": 0.0}]},
+                         {"id": 2, "segments": [0, 2], "length_bp": 11, "end_reasons": {"dead_end": 1},
+                          "end_labels": [{"label": 0, "branches": 1, "loss": 0.0}]}]}
+        body = {"results": [{"outcome": {"walks": "complete"}, "arms": {"right": arm}}],
+                "strategy": echo if echo is not None else {"bounds": {"max_extension_bp": 100}}}
+        return sc, ok_answer(body)
+
+    def test_structural_ends_need_their_conditions(self):
+        # SPEC-labeled-traversal-core §6.4 / §6.6: a structural end short of the radius passes walk_in_record only
+        # where the request, the strategy and the arm show it can have happened; the invariants fail otherwise
+        def judge(sc, ans):
+            return outcome(sc, ans, "walk_in_record")[0], outcome(sc, ans, "invariants")[0]
+        mlb2 = {"branching": {"max_label_branches": 2}}
+        self.assertEqual(judge(*self.structural_walk(strategy=mlb2)), ("pass", "pass"))
+        # the allowance unspent (an off-by-one, a lost lineage counter), or spent on no ambiguous split
+        for kw in ({"branches": 0}, {"branches": 1}, {"kinds": ("ambiguous", "divergence")}):
+            sc, ans = self.structural_walk(strategy=mlb2, **kw)
+            o, d = outcome(sc, ans, "walk_in_record")
+            self.assertEqual((o, outcome(sc, ans, "invariants")[0]), ("fail", "fail"), kw)
+            self.assertIn("a stated stop that cannot have happened", d)
+        # the request's allowance over the echo: a service that dropped the override is not excused by its echo
+        sc, ans = self.structural_walk(strategy=mlb2, branches=0, kinds=("divergence", "divergence"),
+                                       echo={"branching": {"max_label_branches": 0}})
+        self.assertEqual(judge(sc, ans), ("fail", "fail"))
+        sc, ans = self.structural_walk(branches=0, kinds=("divergence", "divergence"),
+                                       echo={"branching": {"max_label_branches": 0}})
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))     # no request value: the echo's 0, nothing to spend
+        sc, ans = self.structural_walk(strategy=mlb2, echo={"branching": {"max_label_branches": 0},
+                                                            "clamped": [{"field": "branching.max_label_branches",
+                                                                         "requested": 2, "effective": 0}]},
+                                       branches=0, kinds=("divergence", "divergence"))
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))     # a stated clamp is the allowance
+        self.assertEqual(judge(*self.structural_walk(strategy={"branching": {"max_label_branches": "unlimited"}})),
+                         ("fail", "fail"))
+        self.assertEqual(judge(*self.structural_walk(strategy={"exhaustive": True})), ("fail", "fail"))
+        # the request's preset over the echo: an exhaustive request whose echo says max_label_branches 2 (a service
+        # that rewrote the preset) is held to the preset's unlimited allowance, as is annotate mode
+        for preset in ({"exhaustive": True}, {"labels": {"mode": "annotate"}}):
+            self.assertEqual(judge(*self.structural_walk(strategy=preset, echo={"branching": {
+                "max_label_branches": 2}})), ("fail", "fail"), preset)
+        self.assertEqual(judge(*self.structural_walk(echo={"exhaustive": False, "branching": {
+            "max_label_branches": 2}})), ("pass", "pass"))
+        # the quorum and split-limit ends need their knob, in either form of the event
+        for end, text in (("minority", None), ("branch", "minority")):
+            self.assertEqual(judge(*self.structural_walk(end=end, text=text)), ("fail", "fail"))
+            self.assertEqual(judge(*self.structural_walk(end=end, text=text, strategy={
+                "branching": {"min_successor_labels": 2}})), ("pass", "pass"))
+            self.assertEqual(judge(*self.structural_walk(end=end, text=text, strategy={
+                "branching": {"min_successor_fraction": 0.2}})), ("pass", "pass"))
+        self.assertEqual(judge(*self.structural_walk(end="below_min_labels")), ("fail", "fail"))
+        self.assertEqual(judge(*self.structural_walk(end="below_min_labels", strategy={
+            "bounds": {"min_live_labels": 2}})), ("pass", "pass"))
+        self.assertEqual(judge(*self.structural_walk(end="split_limit")), ("fail", "fail"))   # 2 of 64 splits
+        self.assertEqual(judge(*self.structural_walk(end="split_limit", strategy={
+            "branching": {"max_splits_per_path": 2}})), ("pass", "pass"))
+        self.assertEqual(judge(*self.structural_walk(end="split_limit", strategy={
+            "branching": {"max_splits_per_path": 3}})), ("fail", "fail"))
+        # a re-entry states its blocked event where the label ended
+        for end in ("edge_reuse", "edge_reuse_rc", "rejoined_seed"):
+            self.assertEqual(judge(*self.structural_walk(end=end)), ("pass", "pass"))
+            self.assertEqual(judge(*self.structural_walk(end=end, blocked=False)), ("fail", "fail"))
+        # a structural reason the path counts without its label_end event at the leaf
+        self.assertEqual(judge(*self.structural_walk(strategy=mlb2, events=False)), ("fail", "fail"))
+
+    def test_branch_taken_without_a_split_under_a_quorum(self):
+        # under a quorum knob the walker raises a lineage's branches on every admissible successor before the
+        # quorum drops the minority ones; one followed successor records no split. Label 0 is ambiguous at 4 bp
+        # within its allowance (max_label_branches 1), its other successor a minority: no split; at 10 bp it is
+        # ambiguous again over its allowance (branch, branches 1), label 1's only successor a minority
+        def walk(msl, branches=1):
+            armo = {"status": "complete", "complete_to_bp": 10,
+                    "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 10, "sequence": "ACGTACGTAC",
+                                  "events": [{"at_bp": 4, "type": "label_end", "label": 0, "reason": "minority",
+                                              "structural_successors": 2},
+                                             {"at_bp": 10, "type": "label_end", "label": 0, "reason": "branch",
+                                              "structural_successors": 2},
+                                             {"at_bp": 10, "type": "label_end", "label": 1, "reason": "minority",
+                                              "structural_successors": 2}]}],
+                    "splits": [],
+                    "paths": [{"id": 0, "segments": [0], "length_bp": 10, "end_reasons": {"branch": 2},
+                               "end_labels": [{"label": 0, "branches": branches, "loss": 0.0},
+                                              {"label": 1, "branches": 0, "loss": 0.0}]}]}
+            strategy = {"direction": "right", "bounds": {"max_extension_bp": 10},
+                        "branching": {"max_label_branches": 1, "min_successor_labels": msl}}
+            sc = {"route": "POST /traverse", "truth": {},
+                  "request": {"seeds": [{"sequence": "A" * 31}], "strategy": strategy}}
+            return sc, ok_answer({"results": [{"outcome": {"walks": "complete"}, "arms": {"right": armo}}],
+                                  "strategy": strategy})
+        self.assertEqual(outcome(*walk(2), "invariants")[0], "pass")
+        o, d = outcome(*walk(2, branches=0), "invariants")
+        self.assertEqual(o, "fail")                 # the allowance is still the lineage's count at the end
+        self.assertIn("a branch end after 0 branch(es) of max_label_branches 1", d)
+        sc, ans = walk(1)                           # no quorum: every branch taken is a split, and no minority
+        o, d = outcome(sc, ans, "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("0 ambiguous split(s)", d)
+
+    def test_structural_knobs_of_the_mcp_arm(self):
+        # the MCP arm asks for its preset with the overrides of the scenario's MCP arguments; the preset mirrors the
+        # scenario's direct request. Its knobs are those overrides, else the direct request, never the echo alone:
+        # a service that lowers the preset's max_label_branches and echoes what it walked (T-walk-0017's MCP answer
+        # with the echo and the branches lowered together) fails, named as a preset mismatch
+        def mcp(branches, echo_mlb, overrides=None):
+            sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 2}}, branches=branches,
+                                           echo={"branching": {"max_label_branches": echo_mlb}})
+            sc["mcp"] = {"tool": "traverse_fetch", "arguments": {"preset": "walk", "overrides": dict(
+                {"bounds": {"max_extension_bp": 100}, "direction": "right"}, **(overrides or {}))}}
+            return sc, ans
+        for check in ("invariants", "walk_in_record"):
+            self.assertEqual(outcome(*mcp(2, 2), check, _arm="mcp")[0], "pass", check)
+            for lowered in (1, 0):
+                o, d = outcome(*mcp(lowered, lowered), check, _arm="mcp")
+                self.assertEqual(o, "fail", (check, lowered))
+                self.assertIn("the service walked with branching.max_label_branches %d, the scenario declares 2: a "
+                              "preset mismatch" % lowered, d)
+            # an override the scenario states is the MCP arm's own declaration; one the service did not apply fails
+            self.assertEqual(outcome(*mcp(1, 1, {"branching": {"max_label_branches": 1}}), check, _arm="mcp")[0],
+                             "pass", check)
+            o, d = outcome(*mcp(1, 1, {"branching": {"max_label_branches": 2}}), check, _arm="mcp")
+            self.assertEqual(o, "fail", check)
+            self.assertIn("the scenario's MCP overrides state 2: an override not applied", d)
+        # a direct arm is held to its request; its echo differing is judged by the end it states
+        o, d = outcome(*mcp(1, 1), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("a branch end after 1 branch(es) of max_label_branches 2", d)
+        # the trie preset mirrors an exhaustive request: no branch end can have happened on either arm
+        sc_trie, a_trie = self.structural_walk(strategy={"exhaustive": True}, echo={"exhaustive": True})
+        sc_trie["mcp"] = {"arguments": {"preset": "trie", "overrides": {"bounds": {"max_extension_bp": 100}}}}
+        self.assertEqual(outcome(sc_trie, a_trie, "invariants", _arm="mcp")[0], "fail")
+        self.assertEqual(outcome(sc_trie, a_trie, "invariants")[0], "fail")
+
+    def test_structural_ends_index_each_arm_once(self):
+        # the route split table is built once per arm, not per path: a wide trie (max_paths 10,000 leaves) would
+        # otherwise cost time quadratic in its paths
+        calls = []
+        real = checks._route_splits
+
+        def counting(armo):
+            calls.append(id(armo))
+            return real(armo)
+        sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 2}})
+        checks._route_splits = counting
+        try:
+            self.assertEqual(outcome(sc, ans, "invariants")[0], "pass")
+            self.assertEqual(len(calls), 1)          # one arm, three paths
+            del calls[:]
+            self.assertEqual(outcome(sc, ans, "walk_in_record")[0], "pass")
+            self.assertEqual(len(calls), 1)
+        finally:
+            checks._route_splits = real
+
+    def test_zero_extension_branch_stop(self):
+        # the zero-extension mutation of T-derived-0001: both arms a 0 bp root whose every label ends
+        # `branch` with branches 0 under max_label_branches 2; the dead_end control fails as well
+        import random
+        rnd = random.Random(5)
+        record = "".join(rnd.choice("ACGT") for _ in range(3000))
+        start, L = 1000, 100
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 3000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}],
+               "strategy": {"direction": "both", "bounds": {"max_extension_bp": 1000},
+                            "branching": {"max_label_branches": 2}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+
+        def zero(reason, branches=0):
+            arms = {}
+            for side in ("left", "right"):
+                labels = list(range(8))
+                seg = {"id": 0, "parents": [], "from_bp": 0, "length_bp": 0, "sequence": "", "labels": labels,
+                       "events": [{"at_bp": 0, "type": "label_end", "label": x, "reason": reason,
+                                   "structural_successors": 2} for x in labels]}
+                arms[side] = {"status": "complete", "complete_to_bp": 1000, "segments": [seg], "splits": [],
+                              "paths": [{"id": 0, "segments": [0], "length_bp": 0, "end_reasons": {reason: 8},
+                                         "end_labels": [{"label": x, "branches": branches, "loss": 0.0}
+                                                        for x in labels]}]}
+            return ok_answer({"results": [{"outcome": {"walks": "partial"}, "arms": arms}],
+                              "strategy": {"bounds": {"max_extension_bp": 1000},
+                                           "branching": {"max_label_branches": 2}}})
+        for ans in (zero("branch"), zero("branch", branches=2), zero("dead_end")):
+            self.assertEqual(outcome(sc, ans, "walk_in_record")[0], "fail")
+        o, d = outcome(sc, zero("branch"), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("a branch end after 0 branch(es) of max_label_branches 2", d)
+        o, d = outcome(sc, zero("branch", branches=2), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("0 ambiguous split(s)", d)
+        self.assertEqual(outcome(sc, zero("dead_end"), "invariants")[0], "pass")
+
+    def test_structural_ends_in_a_graphlet(self):
+        # the graphlet's R records state the lineage's structural successors and branches (SPEC §7.5.2), its G
+        # records the splits: the same conditions as the full result
+        import random
+        rnd = random.Random(13)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}],
+               "strategy": {"direction": "right", "bounds": {"max_extension_bp": 100},
+                            "branching": {"max_label_branches": 2}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+        cont = record[start + L:start + L + 100]
+        off = lambda b: "A" if b != "A" else "C"  # noqa: E731
+
+        def mgt(branches=2, split="1", successors="2"):
+            return "\n".join([
+                "H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *",
+                "A r c 100 u 0 0 1 1 0 steps=31 * 0 * 5 3 3 2 0 32",
+                "G * 0 10 * * * * %s * %s" % (split, cont[:10]),
+                "G 0 10 10 * * * * %s * %s" % (split, cont[10:20]),
+                "G 0 10 1 * * * * * * %s" % off(cont[10]), "T *",
+                "G 1 20 10 * * * * * * %s" % cont[20:30], "T *",
+                "G 1 20 1 * * * * * * %s" % off(cont[20]), "T *",
+                "R 2 0 0 11 D 0 * * 0 1 0",
+                "R 3 0 0 30 R 0 * * %s %d 0" % (successors, branches),
+                "R 4 0 0 21 D 0 * * 0 2 0"]) + "\n"
+
+        def ans(**kw):
+            return ok_answer({"results": [{"outcome": {"walks": "complete"}, "graphlet": mgt(**kw)}],
+                              "strategy": {"bounds": {"max_extension_bp": 100},
+                                           "branching": {"max_label_branches": 2}}})
+        arms = checks.graphlet_arms(mgt())
+        leaf = arms["right"]["paths"][1]
+        self.assertEqual((leaf["length_bp"], leaf["end_reasons"], leaf["end_labels"]),
+                         (30, {"branch": 1}, [{"label": 0, "branches": 2}]))
+        self.assertEqual(arms["right"]["segments"][3]["events"],
+                         [{"at_bp": 30, "type": "label_end", "label": 0, "reason": "branch",
+                           "structural_successors": 2}])
+        for arm in ("mcp", "direct-local"):
+            self.assertEqual(outcome(sc, ans(), "walk_in_record", _arm=arm)[0], "pass")
+            self.assertEqual(outcome(sc, ans(), "invariants", _arm=arm)[0], "pass")
+            for bad in ({"branches": 0}, {"split": "0"}, {"successors": "1"}):
+                self.assertEqual(outcome(sc, ans(**bad), "walk_in_record", _arm=arm)[0], "fail", bad)
+                self.assertEqual(outcome(sc, ans(**bad), "invariants", _arm=arm)[0], "fail", bad)
+
+    def test_every_stored_traverse_answer_states_possible_structural_ends(self):
+        # the engine's stored answers (CLI documents of tiny indexes, full and graphlet, and the mini index's
+        # cells) state only structural ends that can have happened
+        n = ends = 0
+        dirs = [os.path.join(DATA, x) for x in ("documents", os.path.join("documents", "budgets"), "coords",
+                                                 "review3", "r21")] + [self.MINI]
+        for d in dirs:
+            for name in sorted(os.listdir(d)):
+                if not (name.endswith(".full.json") or name.endswith(".graphlet.json") or
+                        name.endswith(".full.json.gz") or name.endswith(".graphlet.json.gz")):
+                    continue
+                stem = name.split(".")[0]
+                opener = (lambda f: gzip.open(f, "rt")) if name.endswith(".gz") else open
+                with opener(os.path.join(d, name)) as f:
+                    doc = json.load(f)
+                req = {}
+                for rq in (stem + ".request.json", stem + ".request.json.gz"):
+                    if os.path.exists(os.path.join(d, rq)):
+                        with ((lambda f: gzip.open(f, "rt")) if rq.endswith(".gz") else open)(os.path.join(d, rq)) as f:
+                            req = json.load(f)
+                sc = {"route": "POST /traverse", "request": req, "truth": {}}
+                ans = ok_answer(doc)
+                for i in range(len(doc.get("results") or [])):
+                    r = checks._result(ans, i)
+                    for side, armo in (r.get("arms") or {}).items():
+                        for p in armo.get("paths") or []:
+                            self.assertEqual(checks._structural_end_problems(sc, ans, armo, p), [], name)
+                            ends += len(set(p.get("end_reasons") or {}) & checks._STATED_STRUCTURAL_ENDS)
+                            n += 1
+        self.assertGreater(n, 500)
+        self.assertGreater(ends, 100)
+
     def test_walk_blocked_by_its_seed(self):
         # G28 (VERIFY-2 item 2, the strict rule): the record's own continuation re-enters the seed at 0 bp, the walk
         # states that block and continues from the repeat's exit: it follows the record
@@ -1960,7 +2555,9 @@ class TraverseChecks(unittest.TestCase):
         arms = checks.graphlet_arms(mgt)
         self.assertEqual(arms["right"]["paths"][0]["end_reasons"], {"branch": 1})
         self.assertEqual(arms["right"]["segments"][0]["events"],
-                         [{"at_bp": 0, "type": "label_end", "label": 0, "reason": "below_min_labels"}])
+                         [{"at_bp": 0, "type": "label_end", "label": 0, "reason": "below_min_labels",
+                           "structural_successors": 1}])
+        self.assertEqual(arms["right"]["paths"][0]["end_labels"], [{"label": 0, "branches": 0}])
 
     def test_traverse_stop(self):
         sc = {"route": "POST /traverse", "truth": {},
@@ -2068,8 +2665,14 @@ class TraverseChecks(unittest.TestCase):
                                      [x for _, x in checks._arm_flanks(arms[side], side)], cell)
                     n += 1
                     # the label_end events derived from the R records (SPEC §7.5.6) are the full result's
+                    # the lineage's branches at each leaf (end_labels) are the full result's
+                    self.assertEqual([[(x["label"], x["branches"]) for x in p.get("end_labels") or []]
+                                      for p in fa["paths"]],
+                                     [[(x["label"], x["branches"]) for x in p["end_labels"]]
+                                      for p in arms[side]["paths"]], cell)
                     for sf, sg in zip(fa["segments"], arms[side]["segments"]):
-                        ends = lambda x: sorted((e["at_bp"], e.get("label"), e["reason"])  # noqa: E731
+                        ends = lambda x: sorted((e["at_bp"], e.get("label"), e["reason"],  # noqa: E731
+                                                 e.get("structural_successors"))
                                                 for e in x.get("events") or [] if e.get("type") == "label_end")
                         self.assertEqual(ends(sf), ends(sg), cell)
                         label_ends += len(ends(sf))

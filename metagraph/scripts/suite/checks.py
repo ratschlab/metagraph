@@ -563,8 +563,10 @@ def _count_text(c: Any) -> str:
 
 def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]:
     """What is wrong with entry i's stated withheld reason, cut reason, stop and time limitation: each must be one
-    SPEC-pattern-search §7.5 / §7.6 lists, and must have happened by what the answer shows (README, "Stated
-    reasons"). Nothing is judged where the answer does not show the quantity (a missing cap, work or timing)."""
+    SPEC-pattern-search §7.5 / §7.6 lists, possible for the request (its mode, whether it reads annotation, has a
+    memory account, a predicate, a path search) and must have happened by what the answer shows (README, "Stated
+    reasons" and "Lane S6g1"). Nothing is judged where the answer does not show the quantity (a missing cap, work or
+    timing)."""
     probs: List[str] = []
     if not isinstance(e, dict) or "counts" not in e or "error" in e:
         return probs
@@ -591,56 +593,106 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     steps_sum = sum(steps) if steps and all(isinstance(v, int) for v in steps) else None
     steps_short = max_steps is not None and steps_sum is not None and steps_sum < max_steps
     where = "p%d" % i
+    # what the request reads and holds: annotation rows are read only with labels all in a retrieval mode (§14.1:
+    # mode count reads none whatever the projection), a supported-path search (§20.3) or a predicate (§19.6, in
+    # every mode); the label-free path (mode count, or labels none) has a memory account only for a path search, and
+    # labels all in a retrieval mode and a predicate add one (§7.6 "Memory", §14.4, §19.9)
+    mode = e.get("mode", req.get("mode", "all_or_count"))
+    ls = req.get("long_search")
+    path_search = long_ and ls in ("paths", "supported_paths")
+    labels_read = labels == "all" and mode != "count"
+    reads_annotation = labels_read or (long_ and ls == "supported_paths") or predicate
+    memory_account = labels_read or predicate or path_search
+    nothing_read = "a request that reads no annotation (labels %r in mode %s, no predicate, long_search %r)" % (
+        labels, mode, ls)
+    no_account = "a request without a memory account (labels %r in mode %s, no predicate, no path search: " \
+                 "§7.6)" % (labels, mode)
+    if e.get("rows_refused") and not reads_annotation:
+        probs.append("%s: rows_refused on %s" % (where, nothing_read))
 
     w = e.get("withheld")
     wr = w.get("reason") if isinstance(w, dict) else (w if isinstance(w, str) else None)
+    if wr not in (None, "paths_later_increment", "anchors_above_threshold") and mode != "all_or_count":
+        # only all_or_count withholds, but for these two of patterns longer than k (§7.5, §12.1)
+        probs.append("%s: withheld %r in mode %s" % (where, wr, mode))
     if wr == "count_above_threshold":
         # exact (or, without the mask, bounds) and above the threshold: a lower bound is threshold_crossed's
-        if main_cap is not None and not ((main or {}).get("relation") in ("exact", "bounds") and
-                                         _count_above(main, main_cap)):
+        constant_true = (e.get("selection") or {}).get("pass") == "constant" and \
+            (body.get("predicate") or {}).get("normal_form") is True
+        if predicate and not long_ and not constant_true:
+            # a normal form that is the constant `true` runs the unfiltered request with the engine's own thresholds
+            # (§19.6: `true` is the unfiltered request), whose count_above_threshold stands; `false` selects nothing
+            # and withholds nothing
+            probs.append("%s: withheld count_above_threshold with a predicate on L <= k (§19.8: its raw threshold "
+                         "is predicate_above_threshold)" % where)
+        elif main_cap is not None and not ((main or {}).get("relation") in ("exact", "bounds") and
+                                           _count_above(main, main_cap)):
             probs.append("%s: withheld count_above_threshold with %s, not above the threshold %s" % (
                 where, _count_text(main), int(main_cap)))
     elif wr == "threshold_crossed":
         if not threshold:
             probs.append("%s: withheld threshold_crossed without stop_at_threshold" % where)
+        elif sr not in _THRESHOLD_STOPS:
+            probs.append("%s: withheld threshold_crossed without a stop_at_threshold stop (stop %r)" % (where, sr))
     elif wr == "discovery_budget":
         if sr != "max_steps":
             probs.append("%s: withheld discovery_budget without a max_steps stop (stop %r)" % (where, sr))
         elif steps_short:
             probs.append("%s: withheld discovery_budget after %d steps of max_steps %d" % (where, steps_sum, max_steps))
+        elif (main or {}).get("relation") == "exact":
+            probs.append("%s: withheld discovery_budget with %s: a count the stop interrupted is not exact (§7.4)" % (
+                where, _count_text(main)))
     elif wr == "deadline":
         if not time_limited:
             probs.append("%s: withheld deadline without a time stop or time limitation (stop %r)" % (where, sr))
     elif wr == "paths_later_increment":
-        if not long_ or req.get("long_search") in ("paths", "supported_paths"):
+        if not long_ or ls in ("paths", "supported_paths"):
             probs.append("%s: withheld paths_later_increment for a pattern of L <= k or with long_search %r" % (
-                where, req.get("long_search")))
+                where, ls))
+        elif (cnt("anchors") or {}).get("relation") == "exact" and (cnt("anchors") or {}).get("value") == 0:
+            probs.append("%s: withheld paths_later_increment with the anchors exact 0 (§7.7: that empty answer is "
+                         "complete)" % where)
     elif wr == "anchors_above_threshold":
         cap = _number(_limit(sc, body, "max_anchors"))
-        if cap is not None and not _count_above(cnt("anchors"), cap):
+        if not path_search:
+            probs.append("%s: withheld anchors_above_threshold without a path search (long_search %r: §12.1)" % (
+                where, ls))
+        elif cap is not None and not _count_above(cnt("anchors"), cap):
             probs.append("%s: withheld anchors_above_threshold with anchors %s, not above max_anchors %s" % (
                 where, _count_text(cnt("anchors")), int(cap)))
     elif wr == "annotation_budget":
-        if sr not in ("max_annotation_work", "max_memory") and not e.get("rows_refused"):
+        if not reads_annotation:
+            probs.append("%s: withheld annotation_budget on %s" % (where, nothing_read))
+        elif sr not in ("max_annotation_work", "max_memory") and not e.get("rows_refused"):
             probs.append("%s: withheld annotation_budget without an annotation stop or a refused row" % where)
     elif wr == "anchor_labels_truncated":
-        if not e.get("anchors_truncated"):
+        if labels != "all":
+            probs.append("%s: withheld anchor_labels_truncated without labels all (labels %r: §14.6)" % (where, labels))
+        elif not e.get("anchors_truncated"):
             probs.append("%s: withheld anchor_labels_truncated without anchors_truncated" % where)
     elif wr == "output_budget":
-        if sr != "max_memory" and e.get("labels_status") != "output_budget":
+        if not memory_account:
+            probs.append("%s: withheld output_budget on %s" % (where, no_account))
+        elif sr != "max_memory" and e.get("labels_status") != "output_budget":
             probs.append("%s: withheld output_budget without a memory stop" % where)
     elif wr == "predicate_above_threshold":
         cap = _number(_limit(sc, body, "max_predicate_contexts"))
-        if cap is not None and not any(_count_above(cnt(n), cap) for n in ("contexts", "paths", "supported_paths")):
+        if not predicate:
+            probs.append("%s: withheld predicate_above_threshold without a predicate" % where)
+        elif cap is not None and not any(_count_above(cnt(n), cap) for n in ("contexts", "paths", "supported_paths")):
             probs.append("%s: withheld predicate_above_threshold with %s, not above max_predicate_contexts %s" % (
                 where, _count_text(raw), int(cap)))
     elif wr == "selected_above_threshold":
         cap = _number(_limit(sc, body, "max_paths" if long_ else "max_contexts"))
-        if cap is not None and not _count_above(cnt("selected"), cap):
+        if not predicate:
+            probs.append("%s: withheld selected_above_threshold without a predicate" % where)
+        elif cap is not None and not _count_above(cnt("selected"), cap):
             probs.append("%s: withheld selected_above_threshold with selected %s, not above %s" % (
                 where, _count_text(cnt("selected")), int(cap)))
     elif wr == "predicate_budget":
-        if sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused"):
+        if not predicate:
+            probs.append("%s: withheld predicate_budget without a predicate" % where)
+        elif sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused"):
             probs.append("%s: withheld predicate_budget without a predicate stop or a refused row" % where)
     elif wr is not None:
         probs.append("%s: withheld %r, a reason SPEC-pattern-search §7.5 does not list" % (where, wr))
@@ -661,19 +713,29 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         if not time_limited:
             probs.append("%s: cut time without a time stop or time limitation (stop %r)" % (where, sr))
     elif cr == "max_memory":
-        if sr != "max_memory" and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
+        if not memory_account:
+            probs.append("%s: cut max_memory on %s" % (where, no_account))
+        elif sr != "max_memory" and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
             probs.append("%s: cut max_memory without a memory stop or a refused row" % where)
     elif cr == "max_paths":
         cap = _number(_limit(sc, body, "max_paths"))
         c = cnt("selected") if predicate and cnt("selected") else main
-        if cap is not None and sr != "max_paths" and _count_above(c, cap) is False:
+        if not path_search:
+            probs.append("%s: cut max_paths without a path search (long_search %r)" % (where, ls))
+        elif cap is not None and sr != "max_paths" and _count_above(c, cap) is False:
             probs.append("%s: cut max_paths with %s, within max_paths %s" % (where, _count_text(c), int(cap)))
     elif cr == "max_annotation_work":
-        if sr != "max_annotation_work":
+        if not (long_ and ls == "supported_paths"):
+            # labels all states an annotation stop without a cut (§7.5); only the supported-path search cuts so
+            probs.append("%s: cut max_annotation_work without a supported-path search (long_search %r: §20.5)" % (
+                where, ls))
+        elif sr != "max_annotation_work":
             probs.append("%s: cut max_annotation_work without that stop (stop %r)" % (where, sr))
     elif cr == "max_predicate_contexts":
         cap = _number(_limit(sc, body, "max_predicate_contexts"))
-        if cap is not None and sr != "max_predicate_contexts" and _count_above(raw, cap) is False:
+        if not predicate:
+            probs.append("%s: cut max_predicate_contexts without a predicate" % where)
+        elif cap is not None and sr != "max_predicate_contexts" and _count_above(raw, cap) is False:
             probs.append("%s: cut max_predicate_contexts with %s, within %s" % (where, _count_text(raw), int(cap)))
     elif cr == "max_predicate_work":
         if sr != "max_predicate_work":
@@ -688,12 +750,31 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         if steps_short:
             probs.append("%s: a max_steps stop after %d steps of max_steps %d (the steps of all patterns reach it: "
                          "SPEC-pattern-search §7.6)" % (where, steps_sum, max_steps))
-    elif sr in ("max_contexts", "max_anchors", "max_paths", "max_predicate_contexts"):
+    elif sr in _THRESHOLD_STOPS:
+        stopped = _threshold_stop_count(sr, stop.get("phase"), cnt, main, predicate, long_)
         if not threshold:
             probs.append("%s: a %s stop (stop_at_threshold) without stop_at_threshold" % (where, sr))
+        elif sr == "max_predicate_contexts" and not predicate:
+            probs.append("%s: a max_predicate_contexts stop without a predicate" % where)
+        elif sr == "max_paths" and not path_search:
+            probs.append("%s: a max_paths stop without a path search (long_search %r)" % (where, ls))
+        elif sr == "max_anchors" and not long_:
+            probs.append("%s: a max_anchors stop of a pattern of L <= k" % where)
+        elif sr == "max_contexts" and long_ and not predicate:
+            probs.append("%s: a max_contexts stop of a pattern longer than k" % where)
+        elif (stopped or {}).get("relation") == "exact":
+            # §7.4: exact means no step, time or threshold stop touched the count
+            probs.append("%s: a %s stop (stop_at_threshold) with %s: a count the stop interrupted is not exact "
+                         "(§7.4)" % (where, sr, _count_text(stopped)))
+        else:
+            m = _threshold_value_problem(sc, body, sr, stop.get("phase"), stopped, predicate, long_)
+            if m:
+                probs.append("%s: %s" % (where, m))
+    elif sr == "max_memory" and not memory_account:
+        probs.append("%s: a max_memory stop of %s" % (where, no_account))
     elif sr == "max_annotation_work":
-        if labels != "all" and req.get("long_search") != "supported_paths" and not predicate:
-            probs.append("%s: a max_annotation_work stop of a search that reads no annotation" % where)
+        if not reads_annotation:
+            probs.append("%s: a max_annotation_work stop of %s" % (where, nothing_read))
     elif sr == "max_predicate_work":
         if not predicate:
             probs.append("%s: a max_predicate_work stop without a predicate" % where)
@@ -704,6 +785,54 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         if m:
             probs.append(m)
     return probs
+
+
+# the stops of stop_at_threshold (SPEC-pattern-search §7.6, §12.1, §19.8, §20.5, §20.9)
+_THRESHOLD_STOPS = ("max_contexts", "max_anchors", "max_paths", "max_predicate_contexts")
+
+
+def _threshold_stop_count(reason: str, phase: Any, cnt: Callable[[str], Optional[dict]], main: Optional[dict],
+                          predicate: bool, long_: bool) -> Optional[dict]:
+    """The count a stop_at_threshold stop of |reason| interrupted: max_contexts the raw contexts in discovery (a
+    constant normal form runs the engine's own threshold), the selected ones in the selection (§19.6);
+    max_predicate_contexts the raw contexts in discovery, the supported paths whose walks it held (§20.9);
+    max_anchors the anchors; max_paths the paths (with a predicate the selected supported paths, §20.9)."""
+    if reason == "max_contexts":
+        return cnt("selected") if phase == "selection" else cnt("contexts")
+    if reason == "max_predicate_contexts":
+        return cnt("contexts") if not long_ else (cnt("supported_paths") or cnt("paths"))
+    if reason == "max_anchors":
+        return cnt("anchors")
+    if reason == "max_paths":
+        return cnt("selected") if predicate and cnt("selected") else main
+    return None
+
+
+def _threshold_value_problem(sc: dict, body: dict, reason: str, phase: Any, stopped: Optional[dict],
+                             predicate: bool, long_: bool) -> Optional[str]:
+    """Why a discovery stop of stop_at_threshold on the contexts of a pattern of L <= k cannot have happened with the
+    count it states, or None: on a masked BASIC or CANONICAL graph discovery stops once its running lower bound
+    passes the threshold (max_contexts, with a predicate max_predicate_contexts: §7.5, §19.6), and the `at_least`
+    value is that bound (the engine's threshold_crossed compares the sum of the counted ranges' lower bounds, which
+    the halted count states: pattern_search.cpp running_lower, tally). Not judged on a graph without its mask (the
+    running upper bound decides, the value is the lower parts only: fixture unmasked_stop_at_threshold, at_least 0)
+    or on a PRIMARY graph (an even-k wrapped union's bound need not be the stated value: §18)."""
+    idx = body.get("index") if isinstance(body.get("index"), dict) else {}
+    if long_ or phase not in (None, "discovery") or idx.get("counting") == "upper_bound" or \
+            idx.get("graph_mode") not in ("basic", "canonical"):
+        return None
+    if reason == "max_contexts" and not predicate:
+        cap_name = "max_contexts"
+    elif reason == "max_predicate_contexts" and predicate:
+        cap_name = "max_predicate_contexts"
+    else:
+        return None
+    cap = _number(_limit(sc, body, cap_name))
+    if cap is None or not isinstance(stopped, dict) or stopped.get("relation") != "at_least" or \
+            not isinstance(stopped.get("value"), (int, float)) or stopped["value"] > cap:
+        return None
+    return "a %s stop (stop_at_threshold) with contexts %s, not past %s %d (§7.5: the running lower bound passed " \
+           "it)" % (reason, _count_text(stopped), cap_name, int(cap))
 
 
 def _hiding(sc: dict, ans: dict, i: int, e: dict) -> Tuple[str, List[str]]:
@@ -852,9 +981,23 @@ def _resource_end_problem(r: dict, armo: dict, side: str, reasons: Iterable[str]
         side, named, trig)
 
 
+def _resource_end_below_frontier(armo: dict, side: str, p: dict) -> Optional[str]:
+    """Why path |p| cannot have ended by the resource reason it states, or None: a cap ends walks at the level it
+    trips, at or past the arm's complete_to_bp, and "every path that ended before complete_to_bp ended for the
+    reported semantic reason" (SPEC-labeled-traversal-core §6.10); not judged where the arm states no
+    complete_to_bp."""
+    ends = ({p.get("path_reason")} | set(p.get("end_reasons") or {})) & _RESOURCE_ENDS
+    ctb, L = armo.get("complete_to_bp"), p.get("length_bp")
+    if not ends or not _finite(ctb) or not _finite(L) or L >= ctb:
+        return None
+    return "%s: path %s ended by %s at %d bp, below the arm's complete_to_bp %d (every path that ended before it " \
+           "ended for a semantic reason: §6.10)" % (side, p.get("id"), "/".join(sorted(ends)), L, ctb)
+
+
 def _path_resource_problems(sc: dict, r: dict, i: int) -> List[str]:
     """_resource_end_problem for every path of the requested arms of seed result |r| (its path_reason and the label
-    end reasons it counts: a resource reason censors the path's labels with the same reason, §7.0)."""
+    end reasons it counts: a resource reason censors the path's labels with the same reason, §7.0), and
+    _resource_end_below_frontier."""
     probs: List[str] = []
     for side in _arms_of(sc, i):
         armo = (r.get("arms") or {}).get(side)
@@ -868,6 +1011,9 @@ def _path_resource_problems(sc: dict, r: dict, i: int) -> List[str]:
                 m = _resource_end_problem(r, armo, side, ends)
                 if m:
                     probs.append("seed %d %s (path %s)" % (i, m, p.get("id")))
+            m = _resource_end_below_frontier(armo, side, p)
+            if m:
+                probs.append("seed %d %s" % (i, m))
     return probs
 
 
@@ -1291,13 +1437,36 @@ def check_source_placement(sc, ans, a, arm):
             raise Missing("occurrence_list")
         for o in occ:
             if o.get("record") == t["record"] and o.get("nt_coords") == coords and o.get("strand") == strand:
-                if "seq_id" in o and o["seq_id"] != t["seq_id"]:
-                    return FAIL, "record %s placed with seq_id %s, the index's is %s" % (t["record"], o["seq_id"], t["seq_id"])
-                if o.get("nt_length") not in (None, t["record_length"]):
-                    return FAIL, "nt_length %s, the record's length is %s" % (o.get("nt_length"), t["record_length"])
+                m = _occurrence_problem(o, t)
+                if m:
+                    return FAIL, m
                 return PASS, "%s %s %s placed (offset %d)" % (t["record"], coords, strand, r["offset"])
     return FAIL, "no occurrence %s %s %s under taxid %s on %d source contexts" % (
         t["record"], coords, strand, t["taxid"], len(found))
+
+
+def _coords_problem(o: dict) -> Optional[str]:
+    """Why occurrence |o|'s 1-based inclusive nt_coords do not lie in its own record (1 <= start <= end <=
+    nt_length, SPEC-pattern-search §14.3), or None (also where it states no coordinates or no length)."""
+    m = re.fullmatch(r"(\d+)-(\d+)", str(o.get("nt_coords")))
+    n = o.get("nt_length")
+    if not m or not isinstance(n, int) or isinstance(n, bool):
+        return None
+    a, b = int(m.group(1)), int(m.group(2))
+    if 1 <= a <= b <= n:
+        return None
+    return "occurrence of %s at %s on %s, outside its record of nt_length %d" % (o.get("record"), o.get("nt_coords"),
+                                                                                  o.get("strand"), n)
+
+
+def _occurrence_problem(o: dict, t: dict) -> Optional[str]:
+    """What is wrong with the truth record's occurrence |o| (its record, coordinates and strand matched): its seq_id
+    must be the index's for the record and its nt_length the record's length, which holds its coordinates."""
+    if "seq_id" in o and o["seq_id"] != t.get("seq_id"):
+        return "record %s placed with seq_id %s, the index's is %s" % (t["record"], o["seq_id"], t.get("seq_id"))
+    if o.get("nt_length") not in (None, t.get("record_length")):
+        return "nt_length %s, the record's length is %s" % (o.get("nt_length"), t.get("record_length"))
+    return _coords_problem(o)
 
 
 def _paths_with_sequence(e: dict, seq: str) -> List[dict]:
@@ -1344,8 +1513,16 @@ def check_path_record_verified(sc, ans, a, arm):
             continue
         if lab.get("support") != "record_verified":
             return FAIL, "taxid %s carries the path with support %r" % (t["taxid"], lab.get("support"))
+        # every occurrence the label verifies lies in its record; the record's own is placed with the index's
+        # seq_id and the record's length (as source_placement places a context)
+        outside = next((m for m in (_coords_problem(o) for o in lab.get("occurrence_list") or []) if m), None)
+        if outside:
+            return FAIL, "taxid %s: %s" % (t["taxid"], outside)
         for o in lab.get("occurrence_list") or []:
             if o.get("record") == t["record"] and o.get("nt_coords") == coords and o.get("strand") == strand:
+                m = _occurrence_problem(o, t)
+                if m:
+                    return FAIL, m
                 return PASS, "%s %s %s record_verified" % (t["record"], coords, strand)
         return FAIL, "taxid %s record_verified, but no occurrence %s %s %s (%s)" % (
             t["taxid"], t["record"], coords, strand, (lab.get("occurrence_list") or [])[:3])
@@ -1827,6 +2004,24 @@ def _pattern_entry_problems(sc: dict, i: int, e: dict, limits: dict, sticky: Opt
             keys.append((0, (r.get("nodes") or [0])[0], _ORIENT_RANK.get(strand, 3), r["sequence"]))
     if keys != sorted(keys):
         probs.append("p%d: results not in answer order" % i)
+    # a context is one k-mer at an offset in an orientation, listed at one level (SPEC-pattern-search §7.1,
+    # §21.4), a path its nodes in an orientation (§12.1): each is listed once, whatever the order says of equal keys
+    # (a copy in place of a distinct result keeps the list's length, which counts_consistent compares)
+    seen: Dict[tuple, int] = {}
+    for j, r in enumerate(res):
+        o = r.get("strand", r.get("orientation"))
+        if "kmer" in r:
+            ident = ("context", r.get("node"), r.get("kmer"), r.get("offset"), o)
+        elif "sequence" in r:
+            ident = ("path", tuple(r.get("nodes") or ()), r.get("sequence"), o)
+        else:
+            continue
+        if ident in seen:
+            probs.append("p%d r%d: the result of r%d listed again (%s %s)" % (
+                i, j, seen[ident], o, ("offset %s of %s" % (r.get("offset"), r.get("kmer"))) if "kmer" in r
+                else "path %s..." % str(r.get("sequence"))[:20]))
+        else:
+            seen[ident] = j
     if e.get("retrieval_complete"):
         name = _primary_count_name(e, req)
         c = counts.get(name)
@@ -1956,6 +2151,17 @@ def check_resolve_runs(sc, ans, a, arm):
                 x, a["label"], ks, runs[:4], (body.get("graph_runs") or [])[:4], x)
         return PASS, "stopped after %s of %s k-mers: the prefix fully supported by %s" % (
             x, stop.get("query_kmers"), a["label"])
+    outcome, detail = _resolve_profile(a, lab, runs, num, ks)
+    if a.get("prefix_if_stopped") and not stop and outcome != FAIL:
+        # the scenario's property is the stated stop (SPEC §4.5: a stop answers the resolve of a prefix): a complete
+        # answer holds the profile but never exercised it
+        return INCONCLUSIVE, "no stop happened: the prefix property was not tested (%s)" % detail
+    return outcome, detail
+
+
+def _resolve_profile(a: dict, lab: dict, runs: list, num: Any, ks: Any) -> Tuple[str, str]:
+    """resolve_runs' assertions on a complete profile of label a["label"]: full support, covered intervals, run
+    ends and starts, exact runs, the supported k-mers."""
     if a.get("full"):
         if ks != num or runs != [[0, num]]:
             return FAIL, "label %s: %s of %s k-mers, runs %s (expected one run [0, %s])" % (a["label"], ks, num, runs[:4], num)
@@ -2186,11 +2392,12 @@ def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bou
 def graphlet_arms(mgt: str) -> Dict[str, dict]:
     """The arms of an MGT v1 body (SPEC-labeled-traversal-core.md §7.5) in the shape of a `detail: full` arm, as
     far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation, events:
-    the blocked successors of the E records and the label_end events of the R records; labels, labels_total and
-    labels_truncated: the entry sets of the G records, _graphlet_label_sets, left out when the body's sets cannot be
-    read), splits (non-empty when a segment ends in a split), branch_events (the V records), and paths (one per leaf,
-    the chain through parents[0], length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf
-    with to_bp = the path length, path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
+    the blocked successors of the E records and the label_end events of the R records with their structural
+    successors; labels, labels_total and labels_truncated: the entry sets of the G records, _graphlet_label_sets,
+    left out when the body's sets cannot be read), splits (non-empty when a segment ends in a split), branch_events
+    (the V records), and paths (one per leaf, the chain through parents[0], length_bp = from_bp + length_bp,
+    end_reasons and end_labels (label, branches) from the runs anchored at the leaf with to_bp = the path length,
+    path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
     arms: Dict[str, dict] = {}
     cur = None
     seg = None
@@ -2256,8 +2463,13 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
         elif rec == "T" and seg is not None:
             cur["_leaves"][seg["id"]] = None if f[1] == "*" else _END_CODES.get(f[1][0], f[1])
         elif rec == "R":
-            cur["_runs"].append({"segment": int(f[1]), "label": int(f[2]), "from_bp": int(f[3]), "to_bp": int(f[4]),
-                                 "end": f[5]})
+            run = {"segment": int(f[1]), "label": int(f[2]), "from_bp": int(f[3]), "to_bp": int(f[4]), "end": f[5]}
+            # R ... <structural_successors|*> <branches> <loss>: the lineage's values when the run ended (§7.5.2)
+            if len(f) > 10 and f[9].isdigit():
+                run["structural_successors"] = int(f[9])
+            if len(f) > 10 and f[10].isdigit():
+                run["branches"] = int(f[10])
+            cur["_runs"].append(run)
     for side, a in arms.items():
         segs = a["segments"]
         try:
@@ -2272,9 +2484,11 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             end = r["end"]
             if end in ("m", "Lw") or not 0 <= r["segment"] < len(segs):
                 continue
-            segs[r["segment"]].setdefault("events", []).append(
-                {"at_bp": r["to_bp"], "type": "label_end", "label": r["label"],
-                 "reason": _END_QUALIFIERS.get(end) or _END_CODES.get(end[0], end)})
+            ev = {"at_bp": r["to_bp"], "type": "label_end", "label": r["label"],
+                  "reason": _END_QUALIFIERS.get(end) or _END_CODES.get(end[0], end)}
+            if "structural_successors" in r:
+                ev["structural_successors"] = r["structural_successors"]
+            segs[r["segment"]].setdefault("events", []).append(ev)
         for leaf, reason in sorted(a["_leaves"].items()):
             chain = [leaf]
             while segs[chain[-1]]["parents"]:
@@ -2282,13 +2496,15 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             chain.reverse()
             length = segs[leaf]["from_bp"] + segs[leaf]["length_bp"]
             ends: Dict[str, int] = {}
+            end_labels = []
             for r in a["_runs"]:
                 if r["segment"] == leaf and r["to_bp"] == length and r["end"] != "m":
                     # the label's end reason as the full result counts it: the code's enum (Dh -> dead_end)
                     name = _END_CODES.get(r["end"][0], r["end"])
                     ends[name] = ends.get(name, 0) + 1
+                    end_labels.append({"label": r["label"], "branches": r.get("branches")})
             a["paths"].append({"id": len(a["paths"]), "segments": chain, "length_bp": length, "end_reasons": ends,
-                               "path_reason": reason})
+                               "end_labels": sorted(end_labels, key=lambda x: x["label"]), "path_reason": reason})
         for k in ("_runs", "_leaves", "_side"):
             a.pop(k, None)
     return arms
@@ -2464,12 +2680,240 @@ def _arms_of(sc: dict, i: int) -> List[str]:
 
 
 # path ends that may legitimately stop a walk along its record short of the radius and the record's end: a stated
-# branch (a split the strategy does not follow further) or the walk meeting its own edges again (a repeat)
+# branch (a split the strategy does not follow further) or the walk meeting its own edges again (a repeat), each
+# only where it can have happened (_structural_end_problems)
 _STATED_STRUCTURAL_ENDS = {"branch", "edge_reuse", "edge_reuse_rc", "rejoined_seed", "minority", "below_min_labels",
                            "split_limit"}
 # a stated resource limit: the walk stopped before it could show the property (inconclusive, never a pass)
 _RESOURCE_ENDS = {"max_steps", "max_live_paths", "max_paths", "max_output_bp", "time_budget", "resource_limit",
                   "beam_pruned"}
+# the quorum and split-limit ends of SPEC-labeled-traversal-core §6.4: a path counts them as `branch`
+# (end_reasons; §13 I3 note 2), its label_end event names the stop (`reason`, or `text` beside reason `branch`; a
+# graphlet's R qualifier Rm / Rb / Rs)
+_QUORUM_ENDS = {"minority", "below_min_labels", "split_limit"}
+# the ends of a step not taken (§6.6), each stated by a blocked event of its reason where the label ended:
+# "blocked continuations are always reported"
+_BLOCKED_ENDS = {"edge_reuse", "edge_reuse_rc", "rejoined_seed"}
+# the defaults (§5) of the knobs a structural end needs
+_STRUCTURAL_KNOBS = {("branching", "max_label_branches"): 0, ("branching", "max_splits_per_path"): 64,
+                     ("branching", "min_successor_labels"): 1, ("branching", "min_successor_fraction"): 0.0,
+                     ("bounds", "min_live_labels"): 1}
+# the same knobs under the exhaustive preset (§6.9: unlimited branches and splits, no quorum) and in annotate mode
+# (§5: no lineage to count, the quorum knobs refused)
+_PRESET_KNOBS = {("branching", "max_label_branches"): "unlimited", ("branching", "max_splits_per_path"): "unlimited",
+                 ("branching", "min_successor_labels"): 1, ("branching", "min_successor_fraction"): 0.0,
+                 ("bounds", "min_live_labels"): 1}
+
+
+def _requested_strategies(sc: dict, arm: Optional[str]) -> List[Tuple[str, dict]]:
+    """The strategies that declare the walk an arm asked for, in order, each (whose, strategy): on the MCP arm the
+    overrides of the scenario's MCP arguments (the knobs it sends beside its preset), then the scenario's direct
+    request, the walk the preset mirrors; on a direct arm the request."""
+    out: List[Tuple[str, dict]] = []   # ("overrides" | "request", strategy)
+    if arm == "mcp":
+        args = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
+        ov = args.get("overrides") if isinstance(args, dict) else None
+        if isinstance(ov, dict):
+            out.append(("overrides", ov))
+    st = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
+    if isinstance(st, dict):
+        out.append(("request", st))
+    return out
+
+
+def _declared_knob(sc: dict, group: str, name: str, arm: Optional[str]) -> Tuple[Optional[str], Any]:
+    """(whose, value) of strategy.<group>.<name> as the arm's requests declare it (_requested_strategies, whose
+    "overrides" or "request"): a knob
+    one states, else the default of the first one's exhaustive preset or annotate mode (§6.9); (None, None) where
+    none declares it."""
+    reqs = _requested_strategies(sc, arm)
+    for whose, st in reqs:
+        g = st.get(group)
+        if isinstance(g, dict) and name in g:
+            return whose, g[name]
+    for whose, st in reqs:
+        if st.get("exhaustive") is True or (st.get("labels") or {}).get("mode") == "annotate":
+            return whose, _PRESET_KNOBS.get((group, name))
+    return None, None
+
+
+def _clamped_knob(ans: dict, group: str, name: str) -> Tuple[bool, Any]:
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    for c in echo.get("clamped") or []:
+        if isinstance(c, dict) and c.get("field") == "%s.%s" % (group, name) and "effective" in c:
+            return True, c["effective"]
+    return False, None
+
+
+def _strategy_knob(sc: dict, ans: dict, group: str, name: str, arm: Optional[str] = None) -> Any:
+    """The value of strategy.<group>.<name> the walk is held to (SPEC-labeled-traversal-core §5): a clamp's
+    effective value (strategy.clamped), else what the arm's requests declare (_declared_knob: on the MCP arm its
+    overrides, then the scenario's direct request, whose walk the preset mirrors), else the answer's echo, else the
+    default (the echo's preset or mode, else §5's). The declaration comes before the echo: a knob a service dropped
+    or rewrote without a clamp, a preset's included, is held to what the scenario asked, never excused by its own
+    echo (_preset_mismatch names such a difference)."""
+    clamped, value = _clamped_knob(ans, group, name)
+    if clamped:
+        return value
+    whose, value = _declared_knob(sc, group, name, arm)
+    if whose is not None:
+        return value
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    g = echo.get(group)
+    if isinstance(g, dict) and name in g:
+        return g[name]
+    if echo.get("exhaustive") is True or (echo.get("labels") or {}).get("mode") == "annotate":
+        return _PRESET_KNOBS.get((group, name))
+    return _STRUCTURAL_KNOBS.get((group, name))
+
+
+def _preset_mismatch(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
+    """On the MCP arm, every structural walk knob whose echo differs from what the scenario declares for it (its MCP
+    overrides, else its direct request, _declared_knob) without a clamp: the service walked another strategy than
+    the scenario's, a preset or override it changed or dropped (a deliberate preset change needs the manifest to
+    follow it)."""
+    if arm != "mcp":
+        return []
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    out = []
+    for group, name in _STRUCTURAL_KNOBS:
+        g = echo.get(group)
+        if not isinstance(g, dict) or name not in g or _clamped_knob(ans, group, name)[0]:
+            continue
+        whose, declared = _declared_knob(sc, group, name, arm)
+        if whose == "overrides" and g[name] != declared:
+            out.append("the service walked with %s.%s %r, the scenario's MCP overrides state %r: an override not "
+                       "applied" % (group, name, g[name], declared))
+        elif whose == "request" and g[name] != declared:
+            out.append("the service walked with %s.%s %r, the scenario declares %r: a preset mismatch" % (
+                group, name, g[name], declared))
+    return out
+
+
+def _route_splits(armo: dict) -> Callable[[Any], Tuple[int, int]]:
+    """segment id -> (the most ambiguous splits, the most splits) any root-to-segment route passes before reaching
+    the segment, through any parent at a merge. A split sits at the end of its segment (SPEC §7.1 splits[].segment;
+    a graphlet's G split flag); a split whose kind is not stated counts as ambiguous."""
+    segs = {s.get("id"): s for s in armo.get("segments") or [] if isinstance(s, dict)}
+    amb: Dict[Any, bool] = {}
+    for sp in armo.get("splits") or []:
+        if not isinstance(sp, dict):
+            continue
+        kind = sp.get("kind")
+        amb[sp.get("segment")] = kind != "divergence" if kind is not None else sp.get("ambiguous") is not False
+    memo: Dict[Any, Tuple[int, int]] = {}
+
+    def most(sid: Any) -> Tuple[int, int]:
+        if sid in memo:
+            return memo[sid]
+        memo[sid] = (0, 0)   # a cycle (never in a valid answer) counts nothing
+        a = n = 0
+        for par in (segs.get(sid) or {}).get("parents") or []:
+            pa, pn = most(par)
+            if par in amb:
+                pa, pn = pa + (1 if amb[par] else 0), pn + 1
+            a, n = max(a, pa), max(n, pn)
+        memo[sid] = (a, n)
+        return memo[sid]
+    return most
+
+
+def _finite(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _arm_index(armo: dict) -> dict:
+    """What _structural_end_problems reads of an arm, built once per arm (every path of a wide trie would otherwise
+    rebuild it: quadratic in the paths): the segments by id, the route split counts (_route_splits) and the runs'
+    branches by (segment, to_bp, label)."""
+    runs: Dict[Tuple[Any, Any], Dict[Any, Any]] = {}
+    for x in armo.get("runs") or []:
+        if isinstance(x, dict):
+            runs.setdefault((x.get("segment"), x.get("to_bp")), {})[x.get("label")] = x.get("branches")
+    return {"segments": {x.get("id"): x for x in armo.get("segments") or [] if isinstance(x, dict)},
+            "splits": _route_splits(armo), "runs": runs}
+
+
+def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Optional[dict] = None,
+                             arm: Optional[str] = None) -> List[str]:
+    """Why the structural ends stated at path |p|'s leaf cannot have happened, judged from the request, the strategy
+    (_strategy_knob) and the arm (SPEC-labeled-traversal-core §6.4, §6.6, §6.7):
+    - a structural reason the path counts (end_reasons) has a label_end event of it on its leaf at the path's end
+      (judged where the leaf states its events);
+    - `branch`: the lineage was ambiguous with its allowance spent (branches + 1 > max_label_branches, and a lineage
+      never has more): max_label_branches finite, the label's branches (end_labels, or runs[] at the leaf) equal to
+      it, and two or more structural successors where the event states them; without a quorum knob also a route to
+      the leaf passing at least that many ambiguous splits (each branch taken is a split there). Under a quorum
+      knob a branch can be taken without a split: the walker raises the lineage's branches on every admissible
+      successor before the quorum drops the minority ones, and one followed successor records no split
+      (walker.cpp, the ambiguity before the quorum);
+    - `minority`: a quorum knob set (min_successor_labels >= 2 or min_successor_fraction > 0); `below_min_labels`:
+      min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route to the leaf through that many
+      splits;
+    - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end.
+    |index| is the arm's _arm_index, built here when not given; |arm| names the arm whose request holds the knobs."""
+    out: List[str] = []
+    chain = p.get("segments") or []
+    if not chain:
+        return out
+    index = index if index is not None else _arm_index(armo)
+    leaf = index["segments"].get(chain[-1])
+    if leaf is None:
+        return out
+    L = p.get("length_bp")
+    where = "path %s at %s bp" % (p.get("id"), L)
+    evs = [x for x in leaf.get("events") or [] if isinstance(x, dict) and x.get("at_bp") == L]
+    ends = [x for x in evs if x.get("type") == "label_end"]
+
+    def named(ev: dict) -> Any:
+        text = ev.get("text")
+        return text if ev.get("reason") == "branch" and text in _QUORUM_ENDS else ev.get("reason")
+    if isinstance(leaf.get("events"), list):
+        stated = {named(x) for x in ends}
+        stated |= {"branch" for x in stated if x in _QUORUM_ENDS}
+        for reason in sorted(set(p.get("end_reasons") or {}) & _STATED_STRUCTURAL_ENDS - stated):
+            out.append("%s ends by %s without a label_end event of it on its leaf" % (where, reason))
+    mlb = _strategy_knob(sc, ans, "branching", "max_label_branches", arm)
+    msp = _strategy_knob(sc, ans, "branching", "max_splits_per_path", arm)
+    msl = _strategy_knob(sc, ans, "branching", "min_successor_labels", arm)
+    msf = _strategy_knob(sc, ans, "branching", "min_successor_fraction", arm)
+    mll = _strategy_knob(sc, ans, "bounds", "min_live_labels", arm)
+    quorum = (_finite(msl) and msl >= 2) or (isinstance(msf, (int, float)) and msf > 0) or (_finite(mll) and mll > 1)
+    amb_n, split_n = index["splits"](chain[-1])
+    lineage = dict(index["runs"].get((chain[-1], L)) or {})
+    lineage.update({x.get("label"): x.get("branches") for x in p.get("end_labels") or [] if isinstance(x, dict)})
+    for ev in ends:
+        what = named(ev)
+        lab = "%s label %s" % (where, ev.get("label"))
+        if what == "branch":
+            br = lineage.get(ev.get("label"))
+            if not _finite(mlb):
+                out.append("%s: a branch end with max_label_branches %r" % (lab, mlb))
+            elif _finite(br) and br != mlb:
+                out.append("%s: a branch end after %d branch(es) of max_label_branches %d" % (lab, br, mlb))
+            elif amb_n < mlb and not quorum:
+                out.append("%s: a branch end after %d ambiguous split(s) on any route to it, max_label_branches %d"
+                           % (lab, amb_n, mlb))
+            elif _finite(ev.get("structural_successors")) and ev["structural_successors"] < 2:
+                out.append("%s: a branch end at %d structural successor(s)" % (lab, ev["structural_successors"]))
+        elif what == "minority":
+            if not ((_finite(msl) and msl >= 2) or (isinstance(msf, (int, float)) and msf > 0)):
+                out.append("%s: a minority end with min_successor_labels %r and min_successor_fraction %r" % (
+                    lab, msl, msf))
+        elif what == "below_min_labels":
+            if not (_finite(mll) and mll > 1):
+                out.append("%s: a below_min_labels end with min_live_labels %r" % (lab, mll))
+        elif what == "split_limit":
+            if not _finite(msp) or split_n < msp:
+                out.append("%s: a split_limit end after %d split(s) on any route to it, max_splits_per_path %r" % (
+                    lab, split_n, msp))
+        elif what in _BLOCKED_ENDS:
+            if not any(x.get("type") == "blocked" and x.get("reason") == what for x in evs):
+                out.append("%s: ended by %s without a blocked event of it there" % (lab, what))
+    return out
 
 
 def _seed_frame(t: dict, c: dict, side: str, L: int) -> Tuple[Callable[[int], str], int, int]:
@@ -2694,6 +3138,7 @@ def check_walk_in_record(sc, ans, a, arm):
         copies += t.get("copies", [])
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     probs, notes, stopped, searched = [], [], [], []
+    mismatch = _preset_mismatch(sc, ans, arm)
     branching = False
     for side in a.get("arms") or _arms_of(sc, i):
         armo = r["arms"].get(side)
@@ -2773,15 +3218,34 @@ def check_walk_in_record(sc, ans, a, arm):
                 side, best, expected, _MAX_ROUTE_STATES))
             continue
         ends = set()
+        possible = set()   # the structural ends of the longest routes' leaves that can have happened
+        disproved = []     # why a stated structural end of such a leaf cannot have happened
+        index = _arm_index(armo)
         for p, f in following:
             if len(f) == best:
-                ends |= _leaf_ends(armo, p)
+                pe = _leaf_ends(armo, p)
+                ends |= pe
+                bad = _structural_end_problems(sc, ans, armo, p, index, arm)
+                if bad:   # a leaf with an end that cannot have happened shows none of its ends
+                    disproved += bad
+                else:
+                    possible |= pe & _STATED_STRUCTURAL_ENDS
         # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
-        unstopped = _resource_end_problem(r, armo, side, ends)
+        unstopped = _resource_end_problem(r, armo, side, ends) or next(
+            (m for m in (_resource_end_below_frontier(armo, side, p) for p, f in following if len(f) == best) if m),
+            None)
         gap = _computed_block(sc, ans, r, i, t, copies[0], side, L) if exact is not None else None
-        if ends & _STATED_STRUCTURAL_ENDS and exact is None:
+        odd_base = _outside_alphabet(frames, side, following, best)
+        if ends & _STATED_STRUCTURAL_ENDS and exact is None and possible:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
-                side, best, sorted(ends & _STATED_STRUCTURAL_ENDS)[0], expected))
+                side, best, sorted(possible)[0], expected))
+        elif ends & _STATED_STRUCTURAL_ENDS and exact is None and mismatch:
+            # the walk ran another strategy than the scenario's: its stop is that strategy's, named as such
+            probs.append("%s: %s; the record followed for %d of %d bp to a stated %s" % (
+                side, mismatch[0], best, expected, sorted(ends & _STATED_STRUCTURAL_ENDS)[0]))
+        elif ends & _STATED_STRUCTURAL_ENDS and exact is None:
+            probs.append("a stated stop that cannot have happened: %s: %s; the record followed for %d of %d bp" % (
+                side, disproved[0], best, expected))
         elif gap is not None and gap["d"] == best and gap["reason"] in ends:
             # the record's own continuation is inadmissible there (§6.6), which the truth's minimum did not count
             searched.append("%s: the record followed for %d of %d bp, ended by %s, which the record and the seed "
@@ -2789,9 +3253,18 @@ def check_walk_in_record(sc, ans, a, arm):
         elif unstopped:
             probs.append("a stated stop that cannot have happened: %s, the record followed for %d of %d bp" % (
                 unstopped, best, expected))
-        elif ends & _RESOURCE_ENDS or (armo.get("status") == "truncated" and trig in _RESOURCE_ENDS):
+        elif ends & _RESOURCE_ENDS or (armo.get("status") == "truncated" and trig in _RESOURCE_ENDS and
+                                       not (_finite(armo.get("complete_to_bp")) and best < armo["complete_to_bp"])):
+            # the cap stopped the record's route only where it reaches the depth the cap left incomplete: a path
+            # that ended before complete_to_bp ended for its own stated reason (SPEC-labeled-traversal-core §6.10)
             stopped.append("%s: the record followed for %d of %d bp, stopped by %s" % (
                 side, best, expected, sorted(ends & _RESOURCE_ENDS)[0] if ends & _RESOURCE_ENDS else trig))
+        elif odd_base:
+            # the record's next base is no base of the graph's alphabet ($ACGT, SPEC-pattern-search §8.2): no k-mer
+            # holds it, so the record's route ends there, which the truth's minimum did not count
+            searched.append("%s: the record followed for %d of %d bp, ended by %s before the record's base %r, "
+                            "which no k-mer of the graph holds: a truth gap" % (
+                                side, best, expected, sorted(ends) or "nothing stated", odd_base))
         else:
             probs.append("%s: the record followed for only %d of %d bp, the path ended by %s%s" % (
                 side, best, expected, sorted(ends) or "nothing stated", how))
@@ -2811,6 +3284,21 @@ def check_walk_in_record(sc, ans, a, arm):
     if stopped or searched:
         return INCONCLUSIVE, "; ".join(stopped + searched + notes)
     return PASS, "; ".join(notes)
+
+
+def _outside_alphabet(frames: Sequence[Tuple[Callable[[int], str], int, int]], side: str,
+                      following: Sequence[Tuple[dict, str]], best: int) -> Optional[str]:
+    """The record's base right after a longest route (|best| bp) along one of |frames| when it is no base the graph
+    holds (not A, C, G or T: an IUPAC code of the record), else None."""
+    longest = set(f for _, f in following if len(f) == best)
+    for cont, room, _ in frames:
+        if room <= best or cont(best) not in longest:
+            continue
+        nxt = cont(best + 1)
+        base = (nxt[-1] if side == "right" else nxt[0]).upper() if nxt else ""
+        if base and base not in "ACGT":
+            return base
+    return None
 
 
 def _first_branch_bp(armo: dict) -> Optional[int]:
@@ -3097,6 +3585,8 @@ def _traverse_invariants(sc, ans, a, arm):
         # only); a lost or a surplus result is no merge
         probs.append("%d results for %d seeds%s" % (len(res), len(seeds), " (%d distinct)" % distinct
                                                     if distinct < len(seeds) else ""))
+    # the MCP walk ran the strategy the scenario declares (§5): a changed or dropped preset knob is named
+    probs += _preset_mismatch(sc, ans, arm)
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     echoed = ((body.get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     radius = echoed if isinstance(echoed, int) else maxbp
@@ -3137,6 +3627,13 @@ def _traverse_invariants(sc, ans, a, arm):
                     probs.append("result %d %s path %s: %s bp above max_extension_bp %s" % (i, side, p.get("id"), p.get("length_bp"), maxbp))
         # a path ended by a resource reason lies on an arm that cap stopped (§7.0)
         probs += _path_resource_problems(sc, r, i)
+        # a structural end lies where the request, the strategy and the arm let it happen (§6.4, §6.6)
+        for side in _arms_of(sc, i):
+            armo = r["arms"].get(side)
+            index = _arm_index(armo) if isinstance(armo, dict) else None
+            for p in (armo.get("paths") or []) if isinstance(armo, dict) else []:
+                probs += ["result %d %s %s" % (i, side, m)
+                          for m in _structural_end_problems(sc, ans, armo, p, index, arm)]
     probs += _traverse_reason_problems(sc, ans)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
 
@@ -3288,7 +3785,22 @@ def _kmer_set(runs: Any, offset: int, lo: int, hi: int) -> set:
     return out
 
 
+def _expects_stop(sc: dict) -> bool:
+    """Whether a /resolve scenario's property is a stated stop: its resolve_runs asks prefix_if_stopped (a budget
+    built to stop inside the query)."""
+    return any(isinstance(e, dict) and e.get("check") == "resolve_runs" and (e.get("args") or {}).get("prefix_if_stopped")
+               for e in sc.get("expect") or [])
+
+
 def _relation_prefix_equals(rel, a_sc, A, b_sc, B):
+    outcome, detail = _prefix_comparison(rel, A, B)
+    if outcome == PASS and _expects_stop(a_sc) and not (_body(A) or {}).get("stop"):
+        # a's property is its stop: two complete profiles that agree say nothing of the prefix a stop answers
+        return INCONCLUSIVE, "no stop happened on a: the prefix property was not tested (%s)" % detail
+    return outcome, detail
+
+
+def _prefix_comparison(rel, A, B):
     if A.get("http") != 200 or B.get("http") != 200:
         return INCONCLUSIVE, "http %s / %s: no two profiles to compare" % (A.get("http"), B.get("http"))
     args = rel.get("args") or {}

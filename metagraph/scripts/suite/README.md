@@ -1539,3 +1539,143 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   executions as a quiet host gives them, a capabilities read added; the not-exposed properties and the suite errors
   left as recorded) passes this policy (exit 0) and the MCP-only policy derived from the same declared file (exit 0);
   without the declared entries both fail on exactly the entries above.
+
+## Lane S6g1: checks that accept wrong answers (2026-10-14)
+
+The verified findings 3-6 of the outside review of 2026-10-14 (VERIFY-C), the check part of the v4 triage's V03
+and V05 (VERIFY-V4): each rule below closes a one-property corruption of a valid recorded answer that the checks
+of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-vendoring.
+
+- /traverse, a structural end (SPEC-labeled-traversal-core §6.4, §6.6, §6.7; `_structural_end_problems`): a path's
+  `branch`, quorum, split-limit or re-entry end is accepted only where the answer shows it can have happened, in
+  `walk_in_record` (a route along the record ending short of its minimum at such an end) and in the invariants (every
+  path of every requested arm), on the full and the graphlet form alike. A structural reason the path counts has a
+  label_end event of it on its leaf at the path's end (judged where the leaf states its events). `branch`:
+  max_label_branches finite, the lineage's branches at the end equal to it (an ambiguous source ends `branch` once
+  branches + 1 exceeds the allowance, and no lineage holds more), and two or more structural successors where the
+  event states them; without a quorum knob also a route to the leaf through at least that many ambiguous splits (each
+  branch taken is then a split; a split whose kind is not stated counts as ambiguous). Under a quorum knob
+  (min_successor_labels >= 2, min_successor_fraction > 0 or min_live_labels > 1) a branch can be taken without a
+  split: the walker raises the lineage's branches on every admissible successor before the quorum drops the minority
+  ones, and a single followed successor records no split (walker.cpp at fe563f38), so the split count is not required
+  there. `minority` (also `branch` with that text): min_successor_labels >= 2 or min_successor_fraction > 0;
+  `below_min_labels`: min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route through that many
+  splits; `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's
+  end ("blocked continuations are always reported"). The knobs are the walk's: a stated clamp's effective value, else
+  what the arm's requests declare (a direct arm: the scenario's request; the MCP arm: the overrides of the scenario's
+  MCP arguments, which it sends beside its preset, then the scenario's direct request, whose walk the preset
+  mirrors), else the default of that request's exhaustive preset or annotate mode ("unlimited" branches and splits,
+  no quorum: §5, §6.9), else the echo's, else the default (the echo's preset or mode, else §5's). The declaration
+  comes before the echo, so a service that drops or rewrites an override, a preset's knob or a knob the request
+  implies, and echoes what it walked, is held to the scenario, not excused by its own echo. On the MCP arm an echoed
+  knob that differs from the declared one fails the invariants and walk_in_record by name: "the service walked with
+  branching.max_label_branches 1, the scenario declares 2: a preset mismatch" ("... the scenario's MCP overrides
+  state 2: an override not applied"); a deliberate preset change needs the manifest to follow it. A leaf with an end
+  that cannot have happened shows none of its ends: walk_in_record fails "a stated stop that cannot have happened".
+  The graphlet reader takes the lineage's values from the R records (structural_successors on the label_end events,
+  `end_labels` with the branches at each leaf), as the full result states them. The arm's route split table is built
+  once per arm (a 4,096-leaf trie: 0.05 s for the invariants, 5.4 s when it was built per path). Closed: GPT's
+  zero-extension mutation of T-derived-0001 (both arms a 0 bp root, every label `branch` with branches 0 under
+  max_label_branches 2; the dead_end control fails as before), branches 0 or 1 of 2, branches 2 on a route without
+  ambiguous splits, an echo of max_label_branches 0 under a request of 2, a quorum or split-limit end without its
+  knob, a re-entry without its blocked event, a graphlet's R branches or G split flags zeroed. Measured on every
+  recorded /traverse answer of v3 and v4 (647, all arms: 447 branch, 16 below_min_labels, 32 edge_reuse, 12
+  rejoined_seed label ends) and on the engine's stored traverse fixtures (tests: every stored answer states possible
+  structural ends): none violates a rule.
+- /pattern, a stated reason tied to the request and the phase that allow it (SPEC-pattern-search §7.4-§7.7, §12.1,
+  §14, §19.6-§19.8, §20.5, §20.9; `_pattern_reason_problems`, which the invariants and every check that turns a
+  missing result into inconclusive read: contains_source_context, source_absent, source_label, source_placement,
+  path_spells, path_record_verified, path_absent, predicate_selected, predicate_either_mirror). Besides "Stated
+  reasons": a request reads annotation only with labels all in a retrieval mode (§14.1: mode count reads none
+  whatever the projection), a supported-path search or a predicate (in every mode), and has a memory account only
+  with labels all in a retrieval mode, a predicate or a path search (§7.6 "Memory": mode count is the label-free
+  path); so `rows_refused` and `annotation_budget` need the reads, `output_budget`, `cut: max_memory` and a
+  `max_memory` stop the account; `anchor_labels_truncated` needs labels all; `predicate_above_threshold`,
+  `selected_above_threshold`, `predicate_budget`, `cut: max_predicate_contexts` and a `max_predicate_contexts` stop a
+  predicate; `count_above_threshold` is not stated with a predicate on L <= k, unless its normal form is the constant
+  `true` (`selection.pass: "constant"` with `predicate.normal_form: true`: it runs the unfiltered request under the
+  engine's own max_contexts, §19.6; `false` selects nothing and withholds nothing); `anchors_above_threshold`, `cut:
+  max_paths` and a `max_paths` stop need a path search; `cut: max_annotation_work` a supported-path search (labels
+  all states that stop without a cut, §7.5); a `max_anchors` stop a pattern longer than k (with or without a path
+  search, §7.7), a `max_contexts` stop one of L <= k or a predicate; `paths_later_increment` is not stated with the
+  anchors `exact` 0 (that empty answer is complete); only `all_or_count` withholds, but for `paths_later_increment`
+  and `anchors_above_threshold`. A step or threshold stop leaves the count it interrupted not `exact` (§7.4):
+  `discovery_budget` with an exact primary count fails, and so does a stop_at_threshold stop whose count
+  (max_contexts: the raw contexts in discovery, the selected ones in the selection; max_predicate_contexts: the raw
+  contexts, on supported paths the held walks' paths; max_anchors: the anchors; max_paths: the paths, with a
+  predicate the selected ones) is exact; `threshold_crossed` needs such a stop. On a masked BASIC or CANONICAL graph
+  a discovery stop of max_contexts (no predicate) or max_predicate_contexts (a predicate) on L <= k states its
+  contexts `at_least` above the threshold: the engine stops once the running lower bound, the sum of the counted
+  ranges' lower bounds, passes it, and the halted count states that sum (pattern_search.cpp at fe563f38:
+  threshold_crossed compares running_lower on a masked graph; add_item adds each range's lower(); tally and to_count
+  make the halted offsets `at_least` of exactly those lowers, the scans not having run; between mismatch levels the
+  bound is recomputed before the comparison; ranges counted after the halt only raise it). Not judged without the
+  mask (the running upper bound decides; fixture unmasked_stop_at_threshold states at_least 0) nor on a PRIMARY graph
+  (an even-k wrapped union's lower bound need not be the stated value, §18 E2-02). Closed: GPT's P-modes-0005 with
+  every count exact 0 and its threshold stop kept, at_least 2 under max_contexts 3, the stop removed; P-scope-0001
+  (label-free) with its list removed behind annotation_budget (a refused row or a work stop), output_budget,
+  anchor_labels_truncated, predicate_budget, or discovery_budget with the count left exact. 0 of the 3,567 recorded
+  entries of v3 and v4 (all arms) and none of the engine's stored pattern fixtures states a reason these rules
+  refuse.
+- /pattern, a result listed twice (SPEC-pattern-search §7.1, §12.1, §21.4; the invariants): a context is one k-mer at
+  an offset in an orientation at one level, (node, kmer, offset, strand), a path its nodes in an orientation, (nodes,
+  sequence, strand); each is listed once. The order check accepts equal keys and counts_consistent compares the
+  list's length, so a copy in place of a distinct result passed both. Closed: P-modes-0002 with its second context
+  replaced by a copy of the first, L-long-0006's path list [+, +] (its '-' path dropped), P-scope-0001 with its count
+  and partitions doubled and every context listed twice (with every exact count anchored by a complete list, a
+  doubled count can no longer be padded). 0 duplicates among the 358,157 recorded results of v3 and v4. A duplicate
+  page boundary of the MCP's paging is the runner's to test (its normaliser).
+- /pattern, path_record_verified places the record (SPEC-pattern-search §14.3, §20.6): the occurrence of the
+  record at the window's coordinates and strand states the index's seq_id and the record's length (as
+  source_placement asks of a context), and every occurrence the label verifies lies in its own record (1 <= start
+  <= end <= nt_length; source_placement applies the same rule to its record's occurrence). Closed: L-verified-0001
+  and X-peptide-long-0001 with the record's occurrence at seq_id 999999999 and/or nt_length 1, nt_length + 1000, or
+  another occurrence outside its record. All 14,298 recorded occurrences of v3 and v4 lie in their records, and
+  every one of the truth's record states its seq_id and length. (L-long-0006's `path_spells` for its '+' path is a
+  manifest change, left to the v5 lane.)
+- /traverse, walk_in_record attributes a cap to the record's route only at the stop frontier (the v4 triage's V03,
+  confirmed by VERIFY-V4): an arm `truncated` by a resource cap stopped the longest route along the record only where
+  that route reaches the arm's `complete_to_bp` (or the arm states none, or the route's own leaf states the resource
+  end); a route that ended before it ended for its own stated reason (SPEC-labeled-traversal-core §6.10: "every path
+  that ended before complete_to_bp ended for the reported semantic reason") and is judged by it, so a `label_lost`
+  short of the minimum fails instead of reading "stopped by time_budget". Where the record's next base after that
+  route is no base of the graph (an IUPAC code: no k-mer holds it), the route ends there legitimately and the truth's
+  minimum did not count it: inconclusive, "a truth gap" (the manifest's cut of the flank at such a base is the v5
+  lane's). Measured: T-walk-0018's left arm (the record's 'S' 4,899 bp from the seed, its route ending label_lost at
+  4,898 bp below complete_to_bp 5,250 / 7,378 / 8,748) on v4 L0, R0, M1 and v3 R0, M1: the detail now names the gap
+  instead of the time budget, the outcome (inconclusive, its right arm time-stopped) is unchanged; the same answers
+  against the record with an A there fail. No other recorded verdict or detail moves. A leaf that states a resource
+  end below complete_to_bp cannot have had it (the same §6.10 sentence: a cap ends walks at the level it trips, at or
+  past complete_to_bp): walk_in_record and the invariants fail it (it read inconclusive); every one of the 346
+  recorded resource-ended paths of v3 and v4 and the 62 of the engine's fixtures ends at or past its arm's
+  complete_to_bp.
+- /resolve, a stop the scenario is built to state (the v4 triage's V05 as VERIFY-V4 amended it): R-budget's
+  property is the stated stop (resolve_runs `prefix_if_stopped`: SPEC-labeled-traversal-core §4.5, a stop answers
+  the resolve of a prefix). A complete answer without a stop holds the full profile but never tested the prefix:
+  resolve_runs reads INCONCLUSIVE, "no stop happened: the prefix property was not tested" (a complete profile that
+  is wrong still fails), where it passed. The relation prefix_equals whose a-scenario asks `prefix_if_stopped`
+  (REL-prefix_equals-0001 / -0003) reads the same when a states no stop and the two profiles agree (they still fail
+  when they differ). A twin's `unless_stopped` (R-twin-*: the reference profile) and the continuation relations
+  (-0002 / -0004) keep their complete-profile tests: there the complete profile is the property. Recorded runs:
+  every direct R-budget answer of v3 and v4 is a 503 and every MCP one a 400 (the 2,000 bp limit), so no outcome
+  moves; R-twin-0004 R0's complete answer judged as R-budget-0002's reads inconclusive (it passed), and so does
+  REL-prefix_equals-0003 on it.
+
+### Validation (offline)
+- Mutation probes (lane-g1/scratch/probes/mutations.py: valid recorded answers of v3 and v4, their one-property
+  corruptions, GPT's probe answers, legitimately incomplete answers): 75 probes; at fe563f38 46 of them read
+  other than they must (every corruption above passed or read inconclusive), here all 75 do: every corruption
+  fails, every valid answer passes, every legitimately incomplete one stays inconclusive. The lane's verification
+  (its probes, lane-g1/verify/probes/my_mut.py, 43 boundary corruptions and legitimate answers) reads as it must
+  on 42; the 43rd judged T-quorum-0001's MCP answer against a direct request changed to min_live_labels 1, which
+  the MCP arm, held to its own overrides (min_live_labels 2), rightly passes; the same change of the MCP overrides
+  fails. Its two legitimate answers the lane's first rules failed (a branch end under a quorum knob after a branch
+  taken without a split; count_above_threshold with a constant `true` predicate) pass. Its follow-up probes
+  (lane-g1/verify/fu/probes/fu_mut.py) read as they must: T-walk-0017's MCP answer with the walk preset's
+  max_label_branches lowered to 1 or 0 and echoed fails as a preset mismatch, an MCP override the service did not
+  apply fails as such, and `selection.pass: "constant"` beside a normal form other than `true` claims no exemption.
+- Re-evaluation of the recorded runs (v3: lane S5e's reeval-S5e copy; v4: the complete run copy; `run_suite.sh
+  --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, against the same copies re-evaluated at fe563f38): 0
+  outcome changes and 0 check outcome changes of 2,900 (v3) and 2,913 (v4) executions, 0 relation changes, compare
+  summaries identical; detail changes only on T-walk-0018's walk_in_record (v4 L0, R0, M1; v3 R0, M1), as stated
+  above.
