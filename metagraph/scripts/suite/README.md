@@ -1541,17 +1541,21 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
 - v4's two-arm policy: 222 selected; MCP 189 scenarios / 384 executions (31 derived exclusions, the declared
   C-caps-0001 and T-budget-0003), direct-local 220 / 253; REL-same_answer-0003 required on both arms, the four
   prefix_equals relations excluded on both.
-- The v4 copy (re-evaluated) under it: `run_suite.sh --reevaluate v4 --gate gate/policy_v4_rt_mcp.json` exits 1 with
-  32 problems, 0 structural: configuration 1 (the recorded MCP runner read no live capabilities document); load-
-  dependent 31, which the strict rule keeps blocking: MCP 19 inconclusive (R-pos-0027 r0 resolve_timeout; N-hard-0021
+- The v4 copy (re-evaluated) under it, on this branch with lanes S6g1 and S6b merged: `run_suite.sh --reevaluate v4
+  --gate gate/policy_v4_rt_mcp.json` exits 1 with 44 problems, 0 structural. Configuration and evidence 13 (v4
+  predates the runner's records): no live service_settings recorded; 1,333 of 1,333 MCP invocations without a read;
+  11 reference paths the replay read from the table (the nine preset-row budgets on 14 executions,
+  service_settings.advanced_enabled on 4, service_settings.resolve.budget_ceiling_ms on 2). Load-dependent 31,
+  which the strict rule keeps blocking (the same before the merge, when configuration was 1 problem): MCP 19 inconclusive (R-pos-0027 r0 resolve_timeout; N-hard-0021
   r0, N-realrep-0002 r0, N-realrep-0025 r0 traversal_resolve_deadline; time-limited checks on T-walk-0004 r0, -0006
   r0 r1, -0012 r0 r1, -0014 r0, -0018 r0 r1, -0022 r0, -0036 r0 r1, T-repeat-0002 r0, T-repeat-0004 r0, T-labels-0003
   r0, N-hard-0022 r0) and direct-local 12 (503 deadlines on R-pos-0027, R-budget-0002, R-twin-0002, R-twin-0004 r0
   and R-budget-0001 r0's finding, a 503 past its budget, triage G22; time-limited walks on T-walk-0006, -0012, -0018,
   -0036, T-repeat-0004, T-labels-0003, T-coords-0003 r0). A clean, complete run built from the same copy (those
   executions as a quiet host gives them, a capabilities read added; the not-exposed properties and the suite errors
-  left as recorded) passes this policy (exit 0) and the MCP-only policy derived from the same declared file (exit 0);
-  without the declared entries both fail on exactly the entries above.
+  left as recorded; on the merged branch the table's service block recorded as the live document and the copy
+  re-evaluated against it, so its references read live) passes this policy (exit 0) and the MCP-only policy derived
+  from the same declared file (exit 0); without the declared entries both fail on exactly the entries above.
 
 ## Lane S6g1: checks that accept wrong answers (2026-10-14)
 
