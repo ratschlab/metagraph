@@ -233,16 +233,16 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   (other answer, same check outcomes, at least one check compared), `not_comparable` (other answer, no check
   evaluated on both) or `disagree`, with `checks_compared`; the MCP class of DESIGN §1.3; overheads, cold vs
   warm, timing and resource summaries per area, arm and host cache.
-- MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; an answer-triggered
-  case of the table (below; lane S5: before the named cases, which then judge the rest); the scenario's
-  `mcp.by_design` case(s) in async's table (below); the MCP runner's own `not_implemented_mcp` /
-  `service_by_design` outcome; else, on the checks both arms evaluated (a check `not_exposed` on either side
+- MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; per MCP execution as
+  async's runner matches it (since lane S5b): the scenario's `mcp.by_design` case(s) in async's table (below), else
+  an answer-triggered case of the table (below); the MCP runner's own `not_implemented_mcp` / `service_by_design`
+  outcome where no table is read (lane S5c, B5b-05: with a table such a mark is judged by its checks); else, on the checks both arms evaluated (a check `not_exposed` on either side
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
 - `service_by_design.json`: async's table (130 cases), copied byte-identical from the search-service work
-  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show 48dcbc1d:scripts/bench/vendor_suite/service_by_design.json`,
-  150,242 bytes, sha256 c49478c2...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
+  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show e334715b:scripts/bench/vendor_suite/service_by_design.json`,
+  154,008 bytes, sha256 0fcf7e7d...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
   splits by value and four answer-triggered cases; lane S5b: `explains_checks` on every answered / clamped case,
   `answer_match.direct_mismatch` on the four answer-triggered ones, validated at load). A case's `agreement`
   `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) -> service-side
@@ -760,14 +760,18 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   SPEC's §7.5.6 does (a code end, on the run's segment at `to_bp`, the reason the qualifier's text through
   `_END_QUALIFIERS`, e.g. `Rb` below_min_labels, or the code's enum; `Lw` and `m` give none); on every mini-index
   fixture they equal the full result's events.
-- The /pattern deadline (G21, as VERIFY-MN amends it: required, not optional). A POST /pattern 503 with code
-  `deadline` is an answer SPEC-pattern-search §6 / §7.6 allow for any search whose answer could not be written
-  within its time_budget_ms, so on a loaded host every searching /pattern request may get it.
-  `checks.pattern_deadline_allowed`: where the scenario's status expectation asks for a 200 and does not itself name
-  the deadline (an http 503, the code `deadline` or a text naming it), such a 503 makes `status` inconclusive and
-  joins evaluate's allowed list, so the body's checks read inconclusive and `budget_respected` judges it by the
-  client's wall time (`_budget_503`: a 503 long past its budget stays a finding). A scenario that expects a refusal
-  (no 200), names the deadline itself, or another route or code is judged as it states.
+- The deadline (G21, as VERIFY-MN amends it: required, not optional; lane S5b G22 and lane S5c A2-01, A2-07). A
+  POST /pattern 503 with code `deadline` is an answer SPEC-pattern-search §6 / §7.6 allow for any search whose answer
+  could not be written within its time_budget_ms, so on a loaded host every searching /pattern request may get it;
+  a POST /resolve one is SPEC-labeled-traversal-core §4.5's answer past the budget, for a request that names
+  bounds.time_budget_ms only (the /resolve deadline is opt-in: without the field there is none, so such a 503
+  fails). `checks.deadline_allowed` (the old name `pattern_deadline_allowed` an alias), on both routes: where the
+  scenario's status expectation asks for a 200 and does not itself name the deadline (an http 503, the code
+  `deadline` or a text naming it), such a 503 makes `status` inconclusive and joins evaluate's allowed list, so the
+  body's checks read inconclusive and `budget_respected` judges it by the client's wall time (`_budget_503`, against
+  min(the requested budget, the route's cap the builder states as cap_ms): before it, /resolve less its 250 ms
+  reserve, a fail; long past it a finding). A scenario that expects a refusal (no 200), names the deadline itself,
+  or another route or code is judged as it states.
 
 ### Comparator and re-evaluation
 - The table: async's 789fb5f0 (130 cases, sha256 2fdea36b...), byte-identical, with the triage's corrections (G09,
@@ -795,24 +799,23 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   the host's overrun answer under load) joins `uninterruptible_overrun_exceeds_allowance` in
   `compare.MCP_HOST_STATE_CODES`, which reevaluate.py applies (inconclusive unless the scenario expects the code);
   when a named case is judged, an MCP execution that is inconclusive by such a code is skipped (it reads neither for
-  nor against the case), and with none left the pair is unverified, not a disagreement.
-- Answer-triggered cases first (B6). An answer_match case takes out the MCP executions its mcp side matches (service
-  side by design, `by: answer`) BEFORE the scenario's named cases, which judge the rest, against the direct
-  executions the answer case does not explain either (a direct answer of its direct side, such as the host's own
-  503 deadline, says nothing about the rest's pair); a disagreement of the rest is the class, with `answer_case`.
-  reevaluate.py applies the answer case before keeping a runner's named-case mark, so the execution names the
-  answer case. answer_match sides: direct {http (a status or a list), code (top-level or slot), slot_code (the
+  nor against the case), and with none left the pair is not comparable (lane S5b, B-09), not a disagreement.
+- Answer-triggered cases (B6; the order is async's runner's since lane S5b: per MCP execution the named cases
+  first, an answer-triggered case only for an execution no named case matches). An answer_match case takes the MCP
+  executions its mcp side matches (service side by design, `by: answer`); the named cases judge theirs against the
+  direct executions no answer case explains (a direct answer of its direct side, such as the host's own 503
+  deadline, says nothing about the rest's pair); a disagreement of the rest is the class, with `answer_case`. answer_match sides: direct {http (a status or a list), code (top-level or slot), slot_code (the
   codes of body.patterns[].error), text_contains}, mcp {http (one status: lane S5b, async's runner compares it by
   equality), code, text_contains, field (as above; an MCP answer that names no field does not match)}, as async's
   runner reads them (`answer_matches`); since lane S5b both apply the named cases first.
 - The runner's matcher replayed (VERIFY-RP G08 point 3; the coordinator's second addendum asks the re-evaluation to
   reproduce async's own replay). reevaluate.py applies the current table to every recorded MCP answer as async's
-  runner at 789fb5f0 does (`compare.named_cases`, `compare.service_answers`: the named cases with their
-  service_answer, the field read from the recorded tool error as the runner's `raw_error` reads it, a case field
-  against an answer naming none not matching), after the answer-triggered cases (B6): a match is service_by_design
-  with that case; a runner's service_by_design mark the current table does not reproduce is kept and says so. So
-  an execution the runner judged `fail` against a case its matcher could not read (G08's alternation) becomes
-  service_by_design offline.
+  runner (at e334715b since lane S5b) does (`compare.named_cases`, `compare.service_answers`: the named cases with
+  their service_answer, the field read from the recorded tool error as the runner's `raw_error` reads it, a case
+  field against an answer naming none not matching), then the answer-triggered cases: a refused / relayed match is
+  service_by_design with that case; a runner's service_by_design mark the current table does not reproduce is
+  judged by the checks (lane S5b, B-06) and says so. So an execution the runner judged `fail` against a case its
+  matcher could not read (G08's alternation) becomes service_by_design offline.
 - A run recorded before a normaliser fix (G06: a pattern refused in its slot) is re-normalised first with async's
   `scripts/bench/suite_mcp_renormalise.py RUN --out COPY` (read-only use of its worktree), COPY put in place of a
   copy's arms/mcp; reevaluate.py itself never re-runs a normaliser.
@@ -953,8 +956,10 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   traversal_resolve_deadline (G22): wall >= budget (the tool error's, else the MCP arguments') - reserve; the R20
   lockout has no wall rule. Rule (c): an unknown threshold or wall makes the verdict inconclusive with
   verdict_detail "no threshold known: plausibility undecidable" / "no service-side timing: plausibility
-  undecidable" (the case, or the host-state code, recorded); a finding wins on the wall-rule path and, here only
-  (the coordinator's addendum 11; async's runner returns inconclusive first), on the host-state path too.
+  undecidable" (the case, or the host-state code, recorded); a finding wins on the wall-rule path, not on the
+  host-state path (as async's runner; lane S5b's addendum-11 divergence is dropped since lane S5c, B5b-03). Lane
+  S5c's additions (the client's wall as an upper bound, a discovery's deadline, the stated resolve_timeout phase):
+  below.
 - `inconclusive_reason` on every inconclusive line (rule (c)'s text, the host-state code, or "checks"); compare.json
   sums it per arm (`summary.inconclusive_by_reason`, from the line or, for a line recorded without it, from the
   raw record), the report's verdict section lists it, so a run whose deadlines are undecidable does not read clean.
@@ -977,8 +982,9 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
 - The direct arms' class `timing` (VERIFY-2 item 5, all its conditions): the outcomes of a repeat differ only
   because one side's own answer states a time limitation (a stop by time, a 503 deadline), that side reads
   inconclusive, the other pass or inconclusive, no check both evaluated differs, and the stopped answer is
-  consistent with the complete one (/pattern: every exact count equal, at_least <= exact, at_most >= exact;
-  /traverse: every stopped path a prefix of a complete one; a 503: no content); or (G27) a repeat inconclusive only
+  consistent with the complete one (/pattern: since lane S5c the ranges the population counts admit overlap and
+  the released results lie among a retrieval_complete side's, below; /traverse: every stopped path a prefix of a
+  complete one; a 503: no content); or (G27) a repeat inconclusive only
   by its determinism check after a time-limited earlier repeat, with the other side's answer the same. Counted
   apart in compare.json (`timing`, `timing_scenarios`) and the report.
 
@@ -999,10 +1005,10 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   snapshot's directory. The snapshot of 6f945db4 is committed in truth/staging_capabilities/ (protein cap 1).
 - A-10: T-attempts-0002 checks the duplicate's 409 shape (answer_fields with `when_http: 409`: attempt.state and
   attempt.usage present, no response-level usage; on a 200 that check passes, and the usage checks judge it) and
-  states `run_unique: ["attempt_id"]`: run_direct.py appends "-<run id>" to the request's attempt_id (the run
-  directory's name, which both direct arms share, so within a run the first arm takes the 200 path and the second
-  meets the retained id's 409; the next run, a new id), cut to the id pattern's 128 characters, and records the
-  request it sent; the manifest keeps the base value, so its digest stays the same for every run. The MCP arm does
+  states `run_unique: ["attempt_id"]`: run_direct.py appends "-<run id>" (lane S5c: "-<run id>-<arm>", A2-06) to
+  the request's attempt_id (the run directory's name, which both direct arms share, so within a run the first arm
+  took the 200 path and the second met the retained id's 409; the next run, a new id), cut to the id pattern's 128
+  characters, and records the request it sent; the manifest keeps the base value, so its digest stays the same for every run. The MCP arm does
   not run the scenario (not implemented via MCP).
 - A-12: (a) gen_D adds a complete m = 2 pick: the forward planted window at max_mismatches 2 with the lowest chance
   estimate (D-M-planted-0005, a 31-mer at level 1); (b) a scenario for each split case of async's table without
@@ -1028,3 +1034,84 @@ N-nearmiss-0028 by design verified -> unverified (B-04); direct classes: 11 disa
 9 deadlines or time stops, T-walk-0004's prefix, D-M-planted-0015 with G27's extension), T-attempts-0002 left (G17).
 The MCP arm reproduces async's replay of its runner at e334715b (inconclusive by reason: checks 55, resolve_timeout
 3, no service-side timing 1); its fails differ by the 16 re-normalised lines (G06) and the 4 lines G27 / G28 fix.
+
+## Lane S5c: the verified review of lane S5b (2026-10-14)
+
+From the review of lane S5b (review-s5b/FINDINGS-A.md A2-01..A2-07, FINDINGS-B.md B5b-01..B5b-10) as its
+VERIFY-REVIEW amends them, and the coordinator's addendum 1 to lane S5c (async's exact rules; the runner's commit
+follows, and each rule is one function here, aligned when it arrives).
+
+### Checks
+- The /resolve deadline is opt-in (A2-01, SPEC-labeled-traversal-core §4.5 l.224; capabilities
+  resolve.time_budget.default null). `deadline_allowed` admits a POST /resolve 503 `deadline` only for a request
+  naming bounds.time_budget_ms; on a budget-less one (the discoveries R-discover-0001..0006, R-edge-0023,
+  N-negative-0014/0016, N-usecase-0010/0012) the status fails, saying why, and the other checks read "no answer".
+- The effective budget (A2-03). `_budget_503` judges an allowed 503 against min(the requested budget, the
+  budget_respected argument `cap_ms`), the route's cap of the snapshot the builder states where a request asks more
+  (/resolve resolve.time_budget.max_time_ms 60,000, /pattern caps.time_budget_ms 600,000): R-edge-0021 (70,000 ms)
+  answered 503 at 60,100 ms is inconclusive, no longer a fail; a manifest without cap_ms is judged as before.
+- A block whose repeat exit lies past the truth's flank (A2-04). When the computed block at d has no exit inside the
+  flank, a route that spells the record's first d bases, states the block (at_bp d, the record's base, the computed
+  reason) and continues is inconclusive ("... which is not in the truth's flank: not verifiable"); one that ends at
+  the block passes; without the stated block the arm still fails; another copy that decides wins.
+- Duplicate seeds (B5b-07). The invariants check's count message states the distinct seeds when the request holds
+  identical ones (the service's identity, planner.py normalize_seeds: the sequence whitespace-free and upper-cased,
+  a FASTA header dropped; the labels trimmed and de-duplicated in order; no seed_id): exactly
+  `"%d results for %d seeds (%d distinct)"`, e.g. "1 results for 2 seeds (1 distinct)"; without duplicates
+  `"%d results for %d seeds"` as before. Async's regex can then explain exactly a merge:
+  `([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)`. Until async's table has it, the table's current entry
+  no longer matches T-edge-0008's detail (its MCP line reads fail).
+
+### The MCP verdict (suite_common, reevaluate)
+- A discovery's relayed deadline (A2-01, addendum 1 item 1): `discovery_without_budget`: a traverse_resolve whose
+  arguments name `discover` and no time_budget_ms gets no deadline from the service, so its
+  traversal_resolve_deadline is implausible (the checks judge: status fails), verdict_detail "a /resolve deadline on
+  a discovery without a budget: no deadline was sent". An explicit-labels resolve without a caller budget stays
+  "budget unknown": the stated budget's threshold, else undecidable.
+- The client's wall as an upper bound (B5b-01, addendum 1 item 2): where the service-side wall is unknown,
+  `client_wall_bound` = t1 of the call that returned the answer (the last timed submit, terminal get_status or
+  traverse_results call of the raw record) - t0 of the execution's FIRST submit call (a busy retry's first call may
+  have started the work: V-03). client wall + 1,000 ms below the threshold: provably premature, R3 implausible (the
+  checks judge), R1 the case does not apply; else undecidable as before. Skipped when the runner called the MCP with
+  an API key, and the detail says so: PROVISIONAL field `mcp_auth` "api_key" on the line or the raw record (the
+  e334715b runner is anonymous and records nothing); async names the field with its commit.
+- resolve_timeout (addendum 1 item 4): a refusal that states `timeout_phase` (read | write | deadline) and `bound_s`
+  (the tool error's, else the answer error's) is a host state at a wall >= bound_s x 1,000 - 1,000 ms, any phase,
+  the phase named in the detail; a legacy refusal (no stated phase): min(10,000 ms, max(A, B)) - 1,000 ms (R2's A
+  and B, capped by the 10 s write phase, V-04). The recorded ~30.4 s lines stay host states.
+- B5b-03: an undecidable host state is inconclusive whatever the checks say (lane S5b's addendum-11 divergence
+  dropped: the replay equals the runner again). B5b-10: with no table, a recorded `finding` whose line names a
+  service_by_design_case is kept, as the runner's mark is.
+
+### Comparator and merge
+- The timing class's content rule (B5b-02, VERIFY-REVIEW): each population count is the range of true values it
+  admits (`count_range`: exact v [v, v], at_least v [v, inf), bounds [lower, upper], unknown anything; a relation
+  outside exact / at_least / bounds / unknown, or a bound that is no number, a contradiction) and a stopped count is
+  consistent with the complete side's at the same path when the ranges overlap; `tested` (work done, §19.7) and
+  `estimate` are no population counts; the stopped entry's released results must lie among the complete entry's
+  when that states retrieval_complete. at_most is gone.
+- direct_mismatch over every direct repeat (B5b-04): `answer_class` classifies each repeat of BOTH direct arms; a
+  disagreeing one wins over a match.
+- Runner marks (B5b-05): with no table an unmatched execution the runner marked service_by_design is an unverified
+  by-design part of its own, the others compared by their checks (a disagreement wins); with a table such a mark is
+  judged by its checks.
+- Explained check items (B5b-06): E per ITEM as the runner keys it: `compare.explained_items` (a name explains every
+  failing item of the check, {check, detail_matches} the items it matches); `check_agreement` sets the explained
+  items apart with the reference's items of the same check and occurrence; the re-evaluation records
+  `explained_items` (indices into checks) beside `explained_checks`, and merge_run leaves out those items only.
+- Host state vs undecidable wall rule (B5b-09): `host_state_line` holds only for a host-state code; a relayed
+  /pattern deadline whose wall rule is undecidable is not_comparable "by undecidable plausibility";
+  `inconclusive_reason` replays the answer-triggered wall rule for a line recorded without the field.
+- The planned 409 (A2-06): `direct_agreement` reads a repeat whose arms answered 200 and 409 on a run_unique scenario
+  that allows 409, neither side failing, as a planned duplicate (`planned_duplicates`), not a disagreement.
+
+### The v4 builder
+- A2-02: R-budget-0001/0002, P-caps-0004, P-heavy-0001/0002, N-usecase-0008 and R-twin-0002..0005 ask for a 200 (no
+  builder states [200, 503] any more); R-twin-0002..0005 are tagged machine-dependent. All ten carry a budget, so
+  the SPEC's 503 deadline stays allowed.
+- A2-03: `set_host_capabilities` takes the routes' time-budget caps from the snapshot; budget_respected states
+  `cap_ms` where a request asks more (R-edge-0021).
+- A2-05: with --areas, an --out / --smoke-out whose realpath is a suite_v*.json / suite_smoke_v*.json of manifest/ is
+  refused, by any spelling (`manifest_path`).
+- A2-06: run_direct appends "-<run id>-<arm>" to a run_unique field, so each arm runs its own attempt;
+  T-attempts-0002 repeats twice (r1 meets its arm's retained 409 and exercises the 409 shape check).

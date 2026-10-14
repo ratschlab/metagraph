@@ -14,20 +14,25 @@ backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
 own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
-replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at 48dcbc1d,
-`judge`, is the reference): the cases the scenario names whose service_answer the answer matches (the field read
-from the recorded tool error), else the first answer-triggered case it matches; a refused / relayed /
-answer-triggered match is service_by_design, finding when a check is a finding (a by-design mark never erases one);
-an answered / clamped match leaves the outcome to the checks (compare.explained_outcome, triage-2 B-01: fail when a
-failing check is not one the matched cases explain, else finding, service_by_design when some failing check is
-explained, else the checks' outcome); the line records the case (`service_by_design_case`) and the explained
-checks (`explained_checks`) whenever a case matched. A runner's service_by_design mark the current table does not
-reproduce is judged by the checks (B-06), and says so. Then the host-state rule (an unexpected
-compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of suite_common.host_state_verdict
-admits is inconclusive; one it rejects is judged by the checks; rule (c): where no threshold or no service-side wall
-is known, for a host state or an answer-triggered case's wall_rule, the execution is inconclusive with verdict_detail
-"no threshold known / no service-side timing: plausibility undecidable"), then a new exception of the checks (fail).
-The line records verdict_detail (why a wall rule or a host state held or not) as async's runner at 1b33afe8 does.
+replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at e334715b,
+`judge`, is the reference, with the rules of the coordinator's addendum 1 to lane S5c): the cases the scenario
+names whose service_answer the answer matches (the field read from the recorded tool error), else the first
+answer-triggered case it matches whose wall rule holds or cannot be decided; a refused / relayed /
+answer-triggered match is service_by_design, finding when a check is a finding (a by-design mark never erases
+one); an answered / clamped match leaves the outcome to the checks (compare.explained_outcome, triage-2 B-01: fail
+when a failing check item is not one the matched cases explain, else finding, service_by_design when some failing
+item is explained, else the checks' outcome); the line records the case (`service_by_design_case`), the explained
+checks (`explained_checks`, names) and items (`explained_items`, indices into checks: B5b-06) whenever a case
+matched. A runner's service_by_design mark the current table does not reproduce is judged by the checks (B-06), and
+says so; with no table a runner's mark, and a by-design finding (B5b-10), are kept. Then the host-state rule (an
+unexpected compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of
+suite_common.host_state_verdict admits is inconclusive; one it rejects is judged by the checks, and so is a relayed
+/resolve deadline on a discovery that sent no budget and an answer the client's own wall proves premature; rule
+(c): where no threshold or wall is known, for a host state or an answer-triggered case's wall_rule, the execution
+is inconclusive with verdict_detail "no threshold known / no service-side timing: plausibility undecidable",
+whatever the checks say on the host-state path, B5b-03), then a new exception of the checks (fail). The line
+records verdict_detail (why a wall rule or a host state held or not) and inconclusive_reason as async's runner at
+e334715b does.
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,

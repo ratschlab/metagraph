@@ -27,8 +27,9 @@ direct_expectation (http or a list, code or slot_code, the text with digits igno
 text_contains, each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
 (refused_at_submit / relayed: error.code, text_contains, field with alternatives and placeholders where the MCP
 execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
-An answer-triggered case (answer_match) is applied before the named cases, which judge the rest of the MCP
-executions; a stated key this comparator does not know leaves its side unverified.
+Each MCP execution is matched as async's runner matches it (e334715b): the cases the scenario names first, else an
+answer-triggered case (answer_match) whose wall rule holds or cannot be decided; a stated key this comparator does
+not know leaves its side unverified.
 """
 
 import argparse
@@ -62,7 +63,7 @@ class TableError(ValueError):
 
 
 # The table's vocabulary as async's runner validates it at load (suite_mcp_runner.py ServiceByDesign.problems at
-# 48dcbc1d, triage-2 B-08: one semantics for the runner and this comparator): what an answer_match may state, what
+# e334715b, triage-2 B-08: one semantics for the runner and this comparator): what an answer_match may state, what
 # each of its sides may state, the direct_mismatch values, the service_answer outcomes the checks judge.
 ANSWER_MATCH_TOP_KEYS = ("routes", "direct", "mcp", "direct_mismatch", "wall_rule")
 ANSWER_MATCH_KEYS = ("http", "code", "text_contains", "field", "slot_code")
@@ -95,7 +96,7 @@ def entry_problem(entry):
 
 
 def table_problems(cases):
-    """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at 1b33afe8,
+    """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at e334715b,
     mirrored): an answer_match without routes (a non-empty list of route strings), a key of it outside
     ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose
     http is not one integer, that states slot_code (a direct-side key) or that states no code (peer review R5), a
@@ -1071,7 +1072,7 @@ def named_case_of(cases, scenario, answer, tool_error=None):
 
 def explained_outcome(checks, explains_names, rule):
     """(the outcome, E) of an execution an answered / clamped case matched (triage-2 B-01; async's runner
-    explained_outcome at 1b33afe8, mirrored): F = the failing checks (outcome fail, or one outside the checks'
+    explained_outcome at e334715b, mirrored): F = the failing checks (outcome fail, or one outside the checks'
     vocabulary), E = those of F with outcome fail that an entry of the case's explains_checks explains
     (entry_explains: a name, or {check, detail_matches}), U = F - E. fail when
     U is non-empty; else r = |rule| over the checks without E: finding when r is finding (a by-design mark never
@@ -1094,7 +1095,7 @@ def explained_outcome(checks, explains_names, rule):
 
 def answered_verdict(matched, checks, rule):
     """(the outcome, E, the recorded case's id) of an execution answered / clamped cases matched (async's judge at
-    1b33afe8): explained_outcome against the union of their explains_checks; the case recorded is the first matched
+    e334715b): explained_outcome against the union of their explains_checks; the case recorded is the first matched
     one that explains an item of E, else the first matched."""
     outcome, explained = explained_outcome(checks, union_of(matched), rule)
     e_items = [c for c in checks if str(c.get("outcome")) == "fail" and str(c.get("check")) in explained]
