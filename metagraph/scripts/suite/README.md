@@ -1013,3 +1013,18 @@ A provisional v4 with the snapshot of 6f945db4 (lane S5b's directory, not manife
 scenario ids (7 added, 5 dropped, 84 changed; every one mapped to its group) and from lane S5's build with the
 run's capabilities (the same protein cap 1) in the 4 added scenarios, T-attempts-0002 and the 64 statuses of A-02.
 suite_v3.json and suite_smoke_v3.json are unchanged; manifest/suite_v4.json is built once async's table is final.
+
+### Validation on the recorded full run (offline)
+A copy of the full run (679 scenarios, 2,900 executions; 2026-10-13 on b7214d29 under the Logan load), its MCP arm
+re-normalised with async's suite_mcp_renormalise.py (1,128 of 1,330 rebuilt, 16 changed: G06), re-evaluated with
+lane S5's scripts (5d5dd2fa) and with this branch (daeb497d), against the recorded re-evaluation reeval-final-B
+(lane S4's checks, MCP arm not re-normalised). Fails: direct-local 40 -> 11 -> 8, direct-remote 31 -> 10 -> 9, MCP
+66 -> 7 -> 2 (Q-more-0003 x2: v3 expects a 200, G07); MCP service_by_design 320 -> 344 -> 134, pass 834 -> 864 ->
+1,071, inconclusive 46 -> 51 -> 59. S5 -> S5b, every change in a group: B-01 (210 MCP lines an answered case had
+marked: 204 pass, 6 inconclusive: C-caps-0001/0003, N-usecase-0005), G27 (D-M-planted-0015 r1/r2 on direct-local and
+MCP), G28 (N-realrep-0006 on all three arms), rule (c) (N-realrep-0002 MCP r0: no service-side timing); MCP classes:
+104 by-design pairs -> agree (B-01), R-edge-0008 and N-realrep-0002 disagree -> agree (B-01 P4, rule (c)),
+N-nearmiss-0028 by design verified -> unverified (B-04); direct classes: 11 disagreements -> timing (VERIFY-2 item 5:
+9 deadlines or time stops, T-walk-0004's prefix, D-M-planted-0015 with G27's extension), T-attempts-0002 left (G17).
+The MCP arm reproduces async's replay of its runner at e334715b (inconclusive by reason: checks 55, resolve_timeout
+3, no service-side timing 1); its fails differ by the 16 re-normalised lines (G06) and the 4 lines G27 / G28 fix.
