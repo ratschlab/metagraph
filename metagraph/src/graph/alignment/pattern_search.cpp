@@ -1109,11 +1109,17 @@ struct BaseSearch {
     // the lower bound of everything counted so far (stop_at_threshold, retention)
     uint64_t running_lower = 0;
     // the upper bound of everything counted so far: what the thresholds compare on a graph
-    // without the mask
+    // without the mask. A range whose scan is deferred enters it once scanned, at the end of
+    // its pass (refresh_running_upper), as running_scanned_upper
     uint64_t running_upper = 0;
-    // the candidates of the items whose palindromes are counted (count_palindromes): at least
-    // the palindromic contexts among them, which a wrapped PRIMARY union finds twice
+    uint64_t running_scanned_upper = 0;
+    // the candidates of the items whose palindromes are counted (count_palindromes), and once
+    // the end of their pass has read their scans, the palindromes found: at least the
+    // palindromic contexts among them, which a wrapped PRIMARY union finds twice
     uint64_t running_palindrome_candidates = 0;
+    // the palindromic contexts the scans of the passes ended so far found: those a wrapped
+    // PRIMARY union counts twice in the running upper bounds of its two searches
+    uint64_t running_palindromes = 0;
 
     // per offset, filled by tally() after the scans
     std::vector<Estimate> contexts;
@@ -1853,8 +1859,9 @@ class PatternRun {
     // orientations. A wrapped PRIMARY union of a + b discovered contexts counts both parts when
     // k is odd (no k-mer of odd length over A, C, G, T is its own reverse complement); for even
     // k it can count a palindromic stored k-mer twice, at most once per candidate of the ranges
-    // where the counting search may meet one (pc), so it holds at least a + b - min(pc, a, b)
-    // (max(a, b) would be about half the count)
+    // where the counting search may meet one, or once their scans counted them per palindrome
+    // found (pc), so it holds at least a + b - min(pc, a, b) (max(a, b) would be about half the
+    // count)
     uint64_t running_lower() const {
         uint64_t total = 0;
         for (const OrientationPlan &o : plans_) {
@@ -1875,15 +1882,24 @@ class PatternRun {
     }
 
     // the running upper bound of the whole pattern, as the thresholds compare it without the
-    // mask: every candidate counted so far, of both parts of a wrapped PRIMARY union, but for
+    // mask: every candidate counted so far, of both parts of a wrapped PRIMARY union less the
+    // palindromes the scans found, which both parts count (U = A + B - P, as count()), but for
     // the ranges whose palindrome scan is pending (add_item): at most the final U, which it
-    // equals on BASIC, CANONICAL and odd-k graphs
+    // equals on BASIC, CANONICAL and odd-k graphs, and for the levels whose passes ended on
+    // every graph
     uint64_t running_upper() const {
         uint64_t total = 0;
         for (const OrientationPlan &o : plans_) {
-            total += searches_[o.direct].running_upper;
-            if (o.mapped)
-                total += searches_[*o.mapped].running_upper;
+            const uint64_t a = searches_[o.direct].running_upper;
+            if (!o.mapped) {
+                total += a;
+                continue;
+            }
+            const uint64_t b = searches_[*o.mapped].running_upper;
+            const uint64_t twice = o.palindromes
+                ? std::min(searches_[*o.palindromes].running_palindromes, a + b)
+                : 0;
+            total += a + b - twice;
         }
         return total;
     }
@@ -1975,9 +1991,10 @@ class PatternRun {
         search.running_lower += item.lower();
         // a range whose scan is pending (the palindromes of an even-k wrapped PRIMARY graph)
         // can only lose candidates to it, and its palindromes come off the union: counted
-        // when scanned, so that the running count never exceeds the final U and a retention
-        // dropped or a stop taken on it agrees with the admission after discovery. Without
-        // a pending scan (every range on BASIC and CANONICAL graphs) it is the final U
+        // once scanned, at the end of its pass (refresh_running_upper), so that the running
+        // count never exceeds the final U and a retention dropped or a stop taken on it agrees
+        // with the admission after discovery. Without a pending scan (every range on BASIC
+        // and CANONICAL graphs) it is the final U
         if (!item.pending())
             search.running_upper += item.upper();
         if (item.count_palindromes)
@@ -2467,10 +2484,11 @@ class PatternRun {
             if (stop_)
                 return;
             // discovery compared the pass's counts before its scans and check completed them:
-            // both bounds are recomputed and compared again before the next pass, so that
-            // stop_at_threshold stops once the levels 0 .. t alone exceed the threshold (level
-            // t then complete) and no later pass compares what the check dropped. After the
-            // last pass nothing is left to save and the counts are the answer
+            // both bounds are recomputed (the scanned ranges and their palindromes included)
+            // and compared again before the next pass, so that stop_at_threshold stops once
+            // the levels 0 .. t alone exceed the threshold (level t then complete) and no
+            // later pass compares what the check dropped. After the last pass nothing is left
+            // to save and the counts are the answer
             if (t + 1 < levels_) {
                 refresh_running_lower();
                 refresh_running_upper();
@@ -2482,26 +2500,34 @@ class PatternRun {
 
     // every base search's running lower bound recomputed from its counts as they stand: the
     // exact contexts (the check's included) and the pending ranges' lower bounds, which the
-    // scans raised after discovery counted them
+    // scans raised after discovery counted them; and the palindromes a wrapped PRIMARY union
+    // can count twice, which the scans counted (palindromes_upper(): at most the candidates
+    // that discovery subtracted)
     void refresh_running_lower() {
         for (BaseSearch &search : searches_) {
             uint64_t lower = 0;
             for (uint64_t exact : search.exact) {
                 lower += exact;
             }
+            uint64_t twice = 0;
             for (const Item &item : search.pending) {
                 lower += item.lower();
+                twice += item.palindromes_upper();
             }
             assert(lower >= search.running_lower);
+            assert(twice <= search.running_palindrome_candidates);
             search.running_lower = lower;
+            search.running_palindrome_candidates = twice;
         }
     }
 
     // every base search's running upper bound recomputed from its counts as they stand: the
     // exact contexts and the unchecked candidates, from which the check moved the real
-    // candidates into the exact ones and dropped the source dummies. The ranges whose scan is
-    // deferred stay out, as add_item leaves them (a scan can only lower their share), so that
-    // the running bound never exceeds the final U and equals it where no scan is pending
+    // candidates into the exact ones and dropped the source dummies, and the ranges whose
+    // deferred scans the passes completed (all of them: the pass ended), at their scanned
+    // upper bounds, with the palindromes they found, which running_upper() takes off a wrapped
+    // PRIMARY union once. So the running bound never exceeds the final U and equals it for
+    // the levels whose passes ended
     void refresh_running_upper() {
         for (BaseSearch &search : searches_) {
             assert(search.unchecked.size() == search.exact.size());
@@ -2509,8 +2535,18 @@ class PatternRun {
             for (size_t p = 0; p < search.exact.size(); ++p) {
                 upper += search.exact[p] + search.unchecked[p];
             }
-            assert(upper <= search.running_upper);
-            search.running_upper = upper;
+            // the check only drops what discovery counted
+            assert(upper + search.running_scanned_upper <= search.running_upper);
+            uint64_t scanned = 0;
+            uint64_t palindromes = 0;
+            for (const Item &item : search.pending) {
+                assert(item.scan_done);
+                scanned += item.upper();
+                palindromes += item.palindromes;
+            }
+            search.running_upper = upper + scanned;
+            search.running_scanned_upper = scanned;
+            search.running_palindromes = palindromes;
         }
     }
 

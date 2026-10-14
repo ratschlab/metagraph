@@ -665,7 +665,10 @@ struct Request {
     // ALL_OR_COUNT's retention and the extension's admission. On an even-k wrapped PRIMARY
     // graph the running U leaves out the ranges whose palindrome scan is pending (the scan can
     // only lower their share), so that it never exceeds the final U: there the stop can fire
-    // late or not at all, the admission after discovery then comparing the final U. (While the
+    // late or not at all, the admission after discovery then comparing the final U. With
+    // max_mismatches the comparison at the end of each pass but the last reads both bounds as
+    // the pass's scans and check left them (a scanned range at its scanned bounds, the
+    // palindromes found taken off the union once), with the mask or without it. (While the
     // pattern's unchecked candidates are at most max_checked_entries, the retention compares
     // the running lower bound instead, since the check after discovery may make the count EXACT
     // and within the threshold; this stop still compares U.)

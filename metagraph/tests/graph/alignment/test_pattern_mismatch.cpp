@@ -689,7 +689,19 @@ uint8_t check_stopped(const Result &r, const Truth &truth, bool exact_below = tr
                     EXPECT_EQ(StopPhase::DISCOVERY, r.stop->phase);
                     break;
                 case Relation::BOUNDS:
-                    EXPECT_EQ(StopPhase::MASK_SCAN, r.stop->phase);
+                    if (r.stop->phase == StopPhase::DISCOVERY) {
+                        // without the mask, its check not run: the threshold compared at the
+                        // end of the pass, as for EXACT below
+                        EXPECT_TRUE(r.stop->reason == StopReason::MAX_CONTEXTS
+                                        || r.stop->reason == StopReason::MAX_ANCHORS)
+                            << "the interrupted level " << int(u) << " is bounds";
+                        EXPECT_GT(levels.size(), u + 1u) << "a stop after the last pass";
+                        if (u + 1u < r.work.steps_by_mismatches.size()) {
+                            EXPECT_EQ(0u, r.work.steps_by_mismatches[u + 1]);
+                        }
+                    } else {
+                        EXPECT_EQ(StopPhase::MASK_SCAN, r.stop->phase);
+                    }
                     break;
                 case Relation::UNKNOWN:
                     // the clock at the pass's start (or a stop before the pattern)
@@ -1201,6 +1213,9 @@ struct ThresholdSweep {
     size_t stale_windows = 0;
     size_t releases = 0;
     size_t stops = 0;
+    // stops at the end of a pass, its level complete: on an even-k wrapped PRIMARY graph the
+    // ranges its palindrome scans counted crossed the cap
+    size_t pass_end_stops = 0;
 };
 
 /**
@@ -1216,27 +1231,47 @@ struct ThresholdSweep {
  * stop_at_threshold stops in the pass of level t iff the levels below t as completed plus
  * level t's candidates exceed the cap, and only then, the levels below t as the check left
  * them. |share|: the counted candidates one checked entry stands for (candidates_per_entry).
+ * |palindrome_scans| (an even-k wrapped PRIMARY graph): the discovery of level t compares its
+ * candidates without the ranges whose palindrome scan is deferred, which enter the running
+ * bound scanned at the end of the pass, each palindrome once (SPEC §21.6): the stop comes in
+ * that pass or a later one, but at the latest at the end of the first pass but the last whose
+ * levels as completed exceed the cap, and a stop at the end of a pass leaves its level as
+ * completed.
  */
 void sweep_thresholds_after_the_check(const DeBruijnGraph &unmasked, const std::string &text,
                                       const Request &base, const std::vector<MCtx> &expected,
                                       const Truth &truth, ThresholdSweep *sweep,
-                                      uint64_t share = 1) {
+                                      uint64_t share = 1, bool palindrome_scans = false) {
     const uint8_t m = base.max_mismatches;
+    const size_t k = unmasked.get_k();
     // per level: its candidates U_t with no check, and the entries the check tests for those
-    // of them unchecked
+    // of them unchecked: k - 1 steps each, what its pass charges with every entry tested above
+    // what it charges with none
     Request none = base;
     none.max_checked_entries = 0;
+    Request every = base;
+    every.max_checked_entries = 1'000'000'000;
     const Result plain = count_of(unmasked, text, none);
+    const Result checked = count_of(unmasked, text, every);
     ASSERT_FALSE(plain.stop);
+    ASSERT_FALSE(checked.stop);
     std::vector<uint64_t> upper(m + 1, 0);
     std::vector<uint64_t> unchecked(m + 1, 0);
     for (uint8_t t = 0; t <= m; ++t) {
         const Count &level = plain.contexts->by_mismatches.at(t);
         EXPECT_TRUE(true_relation(level, truth.by_level[t])) << "level " << int(t);
         upper[t] = level.relation == Relation::BOUNDS ? level.upper : level.value;
-        unchecked[t] = level.relation == Relation::BOUNDS ? level.upper - level.lower : 0;
-        EXPECT_EQ(0u, unchecked[t] % share) << "level " << int(t);
-        unchecked[t] /= share;
+        const uint64_t check_steps = checked.work.steps_by_mismatches.at(t)
+                                        - plain.work.steps_by_mismatches.at(t);
+        EXPECT_EQ(0u, check_steps % (k - 1)) << "level " << int(t);
+        unchecked[t] = check_steps / (k - 1);
+        // the level's bounds differ by its entries, each counted once per orientation counting
+        // it; on an even-k wrapped PRIMARY graph a palindrome only the counting search spells
+        // exactly can raise the lower bound of the union instead (§7.4: at least each part)
+        if (!palindrome_scans) {
+            EXPECT_EQ(level.relation == Relation::BOUNDS ? level.upper - level.lower : 0,
+                      unchecked[t] * share) << "level " << int(t);
+        }
     }
     std::set<uint64_t> limits { 0 };
     uint64_t cumulative = 0;
@@ -1336,20 +1371,57 @@ void sweep_thresholds_after_the_check(const DeBruijnGraph &unmasked, const std::
                 }
                 done += completed[t];
             }
-            ASSERT_EQ(bool(level), bool(s.stop));
-            if (!level) {
+            // the comparison at the end of each pass but the last: the first whose levels as
+            // completed exceed the cap
+            std::optional<uint8_t> latest;
+            uint64_t through = 0;
+            for (uint8_t t = 0; t < m; ++t) {
+                through += completed[t];
+                if (through > cap) {
+                    latest = t;
+                    break;
+                }
+            }
+            if (palindrome_scans) {
+                ASSERT_TRUE(!latest || s.stop);
+                ASSERT_TRUE(level || !s.stop);
+            } else {
+                ASSERT_EQ(bool(level), bool(s.stop));
+            }
+            if (!s.stop) {
                 EXPECT_EQ(final_upper, bound_of(s.contexts->total));
                 continue;
             }
             ++sweep->stops;
             EXPECT_EQ(StopReason::MAX_CONTEXTS, s.stop->reason);
             EXPECT_EQ(StopPhase::DISCOVERY, s.stop->phase);
-            EXPECT_EQ(*level, check_stopped(s, truth, false));
-            for (uint8_t u = 0; u < *level; ++u) {
+            const uint8_t stopped = check_stopped(s, truth, false);
+            if (palindrome_scans) {
+                EXPECT_LE(*level, stopped);
+                if (latest) {
+                    EXPECT_GE(*latest, stopped);
+                }
+            } else {
+                EXPECT_EQ(*level, stopped);
+            }
+            for (uint8_t u = 0; u < stopped; ++u) {
                 const Count &c = s.contexts->by_mismatches.at(u);
                 EXPECT_EQ(exact[u] ? Relation::EXACT : Relation::BOUNDS, c.relation)
                     << "level " << int(u);
                 EXPECT_EQ(completed[u], bound_of(c)) << "level " << int(u);
+            }
+            const Count &at = s.contexts->by_mismatches.at(stopped);
+            if (at.relation != Relation::AT_LEAST) {
+                // stopped at the end of its pass: the level as completed, above the cap with
+                // the levels below it
+                ++sweep->pass_end_stops;
+                EXPECT_EQ(exact[stopped] ? Relation::EXACT : Relation::BOUNDS, at.relation);
+                EXPECT_EQ(completed[stopped], bound_of(at));
+                uint64_t up_to = 0;
+                for (uint8_t u = 0; u <= stopped; ++u) {
+                    up_to += completed[u];
+                }
+                EXPECT_LT(cap, up_to);
             }
             Result w;
             EXPECT_TRUE(released_by(unmasked, text, request, &w).empty());
@@ -1371,19 +1443,19 @@ uint64_t candidates_per_entry(DeBruijnGraph::Mode mode, const std::string &text,
 }
 
 TEST(PatternMismatch, UnmaskedThresholdsAfterTheCheck) {
-    // random cases without the mask (BASIC, CANONICAL and wrapped PRIMARY at odd k, where the
-    // running upper bound is the final U; at even k a wrapped PRIMARY graph's palindrome scans
-    // are pending and the bound leaves them out, SPEC §21.6): the thresholds after the check,
-    // every allowance and every boundary cap
+    // random cases without the mask (BASIC, CANONICAL and wrapped PRIMARY at odd and even k;
+    // at even k a wrapped PRIMARY graph's palindrome scans enter the running bound at the end
+    // of their pass, SPEC §21.6): the thresholds after the check, every allowance and every
+    // boundary cap
     ThresholdSweep sweep;
     size_t cases = 0;
     size_t primary = 0;
+    size_t even_primary = 0;
     for (uint32_t seed = 8000; seed < 8080; ++seed) {
         Case c = random_case(seed);
-        if (c.mode == DeBruijnGraph::PRIMARY && c.k % 2 == 0) {
-            continue;
-        }
+        const bool palindrome_scans = c.mode == DeBruijnGraph::PRIMARY && c.k % 2 == 0;
         primary += c.mode == DeBruijnGraph::PRIMARY;
+        even_primary += palindrome_scans;
         auto unmasked = unmasked_copy(c);
         SCOPED_TRACE(describe(c));
         const std::vector<MCtx> expected = hamming_walk(*c.graph, c.text, c.request.scope,
@@ -1393,11 +1465,14 @@ TEST(PatternMismatch, UnmaskedThresholdsAfterTheCheck) {
                                      c.request, c.text);
         sweep_thresholds_after_the_check(*unmasked, c.text, c.request, expected, truth, &sweep,
                                          candidates_per_entry(c.mode, c.text,
-                                                              c.request.strands));
+                                                              c.request.strands),
+                                         palindrome_scans);
         ++cases;
     }
     EXPECT_LT(40u, cases);
     EXPECT_LT(5u, primary);
+    EXPECT_LT(3u, even_primary);
+    EXPECT_LT(10u, sweep.pass_end_stops);
     EXPECT_LT(10u, sweep.stale_windows);
     EXPECT_LT(50u, sweep.releases);
     EXPECT_LT(50u, sweep.stops);
@@ -1436,6 +1511,276 @@ TEST(PatternMismatch, UnmaskedMiniRefSeqThresholdsAfterTheCheck) {
         EXPECT_LT(0u, sweep.stops);
     }
 }
+
+// a k-mer holding the DNA pattern |q| at |p| can be its own reverse complement with |t|
+// substitutions only where at most t mirrored pairs of pattern positions are not complementary
+// (even k; no odd-length k-mer is its own reverse complement)
+bool palindrome_possible(const std::string &q, size_t p, size_t k, uint8_t t) {
+    if (k % 2) {
+        return false;
+    }
+    size_t conflicts = 0;
+    for (size_t i = 0; i < q.size(); ++i) {
+        const size_t mirror = k - 1 - (p + i);
+        if (mirror > p + i && mirror < p + q.size()
+                && q[mirror - p] != complement_base(q[i])) {
+            ++conflicts;
+        }
+    }
+    return conflicts <= t;
+}
+
+// a wrapped PRIMARY graph whose stored k-mers are those of |contigs| as given (none the reverse
+// complement of another), with the dummy-edge mask or without it
+std::shared_ptr<DeBruijnGraph> primary_of(size_t k, const std::vector<std::string> &contigs,
+                                          bool masked) {
+    auto graph = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
+    for (const std::string &contig : contigs) {
+        graph->add_sequence(contig);
+    }
+    graph->mask_dummy_kmers(1, false);
+    if (!masked) {
+        graph->reset_mask();
+    }
+    return std::make_shared<CanonicalDBG>(std::static_pointer_cast<DeBruijnGraph>(graph), 2);
+}
+
+TEST(PatternMismatch, EvenKPrimaryUnmaskedStopsAtTheEndOfThePass) {
+    // k = 10, a wrapped PRIMARY graph without its mask, L = 8, strands forward: ACGAATTC holds
+    // GAATTC, its own reverse complement, at 2, so a k-mer holding it at offset 0 can be
+    // palindromic at every level, and the direct search's ranges there carry a palindrome scan,
+    // deferred to the end of their pass. The comparison of stop_at_threshold at the end of
+    // pass t (SPEC §21.6) counts those ranges as the scans counted them, each palindrome once:
+    // a cap C between the total of the levels 0 .. t without them and with them stops there
+    // ({discovery, max_contexts}, mismatch_level t, the levels 0 .. t exact, the later ones
+    // unknown), not in a later pass
+    const size_t k = 10;
+    const std::string text = "ACGAATTC";
+    // stored as given, between random flanks: the pattern at offset 0 at levels 0 and 1 (each
+    // with a palindromic k-mer, ACGAATTCGT and TCGAATTCGA), and TGGAATTCGT, whose reverse
+    // complement ACGAATTCCA only the reverse-complement search finds
+    std::mt19937 rng(23);
+    std::vector<std::string> contigs;
+    for (const char *planted : { "ACGAATTCAA", "ACGAATTCTC", "ACGAATTCCC", "ACGAATTCAG",
+                                 "ACGAATTCGT", "TGGAATTCGT", "ACGTATTCAA", "ACCAATTCCA",
+                                 "AGGAATTCTT", "ACGAATACAG", "TCGAATTCGA" }) {
+        const std::vector<std::string> flanks = random_records(rng, 2, 12, 12);
+        contigs.push_back(flanks[0] + planted + flanks[1]);
+    }
+    std::set<std::string> kmers;
+    for (const std::string &contig : contigs) {
+        for (size_t i = 0; i + k <= contig.size(); ++i) {
+            kmers.insert(contig.substr(i, k));
+        }
+    }
+    for (const std::string &kmer : kmers) {
+        const std::string rc = reverse_complement_string(kmer);
+        ASSERT_TRUE(rc == kmer || !kmers.count(rc)) << kmer;
+    }
+    auto masked = primary_of(k, contigs, true);
+    auto unmasked = primary_of(k, contigs, false);
+    const node_index stored = stored_graph(*masked).max_index();
+
+    for (uint8_t m : { 1, 2 }) {
+        SCOPED_TRACE("m " + std::to_string(m));
+        Request request = make_request(Scope::ANY_OFFSET, Strands::FORWARD, m);
+        request.max_checked_entries = 1'000'000;
+        const std::vector<MCtx> expected = hamming_walk(*masked, text, request.scope,
+                                                        request.strands, m);
+        const Truth truth = truth_of(expected, m, text.size(), k, request, text);
+        const Result full = count_of(*unmasked, text, request);
+        ASSERT_FALSE(full.stop);
+        Request unchecked = request;
+        unchecked.max_checked_entries = 0;
+        const Result plain = count_of(*unmasked, text, unchecked);
+        ASSERT_FALSE(plain.stop);
+        // per level: the contexts of the ranges the palindrome scans count less their
+        // palindromes (the stored k-mers holding the pattern at an offset where it can be
+        // palindromic, each not its own reverse complement), and the source dummies among the
+        // candidates
+        std::vector<uint64_t> scanned(m + 1, 0);
+        for (const MCtx &c : expected) {
+            const std::string kmer = masked->get_node_sequence(c.node);
+            scanned[c.level] += c.node <= stored
+                && palindrome_possible(text, c.offset, k, c.level)
+                && kmer != reverse_complement_string(kmer);
+        }
+        std::vector<uint64_t> dummies(m + 1, 0);
+        for (uint8_t t = 0; t <= m; ++t) {
+            ASSERT_EQ(Relation::EXACT, full.contexts->by_mismatches.at(t).relation);
+            ASSERT_EQ(truth.by_level[t], full.contexts->by_mismatches.at(t).value);
+            const Count &level = plain.contexts->by_mismatches.at(t);
+            dummies[t] = (level.relation == Relation::BOUNDS ? level.upper : level.value)
+                            - truth.by_level[t];
+        }
+        // the last pass compared at its end; C just below the levels 0 .. t, above them
+        // without the scanned ranges, and above what the discovery of level t compares (the
+        // levels below t as completed, level t's candidates without the scanned ranges)
+        const uint8_t t = m - 1;
+        uint64_t with = 0;
+        uint64_t without = 0;
+        for (uint8_t u = 0; u <= t; ++u) {
+            with += truth.by_level[u];
+            without += truth.by_level[u] - scanned[u];
+        }
+        const uint64_t cap = with - 1;
+        ASSERT_LE(without, cap);
+        ASSERT_LE(with - scanned[t] + dummies[t], cap);
+
+        request.stop_at_threshold = true;
+        request.max_contexts = cap;
+        const Result s = count_of(*unmasked, text, request);
+        ASSERT_TRUE(s.stop);
+        EXPECT_EQ(StopPhase::DISCOVERY, s.stop->phase);
+        EXPECT_EQ(StopReason::MAX_CONTEXTS, s.stop->reason);
+        EXPECT_EQ(t, s.stop->mismatch_level.value_or(kMaxMismatches + 1));
+        EXPECT_EQ(t, check_stopped(s, truth));
+        for (uint8_t u = 0; u <= m; ++u) {
+            const Count &level = s.contexts->by_mismatches.at(u);
+            if (u <= t) {
+                EXPECT_EQ(Relation::EXACT, level.relation) << "level " << int(u);
+                EXPECT_EQ(truth.by_level[u], level.value) << "level " << int(u);
+            } else {
+                EXPECT_EQ(Relation::UNKNOWN, level.relation) << "level " << int(u);
+                EXPECT_EQ(0u, s.work.steps_by_mismatches.at(u)) << "level " << int(u);
+            }
+        }
+        Result w;
+        EXPECT_TRUE(released_by(*unmasked, text, request, &w).empty());
+        ASSERT_TRUE(w.extraction && w.extraction->withheld);
+        EXPECT_EQ(Withheld::THRESHOLD_CROSSED, *w.extraction->withheld);
+
+        // at the levels' total nothing is crossed up to the end of pass t
+        request.max_contexts = with;
+        const Result above = count_of(*unmasked, text, request);
+        EXPECT_TRUE(!above.stop || *above.stop->mismatch_level > t);
+    }
+}
+
+TEST(PatternMismatch, ThresholdStopsAgainstTheUnboundedRun) {
+    // stop_at_threshold against the run without a threshold on random cases of every mode, odd
+    // and even k, with and without the mask (no check of unchecked candidates: a level's final
+    // bound is then what its pass leaves the running bound): a stop in the pass of level t needs
+    // the levels 0 .. t, as the unbounded run counts them, above the cap (the running bound
+    // never exceeds them), comes at the latest at the end of the first pass but the last whose
+    // levels exceed it (SPEC §21.6), and leaves the levels below t as the unbounded run counts
+    // them, level t too when it came at the end of the pass; without a stop the counts are the
+    // unbounded run's. ALL_OR_COUNT under the caps around the final bound never drops a range
+    // that its admitted release needs (the engine throws) and releases O1's list when it fits
+    std::map<std::string, size_t> pass_end_stops;
+    std::map<std::string, size_t> cases;
+    size_t stops = 0;
+    for (uint32_t seed = 9000; seed < 9200; ++seed) {
+        const Case c = random_case(seed);
+        const uint8_t m = c.request.max_mismatches;
+        const std::vector<MCtx> expected = hamming_walk(*c.graph, c.text, c.request.scope,
+                                                        c.request.strands, m);
+        const Truth truth = truth_of(expected, m, c.text.size(), c.k, c.request, c.text);
+        for (bool unmasked : { false, true }) {
+            const std::string kind = std::string(mode_name(c.mode))
+                + (c.k % 2 ? " odd" : " even") + (unmasked ? " unmasked" : " masked");
+            SCOPED_TRACE(describe(c) + " " + kind);
+            ++cases[kind];
+            auto graph = unmasked ? unmasked_copy(c) : c.graph;
+            const Result full = count_of(*graph, c.text, c.request);
+            ASSERT_FALSE(full.stop);
+            auto bound_of = [](const Count &count) {
+                return count.relation == Relation::BOUNDS ? count.upper : count.value;
+            };
+            std::vector<uint64_t> bound(m + 1, 0);
+            std::set<uint64_t> caps { 0 };
+            uint64_t closer = 0;
+            for (uint8_t t = 0; t <= m; ++t) {
+                const Count &level = full.contexts->by_mismatches.at(t);
+                if (!unmasked) {
+                    EXPECT_EQ(Relation::EXACT, level.relation) << "level " << int(t);
+                }
+                EXPECT_TRUE(true_relation(level, truth.by_level[t])) << "level " << int(t);
+                bound[t] = bound_of(level);
+                closer += bound[t];
+                caps.insert({ closer, closer + 1 });
+                if (closer) {
+                    caps.insert(closer - 1);
+                }
+            }
+            const uint64_t total = bound_of(full.contexts->total);
+            EXPECT_EQ(closer, total);
+
+            for (uint64_t cap : caps) {
+                SCOPED_TRACE("cap " + std::to_string(cap));
+                Request request = c.request;
+                request.stop_at_threshold = true;
+                request.max_contexts = cap;
+                const Result s = count_of(*graph, c.text, request);
+                std::optional<uint8_t> latest;
+                uint64_t through = 0;
+                for (uint8_t t = 0; t < m; ++t) {
+                    through += bound[t];
+                    if (through > cap) {
+                        latest = t;
+                        break;
+                    }
+                }
+                ASSERT_TRUE(!latest || s.stop);
+                if (!s.stop) {
+                    EXPECT_EQ(full.contexts->total.relation, s.contexts->total.relation);
+                    EXPECT_EQ(total, bound_of(s.contexts->total));
+                    continue;
+                }
+                ++stops;
+                EXPECT_EQ(StopPhase::DISCOVERY, s.stop->phase);
+                EXPECT_EQ(StopReason::MAX_CONTEXTS, s.stop->reason);
+                const uint8_t t = check_stopped(s, truth, !unmasked);
+                if (latest) {
+                    EXPECT_GE(*latest, t);
+                }
+                uint64_t up_to = 0;
+                for (uint8_t u = 0; u <= t; ++u) {
+                    up_to += bound[u];
+                }
+                EXPECT_LT(cap, up_to);
+                for (uint8_t u = 0; u < t; ++u) {
+                    const Count &level = s.contexts->by_mismatches.at(u);
+                    EXPECT_EQ(full.contexts->by_mismatches.at(u).relation, level.relation)
+                        << "level " << int(u);
+                    EXPECT_EQ(bound[u], bound_of(level)) << "level " << int(u);
+                }
+                const Count &at = s.contexts->by_mismatches.at(t);
+                if (at.relation != Relation::AT_LEAST) {
+                    ++pass_end_stops[kind];
+                    EXPECT_EQ(full.contexts->by_mismatches.at(t).relation, at.relation);
+                    EXPECT_EQ(bound[t], bound_of(at));
+                }
+            }
+
+            for (uint64_t cap : { total, total + 1, total ? total - 1 : 0 }) {
+                SCOPED_TRACE("release cap " + std::to_string(cap));
+                Request request = c.request;
+                request.max_contexts = cap;
+                Result r;
+                std::vector<MCtx> got;
+                ASSERT_NO_THROW(got = released_by(*graph, c.text, request, &r));
+                ASSERT_TRUE(r.extraction);
+                if (total <= cap) {
+                    EXPECT_EQ(expected, got);
+                } else {
+                    EXPECT_TRUE(got.empty());
+                }
+            }
+        }
+    }
+    for (const char *kind : { "basic odd masked", "basic even unmasked", "canonical odd masked",
+                              "canonical even unmasked", "primary odd masked",
+                              "primary odd unmasked", "primary even masked",
+                              "primary even unmasked" }) {
+        EXPECT_LT(5u, cases[kind]) << kind;
+    }
+    EXPECT_LT(1000u, stops);
+    // the stops the palindrome scans' ranges decide at the end of a pass
+    EXPECT_LT(10u, pass_end_stops["primary even masked"]);
+    EXPECT_LT(10u, pass_end_stops["primary even unmasked"]);
+}
+
 
 // ---------------------------------------------------------------- order and retention
 
