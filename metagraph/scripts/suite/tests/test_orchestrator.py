@@ -531,7 +531,7 @@ class RunSuiteOffline(SuiteCase):
             self.assertEqual(sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]["state"],
                              "done")
             for run_of, own_wait, expect in ((run_id, "2", "stop it with kill -INT"),
-                                             ("another-run", "60", "of another invocation")):
+                                             ("another-run", "60", "another invocation's")):
                 other = stand_in(run_of, 60)
                 try:
                     p = self.run_suite(host, "--resume", run_dir, SUITE_WAIT_RUNNER_S="1",

@@ -602,7 +602,7 @@ if [[ -z "$ATTACH_PID" ]]; then
   wait_no_runner "$WAIT_RUNNER_S" || WRC=$?
   case $WRC in
     0) ;;
-    1) die "a run_direct.py of another invocation runs under ~/$MEX_DIR on $MEX (pid(s) $RUNNER_PIDS); wait for it, or stop it with kill -INT on $MEX (it records its request in flight) and --resume that run later" ;;
+    1) die "a run_direct.py runs under ~/$MEX_DIR on $MEX (another invocation's, pid(s) $RUNNER_PIDS); wait for it, or stop it with kill -INT on $MEX (it records its request in flight) and --resume that run later" ;;
     *) die "no answer from $MEX while checking for a running run_direct.py: refusing to start (an ssh failure never reads as no runner)" ;;
   esac
 fi
