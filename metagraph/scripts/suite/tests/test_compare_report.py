@@ -436,9 +436,20 @@ class CompareTest(unittest.TestCase):
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 130)   # async's vendored table at e334715b
-        self.assertEqual(info["sha256"], "0fcf7e7d69140ac6ab9fe141ab6933a89871da5f8a246e3d9ad0044f84ddfb0c")
+        self.assertEqual(info["cases"], 130)   # async's vendored table at f386a3c0 (e427d503's edit)
+        self.assertEqual(info["sha256"], "e63304709904feee8358f18684425c6ec5965866a1fbc46cf13972e9a060abc7")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
+        # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
+        entry, = cases["traverse.duplicate_seeds"]["explains_checks"]
+        self.assertEqual(entry, {"check": "invariants",
+                                 "detail_matches": r"([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)"})
+        for detail, explained in (("1 results for 2 seeds (1 distinct)", True),
+                                  ("2 results for 3 seeds (2 distinct)", True),
+                                  ("1 results for 3 seeds (2 distinct)", False),
+                                  ("5 results for 2 seeds (1 distinct)", False),
+                                  ("1 results for 2 seeds", False), ("1 results for 2 seeds (1 distinct); x", False)):
+            self.assertEqual(cmp.entry_explains(entry, {"check": "invariants", "outcome": "fail", "detail": detail}),
+                             explained, detail)
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
         self.assertEqual(sorted(c["id"] for c in cmp.answer_cases(cases)),
                          ["mismatch.above_kind_cap", "pattern.caps_zero", "pattern.deadline_ends_task",

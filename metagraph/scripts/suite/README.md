@@ -242,12 +242,13 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
 - `service_by_design.json`: async's table (130 cases), copied byte-identical from the search-service work
-  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show e334715b:scripts/bench/vendor_suite/service_by_design.json`,
-  154,008 bytes, sha256 0fcf7e7d...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
+  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show f386a3c0:scripts/bench/vendor_suite/service_by_design.json`,
+  154,062 bytes, sha256 e6330470...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
   splits by value and four answer-triggered cases; lane S5b: `explains_checks` on every answered / clamped case,
-  `answer_match.direct_mismatch` on the four answer-triggered ones, validated at load). A case's `agreement`
-  `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) -> service-side
-  by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
+  `answer_match.direct_mismatch` on the four answer-triggered ones, validated at load; lane S5e: async's e427d503
+  edit: traverse.duplicate_seeds explains only `([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)`). A
+  case's `agreement` `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) ->
+  service-side by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
   service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text
   with digits ignored, each where stated; the code may also be a pattern slot's) and the MCP executions match
   `service_answer` as async's runner decides each MCP execution (lane S5b, B-02: `refused_at_submit` /
@@ -1218,3 +1219,17 @@ protein mismatch cap 1; each document's sha256 in the manifest's index): 681 sce
 smoke 11 scenarios, content_sha256 8e944aeb792da696a544236156c3ea8c8b435f7a53548689ba520cff7b7e0d6e. It equals the provisional v4 of
 lanes S5c/S5d. run_suite.sh takes v4 by default (`--smoke`: suite_smoke_v4.json); build_manifest.py refuses to overwrite either.
 
+
+## Lane S5e: the mirror of async's final runner f386a3c0 (2026-10-14)
+
+The reference is async's runner on feat/suite-mcp-runner-vendored at f386a3c0 (scripts/bench/suite_mcp_runner.py):
+f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened traverse.duplicate_seeds regex), f52846fb
+(rule 4's read floor) and f386a3c0 (`explained_items` on the line and the raw record).
+
+- The table: async's f386a3c0 (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show
+  f386a3c0:scripts/bench/vendor_suite/service_by_design.json`, 154,062 bytes, sha256 e6330470..., 130 cases),
+  byte-identical here. Against e334715b's (0fcf7e7d...) only traverse.duplicate_seeds changed: its explains_checks
+  entry is {"check": "invariants", "detail_matches": "([1-9][0-9]*) results for [0-9]+ seeds \\(\\1 distinct\\)"}
+  (fullmatch: as many results as distinct seeds, the checks' wording of lane S5c, B5b-07), and the vocabulary's
+  example reads "1 results for 2 seeds (1 distinct)". Async's vendored checks.py and suite_common.py at f386a3c0
+  equal this branch's at 3daea97a.
