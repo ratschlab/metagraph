@@ -18,7 +18,10 @@ replayed with the current table (--by-design PATH, default compare.py's; '' none
 `judge`, is the reference: e334715b with rules 1, 2 and 4 of 62ee4214, 2a8acbaf, f94b079d, rule 4's read floor of
 f52846fb, the explained items of f386a3c0 and answer_match.mcp_outcome of 901893b7): the cases the scenario names
 whose service_answer the answer matches (the field read from the recorded tool error), else the first
-answer-triggered case it matches whose wall rule holds or cannot be decided; when the first matched case states
+answer-triggered case it matches whose wall rule holds or cannot be decided, each only where its `request` holds on
+the scenario's MCP arguments (the references it reads recorded as the line's request_evidence: the run's recorded
+live documents, else the table's blocks; a table, or a manifest naming a case its own arguments do not satisfy, is
+refused like the runner refuses it); when the first matched case states
 answer_match.mcp_outcome not_implemented_mcp the execution is not_implemented_mcp (finding when a check is a
 finding; the case recorded, the runner's verdict_detail; neither rule (c) nor a host-state rule applies, and a
 runner's not_implemented_mcp mark that names its case is replayed, not kept); else a refused / relayed /
@@ -245,10 +248,16 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
     notes = []
     warnings = info.setdefault("warnings", [])
     if arm == "mcp" and cases:
-        # async's runner (judge at 31a2e41f): the named cases first, else an answer-triggered case whose wall rule
-        # holds or cannot be decided (rule (c)); a case a wall holds back (a known one, or rule 2) does not apply
+        # async's runner (judge at 31a2e41f): the named cases first, else an answer-triggered case whose request and
+        # wall rule hold, or whose wall rule cannot be decided (rule (c)); a case its request or a wall holds back
+        # (a known one, or rule 2) does not apply. The references the requests read: request_evidence
         walls = []
-        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls, warnings)
+        evidence = compare.RequestEvidence()
+        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls, warnings, evidence)
+        if evidence.sources:
+            info["request_evidence"] = evidence.sources
+        if evidence.mismatches:
+            info["request_evidence_mismatches"] = evidence.mismatches
         notes = [d for state, d, _ in walls if state != "undecidable"]
         if matched:
             info["by_design_cases"] = [c.get("id") for c in matched]
@@ -298,7 +307,7 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         info["note"] = "the runner's %s mark is not reproduced by the current table: judged by the checks" % recorded
     if arm == "mcp":
         code, state, detail = sc.host_state_verdict(scenario, line, doc, (answer or {}).get("error"), tool_err,
-                                                    warnings)
+                                                    warnings, compare.refs_of(cases))
         if detail:
             notes.append(detail)
         if notes:
@@ -346,16 +355,28 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
     if mcp_auth is not None and mcp_auth not in sc.MCP_AUTH_VALUES:
         raise ValueError("--mcp-auth takes %s, not %r" % (" or ".join(sc.MCP_AUTH_VALUES), mcp_auth))
     checks_dir = os.path.abspath(checks_dir or HERE)
-    cases, by_design_info = compare.load_by_design(compare.DEFAULT_BY_DESIGN if by_design is None else by_design)
+    top_manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
+    if not isinstance(top_manifest, dict):
+        top_manifest = next((m for m in (sc.read_json(os.path.join(d, "manifest.json"))
+                                         for _, d in merge_run.arm_dirs(run_dir)) if isinstance(m, dict)), None)
+    # the table, refused like the runner refuses it, also when a scenario names a case its own arguments do not
+    # satisfy; bound to the run's recorded live documents (compare.bind_run)
+    cases, by_design_info = compare.load_by_design(compare.DEFAULT_BY_DESIGN if by_design is None else by_design,
+                                                   (top_manifest or {}).get("scenarios") or [])
+    if by_design_info is not None:
+        cases = compare.bind_run(cases, run_dir)
     checks_mod = load_checks(checks_dir)
     ident = checks_identity(checks_dir)
     takes = inspect.signature(checks_mod.evaluate).parameters
     takes_prev, takes_client = "previous" in takes, "client" in takes
     short = (ident["checks_sha256"] or "")[:16]
-    top_manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
     mark = {"run_dir": os.path.abspath(run_dir), "reevaluated_utc": sc.iso_utc(time.time()), "checks": ident,
             "client_passed": {"direct-local": "wall_ms", "direct-remote": "wall_ms", "mcp": "mcp_phases.backend_ms"},
             "by_design": by_design_info, "recorded": {}, "arms": {}, "changes": [], "warnings": [],
+            # where the references the table's requests and the plausibility rules read came from, and every live /
+            # table mismatch (judged with the live value)
+            "references": dict(compare.reference_sources(cases), mismatches=compare.reference_mismatches(cases))
+            if by_design_info is not None else None,
             # rule 2's auth (async's 2a8acbaf): the MCP lines by the mcp_auth their record states, and the assumption
             # --mcp-auth made for those that state none (null: none made; they stay unknown, rule 2 decides nothing);
             # run_json: the values the MCP arm's run.json states (its invocations' included)
@@ -465,7 +486,7 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
             # as async's runner records them: the matched case and the failing checks it explains, whenever a case
             # matched (the replay's, not the recorded run's)
             for k in ("service_by_design_case", "explained_checks", "explained_items", "verdict_detail",
-                      "inconclusive_reason"):
+                      "inconclusive_reason", "request_evidence", "request_evidence_mismatches"):
                 row.pop(k, None)
             if "service_by_design_case" in info:
                 row["service_by_design_case"] = info["service_by_design_case"]
@@ -477,7 +498,7 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
                 # the runner's own list (f386a3c0) that the replay does not reproduce (another table, other checks):
                 # noted, not trusted (compare notes a line's differing list the same way, S5c-05)
                 row["reevaluation"]["explained_items_recorded"] = line.get("explained_items")
-            for k in ("verdict_detail", "inconclusive_reason"):
+            for k in ("verdict_detail", "inconclusive_reason", "request_evidence", "request_evidence_mismatches"):
                 if info.get(k):
                     row[k] = info[k]
             for k in ("by_design_cases", "host_state", "note"):

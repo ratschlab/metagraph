@@ -23,15 +23,18 @@
   "answer_match.mcp.field": "ADDED 2026-10-14 (optional): the refused argument's field (the MCP error's `field`) as a pattern: `<...>` placeholders match anything, `a | b` lists alternatives (each part stripped), matched like a named case's service_answer.field; an MCP answer that names no field does not match. It tells apart refusals of one code and text whose host answers differ (pattern.caps_zero: a cap of 0 the host answers, against time_budget_ms 0 with the same REST text, which the host refuses)",
   "answer_match.direct.slot_code": "ADDED 2026-10-14 (optional): a pattern slot's error code: the direct answer (a 200) holds a pattern whose slot is refused with it (body.patterns[].error.code; `a | b` lists alternatives), where the service refuses the whole submit (mismatch.above_kind_cap: the host's mismatches_above_cap slot)",
   "answer_match.direct_mismatch": "ADDED 2026-10-14 (triage-2 B-03; stated on every answer_match of the table; the comparator reads it, the MCP runner has no direct arm): what a direct answer outside answer_match.direct means for the pair. \"disagree\": any direct HTTP answer outside the direct side disagrees (pattern.caps_zero, mismatch.above_kind_cap, traverse.empty_seeds: validation or a stale cap, no timing involved). \"timing\": a direct 200 or a direct 503 deadline (code deadline) reads unverified, a timing difference (the same request, the host finished at another time); any other direct answer (e.g. a 4xx refusal) disagrees (pattern.deadline_ends_task). A direct transport error or a missing direct answer is always unverified, whatever the value. The MCP execution's own checks still count: a finding is never erased by the mark (see explains_checks)",
-  "answer_match.wall_rule": "ADDED 2026-10-14 (optional; peer review R1, the design lead's threshold; judged on the MCP execution, its mcp_phases and raw calls): \"budget_minus_reserve\" = the answer-triggered case applies only when the MCP execution's service-side wall reaches the request's time_budget_ms less the finalisation reserve (the reserve the MCP answer's error text states, \"finalisation reserve of <N> ms\", else 250 ms: app/pattern/validate.py DEFAULT_FINALIZE_RESERVE_MS): the host sends its deadline at budget - reserve at the earliest, so a relayed deadline before it is no host deadline (a budget bug the case would hide). The wall, in order: mcp_phases.backend_ms (the service-measured backend call); for a pattern search, the deadline-ended task's HTTP try (its diagnostic log's last held-slot line, http 1 fail 1 <s>s: the failed POST's seconds, app/queue/held_span.py; the smallest over such tasks; a task without one, or with more than one try, gives none). The request's time_budget_ms is the MCP arguments' (else the direct request's). A KNOWN wall below the threshold: the case does not apply, matching continues with the other cases and, when none applies, the checks judge. CHANGED 2026-10-14 (rule (c), the design lead): no wall (no backend_ms, no usable slot line) or no threshold (no request budget): plausibility undecidable: the case matched (recorded) and the execution is inconclusive with verdict_detail \"no service-side timing: plausibility undecidable\" or \"no threshold known: plausibility undecidable\", never the checks' fail (a finding still wins). The line's verdict_detail says why. pattern.deadline_ends_task states it",
+  "answer_match.wall_rule": "ADDED 2026-10-14 (optional; peer review R1, the design lead's threshold; judged on the MCP execution, its mcp_phases and raw calls). CHANGED 2026-10-14 (lane G2: bounds only from the request, the host's capabilities and the service's settings, never from the failing answer): \"budget_minus_reserve\" = the answer-triggered case applies only when the FAILING ATTEMPT's own service-side wall reaches the request's time_budget_ms - 1000 ms (the engine answers its 503 deadline only once time_budget_ms has elapsed; 1 s of clock and phase slack): a relayed deadline before it is no host deadline (a budget bug the case would hide). The wall: for a pattern search the deadline-ended task's one failed HTTP try (its diagnostic log's last held-slot line, http 1 fail 1 <s>s: the failed POST's seconds, app/queue/held_span.py; the smallest over such tasks; a task without one, or with more than one try, gives none), for a traversal job its last settled attempt's span; NEVER mcp_phases.backend_ms (a sum over a search's tasks or a job's attempts: a retry would count twice). A finalisation reserve the answer's text states (\"finalisation reserve of <N> ms\") above the host's (host_capabilities pattern.finalize_reserve_ms) is no host deadline: the case does not apply. The request's time_budget_ms is the MCP arguments' (else the direct request's). A KNOWN wall below the threshold: the case does not apply, matching continues with the other cases and, when none applies, the checks judge. Rule (c), the design lead: no wall (no usable slot line, no settled attempt) or no threshold (no request budget): plausibility undecidable: the case matched (recorded) and the execution is inconclusive with verdict_detail \"no service-side timing: plausibility undecidable\" or \"no threshold known: plausibility undecidable\", never the checks' fail (a finding still wins). The line's verdict_detail says why (\"... >= time_budget_ms <B> - 1000 ms = <B-1000> ms\"). pattern.deadline_ends_task states it",
   "answer_match.mcp_outcome": "ADDED 2026-10-14 (optional; the design lead, suite_v4's T-labels-0004 / -0006; the async runner reads it, the comparator mirrors it): the outcome class a matched case gives the MCP execution. \"service_by_design\" (the default when absent): the refusal is the service's design (service_by_design; a finding still wins). \"not_implemented_mcp\": the refusal says the request is not implemented via MCP on THIS deployment (a deployment setting gates it): the execution's outcome is not_implemented_mcp, the class a manifest mcp.not_implemented gets, counted there in the run summary; the case is recorded (service_by_design_case, explained_checks []) and verdict_detail names the deployment condition (the case, the refused field and the service's own text); rule (c) (an undecidable wall rule) and the host-state rules do not apply; a check that is a finding still makes it finding. It holds whether the case matched named or answer-triggered (the first matched case decides). Load validation: one of the two values, only inside answer_match (a top-level mcp_outcome is refused), never on an answered / clamped case (the checks decide those). traverse.advanced_path_disabled states not_implemented_mcp",
   "direct_expectation.http": "the host's HTTP status: an integer, or (ADDED 2026-10-14) a list of statuses any one of which holds, e.g. [200, 503] where the host accepts the request and may still overrun its budget (pattern.time_budget_below_minimum); null: not stated",
   "direct_expectation.text_prefix": "ADDED 2026-10-14 (optional): the host's error text starts with it, for a text whose tail varies with the request (resolve.unknown_label names the label); `text` is then null. Compared as is (no digit folding)",
-  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An entry is a check name (it explains every failure of that check) or (ADDED 2026-10-14, peer review R4) an object {\"check\": <name>, \"detail_matches\": <regex>}: it explains a failure of that check only when the check's detail matches the regex completely (Python re.fullmatch with re.S; checks.py joins several violations of one check with \"; \" into one detail, so a detail carrying another violation beside the explained one is not matched). Load validation: a list; an object states check (a non-empty name) and detail_matches (a regex that compiles) and no other key (traverse.duplicate_seeds explains only the merged-seed count message of invariants, \"1 results for 2 seeds (1 distinct)\": as many results as distinct seeds). An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered; not_implemented_mcp where the case's answer_match.mcp_outcome says so), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)"
+  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An entry is a check name (it explains every failure of that check) or (ADDED 2026-10-14, peer review R4) an object {\"check\": <name>, \"detail_matches\": <regex>}: it explains a failure of that check only when the check's detail matches the regex completely (Python re.fullmatch with re.S; checks.py joins several violations of one check with \"; \" into one detail, so a detail carrying another violation beside the explained one is not matched). Load validation: a list; an object states check (a non-empty name) and detail_matches (a regex that compiles) and no other key (traverse.duplicate_seeds explains only the merged-seed count message of invariants, \"1 results for 2 seeds (1 distinct)\": as many results as distinct seeds). An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered; not_implemented_mcp where the case's answer_match.mcp_outcome says so), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)",
+  "request": "ADDED 2026-10-14 (lane G2 with the async session; the suite's comparator and async's runner apply it alike): the machine-readable form of scenario_match, a case key: a non-empty list of predicates that must ALL hold on the request the MCP arm sent (the manifest scenario's mcp.arguments, never the wire) for the case to apply, named or answer-triggered alike; a case whose request does not hold does not apply (matching continues; the line's verdict_detail notes once \"<case>: request predicate <predicate as sorted JSON> does not hold (field <refused field>)\", the first predicate that fails). A predicate is {\"any\": [[predicate, ...], ...]} (one list holds entirely) or exactly one subject and one operator. Subjects: \"path\" (into the arguments; with \"field_prefix\" when it names {field}); \"field\" (the refused field's name less the prefix this subject states, \"\" for none); \"service\" / \"host\" (a reference, see below). Path grammar (refused at load otherwise): keys joined by \".\" (a key: one or more characters other than . [ ] { } and whitespace), [n] or [*] after a key, {field} only as a whole key of a path subject; a reference path has neither {field} nor [*]; a prefix is \"\" or keys each followed by \".\". {field} = the refused field (the tool error's `field` when it states the key, else the answer error's) less the prefix; none, one outside the prefix, or an EMPTY remainder is no field, and then a {field} path or the field subject is false except absent; a substituted path that does not parse reads absent. Values at a path: the non-null values (null is absent); a list at the path is one value unless [*] steps into it ([*] steps into lists only). Operators: present / absent (true), equals (a value, not null), in / not_in (a non-empty list of values, no null; on the field subject an entry \"x.*\" is x and every key under it), gt / ge / lt / le (a number); equals and the comparisons may take a reference {\"service\": <path>} or {\"host\": <path>} instead of a literal. Equality is JSON equality (a boolean equals only a boolean: true is not 1; numbers by value; lists and objects element by element). Every comparison on an absent path is false except not_in (no value there is in the list); an unknown reference makes its predicate false. References resolve, in order, from the run's recorded live document (the service: run.json service_capabilities.document, GET /traverse/capabilities at run start; the host: its /capabilities as the run recorded it), else this table's own block (service_settings / host_capabilities), else unknown; a path both state with different values is a mismatch, judged with the live value. Each line that applied a reference records request_evidence {case: {reference path: live | table | unknown}}. Field placeholders <...> (service_answer.field, answer_match.mcp.field) match one or more characters, never none. Load validation refuses a malformed request, a reference this table's block does not state, a case WITHOUT one where it is required (an answer-triggered case without a wall_rule; a case whose MCP field names several alternatives), and a manifest scenario that names a case its own mcp.arguments do not satisfy for any field the case allows",
+  "host_capabilities": "ADDED 2026-10-14 (lane G2): a top-level block, the host's /capabilities document root as the manifest pins it (truth/staging_capabilities/capabilities.json, index.capabilities_sha256): the values the {\"host\": path} references and the plausibility rules read when the run recorded no live document: pattern.finalize_reserve_ms, pattern.mismatches.max.<kind>, resolve.time_budget.{max_time_ms, finalize_reserve_ms}",
+  "service_settings": "ADDED 2026-10-14 (lane G2): a top-level block shaped as the service's GET /traverse/capabilities document root (the {\"service\": path} namespace): service_settings.{advanced_enabled, resolve.{timeout_s, discover_timeout_s, allowance_s, default_time_budget_ms, budget_ceiling_ms, reserve_margin_ms, acquire_timeout_ms, http_timeouts_s.{connect, write, pool, phase_margin}}} (TRAVERSAL_ADVANCED_ENABLED, the /resolve client's settings: feat/suite-mcp-runner-vendored 7a65e913), presets.<preset>.budgets.<knob> (staging's rows as its traverse_capabilities stated them on 2026-10-14: walk and trace 15000 ms / 512 MB / 1e8, trie 30000 / 512 / 1e8), service_maxima.<knob>, backends.<database>.resolve.time_budget.{default_ms, min_ms, max_ms, finalize_reserve_ms}: the versioned recorded configuration the references read when the run recorded no live document"
  },
  "assumptions": [
   "staging settings at their code defaults: PATTERN_DB_BUDGETS_MS empty, PATTERN_DEFAULT_MAX_ANCHORS unset, TRAVERSAL_ADVANCED_ENABLED false, IDEMPOTENCY_REUSE_DONE true, BACKEND_CACHE_MAX_ANSWER_AGE_SECS 604800, PATTERN_MAX_* / TRAVERSAL_* as in app/settings.py",
-  "host caps from the fixtures (tests/data/pattern/pattern_capabilities: max_patterns 16, max_contexts 10000, time_budget_ms 600000, max_paths 1000, max_anchors 1000, max_labels 1000, max_predicate_contexts 100000, max_predicate_labels 10000, mismatches.max {dna 3, iupac 3, protein 3} with later_increment [long_patterns, labels, predicate, supported_paths]; staging's protein cap is 1 per request.py / the design) and from the recorded refseq33m traverse capabilities of 2026-10-04 (k 31, alphabet $ACGT, max_seeds 4, max_seed_bp 100000, max_time_ms 5000, supports_trace true); resolve.time_budget.max_time_ms 20000 on staging (settings/docstrings). The live values decide; the refusal texts quote whatever the live host states.",
+  "host caps from the fixtures (tests/data/pattern/pattern_capabilities: max_patterns 16, max_contexts 10000, time_budget_ms 600000, max_paths 1000, max_anchors 1000, max_labels 1000, max_predicate_contexts 100000, max_predicate_labels 10000, mismatches.max {dna 3, iupac 3, protein 3} with later_increment [long_patterns, labels, predicate, supported_paths]; staging's protein cap is 1 per request.py / the design) and from the recorded refseq33m traverse capabilities of 2026-10-04 (k 31, alphabet $ACGT, max_seeds 4, max_seed_bp 100000, max_time_ms 5000, supports_trace true); resolve.time_budget.max_time_ms 60000 on staging (the pinned capabilities snapshot truth/staging_capabilities/capabilities.json; the host_capabilities block). The live values decide; the refusal texts quote whatever the live host states.",
   "MCP SDK mcp 2.3.0 (pyproject pins >=2.3,<2.4): argument coercion and extra-argument dropping verified offline in a local container, no network"
  ],
  "pattern_refusal_order": [
@@ -41,6 +44,117 @@
   "route: registry/gate, admission (rate limit), idempotency reuse, queue-depth guard, host capabilities",
   "rest_validator rows in order: 1 unknown db, 2 gate, 3 host support, 4 long_search, 4b predicate, 5 each pattern (kind, id, empty, alphabet, length <= 1000, length vs k), 6 list (<= 64, unique ids, no mixed kinds), 7 mode/scope/labels/strands then opt-ins (occurrences, require_support, genetic_code), 7b max_mismatches (object, later_increment combinations labels/predicate/supported_paths, then per pattern long_patterns and the kind cap), 8 caps, 9 budget minimum, 10 in_ram; then too_many_tasks"
  ],
+ "host_capabilities": {
+  "pattern": {
+   "finalize_reserve_ms": 250,
+   "mismatches": {
+    "max": {
+     "dna": 3,
+     "iupac": 3,
+     "protein": 1
+    }
+   }
+  },
+  "resolve": {
+   "time_budget": {
+    "max_time_ms": 60000,
+    "finalize_reserve_ms": 250
+   }
+  }
+ },
+ "service_settings": {
+  "service_settings": {
+   "advanced_enabled": false,
+   "resolve": {
+    "timeout_s": 20.0,
+    "discover_timeout_s": 120.0,
+    "allowance_s": 10,
+    "default_time_budget_ms": 60000,
+    "budget_ceiling_ms": 240000,
+    "reserve_margin_ms": 250,
+    "acquire_timeout_ms": 2000,
+    "http_timeouts_s": {
+     "connect": 10.0,
+     "write": 10.0,
+     "pool": 5.0,
+     "phase_margin": 25.0
+    }
+   }
+  },
+  "presets": {
+   "walk": {
+    "budgets": {
+     "time_budget_ms": 15000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "max_extension_bp": 5000,
+     "max_output_bp": 500000
+    }
+   },
+   "trace": {
+    "budgets": {
+     "time_budget_ms": 15000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "max_extension_bp": 5000,
+     "max_output_bp": 500000
+    }
+   },
+   "trie": {
+    "budgets": {
+     "time_budget_ms": 30000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "max_live_paths": 1000,
+     "max_extension_bp": 2000
+    }
+   },
+   "label_free_trie": {
+    "budgets": {
+     "time_budget_ms": 30000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "max_live_paths": 1000,
+     "max_extension_bp": 2000
+    }
+   },
+   "beam": {
+    "budgets": {
+     "time_budget_ms": 15000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "max_extension_bp": 10000
+    }
+   }
+  },
+  "service_maxima": {
+   "time_budget_ms": 60000,
+   "max_memory_mb": 512,
+   "max_work_units": 1000000000,
+   "max_extension_bp": 10000,
+   "max_live_paths": 1000,
+   "advanced_max_live_paths": 20,
+   "max_steps": 1000000,
+   "max_paths": 10000,
+   "max_output_bp": 2000000,
+   "max_seed_labels": 10000,
+   "max_labels_per_node": 10000,
+   "max_label_entries": 10000,
+   "max_branch_events": 10000
+  },
+  "backends": {
+   "refseq33m-experimental": {
+    "resolve": {
+     "time_budget": {
+      "default_ms": 60000,
+      "min_ms": 500,
+      "max_ms": 60000,
+      "finalize_reserve_ms": 250
+     }
+    }
+   }
+  }
+ },
  "cases": [
   {
    "id": "pattern.too_many_patterns_chunked",
@@ -1348,6 +1462,17 @@
    "source": [
     "app/pattern/validate.py:641",
     "app/pattern/validate.py:646"
+   ],
+   "request": [
+    {
+     "path": "{field}",
+     "field_prefix": "caps.",
+     "present": true
+    },
+    {
+     "path": "long_search",
+     "absent": true
+    }
    ]
   },
   {
@@ -1725,6 +1850,12 @@
     "app/pattern/validate.py:718",
     "app/pattern/validate.py:738",
     "app/pattern/validate.py:818"
+   ],
+   "request": [
+    {
+     "path": "predicate",
+     "present": true
+    }
    ]
   },
   {
@@ -1788,6 +1919,16 @@
    "source": [
     "app/pattern/validate.py:784",
     "app/pattern/validate.py:789"
+   ],
+   "request": [
+    {
+     "path": "predicate",
+     "absent": true
+    },
+    {
+     "path": "predicate_scope",
+     "equals": "motif"
+    }
    ]
   },
   {
@@ -1816,6 +1957,22 @@
    "source": [
     "app/pattern/validate.py:784",
     "app/pattern/validate.py:789"
+   ],
+   "request": [
+    {
+     "path": "predicate",
+     "absent": true
+    },
+    {
+     "path": "{field}",
+     "present": true
+    },
+    {
+     "path": "predicate_scope",
+     "not_in": [
+      "motif"
+     ]
+    }
    ]
   },
   {
@@ -1843,6 +2000,17 @@
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:651"
+   ],
+   "request": [
+    {
+     "path": "{field}",
+     "field_prefix": "caps.",
+     "present": true
+    },
+    {
+     "path": "predicate",
+     "absent": true
+    }
    ]
   },
   {
@@ -2146,7 +2314,7 @@
     "outcome": "refused_at_submit",
     "http": 400,
     "code": "pattern_out_of_bounds",
-    "text_contains": "is above the maximum 1 for protein patterns on the host of database",
+    "text_contains": "for protein patterns on the host of database",
     "field": "max_mismatches",
     "keys": {
      "requested": 2,
@@ -2175,11 +2343,23 @@
     "mcp": {
      "http": 400,
      "code": "pattern_out_of_bounds",
-     "text_contains": "patterns on the host of database",
+     "text_contains": "for protein patterns on the host of database",
      "field": "max_mismatches"
     },
     "direct_mismatch": "disagree"
-   }
+   },
+   "request": [
+    {
+     "path": "max_mismatches",
+     "gt": {
+      "host": "pattern.mismatches.max.protein"
+     }
+    },
+    {
+     "path": "patterns[*].protein",
+     "present": true
+    }
+   ]
   },
   {
    "id": "mismatch.long_pattern_without_long_search",
@@ -2478,7 +2658,7 @@
     "outcome": "relayed",
     "http": 502,
     "code": "backend_fault",
-    "text_contains": "HTTP 400: ",
+    "text_contains": "HTTP 400: Query shorter than k",
     "keys": {
      "backend_status": 400,
      "job_id": "<id>",
@@ -2822,7 +3002,7 @@
    "areas": [
     "R"
    ],
-   "scenario_match": "POST /resolve with bounds.time_budget_ms above the host's resolve.time_budget.max_time_ms (20,000 on staging)",
+   "scenario_match": "POST /resolve with bounds.time_budget_ms above the host's resolve.time_budget.max_time_ms (60,000 on staging; host_capabilities)",
    "direct_expectation": {
     "http": 200,
     "code": null,
@@ -2850,6 +3030,20 @@
     "app/traversal/resolve.py:420",
     "app/traversal/resolve.py:402",
     "app/settings.py:58"
+   ],
+   "request": [
+    {
+     "path": "time_budget_ms",
+     "gt": {
+      "host": "resolve.time_budget.max_time_ms"
+     }
+    },
+    {
+     "path": "time_budget_ms",
+     "le": {
+      "service": "service_settings.resolve.budget_ceiling_ms"
+     }
+    }
    ]
   },
   {
@@ -2941,7 +3135,7 @@
     "code": null,
     "text_contains": null,
     "stage": "route",
-    "detail": "The service sends bounds.time_budget_ms = TRAVERSAL_RESOLVE_TIME_BUDGET_MS 60,000 held to the host's max_time_ms (20,000 on staging): a resolve needing more than ~20 s answers with a stop object (the answer of the first stop.resolved_kmers k-mers) via MCP and completes directly. A discovery without time_budget_ms gets no deadline (agreement)."
+    "detail": "The service sends bounds.time_budget_ms = TRAVERSAL_RESOLVE_TIME_BUDGET_MS 60,000 held to the host's max_time_ms (60,000 on staging: backends.<db>.resolve.time_budget.default_ms 60000): a resolve needing more than ~60 s answers with a stop object (the answer of the first stop.resolved_kmers k-mers) via MCP and completes directly. A discovery without time_budget_ms gets no deadline (agreement)."
    },
    "explains_checks": [
     "resolve_runs",
@@ -2952,6 +3146,22 @@
     "app/traversal/resolve.py:380",
     "app/traversal/resolve.py:606",
     "app/settings.py:1432"
+   ],
+   "request": [
+    {
+     "path": "labels",
+     "present": true
+    },
+    {
+     "path": "time_budget_ms",
+     "absent": true
+    },
+    {
+     "path": "discover",
+     "not_in": [
+      true
+     ]
+    }
    ]
   },
   {
@@ -3316,7 +3526,57 @@
      "text_contains": "provide `seeds` (a list)"
     },
     "direct_mismatch": "disagree"
-   }
+   },
+   "request": [
+    {
+     "any": [
+      [
+       {
+        "path": "seeds",
+        "absent": true
+       }
+      ],
+      [
+       {
+        "path": "seeds",
+        "equals": []
+       }
+      ]
+     ]
+    },
+    {
+     "any": [
+      [
+       {
+        "path": "sequence",
+        "absent": true
+       }
+      ],
+      [
+       {
+        "path": "sequence",
+        "equals": ""
+       }
+      ]
+     ]
+    },
+    {
+     "any": [
+      [
+       {
+        "path": "sequence_id",
+        "absent": true
+       }
+      ],
+      [
+       {
+        "path": "sequence_id",
+        "equals": ""
+       }
+      ]
+     ]
+    }
+   ]
   },
   {
    "id": "traverse.empty_seed_labels",
@@ -3431,7 +3691,7 @@
     "outcome": "relayed",
     "http": null,
     "code": "backend_rejected",
-    "text_contains": null,
+    "text_contains": "unknown field",
     "stage": "job",
     "detail": "The submit succeeds (a job is created); the task fails permanently with error_class backend_rejected carrying the host's 400 message. traverse_status(job_id, access_token).task_errors lists it verbatim; the job ends failed."
    },
@@ -3447,7 +3707,7 @@
    "areas": [
     "T"
    ],
-   "scenario_match": "POST /traverse with bounds.time_budget_ms, max_memory_mb or max_work_units above the preset's budget row (walk 15,000 ms / 256 MB / 1e8; trie 30,000 / 512 / 1e8)",
+   "scenario_match": "POST /traverse with bounds.time_budget_ms, max_memory_mb or max_work_units above the preset's budget row (presets.<preset>.budgets.<knob> of GET /traverse/capabilities; staging: walk 15,000 ms / 512 MB / 1e8, trie 30,000 / 512 / 1e8)",
    "direct_expectation": {
     "http": 200,
     "code": null,
@@ -3459,8 +3719,8 @@
     "outcome": "refused_at_submit",
     "http": 400,
     "code": "strategy_out_of_bounds",
-    "text_contains": "exceeds its maximum",
-    "field": "bounds.<knob>",
+    "text_contains": "preset's budget row",
+    "field": "bounds.time_budget_ms | bounds.max_memory_mb | bounds.max_work_units",
     "keys": {
      "requested": "<n>",
      "max": "<preset row>",
@@ -3476,6 +3736,210 @@
     "app/settings.py:1577",
     "app/settings.py:1594",
     "app/traversal/presets.py:572"
+   ],
+   "request": [
+    {
+     "any": [
+      [
+       {
+        "any": [
+         [
+          {
+           "path": "preset",
+           "absent": true
+          }
+         ],
+         [
+          {
+           "path": "preset",
+           "equals": "walk"
+          }
+         ]
+        ]
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.time_budget_ms"
+        ]
+       },
+       {
+        "path": "overrides.bounds.time_budget_ms",
+        "gt": {
+         "service": "presets.walk.budgets.time_budget_ms"
+        }
+       }
+      ],
+      [
+       {
+        "any": [
+         [
+          {
+           "path": "preset",
+           "absent": true
+          }
+         ],
+         [
+          {
+           "path": "preset",
+           "equals": "walk"
+          }
+         ]
+        ]
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.max_memory_mb"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_memory_mb",
+        "gt": {
+         "service": "presets.walk.budgets.max_memory_mb"
+        }
+       }
+      ],
+      [
+       {
+        "any": [
+         [
+          {
+           "path": "preset",
+           "absent": true
+          }
+         ],
+         [
+          {
+           "path": "preset",
+           "equals": "walk"
+          }
+         ]
+        ]
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.max_work_units"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_work_units",
+        "gt": {
+         "service": "presets.walk.budgets.max_work_units"
+        }
+       }
+      ],
+      [
+       {
+        "path": "preset",
+        "equals": "trace"
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.time_budget_ms"
+        ]
+       },
+       {
+        "path": "overrides.bounds.time_budget_ms",
+        "gt": {
+         "service": "presets.trace.budgets.time_budget_ms"
+        }
+       }
+      ],
+      [
+       {
+        "path": "preset",
+        "equals": "trace"
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.max_memory_mb"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_memory_mb",
+        "gt": {
+         "service": "presets.trace.budgets.max_memory_mb"
+        }
+       }
+      ],
+      [
+       {
+        "path": "preset",
+        "equals": "trace"
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.max_work_units"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_work_units",
+        "gt": {
+         "service": "presets.trace.budgets.max_work_units"
+        }
+       }
+      ],
+      [
+       {
+        "path": "preset",
+        "equals": "trie"
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.time_budget_ms"
+        ]
+       },
+       {
+        "path": "overrides.bounds.time_budget_ms",
+        "gt": {
+         "service": "presets.trie.budgets.time_budget_ms"
+        }
+       }
+      ],
+      [
+       {
+        "path": "preset",
+        "equals": "trie"
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.max_memory_mb"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_memory_mb",
+        "gt": {
+         "service": "presets.trie.budgets.max_memory_mb"
+        }
+       }
+      ],
+      [
+       {
+        "path": "preset",
+        "equals": "trie"
+       },
+       {
+        "field": "",
+        "in": [
+         "bounds.max_work_units"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_work_units",
+        "gt": {
+         "service": "presets.trie.budgets.max_work_units"
+        }
+       }
+      ]
+     ]
+    }
    ]
   },
   {
@@ -3496,7 +3960,7 @@
     "http": 400,
     "code": "strategy_out_of_bounds",
     "text_contains": "exceeds its maximum",
-    "field": "bounds.<knob> | labels.max_labels_per_node",
+    "field": "bounds.max_extension_bp | bounds.max_steps | bounds.max_paths | bounds.max_output_bp | bounds.max_live_paths | labels.max_labels_per_node",
     "keys": {
      "requested": "<n>",
      "max": "<service maximum>"
@@ -3512,6 +3976,96 @@
     "app/settings.py:1562",
     "app/settings.py:1566",
     "app/settings.py:2265"
+   ],
+   "request": [
+    {
+     "any": [
+      [
+       {
+        "field": "",
+        "in": [
+         "bounds.max_extension_bp"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_extension_bp",
+        "gt": {
+         "service": "service_maxima.max_extension_bp"
+        }
+       }
+      ],
+      [
+       {
+        "field": "",
+        "in": [
+         "bounds.max_steps"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_steps",
+        "gt": {
+         "service": "service_maxima.max_steps"
+        }
+       }
+      ],
+      [
+       {
+        "field": "",
+        "in": [
+         "bounds.max_paths"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_paths",
+        "gt": {
+         "service": "service_maxima.max_paths"
+        }
+       }
+      ],
+      [
+       {
+        "field": "",
+        "in": [
+         "bounds.max_output_bp"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_output_bp",
+        "gt": {
+         "service": "service_maxima.max_output_bp"
+        }
+       }
+      ],
+      [
+       {
+        "field": "",
+        "in": [
+         "bounds.max_live_paths"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_live_paths",
+        "gt": {
+         "service": "service_maxima.max_live_paths"
+        }
+       }
+      ],
+      [
+       {
+        "field": "",
+        "in": [
+         "labels.max_labels_per_node"
+        ]
+       },
+       {
+        "path": "overrides.labels.max_labels_per_node",
+        "gt": {
+         "service": "service_maxima.max_labels_per_node"
+        }
+       }
+      ]
+     ]
+    }
    ]
   },
   {
@@ -4086,7 +4640,7 @@
     "http": 400,
     "code": "pattern_invalid",
     "text_contains": "Input should be greater than or equal to 1",
-    "field": "caps.<cap>",
+    "field": "caps.max_contexts | caps.max_anchors | caps.max_paths",
     "stage": "rest_model",
     "detail": "The REST model takes every cap as an integer >= 1 (pydantic ge=1), mapped to 400 pattern_invalid with the field caps.<cap> and the text \"caps.<cap>: Input should be greater than or equal to 1\" (the table's pattern_refusal_order: rest_model 'caps >= 1'). The service does not offer the answers a cap of 0 asks: max_anchors 0 is the anchor-only answer of a long pattern (pattern-search DESIGN §3.1: 'anchors', the anchor-only answer, is not offered; caps.max_anchors >= 1), and max_contexts 0 / max_paths 0 add only a cut or withheld to what mode count answers. time_budget_ms 0 is refused with the same code and text (field caps.time_budget_ms) but the host refuses it too (a budget not above its finalisation reserve): pattern.time_budget_below_minimum, not this case; answer_match.mcp names the fields. max_predicate_contexts and max_labels (>= 0 on the host) are refused alike; not listed in answer_match: not recorded"
    },
@@ -4114,14 +4668,21 @@
      "field": "caps.max_contexts | caps.max_anchors | caps.max_paths"
     },
     "direct_mismatch": "disagree"
-   }
+   },
+   "request": [
+    {
+     "path": "{field}",
+     "field_prefix": "caps.",
+     "equals": 0
+    }
+   ]
   },
   {
    "id": "traverse.advanced_path_disabled",
    "areas": [
     "T"
    ],
-   "scenario_match": "POST /traverse whose traverse_fetch overrides set a strategy key on the advanced strategy path: any key outside the tool's basic overrides (bounds.*, direction, exhaustive, labels.max_labels_per_node, labels.seed_label_kind), e.g. labels.max_seed_labels (suite_v4's T-labels-0004 and T-labels-0006 send 10000; no other scenario of suite_v4 or suite_v3 sends such a key), labels.mode / quorum / extra / change_cost / max_switch_sources, any branching.*, frontier.*, output.* or annotation.* key, or support. DEPENDS ON THE DEPLOYMENT: it applies only where TRAVERSAL_ADVANCED_ENABLED is false (the code default; staging: see assumptions). On a deployment with the advanced strategy path enabled the tool passes the key on, REST validates it against the service maxima (labels.max_seed_labels <= TRAVERSAL_MAX_SEED_LABELS, 10000) and the job runs: the knob is accepted and the case must not apply (its answer_match.mcp, a preset_unavailable refusal naming an overrides.* field, then matches no answer). No client-readable field states the setting (traverse_capabilities: the presets block carries budgets, batch and queue per preset, the gate block enabled / allow_list / feature_levels; catalog's traversal is the probe outcome), so the case is keyed on the refusal itself. A key the host does not know either is traverse.unknown_strategy_key (named; the host refuses it too)",
+   "scenario_match": "POST /traverse whose traverse_fetch overrides set a strategy key on the advanced strategy path: any key outside the tool's basic overrides (bounds.*, direction, exhaustive, labels.max_labels_per_node, labels.seed_label_kind), e.g. labels.max_seed_labels (suite_v4's T-labels-0004 and T-labels-0006 send 10000; no other scenario of suite_v4 or suite_v3 sends such a key), labels.mode / quorum / extra / change_cost / max_switch_sources, any branching.*, frontier.*, output.* or annotation.* key, or support. DEPENDS ON THE DEPLOYMENT: it applies only where TRAVERSAL_ADVANCED_ENABLED is false (the code default; staging: see assumptions). On a deployment with the advanced strategy path enabled the tool passes the key on, REST validates it against the service maxima (labels.max_seed_labels <= TRAVERSAL_MAX_SEED_LABELS, 10000) and the job runs: the knob is accepted and the case must not apply (its answer_match.mcp, a preset_unavailable refusal naming an overrides.* field, then matches no answer). The service states the setting as service_settings.advanced_enabled in GET /traverse/capabilities (7a65e913; the request's first predicate reads it, live where the run recorded the document, else this table's service_settings block). A key the host does not know either is traverse.unknown_strategy_key (named; the host refuses it too)",
    "direct_expectation": {
     "http": 200,
     "code": null,
@@ -4166,7 +4727,29 @@
     },
     "direct_mismatch": "disagree",
     "mcp_outcome": "not_implemented_mcp"
-   }
+   },
+   "request": [
+    {
+     "service": "service_settings.advanced_enabled",
+     "equals": false
+    },
+    {
+     "path": "{field}",
+     "present": true
+    },
+    {
+     "field": "overrides.",
+     "not_in": [
+      "",
+      "bounds.*",
+      "direction",
+      "exhaustive",
+      "labels",
+      "labels.max_labels_per_node",
+      "labels.seed_label_kind"
+     ]
+    }
+   ]
   }
  ]
 }

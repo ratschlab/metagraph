@@ -32,7 +32,10 @@ text_contains, each where stated; nothing stated: the scenario's own status chec
 execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
 Each MCP execution is matched as async's runner matches it (31a2e41f; the matcher of e334715b, its wall rule with rule
 2 of 2a8acbaf): the cases the scenario names first, else an answer-triggered case (answer_match) whose wall rule
-holds or cannot be decided; a stated key this comparator does not know leaves its side unverified. The explained
+holds or cannot be decided, each only where its `request` holds on the scenario's MCP arguments (request_holds; its
+references to the host's and the service's configuration resolved from the run's recorded live documents, else the
+table's host_capabilities / service_settings blocks: bind_run); a stated key this comparator does not know leaves
+its side unverified. The explained
 check items of an answered / clamped case are computed with the table in hand (S5c-05), as the runner computes its
 line's explained_items (f386a3c0); a line that records another list (another table or other checks) is noted
 (explained_items_recorded), never trusted.
@@ -81,6 +84,23 @@ MCP_OUTCOME_VALUES = ("service_by_design", "not_implemented_mcp")
 WALL_RULE_VALUES = sc.WALL_RULE_VALUES
 ANSWERED_OUTCOMES = ("answered", "clamped")
 EXPLAINS_ENTRY_KEYS = ("check", "detail_matches")
+# A case's `request`: the machine-readable form of its scenario_match, a non-empty list of predicates that must all
+# hold on the request the MCP arm sent (the manifest scenario's mcp.arguments) for the case to apply, named or
+# answer-triggered alike (request_holds). A predicate is {"any": [[predicate, ...], ...]} (any one list holds
+# entirely), or exactly one subject and one operator:
+#   subject  "path": dotted keys into the arguments ("[n]" element n, "[*]" every element; "{field}" the refused
+#            field, the tool error's `field` else the answer error's, less "field_prefix"); "field": the refused
+#            field's name less the prefix the value states ("" none); "service" / "host": a reference into the
+#            service's / the host's configuration (suite_common.References)
+#   operator "present" / "absent": true; "equals": a value; "in" / "not_in": a list ("field": an entry "x.*" is x
+#            and every key under it); "gt" / "ge" / "lt" / "le": a number. A value may be a reference
+#            {"service": path} / {"host": path} instead of a literal.
+# A comparison on an absent path is false except not_in (no value at the path is in the list); with no refused
+# field (or one outside the prefix) a "{field}" path or the "field" subject is false except "absent"; an unknown
+# reference makes its predicate false.
+REQUEST_SUBJECTS = ("path", "field", "service", "host")
+REQUEST_OPS = ("present", "absent", "equals", "in", "not_in", "gt", "ge", "lt", "le")
+REQUEST_NUMBER_OPS = ("gt", "ge", "lt", "le")
 
 
 def entry_problem(entry):
@@ -105,14 +125,16 @@ def entry_problem(entry):
     return ""
 
 
-def table_problems(cases):
+def table_problems(cases, blocks=None):
     """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at 31a2e41f,
     mirrored): an answer_match without routes (a non-empty list of route strings), a key of it outside
     ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose
     http is not one integer, that states slot_code (a direct-side key) or that states no code (peer review R5), a
     direct_mismatch outside DIRECT_MISMATCH_VALUES, a wall_rule outside WALL_RULE_VALUES, an mcp_outcome outside
     MCP_OUTCOME_VALUES, on an answered / clamped case, or stated as a case key instead of in answer_match; an
-    explains_checks that is not a list of entries (entry_problem) or sits on a case other than answered / clamped."""
+    explains_checks that is not a list of entries (entry_problem) or sits on a case other than answered / clamped;
+    a `request` that is malformed, names a reference the table's own |blocks| (namespace -> its block) do not state,
+    or is missing where it is required (case_request_problems)."""
     out = []
     for case in cases:
         cid = "case %r" % (case.get("id"),)
@@ -128,6 +150,7 @@ def table_problems(cases):
                            "checks)" % (cid, (case.get("service_answer") or {}).get("outcome")))
         if "mcp_outcome" in case:   # an answer_match key: a top-level one would be read by no matcher
             out.append("%s: mcp_outcome is an answer_match key (answer_match.mcp_outcome), not a case key" % cid)
+        out.extend("%s: %s" % (cid, x) for x in case_request_problems(case, blocks))
         if "answer_match" not in case:
             continue
         am = case["answer_match"]
@@ -172,23 +195,485 @@ def table_problems(cases):
     return out
 
 
-def load_by_design(path):
+def _is_reference(value):
+    return isinstance(value, dict) and len(value) == 1 and next(iter(value)) in sc.REFERENCE_NAMESPACES \
+        and isinstance(next(iter(value.values())), str) and bool(next(iter(value.values())))
+
+
+def request_problem(pred, where="request"):
+    """What is wrong with one predicate of a case's `request` ('' when nothing; the grammar at REQUEST_SUBJECTS)."""
+    if not isinstance(pred, dict):
+        return "%s: %r is not an object" % (where, pred)
+    if "any" in pred:
+        alts = pred["any"]
+        if set(pred) != {"any"} or not isinstance(alts, list) or not alts or \
+                not all(isinstance(a, list) and a for a in alts):
+            return "%s: any must be the only key, a non-empty list of non-empty predicate lists" % where
+        return "; ".join(x for i, a in enumerate(alts) for j, q in enumerate(a)
+                         for x in [request_problem(q, "%s.any[%d][%d]" % (where, i, j))] if x)
+    subjects = [k for k in REQUEST_SUBJECTS if k in pred]
+    ops = [k for k in REQUEST_OPS if k in pred]
+    unknown = sorted(set(pred) - set(REQUEST_SUBJECTS) - set(REQUEST_OPS) - {"field_prefix"})
+    if unknown or len(subjects) != 1 or len(ops) != 1:
+        return "%s: %s needs exactly one subject of %s and one operator of %s%s" % (
+            where, json.dumps(pred, sort_keys=True), list(REQUEST_SUBJECTS), list(REQUEST_OPS),
+            " (unknown key(s) %s)" % unknown if unknown else "")
+    subject, op = subjects[0], ops[0]
+    value = pred[subject]
+    if not isinstance(value, str) or (subject != "field" and not value):
+        return "%s: %s must be a %sstring" % (where, subject, "" if subject == "field" else "non-empty ")
+    if "field_prefix" in pred and (subject != "path" or "{field}" not in value or
+                                   not isinstance(pred["field_prefix"], str)):
+        return "%s: field_prefix (a string) goes with a path that names {field}" % where
+    if "{field}" in value and subject != "path":
+        return "%s: {field} is bound only in a path" % where
+    if subject == "path" and sc.parse_path(value, field=True) is None:
+        return "%s: path %r does not parse (keys joined by '.', [n] or [*] after a key, {field} a whole key)" % (
+            where, value)
+    if subject in sc.REFERENCE_NAMESPACES and sc.parse_path(value, star=False) is None:
+        return "%s: reference path %r does not parse (keys joined by '.', [n] after a key)" % (where, value)
+    for name, prefix in (("field", value if subject == "field" else None), ("field_prefix", pred.get("field_prefix"))):
+        if prefix and not (prefix.endswith(".") and sc.parse_path(prefix[:-1], star=False) is not None):
+            return "%s: %s %r must be '' or keys each followed by '.'" % (where, name, prefix)
+    want = pred[op]
+    if op in ("present", "absent") and want is not True:
+        return "%s: %s takes true" % (where, op)
+    if op in ("in", "not_in") and (not isinstance(want, list) or not want or
+                                   any(_is_reference(x) or x is None for x in want)):
+        return "%s: %s takes a non-empty list of values (no null: a null path is absent)" % (where, op)
+    if op == "equals" and want is None:
+        return "%s: equals null never holds (a null path is absent): use absent" % where
+    if op in REQUEST_NUMBER_OPS and not _is_reference(want) and sc._number_or_none(want) is None:
+        return "%s: %s takes a number or a reference {\"service\" | \"host\": path}" % (where, op)
+    if isinstance(want, dict) and not _is_reference(want):
+        return "%s: %s's object is no reference (one key, service or host, a path)" % (where, op)
+    if _is_reference(want) and sc.parse_path(next(iter(want.values())), star=False) is None:
+        return "%s: reference path %r does not parse" % (where, next(iter(want.values())))
+    return ""
+
+
+def request_references(preds):
+    """The (namespace, path) of every reference a request names (its subjects and its values), in order, once."""
+    out = []
+    for p in preds or []:
+        if not isinstance(p, dict):
+            continue
+        if "any" in p:
+            for alt in p["any"] if isinstance(p["any"], list) else []:
+                out.extend(x for x in request_references(alt) if x not in out)
+            continue
+        for ns in sc.REFERENCE_NAMESPACES:
+            if isinstance(p.get(ns), str) and (ns, p[ns]) not in out:
+                out.append((ns, p[ns]))
+        for op in REQUEST_OPS:
+            if _is_reference(p.get(op)):
+                ref = next(iter(p[op].items()))
+                if ref not in out:
+                    out.append(ref)
+    return out
+
+
+def _mcp_fields(case):
+    """The refused-field alternatives a case's MCP sides state (service_answer.field, answer_match.mcp.field)."""
+    out = []
+    for side in (case.get("service_answer"), (case.get("answer_match") or {}).get("mcp")
+                 if isinstance(case.get("answer_match"), dict) else None):
+        if isinstance(side, dict) and side.get("field") is not None:
+            out.extend(x for x in _alternatives(side["field"]) if x not in out)
+    return out
+
+
+def request_required(case):
+    """Why a case must state a `request` ('' when it need not): an answer-triggered case without a wall rule applies
+    to any scenario on its route, so only its request says which ones; a case whose refused field may be one of
+    several request fields (alternatives) must say which value of which makes the refusal by design."""
+    am = case.get("answer_match") if isinstance(case.get("answer_match"), dict) else None
+    if am is not None and not am.get("wall_rule"):
+        return "an answer-triggered case without a wall_rule"
+    for side in (case.get("service_answer"), (am or {}).get("mcp")):
+        if isinstance(side, dict) and side.get("field") is not None and len(_alternatives(side["field"])) > 1:
+            return "a case whose field names several request fields (%s)" % side["field"]
+    return ""
+
+
+def case_request_problems(case, blocks=None):
+    """The load validation of a case's `request`: a non-empty list of well-formed predicates (request_problem), each
+    reference stated by the table's own block of its namespace (|blocks|: namespace -> block, the table's
+    host_capabilities / service_settings: the table must be able to decide on its own), and present wherever
+    request_required says so."""
+    out = []
+    if "request" not in case:
+        why = request_required(case)
+        if why:
+            out.append("request is required for %s" % why)
+        return out
+    req = case["request"]
+    if not isinstance(req, list) or not req:
+        return ["request must be a non-empty list of predicates"]
+    out.extend(x for i, p in enumerate(req) for x in [request_problem(p, "request[%d]" % i)] if x)
+    if out:
+        return out
+    for ns, path in request_references(req):
+        block = (blocks or {}).get(ns)
+        if not (isinstance(block, dict) and sc.lookup(block, path)[0]):
+            out.append("request names {%r: %r}, which the table's %s block does not state" % (
+                ns, path, sc.REFERENCE_BLOCKS[ns]))
+    return out
+
+
+class ByDesignCases(dict):
+    """The table's cases by id, with its configuration blocks (`blocks`: namespace -> the table's host_capabilities /
+    service_settings) and the references the rules read (`refs`: suite_common.References over those blocks and, once
+    bound to a run, bind_run, the run's recorded live documents)."""
+
+    def __init__(self, cases=(), blocks=None, refs=None):
+        dict.__init__(self, cases)
+        self.blocks = dict(blocks or {})
+        self.refs = refs if refs is not None else sc.References(self.blocks)
+
+
+def refs_of(cases):
+    """The References |cases| carry (ByDesignCases), else those of the table next to this script."""
+    refs = getattr(cases, "refs", None)
+    return refs if refs is not None else sc.default_references()
+
+
+def load_by_design(path, scenarios=None):
     """(cases by id, info) from async's table; ({}, None) without one ('' or None: no table). A table that fails the
-    load validation (table_problems) raises TableError: refused, as async's runner refuses to start with it."""
+    load validation (table_problems), or, with |scenarios| (a manifest's), a scenario that names a case its own MCP
+    arguments do not satisfy (request_scenario_problems), raises TableError: refused, as async's runner refuses to
+    start with it. The cases are a ByDesignCases (its host_capabilities / service_settings blocks)."""
     if not path or not os.path.exists(path):
         return {}, None
     with open(path, "rb") as fh:
         data_bytes = fh.read()
     data = json.loads(data_bytes.decode("utf-8"))
     listed = [c for c in data.get("cases", []) if isinstance(c, dict)]
-    problems = table_problems(listed)
+    blocks = dict((ns, data.get(name)) for ns, name in sc.REFERENCE_BLOCKS.items() if data.get(name) is not None)
+    problems = ["%s must be an object" % sc.REFERENCE_BLOCKS[ns] for ns, b in sorted(blocks.items())
+                if not isinstance(b, dict)]
+    problems += table_problems(listed, blocks)
+    cases = ByDesignCases(((c["id"], c) for c in listed if c.get("id")), blocks)
+    if not problems and scenarios is not None:
+        problems = request_scenario_problems(cases, scenarios)
     if problems:
         raise TableError("the service-by-design table %s is invalid: %s" % (path, "; ".join(problems)))
-    cases = dict((c["id"], c) for c in listed if c.get("id"))
     info = {"path": os.path.abspath(path), "service_commit": data.get("service_commit"),
             "version": data.get("version"), "cases": len(cases),
-            "sha256": hashlib.sha256(data_bytes).hexdigest()}
+            "sha256": hashlib.sha256(data_bytes).hexdigest(),
+            "blocks": [sc.REFERENCE_BLOCKS[ns] for ns in sc.REFERENCE_NAMESPACES if ns in blocks]}
     return cases, info
+
+
+class RequestEvidence(object):
+    """What the request predicates of the cases matched for one MCP execution read: `sources` {case: {reference
+    path: live | table | unknown}} (the line's request_evidence) and `mismatches` (a reference whose live and
+    table values differ, judged with the live one)."""
+
+    def __init__(self):
+        self.sources = {}
+        self.mismatches = []
+
+
+def _field_name(field, prefix):
+    """The refused field less |prefix|; None without a field, for one outside the prefix, and for an empty
+    remainder (a field equal to its prefix names no key)."""
+    if field is None or not str(field).startswith(prefix or ""):
+        return None
+    return str(field)[len(prefix or ""):] or None
+
+
+def _path_values(obj, path):
+    """The values (not null) at a dotted |path| of |obj|: a list at the path is ONE value, "[*]" steps into every
+    element of a list (never into an object's values); [] when absent or when the path does not parse (a substituted
+    field that is no path)."""
+    parts = sc.parse_path(path)
+    if parts is None:
+        return []
+    vals = [obj]
+    for part in parts:
+        nxt = []
+        for v in vals:
+            if part == "[*]":
+                nxt.extend(v if isinstance(v, list) else [])
+            elif part.startswith("["):
+                if isinstance(v, list) and int(part[1:-1]) < len(v):
+                    nxt.append(v[int(part[1:-1])])
+            elif isinstance(v, dict) and part in v:
+                nxt.append(v[part])
+        vals = nxt
+    return [v for v in vals if v is not None]
+
+
+def _names_in(name, entries):
+    return any(name == e or (str(e).endswith(".*") and (name == e[:-2] or name.startswith(e[:-1])))
+               for e in entries)
+
+
+def request_holds(case, scenario, field, refs=None, evidence=None):
+    """(True / False, detail): whether every predicate of |case|'s `request` holds on the scenario's MCP arguments
+    with the answer's refused |field| (the grammar at REQUEST_SUBJECTS); a case without one holds (True, ''). Every
+    reference the request names is resolved (refs_of: the run's live documents, else the table's blocks) and, with
+    |evidence| (a RequestEvidence), recorded under the case, a live / table mismatch with it. detail:
+    "<case>: request predicate <predicate> does not hold (field <field>)", the first predicate that fails."""
+    preds = (case or {}).get("request")
+    if not preds:
+        return True, ""
+    refs = refs or sc.default_references()
+    resolved = {}
+    for ns, path in request_references(preds):
+        value, source, mismatch = refs.resolve(ns, path)
+        resolved[(ns, path)] = (value, source)
+        if evidence is not None:
+            evidence.sources.setdefault(str(case.get("id")), {})[path] = source
+            if mismatch is not None and mismatch not in evidence.mismatches:
+                evidence.mismatches.append(dict(mismatch, case=case.get("id")))
+    args = (((scenario or {}).get("mcp") or {}).get("arguments")) or {}
+
+    def target(want):
+        if _is_reference(want):
+            value, source = resolved[next(iter(want.items()))]
+            return (source != "unknown"), value
+        return True, want
+
+    def one(p):
+        if "any" in p:
+            return any(all(one(q) for q in alt) for alt in p["any"])
+        op = next(k for k in REQUEST_OPS if k in p)
+        if "path" in p:
+            path = p["path"]
+            if "{field}" in path:
+                name = _field_name(field, p.get("field_prefix"))
+                if name is None:
+                    return op == "absent"
+                path = path.replace("{field}", name)
+            vals = _path_values(args, path)
+        elif "field" in p:
+            name = _field_name(field, p["field"])
+            if name is None:
+                return op == "absent"
+            vals = [name]
+        else:
+            ns = "service" if "service" in p else "host"
+            value, source = resolved[(ns, p[ns])]
+            if source == "unknown":
+                return False
+            vals = [] if value is None else [value]
+        want = p[op]
+        if op == "present":
+            return bool(vals)
+        if op == "absent":
+            return not vals
+        if op in ("in", "not_in"):
+            hit = [v for v in vals if (_names_in(str(v), want) if "field" in p else
+                                        any(sc.json_equal(v, w) for w in want))]
+            return bool(hit) if op == "in" else not hit
+        known, w = target(want)
+        if not known or not vals:
+            return False
+        if op == "equals":
+            return any(sc.json_equal(v, w) for v in vals)
+        w = sc._number_or_none(w)
+        if w is None:
+            return False
+        cmpf = {"gt": lambda a: a > w, "ge": lambda a: a >= w, "lt": lambda a: a < w, "le": lambda a: a <= w}[op]
+        return any(sc._number_or_none(v) is not None and cmpf(float(v)) for v in vals)
+
+    for p in preds:
+        if not one(p):
+            return False, "%s: request predicate %s does not hold (field %s)" % (
+                case.get("id"), json.dumps(p, sort_keys=True), field)
+    return True, ""
+
+
+def _argument_fields(obj, prefix=""):
+    """Every dotted path of an argument object (each key at each depth; list elements as [n])."""
+    out = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            here = "%s.%s" % (prefix, k) if prefix else str(k)
+            out.append(here)
+            out.extend(_argument_fields(v, here))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            here = "%s[%d]" % (prefix, i)
+            out.append(here)
+            out.extend(_argument_fields(v, here))
+    return out
+
+
+def request_scenario_problems(cases, scenarios):
+    """The manifest scenarios that name a case (named_cases) whose `request` their own MCP arguments do not satisfy
+    for any refused field the case allows (its MCP fields' alternatives, or any argument path, with each
+    field_prefix the request uses, that matches them): a manifest / table drift, refused at load like a table
+    error. The table's own blocks decide the references (no run is bound at load)."""
+    out = []
+    table_refs = sc.References(getattr(cases, "blocks", None) or {})
+    for scen in scenarios or []:
+        if not isinstance(scen, dict):
+            continue
+        args = (((scen.get("mcp") or {}).get("arguments")) or {})
+        for case in named_cases(cases, scen):
+            preds = case.get("request")
+            if not preds:
+                continue
+            allowed = _mcp_fields(case)
+            prefixes = set([""]) | set(str(p.get("field_prefix") or "") for p in _flat_predicates(preds))
+            prefixes |= set(str(p["field"]) for p in _flat_predicates(preds) if isinstance(p.get("field"), str))
+            fields = [None] + list(allowed) + [pre + f for pre in sorted(prefixes) for f in _argument_fields(args)]
+            fields = [f for i, f in enumerate(fields) if f not in fields[:i]]
+            fields = [f for f in fields if f is None or not allowed or _field_matches(f, " | ".join(allowed))]
+            if not any(request_holds(case, scen, f, table_refs)[0] for f in fields):
+                out.append("scenario %s names case %s, whose request its own MCP arguments do not satisfy (%s)" % (
+                    scen.get("id"), case.get("id"), request_holds(case, scen, (allowed or [None])[0],
+                                                                  table_refs)[1]))
+    return out
+
+
+def _flat_predicates(preds):
+    out = []
+    for p in preds or []:
+        if isinstance(p, dict) and "any" in p:
+            for alt in p["any"] if isinstance(p["any"], list) else []:
+                out.extend(_flat_predicates(alt))
+        elif isinstance(p, dict):
+            out.append(p)
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the run's recorded configuration: the live documents the references read first
+
+# the MCP runner's run.json record of GET /traverse/capabilities at run start (async's runner: {document, sha256,
+# read_at, base}, on a failed read the error instead of the document)
+SERVICE_CAPABILITIES_KEY = "service_capabilities"
+# the host's /capabilities document as the direct runners record it (run.json capabilities)
+HOST_CAPABILITIES_PATH = "/capabilities"
+
+
+def recorded_documents(run_dir):
+    """{namespace: {document, origin, read_at, sha256} or None} of a run: "service" the MCP arm's run.json
+    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp), "host" the /capabilities
+    document a direct arm recorded (the merged run.json's capabilities, else arms/<direct>/run.json); None where the
+    run recorded none (a run before async's runner read it, or a failed read: then `error` says why)."""
+    out = {"service": None, "host": None}
+    merged = sc.read_json(os.path.join(run_dir, "run.json"), {}) or {}
+    mcp_run = sc.read_json(os.path.join(run_dir, "arms", "mcp", "run.json"), None)
+    if not isinstance(mcp_run, dict):
+        mcp_run = ((merged.get("arms") or {}).get("mcp")) if isinstance(merged.get("arms"), dict) else None
+    rec = (mcp_run or {}).get(SERVICE_CAPABILITIES_KEY) if isinstance(mcp_run, dict) else None
+    if isinstance(rec, dict):
+        doc = rec.get("document")
+        out["service"] = {"document": doc if isinstance(doc, dict) else None,
+                          "origin": "arms/mcp/run.json %s" % SERVICE_CAPABILITIES_KEY,
+                          "read_at": rec.get("read_at"), "sha256": rec.get("sha256"), "base": rec.get("base"),
+                          "error": rec.get("error") if not isinstance(doc, dict) else None}
+    caps = merged.get("capabilities") if isinstance(merged.get("capabilities"), dict) else None
+    origin = "run.json capabilities"
+    if not (caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict)):
+        caps = None
+        for name in sc.DIRECT_ARMS:
+            arm_run = sc.read_json(os.path.join(run_dir, "arms", name, "run.json"), None)
+            if isinstance(arm_run, dict) and isinstance((arm_run.get("capabilities") or {}).get(
+                    HOST_CAPABILITIES_PATH), dict):
+                caps, origin = arm_run["capabilities"], "arms/%s/run.json capabilities" % name
+                break
+    if caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict):
+        out["host"] = {"document": caps[HOST_CAPABILITIES_PATH], "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH),
+                       "read_at": None, "sha256": None}
+    return out
+
+
+def bind_run(cases, run_dir):
+    """|cases| (load_by_design's) with the run's References: the run's recorded live documents (recorded_documents)
+    over the table's own blocks."""
+    docs = recorded_documents(run_dir)
+    live = dict((ns, (d or {}).get("document")) for ns, d in docs.items())
+    origins = dict((ns, (d or {}).get("origin")) for ns, d in docs.items() if d)
+    blocks = getattr(cases, "blocks", None) or {}
+    return ByDesignCases(cases or {}, blocks, sc.References(blocks, live, origins))
+
+
+def referenced_paths(cases):
+    """Every (namespace, path) the rules read: the table's request references, suite_common.TERMS and each
+    database's backends.<db>.resolve.time_budget.default_ms the service_settings block states
+    (suite_common.resolve_default_budget_ms)."""
+    out = []
+    for case in (cases or {}).values():
+        out.extend(x for x in request_references(case.get("request")) if x not in out)
+    out.extend((ns, path) for ns, path, _ in sc.TERMS.values() if (ns, path) not in out)
+    backends = ((getattr(cases, "blocks", None) or {}).get("service") or {}).get("backends")
+    for db in sorted(backends) if isinstance(backends, dict) else []:
+        out.append(("service", "backends.%s.resolve.time_budget.default_ms" % db))
+    return out
+
+
+def reference_mismatches(cases):
+    """The referenced paths (referenced_paths) whose run's live value differs from the table's block (refs_of(cases);
+    judged with the live value): [{namespace, ref, live, table}]."""
+    refs = refs_of(cases)
+    out = []
+    for ns, path in referenced_paths(cases):
+        _, _, mismatch = refs.resolve(ns, path)
+        if mismatch is not None:
+            out.append(mismatch)
+    return out
+
+
+def reference_sources(cases):
+    """{namespace: {source: live | table | unknown, origin}} of the configuration |cases| read (refs_of): live where
+    the run recorded the namespace's document, else the table's block when it has one."""
+    refs = refs_of(cases)
+    out = {}
+    for ns in sc.REFERENCE_NAMESPACES:
+        if refs.live.get(ns) is not None:
+            out[ns] = {"source": "live", "origin": refs.origins.get(ns)}
+        elif refs.table.get(ns) is not None:
+            out[ns] = {"source": "table", "origin": "the table's %s block" % sc.REFERENCE_BLOCKS[ns]}
+        else:
+            out[ns] = {"source": "unknown", "origin": None}
+    return out
+
+
+def reference_warnings(cases):
+    """The report's lines on the configuration the run was judged with: where each namespace's references came from,
+    and each live / table mismatch (a warning; lane G3's gate fails on it: gate_configuration_problems)."""
+    src = reference_sources(cases)
+    out = ["by-design references resolved from: %s" % "; ".join(
+        "%s %s (%s)" % (ns, src[ns]["source"], src[ns]["origin"] or "none") for ns in sc.REFERENCE_NAMESPACES)]
+    out.extend("configuration mismatch: %s %s is %s live, %s in the table (judged with the live value)" % (
+        m["namespace"], m["ref"], json.dumps(m["live"]), json.dumps(m["table"])) for m in reference_mismatches(cases))
+    return out
+
+
+def gate_configuration_problems(run_dir, cases=None, reevaluated=False):
+    """For lane G3's gate: why a run's configuration evidence does not hold, [] when it does: the run recorded no
+    live service_settings ("configuration evidence missing": run.json service_capabilities without a document
+    stating service_settings), a referenced path whose live value differs from the table's (reference_mismatches), an
+    MCP line whose request_evidence read a reference from the table or found it unknown. |cases| load_by_design's
+    (default: the table next to this script)."""
+    out = []
+    if cases is None:
+        cases, _ = load_by_design(DEFAULT_BY_DESIGN)
+    docs = recorded_documents(run_dir)
+    service = docs.get("service") or {}
+    if not isinstance((service.get("document") or {}).get("service_settings"), dict):
+        out.append("configuration evidence missing: the run recorded no live service_settings (%s%s)" % (
+            "run.json %s" % SERVICE_CAPABILITIES_KEY, ": %s" % service.get("error") if service.get("error") else ""))
+    bound = bind_run(cases, run_dir)
+    out.extend("configuration mismatch: %s %s is %s live, %s in the table" % (
+        m["namespace"], m["ref"], json.dumps(m["live"]), json.dumps(m["table"])) for m in reference_mismatches(bound))
+    rows, _ = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
+    if not rows:
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", "mcp", sc.reevaluated_name("executions.jsonl",
+                                                                                           reevaluated)))
+    for r in rows:
+        ev = r.get("request_evidence") if r.get("arm", "mcp") == "mcp" else None
+        for case, paths in sorted((ev or {}).items()) if isinstance(ev, dict) else []:
+            weak = sorted("%s: %s" % (p, v) for p, v in (paths or {}).items() if v in ("table", "unknown"))
+            if weak:
+                out.append("%s r%s case %s read %s" % (r.get("scenario"), r.get("repeat"), case, ", ".join(weak)))
+    return out
 
 
 def table_for(run_dir, by_design=None, reevaluated=False):
@@ -443,19 +928,19 @@ def status_verdict(line):
 
 
 def _field_matches(observed, case_field):
-    """A case's field: alternatives "a | b" (split as its code), each with `<...>` placeholders that match anything,
-    dots included, as async's runner (suite_mcp_runner.py ServiceByDesign._like) matches them: "bounds.<knob>",
-    "predicate<path of the first fault>" (predicate.at_least.n)."""
+    """A case's field: alternatives "a | b" (split as its code), each with `<...>` placeholders that match one or more
+    characters, dots included, never the empty string, as async's runner (suite_mcp_runner.py ServiceByDesign._like)
+    matches them: "overrides.<knob path>", "predicate.<path of the first fault>" (predicate.at_least.n)."""
     if observed is None:
         return False
     for alt in _alternatives(case_field):
-        rx = ".*?".join(re.escape(part) for part in re.split(r"<[^<>]+>", alt))
+        rx = ".+?".join(re.escape(part) for part in re.split(r"<[^<>]+>", alt))
         if re.fullmatch(rx, str(observed), re.S) is not None:
             return True
     return False
 
 
-def host_state_line(line, run_dir, scenario=None):
+def host_state_line(line, run_dir, scenario=None, refs=None):
     """Whether an MCP execution is inconclusive by a host state (MCP_HOST_STATE_CODES) that the scenario does not
     expect and whose wall the plausibility rule admits, or cannot decide (rule (c)) (suite_common.host_state_verdict
     on the raw record's service-side wall; B-09, A-11): it reads neither for nor against a case or the direct arm.
@@ -468,7 +953,8 @@ def host_state_line(line, run_dir, scenario=None):
     if why is not None and code is not None:
         return str(code) in MCP_HOST_STATE_CODES and (why in sc.UNDECIDABLE or str(why) in MCP_HOST_STATE_CODES)
     ans, terr, doc = mcp_view(line, run_dir, with_doc=True)
-    code, state, _ = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error") or mcp_error(line, run_dir), terr)
+    code, state, _ = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error") or mcp_error(line, run_dir), terr,
+                                           refs=refs)
     return code is not None and state in ("host_state", "undecidable")
 
 
@@ -522,7 +1008,65 @@ def _direct_side(case, direct_line, run_dir):
     return ok, detail, None
 
 
-def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None):
+def _direct_lines(direct):
+    """The direct executions a case's direct side is judged on: |direct| one line, or {arm: {repeat: line}} (every
+    repeat of both arms, direct-local first, in repeat order), or None."""
+    if direct is None:
+        return []
+    if isinstance(direct, dict) and ("arm" in direct or "scenario" in direct or "http" in direct):
+        return [direct]
+    out = []
+    for arm in ("direct-local", "direct-remote"):
+        lines = (direct or {}).get(arm) or {}
+        out.extend(x for _, x in sorted(lines.items(), key=lambda kv: kv[0] if isinstance(kv[0], int) else -1))
+    return out
+
+
+# the direct answers of a loaded host rather than of the request: a 503 (the deadline, or busy) or a 429
+LOAD_HTTP = (429, 503)
+
+
+def _host_answers_200(case):
+    """Whether a case's direct side states the host's ordinary answer, http 200 (one status or a list holding it)."""
+    want = (case.get("direct_expectation") or {}).get("http")
+    return 200 in (want if isinstance(want, list) else [want])
+
+
+def _direct_sides(case, direct, run_dir):
+    """(True / False / None, detail, by) of a case's direct side on EVERY direct execution of |direct|
+    (_direct_lines), as answer_class reads every repeat of both arms: a repeat that contradicts the side wins over
+    the ones that hold ("<arm> repeat <r>: <why>", the others counted; a named case's side states the host's answer,
+    so any other HTTP answer, a 503 deadline included, contradicts it, as on the reference execution before), a
+    contradiction by another status named before one by a 503 / 429 (LOAD_HTTP). For a case whose host answers 200
+    a 503 (deadline or busy) or 429 contradicts only when no direct execution holds the side: with one that holds,
+    it is the host's load on that execution, set aside (a load-caused 503 on one arm must not turn a verified pair
+    into a disagreement). A direct execution without an HTTP answer (transport) reads neither way; one that holds
+    verifies (the first one's detail); else unverified."""
+    lines = _direct_lines(direct)
+    if not lines:
+        return _direct_side(case, None, run_dir)
+    held, unknown, bad = [], [], []
+    for x in lines:
+        if _transport_line(x):
+            continue
+        ok, detail, by = _direct_side(case, x, run_dir)
+        (held if ok is True else bad if ok is False else unknown).append((x, detail, by))
+    load = [b for b in bad if b[0].get("http") in LOAD_HTTP]
+    hard = [b for b in bad if not any(b is y for y in load)]
+    counted = hard if (held and load and _host_answers_200(case)) else hard + load
+    if counted:
+        x, detail, by = counted[0]
+        more = "; %d other direct repeat(s) match" % len(held) if held else ""
+        return False, "%s repeat %s: %s%s" % (x.get("arm"), x.get("repeat"), detail, more), by
+    if held:
+        aside = "; %d direct repeat(s) answering 503 / 429 set aside (another matches)" % len(load) if load else ""
+        return True, held[0][1] + aside, held[0][2]
+    if unknown:
+        return None, unknown[0][1], unknown[0][2]
+    return None, "no direct answer to compare (transport errors only)", None
+
+
+def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None, refs=None):
     """The MCP outcome class a refused / relayed / service-only table case gives the MCP executions it names
     (DESIGN §1.3), with the pair's verification.
 
@@ -530,15 +1074,17 @@ def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None):
     the MCP side for `service_only` (no host counterpart); a side with nothing to compare leaves it False
     (counted as an unverified by-design pair in the report). A case that states no host answer (no http, code,
     text, ... in its direct_expectation) has its direct side judged by the scenario's own status check on the
-    reference direct execution (G11: pass verified, fail a disagreement, else unverified). An MCP execution that is
-    inconclusive by a host state (host_state_line) is skipped: it reads neither for nor against the case; with none
-    left the pair is not comparable (B-09)."""
+    reference direct execution (G11: pass verified, fail a disagreement, else unverified). |direct_line| is one
+    direct execution or {arm: {repeat: line}}: the direct side is judged on every repeat of both arms
+    (_direct_sides), as an answer-triggered case's is. An MCP execution that is inconclusive by a host state
+    (host_state_line) is skipped: it reads neither for nor against the case; with none left the pair is not
+    comparable (B-09)."""
     agreement = case.get("agreement")
     base = {"case": case.get("id"), "case_agreement": agreement,
             "service_outcome": (case.get("service_answer") or {}).get("outcome")}
     if agreement == "not_implemented_mcp":
         return dict(base, **{"class": "not_implemented_mcp"})
-    skipped = [x for x in mcp_lines if host_state_line(x, run_dir, scenario)]
+    skipped = [x for x in mcp_lines if host_state_line(x, run_dir, scenario, refs)]
     judged = [x for x in mcp_lines if x not in skipped]
     if skipped:
         base["host_state_repeats"] = [x.get("repeat") for x in skipped]
@@ -553,7 +1099,7 @@ def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None):
         d_ok = True
         base["direct_detail"] = "no host counterpart"
     else:
-        d_ok, d_detail, by = _direct_side(case, direct_line, run_dir)
+        d_ok, d_detail, by = _direct_sides(case, direct_line, run_dir)
         if by:
             base["direct_by"] = by
         base.update({"direct_verified": d_ok, "direct_detail": d_detail})
@@ -783,10 +1329,94 @@ def _released_problems(stopped, complete):
     return []
 
 
+# the bound of the route search of _route_prefix_problem when the checks module states none (checks.py's
+# _MAX_ROUTE_STATES): a search that reaches it has not shown the stopped walk consistent
+ROUTE_STATES_DEFAULT = 100000
+
+
+class _Unreadable(Exception):
+    pass
+
+
+def _walking_dag(arm, side):
+    """(segment id -> its bases in walking order, segment id -> children, roots) of one arm of a /traverse result:
+    a right arm's segment as it reads, a left arm's reversed (SPEC-labeled-traversal-core §7.1: the left flank reads
+    leaf -> root); the merges through segments[].parents, every parent."""
+    seqs, children, roots = {}, {}, []
+    for sg in arm.get("segments") or []:
+        if not isinstance(sg, dict) or not isinstance(sg.get("sequence"), str):
+            raise _Unreadable()
+        seqs[sg.get("id")] = sg["sequence"] if side == "right" else sg["sequence"][::-1]
+        parents = sg.get("parents") or []
+        if not parents:
+            roots.append(sg.get("id"))
+        for par in parents:
+            children.setdefault(par, []).append(sg.get("id"))
+    return seqs, children, roots
+
+
+def _route_prefix_problem(stopped_arm, complete_arm, side, cap):
+    """'' when every root-to-leaf route of the stopped arm (any parent at a merge) is, in walking order, a prefix of
+    a root-to-leaf route of the complete arm (any parent at a merge); else why not: the length of the first route
+    found that is none, or the search bound |cap| (states of a stopped segment with the complete arm's positions
+    its route can be at) reached. A merged walk displays each merge through one parent (§7.1: the most labels, or the
+    arrival order under a memory budget in tree / full detail), and the complete walk forms merges past the stop
+    depth, so a stopped path may continue in the complete answer only through a merge's other parent: the routes,
+    not the displayed paths, are the walk's content (checks._record_routes reads a record the same way)."""
+    sseq, schildren, sroots = _walking_dag(stopped_arm, side)
+    cseq, cchildren, croots = _walking_dag(complete_arm, side)
+
+    def heads(cursor, seen=None):
+        # the complete arm's positions a cursor stands for: inside a segment, or past its end at each child's start
+        cid, off = cursor
+        if off < len(cseq.get(cid, "")):
+            return [cursor]
+        seen = set() if seen is None else seen
+        out = []
+        for k in cchildren.get(cid) or []:
+            if k not in seen:
+                seen.add(k)
+                out.extend(heads((k, 0), seen))
+        return out
+
+    def advance(cursors, bases):
+        for ch in bases:
+            nxt = set()
+            for cur in cursors:
+                for cid, off in heads(cur):
+                    if cseq[cid][off] == ch:
+                        nxt.add((cid, off + 1))
+            if not nxt:
+                return frozenset()
+            cursors = nxt
+        return frozenset(cursors)
+
+    start = frozenset((r, 0) for r in croots)
+    stack = [(r, start, 0) for r in reversed(sroots)]
+    seen, states = set(), 0
+    while stack:
+        sid, cursors, depth = stack.pop()
+        if (sid, cursors) in seen:
+            continue
+        seen.add((sid, cursors))
+        states += 1
+        if states > cap:
+            return "the route search stopped at %d states: not shown consistent" % cap
+        bases = sseq.get(sid, "")
+        after = advance(cursors, bases) if bases else cursors
+        if not after:
+            return "a %d bp route is no prefix of a complete route" % (depth + len(bases))
+        for k in reversed(schildren.get(sid) or []):
+            stack.append((k, after, depth + len(bases)))
+    return ""
+
+
 def _walk_prefix_problems(stopped, complete, checks_mod):
-    """The stopped /traverse answer's paths that are no prefix of a path of the complete one (per seed and arm, the
-    flank in walking order), through the checks' reading of a result (a graphlet included)."""
+    """The stopped /traverse answer's routes that are no prefix of a route of the complete one (per seed and arm,
+    in walking order; _route_prefix_problem: routes through any parent at a merge, not the displayed first-parent
+    paths), through the checks' reading of a result (a graphlet included)."""
     out = []
+    cap = getattr(checks_mod, "_MAX_ROUTE_STATES", ROUTE_STATES_DEFAULT)
     sb, cb = stopped.get("body") or {}, complete.get("body") or {}
     for i in range(min(len(sb.get("results") or []), len(cb.get("results") or []))):
         try:
@@ -799,13 +1429,11 @@ def _walk_prefix_problems(stopped, complete, checks_mod):
                 out.append("seed %d %s: no arm on the complete side" % (i, side))
                 continue
             try:
-                fs = [f if side == "right" else f[::-1] for _, f in checks_mod._arm_flanks(arm, side)]
-                fc = [f if side == "right" else f[::-1] for _, f in checks_mod._arm_flanks(other, side)]
-            except Exception:
+                why = _route_prefix_problem(arm, other, side, cap)
+            except _Unreadable:
                 return ["seed %d %s: segment sequences not readable" % (i, side)]
-            bad = [f for f in fs if not any(c.startswith(f) for c in fc)]
-            if bad:
-                out.append("seed %d %s: a %d bp path is no prefix of a complete path" % (i, side, len(bad[0])))
+            if why:
+                out.append("seed %d %s: %s" % (i, side, why))
     return out
 
 
@@ -814,8 +1442,8 @@ def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=N
     complete one (VERIFY-2 item 5): a 503 carries no content; /pattern: every population count of each pattern entry
     consistent (_count_problems: the ranges the two counts admit overlap, B5b-02) and, where the complete entry
     states retrieval_complete, every released result among its results (_released_problems); /traverse: every
-    stopped path a prefix of a complete path; None where the content cannot be read or the route has no rule (a
-    /resolve stop)."""
+    stopped route a prefix of a complete route, any parent at a merge (_walk_prefix_problems); None where the content
+    cannot be read or the route has no rule (a /resolve stop)."""
     if stopped_line.get("http") == 503:
         return True, "a 503 carries no content"
     a, b = load_answer(stopped_line, run_dir), load_answer(complete_line, run_dir)
@@ -832,7 +1460,7 @@ def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=N
         return (False, "; ".join(probs[:4])) if probs else (True, "every count consistent with the complete answer")
     if route == "POST /traverse" and checks_mod is not None:
         probs = _walk_prefix_problems(a, b, checks_mod)
-        return (False, "; ".join(probs[:4])) if probs else (True, "every stopped path a prefix of a complete one")
+        return (False, "; ".join(probs[:4])) if probs else (True, "every stopped route a prefix of a complete route")
     return None, "no consistency rule for %s" % route
 
 
@@ -1083,33 +1711,53 @@ def not_implemented_detail(case, answer, tool_error, notes=()):
         text=str(err.get("text") or ""))])
 
 
-def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None):
+def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None,
+                 evidence=None):
     """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (31a2e41f): every case
-    the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
-    either refusals or answers, never both, and several named answered cases apply together); else the first
-    answer-triggered case (table order) on its route whose MCP side it matches and whose answer_match.wall_rule (if
-    any) holds for the execution or cannot be decided (|line| and its raw record |doc|: suite_common.wall_rule_verdict,
-    peer review R1, rule (c), rule 2; a case a wall holds back does not apply and matching continues)
-    ("answer-triggered"); ([], None). |walls| (a list) receives each wall rule's (state, detail, case id): an
-    undecidable one last, with its case returned; |warnings| (a list) a recorded client wall the raw record's calls
-    do not reproduce (suite_common.client_wall_ms)."""
+    the scenario names whose service_answer the answer matches and whose `request` holds on the scenario's MCP
+    arguments (request_holds), in the order named ("named"; an answer matches either refusals or answers, never
+    both, and several named answered cases apply together); else the first answer-triggered case (table order) on
+    its route whose MCP side it matches, whose `request` holds and whose answer_match.wall_rule (if any) holds for the
+    execution or cannot be decided (|line| and its raw record |doc|: suite_common.wall_rule_verdict, peer review R1,
+    rule (c), rule 2; a case a wall or its request holds back does not apply and matching continues)
+    ("answer-triggered"); ([], None). |walls| (a list) receives each held-back case's and each wall rule's (state,
+    detail, case id): an undecidable one last, with its case returned; |warnings| (a list) a recorded client wall the
+    raw record's calls do not reproduce (suite_common.client_wall_ms); |evidence| (a RequestEvidence) the references
+    the requests read. The references and the wall rule's terms: refs_of(cases)."""
     if answer is None:
         return [], None
-    named = [c for c in named_cases(cases, scenario) if service_answers(c.get("service_answer"), answer, tool_error)]
-    if named:
-        return named, "named"
+    refs = refs_of(cases)
     err = answer.get("error") if isinstance(answer.get("error"), dict) else {}
     if isinstance(tool_error, dict) and "field" in tool_error:
         err = dict(err, field=tool_error.get("field"))
-    held = set()
+    named, held = [], set()
+    for c in named_cases(cases, scenario):
+        if service_answers(c.get("service_answer"), answer, tool_error):
+            ok, why = request_holds(c, scenario, err.get("field"), refs, evidence)
+            if ok:
+                named.append(c)
+            else:
+                # the same request holds back the same case answer-triggered: noted once
+                held.add(c.get("id"))
+                if walls is not None:
+                    walls.append(("held_back", why, c.get("id")))
+    if named:
+        return named, "named"
     while True:
         case = answer_case_of(cases, (scenario or {}).get("route"), answer.get("http"), err, skip=held)
         if case is None:
             return [], None
+        ok, why = request_holds(case, scenario, err.get("field"), refs, evidence)
+        if not ok:   # the request does not ask what the case is about: it does not apply
+            if walls is not None:
+                walls.append(("held_back", why, case.get("id")))
+            held.add(case.get("id"))
+            continue
         rule = case["answer_match"].get("wall_rule")
         if rule is None:
             return [case], "answer-triggered"
-        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc, warnings)
+        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc, warnings,
+                                             refs)
         if walls is not None:
             walls.append((state, detail, case.get("id")))
         if state in ("holds", "undecidable"):
@@ -1198,22 +1846,34 @@ def _transport_line(line):
     return not isinstance(http, int) or isinstance(http, bool) or http == 0
 
 
-def not_implemented_class(case, hit, how, direct_lines, direct_ref, run_dir, scenario=None):
+def not_implemented_class(case, hit, how, direct_lines, direct_ref, run_dir, scenario=None, refs=None):
     """The class a case stating answer_match.mcp_outcome not_implemented_mcp (async's 901893b7) gives the MCP
     executions it matched (|hit|, matched |how|: named or answer-triggered): not_implemented_mcp (the class of a
     manifest mcp.not_implemented), the case named, `by` mcp_outcome; the pair as the case's match would read it
     (answer_class for an answer-triggered match, by_design_class for a named one) is kept under `pair` (its class and
-    direct verification), never as service_by_design."""
+    direct verification), never as service_by_design. When that pair is a disagreement on the direct side and the
+    case's answer_match.direct_mismatch is "disagree" (a direct answer outside the case's direct side: the host
+    did not serve what the case says it serves), the class is `disagree` (side direct, the case and the direct
+    execution named): the deployment's refusal does not excuse a host answer the case contradicts. The MCP
+    executions themselves stay not_implemented_mcp (`mcp_outcome`; the runner's line and the re-evaluation's are
+    not touched). A "timing" direct_mismatch never disagrees here (answer_class reads it unverified)."""
     if how == "answer-triggered":
         pair = answer_class(case, hit, direct_lines, run_dir)
     else:
-        pair = by_design_class(dict(case, agreement="by_design"), direct_ref, hit, run_dir, scenario)
+        pair = by_design_class(dict(case, agreement="by_design"), direct_ref, hit, run_dir, scenario, refs)
     keep = ("class", "side", "verified", "direct_verified", "direct_detail", "direct_mismatch", "mcp_verified",
             "mcp_detail", "direct_by")
-    return {"class": "not_implemented_mcp", "by": "mcp_outcome", "mcp_outcome": "not_implemented_mcp",
-            "case": case.get("id"), "case_agreement": case.get("agreement"),
-            "service_outcome": (case.get("service_answer") or {}).get("outcome"),
-            "repeats": [r.get("repeat") for r in hit], "pair": dict((k, pair[k]) for k in keep if k in pair)}
+    out = {"class": "not_implemented_mcp", "by": "mcp_outcome", "mcp_outcome": "not_implemented_mcp",
+           "case": case.get("id"), "case_agreement": case.get("agreement"),
+           "service_outcome": (case.get("service_answer") or {}).get("outcome"),
+           "repeats": [r.get("repeat") for r in hit], "pair": dict((k, pair[k]) for k in keep if k in pair)}
+    am = case.get("answer_match") if isinstance(case.get("answer_match"), dict) else {}
+    if pair.get("class") == "disagree" and pair.get("side") == "direct" and am.get("direct_mismatch") == "disagree":
+        detail = str(pair.get("direct_detail") or "")   # names the direct arm and repeat (both judges)
+        out.update({"class": "disagree", "side": "direct", "direct_verified": False, "direct_mismatch": "disagree",
+                    "direct_detail": "%s; the MCP execution(s) %s read not_implemented_mcp (case %s, "
+                                     "answer_match.mcp_outcome)" % (detail, out["repeats"], case.get("id"))})
+    return out
 
 
 def answer_class(case, hit, direct_lines, run_dir):
@@ -1406,7 +2066,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         if any(c.get("agreement") == "not_implemented_mcp" for c in named):
             return {"class": "not_implemented_mcp", "by": "table"}
         return {"class": "missing"}
-    host = [r for r in reps if host_state_line(r, run_dir, scenario)]
+    refs = refs_of(cases)
+    host = [r for r in reps if host_state_line(r, run_dir, scenario, refs)]
     judged = [r for r in reps if not any(r is h for h in host)]
     note = {"host_state_repeats": [r.get("repeat") for r in host]} if host else {}
     if not judged:
@@ -1454,8 +2115,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         if not groups and not plain:
             return dict(note, **{"class": "not_comparable", "by": "undecidable plausibility",
                                  "detail": "every MCP execution's plausibility is undecidable (rule (c))"})
-    sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"
-             or (k[0] == "not_implemented" and k[2] == "answer-triggered")]
+    # the direct answers an answer-triggered case explains (e.g. the host's own 503 deadline) are no reference for
+    # the other MCP executions; a not_implemented_mcp case's direct side is the host's ordinary answer (the
+    # deployment refused what the host serves), which stays the reference for the other repeats
+    sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"]
     kept = _unexplained_direct(direct_lines, sides, run_dir)
     k_arm, k_ref = _direct_ref(kept)
     k_ref0 = k_ref[min(k_ref)] if k_ref else None
@@ -1468,11 +2131,11 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     for key in order:
         case, hit = groups[key]
         if key[0] == "not_implemented":
-            parts.append(not_implemented_class(case, hit, key[2], direct_lines, k_ref0, run_dir, scenario))
+            parts.append(not_implemented_class(case, hit, key[2], direct_lines, kept, run_dir, scenario, refs))
         elif key[0] == "answer-triggered":
             parts.append(answer_class(case, hit, direct_lines, run_dir))
         else:
-            parts.append(by_design_class(case, k_ref0, hit, run_dir, scenario))
+            parts.append(by_design_class(case, kept, hit, run_dir, scenario, refs))
     rest = None
     if plain:
         unmatched = [r for r in plain if r.get("repeat") not in answered]
@@ -1499,7 +2162,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             rest["explained_items"] = dict((str(k), v) for k, v in sorted(explained.items()) if v)
             if rest["class"] == "service_by_design" and rest.get("explained_differences"):
                 case = cases.get(answered.get(rest["explained_differences"][0].get("repeat"))) or {}
-                d_ok, d_detail, by = _direct_side(case, k_ref0, run_dir)
+                d_ok, d_detail, by = _direct_sides(case, kept, run_dir)
                 rest.update({"by": "explains_checks", "case": case.get("id"), "case_agreement": case.get("agreement"),
                              "service_outcome": (case.get("service_answer") or {}).get("outcome"),
                              "mcp_verified": True, "direct_verified": d_ok, "direct_detail": d_detail,
@@ -1510,17 +2173,28 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     nip = [p for p in parts if p.get("mcp_outcome") == "not_implemented_mcp"]
     if nip:
         # a case's answer_match.mcp_outcome not_implemented_mcp (async's 901893b7): counted under not_implemented_mcp,
-        # never service_by_design; the other parts are kept beside it
-        out = dict(nip[0])
-        others = [p for p in parts if p is not nip[0]]
+        # never service_by_design, unless its pair contradicts the case's direct side (not_implemented_class: then a
+        # disagreement, whichever of the case's groups it is in); the other parts are kept beside it
+        # each repeat is classified on its own: a disagreement of a repeat the case did not match (an MCP fault on
+        # another repeat) is the scenario's class, as is the case's own direct-side contradiction
+        faults = [p for p in parts if not any(p is q for q in nip) and (
+            p.get("class") == "disagree" or (p.get("class") == "no_direct_reference"
+                                            and p.get("mcp_outcome") in ("fail", "error")))]
+        first = faults[0] if faults else next((p for p in nip if p.get("class") == "disagree"), nip[0])
+        out = dict(first)
+        others = [p for p in parts if p is not first]
         if others:
             out["other_repeats"] = others[0] if len(others) == 1 else others
         return dict(note, **out)
     dis = [p for p in parts if p.get("class") == "disagree"]
     nim = [c for c in named if c.get("agreement") == "not_implemented_mcp"]
-    if dis and nim:
-        # the table states that the request is not expressible via MCP (e.g. bounds.max_query_bp): a difference
-        # between the arms is that gap, as before lane S5b (the first named case not disagreeing decided)
+    named_ids = [c.get("id") for c in named]
+    if dis and nim and all(d.get("side") == "direct" and d.get("by") != "answer" and d.get("case") in named_ids
+                           for d in dis):
+        # the table states that the request is not expressible via MCP (e.g. bounds.max_query_bp): the direct side of
+        # a case the scenario names that does not hold is that gap (the host saw a request the MCP cannot send, e.g.
+        # resolve.sequence_too_long without max_query_bp); EVERY disagreement must be such a gap: any other (a check,
+        # an MCP side, an answer-triggered case, on any repeat) is no such gap and stays a disagreement
         return dict(note, **{"class": "not_implemented_mcp", "by": "table", "case": nim[0].get("id"),
                              "disagreement": dict(dis[0])})
     if dis:
@@ -1897,7 +2571,8 @@ def inconclusive_reason(line, scenario, run_dir, cases=None):
                 return sc.undecidable_class(walls[-1][1])
             if matched:
                 return "checks"
-        code, state, detail = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error"), terr)
+        code, state, detail = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error"), terr,
+                                                    refs=refs_of(cases))
         if state == "host_state":
             return code
         if state == "undecidable":
@@ -1926,6 +2601,14 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
     cases, table_info = by_design if by_design else ({}, None)
+    warnings = list(warnings or [])
+    references = None
+    if table_info is not None:
+        # the configuration the references read: the run's live documents, else the table's blocks (named in the
+        # report; a mismatch is a warning, judged with the live value)
+        cases = bind_run(cases, run_dir)
+        references = dict(reference_sources(cases), mismatches=reference_mismatches(cases))
+        warnings.extend(w for w in reference_warnings(cases) if w not in warnings)
     titles, areas, manifest_order, scen_by_id = {}, {}, [], {}
     if isinstance(manifest, dict):
         for scen in manifest.get("scenarios", []):
@@ -2084,8 +2767,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         "release": run.get("release"), "server_instance": run.get("server_instance"),
         "manifest_sha256": (run.get("manifest") or {}).get("computed_sha256")
         or (run.get("manifest") or {}).get("content_sha256"),
-        "arms": arms_present, "unparsable_lines": bad, "by_design_table": table_info,
-        "warnings": list(warnings or []),
+        "arms": arms_present, "unparsable_lines": bad, "by_design_table": table_info, "references": references,
+        "warnings": warnings,
         "host_cache": run.get("host_cache"), "reevaluation": run.get("reevaluation") if reevaluated else None,
         "order": order, "scenarios": scenarios, "relations": relations,
         "summary": {
@@ -2127,8 +2810,9 @@ def main(argv=None):
     path, warnings = table_for(args.run_dir, args.by_design, args.reevaluated)
     for w in warnings:
         sys.stderr.write("compare: warning: %s\n" % w)
+    manifest = sc.read_json(os.path.join(args.run_dir, "manifest.json"))
     try:
-        table = load_by_design(path)
+        table = load_by_design(path, (manifest or {}).get("scenarios") if isinstance(manifest, dict) else None)
     except TableError as exc:
         sys.stderr.write("compare: refusing: %s\n" % exc)
         return 4

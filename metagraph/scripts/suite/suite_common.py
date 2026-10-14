@@ -415,6 +415,10 @@ def _number_or_none(v):
 # 1 s) is no host state whatever the wall (read_bound_below_floor). Where the runner recorded what it judged with
 # (raw `client_wall`, line `client_wall_ms`; raw / line `timeout_terms`), the recorded value is read and the
 # recomputed one cross-checked (a mismatch is a warning).
+# Every bound a rule compares with comes from the request (the scenario's MCP arguments), the host's capabilities and
+# the service's settings (References: the run's recorded live documents, else the by-design table's own
+# host_capabilities / service_settings blocks), never from the failing answer: a bound the answer states is checked
+# against them (stated_bound_problem, tool_error_problem, the wall rule's stated reserve), not believed.
 
 # /resolve's finalisation reserve when the refusal states none (app/traversal/resolve.py DEFAULT_FINALIZE_RESERVE_MS)
 RESOLVE_RESERVE_MS = 250.0
@@ -462,6 +466,214 @@ UNDECIDABLE_NO_WALL = "no service-side timing: plausibility undecidable"
 UNDECIDABLE_NO_THRESHOLD = "no threshold known: plausibility undecidable"
 UNDECIDABLE = (UNDECIDABLE_NO_WALL, UNDECIDABLE_NO_THRESHOLD)
 WALL_RULE_VALUES = ("budget_minus_reserve",)
+# a stated resolve bound is rounded to 1 ms by the service (app/traversal/resolve.py timeout_terms)
+STATED_BOUND_ROUNDING_S = 0.001
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# References to the configuration: {"host": <path>} into the host's /capabilities document, {"service": <path>} into
+# the service's GET /traverse/capabilities document (its root: service_settings.*, presets.<p>.budgets.<knob>,
+# service_maxima.*, backends.<db>.resolve.time_budget.*). Resolution order, agreed with async's runner: the run's
+# recorded live document when it states the path, else the by-design table's own block (host_capabilities /
+# service_settings, shaped as those documents' roots: the versioned recorded configuration), else unknown. A path
+# both state with different values is a mismatch, judged with the live value.
+
+REFERENCE_NAMESPACES = ("host", "service")
+REFERENCE_SOURCES = ("live", "table", "unknown")
+# the table's block of each namespace
+REFERENCE_BLOCKS = {"host": "host_capabilities", "service": "service_settings"}
+# A path (a request predicate's subject, a reference): keys joined by "." (a key: any characters but . [ ] { } and
+# whitespace), "[n]" (element n of a list) or "[*]" (every element of a list) after a key, and in a request path the
+# whole-key placeholder "{field}"; nothing else (no empty key, no leading "[", no "a[x]").
+_PATH_KEY = r"[^.\[\]{}\s]+"
+_PATH_STEP = re.compile(r"(%s|\{field\})((?:\[(?:[0-9]+|\*)\])*)" % _PATH_KEY)
+_PATH_INDEX = re.compile(r"\[([0-9]+|\*)\]")
+
+
+def parse_path(path, field=False, star=True):
+    """The steps of a dotted |path| (keys, "[n]", "[*]") by the grammar at _PATH_KEY, or None when it does not
+    parse; "{field}" is a key only with |field|, "[*]" only with |star|."""
+    if not isinstance(path, str) or not path:
+        return None
+    out = []
+    for piece in path.split("."):
+        m = _PATH_STEP.fullmatch(piece)
+        if m is None or (m.group(1) == "{field}" and not field):
+            return None
+        out.append(m.group(1))
+        for idx in _PATH_INDEX.findall(m.group(2)):
+            if idx == "*" and not star:
+                return None
+            out.append("[%s]" % idx)
+    return out
+
+
+def path_parts(path):
+    """The steps of a dotted path (parse_path with "[*]"; [] when it does not parse)."""
+    return parse_path(path) or []
+
+
+def lookup(doc, path):
+    """(True, the value) at a dotted |path| of |doc| ("[n]" an element of a list; a path that does not parse, or
+    names "[*]", is no lookup), else (False, None)."""
+    parts = parse_path(path, star=False)
+    if parts is None:
+        return False, None
+    cur = doc
+    for part in parts:
+        if part.startswith("["):
+            if not isinstance(cur, list) or int(part[1:-1]) >= len(cur):
+                return False, None
+            cur = cur[int(part[1:-1])]
+        elif isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return False, None
+    return True, cur
+
+
+def json_equal(a, b):
+    """JSON equality: a boolean equals only the same boolean (true is not 1), numbers by value (250 and 250.0 are
+    one; never a numeric string), strings, null, and lists / objects element by element and key by key."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if _number_or_none(a) is not None or _number_or_none(b) is not None:
+        return _number_or_none(a) is not None and _number_or_none(b) is not None and float(a) == float(b)
+    if isinstance(a, list) or isinstance(b, list):
+        return isinstance(a, list) and isinstance(b, list) and len(a) == len(b) and \
+            all(json_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) or isinstance(b, dict):
+        return isinstance(a, dict) and isinstance(b, dict) and set(a) == set(b) and \
+            all(json_equal(a[k], b[k]) for k in a)
+    return a == b
+
+
+def same_value(a, b):
+    """Whether two configuration values are the same (json_equal)."""
+    return json_equal(a, b)
+
+
+class References(object):
+    """Resolves {"host": path} / {"service": path} references: the live document of the namespace (the run's recorded
+    one) when it states the path, else the table's block, else unknown. |table| and |live| map a namespace to a
+    document (a dict) or None; |origins| a namespace to where its live document came from (named in reports)."""
+
+    def __init__(self, table=None, live=None, origins=None):
+        self.table = dict((ns, (table or {}).get(ns) if isinstance((table or {}).get(ns), dict) else None)
+                          for ns in REFERENCE_NAMESPACES)
+        self.live = dict((ns, (live or {}).get(ns) if isinstance((live or {}).get(ns), dict) else None)
+                         for ns in REFERENCE_NAMESPACES)
+        self.origins = dict(origins or {})
+
+    def resolve(self, ns, path):
+        """(value, source, mismatch): source "live" | "table" | "unknown"; mismatch {namespace, ref, live, table} when
+        both documents state |path| with different values (the live value is returned), else None."""
+        found_t, value_t = lookup(self.table.get(ns), path) if self.table.get(ns) is not None else (False, None)
+        if self.live.get(ns) is not None:
+            found_l, value_l = lookup(self.live[ns], path)
+            if found_l:
+                mismatch = None
+                if found_t and not same_value(value_t, value_l):
+                    mismatch = {"namespace": ns, "ref": str(path), "live": value_l, "table": value_t}
+                return value_l, "live", mismatch
+        if found_t:
+            return value_t, "table", None
+        return None, "unknown", None
+
+    def number(self, ns, path, default=None):
+        """The numeric value of a reference, else |default| (unknown, or not a number)."""
+        value, source, _ = self.resolve(ns, path)
+        num = _number_or_none(value) if source != "unknown" else None
+        return default if num is None else num
+
+
+_DEFAULT_REFERENCES = []
+
+
+def default_references():
+    """References to the by-design table next to this module (service_by_design.json: its host_capabilities and
+    service_settings blocks), no live document; empty when the table or its blocks are missing (every rule then
+    reads its built-in value)."""
+    if not _DEFAULT_REFERENCES:
+        table = {}
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_by_design.json")) as fh:
+                data = json.load(fh)
+            table = dict((ns, data.get(block)) for ns, block in REFERENCE_BLOCKS.items())
+        except (OSError, ValueError):
+            pass
+        _DEFAULT_REFERENCES.append(References(table))
+    return _DEFAULT_REFERENCES[0]
+
+
+# The terms the plausibility rules read: (namespace, path, the built-in value when the reference is unknown).
+# host: the host's finalisation reserves and /resolve budget cap; service: the /resolve client's settings
+# (app/traversal/resolve.py client_timeout_s, plan_budget; app/traversal/backend.py _timeout_phase).
+TERMS = {
+    "pattern_reserve_ms": ("host", "pattern.finalize_reserve_ms", PATTERN_RESERVE_MS),
+    "resolve_reserve_ms": ("host", "resolve.time_budget.finalize_reserve_ms", RESOLVE_RESERVE_MS),
+    "resolve_max_time_ms": ("host", "resolve.time_budget.max_time_ms", None),
+    "timeout_s": ("service", "service_settings.resolve.timeout_s", 20.0),
+    "discover_timeout_s": ("service", "service_settings.resolve.discover_timeout_s", 120.0),
+    "allowance_s": ("service", "service_settings.resolve.allowance_s", RESOLVE_MIN_ALLOWANCE_MS / 1000.0),
+    "default_time_budget_ms": ("service", "service_settings.resolve.default_time_budget_ms", 60000.0),
+    "budget_ceiling_ms": ("service", "service_settings.resolve.budget_ceiling_ms", 240000.0),
+    "write_timeout_s": ("service", "service_settings.resolve.http_timeouts_s.write", RESOLVE_WRITE_TIMEOUT_MS / 1000.0),
+}
+
+
+def term(refs, name):
+    """A plausibility rule's term (TERMS) from |refs| (default_references()), its built-in value when unknown."""
+    ns, path, builtin = TERMS[name]
+    return (refs or default_references()).number(ns, path, builtin)
+
+
+def _mcp_args(scenario):
+    args = (((scenario or {}).get("mcp") or {}).get("arguments")) or {}
+    return args if isinstance(args, dict) else {}
+
+
+def resolve_default_budget_ms(scenario, refs=None):
+    """The time budget the service sends on an explicit-labels /resolve whose request names none (app/traversal/
+    resolve.py plan_budget): the service document's backends.<database>.resolve.time_budget.default_ms, else
+    min(service_settings.resolve.default_time_budget_ms, the host's resolve.time_budget.max_time_ms,
+    service_settings.resolve.budget_ceiling_ms)."""
+    refs = refs or default_references()
+    db = _mcp_args(scenario).get("database")
+    if isinstance(db, str) and db:
+        stated = refs.number("service", "backends.%s.resolve.time_budget.default_ms" % db)
+        if stated is not None:
+            return stated
+    caps = [term(refs, "default_time_budget_ms"), term(refs, "resolve_max_time_ms"), term(refs, "budget_ceiling_ms")]
+    return min(x for x in caps if x is not None)
+
+
+def resolve_budget(scenario, refs=None):
+    """(the time budget the service sent with a /resolve, whose it is) for the plausibility rules: the request's
+    (the MCP arguments' time_budget_ms); an explicit-labels resolve without one the service's default
+    (resolve_default_budget_ms); a discovery without one, or a request naming neither labels nor a budget, none:
+    (None, why)."""
+    asked = mcp_budget_ms(scenario)
+    if asked is not None:
+        return asked, "the request's"
+    args = _mcp_args(scenario)
+    if args.get("discover"):
+        return None, "a discovery without a budget"
+    if args.get("labels"):
+        return resolve_default_budget_ms(scenario, refs), "the service's default"
+    return None, "no budget"
+
+
+def resolve_client_timeout_s(scenario, refs=None):
+    """The service's client timeout t of the scenario's /resolve call (app/traversal/resolve.py client_timeout_s): the
+    mode's base (service_settings.resolve.timeout_s, discover_timeout_s for a discovery), with a budget B (resolve_budget)
+    max(base, (B + the host's reserve) / 1000 + max(service_settings.resolve.allowance_s, 10))."""
+    base = term(refs, "discover_timeout_s") if _mcp_args(scenario).get("discover") else term(refs, "timeout_s")
+    budget, _ = resolve_budget(scenario, refs)
+    if budget is None:
+        return base
+    allowance = max(term(refs, "allowance_s"), RESOLVE_MIN_ALLOWANCE_MS / 1000.0)
+    return max(base, (budget + term(refs, "resolve_reserve_ms")) / 1000.0 + allowance)
 
 
 def tool_error_of(doc, answer):
@@ -762,81 +974,125 @@ def timeout_terms(line, doc, error, tool_error, warnings=None):
     return rec
 
 
-def read_bound_below_floor(scenario, error, tool_error, doc=None, line=None, warnings=None):
+def read_bound_below_floor(scenario, error, tool_error, doc=None, line=None, warnings=None, refs=None):
     """Rule 4's read floor (the runner's read_bound_below_floor, f52846fb): a resolve_timeout whose statement
     (timeout_terms: the runner's recorded timeout_terms, else timeout_statement) names timeout_phase "read" with a
-    bound_s below the service's own floor for a budgeted call, budget + reserve + 10,000 - 1000 ms (the service's
-    client_timeout_s gives a budgeted /resolve a read timeout of at least budget + reserve + 10 s), the budget the MCP
-    arguments' time_budget_ms, else the tool error's, the reserve the tool error's finalize_reserve_ms, else 250 ms,
-    is no host state: the service sized its own read timeout too short, whatever the wall (an unknown one included).
-    Returns "service read bound <bound_s> s below its own floor <floor> s" (both %g seconds, the runner's text), else
-    None (another phase, no stated phase, no budget known, or a bound at or above the floor). Write and deadline
-    phases keep bound_s - 1 s (resolve_timeout_least); they fire earlier by design."""
+    bound_s below the service's own read timeout less 1 s, t - 1 s (resolve_client_timeout_s: the mode's base, with a
+    budget at least budget + the host's reserve + 10 s; the budget the request's, an explicit-labels resolve's
+    without one the service's default, resolve_budget), is no host state: the service sized its own read timeout
+    too short, whatever the wall (an unknown one included). Returns "service read bound <bound_s> s below its own
+    floor <floor> s" (both %g seconds, the runner's text), else None (another phase, no stated phase, or a bound at
+    or above the floor). Write and deadline phases: stated_bound_problem."""
     te = tool_error if isinstance(tool_error, dict) else {}
     stated = timeout_terms(line, doc, error, te, warnings)
     if stated is None or stated.get("timeout_phase") != "read":
         return None
-    asked = mcp_budget_ms(scenario)
-    budget = asked if asked is not None else _number_or_none(te.get("time_budget_ms"))
-    if budget is None:
-        return None
-    reserve = _number_or_none(te.get("finalize_reserve_ms"))
-    floor_ms = budget + (RESOLVE_RESERVE_MS if reserve is None else reserve) + RESOLVE_MIN_ALLOWANCE_MS \
-        - STATED_TIMEOUT_SLACK_MS
+    floor_ms = resolve_client_timeout_s(scenario, refs) * 1000.0 - STATED_TIMEOUT_SLACK_MS
     bound_s = float(stated["bound_s"])
     if bound_s * 1000.0 >= floor_ms:
         return None
     return "service read bound %g s below its own floor %g s" % (bound_s, floor_ms / 1000.0)
 
 
-def resolve_timeout_least(scenario, error, tool_error, doc=None, line=None, warnings=None):
+def stated_bound_problem(scenario, error, tool_error, doc=None, line=None, warnings=None, refs=None):
+    """The write and deadline phases of a stated resolve_timeout (timeout_terms) against the bounds the service
+    applies (app/traversal/backend.py _timeout_phase, exchange_budget_s): the write bound is min(the write timeout
+    service_settings.resolve.http_timeouts_s.write, t) (t: resolve_client_timeout_s), within the 1 ms the statement
+    is rounded to, else "service write bound <b> s is not its write cap <c> s"; the deadline window is the exchange
+    deadline (t plus each phase's cap up to t) less what preceded the exchange (the token's acquire, the claim), at
+    least the read floor t - 1 s, else "service deadline window <b> s below its own floor <f> s" (%g seconds). None
+    for another phase, no statement, or a bound the service can have applied."""
+    te = tool_error if isinstance(tool_error, dict) else {}
+    stated = timeout_terms(line, doc, error, te, warnings)
+    if stated is None or stated.get("timeout_phase") not in ("write", "deadline"):
+        return None
+    bound_s = float(stated["bound_s"])
+    t_s = resolve_client_timeout_s(scenario, refs)
+    if stated["timeout_phase"] == "write":
+        cap_s = min(term(refs, "write_timeout_s"), t_s)
+        if abs(bound_s - cap_s) <= STATED_BOUND_ROUNDING_S + 1e-9:
+            return None
+        return "service write bound %g s is not its write cap %g s" % (bound_s, cap_s)
+    floor_ms = t_s * 1000.0 - STATED_TIMEOUT_SLACK_MS
+    if bound_s * 1000.0 >= floor_ms:
+        return None
+    return "service deadline window %g s below its own floor %g s" % (bound_s, floor_ms / 1000.0)
+
+
+def tool_error_problem(scenario, tool_error, refs=None):
+    """What a /resolve tool error states that the service cannot have applied (the request, the host and the service
+    settings decide its bounds): a finalize_reserve_ms above the host's resolve.time_budget.finalize_reserve_ms
+    ("stated finalisation reserve <r> ms above the host's <h> ms"), a time_budget_ms other than the one the service
+    sent (resolve_budget: the request's, or the service's default; app/traversal/resolve.py plan_budget refuses a
+    budget above the host's maximum and never lowers one: "the tool error's time_budget_ms <x> ms is not the
+    request's <y> ms"); None otherwise."""
+    te = tool_error if isinstance(tool_error, dict) else {}
+    stated = _number_or_none(te.get("finalize_reserve_ms"))
+    host = term(refs, "resolve_reserve_ms")
+    if stated is not None and stated > host:
+        return "stated finalisation reserve %g ms above the host's %g ms" % (stated, host)
+    sent = _number_or_none(te.get("time_budget_ms"))
+    budget, whose = resolve_budget(scenario, refs)
+    if sent is not None and budget is not None and sent != budget:
+        return "the tool error's time_budget_ms %g ms is not %s %g ms" % (sent, whose, budget)
+    return None
+
+
+def resolve_timeout_least(scenario, error, tool_error, doc=None, line=None, warnings=None, refs=None):
     """(the least plausible wall of a resolve_timeout, the rule as the runner's reason states it), rule 4 (the
     runner's resolve_timeout_least, f94b079d): when the record states what fired (timeout_terms: the runner's
     recorded timeout_terms, else timeout_statement), bound_s x 1000 - 1000 ms, any phase, "the stated bound <b> s
-    (<phase>) - 1000 ms"; else (a legacy record) min(10,000 ms, max(A, B)) - 1000 ms of whichever of A and B is
-    known, "min(the write cap 10000 ms, ...) - 1000 ms" (R2's terms, capped by the write phase, which fires first),
-    A = time_budget_ms (the MCP arguments', else the tool error's) + reserve (the tool error's, else 250 ms) +
-    10,000 ms, B = the timeout the refusal states ("within <N> s" of the answer error's text, else of the tool
-    error's message) x 1000; (None, why) with neither."""
+    (<phase>) - 1000 ms"; else (a legacy record) min(the write timeout, max(A, B)) - 1000 ms of whichever of A and B
+    is known, "min(the write cap 10000 ms, ...) - 1000 ms" (R2's terms, capped by the write phase, which fires
+    first), A = the budget (resolve_budget) + the host's reserve + 10,000 ms, without a budget the service's client
+    timeout (legacy_unbudgeted_client_timeout_term), B = the timeout the refusal states ("within <N> s" of the answer
+    error's text, else of the tool error's message) x 1000."""
     te = tool_error if isinstance(tool_error, dict) else {}
     stated = timeout_terms(line, doc, error, te, warnings)
     if stated is not None:
         bound = float(stated["bound_s"])
         return bound * 1000.0 - STATED_TIMEOUT_SLACK_MS, "the stated bound %g s (%s) - 1000 ms" % (
             bound, stated["timeout_phase"])
-    asked = mcp_budget_ms(scenario)
-    budget = asked if asked is not None else _number_or_none(te.get("time_budget_ms"))
-    reserve = _number_or_none(te.get("finalize_reserve_ms"))
-    reserve = RESOLVE_RESERVE_MS if reserve is None else reserve
+    budget, _ = resolve_budget(scenario, refs)
+    reserve = term(refs, "resolve_reserve_ms")
     text = str((error or {}).get("text") or "") if isinstance(error, dict) else ""
     m = STATED_TIMEOUT.search(text) or STATED_TIMEOUT.search(str(te.get("message") or ""))
     terms = []
     if budget is not None:
-        a = budget + reserve + RESOLVE_MIN_ALLOWANCE_MS
-        terms.append((a, "time_budget_ms %g + reserve %g + allowance %g = %g ms" % (
-            budget, reserve, RESOLVE_MIN_ALLOWANCE_MS, a)))
+        allowance = max(term(refs, "allowance_s") * 1000.0, RESOLVE_MIN_ALLOWANCE_MS)
+        a = budget + reserve + allowance
+        terms.append((a, "time_budget_ms %g + reserve %g + allowance %g = %g ms" % (budget, reserve, allowance, a)))
+    else:
+        terms.extend(legacy_unbudgeted_client_timeout_term(scenario, refs))
     if m is not None:
         terms.append((float(m.group(1)) * 1000.0, "the stated timeout %s s" % m.group(1)))
     if not terms:
         return None, "no time budget known and no stated timeout"
     top = max(t for t, _ in terms)
     named = terms[0][1] if len(terms) == 1 else "max(%s)" % ", ".join(why for _, why in terms)
-    return min(RESOLVE_WRITE_TIMEOUT_MS, top) - STATED_TIMEOUT_SLACK_MS, "min(the write cap %g ms, %s) - 1000 ms" % (
-        RESOLVE_WRITE_TIMEOUT_MS, named)
+    cap = term(refs, "write_timeout_s") * 1000.0
+    return min(cap, top) - STATED_TIMEOUT_SLACK_MS, "min(the write cap %g ms, %s) - 1000 ms" % (cap, named)
 
 
-def resolve_deadline_least(scenario, tool_error):
-    """(the least plausible wall of a relayed /resolve deadline, the rule as stated): time_budget_ms (the tool
-    error's, else the MCP arguments') - finalize_reserve_ms (the tool error's, else 250 ms); (None, why) without a
-    budget (an explicit-labels resolve the service budgeted itself states it in the tool error; else "budget
-    unknown")."""
-    te = tool_error if isinstance(tool_error, dict) else {}
-    budget = _number_or_none(te.get("time_budget_ms"))
-    budget = mcp_budget_ms(scenario) if budget is None else budget
+def legacy_unbudgeted_client_timeout_term(scenario, refs=None):
+    """The legacy rule's term for a resolve_timeout with no stated phase and no budget known (a discovery without
+    one, or neither labels nor a budget): [(t in ms, "the client timeout <t> ms")], t the service's client timeout
+    (resolve_client_timeout_s: the mode's base, 20 s / 120 s), so the threshold is min(the write cap, t) - 1 s =
+    9,000 ms instead of the answer's own "within <N> s" - 1 s or rule (c). PENDING the async session's agreement
+    (lane G2, after its verification): it narrows rule (c) for such records."""
+    t_ms = resolve_client_timeout_s(scenario, refs) * 1000.0
+    return [(t_ms, "the client timeout %g ms" % t_ms)]
+
+
+def resolve_deadline_least(scenario, tool_error, refs=None):
+    """(the least plausible wall of a relayed /resolve deadline, the rule as stated): the budget the service sent
+    (resolve_budget: the request's, an explicit-labels resolve's without one the service's default) - the host's
+    finalisation reserve (resolve.time_budget.finalize_reserve_ms); (None, why) without a budget. The tool error's
+    own budget and reserve are checked, not read (tool_error_problem)."""
+    budget, _ = resolve_budget(scenario, refs)
     if budget is None:
         return None, "no time budget known"
-    reserve = _number_or_none(te.get("finalize_reserve_ms"))
-    return budget - (RESOLVE_RESERVE_MS if reserve is None else reserve), "time_budget_ms - finalize_reserve_ms"
+    return budget - term(refs, "resolve_reserve_ms"), "time_budget_ms - finalize_reserve_ms"
 
 
 def discovery_without_budget(scenario):
@@ -850,19 +1106,39 @@ def discovery_without_budget(scenario):
     return isinstance(args, dict) and bool(args.get("discover")) and args.get("time_budget_ms") is None
 
 
-def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, warnings=None):
+def failing_attempt_wall(scenario, line, doc=None):
+    """(the failing attempt's own service-side wall in ms, its source) for an answer-triggered case's wall rule: a
+    pattern search's deadline-ended task's one failed HTTP try (deadline_task_ms), a traversal job's last settled
+    attempt's span (settled_attempt_ms); else (None, WALL_NONE). Never mcp_phases.backend_ms: a pattern search's
+    is the sum over its tasks' calls, a traversal job's the sum over its sent attempts, so a retry would count twice."""
+    sources = (doc or {}).get("phase_sources") if isinstance((doc or {}).get("phase_sources"), dict) else {}
+    tool = mcp_tool_of(scenario)
+    if tool == "pattern_search":
+        task = deadline_task_ms(doc)
+        if task is not None:
+            return task, WALL_DEADLINE_TASK
+    if tool in ("traverse_resolve", "traverse_fetch"):
+        span = settled_attempt_ms(sources)
+        if span is not None:
+            return span, WALL_ATTEMPT
+    return None, WALL_NONE
+
+
+def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, warnings=None, refs=None):
     """(code, state, detail) of an MCP execution answered with a host-state code (MCP_HOST_STATE_CODES) the scenario
     does not expect (the runner's host_state_plausible, its reason the detail): state "host_state" (inconclusive by
     the runner's host-state rule), "undecidable" (rule (c): no threshold, UNDECIDABLE_NO_THRESHOLD, or no
     service-side wall and rule 2 decided nothing, undecidable_timing: UNDECIDABLE_NO_WALL, + RULE2_SKIPPED_API_KEY
     with an API key; inconclusive) or "not_plausible" (the checks judge: a known wall below the threshold; rule 2,
     an anonymous client wall + 1 s below it; rule 1, a relayed /resolve deadline on a discovery that sent no
-    budget; rule 4's read floor, a stated read bound below the service's own floor for a known budget,
-    read_bound_below_floor, whatever the wall); (None, None, None) for any other answer. traversal_resolve_deadline:
-    discovery_without_budget, then resolve_deadline_least; resolve_timeout: read_bound_below_floor, then
-    resolve_timeout_least; the wall: service_wall, else rule 2
-    (client_wall_premature); uninterruptible_overrun_exceeds_allowance (the R20 lockout answers at once): no wall
-    rule. |warnings| (a list, optional): a recorded client wall or statement the record does not reproduce."""
+    budget; a tool error stating a reserve or budget the service cannot have applied, tool_error_problem; rule 4's
+    read floor, read_bound_below_floor, and the write and deadline bounds, stated_bound_problem, whatever the wall);
+    (None, None, None) for any other answer. traversal_resolve_deadline: discovery_without_budget, tool_error_problem,
+    then resolve_deadline_least; resolve_timeout: tool_error_problem, read_bound_below_floor, stated_bound_problem,
+    then resolve_timeout_least; the wall: service_wall, else rule 2 (client_wall_premature);
+    uninterruptible_overrun_exceeds_allowance (the R20 lockout answers at once): no wall rule. |refs| (References;
+    default_references()) the host's and the service's terms. |warnings| (a list, optional): a recorded client wall
+    or statement the record does not reproduce."""
     err = error if isinstance(error, dict) else (line or {}).get("error")
     err = err if isinstance(err, dict) else {}
     code = err.get("code")
@@ -875,15 +1151,19 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, wa
         return code, "host_state", ""
     if tool_error is None:
         tool_error = tool_error_of(doc, {"error": err})
+    if code == "traversal_resolve_deadline" and discovery_without_budget(scenario):
+        return code, "not_plausible", DISCOVERY_NO_DEADLINE
+    problem = tool_error_problem(scenario, tool_error, refs)
+    if problem is not None:   # the tool error states a bound the service cannot have applied: no host state
+        return code, "not_plausible", problem
     if code == "traversal_resolve_deadline":
-        if discovery_without_budget(scenario):
-            return code, "not_plausible", DISCOVERY_NO_DEADLINE
-        least, rule = resolve_deadline_least(scenario, tool_error)
+        least, rule = resolve_deadline_least(scenario, tool_error, refs)
     else:
-        below = read_bound_below_floor(scenario, err, tool_error, doc, line, warnings)
-        if below is not None:   # rule 4's read floor: the service's own read timeout was too short, whatever the wall
-            return code, "not_plausible", below
-        least, rule = resolve_timeout_least(scenario, err, tool_error, doc, line, warnings)
+        for rule4 in (read_bound_below_floor, stated_bound_problem):
+            below = rule4(scenario, err, tool_error, doc, line, warnings, refs)
+            if below is not None:   # the service's own bound was too short (or not its own), whatever the wall
+                return code, "not_plausible", below
+        least, rule = resolve_timeout_least(scenario, err, tool_error, doc, line, warnings, refs)
     wall, which = service_wall(scenario, line, doc)
     if least is None:
         return code, "undecidable", UNDECIDABLE_NO_THRESHOLD
@@ -898,15 +1178,19 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, wa
     return code, "host_state", "%s after %.0f ms (%s) >= %s = %.0f ms" % (code, wall, which, rule, least)
 
 
-def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None, warnings=None):
+def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None, warnings=None, refs=None):
     """(state, detail) of an answer-triggered case's answer_match.wall_rule for an MCP execution (R1; the runner's
-    wall_rule_holds): budget_minus_reserve: the service-side wall (service_wall) >= the request's time_budget_ms
-    (request_budget_ms) - the finalisation reserve the answer's error text states, else 250 ms. state "holds",
-    "held_back" (a known wall below the threshold; rule 2, an anonymous client wall + 1 s below it, "<case>
-    (wall_rule <rule>): client wall X ms + 1 s slack < threshold Y ms: provably premature"; an unknown rule: the case
-    does not apply, matching continues) or "undecidable" (rule (c): no request budget, UNDECIDABLE_NO_THRESHOLD, or no
+    wall_rule_holds): budget_minus_reserve: the failing attempt's own wall (failing_attempt_wall: never a sum over
+    a search's tasks or a job's attempts) >= the request's time_budget_ms (request_budget_ms) - 1000 ms (the engine
+    answers its 503 deadline only once time_budget_ms has elapsed, Deadline::respond_expired; 1 s of clock and phase
+    slack);
+    a finalisation reserve the answer's text states above the host's (the host_capabilities' pattern
+    .finalize_reserve_ms) is no host deadline: held back. state "holds", "held_back" (a known wall below the
+    threshold; rule 2, an anonymous client wall + 1 s below it, "<case> (wall_rule <rule>): client wall X ms + 1 s
+    slack < threshold Y ms: provably premature"; a stated reserve above the host's; an unknown rule: the case does
+    not apply, matching continues) or "undecidable" (rule (c): no request budget, UNDECIDABLE_NO_THRESHOLD, or no
     service-side wall and rule 2 decided nothing, undecidable_timing: the case matched, the execution is
-    inconclusive). |warnings| as host_state_verdict's."""
+    inconclusive). |refs| and |warnings| as host_state_verdict's."""
     if rule not in WALL_RULE_VALUES:
         return "held_back", "%s: unknown wall_rule %r: the case does not apply" % (case_id, rule)
     budget = request_budget_ms(scenario)
@@ -914,10 +1198,13 @@ def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None, warnings=
         return "undecidable", UNDECIDABLE_NO_THRESHOLD
     err = (answer or {}).get("error")
     m = STATED_RESERVE.search(str((err or {}).get("text") or "")) if isinstance(err, dict) else None
-    reserve = float(m.group(1)) if m else PATTERN_RESERVE_MS
-    least = budget - reserve
-    terms = "time_budget_ms %g - reserve %g (%s) = %g ms" % (budget, reserve, "stated" if m else "default", least)
-    wall, which = service_wall(scenario, line, doc)
+    host = term(refs, "pattern_reserve_ms")
+    if m and float(m.group(1)) > host:
+        return "held_back", "%s (wall_rule %s): stated finalisation reserve %s ms above the host's %g ms: the case " \
+                            "does not apply" % (case_id, rule, m.group(1), host)
+    least = budget - STATED_TIMEOUT_SLACK_MS
+    terms = "time_budget_ms %g - 1000 ms = %g ms" % (budget, least)
+    wall, which = failing_attempt_wall(scenario, line, doc)
     if wall is None:   # rule 2: the anonymous client's wall is an upper bound
         premature, note = client_wall_premature(scenario, line, doc, least, warnings)
         if premature:
