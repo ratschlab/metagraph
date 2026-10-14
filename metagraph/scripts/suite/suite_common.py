@@ -568,16 +568,26 @@ def _warn(warnings, text):
         warnings.append(text)
 
 
+def mcp_auth_recorded(line, doc=None):
+    """Whether the runner recorded `mcp_auth` for the execution (2a8acbaf on: the key on every line and in the raw
+    record, its value the client's SuiteMcp.mcp_auth, null only from a client without one): a record before
+    2a8acbaf has the key in neither."""
+    return any(isinstance(src, dict) and "mcp_auth" in src for src in (line, doc))
+
+
 def mcp_auth_of(line, doc=None):
     """(the MCP arm's auth as rule 2 reads it, where it came from): the `mcp_auth` the runner recorded (2a8acbaf:
-    "anonymous" | "api_key" on every line and in the raw record; the line's, else the raw record's), else the
-    re-evaluation's stated assumption (`reevaluation.mcp_auth_assumed` of a re-evaluated line: reevaluate.py
-    --mcp-auth, for records before 2a8acbaf, which state none), else (None, None): unknown, so rule 2 decides
-    nothing (the runner's client_wall_premature with an auth other than anonymous / api_key)."""
+    "anonymous" | "api_key" on every line and in the raw record; the line's, else the raw record's), else, for a
+    record before 2a8acbaf (no `mcp_auth` key in either: mcp_auth_recorded), the re-evaluation's stated assumption
+    (`reevaluation.mcp_auth_assumed` of a re-evaluated line: reevaluate.py --mcp-auth), else (None, None): unknown,
+    so rule 2 decides nothing (the runner's client_wall_premature with an auth other than anonymous / api_key; a
+    recorded null stays unknown, as the runner judged it)."""
     for src, name in ((line, "line"), (doc, "raw record")):
         v = src.get("mcp_auth") if isinstance(src, dict) else None
         if v is not None:
             return v, name
+    if mcp_auth_recorded(line, doc):
+        return None, None
     assumed = (((line or {}).get("reevaluation") or {}) if isinstance((line or {}).get("reevaluation"), dict)
                else {}).get("mcp_auth_assumed")
     if assumed is not None:

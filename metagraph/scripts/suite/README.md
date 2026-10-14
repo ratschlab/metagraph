@@ -1256,3 +1256,18 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   table in hand and notes a differing recorded list (`explained_items_recorded`), never trusting it; merge_run
   leaves out a line's explained_items (the runner's or the re-evaluation's), and only for a line without the field
   (a runner before f386a3c0) every failing item of its explained_checks.
+- Where the runner records rule 2's and rule 4's terms (its writer, Runner.execute / main at f386a3c0), and where the
+  mirror reads them: `mcp_auth` on every line and in every raw record (the client's SuiteMcp.mcp_auth, "anonymous"
+  | "api_key"; null only from a client without one), and in mcp_runs.jsonl / run.json (the latest invocation's at
+  the top, each one's under `invocations`): `mcp_auth_of` reads the line's, else the raw record's; the
+  re-evaluation's --mcp-auth assumption now applies only to a record with the key in neither (a run before
+  2a8acbaf; `mcp_auth_recorded`): a recorded null stays unknown, as the runner judged it (before, the assumption
+  overrode it). The mark records run.json's values (`mcp_auth.run_json`), and a line whose recorded value is none of
+  them is a warning. `client_wall_ms` on a pattern_search / traverse_resolve line (null when an instant is unknown)
+  and the raw record's `client_wall` ({ms, first_submit_t0, first_submit_call, answer_t1, answer_call,
+  answer_tool}, null for another tool): `client_wall_ms` reads the raw record's first, else the line's, as before.
+  `timeout_terms` ({timeout_phase, bound_s, elapsed_ms, source}) on a resolve_timeout line (null when the error
+  states none) and in every raw record (null unless a resolve_timeout states them): `timeout_terms` reads the raw
+  record's first, else the line's, as before; rule 4's bound and its read floor read it. explained_checks /
+  explained_items / service_by_design_case on a matched line and in the raw record, verdict_detail and
+  inconclusive_reason on the line where set (the raw record: null): read from the line, as before.

@@ -29,14 +29,15 @@ says so; with no table a runner's mark, and a by-design finding (B5b-10), are ke
 unexpected compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of
 suite_common.host_state_verdict admits is inconclusive; one it rejects is judged by the checks, and so is a relayed
 /resolve deadline on a discovery that sent no budget (rule 1) and an answer the client's own wall proves premature
-(rule 2: ANONYMOUS MCP calls only, the line's or raw record's `mcp_auth`; a record before 2a8acbaf states none and
-rule 2 decides nothing there unless --mcp-auth states the arm's auth, recorded in the mark and on each such line as
-reevaluation.mcp_auth_assumed); a resolve_timeout is judged against the bound it states (rule 4; a stated read
-bound below the service's own floor for a known budget, budget + reserve + 10 s - 1 s, is no host state whatever the
-wall: "service read bound B s below its own floor F s", f52846fb); rule (c): where no threshold or wall is known,
-for a host state or an answer-triggered case's wall_rule, the execution is inconclusive with verdict_detail "no
-threshold known / no service-side timing: plausibility undecidable" (with an API key "; rule 2 skipped: ..."),
-whatever the checks say on the host-state path, B5b-03), then a new exception of the checks (fail). The line
+(rule 2: ANONYMOUS MCP calls only, the line's or raw record's `mcp_auth`; a record before 2a8acbaf has no such key
+and rule 2 decides nothing there unless --mcp-auth states the arm's auth, recorded in the mark and on each such line
+as reevaluation.mcp_auth_assumed; a recorded null stays unknown, as the runner judged it); a resolve_timeout is
+judged against the bound it states (rule 4; a stated read bound below the service's own floor for a known budget,
+budget + reserve + 10 s - 1 s, is no host state whatever the wall: "service read bound B s below its own floor F
+s", f52846fb); rule (c): where no threshold or wall is known, for a host state or an answer-triggered case's
+wall_rule, the execution is inconclusive with verdict_detail "no threshold known / no service-side timing:
+plausibility undecidable" (with an API key "; rule 2 skipped: ..."), whatever the checks say on the host-state
+path, B5b-03), then a new exception of the checks (fail). The line
 records verdict_detail (the runner's text: why a wall rule or a host state held or not) and inconclusive_reason as
 async's runner at f386a3c0 does; the runner's recorded client wall (raw `client_wall`, line `client_wall_ms`) and
 timeout statement (`timeout_terms`) are read first and cross-checked against the raw record (a mismatch is a
@@ -48,8 +49,10 @@ Writes, keeping every original file:
       checks_changed: the checks whose outcome changed, added or dropped; mcp_auth_assumed, warnings,
       explained_items_recorded (the runner's recorded explained_items where the replay's differ) where they apply})
   RUN_DIR/reevaluated.json   the re-evaluated set's mark: the checks (directory, commit, `+dirty`, sha256 of
-      checks.py and suite_common.py), the recorded checks (each arm's run.json), counts, and every execution whose
-      outcome or checks changed
+      checks.py and suite_common.py), the recorded checks (each arm's run.json), rule 2's auth (`mcp_auth`: the
+      assumption, the lines by recorded value, the assumed lines, the values the MCP arm's run.json states; a line
+      whose recorded value is none of those is a warning), counts, and every execution whose outcome or checks
+      changed
 Then `merge_run.py --reevaluated`, `compare.py --reevaluated`, `report.py --reevaluated` (or `run_suite.sh
 --reevaluate RUN_DIR`) build the re-evaluated set's executions.reevaluated.jsonl, run.reevaluated.json,
 compare.reevaluated.json and report.reevaluated.md / .pdf beside the recorded ones.
@@ -324,12 +327,21 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
             "client_passed": {"direct-local": "wall_ms", "direct-remote": "wall_ms", "mcp": "mcp_phases.backend_ms"},
             "by_design": by_design_info, "recorded": {}, "arms": {}, "changes": [], "warnings": [],
             # rule 2's auth (async's 2a8acbaf): the MCP lines by the mcp_auth their record states, and the assumption
-            # --mcp-auth made for those that state none (null: none made; they stay unknown, rule 2 decides nothing)
-            "mcp_auth": {"assumed": mcp_auth, "recorded": {}, "assumed_lines": 0}}
+            # --mcp-auth made for those that state none (null: none made; they stay unknown, rule 2 decides nothing);
+            # run_json: the values the MCP arm's run.json states (its invocations' included)
+            "mcp_auth": {"assumed": mcp_auth, "recorded": {}, "assumed_lines": 0, "run_json": []}}
     for name, arm_dir in merge_run.arm_dirs(run_dir):
         run = sc.read_json(os.path.join(arm_dir, "run.json"), {}) or {}
         mark["recorded"][name] = {"checks_module": run.get("checks_module"),
                                   "scripts_commit": run.get("scripts_commit") or run.get("git_head")}
+        # the MCP runner's run.json states the client's mcp_auth (2a8acbaf: the latest invocation's at the top, each
+        # one's under invocations, as mcp_runs.jsonl): recorded in the mark, and a line's own value cross-checked
+        run_auth = []
+        if name == "mcp":
+            for meta in [run] + [m for m in run.get("invocations") or [] if isinstance(m, dict)]:
+                if meta.get("mcp_auth") is not None and meta["mcp_auth"] not in run_auth:
+                    run_auth.append(meta["mcp_auth"])
+            mark["mcp_auth"]["run_json"] = run_auth
         manifest = sc.read_json(os.path.join(arm_dir, "manifest.json")) or top_manifest
         scen = dict((s.get("id"), s) for s in (manifest or {}).get("scenarios", [])) if isinstance(manifest, dict) else {}
         lines, bad = arm_lines(os.path.join(arm_dir, "executions.jsonl"))
@@ -392,8 +404,12 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
                 auth, _ = sc.mcp_auth_of(line, doc)
                 stated = "unknown" if auth is None else str(auth)
                 mark["mcp_auth"]["recorded"][stated] = mark["mcp_auth"]["recorded"].get(stated, 0) + 1
-                if auth is None and mcp_auth is not None:
-                    # a record before 2a8acbaf: rule 2 reads the stated assumption (suite_common.mcp_auth_of)
+                if auth is not None and run_auth and auth not in run_auth:
+                    mark["warnings"].append("arms/%s %s r%s: mcp_auth %r is none of run.json's %s" % (
+                        name, sid, rep, auth, run_auth))
+                if auth is None and mcp_auth is not None and not sc.mcp_auth_recorded(line, doc):
+                    # a record before 2a8acbaf (no mcp_auth key): rule 2 reads the stated assumption
+                    # (suite_common.mcp_auth_of); a recorded null stays unknown, as the runner judged it
                     assumed = mcp_auth
                     judged = dict(line, reevaluation={"mcp_auth_assumed": mcp_auth})
                     mark["mcp_auth"]["assumed_lines"] += 1

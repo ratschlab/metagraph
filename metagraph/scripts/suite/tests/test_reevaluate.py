@@ -605,12 +605,14 @@ class Reevaluate(unittest.TestCase):
         mark = reevaluate.reevaluate(run)
         row = sc.read_jsonl(os.path.join(run, "arms", "mcp", "executions.reevaluated.jsonl"))[0][0]
         self.assertEqual((row["outcome"], row["inconclusive_reason"]), ("inconclusive", sc.UNDECIDABLE_NO_WALL))
-        self.assertEqual(mark["mcp_auth"], {"assumed": None, "recorded": {"unknown": 1}, "assumed_lines": 0})
+        self.assertEqual(mark["mcp_auth"], {"assumed": None, "recorded": {"unknown": 1}, "assumed_lines": 0,
+                                            "run_json": []})
         self.assertNotIn("mcp_auth_assumed", row["reevaluation"])
         self.assertEqual(reevaluate.main([run, "--quiet", "--mcp-auth", "anonymous"]), 0)
         mark = sc.read_json(os.path.join(run, "reevaluated.json"))
         row = sc.read_jsonl(os.path.join(run, "arms", "mcp", "executions.reevaluated.jsonl"))[0][0]
-        self.assertEqual(mark["mcp_auth"], {"assumed": "anonymous", "recorded": {"unknown": 1}, "assumed_lines": 1})
+        self.assertEqual(mark["mcp_auth"], {"assumed": "anonymous", "recorded": {"unknown": 1}, "assumed_lines": 1,
+                                            "run_json": []})
         self.assertEqual((row["outcome"], row["reevaluation"]["mcp_auth_assumed"]), ("fail", "anonymous"))
         self.assertIn("client wall 5 ms + 1 s slack < threshold 59750 ms", row["verdict_detail"])
         direct = sc.read_jsonl(os.path.join(run, "arms", "direct-local", "executions.reevaluated.jsonl"))[0][0]
@@ -624,6 +626,30 @@ class Reevaluate(unittest.TestCase):
         # the option takes anonymous or api_key only
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             reevaluate.main([run, "--quiet", "--mcp-auth", "maybe"])
+        # lane S5e, where the runner records it (2a8acbaf on): mcp_auth on every line and in the raw record, the
+        # client's in run.json (each invocation's). A recorded null (a client without mcp_auth) is unknown to the
+        # runner: no assumption applies; run.json's values are in the mark and a line's other value is a warning
+        d = os.path.join(run, "arms", "mcp")
+        rows = sc.read_jsonl(os.path.join(d, "executions.jsonl"))[0]
+        with open(os.path.join(d, "executions.jsonl"), "w") as fh:
+            fh.write(json.dumps(dict(rows[0], mcp_auth=None)) + "\n")
+        sc.write_json_atomic(os.path.join(d, "run.json"), {"run_id": "R", "arm": "mcp", "checks_module": "checks",
+                                                           "mcp_auth": "anonymous",
+                                                           "invocations": [{"mcp_auth": "api_key"}]})
+        mark = reevaluate.reevaluate(run, mcp_auth="anonymous")
+        row = sc.read_jsonl(os.path.join(run, "arms", "mcp", "executions.reevaluated.jsonl"))[0][0]
+        self.assertEqual(mark["mcp_auth"], {"assumed": "anonymous", "recorded": {"unknown": 1}, "assumed_lines": 0,
+                                            "run_json": ["anonymous", "api_key"]})
+        self.assertEqual((row["outcome"], row["inconclusive_reason"]), ("inconclusive", sc.UNDECIDABLE_NO_WALL))
+        self.assertNotIn("mcp_auth_assumed", row["reevaluation"])
+        self.assertEqual(sc.mcp_auth_of(dict(row, reevaluation={"mcp_auth_assumed": "anonymous"})), (None, None))
+        self.assertTrue(sc.mcp_auth_recorded({}, {"mcp_auth": None}))
+        self.assertFalse(sc.mcp_auth_recorded({"outcome": "fail"}, None))
+        with open(os.path.join(d, "executions.jsonl"), "w") as fh:
+            fh.write(json.dumps(dict(rows[0], mcp_auth="oauth")) + "\n")
+        mark = reevaluate.reevaluate(run)
+        self.assertEqual(mark["mcp_auth"]["recorded"], {"oauth": 1})
+        self.assertIn("mcp_auth 'oauth' is none of run.json's ['anonymous', 'api_key']", mark["warnings"][-1])
 
     def test_discovery_without_budget(self):
         # A2-01 MCP side with addendum 1 item 1: a relayed /resolve deadline on a discovery that names no
