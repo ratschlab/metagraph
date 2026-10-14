@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """Build the suite's frozen scenario manifests (DESIGN §8.1): the full catalogue and the smoke selection.
 
-    build_manifest.py --out manifest/suite_v3.json --smoke-out manifest/suite_smoke_v3.json [--seed N] [--no-fetch]
+    build_manifest.py --out manifest/suite_v4.json --smoke-out manifest/suite_smoke_v4.json [--seed N] [--no-fetch]
+                      [--capabilities DIR]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
 same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
 `relations_sha256` (of `relations`, the comparisons across scenarios); `created_utc` is outside them.
 
-The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v3` in the full manifest): few enough for a
+The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v4` in the full manifest): few enough for a
 paired three-arm smoke run within 60 host requests, the MCP arm's included. The `smoke` tag keeps marking the
 scenarios a smoke validation exercised (the earlier selections).
+
+--capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
+traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
+documents and the scenarios a host capability decides (the protein substitution cap: manifest_lib.HOST_MISMATCH_MAX)
+are built from it, so the frozen manifest is built with a snapshot refreshed from the host it will run against.
+The frozen v3 manifests stay as they are (the builder of v3 is commit 6f945db4).
 """
 
 from __future__ import annotations
@@ -25,17 +32,19 @@ sys.path.insert(0, HERE)
 
 import areas  # noqa: E402
 import checks  # noqa: E402
+import manifest_lib  # noqa: E402
 import truth  # noqa: E402
 from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
-MANIFEST_VERSION = 3
+MANIFEST_VERSION = 4
+DEFAULT_CAPABILITIES = os.path.join(truth.TRUTH_DIR, "staging_capabilities")
 # The v3 smoke selection (lane S3): the checks lane S3 changed, live, within 60 host requests in a paired three-arm
 # run (each scenario MCP cold, direct-local, direct-remote, MCP warm; plus 9 capabilities GETs): the 503 past a
 # budget (R-budget-0001), exact junction runs, a walk to a record's end, a 1 ms walk budget (a stop at depth 1),
 # the telomeric seed's re-entry, an all_or_count hard region never withheld, a peptide, a count in suffix scope
 # (properties the MCP may not expose), a 31-mer of a real repeat, and the max_mismatches 0 relation pair.
-SMOKE_TAG = "smoke-v3"
+SMOKE_TAG = "smoke-v%d" % MANIFEST_VERSION
 SMOKE_IDS = ("R-budget-0001", "R-junction-0001", "T-end-0001", "T-budget-0001", "N-hard-0022", "N-hard-0005",
              "X-peptide10-0009", "P-exact-0001", "N-realrep-0007", "M-refusal-0012", "M-twin-0001")
 CONVENTIONS = {
@@ -54,14 +63,22 @@ CONVENTIONS = {
 }
 
 
-def build(seed: int, fetch: bool, only_areas=None) -> dict:
+def load_capabilities(directory: str) -> dict:
+    """The three capabilities documents of a snapshot directory."""
+    caps = {}
+    for name in ("capabilities", "pattern_capabilities", "traverse_capabilities"):
+        with open(os.path.join(directory, name + ".json")) as f:
+            caps[name] = json.load(f)
+    return caps
+
+
+def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES) -> dict:
     recs = truth.load_with_sequences(fetch=fetch)
     missing = [r.key for r in recs if r.fetch_error]
     ctx = Ctx(recs, seed)
-    caps = {}
-    for name in ("capabilities", "pattern_capabilities", "traverse_capabilities"):
-        with open(os.path.join(truth.TRUTH_DIR, "staging_capabilities", name + ".json")) as f:
-            caps[name] = json.load(f)
+    caps = load_capabilities(capabilities_dir)
+    # the host's substitution caps per kind decide the M-protein scenarios and their by-design naming (G04, G05)
+    manifest_lib.set_host_capabilities(caps["pattern_capabilities"])
     gens = [("R", areas.gen_R), ("T", areas.gen_T), ("P", areas.gen_P), ("L", areas.gen_L), ("X", areas.gen_X),
             ("M", areas.gen_M), ("Q", areas.gen_Q), ("N", areas.gen_N)]
     scenarios = []
@@ -88,7 +105,8 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
         "seed": seed,
         "index": {"database": DB, "release_at_build": caps["capabilities"].get("release"),
                   "index_fp": tc.get("index_fp"), "index_ns": tc.get("index_ns"), "k": tc.get("k"),
-                  "capabilities_snapshot": "truth/staging_capabilities/ (2026-10-13)",
+                  "capabilities_snapshot": _snapshot_name(capabilities_dir),
+                  "mismatches_max": dict(manifest_lib.HOST_MISMATCH_MAX),
                   "kmers_for_the_chance_model": areas.REFSEQ33M_KMERS},
         "ground_truth": {
             "genomes_source": truth.SOURCES["genomes"],
@@ -107,6 +125,12 @@ def build(seed: int, fetch: bool, only_areas=None) -> dict:
         "scenarios": scenarios,
     }
     return manifest
+
+
+def _snapshot_name(directory: str) -> str:
+    """The snapshot directory as the manifest names it: relative to this directory when inside it."""
+    rel = os.path.relpath(os.path.abspath(directory), HERE)
+    return (rel if not rel.startswith("..") else os.path.abspath(directory)) + "/"
 
 
 def not_applicable(caps: dict) -> list:
@@ -284,16 +308,28 @@ def write(path: str, manifest: dict) -> None:
         f.write("]\n}\n")
 
 
+# the committed manifests of earlier versions: never overwritten
+FROZEN = ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json", "suite_v3.json",
+          "suite_smoke_v3.json")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v3.json"))
-    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v3.json"))
+    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v%d.json" % MANIFEST_VERSION))
+    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v%d.json" % MANIFEST_VERSION))
+    ap.add_argument("--capabilities", default=DEFAULT_CAPABILITIES,
+                    help="the capabilities snapshot directory (default truth/staging_capabilities/)")
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--no-fetch", action="store_true", help="use the record cache only")
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
     args = ap.parse_args(argv)
     only = set(args.areas.split(",")) if args.areas else None
-    m = build(args.seed, fetch=not args.no_fetch, only_areas=only)
+    for path in (args.out, args.smoke_out):
+        frozen = os.path.basename(path) in FROZEN and os.path.abspath(os.path.dirname(path)) == \
+            os.path.join(HERE, "manifest")
+        if frozen and os.path.exists(path):
+            raise SystemExit("%s is a frozen manifest: build into another file" % path)
+    m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities)
     if only:
         m["partial_build"] = True
     write(args.out, m)

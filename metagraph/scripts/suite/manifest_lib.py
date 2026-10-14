@@ -49,8 +49,29 @@ TRIE_PRESET = {
     "bounds": {"time_budget_ms": 30000, "max_memory_mb": 512, "max_work_units": 100000000,
                "max_live_paths": 1000, "max_extension_bp": 2000},
 }
-# overrides traverse_fetch can express (DESIGN §4; async's traverse.not_expressible.strategy_keys)
-TRAVERSE_OVERRIDABLE = {"bounds", "direction", "exhaustive", "labels.max_labels_per_node", "labels.seed_label_kind"}
+# overrides traverse_fetch can express (DESIGN §4; async's traverse.not_expressible.strategy_keys); the service bounds
+# labels.max_seed_labels to its TRAVERSAL_MAX_SEED_LABELS, 10,000 (app/traversal/presets.py SERVICE_BOUNDED: VERIFY-T,
+# G14), the host's capabilities state the same maximum
+TRAVERSE_OVERRIDABLE = {"bounds", "direction", "exhaustive", "labels.max_labels_per_node", "labels.seed_label_kind",
+                        "labels.max_seed_labels"}
+SERVER_MAX_SEED_LABELS = 10000
+# a label no annotation holds: the builders' unknown label (resolve.unknown_label names it, G10)
+ABSENT_LABEL = "NOPE_0000.1"
+# The host's substitution caps per pattern kind (/pattern/capabilities mismatches.max), from the capabilities snapshot
+# the build reads (set_host_capabilities); the SPEC's maximum until then. pattern_by_design names
+# mismatch.above_kind_cap above a kind's cap (G05), and the M builders emit the m = 2 peptides only under a protein cap
+# of at least 2 (G04).
+HOST_MISMATCH_MAX = {"dna": 3, "iupac": 3, "protein": 3}
+
+
+def set_host_capabilities(pattern_caps: Optional[dict]) -> None:
+    """Take the host's per-kind substitution caps from a /pattern/capabilities document (the build's snapshot)."""
+    mx = ((pattern_caps or {}).get("mismatches") or {}).get("max") or {}
+    HOST_MISMATCH_MAX.clear()
+    HOST_MISMATCH_MAX.update({"dna": 3, "iupac": 3, "protein": 3})
+    for kind, v in mx.items():
+        if isinstance(v, int) and not isinstance(v, bool):
+            HOST_MISMATCH_MAX[kind] = v
 
 PATTERN_NOT_EXPRESSIBLE = ["max_steps", "max_memory_mb", "min_information_bits", "max_annotation_work",
                            "max_occurrences_per_label", "max_labels_per_anchor", "stop_at_threshold",
@@ -69,6 +90,11 @@ def deep_merge(base: dict, over: dict) -> dict:
         else:
             out[k] = copy.deepcopy(v)
     return out
+
+
+# the service's trace preset (app/traversal/presets.py: the walk preset with support "trace" and
+# branching.on_reconverge "keep", since SPEC-labeled-traversal-core §13 item 9 refuses trace with merging: G15)
+TRACE_PRESET = deep_merge(WALK_PRESET, {"support": "trace", "branching": {"on_reconverge": "keep"}})
 
 
 def canonical_json(obj: Any) -> str:
@@ -309,9 +335,9 @@ def resolve_request(sequence: str, labels: Optional[List[str]] = None, discover:
 
 def traverse_request(seeds: List[dict], overrides: Optional[dict] = None, preset: str = "walk",
                      detail: str = "full", extra: Optional[dict] = None) -> dict:
-    """A /traverse body: the MCP preset's merged strategy, then the overrides, then |extra| (fields the MCP
-    cannot express), with output.detail."""
-    base = WALK_PRESET if preset == "walk" else TRIE_PRESET
+    """A /traverse body: the MCP preset's merged strategy (walk, trie or trace), then the overrides, then |extra|
+    (fields the MCP cannot express), with output.detail."""
+    base = {"walk": WALK_PRESET, "trie": TRIE_PRESET, "trace": TRACE_PRESET}[preset]
     strategy = deep_merge(base, overrides or {})
     strategy = deep_merge(strategy, {"output": {"detail": detail, "timing": True}})
     if extra:
@@ -405,6 +431,10 @@ def pattern_by_design(req: Any) -> List[str]:
     mc = req.get("max_contexts")
     if isinstance(mc, int) and mc > 10000:
         ids.append("pattern.max_contexts_above_10000")
+    # a cap of 0, which the host answers (SPEC-pattern §4.1: integers >= 0) and the service's REST model refuses
+    # (caps >= 1; async's case of G02)
+    if any(req.get(f) == 0 and not isinstance(req.get(f), bool) for f in ("max_contexts", "max_anchors", "max_paths")):
+        ids.append("pattern.caps_zero")
     labels = (req.get("output") or {}).get("labels", "none")
     mode = req.get("mode", "all_or_count")
     if "max_labels" in req and (labels == "none" or mode != "partial"):
@@ -430,11 +460,17 @@ def pattern_by_design(req: Any) -> List[str]:
             ids.append("pattern.max_predicate_contexts_above_10000")
         if _predicate_has_number(pred):
             ids.append("pattern.predicate_name_not_string")
+        if _predicate_form_fault(pred):
+            ids.append("pattern.predicate_form_other")
     else:
         if labels == "predicate_only":
             ids.append("pattern.predicate_only_without_predicate")
-        if "predicate_strands" in req or "predicate_scope" in req:
+        # split by value in async's table (789fb5f0, G08): "motif" without a predicate is a host refusal (the old
+        # id, what suite_v3's Q-motif-0004 sends), predicate_strands or "context" alone a host no-op
+        if req.get("predicate_scope") == "motif":
             ids.append("pattern.predicate_options_without_predicate")
+        elif "predicate_strands" in req or "predicate_scope" in req:
+            ids.append("pattern.predicate_options_noop_without_predicate")
         if "max_predicate_contexts" in req or "max_predicate_work" in req:
             ids.append("pattern.predicate_caps_without_predicate")
     if "max_mismatches" in req:
@@ -454,6 +490,10 @@ def pattern_by_design(req: Any) -> List[str]:
         elif m > 3:
             ids.append("mismatch.value_4")
         elif m > 0:
+            # above a kind's cap of the host (staging: protein 1), for a pattern of at most k bases (a longer one is
+            # the long_pattern case): the service refuses the whole submit, the host answers that pattern's slot
+            if any(m > HOST_MISMATCH_MAX.get(kind, 3) for kind, n in _pattern_kinds(pats) if n <= K):
+                ids.append("mismatch.above_kind_cap")
             if labels in ("all", "predicate_only"):
                 ids.append("mismatch.with_labels")
             if pred is not None and labels == "none":
@@ -466,6 +506,50 @@ def pattern_by_design(req: Any) -> List[str]:
     if "paths" in (req.get("output") or {}):
         ids.append("pattern.not_expressible.output_paths")
     return ids
+
+
+def _pattern_kinds(pats: Any) -> List[Tuple[str, int]]:
+    """(kind, length in bases) of each pattern of a request (a residue counts three bases)."""
+    out = []
+    for p in pats if isinstance(pats, list) else []:
+        if not isinstance(p, dict):
+            continue
+        named = [k for k in ("dna", "iupac", "protein") if k in p]
+        if len(named) == 1 and isinstance(p[named[0]], str):
+            out.append((named[0], len(p[named[0]]) * (3 if named[0] == "protein" else 1)))
+    return out
+
+
+_PREDICATE_OPERATORS = ("any", "all", "none", "at_least", "and", "or", "not")
+
+
+def _predicate_form_fault(p: Any, depth: int = 0) -> bool:
+    """Whether a predicate breaks a form rule of SPEC-pattern-search §19.3 other than a non-string name (that is
+    pattern.predicate_name_not_string): an object of not exactly one operator, an unknown operator, an empty name
+    list or a name twice in one, an empty name, at_least with other keys or n outside 1..len, an empty and/or list,
+    nesting deeper than 64 (async's case pattern.predicate_form_other)."""
+    if depth > 64 or not isinstance(p, dict) or len(p) != 1:
+        return True
+    op, arg = next(iter(p.items()))
+    if op not in _PREDICATE_OPERATORS:
+        return True
+
+    def names_fault(lst: Any) -> bool:
+        if not isinstance(lst, list) or not lst:
+            return True
+        strs = [x for x in lst if isinstance(x, str)]
+        return any(x == "" for x in strs) or len(strs) != len(set(strs))
+
+    if op in ("any", "all", "none"):
+        return names_fault(arg)
+    if op == "at_least":
+        if not isinstance(arg, dict) or set(arg) != {"n", "labels"} or names_fault(arg["labels"]):
+            return True
+        n = arg["n"]
+        return not (isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= len(arg["labels"]))
+    if op in ("and", "or"):
+        return not isinstance(arg, list) or not arg or any(_predicate_form_fault(x, depth + 1) for x in arg)
+    return _predicate_form_fault(arg, depth + 1)
 
 
 def _predicate_has_number(p: Any) -> bool:
@@ -547,20 +631,30 @@ def resolve_by_design(req: Any) -> List[str]:
     if labels is None and disc is None:
         ids.append("resolve.no_labels_no_discover")
     if isinstance(labels, list):
+        if ABSENT_LABEL in labels:
+            ids.append("resolve.unknown_label")
         if len(labels) != len(set(labels)):
             ids.append("resolve.duplicate_labels")
         if len(set(labels)) > 1000:
             ids.append("resolve.too_many_labels")
         if any(isinstance(l, str) and l.strip() == "" for l in labels):
             ids.append("resolve.blank_label")
-    if isinstance(disc, dict) and isinstance(disc.get("max_labels"), int) and not 1 <= disc["max_labels"] <= 100:
-        ids.append("resolve.discover_limit_above_100")
+    # split by value in async's table (789fb5f0, G11): the old ids keep the value suite_v3 sends (max_labels 0, a
+    # budget of 250 ms, both host refusals); above 100 labels and 251..499 ms the host answers
+    ml = disc.get("max_labels") if isinstance(disc, dict) else None
+    if isinstance(ml, int) and not isinstance(ml, bool):
+        if ml < 1:
+            ids.append("resolve.discover_limit_above_100")
+        elif ml > 100:
+            ids.append("resolve.discover_limit_above_100_host_answers")
     tb = (req.get("bounds") or {}).get("time_budget_ms")
     if isinstance(tb, (int, float)) and not isinstance(tb, bool):
         if tb > 20000:
             ids.append("resolve.time_budget_above_host_max")
-        elif tb < 500:
+        elif tb <= 250:
             ids.append("resolve.time_budget_below_minimum")
+        elif tb < 500:
+            ids.append("resolve.time_budget_above_reserve_below_minimum")
     elif labels is not None and disc is None:
         ids.append("resolve.time_budget_unnamed")
     mq = (req.get("bounds") or {}).get("max_query_bp")
@@ -611,6 +705,8 @@ def traverse_by_design(req: Any) -> List[str]:
     if not isinstance(req, dict):
         return ["traverse.not_expressible.non_object_body"]
     seeds = req.get("seeds") or []
+    if isinstance(req.get("seeds"), list) and not req["seeds"]:
+        ids.append("traverse.empty_seeds")   # traverse_fetch refuses it locally (async's case of G19)
     if isinstance(seeds, list):
         seqs = []
         for s in seeds:
@@ -681,7 +777,7 @@ def mcp_traverse(req: Any) -> dict:
     preset_name = "trie" if strategy.get("exhaustive") else "walk"
     preset = TRIE_PRESET if preset_name == "trie" else WALK_PRESET
     if strategy.get("support") == "trace":
-        preset_name = "trace"
+        preset_name, preset = "trace", TRACE_PRESET
     overrides: Dict[str, Any] = {}
     for key in _flat_keys(strategy):
         parts = key.split(".")

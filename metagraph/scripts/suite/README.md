@@ -805,3 +805,45 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   MCP execution the runner judged `fail` against a case its matcher could not read (G08's alternation) stays `fail`
   until the MCP arm runs again with async's fixed matcher; compare.py's class for the scenario changes offline.
 
+### The v4 builder (built later by the integrator)
+`build_manifest.py` now builds manifest version 4 (`manifest/suite_v4.json`, `suite_smoke_v4.json`, the smoke tag
+`smoke-v4`; it refuses to write over a frozen v1-v3 manifest) with `--capabilities DIR` (default
+truth/staging_capabilities/): the frozen v4 is built once the host's capabilities are refreshed after its deploy
+(the snapshot of 2026-10-13 still states a protein substitution cap of 3; the deployed one is 1). The manifest's
+`index` states the snapshot directory and its `mismatches_max`. What changed, by triage group:
+- G03: planted mismatch windows take the shortest length whose chance estimate, the uniform ball model scaled by
+  the window's composition factor where above 1 (`areas._planted_window`), stays below 1,000 (a tenth of
+  max_contexts: the safety factor); a window drawn after a rejected one comes from its own random stream, so the
+  area's other windows stay. `truth.chance_contexts_estimate` states it. In the provisional build M-planted-0001
+  (mge, 20 -> 25), M-planted-0007 (ser, m 3, 25 -> 31) and M-planted-0013 (sso, m 3, 25 -> 31) change.
+- G04: the m = 2 decapeptides only under a snapshot protein cap of at least 2, the cap slot (max_mismatches cap + 1)
+  only under a cap below 3; the ids M-protein-0008..0010 are kept, a scenario not built is listed in `skipped`. The
+  until-next-deploy and needs-next-deploy tags are gone (the snapshot decides).
+- G05: `pattern_by_design` names mismatch.above_kind_cap above a kind's cap of the snapshot
+  (`manifest_lib.set_host_capabilities`, `HOST_MISMATCH_MAX`), for patterns of at most k bases.
+- G07: Q-more-0003 (at_least 3 of 2 labels) expects the refusal, 400 invalid_request naming
+  request.predicate.at_least.n; `pattern_by_design` names pattern.predicate_form_other for a form fault of
+  SPEC-pattern §19.3 other than a non-string name (`_predicate_form_fault`).
+- G10: the builders' absent label is `manifest_lib.ABSENT_LABEL`; a resolve naming it names resolve.unknown_label.
+- G12: R-edge-0019 sends an object cut before its end (no JSON reader accepts it).
+- G14: the header kind of the derived-label pairs (T-labels-0004, -0006) sends labels.max_seed_labels 10,000, the
+  server's and the service's maximum: the offline truth cannot count a window's header carriers (it knows the
+  genomes' own records, not which RefSeq records hold a window), and the eco window's set held 6,181;
+  labels.max_seed_labels is an override traverse_fetch sends.
+- G15: T-coords use the trace preset (`manifest_lib.TRACE_PRESET`, the service's: on_reconverge keep).
+- G17: T-attempts-0002 asks for usage on the 200 only (the duplicate's 409 has none: inconclusive).
+- G18: T-budget-0003's max_work_units is 300,000 (about twice the 151,383 units its seed's validation took, below
+  the run's 1,000 bp header walks); the first run should confirm a partial walk.
+- G19, G02: `traverse_by_design` names traverse.empty_seeds for `seeds: []`, `pattern_by_design` pattern.caps_zero
+  for max_contexts, max_anchors or max_paths 0.
+- G21: the M-planted, M-protein and N-nearmiss /pattern builders allow [200, 503] and are tagged machine-dependent
+  (gen_D then picks other M scenarios for determinism).
+- Splits by value (async's 789fb5f0): pattern.predicate_options_without_predicate for predicate_scope "motif"
+  without a predicate, pattern.predicate_options_noop_without_predicate for predicate_strands or "context" alone;
+  resolve.time_budget_below_minimum at <= 250 ms, resolve.time_budget_above_reserve_below_minimum at 251..499;
+  resolve.discover_limit_above_100 for max_labels below 1, resolve.discover_limit_above_100_host_answers above 100.
+A provisional v4 with the current snapshot (lane S5's directory, not manifest/) differs from suite_v3 in 99
+scenario ids (3 added, 4 dropped, 92 changed; every one mapped to its group), and with the run's capabilities
+(protein cap 1) only in M-protein-0008/0009 (not built) and M-protein-0010 (built). suite_v3.json and
+suite_smoke_v3.json are unchanged; run_suite.sh keeps v3 as its default until the frozen v4 exists.
+

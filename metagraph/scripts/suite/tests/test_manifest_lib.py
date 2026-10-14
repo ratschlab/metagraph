@@ -159,6 +159,165 @@ class Builder(unittest.TestCase):
         self.assertEqual(scs[2]["tags"], ["code-derived"])
 
 
+class V4Builder(unittest.TestCase):
+    """Lane S5: the builder changes of the verified triage (the v4 manifest; built later with a refreshed snapshot)."""
+
+    def tearDown(self):
+        ml.set_host_capabilities(None)
+
+    def test_case_naming(self):
+        p = lambda **f: ml.pattern_by_design(ml.pattern_request([{"dna": "A" * 25}], **f))  # noqa: E731
+        # G02: a cap of 0 (async's pattern.caps_zero)
+        self.assertIn("pattern.caps_zero", p(mode="partial", max_contexts=0))
+        self.assertIn("pattern.caps_zero", p(long_search="paths", max_anchors=0))
+        self.assertIn("pattern.caps_zero", p(long_search="paths", max_paths=0))
+        self.assertNotIn("pattern.caps_zero", p(mode="partial", max_contexts=1))
+        # G07: a predicate form fault other than a non-string name
+        bad = [{"at_least": {"n": 3, "labels": ["1", "2"]}}, {"at_least": {"n": 0, "labels": ["1"]}},
+               {"at_least": {"n": 1, "labels": ["1"], "x": 1}}, {"any": []}, {"any": ["1", "1"]}, {"any": [""]},
+               {"any": ["1"], "none": ["2"]}, {"xor": ["1"]}, {"and": []}, {"not": {"or": []}}, {}]
+        deep = {"any": ["1"]}
+        for _ in range(66):
+            deep = {"not": deep}
+        for pred in bad + [deep]:
+            self.assertIn("pattern.predicate_form_other", p(predicate=pred), pred)
+        good = [{"at_least": {"n": 2, "labels": ["1", "2"]}}, {"and": [{"any": ["562"]}, {"none": ["287"]}]},
+                {"or": [{"all": ["546", "615"]}, {"not": {"any": ["287"]}}]}, {"not": {"any": ["1"]}}]
+        for pred in good:
+            self.assertNotIn("pattern.predicate_form_other", p(predicate=pred), pred)
+        self.assertNotIn("pattern.predicate_form_other", p(predicate={"any": [562]}))   # name_not_string's case
+        self.assertIn("pattern.predicate_name_not_string", p(predicate={"any": [562]}))
+        # the predicate options without a predicate, split by value (async's 789fb5f0)
+        self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif"))
+        self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif",
+                                                                       predicate_strands="either"))
+        self.assertIn("pattern.predicate_options_noop_without_predicate", p(predicate_strands="context"))
+        self.assertIn("pattern.predicate_options_noop_without_predicate", p(predicate_scope="context"))
+        self.assertNotIn("pattern.predicate_options_noop_without_predicate", p(predicate_scope="motif"))
+        # G05: max_mismatches above a kind's cap of the snapshot
+        pep = lambda m: ml.pattern_by_design(ml.pattern_request([{"protein": "MKVLAAGIVG"}], max_mismatches=m))  # noqa
+        self.assertNotIn("mismatch.above_kind_cap", pep(2))       # the SPEC's cap of 3 until a snapshot says
+        ml.set_host_capabilities({"mismatches": {"max": {"dna": 3, "iupac": 3, "protein": 1}}})
+        self.assertIn("mismatch.above_kind_cap", pep(2))
+        self.assertNotIn("mismatch.above_kind_cap", pep(1))
+        self.assertNotIn("mismatch.above_kind_cap", p(max_mismatches=2))   # dna under its cap 3
+        long_pep = ml.pattern_by_design(ml.pattern_request([{"protein": "MKVLAAGIVGK"}], max_mismatches=2))
+        self.assertNotIn("mismatch.above_kind_cap", long_pep)           # 33 bases: the long-pattern case
+        self.assertEqual(ml.mcp_pattern(ml.pattern_request([{"protein": "MKVLAAGIVG"}], max_mismatches=2))["by_design"],
+                         ["mismatch.above_kind_cap"])
+
+    def test_resolve_and_traverse_naming(self):
+        r = lambda seq="ACGT" * 25, **f: ml.resolve_by_design(ml.resolve_request(seq, **f))  # noqa: E731
+        # G10: the builders' absent label
+        self.assertIn("resolve.unknown_label", r(labels=["562", ml.ABSENT_LABEL]))
+        self.assertNotIn("resolve.unknown_label", r(labels=["562"]))
+        # splits by value (async's 789fb5f0): the old ids keep what suite_v3 sends
+        self.assertIn("resolve.time_budget_below_minimum", r(labels=["562"], time_budget_ms=250))
+        self.assertIn("resolve.time_budget_above_reserve_below_minimum", r(labels=["562"], time_budget_ms=300))
+        both = r(labels=["562"], time_budget_ms=500)
+        self.assertFalse({"resolve.time_budget_below_minimum", "resolve.time_budget_above_reserve_below_minimum"} & set(both))
+        self.assertIn("resolve.discover_limit_above_100", r(discover={"max_labels": 0}))
+        self.assertIn("resolve.discover_limit_above_100_host_answers", r(discover={"max_labels": 101}))
+        self.assertFalse([i for i in r(discover={"max_labels": 100}) if i.startswith("resolve.discover_limit")])
+        # G19: an empty seed list
+        req = {"seeds": [], "strategy": ml.traverse_request([])["strategy"]}
+        self.assertEqual(ml.mcp_traverse(req)["by_design"], ["traverse.empty_seeds"])
+        self.assertNotIn("traverse.empty_seeds", ml.traverse_by_design(ml.traverse_request([{"sequence": "A" * 40}])))
+
+    def test_traverse_presets_and_overrides(self):
+        # G15: the trace preset sends on_reconverge keep, as the service's does; the MCP still lacks coordinates
+        req = ml.traverse_request([{"sequence": "A" * 40, "labels": ["x"]}], {"bounds": {"max_extension_bp": 500}},
+                                  preset="trace", extra={"output": {"coordinates": True}})
+        self.assertEqual((req["strategy"]["support"], req["strategy"]["branching"]),
+                         ("trace", {"max_label_branches": 2, "on_reconverge": "keep"}))
+        m = ml.mcp_traverse(req)
+        self.assertEqual(m["not_implemented"], "strategy.output.coordinates")
+        self.assertIn("traverse.trace_preset", m["by_design"])
+        # G14: labels.max_seed_labels is an override traverse_fetch sends (the service bounds it to 10,000)
+        req = ml.traverse_request([{"sequence": "A" * 40}], {"labels": {"seed_label_kind": "header",
+                                                                         "max_seed_labels": 10000}})
+        self.assertEqual(ml.mcp_traverse(req)["arguments"]["overrides"]["labels"],
+                         {"seed_label_kind": "header", "max_seed_labels": 10000})
+
+    def test_planted_window_reads_the_composition(self):
+        # G03: an AT-rich record's 20-mer at m 1 meets far more contexts than the uniform model's 834
+        import random
+        import areas
+        import truth
+        rnd = random.Random(3)
+
+        def rec(key, weights):
+            seq = "".join(rnd.choices("ACGT", weights=weights, k=20000))
+            return truth.Record(key=key, label=key, accession=key + ".1", kingdom="b", compartment="c",
+                                gc_class="x", transl_table=11, column="1", column_index=0, seq_id=0,
+                                records_in_column=1, length=len(seq), last_in_column=False, last_record_scan=None,
+                                region=None, seq=seq)
+        at, even = rec("at", [38, 12, 12, 38]), rec("even", [25, 25, 25, 25])
+        ctx = ml.Ctx([at, even], 1)
+        self.assertLess(areas._expected_ball_contexts(20, 1), areas.MM_CONTEXTS_TARGET)    # 834: uniform passes it
+        t = areas._planted_window(ctx, ctx.rng("a"), at, [20, 25, 31], 1, ctx.rng("b"))
+        self.assertEqual(t["length"], 25)                      # the AT-rich 20-mer is rejected by its composition
+        self.assertGreater(areas._composition_factor(at, "AT" * 10), 10)
+        self.assertLess(t["chance_contexts_estimate"], areas.MM_CONTEXTS_TARGET)
+        lens = [areas._planted_window(ctx, ctx.rng("c", i), even, [20, 25, 31], 1, ctx.rng("d", i))["length"]
+                for i in range(20)]
+        self.assertIn(20, lens)                                # a balanced window keeps the uniform choice
+        self.assertEqual(areas._planted_window(ctx, ctx.rng("e"), at, [31], 3, ctx.rng("f"))["length"], 31)
+        # a factor below 1 is not credited: the estimate never falls below the uniform model's
+        self.assertGreaterEqual(t["chance_contexts_estimate"], round(areas._expected_ball_contexts(25, 1), 1))
+
+    def test_build_refuses_a_frozen_manifest(self):
+        import build_manifest as bm
+        with self.assertRaises(SystemExit):
+            bm.main(["--out", os.path.join(SUITE, "manifest", "suite_v3.json"), "--smoke-out", os.devnull])
+
+    def test_m_area_follows_the_snapshot(self):
+        # G04, G05, G21 on the M area built from the record cache (skipped without it)
+        import build_manifest as bm
+        import tempfile
+        import truth
+        if not os.path.isdir(truth.CACHE_DIR) or not os.listdir(truth.CACHE_DIR):
+            self.skipTest("no record cache (SUITE_TRUTH_CACHE or truth/cache)")
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("capabilities", "pattern_capabilities", "traverse_capabilities"):
+                with open(os.path.join(SUITE, "truth", "staging_capabilities", name + ".json")) as f:
+                    doc = json.load(f)
+                if name == "pattern_capabilities":
+                    doc["mismatches"]["max"]["protein"] = 1
+                with open(os.path.join(d, name + ".json"), "w") as f:
+                    json.dump(doc, f)
+            cap1 = bm.build(20261013, fetch=False, only_areas={"M"}, capabilities_dir=d)
+        cap3 = bm.build(20261013, fetch=False, only_areas={"M"})
+        s1 = dict((s["id"], s) for s in cap1["scenarios"])
+        s3 = dict((s["id"], s) for s in cap3["scenarios"])
+        self.assertEqual(cap1["index"]["mismatches_max"]["protein"], 1)
+        # cap 1: no m = 2 peptide (ids kept, skipped with the reason), the cap slot named by design
+        self.assertNotIn("M-protein-0008", s1)
+        self.assertIn("M-protein-0008", " ".join(x["scenario"] for x in cap1["skipped"]))
+        self.assertEqual(s1["M-protein-0010"]["mcp"]["by_design"], ["mismatch.above_kind_cap"])
+        self.assertEqual(s1["M-protein-0010"]["expect"][1]["args"]["fields"], {"max_mismatches_cap": 1})
+        # cap 3 (the stale snapshot): the m = 2 peptides, no cap slot
+        self.assertIn("M-protein-0008", s3)
+        self.assertNotIn("M-protein-0010", s3)
+        # G21: every planted and protein search allows the 503 deadline and is machine-dependent
+        for sid, s in s1.items():
+            if sid.startswith(("M-planted", "M-protein")) and sid != "M-protein-0010":
+                self.assertEqual(s["expect"][0], {"check": "status", "args": {"http": [200, 503]}}, sid)
+                self.assertIn("machine-dependent", s["tags"], sid)
+            if sid.startswith("M-planted"):
+                self.assertLess(s["truth"]["chance_contexts_estimate"], 1000.0, sid)
+        # G07, G10, G12 on the R and Q areas
+        rq = dict((s["id"], s) for s in bm.build(20261013, fetch=False, only_areas={"R", "Q"})["scenarios"])
+        self.assertEqual(rq["Q-more-0003"]["expect"], [{"check": "status", "args": {
+            "http": 400, "code": "invalid_request", "text_contains": ["request.predicate.at_least.n"]}}])
+        self.assertIn("pattern.predicate_form_other", rq["Q-more-0003"]["mcp"]["by_design"])
+        self.assertIn("resolve.unknown_label", rq["R-edge-0008"]["mcp"]["by_design"])
+        body = rq["R-edge-0019"]["body_raw"]
+        self.assertTrue(body.startswith("{") and not body.rstrip().endswith("}"))
+        with self.assertRaises(ValueError):
+            json.loads(body)
+
+
 class FrozenManifests(unittest.TestCase):
     """The committed manifests: their digest, the contract's fields, every check known to checks.py."""
 

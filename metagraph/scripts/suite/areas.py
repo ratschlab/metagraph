@@ -3,9 +3,9 @@ session's). Each scenario names its ground truth, the exact host body, the MCP m
 expectations (check names of checks.py with their arguments), a timing class and tags.
 
 Expectations are what the CURRENT deployed code answers per the SPECs and the C++ source (texts quoted from
-metagraph/src and the stored fixtures); a scenario that depends on the next deploy is tagged needs-next-deploy, one
-whose expectation the smoke run has not confirmed yet and that rests on reading the code is tagged
-code-derived.
+metagraph/src and the stored fixtures); a scenario that depends on a host capability is built from the build's
+capabilities snapshot (manifest_lib.HOST_MISMATCH_MAX: the protein substitution cap), one whose expectation the smoke
+run has not confirmed yet and that rests on reading the code is tagged code-derived.
 """
 
 from __future__ import annotations
@@ -15,12 +15,15 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 import seqtools as st
-from manifest_lib import (Ctx, DB, K, PATTERN_MAX_CONTEXTS, PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS,
-                          WALK_PRESET, pattern_request, relation, resolve_request, scenario, source_contexts,
-                          traverse_request, walk_expectations)
+from manifest_lib import (ABSENT_LABEL, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, Ctx, DB, K, PATTERN_MAX_CONTEXTS,
+                          PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS, WALK_PRESET, pattern_request, relation,
+                          resolve_request, scenario, source_contexts, traverse_request, walk_expectations)
 from truth import TRUTH_DIR
 
 OK = {"check": "status", "args": {"http": 200}}
+# a search the host may not finish within its time budget on a loaded machine: 200, or the 503 deadline that
+# SPEC-pattern-search §6 / §7.6 states (the README's machine-dependent; G21 as VERIFY-MN amends it)
+OK_OR_DEADLINE = {"check": "status", "args": {"http": [200, 503]}}
 INV = {"check": "invariants", "args": {}}
 CC = {"check": "counts_consistent", "args": {}}
 
@@ -192,8 +195,8 @@ def gen_R(ctx: Ctx) -> List[dict]:
                         [OK, INV, ex("resolve_runs", label=eco.column, full=True)], tags=["edge", "code-derived"]))
     t = ctx.window(rng, eco, 100)
     out.append(scenario(nid(), "R", "an unknown label: refused naming it", "POST /resolve",
-                        resolve_request(t["window"], labels=[eco.column, "NOPE_0000.1"]), t,
-                        [err400("Label not found in the annotation: 'NOPE_0000.1'")], tags=["edge", "refusal"]))
+                        resolve_request(t["window"], labels=[eco.column, ABSENT_LABEL]), t,
+                        [err400("Label not found in the annotation: '%s'" % ABSENT_LABEL)], tags=["edge", "refusal"]))
     out.append(scenario(nid(), "R", "a duplicate label: refused (LabelQuery), not merged", "POST /resolve",
                         resolve_request(t["window"], labels=[eco.column, eco.column]), t,
                         [err400("Duplicate label '%s'" % eco.column)], tags=["edge", "refusal"]))
@@ -227,9 +230,11 @@ def gen_R(ctx: Ctx) -> List[dict]:
                         tags=["edge", "refusal"]))
     out.append(scenario(nid(), "R", "a body that is not an object: refused", "POST /resolve", [t["window"]], None,
                         [err400("request: expected an object")], tags=["edge", "refusal", "protocol"]))
-    out.append(scenario(nid(), "R", "a body that is not JSON: refused", "POST /resolve", None, None,
-                        [err400(prefix="Bad json received: ")], tags=["edge", "refusal", "protocol"],
-                        body_raw='{"sequence": "%s", "labels": ["%s"],}' % (t["window"], eco.column)))
+    # an object cut before its closing brace: no JSON reader accepts it (/resolve's reader takes a trailing comma or a
+    # comment, jsoncpp's defaults: G12; only /pattern promises RFC 8259 strictness)
+    out.append(scenario(nid(), "R", "a body that is not JSON (an object cut before its end): refused", "POST /resolve",
+                        None, None, [err400(prefix="Bad json received: ")], tags=["edge", "refusal", "protocol"],
+                        body_raw='{"sequence": "%s", "labels": ["%s"]' % (t["window"], eco.column)))
     out.append(scenario(nid(), "R", "time_budget_ms not above the finalisation reserve: refused", "POST /resolve",
                         resolve_request(t["window"], labels=[eco.column], time_budget_ms=250), t,
                         [err400(prefix="request.bounds.time_budget_ms: expected more than the finalisation reserve of 250")],
@@ -356,15 +361,23 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # seed_label_kind header vs column on one seed of a multi-record column (the verification's A3: on a
     # single-record column both kinds carry the same k-mers): the derived set holds the record's own label of the
     # kind asked, and only labels of that kind
+    # A derived set keeps the first labels.max_seed_labels carriers in (column, seq_id) order (SPEC §6.1): an eco
+    # window's header set held 6,181 headers (every E. coli assembly), so NC_000913.3 fell past the default 1,000
+    # (G14). The offline truth cannot count a window's header carriers (it knows the genomes' own records, not which
+    # RefSeq records hold a window), so the header kind asks for the server's maximum (10,000, the service's too).
     for key in ("eco", "cal"):
         rec = ctx.rec(key)
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
         for kind in ("column", "header"):
-            req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200},
-                                                           "labels": {"seed_label_kind": kind}})
+            labels = {"seed_label_kind": kind}
+            if kind == "header":
+                labels["max_seed_labels"] = SERVER_MAX_SEED_LABELS
+            req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200}, "labels": labels})
             name = rec.column if kind == "column" else rec.accession
-            out.append(scenario(nid(), "T", "derived %s labels on %s (%d records in its column): %s among them" % (
-                                    kind, rec.key, rec.records_in_column, name), "POST /traverse", req, t,
+            out.append(scenario(nid(), "T", "derived %s labels on %s (%d records in its column%s): %s among them" % (
+                                    kind, rec.key, rec.records_in_column,
+                                    "; max_seed_labels %d" % SERVER_MAX_SEED_LABELS if kind == "header" else "", name),
+                                "POST /traverse", req, t,
                                 [OK, INV, ex("walk_in_record", label_scope="derived"),
                                  ex("label_dict_contains", name=name, kind=kind, only_kind=True)],
                                 tags=["labels", "derived-labels", "label-kind-pair"]))
@@ -389,8 +402,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
     for i, key in enumerate(["eco", "bsu", "lam"]):
         rec = ctx.rec(key)
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=700), 550)
+        # the trace preset (on_reconverge keep: trace support with merging is refused, SPEC §13 item 9, G15)
         req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 500}},
-                               extra={"support": "trace", "output": {"coordinates": True}})
+                               preset="trace", extra={"output": {"coordinates": True}})
         out.append(scenario(nid(), "T", "trace + coordinates on %s: positions equal the record's" % key, "POST /traverse",
                             req, t, [OK, INV, ex("trace_coordinates"), ex("walk_in_record", label_scope="record")],
                             tags=["coordinates", "trace"]))
@@ -400,7 +414,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # (no resource_stop); the walk so far follows the record
     budgets = [("time_budget_ms", 1, "time", "time_budget", ["partial"]),
                ("max_memory_mb", 1, "memory", "resource_limit", ["partial", "failed"]),
-               ("max_work_units", 10, "work", "resource_limit", ["partial", "failed"]),
+               # well above the 151,383 units the seed's validation took (G18: 10 failed it before any walk) and
+               # below the run's 1,000 bp header walks (105k to 13M units per arm), so the walk stops partway
+               ("max_work_units", 300000, "work", "resource_limit", ["partial", "failed"]),
                ("max_steps", 5, None, "max_steps", ["partial"])]
     for i, (knob, val, resource, reason, walks) in enumerate(budgets):
         rec = recs[(i * 11 + 5) % len(recs)]
@@ -429,7 +445,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # allowance, capabilities attempts.allowance_ms 10,000; walk_until_ms below seeds x T + allowance)
     out.append(scenario(nid(), "T", "an attempt: the response states its usage and bound (409 duplicate when retained)",
                         "POST /traverse", req, t,
-                        [ex("status", http=[200, 409]), INV, ex("answer_fields", present=["usage"], any_status=True),
+                        # usage on the 200 only: the duplicate's 409 states {error, attempt}, no usage (SPEC §10.3;
+                        # G17), and then reads inconclusive
+                        [ex("status", http=[200, 409]), INV, ex("answer_fields", present=["usage"]),
                          ex("answer_fields", equals={"usage.bound.seeds": 1, "usage.bound.time_budget_ms": 15000,
                                                      "usage.bound.allowance_ms": 10000},
                             present=["usage.bound.walk_until_ms"])],
@@ -1366,6 +1384,60 @@ def _expected_ball_contexts(L: int, m: int) -> float:
     return st.mismatch_ball_size_iupac("A" * L, m) * REFSEQ33M_KMERS * (K - L + 1) * 2 / 4 ** L
 
 
+# A planted probe's list must be released whole (all_or_count withholds a list above max_contexts 10,000): its length
+# is the shortest candidate whose chance estimate stays below MM_CONTEXTS_TARGET, a tenth of max_contexts. The
+# uniform model above is blind to composition: M-planted-0001 (a 75 % AT 20-mer of M. genitalium at m 1, 834 by the
+# model) met 16,264 contexts (G03, as VERIFY-MN has it). The estimate is therefore scaled by the window's likelihood
+# under its record's base composition against the uniform one (prod over its bases of 4 f(b): 11.3 for that window,
+# 9,418 contexts), where that factor exceeds 1: a window less likely than uniform is not credited (the run's windows
+# with a factor below 1 met up to 15 times their scaled estimate). The target's tenfold margin under max_contexts is
+# the safety factor: M-planted-0001 met 1.7 times its scaled estimate, and no planted window of the run estimated
+# above 50 contexts met more than 3.6 times it.
+MM_CONTEXTS_TARGET = 1000.0
+_COMPOSITION: Dict[str, Dict[str, float]] = {}
+
+
+def _composition(rec) -> Dict[str, float]:
+    """The base frequencies of a record's fetched sequence (ACGT only)."""
+    if rec.key not in _COMPOSITION:
+        n = {b: rec.seq.count(b) for b in "ACGT"}
+        tot = float(sum(n.values())) or 1.0
+        _COMPOSITION[rec.key] = {b: n[b] / tot for b in "ACGT"}
+    return _COMPOSITION[rec.key]
+
+
+def _composition_factor(rec, window: str) -> float:
+    """The window's likelihood under its record's composition against the uniform one: prod of 4 f(b)."""
+    f = _composition(rec)
+    x = 1.0
+    for b in window:
+        x *= 4.0 * f.get(b, 0.25)
+    return x
+
+
+def _planted_window(ctx: Ctx, rng, rec, candidates: List[int], m: int, redraw_rng) -> dict:
+    """The window of the shortest candidate length whose chance estimate, the uniform ball model scaled by the
+    window's composition factor where it exceeds 1, stays below MM_CONTEXTS_TARGET (a candidate whose uniform
+    estimate alone does not is passed over before a window is drawn); the last candidate is taken whatever its
+    estimate. The first window is drawn from |rng| as before the composition was read, a window drawn after a
+    rejected one from |redraw_rng|, so that the area's other windows keep theirs. The truth states the estimate
+    (chance_contexts_estimate)."""
+    cands = list(dict.fromkeys(candidates))
+    drawn = 0
+    for n, L in enumerate(cands):
+        last = n == len(cands) - 1
+        base = _expected_ball_contexts(L, m)
+        if not last and base >= MM_CONTEXTS_TARGET:
+            continue
+        tr = _mm_window(ctx, redraw_rng if drawn else rng, rec, L)
+        drawn += 1
+        est = base * max(1.0, _composition_factor(rec, tr["window"]))
+        if est < MM_CONTEXTS_TARGET or last:
+            tr["chance_contexts_estimate"] = round(est, 1)
+            return tr
+    raise AssertionError("no candidate length")
+
+
 def _subs_plus(variant: str, record_bases: str, positions: List[int]) -> List[dict]:
     return [{"position": p, "expected": variant[p], "found": record_bases[p]} for p in sorted(positions)]
 
@@ -1390,11 +1462,13 @@ def gen_M(ctx: Ctx) -> List[dict]:
         for m in range(t_sub, 4):
             for j in range(3):
                 # the shortest length whose ball keeps the expected random contexts low enough for the list to be
-                # released whole (the smoke run: a 20-mer at max_mismatches 2 has 21,563 level-2 contexts)
-                L = next(x for x in [[20, 25, 31][(i + j) % 3], 25, 31] if _expected_ball_contexts(x, m) < 1000)
+                # released whole (the smoke run: a 20-mer at max_mismatches 2 has 21,563 level-2 contexts), with the
+                # window's composition (_planted_window, G03)
                 rec = recs[(i * 7 + j * 3 + 1) % len(recs)]
                 i += 1
-                tr = _mm_window(ctx, rng, rec, L)
+                tr = _planted_window(ctx, rng, rec, [[20, 25, 31][(i - 1 + j) % 3], 25, 31], m,
+                                     ctx.rng("M", "plant-redraw", i))
+                L = tr["length"]
                 r2 = ctx.rng("M", "plant", i)
                 positions = st.spread_positions(r2, L, t_sub)
                 variant, edits = st.substitute_bases(tr["window"], positions, r2)
@@ -1407,24 +1481,26 @@ def gen_M(ctx: Ctx) -> List[dict]:
                 subs = _subs_plus(variant, tr["window"], positions)
                 out.append(scenario(nid(), "M", "%d-mer of %s with %d planted substitution(s), max_mismatches %d: the source at level %d" % (L, rec.key, t_sub, m, t_sub),
                                     "POST /pattern", req, tr,
-                                    [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=t_sub, substitutions=subs),
+                                    [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand="+", require="all", level=t_sub, substitutions=subs),
                                      ex("count_relation", count="contexts", level=t_sub, relation="exact", min=len(source_contexts(tr)))],
-                                    tags=["mismatch", "planted"] + (["smoke"] if (t_sub == 2 and m == 2 and j == 0) else [])))
+                                    tags=["mismatch", "planted", "machine-dependent"]
+                                    + (["smoke"] if (t_sub == 2 and m == 2 and j == 0) else [])))
     # the reverse orientation: P = rc(variant), the source a - context with substitutions in P's coordinates
     for j in range(4):
         rec = recs[(j * 5 + 4) % len(recs)]
-        tr = _mm_window(ctx, rng, rec, 25)
+        tr = _planted_window(ctx, rng, rec, [25, 31], 2, ctx.rng("M", "rc-redraw", j))
+        Lr = tr["length"]
         r2 = ctx.rng("M", "rc", j)
-        positions = st.spread_positions(r2, 25, 2)
+        positions = st.spread_positions(r2, Lr, 2)
         variant, edits = st.substitute_bases(tr["window"], positions, r2)
         P = st.revcomp(variant)
         tr["edits"] = edits
         tr["strand"] = "-"
         req = pattern_request([_p(P, "rc")], max_mismatches=2)
         out.append(scenario(nid(), "M", "reverse orientation: the source a - context at level 2, substitutions mirrored", "POST /pattern",
-                            req, tr, [OK, INV, CC, ex("contains_source_context", strand="-", require="all", level=2,
-                                                      substitutions=_subs_minus(P, tr["window"]))],
-                            tags=["mismatch", "planted", "reverse"]))
+                            req, tr, [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand="-", require="all", level=2,
+                                                                  substitutions=_subs_minus(P, tr["window"]))],
+                            tags=["mismatch", "planted", "reverse", "machine-dependent"]))
     # m < t: the source is out of reach (its level is t)
     nid = _ids("M-below")
     for j in range(6):
@@ -1489,7 +1565,7 @@ def gen_M(ctx: Ctx) -> List[dict]:
         req = pattern_request([{"id": "pv", "protein": pv}], genetic_code=prot["transl_table"], max_mismatches=1)
         out.append(scenario(nid(), "M", "decapeptide of %s with residue %d %s->%s, max_mismatches 1: the source at level 1" % (prot["key"], res_i, orig, new),
                             "POST /pattern", req, tr,
-                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1, substitutions=subs)],
+                            [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1, substitutions=subs)],
                             timing_class="slow", tags=["mismatch", "protein", "machine-dependent"]))
         n += 1
         if n >= 6:
@@ -1512,14 +1588,21 @@ def gen_M(ctx: Ctx) -> List[dict]:
         req = pattern_request([{"id": "pv", "protein": pv}], genetic_code=prot["transl_table"], max_mismatches=1)
         out.append(scenario(nid(), "M", "decapeptide of %s (table %d) with residue %d %s->%s, max_mismatches 1: the source "
                             "at level 1" % (prot["key"], prot["transl_table"], res_i, orig, new), "POST /pattern", req, tr,
-                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=1,
-                                             substitutions=subs)],
+                            [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all",
+                                                         level=1, substitutions=subs)],
                             timing_class="slow", tags=["mismatch", "protein", "machine-dependent",
                                                        "table-%d" % prot["transl_table"]]))
         np_ += 1
         if np_ >= 2:
             break
+    # m = 2 only under a protein cap of at least 2 in the build's capabilities snapshot (G04: the deployed cap is 1,
+    # and above it the host answers the cap slot, the next scenario); the ids are kept either way
+    pcap = HOST_MISMATCH_MAX.get("protein", 3)
     for j, prot in enumerate(prots[1::11][:2]):
+        if pcap < 2:
+            ctx.skip("M", "%s (m = 2 decapeptide of %s)" % (nid(), prot["key"]),
+                     "max_mismatches 2 is above the snapshot's protein cap of %d (its cap slot is the next scenario)" % pcap)
+            continue
         win = next((w for w in prot["windows"] if w["length_aa"] == 10), None)
         tr = _peptide_truth(ctx, prot, win) if win else None
         if tr is None:
@@ -1535,11 +1618,11 @@ def gen_M(ctx: Ctx) -> List[dict]:
             subs.append({"residue": res_i, "expected": pv[res_i], "found": orig, "codon": win["dna"][3 * res_i:3 * res_i + 3]})
         tr["residue_edits"] = subs
         req = pattern_request([{"id": "pv2", "protein": "".join(pv)}], genetic_code=prot["transl_table"], max_mismatches=2)
-        out.append(scenario(nid(), "M", "decapeptide of %s with 2 substituted residues, max_mismatches 2 (today's protein "
-                            "cap 3): the source at level 2" % prot["key"], "POST /pattern", req, tr,
-                            [OK, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all", level=2,
-                                             substitutions=subs)],
-                            timing_class="slow", tags=["mismatch", "protein", "until-next-deploy", "machine-dependent"]))
+        out.append(scenario(nid(), "M", "decapeptide of %s with 2 substituted residues, max_mismatches 2 (the snapshot's "
+                            "protein cap %d): the source at level 2" % (prot["key"], pcap), "POST /pattern", req, tr,
+                            [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand=tr["strand"], require="all",
+                                                         level=2, substitutions=subs)],
+                            timing_class="slow", tags=["mismatch", "protein", "machine-dependent"]))
     # suffix scope with substitutions: one offset, the floor without exemption (§21.5)
     nid_s = _ids("M-suffix")
     for j, key in enumerate(("hvo", "pfa")):
@@ -1558,18 +1641,27 @@ def gen_M(ctx: Ctx) -> List[dict]:
                             [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=1,
                                              substitutions=_subs_plus(variant, tr["window"], positions))],
                             tags=["mismatch", "planted", "suffix"]))
-    # the staging protein cap after the next restart (1): m = 2 for a peptide -> its slot
+    # the snapshot's protein cap below 3: max_mismatches cap + 1 for a peptide -> its slot (the service refuses the
+    # submit: mismatch.above_kind_cap, G05); above a cap of 3 a value is refused whatever the kind (M-refusal)
     if prots:
-        prot = prots[0]
-        win = next(w for w in prot["windows"] if w["length_aa"] == 10)
-        tr = _peptide_truth(ctx, prot, win)
-        req = pattern_request([{"id": "cap", "protein": win["peptide"]}], genetic_code=prot["transl_table"], max_mismatches=2,
-                              max_contexts=PATTERN_MAX_CONTEXTS, time_budget_ms=30000)
-        out.append(scenario(nid(), "M", "a peptide with max_mismatches 2 above the protein cap of 1", "POST /pattern", req, tr,
-                            [OK, ex("pattern_slot_error", pattern=0, code="mismatches_above_cap",
-                                    text="pattern: max_mismatches 2 above this server's cap of 1 for protein patterns (the capabilities' mismatches.max.protein); ask with at most 1",
-                                    fields={"max_mismatches_cap": 1})],
-                            timing_class="slow", tags=["mismatch", "protein", "needs-next-deploy"]))
+        sid = nid()
+        if pcap >= 3:
+            ctx.skip("M", "%s (a peptide above the protein cap)" % sid,
+                     "the snapshot's protein cap is %d: no max_mismatches above it is in range" % pcap)
+        else:
+            prot = prots[0]
+            win = next(w for w in prot["windows"] if w["length_aa"] == 10)
+            tr = _peptide_truth(ctx, prot, win)
+            mm = pcap + 1
+            req = pattern_request([{"id": "cap", "protein": win["peptide"]}], genetic_code=prot["transl_table"],
+                                  max_mismatches=mm, max_contexts=PATTERN_MAX_CONTEXTS, time_budget_ms=30000)
+            out.append(scenario(sid, "M", "a peptide with max_mismatches %d above the protein cap of %d" % (mm, pcap),
+                                "POST /pattern", req, tr,
+                                [OK, ex("pattern_slot_error", pattern=0, code="mismatches_above_cap",
+                                        text="pattern: max_mismatches %d above this server's cap of %d for protein patterns "
+                                             "(the capabilities' mismatches.max.protein); ask with at most %d" % (mm, pcap, pcap),
+                                        fields={"max_mismatches_cap": pcap})],
+                                timing_class="slow", tags=["mismatch", "protein"]))
     # order and stops
     nid = _ids("M-order")
     rec = ctx.rec("eco")
@@ -1744,11 +1836,14 @@ def gen_Q(ctx: Ctx) -> List[dict]:
                         [OK, INV, ex("predicate_selected", strand="+", selected=True)], tags=["predicate"]))
     rec = ctx.rec("hvo")
     t = ctx.window(rq, rec, 25)
+    # n above the list's length is a form fault: SPEC-pattern-search §19.3 (1 <= n <= the list's length), refused
+    # naming the path of the first fault on both arms (G07; the service: pattern.predicate_form_other)
     req = pattern_request([_p(t["window"])], output={"labels": "predicate_only"},
                           predicate={"at_least": {"n": 3, "labels": [rec.column, human]}}, predicate_strands="either")
-    out.append(scenario(nid(), "Q", "at_least 3 of two labels: never true, nothing selected (complete filtered list)",
+    out.append(scenario(nid(), "Q", "at_least 3 of two labels: refused, n outside 1 .. the list's length",
                         "POST /pattern", req, t,
-                        [OK, INV, ex("predicate_selected", strand="+", selected=False)], tags=["predicate"]))
+                        [err400(code="invalid_request", contains=["request.predicate.at_least.n"])],
+                        tags=["predicate", "refusal"]))
     # predicates on supported paths (Q-supported): none() deselects the record's path, any() under either selects it
     nid = _ids("Q-supported")
     for j, key in enumerate(("buc", "sso")):
@@ -2060,7 +2155,8 @@ def gen_N(ctx: Ctx) -> List[dict]:
         req = pattern_request([_p(variant, "near")], mode="partial", **mm)
         out.append(scenario(nid(), "N", "%d %s substitutions in a 31-mer of %s, max_mismatches %d: the source out of reach" % (
             t_sub, "clustered" if clustered else "spread", rec.key, m), "POST /pattern", req, t,
-            [OK, INV, CC, ex("source_absent", strand="+")], tags=["near-miss"] + (["smoke"] if j == 5 else [])))
+            [OK_OR_DEADLINE, INV, CC, ex("source_absent", strand="+")],
+            tags=["near-miss", "machine-dependent"] + (["smoke"] if j == 5 else [])))
         if m and t_sub > m:
             # its pair within reach: the same window with m of the substitutions
             keep = sorted(positions[:m])
@@ -2076,8 +2172,9 @@ def gen_N(ctx: Ctx) -> List[dict]:
             subs = _subs_plus(v2, t["window"], keep)
             req = pattern_request([_p(v2, "reach")], mode="partial", max_mismatches=m)
             out.append(scenario(nid(), "N", "its pair with %d substitution(s): the source back at level %d" % (m, m), "POST /pattern",
-                                req, t2, [OK, INV, CC, ex("contains_source_context", strand="+", require="all", level=m, substitutions=subs)],
-                                tags=["near-miss", "pair"]))
+                                req, t2, [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand="+", require="all",
+                                                                      level=m, substitutions=subs)],
+                                tags=["near-miss", "pair", "machine-dependent"]))
     # peptides with 2-4 substituted residues under the protein cap (1 after the next restart; 3 today)
     from truth import load_proteins
     prots = [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (1, 11)]
@@ -2096,8 +2193,8 @@ def gen_N(ctx: Ctx) -> List[dict]:
         tr["residue_edits"] = res
         req = pattern_request([{"id": "pn", "protein": pv}], genetic_code=prot["transl_table"], mode="partial", max_mismatches=1)
         out.append(scenario(nid(), "N", "decapeptide with %d substituted residues at max_mismatches 1: the source out of reach" % k_sub,
-                            "POST /pattern", req, tr, [OK, INV, CC, ex("source_absent", strand=tr["strand"])],
-                            timing_class="slow", tags=["near-miss", "peptide"]))
+                            "POST /pattern", req, tr, [OK_OR_DEADLINE, INV, CC, ex("source_absent", strand=tr["strand"])],
+                            timing_class="slow", tags=["near-miss", "peptide", "machine-dependent"]))
     # partly mutated seeds for /resolve and /traverse: a substitution every ~k/2 bases
     for j in range(3):
         rec = recs[(j * 11 + 4) % len(recs)]
@@ -2288,7 +2385,7 @@ def _near_miss_more(ctx: Ctx) -> List[dict]:
     t["edits"], t["variant"] = edits, v
     out.append(scenario(nid(), "N", "a 25-mer of cal with 3 spread substitutions, max_mismatches 1: the source out of reach",
                         "POST /pattern", pattern_request([_p(v, "near")], mode="partial", max_mismatches=1), t,
-                        [OK, INV, CC, ex("source_absent", strand="+")], tags=["near-miss"]))
+                        [OK_OR_DEADLINE, INV, CC, ex("source_absent", strand="+")], tags=["near-miss", "machine-dependent"]))
     rec = ctx.rec("mja")
     t = ctx.window(rng, rec, 31)
     pos = st.spread_positions(rng, 31, 4)
@@ -2297,7 +2394,8 @@ def _near_miss_more(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "N", "the reverse complement of a mja 31-mer with 4 substitutions, max_mismatches 2: the "
                         "'-' source out of reach", "POST /pattern",
                         pattern_request([_p(st.revcomp(v), "near")], mode="partial", max_mismatches=2), tm,
-                        [OK, INV, CC, ex("source_absent", strand="-")], tags=["near-miss", "reverse"]))
+                        [OK_OR_DEADLINE, INV, CC, ex("source_absent", strand="-")],
+                        tags=["near-miss", "reverse", "machine-dependent"]))
     keep = [edits[0]]
     v1 = list(t["window"])
     v1[keep[0]["pos"]] = keep[0]["to"]
@@ -2306,8 +2404,9 @@ def _near_miss_more(ctx: Ctx) -> List[dict]:
     t1 = dict(t, strand="-", edits=keep, variant=v1)
     out.append(scenario(nid(), "N", "its pair with 1 substitution at max_mismatches 1: the '-' source back at level 1",
                         "POST /pattern", pattern_request([_p(P, "reach")], mode="partial", max_mismatches=1), t1,
-                        [OK, INV, CC, ex("contains_source_context", strand="-", require="all", level=1,
-                                         substitutions=_subs_minus(P, t["window"]))], tags=["near-miss", "pair", "reverse"]))
+                        [OK_OR_DEADLINE, INV, CC, ex("contains_source_context", strand="-", require="all", level=1,
+                                                     substitutions=_subs_minus(P, t["window"]))],
+                        tags=["near-miss", "pair", "reverse", "machine-dependent"]))
     return out
 
 
