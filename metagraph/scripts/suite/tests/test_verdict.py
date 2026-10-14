@@ -390,6 +390,16 @@ class UnmatchedNotImplementedMarkTest(unittest.TestCase):
         unmapped.pop("mcp")
         self.assertEqual(cmp.mcp_agreement(m, d, unmapped, cases, None)["class"], "not_implemented_mcp")
 
+    def test_a_flow_is_mapped(self):
+        # the runner's area S flows: mcp.flow in place of mcp.tool
+        s = dict(scen("S-001", "S"), mcp={"flow": "queue_guard", "arguments": {}})
+        self.assertTrue(cmp.mcp_mapped(s))
+        d = {"direct-local": {0: line("S-001", "direct-local", 0, T0, 10.0)}}
+        m = {0: line("S-001", "mcp", 0, T0, 10.0, outcome="not_implemented_mcp", checks=[])}
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        self.assertEqual(cmp.mcp_agreement(m, d, s, cases, None)["class"], "disagree")
+        self.assertFalse(cmp.mcp_mapped({"mcp": {"arguments": {}}}))
+
     def test_other_repeats_still_compared(self):
         s = scen("P-8", "P")
         d = {"direct-local": {0: line("P-8", "direct-local", 0, T0, 10.0)}}

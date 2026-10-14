@@ -1992,9 +1992,10 @@ def outside_vocabulary_part(lines):
 
 
 def mcp_mapped(scenario):
-    """Whether the manifest maps a scenario to an MCP tool (mcp.tool), so the plan expects the MCP arm to send it."""
+    """Whether the manifest maps a scenario to the MCP arm, so the plan expects the MCP arm to send it: one tool
+    (mcp.tool) or a flow of calls (mcp.flow, the runner's area S flows), as the runner reads its plan."""
     mcp = (scenario or {}).get("mcp")
-    return isinstance(mcp, dict) and bool(mcp.get("tool"))
+    return isinstance(mcp, dict) and bool(mcp.get("tool") or mcp.get("flow"))
 
 
 def unmatched_not_implemented_mark(lines):

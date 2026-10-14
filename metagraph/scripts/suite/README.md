@@ -1910,7 +1910,8 @@ failing on 14552938.
 ### The runner's not_implemented_mcp mark (for async: how a new mark is announced)
 - An MCP execution the runner marked not_implemented_mcp that no case reproduced made the scenario's class
   not_implemented_mcp ("by mcp runner") whatever the table said, while the comparator section above said a table
-  judges such a mark. With a table, a mark on a scenario the manifest maps to a tool (`compare.mcp_mapped`) that
+  judges such a mark. With a table, a mark on a scenario the manifest maps to a tool or a flow (`compare.mcp_mapped`:
+  mcp.tool, or mcp.flow, the runner's area S flows) that
   neither mcp.not_implemented nor a named case of agreement not_implemented_mcp states, and that no case with
   answer_match.mcp_outcome matched, is `disagree`, side mcp, by mcp runner, the repeats named
   (`compare.unmatched_not_implemented_mark`; the other repeats are compared as usual). With no table, with such a
