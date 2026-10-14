@@ -3,6 +3,7 @@
 
     gate_policy.py MANIFEST [--routes R1,R2] [--arms mcp] [--by-design PATH] [--advanced-path]
                    [--warm-every 10] [--require-agreement] [--not-required FILE] [--name NAME] [--out POLICY]
+                   [--ids-out FILE]
 
 The selection is by ROUTE (default: POST /resolve, POST /traverse and GET /traverse/capabilities: every scenario the
 resolve / traverse service answers, the N and D scenarios on those routes included, not only areas R and T). For the
@@ -18,7 +19,9 @@ A relation is required on an arm when both of its scenarios are selected and nei
 listed with the reason. No property check is exempt unless --not-required FILE (a JSON list of {scenario (an id or
 "*"), arms, check, reason}) says so. The policy pins the manifest's content_sha256, relations_sha256 and index_fp and
 the by-design table's sha256 (gate.py fails on another), and lists the executions each arm must record (the paired
-plan: suite_common.mcp_repeats for the MCP arm, plan_executions for a direct arm, with --warm-every).
+plan: suite_common.mcp_repeats for the MCP arm, plan_executions for a direct arm, with --warm-every). --ids-out writes
+the ids the policy's arms run (the selection less what is excluded on all of them), one per line in manifest order:
+run_suite.sh --ids FILE, or async's runner standalone (--ids, comma-separated: gate.py policy-ids POLICY).
 """
 
 import argparse
@@ -212,6 +215,7 @@ def main(argv=None):
     ap.add_argument("--not-required", default=None, help="a JSON list of {scenario, arms, check, reason}")
     ap.add_argument("--name", default=None)
     ap.add_argument("--out", default=None, help="write the policy here (default: print the counts only)")
+    ap.add_argument("--ids-out", default=None, help="write the ids the policy's arms run here, one per line")
     a = ap.parse_args(argv)
     manifest = sc.read_json(a.manifest)
     if not isinstance(manifest, dict):
@@ -239,6 +243,13 @@ def main(argv=None):
         sc.write_json_atomic(a.out, policy)
         with open(a.out, "rb") as fh:
             sys.stdout.write("wrote %s (sha256 %s)\n" % (a.out, hashlib.sha256(fh.read()).hexdigest()[:12]))
+    if a.ids_out:
+        ids = gate.policy_ids(policy)
+        with open(a.ids_out, "w") as fh:
+            fh.write("# %s: the scenarios the arms %s run (%d), by route less the exclusions\n" % (
+                policy["name"], ", ".join(policy["arms"]), len(ids)))
+            fh.write("".join("%s\n" % i for i in ids))
+        sys.stdout.write("wrote %s (%d id(s))\n" % (a.ids_out, len(ids)))
     return 0
 
 

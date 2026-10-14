@@ -216,6 +216,22 @@ class PolicyTest(GateCase):
             p.pop("generated_utc")
         self.assertEqual(shipped, fresh)
 
+    def test_cli_writes_policy_and_ids(self):
+        mpath, pol, ids = (os.path.join(self.tmp, n) for n in ("m.json", "p.json", "ids.txt"))
+        sc.write_json_atomic(mpath, self.m)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(gate_policy.main([mpath, "--by-design", "", "--warm-every", "0", "--out", pol,
+                                               "--ids-out", ids]), 0)
+        self.assertIn("excluded on the MCP arm: 2 (advanced_path 1, manifest_not_implemented 1)", out.getvalue())
+        self.assertIn("required on mcp: 4 scenario(s), 9 execution(s)", out.getvalue())
+        self.assertEqual(gate.read_ids(ids, self.m), ["T-001", "R-002", "R-003", "D-007"])
+        self.assertEqual(gate.load_policy(pol)["counts"]["selected"], 6)
+        # a manifest whose stated hash does not verify is refused
+        bad = dict(self.m, relations_sha256="stale")
+        sc.write_json_atomic(mpath, bad)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(gate_policy.main([mpath, "--by-design", ""]), 2)
+
     def test_read_ids(self):
         path = os.path.join(self.tmp, "ids")
         with open(path, "w") as fh:

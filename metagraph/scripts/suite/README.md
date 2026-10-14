@@ -1386,7 +1386,10 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   outside the selection are listed as excluded), the property checks not required (none unless --not-required), and
   pins content_sha256, relations_sha256, index_fp and the by-design table's sha256. gate/policy_v4_rt_mcp.json is
   the v4 policy for the MCP arm (`gate_policy.py manifest/suite_v4.json --name v4-rt-mcp --out
-  gate/policy_v4_rt_mcp.json`; a test regenerates it and compares). A v5 policy is one command on the v5 manifest.
+  gate/policy_v4_rt_mcp.json`; a test regenerates it and compares). A v5 policy is one command on the v5 manifest,
+  which prints the counts (selected by route and area, exclusions by rule with each reason, required executions per
+  arm, relations required and excluded); `--ids-out FILE` writes the ids the policy's arms run (v4, MCP: 189), for
+  run_suite.sh --ids or async's runner standalone (`gate.py policy-ids POLICY` prints them comma-separated).
 - **The gate** (`gate.py RUN_DIR POLICY [--reevaluated]`: exit 0 PASS, 1 FAIL, 2 usage; RUN_DIR/gate.json) fails,
   listing every problem by kind, on: identity (either manifest hash not the policy's, a stated hash not verified, an
   arm or a plan on another manifest, another index_fp, another by-design table); missing (a planned or required
