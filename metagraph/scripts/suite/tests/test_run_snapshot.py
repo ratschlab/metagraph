@@ -167,11 +167,33 @@ class MergeChecksIdentityTest(unittest.TestCase):
         merged = merge_run.merge(self.make(snapshot=False, direct_sha="a" * 64, mcp_dir=None))
         self.assertEqual(merged["checks_identity"]["differs"], [])
         run = sc.read_json(os.path.join(self.run_dir, "arms", "mcp", "run.json"))
-        run["checks_module"] = {"file": "x/checks.py", "stub": False, "sha256": "b" * 64}
+        run["checks_sha256"] = "b" * 64        # a runner without invocations states its one at the top
         sc.write_json_atomic(os.path.join(self.run_dir, "arms", "mcp", "run.json"), run)
         merged = merge_run.merge(self.run_dir)
         self.assertTrue(merged["checks_identity"]["differs"][0].startswith(
             "the arms were judged with different checks"))
+
+    def test_the_mcp_runner_states_its_checks_per_invocation(self):
+        # async's runner records checks_dir, checks_sha256 and suite_common_sha256 per invocation (run.json
+        # invocations[]); an invocation whose suite_common is not the snapshot's is named, and a top-level
+        # checks_module is not read once invocations exist
+        d = self.make()
+        files = sc.read_json(os.path.join(d, "scripts", "SNAPSHOT.json"))["files"]
+        snap = os.path.join(d, "scripts")
+        good = {"checks_dir": snap, "checks_sha256": files["checks.py"],
+                "suite_common_sha256": files["suite_common.py"]}
+        run = sc.read_json(os.path.join(d, "arms", "mcp", "run.json"))
+        run.update(invocations=[good, dict(good, suite_common_sha256="c" * 64)],
+                   checks_module={"file": "x", "stub": False, "sha256": "d" * 64})
+        sc.write_json_atomic(os.path.join(d, "arms", "mcp", "run.json"), run)
+        ident = merge_run.merge(d)["checks_identity"]
+        self.assertEqual(ident["errors"], ["arms/mcp: 1 of 2 invocation(s) judged with other checks than the run's "
+                                           "snapshot (e.g. checks_sha256 %s, suite_common_sha256 %s, checks_dir %s)"
+                                           % (files["checks.py"], "c" * 64, snap)])
+        self.assertEqual(ident["arms"]["mcp"]["suite_common_sha256"], sorted([files["suite_common.py"], "c" * 64]))
+        run["invocations"] = [good, good]
+        sc.write_json_atomic(os.path.join(d, "arms", "mcp", "run.json"), run)
+        self.assertEqual(merge_run.merge(d)["checks_identity"]["errors"], [])
 
     def test_the_merge_judges_with_the_snapshot(self):
         # checks.scenario_outcome makes outcomes stricter: the run's snapshot's, not the live tree's
@@ -223,6 +245,7 @@ class RunSuiteSnapshotTest(SuiteCase):
             self.assertEqual(merged["checks_identity"]["errors"], [])
             self.assertEqual(merged["checks_identity"]["arms"]["mcp"]["checks_dirs"],
                              [os.path.join(run_dir, "scripts")])
+            self.assertEqual(merged["checks_identity"]["arms"]["mcp"]["checks_sha256"], [snap["files"]["checks.py"]])
             sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
             self.assertEqual(sess["snapshot"], {"state": "created", "changed": [], "live_differs": [],
                                                 "mcp_checks_dir": "snapshot"})

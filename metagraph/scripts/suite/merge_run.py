@@ -51,8 +51,9 @@ during the run, or between an interrupt and its resume) is a warning, and an err
 
 The checks' identity (checks_identity, of the recorded set): run_suite.sh judges every arm with the run's snapshot
 RUN_DIR/scripts (SNAPSHOT.json: the sha256 of its files); run_direct.py records per session the sha256 of the checks
-and suite_common it imported, async's runner per invocation its checks directory (and the sha256 once it records
-one). An arm or session judged with other checks than the snapshot's, or a snapshot changed after it was taken, is
+and suite_common it imported; async's runner records per invocation (run.json invocations[]) its checks_dir, and
+checks_sha256 / suite_common_sha256 once it records them (a runner without invocations states them at the
+top). An arm or session judged with other checks than the snapshot's, or a snapshot changed after it was taken, is
 a warning; an arm or session that states neither, in a run with a snapshot, too; both are errors with
 --strict-identity (run.json `checks_identity`). The outcomes made stricter by checks.scenario_outcome are the
 snapshot's checks' (the re-evaluation's for a re-evaluated set).
@@ -348,31 +349,33 @@ def checks_identity(run_dir, arm_runs):
                                                   ", ".join(str(i) for i in idx[:5]) + (" ..." if len(idx) > 5 else ""),
                                                   str(want[name])[:12]))
         else:
+            # per invocation (async's runner: run.json invocations[]; a runner without them states its one at the
+            # top): checks_dir, checks_sha256 and suite_common_sha256
             invs = [x for x in run.get("invocations") or [] if isinstance(x, dict)] or [run]
-            entries = []
-            for inv in invs:
-                module = inv.get("checks_module") if isinstance(inv.get("checks_module"), dict) else {}
-                entries.append({"checks_dir": inv.get("checks_dir"),
-                                "checks_sha256": inv.get("checks_sha256") or module.get("sha256")})
-            arms[arm] = {"invocations": len(entries), "checks_dirs": sorted(set(str(e["checks_dir"]) for e in entries
-                                                                                 if e["checks_dir"])),
-                         "checks_sha256": sorted(set(e["checks_sha256"] for e in entries if e["checks_sha256"]))}
+            entries = [dict((k, inv.get(k)) for k in ("checks_dir", "checks_sha256", "suite_common_sha256"))
+                       for inv in invs]
+            arms[arm] = {"invocations": len(entries)}
+            for key, name in (("checks_dir", "checks_dirs"), ("checks_sha256", "checks_sha256"),
+                              ("suite_common_sha256", "suite_common_sha256")):
+                arms[arm][name] = sorted(set(str(e[key]) for e in entries if e[key]))
             none = [e for e in entries if not e["checks_dir"] and not e["checks_sha256"]]
             if none:
                 unverified.append("arms/%s: %d of %d invocation(s) state no checks directory or sha256" % (
                     arm, len(none), len(entries)))
             for e in entries:
                 if e["checks_sha256"]:
-                    stated.setdefault((e["checks_sha256"], None), []).append("arms/%s" % arm)
+                    stated.setdefault((e["checks_sha256"], e["suite_common_sha256"]), []).append("arms/%s" % arm)
             if snap is not None:
                 other = [e for e in entries
                          if (e["checks_sha256"] and e["checks_sha256"] != files.get("checks.py")) or
+                         (e["suite_common_sha256"] and e["suite_common_sha256"] != files.get("suite_common.py")) or
                          (not e["checks_sha256"] and e["checks_dir"]
                           and not sc.snapshot_pins(e["checks_dir"], run_dir))]
                 if other:
                     differs.append("arms/%s: %d of %d invocation(s) judged with other checks than the run's snapshot "
-                                   "(e.g. %s)" % (arm, len(other), len(entries), other[0]["checks_sha256"] or
-                                                  other[0]["checks_dir"]))
+                                   "(e.g. %s)" % (arm, len(other), len(entries), ", ".join(
+                                       "%s %s" % (k, other[0][k]) for k in
+                                       ("checks_sha256", "suite_common_sha256", "checks_dir") if other[0][k])))
     if snap is None and len(set(k[0] for k in stated)) > 1:
         differs.append("the arms were judged with different checks: %s" % "; ".join(
             "%s: %s" % (str(k[0])[:12], ", ".join(v[:3]) + (" ..." if len(v) > 3 else ""))

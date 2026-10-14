@@ -82,9 +82,9 @@
 # SUITE_REMOTE_BASE (the public refseq33m-experimental URL), SUITE_RUNS, PYTHON (python3), SUITE_POLL_S (15),
 # SUITE_SAMPLER (1; 0: no mex sampler besides direct-local's own in sequential mode), SUITE_WAIT_RUNNER_S
 # (150), SUITE_WAIT_OWN_RUNNER_S (1860: how long a --resume waits for its own run's runner, the long class's client
-# timeout and a minute), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
-# macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat interval),
-# SUITE_RUNNER_PATTERN (the pgrep pattern of the mex runners; the offline tests narrow it to their own).
+# timeout and a minute), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine;
+# default macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat
+# interval), SUITE_RUNNER_PATTERN (the pgrep pattern of the mex runners; the offline tests narrow it to their own).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

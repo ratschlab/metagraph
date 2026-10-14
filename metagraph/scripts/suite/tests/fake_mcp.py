@@ -17,7 +17,8 @@ calls.log whether that print worked (exit 130) or met a closed pipe (exit 1).
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
 identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
 out, `failed` records a failed read, `mismatch` a live / table mismatch) and the checks it judges with: `checks_dir`
-(--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}) and `checks_module` {file, stub}."""
+(--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}), `checks_sha256` and `suite_common_sha256` of
+its files, and `checks_module` {file, stub}."""
 
 import argparse
 import json
@@ -53,7 +54,10 @@ def main(argv=None):
     run = {"arm": "mcp", "manifest": {"computed_sha256": computed, "content_sha256": manifest.get("content_sha256"),
                                       "sha_verified": ok}}
     if args.checks_dir:
+        # what the runner judges with, as async's runner is to record it per invocation (one invocation here)
         run.update(checks_dir=args.checks_dir,
+                   checks_sha256=sc.file_sha256(os.path.join(args.checks_dir, "checks.py")),
+                   suite_common_sha256=sc.file_sha256(os.path.join(args.checks_dir, "suite_common.py")),
                    checks_module={"file": os.path.join(args.checks_dir, "checks.py"), "stub": False})
     caps = os.environ.get("FAKE_MCP_CAPS", "")
     if caps != "missing":

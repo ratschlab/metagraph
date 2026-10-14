@@ -463,7 +463,8 @@ class RunSuiteOffline(SuiteCase):
             self.assertEqual(len(host.log) - n2, 1)           # direct-local's closing GET only
             sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
             self.assertEqual([x["skip_remote"] for x in sessions], ["1", "0", "1"])
-            for pair in (("--skip-local", "--local"), ("--allow-stub", "--no-allow-stub"), ("--remote", "--skip-remote")):
+            for pair in (("--skip-local", "--local"), ("--allow-stub", "--no-allow-stub"),
+                         ("--remote", "--skip-remote")):
                 p = self.run_suite(host, "--resume", run_dir, *pair)
                 self.assertEqual(p.returncode, 2, p.stderr)
                 self.assertIn("exclude each other", p.stderr)
