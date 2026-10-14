@@ -2609,6 +2609,26 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, ok_answer(full), "traverse_seed_outcome", walks="complete")[0], "pass")
         self.assertEqual(outcome(sc, ok_answer(full), "traverse_seed_outcome", walks="failed")[0], "fail")
 
+    def test_walk_end_resource_end_below_the_frontier(self):
+        # a resource end of a path shorter than its arm's complete_to_bp cannot have happened (a cap ends walks at or
+        # past it, SPEC-labeled-traversal-core §6.10): the record's end not reached is no stated stop then
+        import random
+        rnd = random.Random(5)
+        record = "".join(rnd.choice("ACGT") for _ in range(400))
+        start, L = 100, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 400, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        sc = {"route": "POST /traverse", "truth": t, "request": {"seeds": [{"sequence": t["window"]}], "strategy": {
+            "direction": "right", "bounds": {"max_extension_bp": 1000, "time_budget_ms": 15000}}}}
+        right = record[start + L:start + L + 30]
+        capped = dict(status="truncated", trig="time_budget", reason="time_budget")
+        o, d = outcome(sc, self.walk({"right": right}, **capped), "walk_end", arm="right")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("stopped by time_budget", d)
+        o, d = outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **capped), "walk_end", arm="right")
+        self.assertEqual(o, "fail")
+        self.assertIn("below the arm's complete_to_bp 60", d)
+
     def test_blocked_event(self):
         # N-hard-0022: a tandem-repeat seed re-enters itself at 0 bp on each arm (SPEC §6.6)
         sc = {"route": "POST /traverse", "request": {"seeds": [{"sequence": "TTAGGG" * 10}],

@@ -3450,8 +3450,11 @@ def check_walk_end(sc, ans, a, arm):
                 len(f) < want and (p.get("path_reason") in _RESOURCE_ENDS or set(p.get("end_reasons") or {}) & _RESOURCE_ENDS)
                 for p, f in fl):
             trig = armo.get("cap_trigger") or {}
+            # a cap ends walks at or past complete_to_bp (SPEC-labeled-traversal-core §6.10), as walk_in_record
+            # judges a resource end
             bad = next((m for m in (_resource_end_problem(r, armo, side, {p.get("path_reason")} | set(
-                p.get("end_reasons") or {})) for p, _ in fl) if m), None) or _arm_stop_problem(sc, ans, r, i, side)
+                p.get("end_reasons") or {})) or _resource_end_below_frontier(armo, side, p) for p, _ in fl) if m),
+                       None) or _arm_stop_problem(sc, ans, r, i, side)
             if bad:
                 return FAIL, "not reached: a stated stop that cannot have happened: %s" % bad
             return INCONCLUSIVE, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
