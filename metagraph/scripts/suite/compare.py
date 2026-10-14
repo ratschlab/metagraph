@@ -2058,8 +2058,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         if not groups and not plain:
             return dict(note, **{"class": "not_comparable", "by": "undecidable plausibility",
                                  "detail": "every MCP execution's plausibility is undecidable (rule (c))"})
-    sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"
-             or (k[0] == "not_implemented" and k[2] == "answer-triggered")]
+    # the direct answers an answer-triggered case explains (e.g. the host's own 503 deadline) are no reference for
+    # the other MCP executions; a not_implemented_mcp case's direct side is the host's ordinary answer (the
+    # deployment refused what the host serves), which stays the reference for the other repeats
+    sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"]
     kept = _unexplained_direct(direct_lines, sides, run_dir)
     k_arm, k_ref = _direct_ref(kept)
     k_ref0 = k_ref[min(k_ref)] if k_ref else None
@@ -2116,7 +2118,12 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         # a case's answer_match.mcp_outcome not_implemented_mcp (async's 901893b7): counted under not_implemented_mcp,
         # never service_by_design, unless its pair contradicts the case's direct side (not_implemented_class: then a
         # disagreement, whichever of the case's groups it is in); the other parts are kept beside it
-        first = next((p for p in nip if p.get("class") == "disagree"), nip[0])
+        # each repeat is classified on its own: a disagreement of a repeat the case did not match (an MCP fault on
+        # another repeat) is the scenario's class, as is the case's own direct-side contradiction
+        faults = [p for p in parts if not any(p is q for q in nip) and (
+            p.get("class") == "disagree" or (p.get("class") == "no_direct_reference"
+                                            and p.get("mcp_outcome") in ("fail", "error")))]
+        first = faults[0] if faults else next((p for p in nip if p.get("class") == "disagree"), nip[0])
         out = dict(first)
         others = [p for p in parts if p is not first]
         if others:

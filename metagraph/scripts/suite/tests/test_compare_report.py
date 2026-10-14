@@ -1423,10 +1423,24 @@ class ReviewFixesTest(unittest.TestCase):
         res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d400}}, named_a, cases, self.dir)
         self.assertEqual((res["class"], res["side"], res["case"]), ("disagree", "direct", "a"))
         self.assertTrue(res["direct_detail"].startswith("direct-local repeat 0: "), res["direct_detail"])
-        # mixed with another repeat the checks compare: the disagreement still decides
+        # mixed with another repeat the checks compare: a disagreement decides (here the other repeat's own: its
+        # status passes where the direct one fails; each repeat is classified on its own)
         m_other = self.raw_line("T-labels-0004", "mcp", 1, checks=[{"check": "status", "outcome": "pass"}])
         res = cmp.mcp_agreement({0: m, 1: m_other}, {"direct-local": {0: d400}}, s, cases, self.dir)
-        self.assertEqual((res["class"], res["side"]), ("disagree", "direct"))
+        self.assertEqual((res["class"], [d["check"] for d in res["differing_checks"]]), ("disagree", ["status"]))
+        self.assertEqual(res["other_repeats"]["case"], "a")
+        # the T-labels-0004 pattern: the advanced-path refusal on one repeat and an MCP fault on another, the direct
+        # arm inside the case's side: the fault is the scenario's class, never hidden under not_implemented_mcp
+        fault = self.raw_line("T-labels-0004", "mcp", 1, http=502, outcome="fail",
+                              error={"code": "backend_fault", "text": "x"},
+                              checks=[{"check": "status", "outcome": "fail", "detail": "http 502"}])
+        for reps in ({0: m, 1: fault}, {0: fault, 1: m}):
+            res = cmp.mcp_agreement(reps, {"direct-local": {0: d}}, s, cases, self.dir)
+            self.assertEqual(res["class"], "disagree", res)
+            self.assertEqual(res["other_repeats"]["class"], "not_implemented_mcp")
+        # the refusal alone stays not_implemented_mcp
+        self.assertEqual(cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, s, cases, self.dir)["class"],
+                         "not_implemented_mcp")
         # direct_mismatch "timing": a direct 200 / 503 deadline outside the side stays unverified, not a disagreement
         timing = {"a": dict(base, answer_match=dict(base["answer_match"], direct={"http": 503},
                                                    direct_mismatch="timing"))}
