@@ -783,10 +783,94 @@ def _released_problems(stopped, complete):
     return []
 
 
+# the bound of the route search of _route_prefix_problem when the checks module states none (checks.py's
+# _MAX_ROUTE_STATES): a search that reaches it has not shown the stopped walk consistent
+ROUTE_STATES_DEFAULT = 100000
+
+
+class _Unreadable(Exception):
+    pass
+
+
+def _walking_dag(arm, side):
+    """(segment id -> its bases in walking order, segment id -> children, roots) of one arm of a /traverse result:
+    a right arm's segment as it reads, a left arm's reversed (SPEC-labeled-traversal-core §7.1: the left flank reads
+    leaf -> root); the merges through segments[].parents, every parent."""
+    seqs, children, roots = {}, {}, []
+    for sg in arm.get("segments") or []:
+        if not isinstance(sg, dict) or not isinstance(sg.get("sequence"), str):
+            raise _Unreadable()
+        seqs[sg.get("id")] = sg["sequence"] if side == "right" else sg["sequence"][::-1]
+        parents = sg.get("parents") or []
+        if not parents:
+            roots.append(sg.get("id"))
+        for par in parents:
+            children.setdefault(par, []).append(sg.get("id"))
+    return seqs, children, roots
+
+
+def _route_prefix_problem(stopped_arm, complete_arm, side, cap):
+    """'' when every root-to-leaf route of the stopped arm (any parent at a merge) is, in walking order, a prefix of
+    a root-to-leaf route of the complete arm (any parent at a merge); else why not: the length of the first route
+    found that is none, or the search bound |cap| (states of a stopped segment with the complete arm's positions
+    its route can be at) reached. A merged walk displays each merge through one parent (§7.1: the most labels, or the
+    arrival order under a memory budget in tree / full detail), and the complete walk forms merges past the stop
+    depth, so a stopped path may continue in the complete answer only through a merge's other parent: the routes,
+    not the displayed paths, are the walk's content (checks._record_routes reads a record the same way)."""
+    sseq, schildren, sroots = _walking_dag(stopped_arm, side)
+    cseq, cchildren, croots = _walking_dag(complete_arm, side)
+
+    def heads(cursor, seen=None):
+        # the complete arm's positions a cursor stands for: inside a segment, or past its end at each child's start
+        cid, off = cursor
+        if off < len(cseq.get(cid, "")):
+            return [cursor]
+        seen = set() if seen is None else seen
+        out = []
+        for k in cchildren.get(cid) or []:
+            if k not in seen:
+                seen.add(k)
+                out.extend(heads((k, 0), seen))
+        return out
+
+    def advance(cursors, bases):
+        for ch in bases:
+            nxt = set()
+            for cur in cursors:
+                for cid, off in heads(cur):
+                    if cseq[cid][off] == ch:
+                        nxt.add((cid, off + 1))
+            if not nxt:
+                return frozenset()
+            cursors = nxt
+        return frozenset(cursors)
+
+    start = frozenset((r, 0) for r in croots)
+    stack = [(r, start, 0) for r in reversed(sroots)]
+    seen, states = set(), 0
+    while stack:
+        sid, cursors, depth = stack.pop()
+        if (sid, cursors) in seen:
+            continue
+        seen.add((sid, cursors))
+        states += 1
+        if states > cap:
+            return "the route search stopped at %d states: not shown consistent" % cap
+        bases = sseq.get(sid, "")
+        after = advance(cursors, bases) if bases else cursors
+        if not after:
+            return "a %d bp route is no prefix of a complete route" % (depth + len(bases))
+        for k in reversed(schildren.get(sid) or []):
+            stack.append((k, after, depth + len(bases)))
+    return ""
+
+
 def _walk_prefix_problems(stopped, complete, checks_mod):
-    """The stopped /traverse answer's paths that are no prefix of a path of the complete one (per seed and arm, the
-    flank in walking order), through the checks' reading of a result (a graphlet included)."""
+    """The stopped /traverse answer's routes that are no prefix of a route of the complete one (per seed and arm,
+    in walking order; _route_prefix_problem: routes through any parent at a merge, not the displayed first-parent
+    paths), through the checks' reading of a result (a graphlet included)."""
     out = []
+    cap = getattr(checks_mod, "_MAX_ROUTE_STATES", ROUTE_STATES_DEFAULT)
     sb, cb = stopped.get("body") or {}, complete.get("body") or {}
     for i in range(min(len(sb.get("results") or []), len(cb.get("results") or []))):
         try:
@@ -799,13 +883,11 @@ def _walk_prefix_problems(stopped, complete, checks_mod):
                 out.append("seed %d %s: no arm on the complete side" % (i, side))
                 continue
             try:
-                fs = [f if side == "right" else f[::-1] for _, f in checks_mod._arm_flanks(arm, side)]
-                fc = [f if side == "right" else f[::-1] for _, f in checks_mod._arm_flanks(other, side)]
-            except Exception:
+                why = _route_prefix_problem(arm, other, side, cap)
+            except _Unreadable:
                 return ["seed %d %s: segment sequences not readable" % (i, side)]
-            bad = [f for f in fs if not any(c.startswith(f) for c in fc)]
-            if bad:
-                out.append("seed %d %s: a %d bp path is no prefix of a complete path" % (i, side, len(bad[0])))
+            if why:
+                out.append("seed %d %s: %s" % (i, side, why))
     return out
 
 
@@ -832,7 +914,7 @@ def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=N
         return (False, "; ".join(probs[:4])) if probs else (True, "every count consistent with the complete answer")
     if route == "POST /traverse" and checks_mod is not None:
         probs = _walk_prefix_problems(a, b, checks_mod)
-        return (False, "; ".join(probs[:4])) if probs else (True, "every stopped path a prefix of a complete one")
+        return (False, "; ".join(probs[:4])) if probs else (True, "every stopped route a prefix of a complete route")
     return None, "no consistency rule for %s" % route
 
 

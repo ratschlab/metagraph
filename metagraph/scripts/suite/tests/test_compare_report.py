@@ -1448,6 +1448,59 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertEqual(res["class"], "disagree")
         self.assertIn("no prefix", res["outcome_differs"][0]["detail"])
 
+    def test_timing_class_traverse_routes(self):
+        # T-labels-0003 of the v4 run: a merged walk displays each merge through ONE parent (SPEC-labeled-
+        # traversal-core §7.1), and the complete walk forms merges past the stop depth: a stopped path may continue
+        # in the complete answer only through a merge's other parent. The stopped walk's routes are tested against
+        # the complete walk's routes through any parent, not against its displayed paths
+        import checks
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+
+        def seg(sid, parents, seq, at):
+            return {"id": sid, "parents": parents, "from_bp": at, "length_bp": len(seq), "sequence": seq}
+
+        def walk(segments, paths, side="right"):
+            arm = {"status": "complete", "segments": segments,
+                   "paths": [{"id": i, "segments": p, "length_bp": 0, "path_reason": "x"} for i, p in enumerate(paths)]}
+            return {"results": [{"outcome": {"walks": "complete"}, "arms": {side: arm}}]}
+        # complete: ACGT, then GG or TT, merging into CCCC displayed through GG (the first parent)
+        full = walk([seg(0, [], "ACGT", 0), seg(1, [0], "GG", 4), seg(2, [0], "TT", 4), seg(3, [1, 2], "CCCC", 6)],
+                    [[0, 1, 3]])
+        # stopped: the same split, merged after 2 bp, displayed through TT (another arrival order)
+        part = walk([seg(0, [], "ACGT", 0), seg(1, [0], "GG", 4), seg(2, [0], "TT", 4), seg(3, [2, 1], "CC", 6)],
+                    [[0, 2, 3]])
+        tl = "seed 0 right arm stopped by time_budget"
+        complete = self.raw_line("T-1", "direct-remote", 0, body=full, checks=[st("pass")], digest="b")
+        stopped = self.raw_line("T-1", "direct-local", 0, body=part, outcome="inconclusive", checks=[st("pass")],
+                                digest="a", time_limited=tl)
+        res = cmp.direct_agreement({0: stopped}, {0: complete}, "POST /traverse", self.dir, checks)
+        self.assertEqual(res["class"], "timing", res)
+        self.assertIn("every stopped route a prefix of a complete route", res["timing_repeats"][0]["detail"])
+        # the left arm reads leaf -> root: the same walk mirrored
+        mirror = lambda body: json.loads(json.dumps(body).replace('"right"', '"left"'))  # noqa: E731
+        left_full = mirror(walk([seg(0, [], "TGCA", 0), seg(1, [0], "GG", 4), seg(2, [0], "TT", 4),
+                                 seg(3, [1, 2], "CCCC", 6)], [[0, 1, 3]]))
+        left_part = mirror(walk([seg(0, [], "TGCA", 0), seg(1, [0], "GG", 4), seg(2, [0], "TT", 4),
+                                 seg(3, [2, 1], "CC", 6)], [[0, 2, 3]]))
+        c2 = self.raw_line("T-1", "direct-remote", 2, body=left_full, checks=[st("pass")], digest="b")
+        s2 = self.raw_line("T-1", "direct-local", 2, body=left_part, outcome="inconclusive", checks=[st("pass")],
+                           digest="a", time_limited=tl)
+        self.assertEqual(cmp.direct_agreement({2: s2}, {2: c2}, "POST /traverse", self.dir, checks)["class"],
+                         "timing")
+        # a stopped route in no route of the complete walk still disagrees (here behind the merge's second parent)
+        bad = walk([seg(0, [], "ACGT", 0), seg(1, [0], "GG", 4), seg(2, [0], "TA", 4), seg(3, [1, 2], "CC", 6)],
+                   [[0, 1, 3]])
+        off = self.raw_line("T-1", "direct-local", 1, body=bad, outcome="inconclusive", checks=[st("pass")],
+                            digest="a", time_limited=tl)
+        res = cmp.direct_agreement({1: off}, {1: dict(complete, repeat=1)}, "POST /traverse", self.dir, checks)
+        self.assertEqual(res["class"], "disagree", res)
+        self.assertIn("seed 0 right: a 6 bp route is no prefix of a complete route",
+                      res["outcome_differs"][0]["detail"])
+        # the route search's bound: not shown consistent
+        self.assertIn("the route search stopped at 2 states",
+                      cmp._route_prefix_problem(part["results"][0]["arms"]["right"],
+                                                full["results"][0]["arms"]["right"], "right", 2))
+
 
 class ReportTest(unittest.TestCase):
     def setUp(self):
