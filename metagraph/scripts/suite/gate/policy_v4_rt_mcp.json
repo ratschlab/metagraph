@@ -31,8 +31,8 @@
    "table_not_expressible": 26
   },
   "properties_not_required": 3,
-  "relations_excluded": 25,
-  "relations_required": 1,
+  "relations_excluded": 24,
+  "relations_required": 2,
   "required": {
    "direct-local": {
     "executions": 253,
@@ -48,7 +48,7 @@
  "declared": {
   "declared_version": 1,
   "file": "gate/declared_v4_rt.json",
-  "sha256": "9762058eb40843b215eb4f622639a549b4ad0f6b4e7874cfeff651aabaabb34d"
+  "sha256": "a95e6dbddb24b53de4c0f7b150e74f2d4c9e378f6b1dcf6b34bc7fa5a4a1bc6c"
  },
  "exclusions": [
   {
@@ -426,7 +426,7 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-14T15:12:01.108Z",
+ "generated_utc": "2026-10-14T20:22:06.839Z",
  "manifest": {
   "content_sha256": "3a7417d60e4eb5d0e54433c76139df7ed1221ae35bcccf814b7fca2cf913f113",
   "file": "manifest/suite_v4.json",
@@ -485,6 +485,15 @@
    "b": "R-twin-0001",
    "relation": "REL-same_answer-0003",
    "type": "same_answer"
+  },
+  {
+   "a": "R-twin-0005",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0004",
+   "relation": "REL-prefix_equals-0004",
+   "type": "prefix_equals"
   }
  ],
  "relations_excluded": [
@@ -523,7 +532,7 @@
    "arms": [
     "direct-local"
    ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there).",
+   "reason": "v4 coverage error (triage-v4 V05, VERIFY-V4, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the R-budget scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there).",
    "relation": "REL-prefix_equals-0001",
    "rules": [
     "declared"
@@ -540,7 +549,7 @@
    "arms": [
     "direct-local"
    ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there).",
+   "reason": "eco's full 10 kb (R-twin-0002) never completed on this host in v3 or v4 (VERIFY-V4 V05): the full-twin profile the twin half R-twin-0003 is compared against does not exist, so the relation is inconclusive whatever the half answers; excluded on MCP already (R-twin-0002/0003 are not expressible there).",
    "relation": "REL-prefix_equals-0002",
    "rules": [
     "declared"
@@ -557,7 +566,7 @@
    "arms": [
     "direct-local"
    ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there).",
+   "reason": "v4 coverage error (triage-v4 V05, VERIFY-V4, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the R-budget scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there).",
    "relation": "REL-prefix_equals-0003",
    "rules": [
     "declared"
@@ -569,16 +578,6 @@
    ],
    "reason": "R-twin-0005, R-twin-0004 excluded on mcp",
    "relation": "REL-prefix_equals-0004"
-  },
-  {
-   "arms": [
-    "direct-local"
-   ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there).",
-   "relation": "REL-prefix_equals-0004",
-   "rules": [
-    "declared"
-   ]
   },
   {
    "arms": [

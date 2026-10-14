@@ -219,6 +219,16 @@ class PolicyTest(GateCase):
                                                    "advanced_path": 2, "needs_direct_arm": 4})
         self.assertEqual(sorted(e["scenario"] for e in pol["exclusions"] if "needs_direct_arm" in e["rules"]),
                          ["C-caps-0001", "R-edge-0009", "T-edge-0007", "T-edge-0008"])
+        # the reason fits each of them: C-caps-0001's service answers its own view, it refuses nothing
+        caps = [e for e in pol["exclusions"] if e["scenario"] == "C-caps-0001"][0]
+        self.assertNotIn("refuses", caps["reason"])
+        self.assertIn("capabilities.traverse_capabilities_document", caps["reason"])
+        self.assertIn("only against a direct execution", caps["reason"])
+        # the MCP-only policy with the declared file (the shipped declared entries on the MCP arm)
+        only = gate_policy.build_policy(m, manifest_file="manifest/suite_v4.json",
+                                        declared=sc.read_json(os.path.join(SUITE, "gate", "declared_v4_rt.json")))
+        self.assertEqual(only["counts"]["excluded"], 36)
+        self.assertEqual(only["counts"]["required"], {"mcp": {"scenarios": 186, "executions": 378}})
         self.assertEqual(c["required"], {"mcp": {"scenarios": 187, "executions": 380}})
         self.assertEqual([r["relation"] for r in pol["relations"]], ["REL-same_answer-0003"])
         # the deploy gate's two arms with the owner's declared entries
@@ -229,9 +239,19 @@ class PolicyTest(GateCase):
                                                    "advanced_path": 2, "declared": 4})
         self.assertEqual(c["required"], {"mcp": {"scenarios": 189, "executions": 384},
                                          "direct-local": {"scenarios": 220, "executions": 253}})
-        self.assertEqual([r["relation"] for r in two["relations"]], ["REL-same_answer-0003"])
-        self.assertEqual(sorted(r["relation"] for r in two["relations_excluded"] if "declared" in (r.get("rules") or ())),
-                         ["REL-prefix_equals-%04d" % i for i in (1, 2, 3, 4)])
+        # REL-prefix_equals-0004 (twin half vs full twin, no stated stop) stays required on direct-local; -0002 is
+        # declared with its own reason, -0001 / -0003 with V05's
+        self.assertEqual([(r["relation"], r["arms"]) for r in two["relations"]],
+                         [("REL-same_answer-0003", ["direct-local", "mcp"]),
+                          ("REL-prefix_equals-0004", ["direct-local"])])
+        declared_rel = dict((r["relation"], r["reason"]) for r in two["relations_excluded"]
+                            if "declared" in (r.get("rules") or ()))
+        self.assertEqual(sorted(declared_rel), ["REL-prefix_equals-0001", "REL-prefix_equals-0002",
+                                                "REL-prefix_equals-0003"])
+        self.assertIn("a stated stop answers the prefix", declared_rel["REL-prefix_equals-0001"])
+        self.assertIn("a stated stop answers the prefix", declared_rel["REL-prefix_equals-0003"])
+        self.assertNotIn("stated stop", declared_rel["REL-prefix_equals-0002"])
+        self.assertIn("never completed on this host", declared_rel["REL-prefix_equals-0002"])
         self.assertEqual(sorted((n["scenario"], n["check"]) for n in two["properties"]["not_required"]),
                          [("T-edge-0008", "answer_fields"), ("T-labels-0003", "label_dict_contains"),
                           ("T-labels-0005", "label_dict_contains")])

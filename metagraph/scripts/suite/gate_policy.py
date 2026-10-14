@@ -18,8 +18,9 @@ table, never from an answer a run received:
                             MCP's basic list, a preset other than walk / trie, a `strategy` object), which a deployment
                             without TRAVERSAL_ADVANCED_ENABLED refuses; --advanced-path for one that enables it;
   needs_direct_arm          a policy without a direct arm only: a named answered / clamped case that explains checks
-                            (the service answers what the host refuses, e.g. resolve.duplicate_labels): compare
-                            verifies such a pair only against a direct execution.
+                            (the service answers in place of the host's answer, e.g. resolve.duplicate_labels where
+                            the host refuses, capabilities.traverse_capabilities_document, the service's own view):
+                            compare verifies such a pair only against a direct execution.
 The deploy gate runs two arms, mcp and direct-local (paired): direct-local verifies the answered pairs and lets the
 gate catch an MCP vs direct disagreement. Owner-declared entries come from --declared FILE, a versioned JSON file
 beside the policy: {declared_version 1, manifest {content_sha256}, exclusions [{scenario, arms, repeats (optional:
@@ -155,8 +156,9 @@ def mcp_exclusion(scenario, cases, advanced_path=False, direct_arm=True):
     answered = [] if direct_arm else explaining_answered_cases(scenario, cases)
     if answered:
         rules.append("needs_direct_arm")
-        reasons.append("it names %s, answered by the service where the host refuses: compare verifies that pair only "
-                       "against a direct execution, which this policy does not run" % ", ".join(answered))
+        reasons.append("it names %s, a case the service answers by design in place of the host's answer, which "
+                       "explains the checks the two answers differ in: compare verifies that pair only against a "
+                       "direct execution, which this policy does not run" % ", ".join(answered))
     if not rules:
         return None
     return {"scenario": scenario.get("id"), "arms": ["mcp"], "rules": sorted(set(rules), key=rules.index),

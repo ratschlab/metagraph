@@ -71,28 +71,21 @@
    "arms": [
     "direct-local"
    ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there)."
+   "reason": "v4 coverage error (triage-v4 V05, VERIFY-V4, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the R-budget scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there)."
   },
   {
    "relation": "REL-prefix_equals-0002",
    "arms": [
     "direct-local"
    ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there)."
+   "reason": "eco's full 10 kb (R-twin-0002) never completed on this host in v3 or v4 (VERIFY-V4 V05): the full-twin profile the twin half R-twin-0003 is compared against does not exist, so the relation is inconclusive whatever the half answers; excluded on MCP already (R-twin-0002/0003 are not expressible there)."
   },
   {
    "relation": "REL-prefix_equals-0003",
    "arms": [
     "direct-local"
    ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there)."
-  },
-  {
-   "relation": "REL-prefix_equals-0004",
-   "arms": [
-    "direct-local"
-   ],
-   "reason": "v4 coverage error (triage-v4 V05, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there)."
+   "reason": "v4 coverage error (triage-v4 V05, VERIFY-V4, manifest v5): 'a stated stop answers the prefix' was never testable: no /resolve answered a stated stop in v3 or v4 and the R-budget scenarios' budgets cannot produce one on this host (the relation is inconclusive, no two profiles); excluded on MCP already (its R-budget / R-twin partners are not expressible there)."
   }
  ]
 }
