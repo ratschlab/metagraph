@@ -679,26 +679,86 @@ def _own_time_limitation(line):
     return ""
 
 
+# SPEC-pattern-search §7.4: the relations a count states; `tested` (§19.7: the decisions a selection pass made,
+# work done) and `estimate` (not a bound) are no population counts
+COUNT_RELATIONS = ("exact", "at_least", "bounds", "unknown")
+NOT_POPULATION = ("tested", "estimate")
+
+
+def count_range(count):
+    """The true values a count object admits (SPEC-pattern-search §7.4), B5b-02: exact v -> (v, v); at_least v ->
+    (v, inf); bounds -> (lower, upper) (lower defaults to its value); unknown (the phase never ran) -> None (no
+    constraint); a relation outside the vocabulary, or a bound that is no number -> a str naming the contradiction
+    (fail closed)."""
+    rel = count.get("relation")
+    if rel == "unknown":
+        return None
+    if rel == "exact":
+        v = _num(count.get("value"))
+        return (v, v) if v is not None else "exact without a numeric value"
+    if rel == "at_least":
+        v = _num(count.get("value"))
+        return (v, float("inf")) if v is not None else "at_least without a numeric value"
+    if rel == "bounds":
+        lo = _num(count.get("lower", count.get("value")))
+        hi = _num(count.get("upper"))
+        if lo is None or hi is None:
+            return "bounds without numeric lower and upper"
+        return (lo, hi) if lo <= hi else "bounds [%s, %s] empty" % (lo, hi)
+    return "relation %r outside %s" % (rel, "/".join(COUNT_RELATIONS))
+
+
+def _describe_count(count):
+    rel = count.get("relation")
+    if rel == "bounds":
+        return "bounds [%s, %s]" % (count.get("lower", count.get("value")), count.get("upper"))
+    return "%s %s" % (rel, count.get("value"))
+
+
 def _count_problems(stopped, complete, path=""):
-    """The count objects ({relation, value}) of a stopped answer's entry that contradict the complete one's at the
-    same path: an exact count unequal, an at_least above the exact value, an at_most below it."""
+    """The population counts of a stopped answer's entry that contradict the complete answer's count at the same
+    path (B5b-02, VERIFY-REVIEW's rule): each count is the range of true values it admits (count_range), and two
+    counts are consistent when their ranges overlap (a stopped exact v against a complete at_least w: v >= w; a
+    stopped bounds [l, u] against a complete exact c: l <= c <= u; ...); unknown admits anything; a relation outside
+    the vocabulary is a contradiction. `tested` and `estimate` are skipped (NOT_POPULATION)."""
     out = []
-    if isinstance(stopped, dict) and "relation" in stopped and "value" in stopped:
-        rel, val = stopped.get("relation"), stopped.get("value")
-        if isinstance(complete, dict) and complete.get("relation") == "exact" and _num(complete.get("value")) is not None \
-                and _num(val) is not None:
-            cv = complete["value"]
-            if rel == "exact" and val != cv:
-                out.append("%s exact %s vs %s" % (path or "count", val, cv))
-            elif rel == "at_least" and val > cv:
-                out.append("%s at_least %s > exact %s" % (path or "count", val, cv))
-            elif rel == "at_most" and val < cv:
-                out.append("%s at_most %s < exact %s" % (path or "count", val, cv))
+    if isinstance(stopped, dict) and "relation" in stopped and isinstance(complete, dict) and "relation" in complete:
+        ra, rb = count_range(stopped), count_range(complete)
+        where = path or "count"
+        for r, side, c in ((ra, "stopped", stopped), (rb, "complete", complete)):
+            if isinstance(r, str):
+                out.append("%s %s: %s" % (where, side, r))
+        if isinstance(ra, tuple) and isinstance(rb, tuple) and max(ra[0], rb[0]) > min(ra[1], rb[1]):
+            out.append("%s %s vs %s: no common value" % (where, _describe_count(stopped), _describe_count(complete)))
     if isinstance(stopped, dict):
         for k, v in stopped.items():
+            if str(k) in NOT_POPULATION:
+                continue
             if isinstance(v, dict) and isinstance(complete, dict):
                 out += _count_problems(v, complete.get(k), (path + "." if path else "") + str(k))
     return out
+
+
+def _released_key(row):
+    """A released result's identity: a context (kmer, offset, strand) or a path (sequence, strand)."""
+    st = row.get("strand", row.get("orientation"))
+    if row.get("kmer") is not None:
+        return ("context", row.get("kmer"), row.get("offset"), st, row.get("mismatches", 0))
+    return ("path", row.get("sequence"), st, row.get("mismatches", 0))
+
+
+def _released_problems(stopped, complete):
+    """The stopped entry's released results that the complete entry does not list although it states
+    retrieval_complete (VERIFY-2 item 5's subset rule; SPEC-pattern-search §7.5: then every context is listed)."""
+    if not isinstance(stopped, dict) or not isinstance(complete, dict) or complete.get("retrieval_complete") is not True:
+        return []
+    mine = [r for r in stopped.get("results") or [] if isinstance(r, dict)]
+    theirs = set(_released_key(r) for r in complete.get("results") or [] if isinstance(r, dict))
+    missing = [_released_key(r) for r in mine if _released_key(r) not in theirs]
+    if missing:
+        return ["%d of %d released results not in the complete list (first %s)" % (len(missing), len(mine),
+                                                                                    list(missing[0][1:]))]
+    return []
 
 
 def _walk_prefix_problems(stopped, complete, checks_mod):
@@ -729,9 +789,11 @@ def _walk_prefix_problems(stopped, complete, checks_mod):
 
 def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=None):
     """(True / False / None, detail): whether a time-limited answer's content is consistent with the other arm's
-    complete one (VERIFY-2 item 5): a 503 carries no content; /pattern: every count of each pattern entry consistent
-    (_count_problems: an exact count equal, at_least <= the exact value); /traverse: every stopped path a prefix of a
-    complete path; None where the content cannot be read or the route has no rule (a /resolve stop)."""
+    complete one (VERIFY-2 item 5): a 503 carries no content; /pattern: every population count of each pattern entry
+    consistent (_count_problems: the ranges the two counts admit overlap, B5b-02) and, where the complete entry
+    states retrieval_complete, every released result among its results (_released_problems); /traverse: every
+    stopped path a prefix of a complete path; None where the content cannot be read or the route has no rule (a
+    /resolve stop)."""
     if stopped_line.get("http") == 503:
         return True, "a 503 carries no content"
     a, b = load_answer(stopped_line, run_dir), load_answer(complete_line, run_dir)
@@ -744,6 +806,7 @@ def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=N
         probs = []
         for i, (ea, eb) in enumerate(zip(pa, pb)):
             probs += ["p%d %s" % (i, x) for x in _count_problems((ea or {}).get("counts"), (eb or {}).get("counts"))]
+            probs += ["p%d %s" % (i, x) for x in _released_problems(ea, eb)]
         return (False, "; ".join(probs[:4])) if probs else (True, "every count consistent with the complete answer")
     if route == "POST /traverse" and checks_mod is not None:
         probs = _walk_prefix_problems(a, b, checks_mod)
@@ -787,17 +850,40 @@ def timing_repeat(a, b, route, run_dir, checks_mod=None):
     return False, "no time limitation tells the outcomes apart"
 
 
-def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None):
+def planned_duplicate(a, b, scenario):
+    """Why two direct executions of one repeat differ by a planned 409 duplicate, else None (A2-06 of the review of
+    lane S5b): the scenario makes an id unique per run and arm (run_unique) and allows a 409 (a retained attempt's
+    duplicate), one side answered 200 and the other 409, and neither failed (the 409's shape is checked:
+    answer_fields when_http 409); e.g. T-attempts-0002 when one arm's attempt was retained and the other's not."""
+    if not (scenario or {}).get("run_unique"):
+        return None
+    allowed = []
+    for e in (scenario or {}).get("expect") or []:
+        if e.get("check") == "status":
+            w = (e.get("args") or {}).get("http", 200)
+            allowed = w if isinstance(w, list) else [w]
+    if 409 not in allowed or sorted([a.get("http"), b.get("http")], key=str) != [200, 409]:
+        return None
+    if any(x.get("outcome") not in ("pass", "inconclusive") for x in (a, b)):
+        return None
+    dup = a if a.get("http") == 409 else b
+    return "%s met its run's retained id (409 duplicate, planned: run_unique %s)" % (
+        dup.get("arm"), scenario.get("run_unique"))
+
+
+def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, scenario=None):
     """Agreement of the two direct arms on every repeat both ran: identical (equal digests), disagree (a check differs,
-    or the outcomes differ other than by timing), timing (the outcomes differ only on repeats where timing_repeat
-    holds: counted apart, VERIFY-2 item 5), not_comparable (no check compared), same_checks."""
+    or the outcomes differ other than by timing or a planned 409 duplicate), timing (the outcomes differ only on
+    repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no check compared),
+    same_checks. A repeat whose outcomes differ by a planned 409 duplicate (planned_duplicate, A2-06) is listed
+    under planned_duplicates and reads neither way."""
     common = sorted(set(local) & set(remote))
     if not common:
         return None
     digest_equal = all(local[r].get("answer_digest") == remote[r].get("answer_digest") for r in common)
     differing = []
     compared = 0
-    timing, untimed = [], []
+    timing, untimed, planned = [], [], []
     for r in common:
         d, _, n, _, _ = compare_checks(local[r].get("checks"), remote[r].get("checks"))
         compared += n
@@ -805,6 +891,10 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None):
             x["repeat"] = r
         differing.extend(d)
         if local[r].get("outcome") != remote[r].get("outcome"):
+            dup = planned_duplicate(local[r], remote[r], scenario)
+            if dup and not d:
+                planned.append({"repeat": r, "detail": dup})
+                continue
             ok, why = timing_repeat(local[r], remote[r], route, run_dir, checks_mod)
             (timing if ok else untimed).append({"repeat": r, "detail": why})
     outcome_equal = all(local[r].get("outcome") == remote[r].get("outcome") for r in common)
@@ -822,6 +912,8 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None):
            "differing_checks": differing, "checks_compared": compared, "repeats": common}
     if timing:
         out["timing_repeats"] = timing
+    if planned:
+        out["planned_duplicates"] = planned
     if untimed and cls == "disagree":
         out["outcome_differs"] = untimed
     return out
@@ -1010,6 +1102,23 @@ def answered_verdict(matched, checks, rule):
     return outcome, explained, noted.get("id")
 
 
+def explained_items(checks, entries):
+    """The indices of a line's check items an answered / clamped case's explains_checks entries explain (B5b-06:
+    per ITEM, as async's runner's explained_outcome keys E: an item of outcome fail that an entry explains,
+    entry_explains: a name every item of that check, {check, detail_matches} an item whose detail it matches)."""
+    return [i for i, c in enumerate(checks or []) if str(c.get("outcome")) == "fail"
+            and any(entry_explains(entry, c) for entry in entries or [])]
+
+
+def line_explained_items(line, matched):
+    """The explained items of an MCP line an answered / clamped case matched: the line's recorded explained_items
+    (the re-evaluation's), else explained_items against the matched cases' union."""
+    rec = line.get("explained_items")
+    if isinstance(rec, list) and all(isinstance(i, int) and not isinstance(i, bool) for i in rec):
+        return list(rec)
+    return explained_items(line.get("checks") or [], union_of(matched))
+
+
 def case_ids(scenario):
     """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
     ids = ((scenario or {}).get("mcp") or {}).get("by_design")
@@ -1026,20 +1135,25 @@ def _transport_line(line):
     return not isinstance(http, int) or isinstance(http, bool) or http == 0
 
 
-def answer_class(case, hit, ref, run_dir):
+def answer_class(case, hit, direct_lines, run_dir):
     """The class an answer-triggered case gives the MCP executions it matched (|hit|): service-side by design (`by`
-    answer), verified when a reference direct execution matches its direct side. A direct answer outside it is read by
-    the case's answer_match.direct_mismatch (triage-2 B-03, async's table at a3692e2c): "disagree": any direct HTTP
-    answer outside the direct side disagrees (side direct); "timing": a direct 200 or a direct 503 deadline reads
-    unverified (the host answered at another time), any other direct answer disagrees; a direct transport error or no
-    direct answer is unverified whatever the value; without direct_mismatch every such answer is unverified."""
+    answer), verified when a direct execution matches its direct side. Every repeat of BOTH direct arms is classified
+    (B5b-04; |direct_lines| {arm: {repeat: line}}): matched, unknown (a key this
+    comparator does not match) or outside. An answer outside the direct side is read by the case's
+    answer_match.direct_mismatch (triage-2 B-03, async's table): "disagree": any direct HTTP answer outside it
+    disagrees (side direct); "timing": a direct 200 or a direct 503 deadline is unverified (the host answered at
+    another time), any other direct answer disagrees; a direct transport error or no direct answer is unverified
+    whatever the value. A disagreeing repeat wins over a matching one (a match on one repeat does not excuse another
+    repeat's contradiction); without direct_mismatch an outside answer is unverified and a match verifies."""
     am = case["answer_match"]
     side = am.get("direct")
     dm = am.get("direct_mismatch")
     res = {"class": "service_by_design", "by": "answer", "case": case["id"], "case_agreement": case.get("agreement"),
            "service_outcome": (case.get("service_answer") or {}).get("outcome"),
            "repeats": [r.get("repeat") for r in hit], "mcp_verified": True}
-    lines = list((ref or {}).values())
+    lines = [x for arm in ("direct-local", "direct-remote")
+             for _, x in sorted(((direct_lines or {}).get(arm) or {}).items(),
+                                key=lambda kv: kv[0] if isinstance(kv[0], int) else -1)]
     matched, unknown, outside = [], False, []
     for x in lines:
         top, slots, texts = direct_error_parts(x, run_dir)
@@ -1050,15 +1164,6 @@ def answer_class(case, hit, ref, run_dir):
             unknown = True
         else:
             outside.append(x)
-    if matched:
-        res.update(direct_verified=True, verified=True,
-                   direct_detail="repeat(s) %s match" % [x.get("repeat") for x in matched])
-        return res
-    if unknown:
-        res.update(direct_verified=None, verified=False,
-                   direct_detail="the case's answer_match.direct states %s, which this comparator does not match" % (
-                       unknown_keys(side, ANSWER_DIRECT_KEYS)))
-        return res
     disagreeing = []
     for x in outside:
         err = x.get("error") or {}
@@ -1070,11 +1175,22 @@ def answer_class(case, hit, ref, run_dir):
     if disagreeing:
         x = disagreeing[0]
         res.update({"class": "disagree", "side": "direct", "direct_verified": False, "direct_mismatch": dm,
-                    "direct_detail": "repeat %s: http %s (%s), outside the case's direct side %s (direct_mismatch %s)" % (
-                        x.get("repeat"), x.get("http"), (x.get("error") or {}).get("code"), side, dm)})
+                    "direct_detail": "%s repeat %s: http %s (%s), outside the case's direct side %s (direct_mismatch "
+                                     "%s)%s" % (x.get("arm"), x.get("repeat"), x.get("http"),
+                                                (x.get("error") or {}).get("code"), side, dm,
+                                                "; %d other direct repeat(s) match" % len(matched) if matched else "")})
+        return res
+    if matched:
+        res.update(direct_verified=True, verified=True,
+                   direct_detail="repeat(s) %s match" % ["%s r%s" % (x.get("arm"), x.get("repeat")) for x in matched])
+        return res
+    if unknown:
+        res.update(direct_verified=None, verified=False,
+                   direct_detail="the case's answer_match.direct states %s, which this comparator does not match" % (
+                       unknown_keys(side, ANSWER_DIRECT_KEYS)))
         return res
     res.update(direct_verified=None, verified=False,
-               direct_detail="no reference direct execution answered %s%s" % (
+               direct_detail="no direct execution answered %s%s" % (
                    side, " (direct_mismatch %s: unverified)" % dm if dm else ""))
     return res
 
@@ -1086,12 +1202,39 @@ def _direct_ref(direct_lines):
     return None, None
 
 
+def _split_items(checks, indices):
+    """(the items at |indices|, the others, the (name, occurrence) keys of the former) of a check list."""
+    keys, seen, picked, rest = set(), {}, [], []
+    for i, c in enumerate(checks or []):
+        name = c.get("check")
+        n = seen.get(name, 0)
+        seen[name] = n + 1
+        if i in indices:
+            picked.append(c)
+            keys.add((name, n))
+        else:
+            rest.append(c)
+    return picked, rest, keys
+
+
+def _split_by_keys(checks, keys):
+    """(the items whose (name, occurrence) is in |keys|, the others)."""
+    seen, picked, rest = {}, [], []
+    for c in checks or []:
+        name = c.get("check")
+        n = seen.get(name, 0)
+        seen[name] = n + 1
+        (picked if (name, n) in keys else rest).append(c)
+    return picked, rest
+
+
 def check_agreement(reps, ref, ref_arm, explained=None):
     """The per-check agreement of MCP executions with the reference direct arm (DESIGN §1.3; ref: {repeat: line},
-    each MCP repeat against the reference's same repeat, else its first): `explained` {repeat: names} the checks an
-    answered / clamped case explains on that repeat (E of explained_outcome), compared apart: their differences do
-    not count (B-01). The class: disagree (a differing check outside E, or one side alone errored), service_by_design
-    (only checks of E differ), not_comparable (no check compared), agree."""
+    each MCP repeat against the reference's same repeat, else its first): `explained` {repeat: item indices} the
+    check ITEMS an answered / clamped case explains on that repeat (E of explained_outcome, B5b-06), compared apart
+    with the reference's items of the same check and occurrence: their differences do not count (B-01). The class:
+    disagree (a differing check outside E, or one side alone errored), service_by_design (only items of E differ),
+    not_comparable (no check compared), agree."""
     explained = explained or {}
     ref0 = ref[min(ref)]
     differing, by_design, unmatched = [], [], set()
@@ -1101,13 +1244,12 @@ def check_agreement(reps, ref, ref_arm, explained=None):
         mine = r.get("checks") or []
         e = set(explained.get(r.get("repeat")) or ())
         if e:
-            d_e, _, _, _, _ = compare_checks([c for c in mine if c.get("check") in e],
-                                             [c for c in theirs if c.get("check") in e])
+            mine_e, mine, keys = _split_items(mine, e)
+            theirs_e, theirs = _split_by_keys(theirs, keys)
+            d_e, _, _, _, _ = compare_checks(mine_e, theirs_e)
             for x in d_e:
                 x["repeat"] = r.get("repeat")
             by_design.extend(d_e)
-            mine = [c for c in mine if c.get("check") not in e]
-            theirs = [c for c in theirs if c.get("check") not in e]
         d, u, n, ne, ni = compare_checks(mine, theirs)
         compared += n
         not_exposed += ne
@@ -1165,9 +1307,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     its direct side (answer_class, direct_mismatch, B-03), a refused / relayed / service-only named case its pair
     (by_design_class), against the direct executions no answer-triggered case explains; the executions an answered /
     clamped case matched, and those no case matched, are compared check by check with the reference direct execution
-    (check_agreement), the failing checks the matched answered cases explain apart (B-01: service_by_design only when
-    nothing else differs; the case is a note); unmatched executions the MCP runner marked (a table this comparator
-    does not have) keep the runner's class. A case id the scenario names that the table lacks, with no named case
+    (check_agreement), the failing check items the matched answered cases explain apart (B-01, B5b-06:
+    service_by_design only when nothing else differs; the case is a note); an unmatched execution the MCP runner
+    marked service_by_design is, with no table, an unverified by-design part of its own beside the others' check
+    agreement, and with a table judged by its checks like any other (B5b-05, B-06). A case id the scenario names that the table lacks, with no named case
     matched, is a disagreement (side table). A disagreement anywhere is the class (the first in execution order, the
     checks last); else a by-design class, verified only when every part held (B-04: other parts that do not agree make
     it unverified, shown as `other_repeats`); else the checks' class, naming the matched answered cases."""
@@ -1189,7 +1332,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                              "detail": "every MCP execution is inconclusive by a host state (%s)" % sorted(set(
                                  str((mcp_error(x, run_dir) or {}).get("code")) for x in host))})
     # the runner's matcher, per execution
-    groups, order, answered, explained, plain = {}, [], {}, {}, []
+    groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
     undecided = []
     for r in judged:
         ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
@@ -1201,7 +1344,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         if matched and judged_by_checks(matched[0]):
             _, e, noted = answered_verdict(matched, r.get("checks") or [], sc.outcome_from_checks)
             answered[r.get("repeat")] = noted
-            explained[r.get("repeat")] = e
+            explained[r.get("repeat")] = line_explained_items(r, matched)
+            explained_names[r.get("repeat")] = e
             plain.append(r)
         elif matched:
             key = (how, matched[0].get("id"))
@@ -1229,24 +1373,33 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     for key in order:
         case, hit = groups[key]
         if key[0] == "answer-triggered":
-            parts.append(answer_class(case, hit, ref, run_dir))
+            parts.append(answer_class(case, hit, direct_lines, run_dir))
         else:
             parts.append(by_design_class(case, k_ref0, hit, run_dir, scenario))
     rest = None
     if plain:
         unmatched = [r for r in plain if r.get("repeat") not in answered]
+        # B5b-05: the runner's marks no case reproduces: with no table each stays an unverified by-design part of
+        # its own; with a table it is judged by its checks (B-06); every other execution is compared check by check
+        marks = [r for r in unmatched if r.get("outcome") == "service_by_design"] if not cases else []
+        compared_lines = [r for r in plain if not any(r is x for x in marks)]
         if any(r.get("outcome") == "not_implemented_mcp" for r in unmatched):
             rest = {"class": "not_implemented_mcp", "by": "mcp runner"}
-        elif any(r.get("outcome") == "service_by_design" for r in unmatched):
-            rest = {"class": "service_by_design", "by": "mcp runner", "verified": False}
-        elif k_ref is None:
-            rest = {"class": "no_direct_reference",
-                    "mcp_outcome": aggregate_outcome([r.get("outcome") for r in plain])}
+            marks = []
         else:
-            rest = check_agreement(plain, k_ref, k_arm, explained)
+            if marks:
+                parts.append({"class": "service_by_design", "by": "mcp runner", "verified": False,
+                              "repeats": [r.get("repeat") for r in marks]})
+            if compared_lines and k_ref is None:
+                rest = {"class": "no_direct_reference",
+                        "mcp_outcome": aggregate_outcome([r.get("outcome") for r in compared_lines])}
+            elif compared_lines:
+                rest = check_agreement(compared_lines, k_ref, k_arm, explained)
+    if rest is not None:
         if answered:
             rest["by_design_notes"] = dict((str(k), v) for k, v in sorted(answered.items()))
-            rest["explained_checks"] = dict((str(k), v) for k, v in sorted(explained.items()) if v)
+            rest["explained_checks"] = dict((str(k), v) for k, v in sorted(explained_names.items()) if v)
+            rest["explained_items"] = dict((str(k), v) for k, v in sorted(explained.items()) if v)
             if rest["class"] == "service_by_design" and rest.get("explained_differences"):
                 case = cases.get(answered.get(rest["explained_differences"][0].get("repeat"))) or {}
                 d_ok, d_detail, by = _direct_side(case, k_ref0, run_dir)
@@ -1736,7 +1889,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         local, remote, mcp = by_arm.get("direct-local"), by_arm.get("direct-remote"), by_arm.get("mcp")
         if local and remote:
             agree = direct_agreement(local, remote, (scen_by_id.get(sid) or {}).get("route") or any_line.get("route"),
-                                     run_dir, checks_mod)
+                                     run_dir, checks_mod, scen_by_id.get(sid))
             entry["direct_agreement"] = agree
             direct_summary["compared"] += 1
             direct_summary[agree["class"]] += 1

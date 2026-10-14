@@ -634,7 +634,25 @@ class Reevaluate(unittest.TestCase):
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", by(["job", "dup"]), ok, {"outcome": "fail"},
                                                [st("fail"), runs], False, cases, None, info)[0], "service_by_design")
-        self.assertEqual((info["service_by_design_case"], info["explained_checks"]), ("dup", ["status"]))
+        self.assertEqual((info["service_by_design_case"], info["explained_checks"], info["explained_items"]),
+                         ("dup", ["status"], [0]))
+        # B5b-06: E per item: {check, detail_matches} explains the matching item only; the line records its index,
+        # and merge_run leaves out that item alone (not every item of the name)
+        item_cases = dict(cases, res={"id": "res", "agreement": "by_design", "direct_expectation": {"http": 200},
+                                      "service_answer": {"outcome": "answered"},
+                                      "explains_checks": [{"check": "resolve_runs", "detail_matches": "merged .*"}]})
+        two = [st("pass"), dict(bad, detail="merged runs"), dict(bad, detail="wrong run 3")]
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", by(["res"]), ok, {"outcome": "fail"}, two, False,
+                                               item_cases, None, info)[0], "fail")
+        self.assertEqual((info["explained_checks"], info["explained_items"]), (["resolve_runs"], [1]))
+        row = {"arm": "mcp", "outcome": "pass", "checks": two, "explained_checks": ["resolve_runs"],
+               "explained_items": [1], "reevaluation": {}}
+        merge_run.stricter_outcomes([row], {}, sc.outcome_from_checks)
+        self.assertEqual(row["outcome"], "fail")   # the unexplained item still fails
+        row = dict(row, outcome="pass", checks=two[:2] + [dict(runs)])
+        merge_run.stricter_outcomes([row], {}, sc.outcome_from_checks)
+        self.assertEqual(row["outcome"], "pass")
         # U non-empty: fail; E with a finding left: finding (a mark never erases one)
         self.assertEqual(reevaluate.outcome_of(None, "mcp", by(["job", "dup"]), ok, {"outcome": "fail"},
                                                [st("fail"), bad], False, cases)[0], "fail")

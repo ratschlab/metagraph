@@ -1118,7 +1118,7 @@ class ReviewFixesTest(unittest.TestCase):
         complete1 = dict(complete, repeat=1, raw=complete["raw"])
         res = cmp.direct_agreement({1: bad}, {1: complete1}, "POST /pattern", self.dir)
         self.assertEqual(res["class"], "disagree")
-        self.assertIn("at_least 99 > exact 6", res["outcome_differs"][0]["detail"])
+        self.assertIn("contexts at_least 99 vs exact 6: no common value", res["outcome_differs"][0]["detail"])
         # a 503 deadline carries no content; a finding or a fail on the stopped side is no timing
         dead = self.raw_line("N-1", "direct-local", 2, http=503, error={"code": "deadline", "text": "late"},
                              outcome="inconclusive", checks=[st("inconclusive"), rel("inconclusive")], digest="c")
@@ -1146,6 +1146,174 @@ class ReviewFixesTest(unittest.TestCase):
         both_l = {0: dict(l1b, repeat=0, answer_digest="z", outcome="pass", checks=[st("pass")]), 1: l1b}
         res = cmp.direct_agreement(both_l, both_r, "POST /pattern", self.dir)
         self.assertEqual(res["class"], "identical")
+
+    def test_timing_count_ranges(self):
+        # B5b-02 (VERIFY-REVIEW's rule): each population count admits a range of true values (exact [v, v],
+        # at_least [v, inf), bounds [lower, upper], unknown anything); the stopped and the complete count must overlap
+        ex = lambda v: {"relation": "exact", "value": v}  # noqa: E731
+        al = lambda v: {"relation": "at_least", "value": v}  # noqa: E731
+        bd = lambda lo, hi: {"relation": "bounds", "value": lo, "lower": lo, "upper": hi}  # noqa: E731
+        unk = {"relation": "unknown", "value": None}
+        bad = [(bd(10, 12), ex(6)), (bd(2, 5), ex(6)), (ex(9), al(12)), (ex(9), bd(10, 12)), (al(13), bd(10, 12)),
+               (bd(1, 3), bd(10, 12)), (al(99), ex(6)), (ex(5), ex(0)), ({"relation": "at_most", "value": 9}, ex(6)),
+               (ex(6), {"relation": "about", "value": 6}), (ex(None), ex(6))]
+        good = [(bd(5, 7), ex(6)), (ex(12), al(12)), (ex(11), bd(10, 12)), (al(12), bd(10, 12)), (bd(1, 10), bd(10, 12)),
+                (al(2), ex(6)), (al(0), al(5)), (ex(6), ex(6)), (unk, ex(6)), (ex(6), unk), (al(3), unk)]
+        for a, b in bad:
+            self.assertTrue(cmp._count_problems({"contexts": a}, {"contexts": b}), (a, b))
+        for a, b in good:
+            self.assertEqual(cmp._count_problems({"contexts": a}, {"contexts": b}), [], (a, b))
+        # population counts only: `tested` is work done (a stopped selection pass tests fewer), estimate no bound
+        stopped = {"tested": ex(50), "labels": ex(3), "occurrences": al(4), "contexts": dict(ex(9), by_offset={
+            "0": bd(4, 6)}), "estimate": ex(1)}
+        complete = {"tested": ex(80), "labels": ex(3), "occurrences": ex(9), "contexts": dict(ex(9), by_offset={
+            "0": ex(5)}), "estimate": ex(7)}
+        self.assertEqual(cmp._count_problems(stopped, complete), [])
+        stopped["contexts"]["by_offset"]["0"] = bd(6, 8)
+        self.assertEqual(cmp._count_problems(stopped, complete),
+                         ["contexts.by_offset.0 bounds [6, 8] vs exact 5: no common value"])
+        # end to end, the recorded N-nearmiss-0030 r0 pair: level 1 bounds [10, 12] against the remote's exact 6 is
+        # no timing (it read timing); at_least 2 is
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+        complete = self.raw_line("N-2", "direct-remote", 0, body=self.pattern_body(
+            {"relation": "exact", "value": 6, "by_mismatches": {"1": ex(6)}}), checks=[st("pass")], digest="b")
+        for counts, cls in (({"relation": "at_least", "value": 2, "by_mismatches": {"1": al(2)}}, "timing"),
+                            ({"relation": "at_least", "value": 10, "by_mismatches": {"1": bd(10, 12)}}, "disagree")):
+            stopped = self.raw_line("N-2", "direct-local", 0, body=self.pattern_body(counts, {"reason": "time"}),
+                                    outcome="inconclusive", checks=[st("pass")], digest="a",
+                                    time_limited="pattern 0 time-limited")
+            self.assertEqual(cmp.direct_agreement({0: stopped}, {0: complete}, "POST /pattern", self.dir)["class"],
+                             cls, counts)
+
+    def test_timing_released_subset(self):
+        # VERIFY-2 item 5's subset rule: a stopped answer's released contexts are among a complete side's that
+        # states retrieval_complete
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+        ctx = lambda k, o: {"kmer": k, "offset": o, "strand": "+"}  # noqa: E731
+        def body(results, complete, relation="exact", n=2):
+            return {"patterns": [{"id": "p", "counts": {"contexts": {"relation": relation, "value": n}},
+                                  "results": results, "retrieval_complete": complete}]}
+        full = self.raw_line("P-1", "direct-remote", 0, body=body([ctx("A" * 31, 0), ctx("C" * 31, 1)], True),
+                             checks=[st("pass")], digest="b")
+        def stopped(results):
+            return self.raw_line("P-1", "direct-local", 0, body=body(results, False, "at_least", len(results)),
+                                 outcome="inconclusive", checks=[st("pass")], digest="a",
+                                 time_limited="pattern 0 time-limited")
+        self.assertEqual(cmp.direct_agreement({0: stopped([ctx("C" * 31, 1)])}, {0: full}, "POST /pattern",
+                                              self.dir)["class"], "timing")
+        res = cmp.direct_agreement({0: stopped([ctx("G" * 31, 0)])}, {0: full}, "POST /pattern", self.dir)
+        self.assertEqual(res["class"], "disagree")
+        self.assertIn("1 of 1 released results not in the complete list", res["outcome_differs"][0]["detail"])
+        # a complete side that does not state retrieval_complete licenses nothing
+        partial = self.raw_line("P-1", "direct-remote", 0, body=body([ctx("A" * 31, 0)], False, "at_least", 1),
+                                checks=[st("pass")], digest="b")
+        self.assertEqual(cmp.direct_agreement({0: stopped([ctx("G" * 31, 0)])}, {0: partial}, "POST /pattern",
+                                              self.dir)["class"], "timing")
+
+    def test_direct_mismatch_every_repeat(self):
+        # B5b-04: with direct_mismatch every repeat of both direct arms is classified and a disagreeing one wins
+        # over a match (mismatch.above_kind_cap: r0 matches, r1 a 200 without the slot, r2 a 400)
+        s = scen("M-1", "M")
+        m = self.raw_line("M-1", "mcp", 0, http=400, outcome="service_by_design",
+                          error={"code": "pattern_out_of_bounds", "text": "above the cap"})
+        good = self.raw_line("M-1", "direct-local", 0, http=200,
+                             body={"patterns": [{"error": {"code": "mismatches_above_cap", "message": "cap 1"}}]})
+        stale = self.raw_line("M-1", "direct-local", 1, http=200, body={"patterns": [{"id": "w"}]})
+        refusal = self.raw_line("M-1", "direct-local", 2, http=400, error={"code": "invalid_request", "text": "x"})
+        slot = {"http": 200, "slot_code": "mismatches_above_cap"}
+        cls = lambda dm, d: cmp.mcp_agreement({0: m}, d, s, self.answer_case(slot, dm), self.dir)  # noqa: E731
+        res = cls("disagree", {"direct-local": {0: good, 1: stale, 2: refusal}})
+        self.assertEqual((res["class"], res["side"]), ("disagree", "direct"))
+        self.assertIn("1 other direct repeat(s) match", res["direct_detail"])
+        self.assertEqual(cls("disagree", {"direct-local": {1: stale, 2: refusal}})["class"], "disagree")
+        # timing: the 200 is unverified, the 400 disagrees, whatever matched
+        self.assertEqual(cls("timing", {"direct-local": {0: good, 2: refusal}})["class"], "disagree")
+        res = cls("timing", {"direct-local": {0: good, 1: stale}})
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", True))
+        # both direct arms count: a disagreeing remote repeat is no longer hidden behind the reference arm
+        remote = dict(refusal, arm="direct-remote", repeat=0)
+        self.assertEqual(cls("disagree", {"direct-local": {0: good}, "direct-remote": {0: remote}})["class"],
+                         "disagree")
+        res = cls("disagree", {"direct-local": {0: good}, "direct-remote": {0: dict(good, arm="direct-remote")}})
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", True))
+        self.assertIn("direct-remote r0", res["direct_detail"])
+
+    def test_unmatched_runner_marks_split(self):
+        # B5b-05: r0 marked service_by_design by the runner (a refusal no case of the table matches), r1 failing
+        # its invariants against a passing direct arm: the disagreement of r1 decides, with or without the table
+        s = dict(scen("N-1", "N"), mcp={"tool": "pattern_search", "arguments": {}})
+        ok = [{"check": "status", "outcome": "pass", "detail": ""}, {"check": "invariants", "outcome": "pass",
+                                                                     "detail": ""}]
+        d = {0: self.raw_line("N-1", "direct-local", 0, checks=ok), 1: self.raw_line("N-1", "direct-local", 1,
+                                                                                     checks=ok)}
+        marked = self.raw_line("N-1", "mcp", 0, http=400, outcome="service_by_design",
+                               error={"code": "unlisted_refusal", "text": "x"},
+                               checks=[{"check": "status", "outcome": "fail", "detail": "http 400"}])
+        broken = self.raw_line("N-1", "mcp", 1, outcome="fail", checks=[
+            ok[0], {"check": "invariants", "outcome": "fail", "detail": "bad"}])
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        for table in ({}, cases):
+            res = cmp.mcp_agreement({0: marked, 1: broken}, {"direct-local": d}, s, table, self.dir)
+            self.assertEqual(res["class"], "disagree", table and "table")
+        # no table: the mark alone stays an unverified by-design class
+        res = cmp.mcp_agreement({0: marked}, {"direct-local": d}, s, {}, self.dir)
+        self.assertEqual((res["class"], res["by"], res["verified"]), ("service_by_design", "mcp runner", False))
+        # with the table a mark it does not reproduce is judged by its checks (B-06): status fail vs pass
+        self.assertEqual(cmp.mcp_agreement({0: marked}, {"direct-local": d}, s, cases, self.dir)["class"],
+                         "disagree")
+
+    def test_explained_items(self):
+        # B5b-06: explains_checks entries explain check ITEMS ({check, detail_matches}); an unexplained item of the
+        # same check is compared (it was hidden behind the name)
+        cases = {"res": {"id": "res", "agreement": "by_design", "direct_expectation": {"http": 200},
+                         "service_answer": {"outcome": "answered"},
+                         "explains_checks": [{"check": "resolve_runs", "detail_matches": "merged .*"}]}}
+        s = {"id": "R-1", "route": "POST /resolve", "request": {}, "mcp": {"tool": "traverse_resolve",
+                                                                           "by_design": ["res"]},
+             "expect": [{"check": "status", "args": {"http": 200}}]}
+        rr = lambda o, d: {"check": "resolve_runs", "outcome": o, "detail": d}  # noqa: E731
+        st = {"check": "status", "outcome": "pass", "detail": ""}
+        mine = [st, rr("fail", "merged runs"), rr("fail", "wrong run 3")]
+        self.assertEqual(cmp.explained_items(mine, cmp.union_of([cases["res"]])), [1])
+        m = self.raw_line("R-1", "mcp", 0, outcome="fail", checks=mine)
+        d = self.raw_line("R-1", "direct-local", 0, checks=[st, rr("pass", ""), rr("pass", "")])
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: d}}, s, cases, self.dir)
+        self.assertEqual(res["class"], "disagree")
+        self.assertEqual(res["differing_checks"][0]["check"], "resolve_runs")
+        self.assertEqual((res["explained_items"], res["explained_checks"]), ({"0": [1]}, {"0": ["resolve_runs"]}))
+        # only the explained item fails: service_by_design by explains_checks
+        m2 = self.raw_line("R-1", "mcp", 0, outcome="service_by_design", checks=mine[:2] + [rr("pass", "")])
+        res = cmp.mcp_agreement({0: m2}, {"direct-local": {0: d}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["by"]), ("service_by_design", "explains_checks"))
+        # a line that records the explained items (the re-evaluation's explained_items) is read as recorded
+        m3 = dict(m, explained_items=[1, 2])
+        self.assertEqual(cmp.mcp_agreement({0: m3}, {"direct-local": {0: d}}, s, cases, self.dir)["class"],
+                         "service_by_design")
+
+    def test_planned_duplicate(self):
+        # A2-06: T-attempts-0002 runs its attempt per run and arm (run_unique); a repeat that meets its retained id
+        # answers 409, which the scenario plans: one arm 200, the other 409 is no disagreement (the recorded run:
+        # direct-local 200 pass vs direct-remote 409, its only direct disagreement)
+        s = {"id": "T-1", "route": "POST /traverse", "run_unique": ["attempt_id"],
+             "expect": [{"check": "status", "args": {"http": [200, 409]}}]}
+        st = lambda o: {"check": "status", "outcome": o, "detail": ""}  # noqa: E731
+        af = lambda o: {"check": "answer_fields", "outcome": o, "detail": ""}  # noqa: E731
+        ok = self.raw_line("T-1", "direct-local", 0, checks=[st("pass"), af("pass"), af("pass")], digest="a")
+        dup = self.raw_line("T-1", "direct-remote", 0, http=409, outcome="inconclusive", digest="b",
+                            error={"code": "duplicate_attempt", "text": "retained"},
+                            checks=[st("pass"), af("inconclusive"), af("pass")])
+        res = cmp.direct_agreement({0: ok}, {0: dup}, "POST /traverse", self.dir, None, s)
+        self.assertEqual(res["class"], "same_checks", res)
+        self.assertIn("direct-remote met its run's retained id", res["planned_duplicates"][0]["detail"])
+        # not planned: no run_unique, no 409 in the status, or the 409's shape check failed
+        self.assertEqual(cmp.direct_agreement({0: ok}, {0: dup}, "POST /traverse", self.dir, None,
+                                              dict(s, run_unique=[]))["class"], "disagree")
+        self.assertEqual(cmp.direct_agreement({0: ok}, {0: dup}, "POST /traverse", self.dir, None,
+                                              dict(s, expect=[{"check": "status", "args": {"http": 200}}]))["class"],
+                         "disagree")
+        bad = dict(dup, outcome="fail", checks=[st("pass"), af("inconclusive"), af("fail")])
+        self.assertEqual(cmp.direct_agreement({0: ok}, {0: bad}, "POST /traverse", self.dir, None, s)["class"],
+                         "disagree")
 
     def test_timing_class_traverse(self):
         # a stopped walk's paths are prefixes of the complete walk's

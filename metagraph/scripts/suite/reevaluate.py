@@ -227,7 +227,8 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
                 return "inconclusive", "the table's %s case %s: %s (rule (c))" % (how, cid, why)
             if compare.judged_by_checks(matched[0]):
                 outcome, explained, noted = compare.answered_verdict(matched, new_checks, rule)
-                info.update(service_by_design_case=noted, explained_checks=explained)
+                info.update(service_by_design_case=noted, explained_checks=explained,
+                            explained_items=compare.explained_items(new_checks, compare.union_of(matched)))
                 info["note"] = "the table's %s case %s: judged by the checks%s" % (
                     how, noted, ", %s explained" % explained if explained else "")
                 return outcome, None
@@ -377,11 +378,14 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                 row["reevaluation"]["kept"] = kept
             # as async's runner records them: the matched case and the failing checks it explains, whenever a case
             # matched (the replay's, not the recorded run's)
-            for k in ("service_by_design_case", "explained_checks", "verdict_detail", "inconclusive_reason"):
+            for k in ("service_by_design_case", "explained_checks", "explained_items", "verdict_detail",
+                      "inconclusive_reason"):
                 row.pop(k, None)
             if "service_by_design_case" in info:
                 row["service_by_design_case"] = info["service_by_design_case"]
                 row["explained_checks"] = info.get("explained_checks") or []
+                # B5b-06: the explained check ITEMS (indices into checks), as the runner's E is keyed
+                row["explained_items"] = info.get("explained_items") or []
             for k in ("verdict_detail", "inconclusive_reason"):
                 if info.get(k):
                     row[k] = info[k]
