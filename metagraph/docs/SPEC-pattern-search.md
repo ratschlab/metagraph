@@ -4667,17 +4667,26 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   level `at_least`, or at its end) or not at all (the counts `exact`, `all_or_count` withholding
   `count_above_threshold`).
   The comparison now reads those ranges as their scans counted them, each palindromic stored k-mer once, as §21.6
-  states. Changed answers, only with `max_mismatches` > 0 on even-k wrapped PRIMARY graphs (the production
-  graphs and the mini index have k = 31: no stored fixture changes): with `stop_at_threshold`,
-  `stop` (present where it was absent; `mismatch_level` t instead of a later level's), `counts.contexts`
-  (level t as completed instead of a later level `at_least`, the later levels `unknown`, the totals `at_least`),
-  `work` (less of it), `all_or_count`'s `withheld` (`threshold_crossed` where it was `count_above_threshold`) and,
-  without the mask, the note `threshold_upper_bound` (the running lower bound subtracts the palindromes found
-  once the scans have counted them); without `stop_at_threshold` no answer changes (`all_or_count` can free its
-  retained ranges a level earlier). Tests: `PatternMismatch.EvenKPrimaryUnmaskedStopsAtTheEndOfThePass`,
-  `PatternMismatch.ThresholdStopsAgainstTheUnboundedRun` (every mode, odd and even k, with and without the
-  mask, against the run without a threshold), and `PatternMismatch.UnmaskedThresholdsAfterTheCheck` with the
-  even-k wrapped PRIMARY cases it skipped.
+  states. Changed answers, only with `max_mismatches` > 0 and `stop_at_threshold` on even-k wrapped PRIMARY
+  graphs (the production graphs and the mini index have k = 31: no stored fixture changes). From the end of level
+  t's work on, the running total carries the levels 0 … t as completed, so every later comparison, those inside
+  discovery included, sees a larger total: a stop comes earlier or is new, never later, never gone.
+  - `stop`: present where it was absent (at the end of a level's work, or in the discovery of a level, the last
+    level's included); `mismatch_level` an earlier level's; at the same level a stop in discovery that comes
+    earlier, or one at the end of the level's work that now comes inside its discovery.
+  - `counts.contexts`: the stopped level as completed instead of a later level `at_least`, or at the same level
+    smaller `at_least` counts (per level, offset and orientation); the later levels `unknown`, the totals
+    `at_least`. `work`: less of it.
+  - `all_or_count`: `withheld` `threshold_crossed` where it was `count_above_threshold`.
+  - `partial`: fewer contexts, other contexts of the same number, or a newly stated `cut: max_contexts`; each
+    list is the first `max_contexts` in answer order among the contexts discovered (§7.5).
+  - Without the mask, the note `threshold_upper_bound` (the running lower bound subtracts the palindromes found
+    once the scans have counted them).
+  - Without `stop_at_threshold` no answer changes (`all_or_count` can free its retained ranges a level earlier).
+  - Tests: `PatternMismatch.EvenKPrimaryUnmaskedStopsAtTheEndOfThePass`,
+    `PatternMismatch.ThresholdStopsAgainstTheUnboundedRun` (every mode, odd and even k, with and without the
+    mask, against the run without a threshold), and `PatternMismatch.UnmaskedThresholdsAfterTheCheck` with the
+    even-k wrapped PRIMARY cases it skipped.
 
 ## 28. Changed after the review of 2026-10-12
 
