@@ -1263,14 +1263,37 @@ def check_notes(sc, ans, a, arm):
 
 
 _SEARCH_BUDGET_STOPS = {"max_steps", "time", "max_annotation_work", "max_memory"}
+# the engine's phases (SPEC-pattern-search §7.6: the range search, the deferred scans, the release and its delivery,
+# a path search's extension), whose stop the engine's low-complexity diagnostic follows; the labels' reads, a
+# predicate's selection and the output come after it (§7.8)
+_ENGINE_PHASES = {"discovery", "mask_scan", "extraction", "extension"}
+
+
+def _note_stop(sc: dict, e: dict) -> str:
+    """How entry |e|'s stop bears on the low_complexity_pattern note (SPEC-pattern-search §7.8, §8.10, §20.5): "budget"
+    for a budget stop of the search (max_steps, time, the supported-path search's max_annotation_work and max_memory)
+    in an engine phase, a stop without a phase counted as the engine's, which leaves the note out; "selection" for a
+    selection-phase stop of a supported-path search, whose selection runs in the search (a held walk the account
+    refused) or after it, so that the note may be either; "" for none, a stop_at_threshold stop or a later phase's
+    stop (labels, selection, output), which leave the note as it is."""
+    stop = e.get("stop") if isinstance(e.get("stop"), dict) else {}
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    phase = stop.get("phase")
+    if stop.get("reason") in _SEARCH_BUDGET_STOPS and (phase is None or phase in _ENGINE_PHASES):
+        return "budget"
+    if phase == "selection" and req.get("long_search") == "supported_paths":
+        return "selection"
+    return ""
 
 
 def check_low_complexity_note(sc, ans, a, arm):
     """The `low_complexity_pattern` note as SPEC-pattern-search §7.8 states it: on an exact pattern that sdust flags
     (args.expected, computed by the builder with seqtools.sdust, the host's T = 20, W = 64), when the answer states
-    no budget stop of the search; never beside such a stop. A pattern of more than 191 bases whose diagnostic the
-    work time cut (determinism time_limited) may lack it: inconclusive then, as is an expected note a budget stop
-    left out."""
+    no budget stop of the search (_note_stop: an engine phase's); never beside such a stop. A stop of a later phase
+    (the labels' reads, a predicate's selection, the output) leaves the note as the engine decided it, so the note
+    follows sdust there; a supported-path search's selection stop allows either, a present note only where sdust
+    flags the pattern. A pattern of more than 191 bases whose diagnostic the work time cut (determinism
+    time_limited) may lack it: inconclusive then, as is an expected note a budget stop left out."""
     e = _entry(ans, a.get("pattern", 0))
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
@@ -1279,26 +1302,32 @@ def check_low_complexity_note(sc, ans, a, arm):
         raise Missing("notes")
     has = "low_complexity_pattern" in notes
     stop = e.get("stop") or {}
+    kind = _note_stop(sc, e)
     if stop.get("reason") in _SEARCH_BUDGET_STOPS or e.get("determinism") == "time_limited":
         bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
         if bad and not has:
             return FAIL, "no note after a stop or time limitation that cannot have happened: %s" % bad[0]
-    if stop.get("reason") in _SEARCH_BUDGET_STOPS:
+    if kind == "budget":
         if has:
             return FAIL, "low_complexity_pattern beside a budget stop %s/%s" % (stop.get("phase"), stop.get("reason"))
         if a["expected"]:
             return INCONCLUSIVE, "a budget stop %s/%s leaves the note out" % (stop.get("phase"), stop.get("reason"))
         return PASS, "no note (a budget stop, and sdust does not flag the pattern)"
+    if kind == "selection" and not has and a["expected"]:
+        return INCONCLUSIVE, "a supported-path search's selection stop %s/%s, which can come from the search's own " \
+                             "refusal of a held walk: the note may be left out" % (stop.get("phase"), stop.get("reason"))
+    later = " beside a later phase's stop %s/%s" % (stop.get("phase"), stop.get("reason")) if stop.get("phase") not in (
+        None, "discovery", "mask_scan", "extraction", "extension") else ""
     if has == bool(a["expected"]):
-        return PASS, "note %s, as sdust says" % ("present" if has else "absent")
+        return PASS, "note %s, as sdust says%s" % ("present" if has else "absent", later)
     try:
         L = _pattern_length(*_request_pattern(sc, a.get("pattern", 0)))
     except Missing:
         L = 0
     if not has and L > 191 and e.get("determinism") == "time_limited":
         return INCONCLUSIVE, "the diagnostic of a %d-base pattern was cut by the work time" % L
-    return FAIL, "low_complexity_pattern %s, sdust %s the pattern" % (
-        "present" if has else "absent", "flags" if a["expected"] else "does not flag")
+    return FAIL, "low_complexity_pattern %s, sdust %s the pattern%s" % (
+        "present" if has else "absent", "flags" if a["expected"] else "does not flag", later)
 
 
 def check_stops_stated(sc, ans, a, arm):
@@ -2081,8 +2110,11 @@ def _pattern_entry_problems(sc: dict, i: int, e: dict, limits: dict, sticky: Opt
         if not c or c.get("relation") != "exact" or c.get("value") != len(res):
             probs.append("p%d: retrieval_complete with %s %r and %d results" % (i, name, c and (c.get("relation"), c.get("value")), len(res)))
     stop = e.get("stop")
-    if stop and stop.get("reason") in _BUDGET_STOP_REASONS and "low_complexity_pattern" in (e.get("notes") or []):
-        probs.append("p%d: low_complexity_pattern beside a budget stop" % i)
+    if _note_stop(sc, e) == "budget" and "low_complexity_pattern" in (e.get("notes") or []):
+        # the engine diagnoses the note only after a search that completed or stopped at a threshold
+        # (SPEC-pattern-search §7.8); a later phase's stop leaves it as it is
+        probs.append("p%d: low_complexity_pattern beside a budget stop %s/%s of the search" % (
+            i, stop.get("phase"), stop.get("reason")))
     # SPEC-pattern-search §7.5: a stop of the graph search shortens a list only with a cut (partial) or a withheld
     # list (all_or_count)
     if isinstance(stop, dict) and stop.get("phase") in ("discovery", "mask_scan", "extraction", "extension", "selection") and \

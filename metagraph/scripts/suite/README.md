@@ -1862,3 +1862,18 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   v3 and v4 (R-discover, N-usecase-0010 / -0012, R-edge-0023 with 150 kept of 2,753, N-negative): none violates a
   rule; R-discover-0001's eight passes keep their outcome with the new detail. DESIGN-test-suite.md's R-discover
   line still states the caveat ("index order, not best-supported"): a docs change for the integrator.
+- /pattern, low_complexity_note and the invariants read the stop's phase (SPEC-pattern-search §7.8, §8.10, §20.5):
+  the note is the engine's, diagnosed after a search that completed or stopped at a threshold
+  (pattern_search.cpp decides it on engine.stop()), so only a budget stop of the search in an engine phase
+  (discovery, mask_scan, extraction, extension; max_steps, time, max_annotation_work, max_memory; a stop without a
+  phase counts as the engine's) leaves it out. A stop of a later phase (label_discovery, placement, output, a
+  predicate's selection) leaves the note as the engine decided it: the note follows sdust there (present and
+  expected passes, absent and expected fails), where both checks failed a present note beside {output, time},
+  {output, max_memory}, {label_discovery, max_annotation_work} or {placement, max_memory} and read a missing one
+  inconclusive. A supported-path search's selection stop can be its own refusal of a held walk inside the search
+  (§20.9) or come after it: a present note passes only where sdust flags the pattern, a missing one is inconclusive.
+  The invariants fail a note beside every engine-phase budget stop (before: max_steps and time only; now also the
+  supported-path search's {extension, max_annotation_work | max_memory} and the path extension's {extension,
+  max_memory}, which the engine counts as budget stops). Measured: no recorded answer of v3 or v4 and no stored
+  fixture states the note beside any stop, and no exact pattern sdust flags meets a later-phase stop there (14
+  fixture and 11 recorded later-phase stops, none of a flagged pattern); no recorded outcome or detail moves.

@@ -662,6 +662,57 @@ class MoreChecks(unittest.TestCase):
         thr = self.entry(notes=["low_complexity_pattern"], stop={"phase": "discovery", "reason": "max_contexts"}, counts={})
         self.assertEqual(outcome(sc, thr, "low_complexity_note", expected=True)[0], "pass")    # a threshold stop
 
+    def test_low_complexity_note_beside_a_later_phase(self):
+        # SPEC-pattern-search §7.8: the note is the engine's, decided after its search; a stop of a later phase (the
+        # labels' reads, the selection, the output) leaves it as it is, an engine phase's budget stop leaves it out
+        sc = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "A" * 31}]})
+        for st in ({"phase": "output", "reason": "time"}, {"phase": "output", "reason": "max_memory"},
+                   {"phase": "label_discovery", "reason": "max_annotation_work"},
+                   {"phase": "placement", "reason": "max_memory"}, {"phase": "selection", "reason": "max_predicate_work"}):
+            noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
+            plain = self.entry(notes=[], stop=st, counts={})
+            self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "pass", st)
+            o, d = outcome(sc, plain, "low_complexity_note", expected=True)
+            self.assertEqual(o, "fail", st)
+            self.assertIn("beside a later phase's stop", d)
+            self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=False)[0], "fail", st)
+            self.assertEqual(outcome(sc, plain, "low_complexity_note", expected=False)[0], "pass", st)
+        for st in ({"phase": "discovery", "reason": "time"}, {"phase": "extension", "reason": "max_memory"},
+                   {"phase": "extension", "reason": "max_annotation_work"}, {"reason": "max_steps"}):
+            noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
+            self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "fail", st)
+            self.assertEqual(outcome(sc, self.entry(notes=[], stop=st, counts={}), "low_complexity_note",
+                                     expected=True)[0], "inconclusive", st)
+        # a supported-path search's selection stop can be its own refusal of a held walk, inside the search
+        sup = self.sc({"long_search": "supported_paths", "predicate": {"any": ["1"]}, "predicate_strands": "either",
+                       "patterns": [{"dna": "A" * 40}]})
+        st = {"phase": "selection", "reason": "max_memory"}
+        noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
+        plain = self.entry(notes=[], stop=st, counts={})
+        self.assertEqual(outcome(sup, noted, "low_complexity_note", expected=True)[0], "pass")
+        self.assertEqual(outcome(sup, plain, "low_complexity_note", expected=True)[0], "inconclusive")
+        self.assertEqual(outcome(sup, noted, "low_complexity_note", expected=False)[0], "fail")
+        self.assertEqual(outcome(sup, plain, "low_complexity_note", expected=False)[0], "pass")
+        # the invariants: a stored answer with an output stop keeps a note; a supported-path search's own budget
+        # stop does not
+        req, ans = fixture("labels_all_output_budget")
+        fsc = {"route": "POST /pattern", "request": req, "truth": {}}
+        ans = copy.deepcopy(ans)
+        ans["patterns"][0]["notes"].append("low_complexity_pattern")
+        self.assertEqual(outcome(fsc, ok_answer(ans), "invariants")[0], "pass")
+        ans["patterns"][0]["stop"]["reason"] = "time"
+        ans["patterns"][0]["determinism"] = "time_limited"
+        o, d = outcome(fsc, ok_answer(ans), "invariants")
+        self.assertNotIn("low_complexity_pattern", d)
+        req, ans = fixture("supported_paths_work_budget")
+        fsc = {"route": "POST /pattern", "request": req, "truth": {}}
+        self.assertEqual(outcome(fsc, ok_answer(ans), "invariants")[0], "pass")
+        ans = copy.deepcopy(ans)
+        ans["patterns"][0]["notes"].append("low_complexity_pattern")
+        o, d = outcome(fsc, ok_answer(ans), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("low_complexity_pattern beside a budget stop extension/max_annotation_work", d)
+
     def test_stops_stated_and_levels(self):
         sc = self.sc({"patterns": [{"dna": "A" * 20}, {"dna": "C" * 20}]})
         ok = ok_answer({"patterns": [{"stop": None, "counts": {"contexts": {"value": 3, "relation": "exact"}}},
