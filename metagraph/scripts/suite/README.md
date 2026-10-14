@@ -230,7 +230,8 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   repeat 0 / later) stays as §8.3 has it; everything timed keys on `host_cache`.
 - `compare.py RUN_DIR [--by-design PATH]`: merges first when `arms/` exists, then writes compare.json:
   per scenario and arm the outcome over the repeats (the common one, else error > fail > mixed) and whether
-  the repeats' digests agree; direct-local vs direct-remote as `identical` (same digest), `same_checks`
+  the repeats' digests agree; direct-local vs direct-remote as `identical` (same digest, no check or outcome
+  differing other than by timing: lane S7v), `same_checks`
   (other answer, same check outcomes, at least one check compared), `not_comparable` (other answer, no check
   evaluated on both) or `disagree`, with `checks_compared`; the MCP class of DESIGN §1.3; overheads, cold vs
   warm, timing and resource summaries per area, arm and host cache.
@@ -1848,10 +1849,10 @@ failing on 14552938.
   direct-remote executions that gave an item are in; without a fallback it is unchanged). The report's agreement
   depth reads the same items. The by-design pairs were already judged on every repeat of both direct arms (lane G2).
 - Moves: v4 N-usecase-0008 and R-pos-0027 not_comparable -> agree (direct-local r0 a 503 deadline, direct-remote r0
-  decides 6 / 5 items), T-walk-0004 and T-repeat-0004 one more item compared (walk_in_record from direct-remote);
-  v3 M-planted-0017 not_comparable -> agree, and six v3 scenarios already `disagree` by an MCP runner_error now list
-  the error line's failing items against direct-remote's (M-planted-0016, M-protein-0002 / -0007,
-  N-nearmiss-0006 / -0007 / -0013). gate.py's uncompared_properties (require_agreement only; the shipped policy does
+  decides 6 / 5 items), T-repeat-0004 one more item compared (walk_in_record from direct-remote); v3
+  M-planted-0017 not_comparable -> agree, T-walk-0004 one more item compared, and six v3 scenarios already
+  `disagree` by an MCP runner_error now list the error line's failing items against direct-remote's
+  (M-planted-0016, M-protein-0002 / -0007, N-nearmiss-0006 / -0007 / -0013). gate.py's uncompared_properties (require_agreement only; the shipped policy does
   not set it) still reads the reference arm alone, so it is stricter than compare where an item fell back.
 
 ### The host cache after a relayed deadline
@@ -1959,3 +1960,18 @@ failing on 14552938.
   planned execution(s) not recorded (mcp 12; plan of plan.json)"; the exit status and the loop record are lane
   S-runner's). Left: the Agreement section of such a run said "No MCP arm in this run."; it says "No MCP execution
   was recorded although the run planned N (see the Verdict: INCOMPLETE)" whenever the plan holds MCP executions.
+
+### Validation on the recorded runs (offline)
+- Fresh copies of v3 (lane-s5e/reeval-S5e) and v4 (v4-run-copies/20261014T061053Z_refseq97-6f945db4) re-evaluated
+  with 14552938 and with this lane (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`): 0 changes
+  of outcome, checks, case, explained checks / items, verdict_detail, inconclusive_reason, time_limited or
+  outcome_runner over 2,900 and 2,913 lines; the line changes are the host-cache labels (v3 18 / v4 66 host_cache,
+  8 / 27 since_prev_s and host_cache_after, 54 / 70 lines gaining host_cache_after_interrupted).
+- Class moves, each the point of its rule: v4 R-budget-0002, R-twin-0002 direct identical -> disagree; v4
+  N-usecase-0008, R-pos-0027 and v3 M-planted-0017 MCP not_comparable -> agree; v4 T-repeat-0004 and v3
+  T-walk-0004 one more item compared; six v3 scenarios already disagreeing by an MCP runner_error list their
+  differing items. Summary: v4 MCP 534 agree / 4 not comparable -> 536 / 2, direct disagree 0 -> 2; v3 MCP 542 / 5
+  -> 543 / 4. No relation moves.
+- Verdicts: v4 FINDINGS -> FAIL (the 2 direct disagreements above); v3 FAIL unchanged. Both gain the line naming area
+  C and the two capabilities routes on mcp where nothing passed. The deploy gate on the v4 copy
+  (`--gate gate/policy_v4_rt_mcp.json`, two arms mcp + direct-local): 45 problems before and after, the same list.
