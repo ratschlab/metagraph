@@ -282,6 +282,15 @@ bool PathSelection::decide_now(const PathView &path) {
             // the account cannot hold its selection labels: the list ends before it
             output_cut_ = true;
             keeping_ = false;
+            if (options_.mode == Mode::ALL_OR_COUNT) {
+                // all or none: none can be listed, so what the list holds (the listed paths'
+                // selection labels, the sink's paths) is given back to the search at once
+                account.release(kept_bytes_);
+                kept_bytes_ = 0;
+                kept_text_ = 0;
+                kept_labels_.clear();
+                sink_.retain({});
+            }
         } else {
             const size_t before = sink_.paths().size();
             if (!sink_.accept(path, &tracker_)) {

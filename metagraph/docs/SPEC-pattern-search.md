@@ -3472,7 +3472,9 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   label for the selection's ids (freed with the pattern) and 32 + the names' lengths + 32 + 24 per label for
   their strings in the answer (§19.9's model), which stay with the result object until the request ends as every
   label built does (§14.4); when they do not fit, the list ends before the path (`partial`: `cut: max_memory`,
-  `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`).
+  `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`, `stop {output, max_memory}`, and what the
+  list held — the listed paths' selection labels and the paths kept for them — is given back to the account at
+  once, so that the rest of the search has it, as under `"either"` below).
 - **`"either"` on a BASIC graph**: the decision of a walk needs its mirror's support, which only the end of the
   search gives, so the supported walks are **held** (at most `max_predicate_contexts`, each charged before it is
   held: 192 + 2L + 8 per predicate label of its support) and decided after the search, never pruned by the
@@ -4671,6 +4673,13 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   max_memory}`) or stop the selection (`stop {selection, max_memory}`) where it did not, and `work.memory_bytes`
   grows with the objects the earlier patterns kept
   (`PatternSelection.ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds`).
+  Supported paths decided at completion (§20.9): `all_or_count` gives back what its list holds (the listed paths'
+  selection labels and the paths kept) as soon as the account refuses a listed path's selection labels, as it did
+  on its other cuts; a later row or frame of the search that then fits no longer stops it, where the answer was
+  `withheld: annotation_budget` with `stop {extension, max_memory}`, `rows_refused` and `at_least` counts
+  (`counts.supported_paths`, `counts.selected`): it is now `withheld: output_budget` with `stop {output,
+  max_memory}`, exact counts and no refused row
+  (`PatternSupportedRoute.AllOrCountGivesBackItsListWhenALabelChargeIsRefused`).
 
 ## 28. Changed after the review of 2026-10-12
 

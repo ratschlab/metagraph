@@ -1267,9 +1267,13 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
         out = answer(idx, long_name, "all_or_count");
         const Json::Value &w = out["patterns"][0];
         EXPECT_EQ("output_budget", w["withheld"]["reason"].asString());
+        EXPECT_EQ("output", w["stop"]["phase"].asString());
         EXPECT_EQ("max_memory", w["stop"]["reason"].asString());
         EXPECT_EQ(0u, w["results"].size());
+        EXPECT_EQ("exact", w["counts"]["selected"]["relation"].asString());
         EXPECT_EQ(256u, w["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ("exact", w["counts"]["supported_paths"]["relation"].asString());
+        EXPECT_EQ(0u, w["rows_refused"].size());
         EXPECT_GT(256u * 1024, compact(out).size());
     }
     {
@@ -1282,6 +1286,114 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
             EXPECT_EQ(256u, e["results"].size()) << mode;
         }
     }
+}
+
+// all_or_count lists every selected path or none: once the account refuses a listed path's
+// selection labels (a path decided at completion), nothing can be listed, so what the list
+// holds -- the listed paths' selection labels and the sink's paths -- is given back at once,
+// before the search goes on (SPEC §20.9), as the sink's own cut and the held walks' are.
+// Driven below the route, so that the account is seen between the search and finish(): on the
+// graph of all 64 3-mers under a 64 KiB label name (SelectionLabelNamesAreCharged's), each of
+// NNNN's 256 forward walks is selected and listed with that name until the 1 MiB account
+// refuses one; then the sink keeps nothing and the account holds what count mode's holds (the
+// search's own), and finish() withholds output_budget with stop {output, max_memory} and exact
+// counts. Mutation tried: the charges kept until finish(): fails.
+TEST(PatternSupportedRoute, AllOrCountGivesBackItsListWhenALabelChargeIsRefused) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const std::string long_name(64 * 1024, 'x');
+    const Index idx = build_rd(3, { { long_name, "h0", record } });
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    struct Seen {
+        bool searched = false;
+        size_t kept = 0;
+        uint64_t held = 0;
+        PathSelectionAnswer answer;
+    };
+    const uint64_t max_memory = 1 << 20;
+    auto run = [&](gp::Mode mode) {
+        Seen seen;
+        graph::traversal::LabelOracle oracle(*idx.anno, nullptr);
+        retrieval::Account account(max_memory);
+        gp::Budget budget(1'000'000'000,
+                          gp::Deadline(Clock::now(), std::numeric_limits<double>::infinity(),
+                                       0, std::function<Clock::time_point()>(&Clock::now)));
+        uint64_t units = 0;
+        RetrievalLimits limits;
+        limits.max_memory_bytes = max_memory;
+        PathSupportEnv env { oracle, budget, account, units, limits,
+                             gp::PatternSearch::support(graph).mode, oracle.decode_charged(),
+                             nullptr, nullptr };
+        PathSupportOptions o;
+        o.level = graph::traversal::Support::KMER;
+        o.labels = true;
+        PathTracker tracker(env, o);
+        SupportedPathSink sink(tracker);
+        Json::Value p;
+        p["any"].append(long_name);
+        const predicate::Binding binding = predicate::Bound::bind(
+                predicate::Predicate::parse(p, 1'000), oracle, budget);
+        PathSelection selection(tracker, sink, *binding.bound);
+        gp::PatternSearch search(graph);
+        gp::Request rq;
+        rq.mode = mode;
+        rq.strands = gp::Strands::FORWARD;
+        rq.extend_paths = true;
+        rq.max_paths = std::numeric_limits<uint64_t>::max();
+        rq.min_information_bits = 0;
+        rq.support = &selection;
+        rq.sink = &selection;
+        PathSelectionOptions so;
+        so.mode = mode;
+        so.max_paths = 1'000;
+        so.either = false;
+        so.selection_labels = true;
+        const gp::Pattern pattern = gp::Pattern::parse(gp::PatternKind::IUPAC, "NNNN");
+        tracker.begin_pattern(pattern.length());
+        sink.begin_pattern(PathSelection::sink_mode(so), PathSelection::sink_threshold(so));
+        selection.begin_pattern(so, pattern.length());
+        const gp::Result result = search.count(pattern, rq, budget);
+        seen.searched = result.anchors
+                && result.anchors->extension == gp::Extension::COMPLETED;
+        seen.kept = sink.paths().size();
+        seen.held = account.held();
+        seen.answer = selection.finish(result);
+        selection.end_pattern();
+        sink.end_pattern(0);
+        tracker.end_pattern();
+        return seen;
+    };
+    const Seen count = run(gp::Mode::COUNT);
+    ASSERT_TRUE(count.searched);
+    EXPECT_EQ(0u, count.kept);
+    EXPECT_EQ(256u, count.answer.selected.value);
+    const Seen all = run(gp::Mode::ALL_OR_COUNT);
+    ASSERT_TRUE(all.searched);
+    EXPECT_EQ(0u, all.kept);
+    EXPECT_EQ(count.held, all.held);
+    EXPECT_EQ("output_budget", all.answer.withheld.value_or(""));
+    ASSERT_TRUE(all.answer.stop);
+    EXPECT_EQ("output", all.answer.stop->first);
+    EXPECT_EQ("max_memory", all.answer.stop->second);
+    EXPECT_EQ(SelectionPass::COMPLETED, all.answer.pass);
+    EXPECT_EQ(gp::Relation::EXACT, all.answer.tested.relation);
+    EXPECT_EQ(256u, all.answer.tested.value);
+    EXPECT_EQ(gp::Relation::EXACT, all.answer.selected.relation);
+    EXPECT_EQ(256u, all.answer.selected.value);
+    EXPECT_EQ(0u, all.answer.listed);
+    // partial under the same account lists the paths whose labels fit, its cut the account's
+    const Seen part = run(gp::Mode::PARTIAL);
+    EXPECT_LT(0u, part.answer.listed);
+    EXPECT_GT(256u, part.answer.listed);
+    EXPECT_EQ("max_memory", part.answer.cut.value_or(""));
 }
 
 // The mirror of a held walk ("either" on a BASIC graph) is read only when it decides (SPEC
