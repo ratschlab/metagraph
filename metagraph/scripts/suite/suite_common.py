@@ -4,7 +4,7 @@
 Stdlib only: this module is copied to mex and imported by run_direct.py there (python3.12).
 Everything here is pure except the small file helpers at the end, so the unit tests cover it offline.
 
-Contract: DESIGN.md (v2) section 8 of ~/.cache/metagraph-traverse-plans/2026-10-13/suite/.
+Contract: metagraph/docs/DESIGN-test-suite.md (v2), section 8.
 """
 
 import datetime

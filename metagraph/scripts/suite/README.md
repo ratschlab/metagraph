@@ -1,6 +1,6 @@
 # Verified test and benchmark suite (/traverse, /resolve, /pattern on refseq33m-experimental)
 
-Design: `~/.cache/metagraph-traverse-plans/2026-10-13/suite/DESIGN.md` (v2; §8 is the interface contract).
+Design: [`metagraph/docs/DESIGN-test-suite.md`](../../docs/DESIGN-test-suite.md) (v2, with how the built suite departs from it; §8 is the interface contract).
 
 ## Runner, sampler, orchestrator, comparator, report (lane S2)
 
