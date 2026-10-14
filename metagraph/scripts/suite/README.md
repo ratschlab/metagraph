@@ -1331,9 +1331,10 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
 
 ## Lane S6b: exception matching, timing plausibility and the comparator (lane G2, 2026-10-14)
 
-The verified findings 2 and 7 of the outside review of the suite (VERIFY-B), the triage's V01 and the compare decision
-agreed with the async session. The async session's runner implements the same matching and plausibility rules in the
-same round from the lane's TABLE-DIFF.md; both read service_by_design.json at sha256 e133f6ee...
+The verified findings 2 and 7 of the outside review of the suite (VERIFY-B), the triage's V01, the compare decision
+agreed with the async session, and the amendments of the lane's own verification (VERIFY-G2). The async session's
+runner implements the same matching and plausibility rules from the lane's TABLE-DIFF.md; both read
+service_by_design.json at sha256 f9565038...
 
 ### By-design cases state the request they are about (finding 2)
 - A case may state `request`, the machine-readable form of its scenario_match: a non-empty list of predicates that
@@ -1342,11 +1343,16 @@ same round from the lane's TABLE-DIFF.md; both read service_by_design.json at sh
   request set to 10,000 (or never sent) read as pattern.caps_zero, a refusal of a basic traverse override as the
   advanced path (every T scenario not_implemented_mcp), a budget refusal of max_extension_bp as the preset row; a
   regression of the service became a verified by-design pair and the gate saw no failure.
-- Grammar: `{"any": [[p, ...], ...]}`, or one subject (`path` into the arguments with `[n]`, `[*]` and `{field}`, the
-  refused field less `field_prefix`: pattern_search's arguments are flat, its errors name caps.*; `field`, the refused
-  field's name less a prefix; `service` / `host`, a reference) and one operator (present, absent, equals, in, not_in,
-  gt, ge, lt, le); a value may be a reference `{"service": path}` / `{"host": path}`. An absent path fails every
-  comparison but not_in; an unknown reference fails its predicate; booleans never equal numbers.
+- Grammar: `{"any": [[p, ...], ...]}`, or one subject (`path` into the arguments; `field`, the refused field's name
+  less a prefix; `service` / `host`, a reference) and one operator (present, absent, equals, in, not_in, gt, ge, lt,
+  le); a value may be a reference `{"service": path}` / `{"host": path}`. Pinned so that two implementations read it
+  alike: a path is keys joined by ".", `[n]` / `[*]` after a key, `{field}` a whole key (the refused field, the tool
+  error's else the answer error's, less `field_prefix`: pattern_search's arguments are flat, its errors name caps.*),
+  validated at load, and a substituted field that is no path reads absent; a list at a path is one value unless `[*]`
+  steps into it (never into an object's values); null and absent are one (equals null and null in an in / not_in
+  list are refused at load); equality is JSON equality (true is not 1, also inside lists; 250 and 250.0 are one); an
+  absent path fails every comparison but not_in; a refused field equal to its prefix names no key; an unknown
+  reference fails its predicate; `<...>` field placeholders match one or more characters, never none.
 - References: the host's /capabilities (`host`) and the service's GET /traverse/capabilities root (`service`:
   service_settings.*, presets.<preset>.budgets.<knob>, service_maxima.*, backends.<db>.resolve.time_budget.*), resolved
   from the run's recorded live document (the MCP runner's run.json `service_capabilities.document`; the host's
@@ -1357,46 +1363,57 @@ same round from the lane's TABLE-DIFF.md; both read service_by_design.json at sh
   name the source of each namespace and every mismatch; reevaluated.json records the same. Lane G3's gate calls
   compare.gate_configuration_problems (no live service_settings recorded, a mismatch, a line that read the table or
   found a reference unknown).
-- A case its request holds back does not apply (matching continues; the line's verdict_detail notes "<case>: request
-  predicate <predicate> does not hold (field <f>)").
+- A case its request holds back does not apply (matching continues; the line's verdict_detail notes once "<case>:
+  request predicate <predicate> does not hold (field <f>)", also for a case both named and answer-triggered).
 - Load validation (both implementations refuse the table): a malformed request, a reference the table's own blocks do
   not state, a missing request where one is required (an answer-triggered case without a wall rule; a case whose MCP
   field names several alternatives), and (compare.py's command line, reevaluate.py: the run's manifest) a scenario
   that names a case its own arguments do not satisfy for any field the case allows.
 - The table: the two blocks (staging's values: protein mismatch cap 1, reserves 250, /resolve max 60,000 ms; the
   service settings of async's 7a65e913; the preset rows and service maxima as staging's traverse_capabilities stated
-  them in the v4 run, walk 15,000 ms / 512 MB / 1e8); thirteen cases state their request (caps_zero, advanced_path_disabled,
-  empty_seeds, above_kind_cap, the preset row, the service-maximum knobs, five pattern refusals with field
-  alternatives, resolve.time_budget_above_host_max, resolve.time_budget_unnamed); caps_zero, the preset row and the
-  service-maximum case list their fields explicitly; the stale "20000 on staging" reads 60,000; tighter texts where the
-  recorded refusals state them. Every frozen manifest satisfies the requests it names.
+  them in the v4 run, walk 15,000 ms / 512 MB / 1e8); thirteen cases state their request (caps_zero,
+  advanced_path_disabled, empty_seeds, above_kind_cap, the preset row, the service-maximum knobs, five pattern refusals
+  with field alternatives, resolve.time_budget_above_host_max, resolve.time_budget_unnamed); caps_zero, the preset row
+  and the service-maximum case name their fields one by one instead of `caps.<cap>` / `bounds.<knob>` (the
+  service-maximum case: the knobs presets._check_knobs bounds by service_maxima that a basic request can reach,
+  bounds.max_extension_bp / max_steps / max_paths / max_output_bp / max_live_paths and labels.max_labels_per_node);
+  the advanced path never reads a refused "overrides." or "overrides.labels"; the stale "20000 on staging" reads
+  60,000; tighter texts where the recorded refusals state them. Every frozen manifest satisfies the requests it names.
 
 ### Timing plausibility from the request, the host and the service (finding 7)
 - The bounds a rule compares with come from the request, the host's capabilities and the service's settings (the same
-  references), never from the failing answer, whose stated bounds are checked: the /resolve budget is the request's,
-  an explicit-labels resolve's without one the service's default (60,000 ms); the client timeout t = max(the mode's
-  base 20 s / 120 s, budget + the host's reserve + 10 s).
+  references); the bounds a failing answer states are checked against them before any is used (a stated phase's
+  bound that passes sets the least wall, bound - 1 s; the legacy rule's stated timeout can only raise a term the
+  write cap then caps): the /resolve budget is the request's, an explicit-labels resolve's without one the service's
+  default (60,000 ms); the client timeout t = max(the mode's base 20 s / 120 s, budget + the host's reserve + 10 s).
 - resolve_timeout: a stated read bound or deadline window below t - 1 s ("service read bound ... below its own floor
   ...", "service deadline window ... below its own floor ..."), a write bound other than min(10 s, t) within 1 ms
   ("service write bound ... is not its write cap ...") is no host state whatever the wall; a tool error stating a
   reserve above the host's or a budget other than the one sent ("stated finalisation reserve ... above the host's ...",
   "the tool error's time_budget_ms ... is not the request's ...") is no host state (resolve_timeout and the relayed
-  /resolve deadline). The relayed deadline's threshold is budget - the host's reserve.
+  /resolve deadline). The relayed deadline's threshold is budget - the host's reserve. A legacy record (no stated
+  phase) without a budget takes the client timeout as a term (suite_common.legacy_unbudgeted_client_timeout_term:
+  threshold 9,000 ms instead of the answer's "within <N> s" - 1 s or rule (c); pending the async session's agreement).
 - pattern.deadline_ends_task's wall rule: the request's budget - 1 s (the engine answers its deadline only once the
   budget has elapsed) on the failing attempt's own wall (the deadline-ended task's one HTTP try; a traversal job's last
   settled attempt), never mcp_phases.backend_ms (a sum over a search's tasks or a job's attempts); a reserve the answer
   states above the host's keeps the case from applying. Rule 2 and rule (c) are unchanged.
 - Three tests asserted answer-trusting bounds (a 5 s write bound, a 15 s deadline window on a 20 s budget, a tool
   error's 5,000 ms budget for a 20,000 ms request) and are corrected, with the read floor's and the explicit-labels
-  deadline's expectations that followed the tool error's budget.
+  deadline's expectations that followed the tool error's budget and the legacy rule's without a budget.
 
 ### Comparator
 - A not_implemented_mcp match (answer_match.mcp_outcome) whose pair is a direct-side disagreement with
   direct_mismatch "disagree" makes the scenario's class `disagree` (side direct, the case and the direct execution
   named, the MCP executions' not_implemented_mcp stated in the detail the report shows); the MCP lines keep
-  not_implemented_mcp; "timing" stays unverified (the agreed decision of 2026-10-14).
-- A named not-expressible case (resolve.not_expressible.bounds_max_query_bp) turns only the direct side of a case the
-  scenario names into not_implemented_mcp; a check-level disagreement or an MCP side stays a disagreement.
+  not_implemented_mcp; "timing" stays unverified (the agreed decision of 2026-10-14). Each repeat is classified on its
+  own: the host's ordinary answer stays the reference beside a not_implemented_mcp group, and an MCP fault on another
+  repeat is the scenario's class, never hidden under not_implemented_mcp.
+- A named not-expressible case (resolve.not_expressible.bounds_max_query_bp) reads not_implemented_mcp only when every
+  disagreement is the direct side of a case the scenario names; a check-level disagreement, an MCP side or a fault on
+  any repeat stays a disagreement.
+- A named case's direct side is judged on every repeat of both direct arms, as an answer-triggered case's is (the
+  arm and repeat of a contradiction named; a transport error reads neither way).
 - The direct arms' timing content rule tests every route of the stopped walk (any parent at a merge) as a prefix of a
   route of the complete walk, not the displayed first-parent paths (T-labels-0003 of the v4 run, SPEC-labeled-
   traversal-core §7.1), bounded by the checks' route-state limit.
@@ -1406,5 +1423,5 @@ same round from the lane's TABLE-DIFF.md; both read service_by_design.json at sh
   anonymous) against fe563f38: no outcome, matched case, check or MCP class moves; v4 T-labels-0003's direct pair reads
   timing (was the run's only direct disagreement). The deadline_ends_task lines state the new threshold (v3 6, v4 35
   lines); 22 lines per run gain request_evidence (T-labels-0004 / -0006 stay not_implemented_mcp, the setting read from
-  the table's block).
-- 260 tests pass (1 skipped).
+  the table's block). The verification's amendments move nothing further.
+- 262 tests pass (1 skipped).

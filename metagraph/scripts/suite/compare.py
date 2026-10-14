@@ -1425,8 +1425,8 @@ def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=N
     complete one (VERIFY-2 item 5): a 503 carries no content; /pattern: every population count of each pattern entry
     consistent (_count_problems: the ranges the two counts admit overlap, B5b-02) and, where the complete entry
     states retrieval_complete, every released result among its results (_released_problems); /traverse: every
-    stopped path a prefix of a complete path; None where the content cannot be read or the route has no rule (a
-    /resolve stop)."""
+    stopped route a prefix of a complete route, any parent at a merge (_walk_prefix_problems); None where the content
+    cannot be read or the route has no rule (a /resolve stop)."""
     if stopped_line.get("http") == 503:
         return True, "a 503 carries no content"
     a, b = load_answer(stopped_line, run_dir), load_answer(complete_line, run_dir)
