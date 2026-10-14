@@ -2243,6 +2243,26 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(o, "fail")
         self.assertIn("0 ambiguous split(s)", d)
 
+    def test_structural_knobs_of_the_mcp_arm(self):
+        # the MCP arm asks for its preset with the overrides of the scenario's MCP arguments: its knobs are those
+        # overrides, else the answer's echo (the preset's values), not the direct request's
+        sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 1}},
+                                       echo={"branching": {"max_label_branches": 2}})
+        sc["mcp"] = {"tool": "traverse_fetch", "arguments": {"preset": "walk", "overrides": {
+            "bounds": {"max_extension_bp": 100}, "direction": "right"}}}
+        self.assertEqual(outcome(sc, ans, "invariants", _arm="mcp")[0], "pass")
+        self.assertEqual(outcome(sc, ans, "walk_in_record", _arm="mcp")[0], "pass")
+        self.assertEqual(outcome(sc, ans, "invariants")[0], "fail")          # the direct request's 1
+        sc["mcp"]["arguments"]["overrides"]["branching"] = {"max_label_branches": 1}
+        o, d = outcome(sc, ans, "invariants", _arm="mcp")
+        self.assertEqual(o, "fail")                                          # an override the service dropped
+        self.assertIn("a branch end after 2 branch(es) of max_label_branches 1", d)
+        # the trie preset's echo states the exhaustive walk: no branch end can have happened on either arm
+        sc_trie, a_trie = self.structural_walk(strategy={"exhaustive": True}, echo={"exhaustive": True})
+        sc_trie["mcp"] = {"arguments": {"preset": "trie", "overrides": {"bounds": {"max_extension_bp": 100}}}}
+        self.assertEqual(outcome(sc_trie, a_trie, "invariants", _arm="mcp")[0], "fail")
+        self.assertEqual(outcome(sc_trie, a_trie, "invariants")[0], "fail")
+
     def test_structural_ends_index_each_arm_once(self):
         # the route split table is built once per arm, not per path: a wide trie (max_paths 10,000 leaves) would
         # otherwise cost time quadratic in its paths
@@ -2332,7 +2352,8 @@ class TraverseChecks(unittest.TestCase):
 
         def ans(**kw):
             return ok_answer({"results": [{"outcome": {"walks": "complete"}, "graphlet": mgt(**kw)}],
-                              "strategy": {"bounds": {"max_extension_bp": 100}}})
+                              "strategy": {"bounds": {"max_extension_bp": 100},
+                                           "branching": {"max_label_branches": 2}}})
         arms = checks.graphlet_arms(mgt())
         leaf = arms["right"]["paths"][1]
         self.assertEqual((leaf["length_bp"], leaf["end_reasons"], leaf["end_labels"]),
@@ -2340,12 +2361,12 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(arms["right"]["segments"][3]["events"],
                          [{"at_bp": 30, "type": "label_end", "label": 0, "reason": "branch",
                            "structural_successors": 2}])
-        for a in ({}, ):
-            self.assertEqual(outcome(sc, ans(**a), "walk_in_record", _arm="mcp")[0], "pass")
-            self.assertEqual(outcome(sc, ans(**a), "invariants", _arm="mcp")[0], "pass")
-        for bad in ({"branches": 0}, {"split": "0"}, {"successors": "1"}):
-            self.assertEqual(outcome(sc, ans(**bad), "walk_in_record", _arm="mcp")[0], "fail", bad)
-            self.assertEqual(outcome(sc, ans(**bad), "invariants", _arm="mcp")[0], "fail", bad)
+        for arm in ("mcp", "direct-local"):
+            self.assertEqual(outcome(sc, ans(), "walk_in_record", _arm=arm)[0], "pass")
+            self.assertEqual(outcome(sc, ans(), "invariants", _arm=arm)[0], "pass")
+            for bad in ({"branches": 0}, {"split": "0"}, {"successors": "1"}):
+                self.assertEqual(outcome(sc, ans(**bad), "walk_in_record", _arm=arm)[0], "fail", bad)
+                self.assertEqual(outcome(sc, ans(**bad), "invariants", _arm=arm)[0], "fail", bad)
 
     def test_every_stored_traverse_answer_states_possible_structural_ends(self):
         # the engine's stored answers (CLI documents of tiny indexes, full and graphlet, and the mini index's

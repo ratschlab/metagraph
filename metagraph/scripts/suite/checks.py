@@ -2702,19 +2702,30 @@ _PRESET_KNOBS = {("branching", "max_label_branches"): "unlimited", ("branching",
                  ("bounds", "min_live_labels"): 1}
 
 
-def _strategy_knob(sc: dict, ans: dict, group: str, name: str) -> Any:
+def _requested_strategy(sc: dict, arm: Optional[str]) -> dict:
+    """The strategy an arm asked for: the request's on a direct arm; on the MCP arm the overrides of the scenario's
+    MCP arguments, the knobs it states beside its preset (the preset's own reach the walk unstated, and the answer's
+    echo states them)."""
+    if arm == "mcp":
+        args = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
+        st = args.get("overrides") if isinstance(args, dict) else None
+    else:
+        st = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
+    return st if isinstance(st, dict) else {}
+
+
+def _strategy_knob(sc: dict, ans: dict, group: str, name: str, arm: Optional[str] = None) -> Any:
     """The value of strategy.<group>.<name> the walk ran with (SPEC-labeled-traversal-core §5): a clamp's effective
-    value (strategy.clamped), else the request's, else the default of the request's exhaustive preset or annotate
-    mode (§6.9), else the answer's echo, else the default (the echo's preset or mode, else §5's). The request comes
-    before the echo: a knob a service dropped or rewrote without a clamp is held to what the request asked, never
-    excused by its own echo, and so is a preset's knob the request implies."""
+    value (strategy.clamped), else the arm's request's (_requested_strategy), else the default of that request's
+    exhaustive preset or annotate mode (§6.9), else the answer's echo, else the default (the echo's preset or mode,
+    else §5's). The request comes before the echo: a knob a service dropped or rewrote without a clamp is held to
+    what the arm asked, never excused by its own echo, and so is a preset's knob the request implies."""
     body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
     echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
     for c in echo.get("clamped") or []:
         if isinstance(c, dict) and c.get("field") == "%s.%s" % (group, name) and "effective" in c:
             return c["effective"]
-    req = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
-    req = req if isinstance(req, dict) else {}
+    req = _requested_strategy(sc, arm)
     for st in (req, echo):
         g = st.get(group)
         if isinstance(g, dict) and name in g:
@@ -2768,7 +2779,8 @@ def _arm_index(armo: dict) -> dict:
             "splits": _route_splits(armo), "runs": runs}
 
 
-def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Optional[dict] = None) -> List[str]:
+def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Optional[dict] = None,
+                             arm: Optional[str] = None) -> List[str]:
     """Why the structural ends stated at path |p|'s leaf cannot have happened, judged from the request, the strategy
     (_strategy_knob) and the arm (SPEC-labeled-traversal-core §6.4, §6.6, §6.7):
     - a structural reason the path counts (end_reasons) has a label_end event of it on its leaf at the path's end
@@ -2784,7 +2796,7 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
       min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route to the leaf through that many
       splits;
     - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end.
-    |index| is the arm's _arm_index, built here when not given."""
+    |index| is the arm's _arm_index, built here when not given; |arm| names the arm whose request holds the knobs."""
     out: List[str] = []
     chain = p.get("segments") or []
     if not chain:
@@ -2806,11 +2818,11 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
         stated |= {"branch" for x in stated if x in _QUORUM_ENDS}
         for reason in sorted(set(p.get("end_reasons") or {}) & _STATED_STRUCTURAL_ENDS - stated):
             out.append("%s ends by %s without a label_end event of it on its leaf" % (where, reason))
-    mlb = _strategy_knob(sc, ans, "branching", "max_label_branches")
-    msp = _strategy_knob(sc, ans, "branching", "max_splits_per_path")
-    msl = _strategy_knob(sc, ans, "branching", "min_successor_labels")
-    msf = _strategy_knob(sc, ans, "branching", "min_successor_fraction")
-    mll = _strategy_knob(sc, ans, "bounds", "min_live_labels")
+    mlb = _strategy_knob(sc, ans, "branching", "max_label_branches", arm)
+    msp = _strategy_knob(sc, ans, "branching", "max_splits_per_path", arm)
+    msl = _strategy_knob(sc, ans, "branching", "min_successor_labels", arm)
+    msf = _strategy_knob(sc, ans, "branching", "min_successor_fraction", arm)
+    mll = _strategy_knob(sc, ans, "bounds", "min_live_labels", arm)
     quorum = (_finite(msl) and msl >= 2) or (isinstance(msf, (int, float)) and msf > 0) or (_finite(mll) and mll > 1)
     amb_n, split_n = index["splits"](chain[-1])
     lineage = dict(index["runs"].get((chain[-1], L)) or {})
@@ -3154,7 +3166,7 @@ def check_walk_in_record(sc, ans, a, arm):
             if len(f) == best:
                 pe = _leaf_ends(armo, p)
                 ends |= pe
-                bad = _structural_end_problems(sc, ans, armo, p, index)
+                bad = _structural_end_problems(sc, ans, armo, p, index, arm)
                 if bad:   # a leaf with an end that cannot have happened shows none of its ends
                     disproved += bad
                 else:
@@ -3556,7 +3568,7 @@ def _traverse_invariants(sc, ans, a, arm):
             index = _arm_index(armo) if isinstance(armo, dict) else None
             for p in (armo.get("paths") or []) if isinstance(armo, dict) else []:
                 probs += ["result %d %s %s" % (i, side, m)
-                          for m in _structural_end_problems(sc, ans, armo, p, index)]
+                          for m in _structural_end_problems(sc, ans, armo, p, index, arm)]
     probs += _traverse_reason_problems(sc, ans)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
 
