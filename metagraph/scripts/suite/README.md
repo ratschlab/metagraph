@@ -1851,7 +1851,9 @@ by lane S6c; everything below was open.
   sessions[-1].loop, `loop_record`) counts a scenario as completed only when every step of it succeeded, lists
   `failed_steps` as ARM:SCENARIO:EXIT, and a loop that ran through with a failed step ends `incomplete` (reason
   `failed_steps`; the report's verdict reads INCOMPLETE through it) with exit status 1, like a failed loop. No
-  retry: a step that failed is resumed like any other (`--resume`).
+  retry: a step that failed is resumed like any other (`--resume`). A loop stopped by the request cap stays `capped`
+  (exit 0, a planned stop that --resume continues) also when a step failed before the cap; its failed_steps are
+  recorded and the report reads INCOMPLETE.
 
 ### The orchestration records what its arms lost (P6-end-to-end-01, the run_suite side)
 - Lane S6c's plan reconciliation already reads a planned execution no arm recorded as INCOMPLETE (the report side
@@ -1949,16 +1951,27 @@ by lane S6c; everything below was open.
   session of orchestrator.json records `snapshot` {state created / kept, changed, live_differs, mcp_checks_dir}.
 - **What judged each arm.** run_direct records per session `checks_sha256`, `suite_common_sha256` and `checks_dir`
   (of the modules it imported; the stub's file under --checks stub), and the latest at run.json's top. async's runner
-  records `checks_dir` per invocation (and `checks_module.file`); it records no sha256 yet (for async below).
+  records `checks_dir` per invocation (run.json `invocations[]`; it keeps `checks_module` out of them). It is to
+  record, per invocation beside `checks_dir`, `checks_sha256` and `suite_common_sha256` (the sha256 of checks.py and
+  suite_common.py it imported); merge_run reads exactly these per-invocation keys (a runner without `invocations`, as
+  tests/fake_mcp.py, states its one at run.json's top) and never `checks_module`.
 - **merge_run.checks_identity** (recorded sets; a re-evaluated set is judged with one checks module, the
   re-evaluation's) compares them with the snapshot: a direct session whose checks or suite_common sha256 is not the
   snapshot's (the stub's for a stub arm), an MCP invocation whose recorded checks directory is not RUN_ID/scripts (a
-  copy of the run elsewhere keeps that tail) or whose stated sha256 is not the snapshot's, and a snapshot file changed
-  after it was taken are `differs`; a session or invocation stating neither is `unverified` (sessions that started
-  before the snapshot are counted apart); one sentence per arm and kind, since a paired run has a session per step. Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
-  --strict-identity (exit 3) and for gate.py (kind identity; a run older than the snapshot passes the gate through a
-  re-evaluation). Without a snapshot (a run before lane S7r) only arms stating different sha256 are named. The
-  outcomes merge_run makes stricter with checks.scenario_outcome are the snapshot's checks' for a recorded set.
+  copy of the run elsewhere keeps that tail) or whose stated checks or suite_common sha256 is not the snapshot's, and
+  a snapshot file changed after it was taken are `differs`; a session or invocation stating neither is `unverified`
+  (sessions that started before the snapshot are counted apart); one sentence per arm and kind, since a paired run
+  has a session per step. Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
+  --strict-identity (exit 3) and for gate.py (kind identity). Without a snapshot (a run before lane S7r) only arms
+  stating different sha256 are named. The outcomes merge_run makes stricter with checks.scenario_outcome are the
+  snapshot's checks' for a recorded set.
+- **A gated resume of a run started before the snapshot existed always fails the checks identity.** Its first
+  resume takes the snapshot, and the sessions of its earlier invocations cannot state a checks sha256: they are
+  `unverified`, an error with a snapshot. This is the strict gate's intent (what judged those executions is not
+  recorded); the remedy is a fresh run. (A re-evaluated set is judged with one checks module, the re-evaluation's,
+  and the check does not apply to it.)
+- **`--mcp-run DIR`** (a finished MCP run copied into arms/mcp) was not judged with the run's snapshot: its
+  invocations state another checks directory (or none), which the merge names and the gate fails on.
 - compare.py, report.py and gate.py's property reading still load this directory's checks.py and table for a
   recorded set (lane S-verdict's files; noted for the integrator).
 
