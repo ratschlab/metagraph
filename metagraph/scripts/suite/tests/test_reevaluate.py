@@ -304,6 +304,33 @@ class Reevaluate(unittest.TestCase):
                          "fail")
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False)[0], "fail")
 
+    def test_host_state_and_answer_case_order(self):
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        fail = [{"check": "status", "outcome": "fail", "detail": "http 504"}]
+        # G23: the service's resolve_timeout is a host state (inconclusive) unless the scenario expects the code
+        res = scenario("R-0009", "POST /resolve", STATUS)
+        to = {"http": 504, "body": None, "error": {"code": "resolve_timeout", "text": "the backend did not answer"}}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, {"outcome": "fail"}, fail, False, cases),
+                         ("inconclusive", "the MCP runner's host-state rule (resolve_timeout)"))
+        named = scenario("R-0010", "POST /resolve", [{"check": "status", "args": {"http": 504,
+                                                                                 "code": "resolve_timeout"}}])
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", named, to, {"outcome": "fail"}, fail, False, cases)[0],
+                         "fail")
+        # B6: the answer-triggered case before a case the runner named: it names the execution's case
+        sc_ = scenario("N-0001", "POST /pattern", STATUS)
+        relayed = {"http": 502, "body": None,
+                   "error": {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be"}}
+        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "service_by_design"}, fail, False,
+                                          cases)
+        self.assertEqual((out, kept), ("service_by_design",
+                                       "the table's answer-triggered case pattern.deadline_ends_task"))
+        out, kept = reevaluate.outcome_of(None, "mcp", sc_, {"http": 400, "error": {"code": "x"}},
+                                          {"outcome": "service_by_design"}, fail, False, cases)
+        self.assertEqual((out, kept), ("service_by_design", "decided by the runner without the checks"))
+        # a runner error stays one
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "error"}, fail, False, cases)[0],
+                         "error")
+
     def test_merge_without_a_reevaluation(self):
         with self.assertRaises(SystemExit):
             merge_run.merge(self.run_dir, reevaluated=True)

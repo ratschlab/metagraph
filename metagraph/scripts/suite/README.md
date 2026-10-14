@@ -233,9 +233,9 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   (other answer, same check outcomes, at least one check compared), `not_comparable` (other answer, no check
   evaluated on both) or `disagree`, with `checks_compared`; the MCP class of DESIGN §1.3; overheads, cold vs
   warm, timing and resource summaries per area, arm and host cache.
-- MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; the scenario's
-  `mcp.by_design` case(s) in async's table (below); an answer-triggered case of the table (below); the MCP
-  runner's own `not_implemented_mcp` /
+- MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; an answer-triggered
+  case of the table (below; lane S5: before the named cases, which then judge the rest); the scenario's
+  `mcp.by_design` case(s) in async's table (below); the MCP runner's own `not_implemented_mcp` /
   `service_by_design` outcome; else, on the checks both arms evaluated (a check `not_exposed` on either side
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
@@ -256,7 +256,8 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   report counts verified and unverified by-design pairs. The MCP arm's execution lines should carry `error`
   {code, text, field}.
 - Answer-triggered cases (`answer_match` {routes, direct, mcp}, each side {http, code (or `a | b`),
-  text_contains}; so far pattern.deadline_ends_task: the host's 503 deadline the service relays as a failed
+  text_contains}, lane S5 adds http lists, the mcp side's field and the direct side's slot_code: "Comparator and
+  re-evaluation" below; so far pattern.deadline_ends_task: the host's 503 deadline the service relays as a failed
   search, 502 search_failed with the text pattern_deadline): they apply whatever the scenario names. An MCP
   execution on one of `routes` matching the `mcp` side is service-side by design (`by` answer), verified when a
   reference direct execution of the scenario matches the `direct` side, unverified otherwise (the host answered
@@ -762,4 +763,36 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   joins evaluate's allowed list, so the body's checks read inconclusive and `budget_respected` judges it by the
   client's wall time (`_budget_503`: a 503 long past its budget stays a finding). A scenario that expects a refusal
   (no 200), names the deadline itself, or another route or code is judged as it states.
+
+### Comparator and re-evaluation
+- Field alternatives and placeholders (G08, G07 as VERIFY-RP has it). A case's `field` may list alternatives
+  `a | b`, split as its code is (outside `<...>`), and a `<...>` placeholder matches anything, dots included, as
+  async's runner (`ServiceByDesign._like`) reads it: `predicate<path of the first fault>` matches
+  `predicate.at_least.n`, `bounds.<knob>` matches `bounds.a.b` too (lane S3's test said otherwise; the runner decides
+  the execution's outcome with its own reading, so the comparator follows it).
+- The host side of a case (G09, G10; async's additions). `direct_expectation` may state `http` as a status or a list
+  (a budget that gives 200 or 503), `code` (a top-level or a pattern slot's, `a | b`), `slot_code` (a pattern
+  slot's only), `text` (whole, digits ignored), `text_prefix` (digits ignored: a label-agnostic text such as
+  "Label not found in the annotation: ") and `text_contains`; `text_source` and `behaviour` are descriptive. A
+  case whose host side states nothing (G11) has its direct side judged by the scenario's own `status` check on the
+  reference direct execution: pass verified, fail a disagreement (side direct), anything else unverified.
+- Keys a newer table may state. A side's key the comparator neither matches nor knows as descriptive is never
+  ignored when it is stated (present, not null): that side is unverified (None) with a detail naming the key; an
+  answer_match whose mcp side states one never triggers. tests/test_compare_report.py checks that async's table
+  states none.
+- Host-state executions (G23 as VERIFY-RP amends it). `resolve_timeout` (the service's resolve client gave up before
+  the host's overrun answer under load) joins `uninterruptible_overrun_exceeds_allowance` in
+  `compare.MCP_HOST_STATE_CODES`, which reevaluate.py applies (inconclusive unless the scenario expects the code);
+  when a named case is judged, an MCP execution that is inconclusive by such a code is skipped (it reads neither for
+  nor against the case), and with none left the pair is unverified, not a disagreement.
+- Answer-triggered cases first (B6). An answer_match case takes out the MCP executions its mcp side matches (service
+  side by design, `by: answer`) BEFORE the scenario's named cases, which judge the rest, against the direct
+  executions the answer case does not explain either (a direct answer of its direct side, such as the host's own
+  503 deadline, says nothing about the rest's pair); a disagreement of the rest is the class, with `answer_case`.
+  reevaluate.py applies the answer case before keeping a runner's named-case mark, so the execution names the
+  answer case. answer_match sides: direct {http (a status or a list), code (top-level or slot), slot_code,
+  text_contains}, mcp {http (a status or a list), code, text_contains, field (as above)}.
+- Not changed: reevaluate.py keeps the runner's verdict on a named case (it does not re-apply named cases), so an
+  MCP execution the runner judged `fail` against a case its matcher could not read (G08's alternation) stays `fail`
+  until the MCP arm runs again with async's fixed matcher; compare.py's class for the scenario changes offline.
 

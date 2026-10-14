@@ -213,9 +213,20 @@ class FieldPlaceholder(unittest.TestCase):
     def test_placeholder(self):
         self.assertTrue(compare._field_matches("bounds.time_budget_ms", "bounds.<knob>"))
         self.assertFalse(compare._field_matches("strategy.time_budget_ms", "bounds.<knob>"))
-        self.assertFalse(compare._field_matches("bounds.a.b", "bounds.<knob>"))
+        # a placeholder matches anything, dots included, as async's runner (_like) reads it (lane S5's B2, G07):
+        # "predicate<path of the first fault>" names the path of the first fault
+        self.assertTrue(compare._field_matches("bounds.a.b", "bounds.<knob>"))
+        self.assertTrue(compare._field_matches("predicate.at_least.n", "predicate<path of the first fault>"))
+        self.assertTrue(compare._field_matches("predicate", "predicate<path of the first fault>"))
+        self.assertFalse(compare._field_matches("max_mismatches", "predicate<path of the first fault>"))
         self.assertTrue(compare._field_matches("max_mismatches", "max_mismatches"))
         self.assertFalse(compare._field_matches("max_contexts", "max_mismatches"))
+        # alternatives "a | b", split as codes are (G08)
+        self.assertTrue(compare._field_matches("predicate_scope", "predicate_strands | predicate_scope"))
+        self.assertTrue(compare._field_matches("predicate_strands", "predicate_strands | predicate_scope"))
+        self.assertFalse(compare._field_matches("predicate", "predicate_strands | predicate_scope"))
+        self.assertTrue(compare._field_matches("caps.max_paths", "caps.<cap> | max_mismatches"))
+        self.assertFalse(compare._field_matches(None, "max_mismatches"))
 
 
 if __name__ == "__main__":

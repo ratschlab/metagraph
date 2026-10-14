@@ -23,9 +23,12 @@ commit 22d034ba; --by-design overrides) holds cases {id, direct_expectation, ser
 scenario names its cases in `mcp.by_design` (an id or a list). agreement `not_implemented_mcp` makes the
 scenario "not implemented yet via MCP"; `service_only` (no host counterpart) makes it service-side by design;
 `by_design` makes it service-side by design when the pair holds: the direct answer matches
-direct_expectation (http, code, and the text with digits ignored, each where stated) and the MCP answer
-matches service_answer (refused_at_submit / relayed: error.code, text_contains, field where the MCP execution
-states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
+direct_expectation (http or a list, code or slot_code, the text or text_prefix with digits ignored, text_contains,
+each where stated; nothing stated: the scenario's own status check) and the MCP answer matches service_answer
+(refused_at_submit / relayed: error.code, text_contains, field with alternatives and placeholders where the MCP
+execution states them; answered / clamped: no error). A pair that does not hold is a disagreement, naming the side.
+An answer-triggered case (answer_match) is applied before the named cases, which judge the rest of the MCP
+executions; a stated key this comparator does not know leaves its side unverified.
 """
 
 import argparse
@@ -72,12 +75,48 @@ def _digits_free(text):
     return re.sub(r"[0-9]+", "#", text or "")
 
 
-def direct_errors(line, run_dir):
-    """(codes, texts) of a direct answer: the top-level error's and each pattern slot's (from the raw answer)."""
-    codes, texts = set(), set()
+# The keys a side of a table case may state. A key the comparator matches is stated when it is present and not null;
+# a descriptive key is never matched. A stated key outside both (a table newer than this comparator) is never
+# ignored silently: the side is then unverified (None), its detail naming the key.
+DIRECT_KEYS = ("http", "code", "slot_code", "text", "text_prefix", "text_contains")
+DIRECT_NOTES = ("text_source", "behaviour")
+SERVICE_KEYS = ("outcome", "code", "text_contains", "field")
+SERVICE_NOTES = ("tool", "http", "stage", "detail", "keys", "missing_argument", "reason")
+ANSWER_DIRECT_KEYS = ("http", "code", "slot_code", "text_contains")
+ANSWER_MCP_KEYS = ("http", "code", "text_contains", "field")
+# async's MCP runner (suite_mcp_runner.py HOST_STATE_CODES) and the design lead's rule of 2026-10-13: an MCP answer
+# refused with one of these codes states an environmental host state, not a result: inconclusive (reevaluate.py), and
+# read neither for nor against a named case here. resolve_timeout (G23 as VERIFY-RP amends it): the service's resolve
+# client gave up before the host's overrun answer (an unpolled cold row piece under load, SPEC-core §4.5).
+MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance", "resolve_timeout")
+
+
+def unknown_keys(side, known, notes=()):
+    """The keys |side| states (present, not null) that are neither matched (|known|) nor descriptive (|notes|)."""
+    if not isinstance(side, dict):
+        return []
+    return sorted(k for k, v in side.items() if v is not None and k not in known and k not in notes)
+
+
+def _alternatives(value):
+    """A stated value's alternatives: "a | b" (outside <...> placeholders), or a list."""
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if v is not None and str(v).strip()]
+    return [x.strip() for x in re.split(r"\|(?![^<]*>)", str(value)) if x.strip()]
+
+
+def _http_wants(value):
+    """A stated http: one status or a list of them."""
+    return value if isinstance(value, list) else [value]
+
+
+def direct_error_parts(line, run_dir):
+    """(top-level codes, pattern slot codes, texts) of a direct answer: the error of the line and of each pattern
+    slot of the raw answer."""
+    top, slots, texts = set(), set(), set()
     err = line.get("error") or {}
     if err.get("code"):
-        codes.add(err["code"])
+        top.add(err["code"])
     if err.get("text"):
         texts.add(err["text"])
     raw = line.get("raw")
@@ -92,10 +131,16 @@ def direct_errors(line, run_dir):
                 for p in body.get("patterns") or []:
                     if isinstance(p, dict) and isinstance(p.get("error"), dict):
                         if p["error"].get("code"):
-                            codes.add(p["error"]["code"])
+                            slots.add(p["error"]["code"])
                         if p["error"].get("message"):
                             texts.add(p["error"]["message"])
-    return codes, texts
+    return top, slots, texts
+
+
+def direct_errors(line, run_dir):
+    """(codes, texts) of a direct answer: the top-level error's and each pattern slot's (from the raw answer)."""
+    top, slots, texts = direct_error_parts(line, run_dir)
+    return top | slots, texts
 
 
 def mcp_error(line, run_dir):
@@ -118,46 +163,113 @@ def mcp_error(line, run_dir):
     return None
 
 
+def _direct_problems(side, http, top, slots, texts):
+    """(problems, number of stated keys compared) of a direct answer against a case's direct side: http (a status or
+    a list), code (a top-level or a pattern slot's; alternatives "a | b"), slot_code (a pattern slot's only), text
+    (whole, digits ignored), text_prefix (digits ignored), text_contains (a string or a list)."""
+    problems, compared = [], 0
+    if side.get("http") is not None:
+        compared += 1
+        if http not in _http_wants(side["http"]):
+            problems.append("http %s, the case expects %s" % (http, side["http"]))
+    if side.get("code") is not None:
+        compared += 1
+        if not set(_alternatives(side["code"])) & (top | slots):
+            problems.append("code %s, the case expects %s" % (sorted(top | slots) or None, side["code"]))
+    if side.get("slot_code") is not None:
+        compared += 1
+        if not set(_alternatives(side["slot_code"])) & slots:
+            problems.append("slot code %s, the case expects %s" % (sorted(slots) or None, side["slot_code"]))
+    if side.get("text") is not None:
+        compared += 1
+        want = _digits_free(side["text"])
+        if not any(_digits_free(t) == want for t in texts):
+            problems.append("text %r, the case expects %r" % (sorted(texts)[:1], side["text"]))
+    if side.get("text_prefix") is not None:
+        compared += 1
+        want = _digits_free(side["text_prefix"])
+        if not any(_digits_free(t).startswith(want) for t in texts):
+            problems.append("text %r, the case expects the prefix %r" % (sorted(texts)[:1], side["text_prefix"]))
+    if side.get("text_contains") is not None:
+        compared += 1
+        frags = side["text_contains"] if isinstance(side["text_contains"], list) else [side["text_contains"]]
+        if not any(all(str(f) in t for f in frags) for t in texts):
+            problems.append("text %r lacks %r" % (sorted(texts)[:1], side["text_contains"]))
+    return problems, compared
+
+
+def states_host_answer(expectation):
+    """Whether a case's direct_expectation states anything to compare (a matched key, present and not null)."""
+    return any((expectation or {}).get(k) is not None for k in DIRECT_KEYS)
+
+
 def match_direct(expectation, line, run_dir):
     """(True / False / None, detail): does the direct answer match a case's direct_expectation (None: no
-    direct execution, or nothing stated to compare)."""
+    direct execution, nothing stated to compare, or a stated key this comparator does not know)."""
     if line is None:
         return None, "no direct execution"
-    problems, compared = [], 0
-    if expectation.get("http") is not None:
-        compared += 1
-        if line.get("http") != expectation["http"]:
-            problems.append("http %s, the case expects %s" % (line.get("http"), expectation["http"]))
-    codes, texts = direct_errors(line, run_dir)
-    if expectation.get("code") is not None:
-        compared += 1
-        if expectation["code"] not in codes:
-            problems.append("code %s, the case expects %s" % (sorted(codes) or None, expectation["code"]))
-    if expectation.get("text") is not None:
-        compared += 1
-        want = _digits_free(expectation["text"])
-        if not any(_digits_free(t) == want for t in texts):
-            problems.append("text %r, the case expects %r" % (sorted(texts)[:1], expectation["text"]))
+    unknown = unknown_keys(expectation, DIRECT_KEYS, DIRECT_NOTES)
+    if unknown:
+        return None, "the case's direct_expectation states %s, which this comparator does not match" % unknown
+    top, slots, texts = direct_error_parts(line, run_dir)
+    problems, compared = _direct_problems(expectation or {}, line.get("http"), top, slots, texts)
     if problems:
         return False, "; ".join(problems)
     return (True if compared else None), ("matches" if compared else "nothing stated to compare")
 
 
+def status_verdict(line):
+    """(True / False / None, detail) of the scenario's own status check(s) on a direct execution: the direct side of a
+    case that states no host answer (G11), judged by what the scenario itself expects of the host."""
+    if line is None:
+        return None, "no direct execution"
+    st = [c for c in line.get("checks") or [] if c.get("check") == "status"]
+    if not st:
+        return None, "the case states no host answer, and the reference direct execution has no status check"
+    outs = [c.get("outcome") for c in st]
+    detail = "; ".join(str(c.get("detail") or "")[:160] for c in st)
+    if "fail" in outs:
+        return False, "the case states no host answer; the scenario's own status check failed on repeat %s (%s)" % (
+            line.get("repeat"), detail)
+    if all(o == "pass" for o in outs):
+        return True, "the case states no host answer; the scenario's own status check passed on repeat %s (%s)" % (
+            line.get("repeat"), detail)
+    return None, "the case states no host answer; the scenario's own status check reads %s on repeat %s" % (
+        outs, line.get("repeat"))
+
+
 def _field_matches(observed, case_field):
-    """A case's field may name a placeholder ("bounds.<knob>": any one path element there)."""
-    if "<" not in case_field:
-        return observed == case_field
-    import re
-    pattern = re.sub(r"<[^>]*>", "[^.]+", re.escape(case_field).replace("\\<", "<").replace("\\>", ">"))
-    return re.fullmatch(pattern, observed) is not None
+    """A case's field: alternatives "a | b" (split as its code), each with `<...>` placeholders that match anything,
+    dots included, as async's runner (suite_mcp_runner.py ServiceByDesign._like) matches them: "bounds.<knob>",
+    "predicate<path of the first fault>" (predicate.at_least.n)."""
+    if observed is None:
+        return False
+    for alt in _alternatives(case_field):
+        rx = ".*?".join(re.escape(part) for part in re.split(r"<[^<>]+>", alt))
+        if re.fullmatch(rx, str(observed), re.S) is not None:
+            return True
+    return False
+
+
+def host_state_line(line, run_dir):
+    """Whether an MCP execution is inconclusive by a host-state code (MCP_HOST_STATE_CODES): it reads neither for nor
+    against a named case."""
+    if line.get("outcome") != "inconclusive":
+        return False
+    err = mcp_error(line, run_dir) or {}
+    return str(err.get("code")) in MCP_HOST_STATE_CODES
 
 
 def match_service(service_answer, lines, run_dir):
     """(True / False / None, detail): do the MCP executions match a case's service_answer (None: the MCP
-    execution states nothing to compare, and its runner marked it service_by_design)."""
+    execution states nothing to compare, and its runner marked it service_by_design; or the case states a key
+    this comparator does not know)."""
+    unknown = unknown_keys(service_answer, SERVICE_KEYS, SERVICE_NOTES)
+    if unknown:
+        return None, "the case's service_answer states %s, which this comparator does not match" % unknown
     outcome = service_answer.get("outcome")
     # A case may name alternative codes ("capacity_unavailable | traversal_queue_full").
-    codes = [c.strip() for c in str(service_answer.get("code") or "").split("|") if c.strip()]
+    codes = _alternatives(service_answer.get("code") or "")
     for line in lines:
         err = mcp_error(line, run_dir)
         if outcome in ("refused_at_submit", "relayed"):
@@ -201,19 +313,38 @@ def by_design_class(case, direct_line, mcp_lines, run_dir):
 
     `verified` is True only when every side the case has was checked and held: both sides for `by_design`,
     the MCP side for `service_only` (no host counterpart); a side with nothing to compare leaves it False
-    (counted as an unverified by-design pair in the report)."""
+    (counted as an unverified by-design pair in the report). A case that states no host answer (no http, code,
+    text, ... in its direct_expectation) has its direct side judged by the scenario's own status check on the
+    reference direct execution (G11: pass verified, fail a disagreement, else unverified). An MCP execution that is
+    inconclusive by a host-state code (MCP_HOST_STATE_CODES) is skipped: it reads neither for nor against the case,
+    and with none left the pair is unverified."""
     agreement = case.get("agreement")
     base = {"case": case.get("id"), "case_agreement": agreement,
             "service_outcome": (case.get("service_answer") or {}).get("outcome")}
     if agreement == "not_implemented_mcp":
         return dict(base, **{"class": "not_implemented_mcp"})
-    m_ok, m_detail = match_service(case.get("service_answer") or {}, mcp_lines, run_dir)
+    skipped = [x for x in mcp_lines if host_state_line(x, run_dir)]
+    judged = [x for x in mcp_lines if x not in skipped]
+    if skipped:
+        base["host_state_repeats"] = [x.get("repeat") for x in skipped]
+    if mcp_lines and not judged:
+        m_ok, m_detail = None, "every MCP execution is inconclusive by a host state (%s): none reads for or " \
+                               "against the case" % sorted(set(str((mcp_error(x, run_dir) or {}).get("code"))
+                                                               for x in skipped))
+    else:
+        m_ok, m_detail = match_service(case.get("service_answer") or {}, judged, run_dir)
     base.update({"mcp_verified": m_ok, "mcp_detail": m_detail})
     if agreement == "service_only":
         d_ok = True
         base["direct_detail"] = "no host counterpart"
     else:
-        d_ok, d_detail = match_direct(case.get("direct_expectation") or {}, direct_line, run_dir)
+        d_exp = case.get("direct_expectation") or {}
+        if direct_line is not None and not states_host_answer(d_exp) and \
+                not unknown_keys(d_exp, DIRECT_KEYS, DIRECT_NOTES):
+            d_ok, d_detail = status_verdict(direct_line)
+            base["direct_by"] = "scenario status check"
+        else:
+            d_ok, d_detail = match_direct(d_exp, direct_line, run_dir)
         base.update({"direct_verified": d_ok, "direct_detail": d_detail})
     if not mcp_lines:
         return dict(base, **{"class": "missing"})
@@ -375,34 +506,50 @@ def direct_agreement(local, remote):
 
 
 def answer_cases(cases):
-    """The table cases an answer triggers (`answer_match`, whatever the scenario names): {routes, direct, mcp},
-    each side {http, code, text_contains}; e.g. pattern.deadline_ends_task, the host's 503 deadline the service
-    relays as a failed search."""
+    """The table cases an answer triggers (`answer_match`, whatever the scenario names): {routes, direct, mcp}; the
+    direct side {http (a status or a list), code (a top-level or a pattern slot's; "a | b"), slot_code (a pattern
+    slot's only), text_contains}, the mcp side {http, code, text_contains, field (placeholders and alternatives as
+    _field_matches)}; e.g. pattern.deadline_ends_task, the host's 503 deadline the service relays as a failed search."""
     return [c for c in (cases or {}).values() if isinstance(c.get("answer_match"), dict)]
 
 
-def answer_side_matches(side, http, codes, texts):
-    """Whether one side of an answer_match holds for an answer (its status, error codes and texts); a side that
-    states nothing never matches."""
-    if not isinstance(side, dict) or not any(side.get(k) is not None for k in ("http", "code", "text_contains")):
+def answer_side_matches(side, http, codes, texts, field=None, slot_codes=None, known=None):
+    """Whether one side of an answer_match holds for an answer (its status, error codes, texts, the MCP error's
+    field, the pattern slots' codes): True or False; None when the side states a key outside |known| (default: the
+    union of both sides' keys), which is never ignored silently. A side that states nothing never matches."""
+    if not isinstance(side, dict):
         return False
-    if side.get("http") is not None and http != side["http"]:
+    known = known or tuple(sorted(set(ANSWER_DIRECT_KEYS) | set(ANSWER_MCP_KEYS)))
+    if unknown_keys(side, known):
+        return None
+    if not any(side.get(k) is not None for k in known):
         return False
-    if side.get("code") is not None and not any(c.strip() in codes for c in str(side["code"]).split("|")):
+    slots = set(slot_codes or ())
+    if side.get("http") is not None and http not in _http_wants(side["http"]):
+        return False
+    if side.get("code") is not None and not set(_alternatives(side["code"])) & (set(codes) | slots):
         return False  # a code or alternatives "a | b", as the MCP runner's matcher reads them
+    if side.get("slot_code") is not None and not set(_alternatives(side["slot_code"])) & slots:
+        return False
+    if side.get("field") is not None and not _field_matches(field, side["field"]):
+        return False
     tc = side.get("text_contains")
     return not tc or any(tc in (t or "") for t in texts)
 
 
-def answer_case_of(cases, route, http, error):
-    """The first answer-triggered case whose MCP side the MCP answer (status, error {code, text}) matches on the
-    scenario's route, else None (reevaluate.py's outcome rule and the MCP runner's matcher)."""
+def answer_case_of(cases, route, http, error, skip=()):
+    """The first answer-triggered case whose MCP side the MCP answer (status, error {code, text, field}) matches on
+    the scenario's route, else None (reevaluate.py's outcome rule and the MCP runner's matcher); a case whose MCP side
+    states a key this comparator does not know never triggers."""
     err = error if isinstance(error, dict) else {}
     for case in answer_cases(cases):
+        if case.get("id") in skip:
+            continue
         am = case["answer_match"]
         if am.get("routes") and route not in am["routes"]:
             continue
-        if answer_side_matches(am.get("mcp"), http, set([err.get("code")]) - {None}, [err.get("text")]):
+        if answer_side_matches(am.get("mcp"), http, set([err.get("code")]) - {None}, [err.get("text")],
+                               field=err.get("field"), known=ANSWER_MCP_KEYS) is True:
             return case
     return None
 
@@ -411,19 +558,32 @@ def _mcp_answer_case(cases, route, line, run_dir):
     return answer_case_of(cases, route, line.get("http"), mcp_error(line, run_dir))
 
 
-def answer_triggered(cases, route, reps, ref, run_dir):
-    """(case, MCP lines it triggers on, the reference direct lines matching its direct side) for the first
-    answer-triggered case one of the scenario's MCP executions matches; None when none does."""
+def answer_triggered(cases, route, reps, ref, run_dir, skip=()):
+    """(case, MCP lines it triggers on, the reference direct lines matching its direct side, the direct side's
+    detail) for the first answer-triggered case (not in |skip|) one of the scenario's MCP executions matches; None
+    when none does. A direct side stating a key this comparator does not know is unverified, its detail naming it."""
     for case in answer_cases(cases):
+        if case.get("id") in skip:
+            continue
         hit = [r for r in reps if _mcp_answer_case({case["id"]: case}, route, r, run_dir) is not None]
         if not hit:
             continue
+        side = case["answer_match"].get("direct")
+        unknown = unknown_keys(side, ANSWER_DIRECT_KEYS)
         direct = []
-        for x in (ref or {}).values():
-            codes, texts = direct_errors(x, run_dir)
-            if answer_side_matches(case["answer_match"].get("direct"), x.get("http"), codes, texts):
-                direct.append(x)
-        return case, hit, direct
+        if not unknown:
+            for x in (ref or {}).values():
+                top, slots, texts = direct_error_parts(x, run_dir)
+                if answer_side_matches(side, x.get("http"), top, texts, slot_codes=slots,
+                                       known=ANSWER_DIRECT_KEYS) is True:
+                    direct.append(x)
+        if unknown:
+            detail = "the case's answer_match.direct states %s, which this comparator does not match" % unknown
+        elif direct:
+            detail = "repeat(s) %s match" % [x.get("repeat") for x in direct]
+        else:
+            detail = "no reference direct execution answered %s" % side
+        return case, hit, direct, detail
     return None
 
 
@@ -437,13 +597,14 @@ def case_ids(scenario):
     return []
 
 
-def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
+def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir, _answered=()):
     """The MCP arm's outcome class against the reference direct arm (DESIGN §1.3).
 
-    Order: the manifest's `mcp.not_implemented`; the scenario's table cases (the first whose pair holds, else
-    the first); an answer-triggered table case (answer_triggered); the MCP runner's own marks; else the
-    per-check agreement with direct-local (or direct-remote).
-    """
+    Order: the manifest's `mcp.not_implemented`; an answer-triggered table case (answer_triggered: applied BEFORE the
+    named cases, lane S5's B6), whose matching MCP executions it takes out, the rest judged by what follows; the
+    scenario's table cases (the first whose pair holds, else the first); the MCP runner's own marks; else the
+    per-check agreement with direct-local (or direct-remote). `_answered`: the answer-triggered cases already
+    applied (the recursion over the rest)."""
     mcp = mcp or {}
     reps = [mcp[k] for k in sorted(mcp)]
     ref_arm, ref = None, None
@@ -454,6 +615,40 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     ref0 = ref[min(ref)] if ref else None
     if ((scenario or {}).get("mcp") or {}).get("not_implemented"):
         return {"class": "not_implemented_mcp", "by": "manifest", "field": scenario["mcp"]["not_implemented"]}
+    route = (scenario or {}).get("route") or (reps[0].get("route") if reps else None)
+    trig = answer_triggered(cases, route, reps, ref, run_dir, skip=_answered) if reps else None
+    if trig is not None:
+        # An answer-triggered case (the table's answer_match): its MCP executions are the host's answer relayed by
+        # design, verified when a reference direct execution answered the same (e.g. both hit the host's deadline);
+        # otherwise the host answered within the budget on the direct arm while the MCP call did not, a timing
+        # difference under load and no content one. The scenario's other MCP executions are judged as usual, its
+        # named cases included (a disagreement there is the class, with answer_case).
+        case, hit, direct, d_detail = trig
+        rest = dict((r.get("repeat"), r) for r in reps if r not in hit)
+        res = {"class": "service_by_design", "by": "answer", "case": case["id"],
+               "case_agreement": case.get("agreement"),
+               "service_outcome": (case.get("service_answer") or {}).get("outcome"),
+               "repeats": [r.get("repeat") for r in hit], "mcp_verified": True,
+               "direct_verified": True if direct else None, "verified": bool(direct), "direct_detail": d_detail}
+        if rest:
+            # the rest is judged against the direct executions the case does not explain either (a direct answer of
+            # its direct side, e.g. the host's own deadline, says nothing of the rest's pair)
+            side = case["answer_match"].get("direct")
+            kept = {}
+            for arm_name, lines in direct_lines.items():
+                left = {}
+                for k, x in (lines or {}).items():
+                    top, slots, texts = direct_error_parts(x, run_dir)
+                    if answer_side_matches(side, x.get("http"), top, texts, slot_codes=slots,
+                                           known=ANSWER_DIRECT_KEYS) is not True:
+                        left[k] = x
+                if left:
+                    kept[arm_name] = left
+            other = mcp_agreement(rest, kept, scenario, cases, run_dir, tuple(_answered) + (case["id"],))
+            res["other_repeats"] = other
+            if other.get("class") == "disagree":
+                return dict(other, answer_case=case["id"], answer_case_repeats=res["repeats"])
+        return res
     ids = case_ids(scenario)
     if ids:
         results = []
@@ -470,29 +665,6 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         return results[0]
     if not reps:
         return {"class": "missing"}
-    route = (scenario or {}).get("route") or reps[0].get("route")
-    trig = answer_triggered(cases, route, reps, ref, run_dir)
-    if trig is not None:
-        # An answer-triggered case (the table's answer_match): its MCP executions are the host's answer relayed by
-        # design, verified when a reference direct execution answered the same (e.g. both hit the host's deadline);
-        # otherwise the host answered within the budget on the direct arm while the MCP call did not, a timing
-        # difference under load and no content one. The scenario's other MCP executions are compared as usual.
-        case, hit, direct = trig
-        rest = dict((r.get("repeat"), r) for r in reps if r not in hit)
-        res = {"class": "service_by_design", "by": "answer", "case": case["id"],
-               "case_agreement": case.get("agreement"),
-               "service_outcome": (case.get("service_answer") or {}).get("outcome"),
-               "repeats": [r.get("repeat") for r in hit], "mcp_verified": True,
-               "direct_verified": True if direct else None, "verified": bool(direct),
-               "direct_detail": ("repeat(s) %s match" % [x.get("repeat") for x in direct]) if direct else
-               "no reference direct execution answered %s" % case["answer_match"].get("direct")}
-        if rest:
-            others = dict((k, v) for k, v in cases.items() if k != case["id"])
-            other = mcp_agreement(rest, direct_lines, scenario, others, run_dir)
-            res["other_repeats"] = other
-            if other.get("class") == "disagree":
-                return dict(other, answer_case=case["id"], answer_case_repeats=res["repeats"])
-        return res
     outcomes = set(r.get("outcome") for r in reps)
     if "not_implemented_mcp" in outcomes:
         return {"class": "not_implemented_mcp", "by": "mcp runner"}

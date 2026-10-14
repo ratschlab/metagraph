@@ -419,6 +419,14 @@ class CompareTest(unittest.TestCase):
             self.assertIn(case["agreement"], ("by_design", "not_implemented_mcp", "service_only"))
             self.assertIn(case["service_answer"]["outcome"],
                           ("refused_at_submit", "answered", "clamped", "not_expressible", "relayed"))
+            # every key the table states is one the comparator matches or knows as descriptive
+            self.assertEqual(cmp.unknown_keys(case["direct_expectation"], cmp.DIRECT_KEYS, cmp.DIRECT_NOTES), [],
+                             case["id"])
+            self.assertEqual(cmp.unknown_keys(case["service_answer"], cmp.SERVICE_KEYS, cmp.SERVICE_NOTES), [],
+                             case["id"])
+            am = case.get("answer_match") or {}
+            self.assertEqual(cmp.unknown_keys(am.get("direct"), cmp.ANSWER_DIRECT_KEYS), [], case["id"])
+            self.assertEqual(cmp.unknown_keys(am.get("mcp"), cmp.ANSWER_MCP_KEYS), [], case["id"])
 
     def test_overheads(self):
         # review H1: the front cost pairs host-warm executions only: P-001 local r1 (6 ms, server 3) with
@@ -533,6 +541,203 @@ class CompareTest(unittest.TestCase):
         self.assertIsNone(data["by_design_table"])
         # without the table, case-referencing scenarios fall back to the generic comparison
         self.assertEqual(data["scenarios"]["P-005"]["mcp_agreement"]["class"], "disagree")
+
+
+class TriageFixesTest(unittest.TestCase):
+    """Lane S5 (the verified triage of the full run's first part): the by-design matchers (B1-B7) and the keys async
+    adds to its table (answer_match.mcp field, answer_match.direct slot_code, direct_expectation http lists and
+    text_prefix; a stated key the comparator does not know is never ignored)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        os.makedirs(os.path.join(self.dir, "raw"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def raw_line(self, sid, arm, repeat, http=200, body=None, error=None, outcome="pass", checks=None):
+        ln = line(sid, arm, repeat, T0, 10.0, outcome=outcome, http=http, error=error, checks=checks)
+        sc.write_gz_json(os.path.join(self.dir, ln["raw"]), {"answer": {"http": http, "body": body, "error": error}})
+        return ln
+
+    def test_field_alternatives_and_dotted_placeholders(self):
+        # B1 (G08): "predicate_strands | predicate_scope"; B2 (G07): "predicate<path of the first fault>"
+        alt = {"id": "pattern.predicate_options_without_predicate", "agreement": "by_design",
+               "direct_expectation": {"http": None, "code": None, "text": None, "behaviour": "not quoted"},
+               "service_answer": {"outcome": "refused_at_submit", "code": "pattern_invalid",
+                                  "text_contains": "it acts only with a predicate",
+                                  "field": "predicate_strands | predicate_scope"}}
+        m = line("Q-1", "mcp", 0, T0, 1.0, outcome="fail", http=400,
+                 error={"code": "pattern_invalid", "field": "predicate_scope",
+                        "text": "predicate_scope says ...: it acts only with a predicate"})
+        self.assertEqual(cmp.match_service(alt["service_answer"], [m], None), (True, "matches"))
+        dotted = {"outcome": "refused_at_submit", "code": "pattern_invalid", "text_contains": "predicate",
+                  "field": "predicate<path of the first fault>"}
+        q = line("Q-2", "mcp", 0, T0, 1.0, outcome="fail", http=400,
+                 error={"code": "pattern_invalid", "field": "predicate.at_least.n",
+                        "text": "predicate.at_least.n: an integer from 1 to the list's length (2), got 3"})
+        self.assertEqual(cmp.match_service(dotted, [q], None)[0], True)
+        self.assertEqual(cmp.match_service(dict(dotted, field="caps.<cap>"), [q], None)[0], False)
+
+    def test_direct_http_lists_and_text_prefix(self):
+        # B3 (G09, G10): http as a list (a host answering 200 or 503), text_prefix with digits ignored
+        d200 = self.raw_line("P-1", "direct-local", 0, http=200, body={"patterns": []})
+        d503 = self.raw_line("P-1", "direct-local", 1, http=503, error={"code": "deadline", "text": "late"})
+        self.assertEqual(cmp.match_direct({"http": [200, 503]}, d200, self.dir)[0], True)
+        self.assertEqual(cmp.match_direct({"http": [200, 503]}, d503, self.dir)[0], True)
+        self.assertEqual(cmp.match_direct({"http": [200]}, d503, self.dir)[0], False)
+        nope = self.raw_line("R-1", "direct-local", 0, http=400,
+                             error={"code": None, "text": "Label not found in the annotation: 'NOPE_0000.1'"})
+        self.assertEqual(cmp.match_direct({"http": 400, "text_prefix": "Label not found in the annotation: "},
+                                          nope, self.dir)[0], True)
+        self.assertEqual(cmp.match_direct({"text_prefix": "Label not found in the annotation: 'NOPE_9"}, nope,
+                                          self.dir)[0], True)             # digits ignored, as for text
+        self.assertEqual(cmp.match_direct({"text_prefix": "Duplicate label"}, nope, self.dir)[0], False)
+        self.assertEqual(cmp.match_direct({"text": "Label not found in the annotation: 'not-a-label-xyz'"}, nope,
+                                          self.dir)[0], False)            # the whole text: label-specific
+        # a stated key the comparator does not know: unverified, named; a null one is not stated
+        res = cmp.match_direct({"http": 400, "text_regex": "Label .*"}, nope, self.dir)
+        self.assertIsNone(res[0])
+        self.assertIn("text_regex", res[1])
+        self.assertEqual(cmp.match_direct({"http": 400, "text_regex": None, "behaviour": "x", "text_source": "y"},
+                                          nope, self.dir)[0], True)
+
+    def test_slot_codes(self):
+        # B7: a direct side's code may be a pattern slot's; slot_code is a slot's only (not the top-level error)
+        slot = self.raw_line("M-1", "direct-local", 0, http=200,
+                             body={"patterns": [{"id": "w", "error": {"code": "mismatches_above_cap",
+                                                                      "message": "pattern: max_mismatches 2 above"}}]})
+        top = self.raw_line("M-2", "direct-local", 0, http=400,
+                            error={"code": "mismatches_above_cap", "text": "pattern: max_mismatches 2 above"})
+        self.assertEqual(cmp.match_direct({"http": 200, "code": "mismatches_above_cap"}, slot, self.dir)[0], True)
+        self.assertEqual(cmp.match_direct({"slot_code": "mismatches_above_cap"}, slot, self.dir)[0], True)
+        self.assertEqual(cmp.match_direct({"slot_code": "mismatches_above_cap"}, top, self.dir)[0], False)
+        self.assertEqual(cmp.match_direct({"code": "mismatches_above_cap"}, top, self.dir)[0], True)
+
+    def test_unstated_host_answer_judged_by_the_status_check(self):
+        # B4 (G11): a case stating no host answer: the scenario's own status check on the reference direct line
+        case = {"id": "pattern.duplicate_ids", "agreement": "by_design",
+                "direct_expectation": {"http": None, "code": None, "text": None, "behaviour": "not quoted"},
+                "service_answer": {"outcome": "refused_at_submit", "code": "pattern_invalid"}}
+        m = [line("P-1", "mcp", 0, T0, 1.0, outcome="service_by_design", http=400,
+                  error={"code": "pattern_invalid", "text": "pattern id 'same' is used twice"})]
+        st = lambda o: [{"check": "status", "outcome": o, "detail": "http 200"}]  # noqa: E731
+        res = cmp.by_design_class(case, line("P-1", "direct-local", 0, T0, 1.0, checks=st("pass")), m, None)
+        self.assertEqual((res["class"], res["verified"], res["direct_by"]),
+                         ("service_by_design", True, "scenario status check"))
+        res = cmp.by_design_class(case, line("P-1", "direct-local", 0, T0, 1.0, checks=st("fail")), m, None)
+        self.assertEqual((res["class"], res["side"]), ("disagree", "direct"))
+        res = cmp.by_design_class(case, line("P-1", "direct-local", 0, T0, 1.0, checks=st("inconclusive")), m, None)
+        self.assertEqual((res["class"], res["verified"], res["direct_verified"]), ("service_by_design", False, None))
+        res = cmp.by_design_class(case, line("P-1", "direct-local", 0, T0, 1.0, checks=[]), m, None)
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", False))
+        # a stated key the comparator does not know is no "nothing stated": unverified, named
+        odd = dict(case, direct_expectation={"http": None, "answer_shape": "x"})
+        res = cmp.by_design_class(odd, line("P-1", "direct-local", 0, T0, 1.0, checks=st("pass")), m, None)
+        self.assertEqual((res["class"], res["verified"], res["direct_verified"]), ("service_by_design", False, None))
+        self.assertIn("answer_shape", res["direct_detail"])
+        # the same for the service side
+        odd = dict(case, service_answer={"outcome": "refused_at_submit", "code": "pattern_invalid", "text_regex": "x"})
+        res = cmp.by_design_class(odd, line("P-1", "direct-local", 0, T0, 1.0, checks=st("pass")), m, None)
+        self.assertEqual((res["class"], res["mcp_verified"]), ("service_by_design", None))
+        self.assertIn("text_regex", res["mcp_detail"])
+
+    def test_host_state_executions_read_neither_way(self):
+        # B5 (G23): an MCP execution inconclusive by a host-state code is skipped when a named case is judged
+        job_path = {"id": "resolve.job_path", "agreement": "by_design", "direct_expectation": {"http": 200},
+                    "service_answer": {"outcome": "answered"}}
+        d = line("R-1", "direct-local", 0, T0, 1.0)
+        timeout = line("R-1", "mcp", 0, T0, 30250.0, outcome="inconclusive", http=504,
+                       error={"code": "resolve_timeout", "text": "the backend did not answer within 30.25 s"})
+        ok = line("R-1", "mcp", 1, T0, 4500.0)
+        res = cmp.by_design_class(job_path, d, [timeout, ok], None)
+        self.assertEqual((res["class"], res["verified"], res["host_state_repeats"]), ("service_by_design", True, [0]))
+        res = cmp.by_design_class(job_path, d, [timeout], None)
+        self.assertEqual((res["class"], res["verified"], res["mcp_verified"]), ("service_by_design", False, None))
+        self.assertIn("resolve_timeout", res["mcp_detail"])
+        # judged when it is not inconclusive (a runner of before the rule recorded it as fail)
+        res = cmp.by_design_class(job_path, d, [dict(timeout, outcome="fail"), ok], None)
+        self.assertEqual((res["class"], res["side"]), ("disagree", "mcp"))
+        self.assertIn("resolve_timeout", cmp.MCP_HOST_STATE_CODES)
+
+    def deadline_cases(self, **am):
+        case = {"id": "pattern.deadline_ends_task", "agreement": "by_design",
+                "direct_expectation": {"http": 503, "code": "deadline"},
+                "service_answer": {"outcome": "relayed", "http": 502, "code": "search_failed",
+                                   "text_contains": "pattern_deadline"},
+                "answer_match": {"routes": ["POST /pattern"], "direct": {"http": 503, "code": "deadline"},
+                                 "mcp": {"http": 502, "code": "search_failed", "text_contains": "pattern_deadline"}}}
+        for k, v in am.items():
+            case["answer_match"][k] = v
+        return dict(CASES, **{case["id"]: case}), case
+
+    def test_answer_cases_before_named_cases(self):
+        # B6: the answer-triggered case takes its MCP executions out, the named case is judged on the rest
+        cases, case = self.deadline_cases()
+        s = scen("M-1", "M", by_design="case.slot")
+        relayed = line("M-1", "mcp", 0, T0, 1.0, outcome="service_by_design", http=502,
+                       error={"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be"})
+        refused = line("M-1", "mcp", 1, T0, 1.0, outcome="service_by_design", http=400,
+                       error={"code": "pattern_out_of_bounds", "text": "max_mismatches 2 is above the maximum 1"})
+        dead = self.raw_line("M-1", "direct-local", 0, http=503, error={"code": "deadline", "text": "late"})
+        slot = self.raw_line("M-1", "direct-local", 1, http=200,
+                             body={"patterns": [{"error": {"code": "mismatches_above_cap", "message": "above"}}]})
+        res = cmp.mcp_agreement({0: relayed, 1: refused}, {"direct-local": {0: dead, 1: slot}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["by"], res["case"], res["repeats"]),
+                         ("service_by_design", "answer", case["id"], [0]))
+        self.assertEqual((res["other_repeats"]["class"], res["other_repeats"]["case"]), ("service_by_design", "case.slot"))
+        # before lane S5 the named case judged the relayed deadline too and read a disagreement
+        self.assertEqual(cmp.by_design_class(CASES["case.slot"], dead, [relayed, refused], self.dir)["class"], "disagree")
+        # a rest that disagrees with the named case is the class, naming the answer case
+        wrong = dict(refused, error={"code": "pattern_invalid", "text": "x"})
+        res = cmp.mcp_agreement({0: relayed, 1: wrong}, {"direct-local": {0: dead, 1: slot}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["case"], res["answer_case"], res["answer_case_repeats"]),
+                         ("disagree", "case.slot", case["id"], [0]))
+        # every MCP execution taken out: no rest to judge
+        res = cmp.mcp_agreement({0: relayed}, {"direct-local": {0: dead}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", True))
+        self.assertNotIn("other_repeats", res)
+        # the rest is judged against the direct executions the answer case does not explain: with only the host's
+        # deadline on record, the named case's direct side is unverified, not a disagreement
+        res = cmp.mcp_agreement({0: relayed, 1: refused}, {"direct-local": {0: dead}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["verified"], res["other_repeats"]["class"],
+                          res["other_repeats"]["verified"], res["other_repeats"]["direct_detail"]),
+                         ("service_by_design", True, "service_by_design", False, "no direct execution"))
+
+    def test_answer_match_keys(self):
+        # B7 and async's addendum: the mcp side's field and http lists, the direct side's slot_code; a stated key the
+        # comparator does not know: the mcp side never triggers, the direct side is unverified, named
+        cases, case = self.deadline_cases(
+            mcp={"http": [400, 502], "code": "pattern_invalid | pattern_out_of_bounds", "field": "caps.<cap>"},
+            direct={"http": [200, 503], "slot_code": "mismatches_above_cap"})
+        s = scen("P-1", "P")
+        m = line("P-1", "mcp", 0, T0, 1.0, outcome="fail", http=400,
+                 error={"code": "pattern_invalid", "field": "caps.max_paths",
+                        "text": "caps.max_paths: Input should be greater than or equal to 1"})
+        slot = self.raw_line("P-1", "direct-local", 0, http=200,
+                             body={"patterns": [{"error": {"code": "mismatches_above_cap", "message": "x"}}]})
+        top = self.raw_line("P-1", "direct-local", 1, http=200, error={"code": "mismatches_above_cap", "text": "x"})
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: slot}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["by"], res["verified"]), ("service_by_design", "answer", True))
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {1: top}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", False))  # slot_code: slots only
+        other_field = dict(m, error=dict(m["error"], field="max_mismatches"))
+        self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 400, other_field["error"]))
+        self.assertIs(cmp.answer_case_of(cases, "POST /pattern", 400, m["error"]), case)
+        self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 409, m["error"]))  # http not in the list
+        # unknown keys
+        cases_u, _ = self.deadline_cases(mcp={"http": 400, "code": "pattern_invalid", "text_regex": "caps"})
+        self.assertIsNone(cmp.answer_case_of(cases_u, "POST /pattern", 400, m["error"]))
+        self.assertIsNone(cmp.answer_side_matches({"http": 400, "text_regex": "caps"}, 400, {"pattern_invalid"}, []))
+        cases_d, _ = self.deadline_cases(mcp={"http": 400, "code": "pattern_invalid"},
+                                         direct={"http": 200, "body_hash": "abc"})
+        res = cmp.mcp_agreement({0: m}, {"direct-local": {0: slot}}, s, cases_d, self.dir)
+        self.assertEqual((res["class"], res["verified"], res["direct_verified"]), ("service_by_design", False, None))
+        self.assertIn("body_hash", res["direct_detail"])
+        # a field on the direct side, or a slot_code on the mcp side, is a key that side does not have
+        cases_f, _ = self.deadline_cases(mcp={"http": 400, "code": "pattern_invalid", "slot_code": "x"})
+        self.assertIsNone(cmp.answer_case_of(cases_f, "POST /pattern", 400, m["error"]))
 
 
 class ReportTest(unittest.TestCase):

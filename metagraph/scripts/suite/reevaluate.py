@@ -14,8 +14,9 @@ backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
 own exception, which a re-evaluation repeats), `not_implemented_mcp`, `service_by_design` (async's table; also an
-MCP answer an answer-triggered case of the table matches, --by-design PATH, default compare.py's), and the
-MCP runner's host-state rule (an unexpected `uninterruptible_overrun_exceeds_allowance` is inconclusive).
+MCP answer an answer-triggered case of the table matches, --by-design PATH, default compare.py's: applied before the
+runner's named case), and the MCP runner's host-state rule (an unexpected `uninterruptible_overrun_exceeds_allowance`
+or `resolve_timeout`, compare.MCP_HOST_STATE_CODES, is inconclusive).
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
@@ -49,8 +50,9 @@ MARK = "reevaluated.json"
 # outcomes a runner decides without the checks (kept by a re-evaluation)
 KEPT_OUTCOMES = ("error", "not_implemented_mcp", "service_by_design")
 # async's MCP runner (suite_mcp_runner.py HOST_STATE_CODES): an environmental host state the scenario does not
-# expect is inconclusive, whatever the checks say
-MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance",)
+# expect is inconclusive, whatever the checks say; with resolve_timeout (G23 as VERIFY-RP amends it: the service's
+# resolve client gave up before the host's overrun answer under load), as compare.py reads them
+MCP_HOST_STATE_CODES = compare.MCP_HOST_STATE_CODES
 
 
 def sha256_file(path):
@@ -150,15 +152,19 @@ def evaluate_raised(checks):
 def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None):
     """The re-evaluated outcome (module docstring) and why it was kept, if it was."""
     recorded = line.get("outcome")
-    if recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks"))):
+    kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
+    if kept and recorded != "service_by_design":
         return recorded, "decided by the runner without the checks"
     if arm == "mcp" and cases:
         # an answer-triggered table case (answer_match), as the MCP runner's matcher applies it since async's
-        # 2d1cd9b3 table: the host's answer relayed by design, whatever the scenario names
+        # 2d1cd9b3 table: the host's answer relayed by design, whatever the scenario names; applied before the
+        # scenario's named cases (lane S5's B6), so it also names the case of an execution the runner marked by one
         case = compare.answer_case_of(cases, scenario.get("route") or line.get("route"), (answer or {}).get("http"),
                                       (answer or {}).get("error"))
         if case is not None:
             return "service_by_design", "the table's answer-triggered case %s" % case["id"]
+    if kept:
+        return recorded, "decided by the runner without the checks"
     if raised:
         return ("fail" if arm == "mcp" else "error"), None
     err = (answer or {}).get("error") or {}
