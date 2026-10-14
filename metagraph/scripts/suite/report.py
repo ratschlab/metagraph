@@ -659,7 +659,7 @@ def depth_counts(depth):
     return counts
 
 
-def agreement_section(comp, depth=None):
+def agreement_section(comp, depth=None, mcp_planned_missing=0):
     s = comp["summary"]
     da = s["direct_agreement"]
     out = ["# Agreement between the arms", "", "## direct-local vs direct-remote", ""]
@@ -691,7 +691,12 @@ def agreement_section(comp, depth=None):
     out.append("")
     ma = s["mcp_agreement"]
     if not ma.get("compared"):
-        out.append("No MCP arm in this run.\n")
+        if mcp_planned_missing:
+            # the run planned the MCP arm and it recorded nothing (a refusal at start, a crash): never "no arm"
+            out.append("No MCP execution was recorded although the run planned %d (see the Verdict: INCOMPLETE).\n"
+                       % mcp_planned_missing)
+        else:
+            out.append("No MCP arm in this run.\n")
         return "\n".join(out)
     classes = [k for k in ("agree", "not_comparable", "disagree", "not_implemented_mcp", "service_by_design",
                            "missing", "no_direct_reference") if ma.get(k)]
@@ -1094,7 +1099,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))
     parts.append(findings_section(rows, manifest, max_failures))
-    parts.append(agreement_section(comp, depth))
+    parts.append(agreement_section(comp, depth, sum(1 for k in missing[0] if k[1] == "mcp")))
     parts.append(relations_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))

@@ -520,5 +520,41 @@ class UntestedAndExposureTest(unittest.TestCase):
         self.assertEqual([(g[0], g[1], g[2]) for g in groups], [("area", "C", "mcp"), ("route", "GET /c", "mcp")])
 
 
+class PlannedMcpArmTest(unittest.TestCase):
+    """A run that planned the MCP arm and recorded no MCP execution (a refusal at start, a crash, the sequential
+    mode's exit 3): INCOMPLETE, and the Agreement section never says there was no MCP arm."""
+
+    def test_sequential_session_without_mcp_lines(self):
+        import gate
+        with tempfile.TemporaryDirectory() as d:
+            S = [scen("P-001", "P"), scen("P-002", "P")]
+            orch = {"sessions": [{"mode": "sequential", "mcp_cmd": "x {ids} {out}", "checks": "checks",
+                                  "warm_every": "0"}]}
+            rows = dict((arm, [line(x["id"], arm, 0, T0 + i * 10 + k, 20.0) for i, x in enumerate(S)])
+                        for k, arm in enumerate(("direct-local", "direct-remote")))
+            run_dir_with(d, S, rows, orch)
+            text, v = verdict_of(d)
+            self.assertIn("INCOMPLETE", v)
+            self.assertIn("4 planned execution(s) not recorded (mcp 4; plan of orchestrator.json (reconstructed))", v)
+            self.assertIn("No MCP execution was recorded although the run planned 4", text)
+            self.assertNotIn("No MCP arm in this run", text)
+            # the plan run_suite.sh writes before any arm (both modes) gives the same
+            manifest = sc.read_json(os.path.join(d, "manifest.json"))
+            gate.write_plan(d, gate.plan_entry(manifest, None, None, None, 0, sc.ARMS, "sequential", session=0))
+            text, v = verdict_of(d)
+            self.assertIn("4 planned execution(s) not recorded (mcp 4; plan of plan.json)", v)
+
+    def test_no_mcp_planned_says_no_arm(self):
+        with tempfile.TemporaryDirectory() as d:
+            S = [scen("P-001", "P")]
+            orch = {"sessions": [{"mode": "sequential", "checks": "checks", "warm_every": "0"}]}
+            rows = dict((arm, [line("P-001", arm, 0, T0 + k, 20.0)]) for k, arm in enumerate(("direct-local",
+                                                                                              "direct-remote")))
+            run_dir_with(d, S, rows, orch)
+            text, v = verdict_of(d)
+            self.assertTrue(v.startswith("**PASS"), v)
+            self.assertIn("No MCP arm in this run", text)
+
+
 if __name__ == "__main__":
     unittest.main()

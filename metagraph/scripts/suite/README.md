@@ -1951,3 +1951,11 @@ failing on 14552938.
     reads not_exposed on an MCP execution compared check by check is `disagree` (side mcp, by exposes, the checks and
     repeats named; `compare.exposure_drops`), so a dropped field fails the report and the gate's disagreement rule.
     No frozen manifest states it, so nothing recorded moves.
+
+### A planned MCP arm that recorded nothing (the report side of a missing MCP execution)
+- Lane G3's plan reconciliation already makes the verdict INCOMPLETE for a planned MCP execution no arm recorded, in
+  both modes: run_suite.sh writes plan.json before any arm, and a run without it is reconstructed from
+  orchestrator.json (proved here for the sequential mode with the real run_suite.sh and fake_mcp's exit3: "12
+  planned execution(s) not recorded (mcp 12; plan of plan.json)"; the exit status and the loop record are lane
+  S-runner's). Left: the Agreement section of such a run said "No MCP arm in this run."; it says "No MCP execution
+  was recorded although the run planned N (see the Verdict: INCOMPLETE)" whenever the plan holds MCP executions.
