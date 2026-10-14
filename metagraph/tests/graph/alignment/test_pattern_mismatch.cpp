@@ -565,9 +565,7 @@ TEST(PatternMismatch, RandomCasesAtK31) {
 
 // the same graph built again, its dummy-edge mask removed (ids and BOSS identical)
 std::shared_ptr<DeBruijnGraph> unmasked_copy(const Case &c) {
-    auto graph = build(c.k, c.records, c.mode);
-    const_cast<DBGSuccinct&>(stored_graph(*graph)).reset_mask();
-    return graph;
+    return mtg::test::without_mask(build(c.k, c.records, c.mode));
 }
 
 TEST(PatternMismatch, PassZeroIsTheSearchWithoutMismatches) {
@@ -934,7 +932,7 @@ TEST(PatternMismatch, ExtractionStopCarriesNoLevel) {
         std::shared_ptr<DeBruijnGraph> graph = masked;
         if (unmasked) {
             graph = build(k, records, DeBruijnGraph::BASIC);
-            const_cast<DBGSuccinct&>(stored_graph(*graph)).reset_mask();
+            graph = mtg::test::without_mask(graph);
         }
         auto as_mctx = [&](const Context &c) {
             const std::string kmer = graph->get_node_sequence(c.node);
@@ -2490,7 +2488,7 @@ TEST(PatternMismatchPeptide, PassZeroIsTheSearchWithoutMismatches) {
         auto graph = c.graph;
         if (unmasked) {
             graph = build(c.k, c.records, c.mode);
-            const_cast<DBGSuccinct&>(stored_graph(*graph)).reset_mask();
+            graph = mtg::test::without_mask(graph);
         }
         SCOPED_TRACE(describe(c) + (unmasked ? " unmasked" : ""));
         const Pattern pattern = peptide_of(c.peptide, c.table);
@@ -3009,7 +3007,7 @@ TEST(PatternMismatchPeptide, UnmaskedTwins) {
     for (uint32_t seed = 1300; seed < 1360; ++seed) {
         const PeptideCase c = random_peptide_case(seed);
         auto unmasked = build(c.k, c.records, c.mode);
-        const_cast<DBGSuccinct&>(stored_graph(*unmasked)).reset_mask();
+        unmasked = mtg::test::without_mask(unmasked);
         SCOPED_TRACE(describe(c));
         const Pattern pattern = peptide_of(c.peptide, c.table);
         const std::vector<MCtx> expected = peptide_walk(*c.graph, c.peptide, c.table,

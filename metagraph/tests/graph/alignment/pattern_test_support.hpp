@@ -6,11 +6,13 @@
 #include <cassert>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string>
 
 #include <sdsl/int_vector.hpp>
 
 #include "graph/alignment/pattern_search.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -23,6 +25,23 @@ namespace test {
 inline graph::pattern::Deadline unbounded_deadline() {
     return graph::pattern::Deadline(graph::pattern::Deadline::Clock::now(),
                                     std::numeric_limits<double>::infinity(), 0);
+}
+
+/**
+ * |graph| without its dummy-edge mask (the test twin of a graph built without one). A wrapped
+ * PRIMARY graph is wrapped again after the reset: CanonicalDBG reads whether the graph it wraps
+ * has the sentinel (no mask) once, when it is constructed, so a wrapper built before the reset
+ * would meet the dummy edges the unmasked graph reports as edges it cannot have.
+ */
+inline std::shared_ptr<graph::DeBruijnGraph>
+without_mask(std::shared_ptr<graph::DeBruijnGraph> graph) {
+    if (auto canonical = std::dynamic_pointer_cast<const graph::CanonicalDBG>(graph)) {
+        auto stored = std::const_pointer_cast<graph::DeBruijnGraph>(canonical->get_graph_ptr());
+        dynamic_cast<graph::DBGSuccinct&>(*stored).reset_mask();
+        return std::make_shared<graph::CanonicalDBG>(stored, 2);
+    }
+    dynamic_cast<graph::DBGSuccinct&>(*graph).reset_mask();
+    return graph;
 }
 
 // The three bases of a codon index (graph::pattern::codon_index's order), upper case
