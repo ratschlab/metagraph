@@ -241,9 +241,10 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
 - `service_by_design.json`: async's table (130 cases), copied byte-identical from the search-service work
-  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show 789fb5f0:scripts/bench/vendor_suite/service_by_design.json`,
-  146,755 bytes, sha256 2fdea36b...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
-  splits by value and four answer-triggered cases). A case's `agreement`
+  (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show 48dcbc1d:scripts/bench/vendor_suite/service_by_design.json`,
+  150,242 bytes, sha256 c49478c2...; `service_commit` inside 22d034ba; lane S5: the triage's corrections, the
+  splits by value and four answer-triggered cases; lane S5b: `explains_checks` on every answered / clamped case,
+  `answer_match.direct_mismatch` on the four answer-triggered ones, validated at load). A case's `agreement`
   `not_implemented_mcp` -> not implemented yet via MCP; `service_only` (no host counterpart) -> service-side
   by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
   service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text

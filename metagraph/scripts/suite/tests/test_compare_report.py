@@ -410,8 +410,8 @@ class CompareTest(unittest.TestCase):
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 130)   # async's vendored table at 789fb5f0
-        self.assertEqual(info["sha256"], "2fdea36b5d20a5eee5a2a6449d77f50e59470b6ef7091ed5804a7e7ac248a6d4")
+        self.assertEqual(info["cases"], 130)   # async's vendored table at 48dcbc1d
+        self.assertEqual(info["sha256"], "c49478c26e486a7fef62b172a070f4ea213802ab522f619f996d7cb52fad50e8")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
         self.assertEqual(sorted(c["id"] for c in cmp.answer_cases(cases)),

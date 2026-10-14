@@ -18,11 +18,13 @@
    "not_implemented_mcp": "the scenario is 'not implemented yet via MCP'",
    "service_only": "no host counterpart (service behaviour only)"
   },
-  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`, unverified otherwise",
+  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`; a direct answer outside `direct` is read by `direct_mismatch` (ADDED 2026-10-14). Load validation (ADDED 2026-10-14, triage-2 B-08; the async runner's ServiceByDesign.problems refuses the table, naming the case): `routes` is required (a non-empty list of routes); answer_match states only routes, direct, mcp, direct_mismatch; a side only http, code, text_contains, field, slot_code; on the mcp side `http` is one integer and `slot_code` is not allowed (a direct-side key: a host 200 body's slot refusal); direct_mismatch is disagree or timing",
   "answer_match.mcp.field": "ADDED 2026-10-14 (optional): the refused argument's field (the MCP error's `field`) as a pattern: `<...>` placeholders match anything, `a | b` lists alternatives (each part stripped), matched like a named case's service_answer.field; an MCP answer that names no field does not match. It tells apart refusals of one code and text whose host answers differ (pattern.caps_zero: a cap of 0 the host answers, against time_budget_ms 0 with the same REST text, which the host refuses)",
   "answer_match.direct.slot_code": "ADDED 2026-10-14 (optional): a pattern slot's error code: the direct answer (a 200) holds a pattern whose slot is refused with it (body.patterns[].error.code; `a | b` lists alternatives), where the service refuses the whole submit (mismatch.above_kind_cap: the host's mismatches_above_cap slot)",
+  "answer_match.direct_mismatch": "ADDED 2026-10-14 (triage-2 B-03; stated on every answer_match of the table; the comparator reads it, the MCP runner has no direct arm): what a direct answer outside answer_match.direct means for the pair. \"disagree\": any direct HTTP answer outside the direct side disagrees (pattern.caps_zero, mismatch.above_kind_cap, traverse.empty_seeds: validation or a stale cap, no timing involved). \"timing\": a direct 200 or a direct 503 deadline (code deadline) reads unverified, a timing difference (the same request, the host finished at another time); any other direct answer (e.g. a 4xx refusal) disagrees (pattern.deadline_ends_task). A direct transport error or a missing direct answer is always unverified, whatever the value. The MCP execution's own checks still count: a finding is never erased by the mark (see explains_checks)",
   "direct_expectation.http": "the host's HTTP status: an integer, or (ADDED 2026-10-14) a list of statuses any one of which holds, e.g. [200, 503] where the host accepts the request and may still overrun its budget (pattern.time_budget_below_minimum); null: not stated",
-  "direct_expectation.text_prefix": "ADDED 2026-10-14 (optional): the host's error text starts with it, for a text whose tail varies with the request (resolve.unknown_label names the label); `text` is then null. Compared as is (no digit folding)"
+  "direct_expectation.text_prefix": "ADDED 2026-10-14 (optional): the host's error text starts with it, for a text whose tail varies with the request (resolve.unknown_label names the label); `text` is then null. Compared as is (no digit folding)",
+  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)"
  },
  "assumptions": [
   "staging settings at their code defaults: PATTERN_DB_BUDGETS_MS empty, PATTERN_DEFAULT_MAX_ANCHORS unset, TRAVERSAL_ADVANCED_ENABLED false, IDEMPOTENCY_REUSE_DONE true, BACKEND_CACHE_MAX_ANSWER_AGE_SECS 604800, PATTERN_MAX_* / TRAVERSAL_* as in app/settings.py",
@@ -58,6 +60,9 @@
     "stage": "plan",
     "detail": "The service splits the patterns into chunks of the host's caps.max_patterns (16; 16 also when the host states none), one task (one host request) per chunk; every pattern is answered and get_status merges them per pattern. Each chunk is its own host request with the FULL time_budget_ms and the per-request caps (max_steps, max_predicate_work, ...), so per-request work and timing are not those of one request. Ids absent from the request are assigned p1..pn over the whole list. The host text varies with the count ('got N'); compare its stable part 'expected a list of 1 to 16 pattern objects'. A search fanning out to more than PATTERN_MAX_TASKS_PER_SEARCH (2,000) tasks is refused 400 pattern_invalid (reason too_many_tasks); unreachable on single-graph refseq33m (at most 4 chunk tasks)."
    },
+   "explains_checks": [
+    "status"
+   ],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1280",
@@ -192,6 +197,11 @@
     "stage": "plan",
     "detail": "The service always sends max_contexts: the request's, else PATTERN_DEFAULT_MAX_CONTEXTS 1,000 held to the host's cap. A pattern with 1,001..10,000 contexts is withheld count_above_threshold (all_or_count) or cut max_contexts at 1,000 (partial) via MCP, released whole directly. Pass max_contexts explicitly to mirror the direct request."
    },
+   "explains_checks": [
+    "withheld",
+    "cut",
+    "retrieval_complete"
+   ],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1235",
@@ -380,6 +390,7 @@
     "stage": "plan",
     "detail": "The service NORMALISES: every character is checked in either case, then the pattern is upper-cased before it is stored and sent, so the host never sees lower case from the MCP arm. Compare against the direct answer of the upper-cased pattern if the host treats case differently."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:548",
@@ -557,6 +568,7 @@
     "stage": "mcp_local",
     "detail": "The tool's default mode is count (no rows), and the tool always sends mode. To mirror a direct request without mode, pass mode='all_or_count'."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:2211",
@@ -585,6 +597,7 @@
     "stage": "plan",
     "detail": "The MCP/REST words are both | plus | minus, mapped to the host's both | forward | reverse (plus->forward, minus->reverse). Passing 'forward' or 'reverse' to pattern_search is refused 400 pattern_invalid (strands: Input should be 'both', 'plus' or 'minus'). Map before calling."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:206",
@@ -688,6 +701,7 @@
     "stage": "plan",
     "detail": "The service always sends time_budget_ms: PATTERN_DB_BUDGETS_MS[db] when set, else PATTERN_TIME_BUDGET_MS (60,000), held to the host's cap. Equal to the host's default unless staging sets PATTERN_DB_BUDGETS_MS for refseq33m-experimental (not readable from the code: see open points)."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1097",
@@ -782,6 +796,9 @@
     "stage": "plan",
     "detail": "The service sends max_labels = PATTERN_DEFAULT_MAX_LABELS 100 (held to the host's cap) with every labelled partial request; by_label and each row list at most 100 labels (labels_cut when cut). Pass max_labels explicitly to mirror."
    },
+   "explains_checks": [
+    "source_label"
+   ],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1271",
@@ -839,6 +856,7 @@
     "stage": "plan",
     "detail": "Without high_throughput the service sends in_ram: true when the stored FASTA exceeds LARGE_QUERY_INPUT_THRESHOLD_BYTES (50 kB) and the host's block states in_ram 'accepted' (timing load_ms; a single-graph server reports 0). Pass high_throughput=False to keep it off."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1046",
@@ -1350,6 +1368,7 @@
     "stage": "plan",
     "detail": "The service always sends max_paths with long_search: min(the host's cap (1,000 when unstated), PATTERN_MAX_PATHS 1,024) = the host's default on refseq33m; no difference expected. max_anchors is sent only when named (or PATTERN_DEFAULT_MAX_ANCHORS is set on the deployment)."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1246",
@@ -1880,6 +1899,10 @@
     "stage": "plan",
     "detail": "The service sends max_predicate_contexts = min(PATTERN_MAX_PREDICATE_CONTEXTS 10,000, the host's cap) with every predicate request: a pattern with 10,001..100,000 raw contexts is withheld predicate_above_threshold via MCP (all_or_count) and tested directly. max_predicate_work is sent as min(1e8, host cap) = the host's default."
    },
+   "explains_checks": [
+    "withheld",
+    "retrieval_complete"
+   ],
    "agreement": "by_design",
    "source": [
     "app/pattern/validate.py:1263",
@@ -1999,6 +2022,9 @@
     "stage": "fastmcp_args",
     "detail": "The MCP SDK's lax int validation COERCES \"1\" to 1 (verified offline, mcp 2.3.0), so the tool sends max_mismatches 1 and the search runs with one substitution. REST alone would refuse it (pattern_invalid, 'got a string'), but the MCP arm never sends a string. Compare the MCP answer with the direct answer at max_mismatches 1, or mark the pair by design."
    },
+   "explains_checks": [
+    "status"
+   ],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:2234",
@@ -2028,6 +2054,9 @@
     "stage": "mcp_local",
     "detail": "null is the tool argument's default: nothing is sent and the search is EXACT (m = 0), the request of before. REST alone would refuse an explicit null (pattern_invalid, 'got null'). Compare with the direct answer without the field."
    },
+   "explains_checks": [
+    "status"
+   ],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:2234",
@@ -2056,6 +2085,9 @@
     "stage": "fastmcp_args",
     "detail": "The MCP SDK coerces true to 1 (verified offline, mcp 2.3.0): searched at m = 1; false becomes 0 (nothing sent, exact). REST alone would refuse booleans."
    },
+   "explains_checks": [
+    "status"
+   ],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:2234",
@@ -2084,6 +2116,7 @@
     "stage": "plan",
     "detail": "0 is never sent: the host receives the request without the field (byte for byte the body of before; the idempotency fingerprint too). The direct arm's explicit 0 and the MCP arm's absent field should give the same answer."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:2634",
@@ -2141,7 +2174,8 @@
      "code": "pattern_out_of_bounds",
      "text_contains": "patterns on the host of database",
      "field": "max_mismatches"
-    }
+    },
+    "direct_mismatch": "disagree"
    }
   },
   {
@@ -2506,6 +2540,7 @@
     "stage": "route",
     "detail": "The service NORMALISES before sending: whitespace removed, upper-cased, a single-record FASTA's header dropped (blank lines before it allowed). A multi-record FASTA or a header after sequence is refused resolve_sequence_invalid."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/traversal/resolve.py:253"
@@ -2568,6 +2603,9 @@
     "stage": "route",
     "detail": "The service trims and DE-DUPLICATES the labels (first occurrence kept) before sending, so the host never sees a duplicate: answered as the request with each label once."
    },
+   "explains_checks": [
+    "status"
+   ],
    "agreement": "by_design",
    "source": [
     "app/traversal/resolve.py:285",
@@ -2902,6 +2940,10 @@
     "stage": "route",
     "detail": "The service sends bounds.time_budget_ms = TRAVERSAL_RESOLVE_TIME_BUDGET_MS 60,000 held to the host's max_time_ms (20,000 on staging): a resolve needing more than ~20 s answers with a stop object (the answer of the first stop.resolved_kmers k-mers) via MCP and completes directly. A discovery without time_budget_ms gets no deadline (agreement)."
    },
+   "explains_checks": [
+    "resolve_runs",
+    "resolve_graph_runs"
+   ],
    "agreement": "by_design",
    "source": [
     "app/traversal/resolve.py:380",
@@ -3043,6 +3085,7 @@
     "stage": "job",
     "detail": "A resolve is a JOB: traverse_resolve waits up to wait_seconds (default 30 s explicit labels, 10 s discovery, max 45) and answers inline (the host answer + job_id, inline: true, access_token, database, host, mode, capabilities_level, elapsed_ms, untrusted_notice); otherwise the job handle (inline: false) -> traverse_status until terminal -> traverse_results(job_id, access_token).resolve (resolve_error for a refusal). One resolve per host at a time: a busy slot queues the job."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:7060",
@@ -3132,6 +3175,9 @@
     "stage": "rest_planner",
     "detail": "The service batches the seeds into host requests of min(the preset class's batch (walk 8, trie 4), the host's max_seeds) seeds, one task each; one graphlet per seed."
    },
+   "explains_checks": [
+    "status"
+   ],
    "agreement": "by_design",
    "source": [
     "app/traversal/planner.py:816",
@@ -3187,6 +3233,9 @@
     "stage": "rest_planner",
     "detail": "The service merges identical (sequence, labels) seeds onto the first before sending; the receipt lists duplicate_seeds [{submitted, kept}]."
    },
+   "explains_checks": [
+    "invariants"
+   ],
    "agreement": "by_design",
    "source": [
     "app/traversal/planner.py:661"
@@ -3259,7 +3308,8 @@
     "mcp": {
      "code": "invalid_arguments",
      "text_contains": "provide `seeds` (a list)"
-    }
+    },
+    "direct_mismatch": "disagree"
    }
   },
   {
@@ -3479,6 +3529,11 @@
     "stage": "rest_planner",
     "detail": "The service always sends the preset's merged strategy: walk = {direction: both, exhaustive: false, labels: {mode: constrain}, branching: {max_label_branches: 2}, bounds: {time_budget_ms: 15000, max_memory_mb: 256, max_work_units: 100000000, max_extension_bp: 5000, max_output_bp: 500000}, output: {detail: graphlet, timing: true}}; trie = {direction: both, exhaustive: true, labels: {mode: constrain}, bounds: {time_budget_ms: 30000, max_memory_mb: 512, max_work_units: 100000000, max_live_paths: 1000, max_extension_bp: 2000}, output: {...}}; overrides deep-merge into it. The host clamps time_budget_ms to its max_time_ms (5,000). The direct request must send this merged strategy for comparable answers."
    },
+   "explains_checks": [
+    "traverse_stop",
+    "walk_end",
+    "paths_end"
+   ],
    "agreement": "by_design",
    "source": [
     "app/traversal/presets.py:173",
@@ -3507,6 +3562,7 @@
     "stage": "rest_planner",
     "detail": "preset='trace' is accepted (exposure coordinate_index: public where the host states supports_trace) although the tool's docstring names only walk and trie; output.coordinates cannot be set (traverse.not_expressible.strategy_keys)."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/traversal/presets.py:173",
@@ -3735,6 +3791,9 @@
     "stage": "route",
     "detail": "Reshaped: traverse_capabilities(databases=[db]).backends[db] carries identity (release, index_ns, index_fp, index_meta_fp), limits (max_query_bp, max_seed_bp, max_seeds, max_seed_labels, max_time_ms), feature_level/level, resolve bounds and request_body (max_request_body_mb) — not the raw document (no size, no 32 KiB check, no features list, no server_instance in the raw form)."
    },
+   "explains_checks": [
+    "capabilities_doc"
+   ],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:6828",
@@ -3762,6 +3821,9 @@
     "stage": "route",
     "detail": "The service's view (gate, backends, service_maxima, presets), cached up to an hour; the raw document and its gate-block projection are not exposed."
    },
+   "explains_checks": [
+    "capabilities_doc"
+   ],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:6828",
@@ -3818,6 +3880,7 @@
     "stage": "route",
     "detail": "Without an explicit idempotency_key the tool derives one from the request, so an identical call returns the SAME search_id (deduplicated: true, reused_search, no new access_token) while it runs, and once DONE for BACKEND_CACHE_MAX_ANSWER_AGE_SECS (7 days) with IDEMPOTENCY_REUSE_DONE true. The anonymous scope 'a:' is SHARED by every anonymous caller. Nothing is re-executed: pass a unique idempotency_key per execution (e.g. run_id:scenario:repeat) for a real repeat."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:2640",
@@ -3851,6 +3914,7 @@
     "stage": "route",
     "detail": "Anonymous: every call is a new resolve job (no reuse). With a valid API key the same resolve returns the same job while it runs or for TRAVERSAL_RESOLVE_REUSE_S (600 s) after (reused_job)."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:6885",
@@ -3880,6 +3944,7 @@
     "stage": "route",
     "detail": "Anonymous: no receipt, every call a new job. With an API key the derived receipt returns the same job (reused_job) unless force_fresh=True or a new idempotency_key."
    },
+   "explains_checks": [],
    "agreement": "by_design",
    "source": [
     "app/mcp_server.py:7463",
@@ -3991,7 +4056,8 @@
      "http": 502,
      "code": "search_failed",
      "text_contains": "pattern_deadline"
-    }
+    },
+    "direct_mismatch": "timing"
    }
   },
   {
@@ -4039,7 +4105,8 @@
      "code": "pattern_invalid",
      "text_contains": "Input should be greater than or equal to 1",
      "field": "caps.max_contexts | caps.max_anchors | caps.max_paths"
-    }
+    },
+    "direct_mismatch": "disagree"
    }
   }
  ]
