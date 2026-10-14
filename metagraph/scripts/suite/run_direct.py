@@ -25,7 +25,8 @@ planned execution is recorded, else `partial`.
 
 Resumable: a second invocation with the same --out skips the executions already recorded (same manifest
 required). SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
-state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run). --max-requests counts
+state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run), also when the reader of
+stdout is gone by then (a paired step whose ssh client a Ctrl-C ended: `say`). --max-requests counts
 every request of the invocation, the closing GET /capabilities included. Stdlib only: runs with python3.12 on
 mex.
 """
@@ -81,6 +82,38 @@ STOP = StopState()
 def reset_stop():
     """A fresh stop state (the tests run several runs in one process)."""
     STOP.flag, STOP.reason, STOP.signals = False, None, 0
+    STDOUT.gone = False
+
+
+class StdoutState(object):
+    def __init__(self):
+        self.gone = False
+
+
+STDOUT = StdoutState()
+
+
+def say(text):
+    """Writes |text| to stdout (the progress lines, the summary, the status line) and flushes it. A paired step's
+    stdout is its ssh channel: a Ctrl-C at the orchestrator ends the ssh client, and the runner, stopped by the
+    orchestrator's SIGINT after its request in flight, then meets a closed pipe. That is no failure of the run: the
+    first write that finds the reader gone points stdout at /dev/null (so no later write, nor the interpreter's
+    final flush, raises) and the run ends as its stop says (interrupted, exit 130)."""
+    if STDOUT.gone:
+        return
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        STDOUT.gone = True
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(devnull, sys.stdout.fileno())
+            finally:
+                os.close(devnull)
+        except (OSError, ValueError):
+            pass
 
 
 def _on_signal(signum, frame):
@@ -676,10 +709,9 @@ class Runner(object):
                 ran_in_session.add((sid, repeat))
                 ndone += 1
                 if not self.args.quiet:
-                    sys.stdout.write("[%s] %d/%d %s r%d %s http=%s %.0f ms\n" % (
+                    say("[%s] %d/%d %s r%d %s http=%s %.0f ms\n" % (
                         self.args.arm, ndone, len(planned), sid, repeat, line["outcome"], line["http"],
                         line["wall_ms"] or 0.0))
-                    sys.stdout.flush()
                 self.pause()
             if STOP.flag:
                 state = "interrupted"
@@ -777,13 +809,11 @@ def main(argv=None):
     runner = Runner(args, manifest, checks, checks_name, checks_error)
     state = runner.run_all()
     if not args.quiet:
-        sys.stdout.write("[%s] %s: %d executed, %d requests, run dir %s\n"
-                         % (args.arm, state, runner.executed, runner.requests, runner.out))
+        say("[%s] %s: %d executed, %d requests, run dir %s\n"
+            % (args.arm, state, runner.executed, runner.requests, runner.out))
     if args.status_line:
-        sys.stdout.write(STATUS_PREFIX + json.dumps({"state": state, "executed": runner.executed,
-                                                     "requests": runner.requests, "reason": STOP.reason},
-                                                    sort_keys=True) + "\n")
-    sys.stdout.flush()
+        say(STATUS_PREFIX + json.dumps({"state": state, "executed": runner.executed, "requests": runner.requests,
+                                        "reason": STOP.reason}, sort_keys=True) + "\n")
     if state == "interrupted" and (STOP.reason or "").startswith("max_requests"):
         return EXIT_REQUEST_CAP
     return {"done": 0, "partial": 0, "interrupted": 130}.get(state, 1)

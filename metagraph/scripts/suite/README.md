@@ -1833,3 +1833,13 @@ by lane S6c; everything below was open.
   repeat). The rule is async's BENCH-01 for its runner and is reevaluate.py's to apply as well (a mirror rule: the
   same helper).
 
+### Ctrl-C of a paired run over ssh (P3-run-measure-report-02)
+- A paired direct-local step's stdout is its ssh channel. Ctrl-C ends the ssh client; the runner on mex survives on
+  its request, gets the orchestrator's `pkill -INT`, records its line, and its next stdout write (the progress line,
+  or with --quiet the status line) met the closed pipe: BrokenPipeError, state `failed`, a "runner failed:
+  Traceback" warning that stayed in the arm's run.json (and the report) after a successful resume, exit 120 instead of
+  130. Every stdout write of run_direct goes through `say`: the first write that finds the reader gone points stdout
+  at /dev/null, and the run ends as its stop says (interrupted, exit 130, no warning). Tests: run_direct with its
+  stdout reader closed before SIGINT (with and without --quiet), and Ctrl-C of a paired run over tests/fake_ssh.py
+  followed by a resume.
+

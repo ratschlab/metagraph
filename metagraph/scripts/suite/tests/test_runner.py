@@ -540,6 +540,37 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(run["state"], "interrupted")
         self.assertEqual(sc.read_json(os.path.join(out, "state.json"))["state"], "interrupted")
 
+    def test_sigint_after_the_reader_of_stdout_is_gone(self):
+        # a paired step's stdout is its ssh channel: Ctrl-C ends the ssh client, then the orchestrator's SIGINT stops
+        # the runner after its request in flight; its next stdout write meets a closed pipe. The run is interrupted
+        # (exit 130), not failed (exit 120 with a "runner failed" BrokenPipeError warning), with or without --quiet
+        scen = [scenario("S-%d" % i, "S", "POST /slow", {"sleep_s": 1.0}) for i in range(3)]
+        make_manifest(self.manifest_path, scen)
+        for extra in ([], ["--quiet", "--status-line"]):
+            out = os.path.join(self.dir, "run%d" % len(extra))
+            with FakeHost() as host:
+                r, w = os.pipe()
+                proc = subprocess.Popen([sys.executable, os.path.join(SUITE, "run_direct.py"), "--manifest",
+                                         self.manifest_path, "--arm", "direct-local", "--base", host.base, "--out", out,
+                                         "--pause", "0", "--checks", "stub", "--warm-every", "0"] + extra,
+                                        stdout=w, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+                os.close(w)
+                deadline = time.time() + 30
+                while time.time() < deadline and ("POST", "/slow") not in host.log:
+                    time.sleep(0.02)
+                os.close(r)                     # the reader is gone while the request is in flight
+                time.sleep(0.2)
+                proc.send_signal(signal.SIGINT)
+                _, stderr = proc.communicate(timeout=60)
+            self.assertEqual(proc.returncode, 130, (extra, stderr.decode()))
+            self.assertNotIn(b"BrokenPipeError", stderr)
+            run = sc.read_json(os.path.join(out, "run.json"))
+            self.assertEqual((run["state"], run["sessions"][-1]["state"]), ("interrupted", "interrupted"), extra)
+            self.assertEqual(run.get("warnings", []), [], extra)
+            self.assertEqual(sc.read_json(os.path.join(out, "state.json"))["state"], "interrupted")
+            rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+            self.assertEqual([x["scenario"] for x in rows], ["S-0"])    # the request in flight is recorded
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -631,6 +631,36 @@ class RunSuiteOverSsh(SuiteCase):
         self.assertEqual((sess["loop"]["state"], sess["loop"]["reason"]), ("failed", "runner_still_running"))
         self.assertFalse(os.path.exists(self.lock_path()))
 
+    def test_ctrl_c_of_a_paired_run_over_ssh(self):
+        # Ctrl-C reaches the ssh client of the direct-local step in flight, which ends; the orchestrator's SIGINT stops
+        # the mex runner after its request, whose next stdout write then meets the closed channel: the arm is
+        # interrupted (no "runner failed" warning that would outlive a successful resume), the run resumable
+        make_manifest(self.mpath, [scenario("S-01", "S", "POST /slow", {"sleep_s": 3}),
+                                   scenario("S-02", "S", "POST /slow", {"sleep_s": 0})])
+        with FakeHost() as host:
+            cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                   "--warm-every", "0"]
+            proc = subprocess.Popen(cmd, env=self.env(host), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True, start_new_session=True, stdin=subprocess.DEVNULL)
+            self.wait_for(lambda: ("POST", "/slow") in host.log)
+            time.sleep(0.3)
+            os.killpg(proc.pid, signal.SIGINT)   # a terminal's Ctrl-C reaches the whole foreground group
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 130, err)
+            run_dir = [os.path.join(self.runs, x) for x in os.listdir(self.runs)][0]
+            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir)))
+            arm = os.path.join(self.mex, "suite-dev", "runs", os.path.basename(run_dir), "arms", "direct-local")
+            rj = sc.read_json(os.path.join(arm, "run.json"))
+            self.assertEqual((rj["state"], rj["sessions"][-1]["state"]), ("interrupted", "interrupted"))
+            self.assertFalse([w for w in rj.get("warnings", []) if "runner failed" in w])
+            with open(os.path.join(arm, "runner.log")) as fh:
+                self.assertNotIn("BrokenPipeError", fh.read())
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        merged = sc.read_json(os.path.join(run_dir, "run.json"))
+        self.assertEqual(merged["arms"]["direct-local"]["state"], "done")
+        self.assertFalse([w for w in merged.get("warnings", []) if "runner failed" in w])
+
 
 if __name__ == "__main__":
     unittest.main()
