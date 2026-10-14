@@ -1552,6 +1552,18 @@ class Relations(unittest.TestCase):
         self.assertEqual(self.ev(rel, self.resolve(50, [[0, 50]], [[0, 50]]), full)[0], "fail")
         self.assertEqual(self.ev(rel, self.resolve(0, [], [], stop=True), full)[0], "inconclusive")   # nothing common
         self.assertEqual(self.ev(rel, checks.normalise_direct(503, b'{"code": "deadline"}'), full)[0], "inconclusive")
+        # lane S6g1 (VERIFY-V4 V05): a's property is its stop (R-budget, resolve_runs prefix_if_stopped): two
+        # complete profiles that agree did not test it; one that disagrees still fails; the continuation keeps its
+        # comparison (REL-prefix_equals-0002 / -0004)
+        budget = {"route": "POST /resolve", "request": {}, "truth": {},
+                  "expect": [{"check": "resolve_runs", "args": {"label": "562", "full": True, "prefix_if_stopped": True}}]}
+        rel = self.rel("prefix_equals", labels=["562"], a_from_kmer=0, b_from_kmer=0)
+        self.assertEqual(self.ev(rel, stopped, full, sa=budget)[0], "pass")
+        o, d = self.ev(rel, full, full, sa=budget)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("no stop happened on a: the prefix property was not tested", d)
+        self.assertEqual(self.ev(rel, self.resolve(100, [[0, 100]], [[0, 41], [60, 100]]), full, sa=budget)[0], "fail")
+        self.assertEqual(self.ev(rel, full, full)[0], "pass")
 
     def test_zero_equals_absent(self):
         q = "ACGT" * 7 + "ACG"
@@ -1653,6 +1665,17 @@ class ResolveChecks(unittest.TestCase):
         bad = copy.deepcopy(a)
         bad["body"]["stop"]["remainder_from_bp"] = 41
         self.assertEqual(outcome(sc, bad, "invariants")[0], "fail")
+        # lane S6g1 (VERIFY-V4 V05): R-budget's property is the stop; a complete answer holds the profile but never
+        # tested the prefix a stop answers (inconclusive), a wrong complete profile still fails; a twin's property
+        # (unless_stopped) is the complete profile itself
+        complete = self.body([[0, 70]])
+        complete["body"].update(limits={"time_budget_ms": 3000, "finalize_reserve_ms": 250}, stop=None)
+        o, d = outcome(sc, complete, "resolve_runs", label="562", full=True, prefix_if_stopped=True)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("no stop happened: the prefix property was not tested", d)
+        holed = self.body([[0, 30]])
+        self.assertEqual(outcome(sc, holed, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "fail")
+        self.assertEqual(outcome(sc, complete, "resolve_runs", label="562", full=True, unless_stopped=True)[0], "pass")
         empty = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [], "labels": [
             {"label": "562", "kind": "column", "kmers_supported": 0, "runs": []}]})
         self.assertEqual(outcome(sc, empty, "resolve_absent")[0], "pass")

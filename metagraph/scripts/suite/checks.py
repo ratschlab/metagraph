@@ -2125,6 +2125,17 @@ def check_resolve_runs(sc, ans, a, arm):
                 x, a["label"], ks, runs[:4], (body.get("graph_runs") or [])[:4], x)
         return PASS, "stopped after %s of %s k-mers: the prefix fully supported by %s" % (
             x, stop.get("query_kmers"), a["label"])
+    outcome, detail = _resolve_profile(a, lab, runs, num, ks)
+    if a.get("prefix_if_stopped") and not stop and outcome != FAIL:
+        # the scenario's property is the stated stop (SPEC §4.5: a stop answers the resolve of a prefix): a complete
+        # answer holds the profile but never exercised it
+        return INCONCLUSIVE, "no stop happened: the prefix property was not tested (%s)" % detail
+    return outcome, detail
+
+
+def _resolve_profile(a: dict, lab: dict, runs: list, num: Any, ks: Any) -> Tuple[str, str]:
+    """resolve_runs' assertions on a complete profile of label a["label"]: full support, covered intervals, run
+    ends and starts, exact runs, the supported k-mers."""
     if a.get("full"):
         if ks != num or runs != [[0, num]]:
             return FAIL, "label %s: %s of %s k-mers, runs %s (expected one run [0, %s])" % (a["label"], ks, num, runs[:4], num)
@@ -3648,7 +3659,22 @@ def _kmer_set(runs: Any, offset: int, lo: int, hi: int) -> set:
     return out
 
 
+def _expects_stop(sc: dict) -> bool:
+    """Whether a /resolve scenario's property is a stated stop: its resolve_runs asks prefix_if_stopped (a budget
+    built to stop inside the query)."""
+    return any(isinstance(e, dict) and e.get("check") == "resolve_runs" and (e.get("args") or {}).get("prefix_if_stopped")
+               for e in sc.get("expect") or [])
+
+
 def _relation_prefix_equals(rel, a_sc, A, b_sc, B):
+    outcome, detail = _prefix_comparison(rel, A, B)
+    if outcome == PASS and _expects_stop(a_sc) and not (_body(A) or {}).get("stop"):
+        # a's property is its stop: two complete profiles that agree say nothing of the prefix a stop answers
+        return INCONCLUSIVE, "no stop happened on a: the prefix property was not tested (%s)" % detail
+    return outcome, detail
+
+
+def _prefix_comparison(rel, A, B):
     if A.get("http") != 200 or B.get("http") != 200:
         return INCONCLUSIVE, "http %s / %s: no two profiles to compare" % (A.get("http"), B.get("http"))
     args = rel.get("args") or {}

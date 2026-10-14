@@ -1420,3 +1420,14 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   ending label_lost at 4,898 bp below complete_to_bp 5,250 / 7,378 / 8,748) on v4 L0, R0, M1 and v3 R0, M1: the
   detail now names the gap instead of the time budget, the outcome (inconclusive, its right arm time-stopped) is
   unchanged; the same answers against the record with an A there fail. No other recorded verdict or detail moves.
+- /resolve, a stop the scenario is built to state (the v4 triage's V05 as VERIFY-V4 amended it): R-budget's
+  property is the stated stop (resolve_runs `prefix_if_stopped`: SPEC-labeled-traversal-core §4.5, a stop answers
+  the resolve of a prefix). A complete answer without a stop holds the full profile but never tested the prefix:
+  resolve_runs reads INCONCLUSIVE, "no stop happened: the prefix property was not tested" (a complete profile that
+  is wrong still fails), where it passed. The relation prefix_equals whose a-scenario asks `prefix_if_stopped`
+  (REL-prefix_equals-0001 / -0003) reads the same when a states no stop and the two profiles agree (they still fail
+  when they differ). A twin's `unless_stopped` (R-twin-*: the reference profile) and the continuation relations
+  (-0002 / -0004) keep their complete-profile tests: there the complete profile is the property. Recorded runs:
+  every direct R-budget answer of v3 and v4 is a 503 and every MCP one a 400 (the 2,000 bp limit), so no outcome
+  moves; R-twin-0004 R0's complete answer judged as R-budget-0002's reads inconclusive (it passed), and so does
+  REL-prefix_equals-0003 on it.
