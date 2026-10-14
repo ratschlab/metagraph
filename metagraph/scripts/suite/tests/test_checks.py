@@ -433,6 +433,37 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(o, "fail")
         self.assertIn("listed again", d)
 
+    def test_path_record_verified_placement(self):
+        # lane S6g1 (the review of 2026-10-14, finding 6 B): the record's occurrence is placed with the index's
+        # seq_id and the record's length, and every occurrence the label verifies lies in its record
+        # (L-verified-0001: NC_1.1 34701-34740 '+', seq_id 2, 640,681 bp)
+        t = {"record": "NC_1.1", "taxid": "562", "seq_id": 2, "record_length": 640681, "start": 34700, "length": 40,
+             "strand": "+", "window": "ACGT" * 10}
+        sc = {"route": "POST /pattern", "truth": t, "request": {"patterns": [{"dna": "ACGT" * 10, "id": "w"}],
+                                                                "long_search": "paths", "output": {"labels": "all"}}}
+
+        def ans(other=None, **occ):
+            o = {"record": "NC_1.1", "seq_id": 2, "strand": "+", "nt_coords": "34701-34740", "nt_length": 640681}
+            o.update(occ)
+            path = {"sequence": "ACGT" * 10, "strand": "+", "labels": [
+                {"column": "562", "support": "record_verified", "occurrence_list": [o] + ([other] if other else [])}]}
+            return ok_answer({"patterns": [{"id": "w", "counts": {"paths": {"relation": "exact", "value": 1}},
+                                            "results": [path], "returned": 1}]})
+        self.assertEqual(outcome(sc, ans(), "path_record_verified")[0], "pass")
+        for bad in ({"nt_length": 1}, {"seq_id": 999999999}, {"nt_length": 1, "seq_id": 999999999},
+                    {"nt_length": 640681 + 1000}):
+            self.assertEqual(outcome(sc, ans(**bad), "path_record_verified")[0], "fail", bad)
+        other = {"record": "NC_2.1", "seq_id": 7, "strand": "-", "nt_coords": "901-940", "nt_length": 5000}
+        self.assertEqual(outcome(sc, ans(other=other), "path_record_verified")[0], "pass")
+        o, d = outcome(sc, ans(other=dict(other, nt_length=900)), "path_record_verified")
+        self.assertEqual(o, "fail")
+        self.assertIn("outside its record of nt_length 900", d)
+        self.assertEqual(outcome(sc, ans(other=dict(other, nt_coords="940-901")), "path_record_verified")[0], "fail")
+        # source_placement places a context's record occurrence by the same rule
+        self.assertIsNone(checks._occurrence_problem({"record": "NC_1.1", "seq_id": 2, "nt_coords": "34701-34740",
+                                                      "nt_length": 640681}, t))
+        self.assertIn("outside its record", checks._coords_problem({"nt_coords": "0-39", "nt_length": 100}))
+
     def test_counts_consistent_refuses(self):
         req, ans = fixture("all_or_count")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}

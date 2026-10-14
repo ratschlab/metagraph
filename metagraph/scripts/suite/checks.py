@@ -1411,13 +1411,36 @@ def check_source_placement(sc, ans, a, arm):
             raise Missing("occurrence_list")
         for o in occ:
             if o.get("record") == t["record"] and o.get("nt_coords") == coords and o.get("strand") == strand:
-                if "seq_id" in o and o["seq_id"] != t["seq_id"]:
-                    return FAIL, "record %s placed with seq_id %s, the index's is %s" % (t["record"], o["seq_id"], t["seq_id"])
-                if o.get("nt_length") not in (None, t["record_length"]):
-                    return FAIL, "nt_length %s, the record's length is %s" % (o.get("nt_length"), t["record_length"])
+                m = _occurrence_problem(o, t)
+                if m:
+                    return FAIL, m
                 return PASS, "%s %s %s placed (offset %d)" % (t["record"], coords, strand, r["offset"])
     return FAIL, "no occurrence %s %s %s under taxid %s on %d source contexts" % (
         t["record"], coords, strand, t["taxid"], len(found))
+
+
+def _coords_problem(o: dict) -> Optional[str]:
+    """Why occurrence |o|'s 1-based inclusive nt_coords do not lie in its own record (1 <= start <= end <=
+    nt_length, SPEC-pattern-search §14.3), or None (also where it states no coordinates or no length)."""
+    m = re.fullmatch(r"(\d+)-(\d+)", str(o.get("nt_coords")))
+    n = o.get("nt_length")
+    if not m or not isinstance(n, int) or isinstance(n, bool):
+        return None
+    a, b = int(m.group(1)), int(m.group(2))
+    if 1 <= a <= b <= n:
+        return None
+    return "occurrence of %s at %s on %s, outside its record of nt_length %d" % (o.get("record"), o.get("nt_coords"),
+                                                                                  o.get("strand"), n)
+
+
+def _occurrence_problem(o: dict, t: dict) -> Optional[str]:
+    """What is wrong with the truth record's occurrence |o| (its record, coordinates and strand matched): its seq_id
+    must be the index's for the record and its nt_length the record's length, which holds its coordinates."""
+    if "seq_id" in o and o["seq_id"] != t.get("seq_id"):
+        return "record %s placed with seq_id %s, the index's is %s" % (t["record"], o["seq_id"], t.get("seq_id"))
+    if o.get("nt_length") not in (None, t.get("record_length")):
+        return "nt_length %s, the record's length is %s" % (o.get("nt_length"), t.get("record_length"))
+    return _coords_problem(o)
 
 
 def _paths_with_sequence(e: dict, seq: str) -> List[dict]:
@@ -1464,8 +1487,16 @@ def check_path_record_verified(sc, ans, a, arm):
             continue
         if lab.get("support") != "record_verified":
             return FAIL, "taxid %s carries the path with support %r" % (t["taxid"], lab.get("support"))
+        # every occurrence the label verifies lies in its record; the record's own is placed with the index's
+        # seq_id and the record's length (as source_placement places a context)
+        outside = next((m for m in (_coords_problem(o) for o in lab.get("occurrence_list") or []) if m), None)
+        if outside:
+            return FAIL, "taxid %s: %s" % (t["taxid"], outside)
         for o in lab.get("occurrence_list") or []:
             if o.get("record") == t["record"] and o.get("nt_coords") == coords and o.get("strand") == strand:
+                m = _occurrence_problem(o, t)
+                if m:
+                    return FAIL, m
                 return PASS, "%s %s %s record_verified" % (t["record"], coords, strand)
         return FAIL, "taxid %s record_verified, but no occurrence %s %s %s (%s)" % (
             t["taxid"], t["record"], coords, strand, (lab.get("occurrence_list") or [])[:3])

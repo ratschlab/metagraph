@@ -1400,3 +1400,11 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   with its count and partitions doubled and every context listed twice (with every exact count anchored by a
   complete list, a doubled count can no longer be padded). 0 duplicates among the 358,157 recorded results of v3
   and v4. A duplicate page boundary of the MCP's paging is the runner's to test (its normaliser).
+- /pattern, path_record_verified places the record (SPEC-pattern-search §14.3, §20.6): the occurrence of the
+  record at the window's coordinates and strand states the index's seq_id and the record's length (as
+  source_placement asks of a context), and every occurrence the label verifies lies in its own record (1 <= start
+  <= end <= nt_length; source_placement applies the same rule to its record's occurrence). Closed: L-verified-0001
+  and X-peptide-long-0001 with the record's occurrence at seq_id 999999999 and/or nt_length 1, nt_length + 1000, or
+  another occurrence outside its record. All 14,298 recorded occurrences of v3 and v4 lie in their records, and
+  every one of the truth's record states its seq_id and length. (L-long-0006's `path_spells` for its '+' path is a
+  manifest change, left to the v5 lane.)
