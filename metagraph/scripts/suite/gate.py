@@ -38,9 +38,10 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
 - disagreement: no MCP disagreement (MCP a policy arm) and no direct disagreement (both direct arms policy arms) in the
   selection; with require_agreement the MCP class is agree or a verified by-design pair;
 - relation: every relation the policy requires passed on each of its arms;
-- configuration (the MCP arm a policy arm): arms/mcp/run.json records service_capabilities, a successful read of the
-  live GET /traverse/capabilities with no mismatch against the by-design table, and no MCP line resolved a
-  configuration reference from the table or not at all (request_evidence "table" / "unknown");
+- configuration (the MCP arm a policy arm): configuration_problems, i.e. compare.gate_configuration_problems
+  (a live document with service_settings, no live / table mismatch, no reference read from the table or unknown)
+  plus a read by every invocation, one document per run, the runner's recorded mismatches, the advanced_path
+  premise checked live and well-formed request_evidence; the per-line evidence is one problem per reference path;
 - something passed.
 """
 
@@ -305,47 +306,121 @@ def _explained_property(line, name, k):
     return name in (line.get("explained_checks") or ())
 
 
-def configuration_problems(run_dir, rows, policy_arms, selected):
-    """The MCP service's configuration evidence (the async runner's records agreed on 2026-10-14):
-    arms/mcp/run.json service_capabilities (a live read of GET /traverse/capabilities: a document or the read's
-    error, and the live / table mismatches on referenced keys), and each MCP line's request_evidence
-    {case: {reference path: live | table | unknown}}."""
-    if "mcp" not in policy_arms:
+EVIDENCE_SOURCES = ("live", "table", "unknown")
+
+
+def _document_sha(rec):
+    doc = rec.get("document")
+    return rec.get("sha256") or (hashlib.sha256(sc.canonical_json(doc)).hexdigest() if isinstance(doc, dict) else None)
+
+
+def configuration_problems(run_dir, rows, policy, reevaluated=False):
+    """The MCP service's configuration evidence (agreed with async's runner on 2026-10-14), with the MCP arm gated:
+    compare.gate_configuration_problems (lane G2's definition: a recorded live document stating service_settings,
+    each referenced path live and equal to the table's block, no request_evidence read from the table or unknown),
+    and besides it: every invocation of the MCP runner recorded a successful read and all reads are one document; the
+    runner's own recorded mismatches (run.json, a line's request_evidence_mismatches); the live
+    service_settings.advanced_enabled equals the policy's advanced_path where its exclusions assume it; a
+    request_evidence that is not {case: {path: live | table | unknown}}. The per-line evidence not read live is one
+    problem per reference path and source, naming its cases and executions."""
+    if "mcp" not in (policy.get("arms") or []):
         return []
     out = []
+    table_path, _ = cmp.table_for(run_dir, None, reevaluated)
+    cases = cmp.load_by_design(table_path)[0] if table_path else {}
+    try:
+        defined = cmp.gate_configuration_problems(run_dir, cases, reevaluated)
+    except (AttributeError, TypeError, ValueError) as e:
+        # a malformed record compare's reading cannot take (named below line by line)
+        defined = []
+        out.append(_problem("configuration", "compare.gate_configuration_problems could not read the run's "
+                                             "configuration records (%s: %s)" % (type(e).__name__, e), arm="mcp"))
+    head = ("configuration evidence missing", "configuration mismatch")
+    out.extend(_problem("configuration", x, arm="mcp") for x in defined if x.startswith(head))
+    line_entries = [x for x in defined if not x.startswith(head)]
     run = sc.read_json(os.path.join(run_dir, "arms", "mcp", "run.json")) or {}
     reads = []
-    if "service_capabilities" in run:
-        reads.append(("run.json", run.get("service_capabilities")))
-    for i, inv in enumerate(run.get("invocations") or []):
-        if isinstance(inv, dict) and "service_capabilities" in inv:
-            reads.append(("invocation %d" % i, inv.get("service_capabilities")))
-    if not reads:
-        out.append(_problem("configuration", "arms/mcp/run.json records no service_capabilities: the live "
-                                             "configuration of the service under the gate was not read (a runner of "
-                                             "before the record, or no MCP run)", arm="mcp"))
-    for where, sc_doc in reads:
-        if not isinstance(sc_doc, dict):
-            out.append(_problem("configuration", "%s: service_capabilities is %r, not a read" % (where, sc_doc),
-                                arm="mcp"))
+    if isinstance(run.get("service_capabilities"), dict):
+        reads.append(("run.json", run["service_capabilities"]))
+    invocations = [inv for inv in run.get("invocations") or [] if isinstance(inv, dict)]
+    unread = []
+    for i, inv in enumerate(invocations):
+        rec = inv.get("service_capabilities")
+        if not isinstance(rec, dict) or not isinstance(rec.get("document"), dict) or rec.get("error"):
+            unread.append("invocation %d started %s%s" % (i, inv.get("started_utc"), (": %s" % str(
+                rec.get("error"))[:120]) if isinstance(rec, dict) and rec.get("error") else ""))
             continue
-        if sc_doc.get("error") or not isinstance(sc_doc.get("document"), dict):
-            out.append(_problem("configuration", "%s: the read of the live capabilities failed (%s)" % (
-                where, str(sc_doc.get("error") or "no document")[:200]), arm="mcp"))
-        for m in sc_doc.get("mismatches") or []:
+        reads.append(("invocation %d" % i, rec))
+    if unread:
+        # one problem for the run: a runner of before the record leaves every invocation without one
+        out.append(_problem("configuration", "%d of %d invocation(s) of the MCP runner recorded no read of the live "
+                                             "capabilities document (%s%s)" % (
+                                                 len(unread), len(invocations), "; ".join(unread[:5]),
+                                                 "; ..." if len(unread) > 5 else ""), arm="mcp"))
+    shas = sorted(set(_document_sha(rec) for _, rec in reads if isinstance(rec.get("document"), dict)))
+    if len(shas) > 1:
+        out.append(_problem("configuration", "%d different capabilities documents in one run (sha256 %s): the run "
+                                             "spans more than one deployment" % (
+                                                 len(shas), ", ".join(x[:12] for x in shas)), arm="mcp"))
+    for where, rec in reads:
+        for m in rec.get("mismatches") or []:
             out.append(_problem("configuration", "%s: live / table mismatch: %s" % (
                 where, json.dumps(m, sort_keys=True)[:300] if not isinstance(m, str) else m[:300]), arm="mcp"))
+    doc = (reads[0][1].get("document") if reads else None)
+    if isinstance(doc, dict) and isinstance(doc.get("service_settings"), dict):
+        premise = any("advanced_path" in (e.get("rules") or ()) for e in policy.get("exclusions") or [])
+        want = bool(policy.get("advanced_path"))
+        if premise or want:
+            settings = doc["service_settings"]
+            if "advanced_enabled" not in settings:
+                out.append(_problem("configuration", "the live document does not state "
+                                                     "service_settings.advanced_enabled: the policy's advanced_path "
+                                                     "%s cannot be checked" % ("exclusions" if premise else "setting"),
+                                    arm="mcp"))
+            elif settings.get("advanced_enabled") is not want:
+                out.append(_problem("configuration", "the live service_settings.advanced_enabled is %s, the policy "
+                                                     "assumes %s (%s)" % (
+                                                         json.dumps(settings.get("advanced_enabled")),
+                                                         json.dumps(want), "its advanced_path exclusions"
+                                                         if premise else "advanced_path"), arm="mcp"))
+    weak, pairs_weak = {}, 0
     for r in rows:
-        if r.get("arm") != "mcp" or r.get("scenario") not in selected:
+        if r.get("arm") != "mcp":
             continue
-        ev = r.get("request_evidence")
-        if not isinstance(ev, dict):
+        key = "%s r%s" % (r.get("scenario"), r.get("repeat"))
+        for m in r.get("request_evidence_mismatches") or []:
+            out.append(_problem("configuration", "%s recorded a live / table mismatch: %s" % (
+                key, json.dumps(m, sort_keys=True)[:300]), r.get("scenario"), "mcp", r.get("repeat")))
+        if "request_evidence" not in r or r.get("request_evidence") is None:
             continue
-        for case, refs in sorted(ev.items()):
-            for path, source in sorted((refs or {}).items()) if isinstance(refs, dict) else []:
-                if source in NOT_LIVE_EVIDENCE or source != "live":
-                    out.append(_problem("configuration", "case %s resolved %s from %s, not from the live document" % (
-                        case, path, source), r.get("scenario"), "mcp", r.get("repeat")))
+        ev = r["request_evidence"]
+        bad = not isinstance(ev, dict) or any(
+            not isinstance(paths, dict) or any(v not in EVIDENCE_SOURCES for v in paths.values())
+            for paths in ev.values())
+        if bad:
+            out.append(_problem("configuration", "malformed request_evidence %s (not {case: {path: live | table | "
+                                                 "unknown}})" % json.dumps(ev, sort_keys=True)[:200],
+                                r.get("scenario"), "mcp", r.get("repeat")))
+            continue
+        for case, paths in sorted(ev.items()):
+            pairs_weak += any(v != "live" for v in paths.values())
+            for path, source in sorted(paths.items()):
+                if source != "live":
+                    weak.setdefault((path, source), {}).setdefault(case, []).append(key)
+    for (path, source), by_case in sorted(weak.items()):
+        n = len(set(k for keys in by_case.values() for k in keys))
+        what = "was read from the table, not the live document," if source == "table" else \
+            "was not found (unknown), live or in the table,"
+        out.append(_problem("configuration", "the reference %s %s on %d MCP execution(s) (%s)" % (
+            path, what, n, "; ".join("%s: %s" % (case, ", ".join(keys[:12]) + (" ..." if len(keys) > 12 else ""))
+                                      for case, keys in sorted(by_case.items()))), arm="mcp"))
+    if len(line_entries) != pairs_weak and not any(p["detail"].startswith("compare.gate_configuration_problems")
+                                                   for p in out):
+        # one definition: compare's per-line reading and this aggregation name the same (execution, case) pairs
+        out.append(_problem("configuration", "compare.gate_configuration_problems names %d per-line evidence item(s), "
+                                             "the gate's aggregation %d: %s" % (
+                                                 len(line_entries), pairs_weak, "; ".join(line_entries[:5])),
+                            arm="mcp"))
     return out
 
 
@@ -393,7 +468,7 @@ def judge(run_dir, policy, reevaluated=False):
 
     arms = list(policy.get("arms") or [])
     selected = set(policy["selection"].get("scenarios") or [])
-    problems.extend(configuration_problems(run_dir, rows, arms, selected))
+    problems.extend(configuration_problems(run_dir, rows, policy, reevaluated))
 
     # completeness
     recorded = dict((sc.execution_key(r), r) for r in rows)

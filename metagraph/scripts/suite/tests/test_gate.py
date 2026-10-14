@@ -632,17 +632,20 @@ class JudgeTest(GateCase):
 
     def test_configuration_evidence(self):
         v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m), caps=None))
-        self.assertIn("records no service_capabilities", self.problems(v, "configuration")[0]["detail"])
+        self.assertIn("configuration evidence missing", self.problems(v, "configuration")[0]["detail"])
         v = self.judge(make_run(self.run_dir("b"), self.m, mcp_lines(self.m),
                                 caps=dict(CAPS, document=None, error="refused")))
-        self.assertIn("read of the live capabilities failed", self.problems(v, "configuration")[0]["detail"])
+        self.assertIn("configuration evidence missing", self.problems(v, "configuration")[0]["detail"])
+        self.assertIn("refused", self.problems(v, "configuration")[0]["detail"])
         v = self.judge(make_run(self.run_dir("c"), self.m, mcp_lines(self.m),
                                 caps=dict(CAPS, mismatches=[{"path": "service_settings.advanced_enabled"}])))
         self.assertIn("live / table mismatch", self.problems(v, "configuration")[0]["detail"])
         ev = {"case.refused": {"service_settings.advanced_enabled": "table"}}
         v = self.judge(make_run(self.run_dir("d"), self.m, mcp_lines(self.m, change={
             ("R-003", 0): {"request_evidence": ev}})))
-        self.assertEqual([(p["scenario"], p["repeat"]) for p in self.problems(v, "configuration")], [("R-003", 0)])
+        self.assertEqual([p["detail"] for p in self.problems(v, "configuration")],
+                         ["the reference service_settings.advanced_enabled was read from the table, not the live "
+                          "document, on 1 MCP execution(s) (case.refused: R-003 r0)"])
         ev = {"case.refused": {"service_settings.advanced_enabled": "live"}}
         v = self.judge(make_run(self.run_dir("e"), self.m, mcp_lines(self.m, change={
             ("R-003", 0): {"request_evidence": ev}})))
@@ -670,6 +673,75 @@ class JudgeTest(GateCase):
         self.assertIn("T-001 mcp r1: planned, not recorded", p.stdout)
         sc.write_json_atomic(pol, {"policy_version": 99})
         self.assertEqual(subprocess.run(cmd + [d, pol], capture_output=True, text=True).returncode, 2)
+
+
+class ConfigurationTest(GateCase):
+    """Configuration evidence through compare.gate_configuration_problems (lane G2's definition) and what the gate
+    adds: every invocation read one document, the advanced_path exclusions' premise holds live, request_evidence is
+    well formed, and the per-line table evidence is one problem per reference path."""
+
+    def judge(self, d, **kw):
+        return gate.judge(d, policy_of(self.m, **kw))
+
+    def conf(self, v):
+        return [p["detail"] for p in v["problems"] if p["kind"] == "configuration"]
+
+    def set_mcp_run(self, d, **fields):
+        path = os.path.join(d, "arms", "mcp", "run.json")
+        run = sc.read_json(path)
+        run.update(fields)
+        sc.write_json_atomic(path, run)
+
+    def test_a_document_without_service_settings(self):
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m), caps=dict(CAPS, document={})))
+        self.assertIn("configuration evidence missing", " ".join(self.conf(v)))
+
+    def test_every_invocation_reads_one_document(self):
+        d = make_run(self.run_dir(), self.m, mcp_lines(self.m))
+        self.set_mcp_run(d, invocations=[{"started_utc": "a", "service_capabilities": CAPS},
+                                         {"started_utc": "b"}])
+        self.assertIn("1 of 2 invocation(s) of the MCP runner recorded no read of the live capabilities document "
+                      "(invocation 1 started b)", " ".join(self.conf(self.judge(d))))
+        other = dict(CAPS, sha256="d", document={"service_settings": {"advanced_enabled": True}})
+        self.set_mcp_run(d, invocations=[{"started_utc": "a", "service_capabilities": CAPS},
+                                         {"started_utc": "b", "service_capabilities": other}])
+        self.assertIn("2 different capabilities documents in one run", " ".join(self.conf(self.judge(d))))
+        self.set_mcp_run(d, invocations=[{"started_utc": "a", "service_capabilities": CAPS},
+                                         {"started_utc": "b", "service_capabilities": CAPS}])
+        self.assertEqual(self.conf(self.judge(d)), [])
+
+    def test_advanced_path_premise_checked_live(self):
+        on = dict(CAPS, document={"service_settings": {"advanced_enabled": True}})
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m), caps=on))
+        self.assertIn("the live service_settings.advanced_enabled is true", " ".join(self.conf(v)))
+        # a policy for a deployment with the advanced path: required, and the live document must say so
+        v = self.judge(make_run(self.run_dir("b"), self.m, mcp_lines(self.m)), advanced_path=True)
+        self.assertIn("the live service_settings.advanced_enabled is false", " ".join(self.conf(v)))
+        unstated = dict(CAPS, document={"service_settings": {}})
+        v = self.judge(make_run(self.run_dir("c"), self.m, mcp_lines(self.m), caps=unstated))
+        self.assertIn("does not state service_settings.advanced_enabled", " ".join(self.conf(v)))
+
+    def test_malformed_request_evidence(self):
+        for bad in ({"case.refused": "table"}, ["live"], {"case.refused": {"p": "maybe"}}):
+            v = self.judge(make_run(self.run_dir(str(len(os.listdir(self.tmp)))), self.m, mcp_lines(
+                self.m, change={("R-003", 1): {"request_evidence": bad}})))
+            self.assertIn("malformed request_evidence", " ".join(self.conf(v)), bad)
+
+    def test_table_evidence_is_one_problem_per_reference_path(self):
+        ev = {"case.refused": {"service_settings.advanced_enabled": "table",
+                               "presets.walk.budgets.max_extension_bp": "unknown"}}
+        change = dict(((sid, r), {"request_evidence": ev}) for sid in ("R-003", "T-001") for r in (0, 1))
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change=change)))
+        self.assertEqual(self.conf(v), [
+            "the reference presets.walk.budgets.max_extension_bp was not found (unknown), live or in the table, on 4 "
+            "MCP execution(s) (case.refused: T-001 r0, T-001 r1, R-003 r0, R-003 r1)",
+            "the reference service_settings.advanced_enabled was read from the table, not the live document, on 4 MCP "
+            "execution(s) (case.refused: T-001 r0, T-001 r1, R-003 r0, R-003 r1)"])
+
+    def test_line_mismatches_are_read(self):
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change={("R-003", 0): {
+            "request_evidence_mismatches": [{"namespace": "service", "ref": "x", "live": 1, "table": 2}]}})))
+        self.assertIn("R-003 r0 recorded a live / table mismatch", " ".join(self.conf(v)))
 
 
 class StaleGateTest(GateCase):

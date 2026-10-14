@@ -132,7 +132,8 @@ class IdsPlanAndGate(SuiteCase):
             p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
                                "--skip-remote", "--gate", pol, "--by-design", "", FAKE_MCP_CAPS="failed")
             self.assertEqual(p.returncode, 1, p.stderr)
-            self.assertIn("read of the live capabilities failed", p.stderr)
+            self.assertIn("configuration evidence missing", p.stderr)
+            self.assertIn("fake: connection refused", p.stderr)
             failed_dir = p.stdout.strip().splitlines()[-1]
             # every execution failing: exit 1 with --gate, 0 without (the exploratory exit status is unchanged)
             p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",

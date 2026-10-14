@@ -1413,11 +1413,19 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   says so), while an answered or clamped case that explains checks (the service answers what the host refuses:
   R-edge-0009, T-edge-0007, T-edge-0008) is verified only against a direct execution, so an MCP-only policy excludes
   those scenarios (`needs_direct_arm`, below) and the deploy gate runs two arms.
-- **Configuration evidence** (agreed with async's runner on 2026-10-14): with the MCP arm gated, arms/mcp/run.json
-  must record `service_capabilities` (the runner's read of the live GET /traverse/capabilities: a document, no
-  error) with no `mismatches` against the by-design table, and no MCP line may record `request_evidence` with a
-  source other than "live" (a reference resolved from the table or not at all is no evidence of the deployment under
-  the gate). gate.py reads these fields directly; lane G2's resolution helpers do not exist on this branch.
+- **Configuration evidence** (agreed with async's runner on 2026-10-14), with the MCP arm gated: lane S6b's
+  `compare.gate_configuration_problems` is the definition (a recorded live document stating service_settings, an
+  empty `{}` or a failed read included; every referenced path equal live and in the table's blocks; no MCP line whose
+  request_evidence read a reference from the table or found it unknown), and the gate adds: every invocation of the
+  MCP runner recorded a successful read (run.json `invocations[]`, one problem for the run naming how many did not)
+  and all reads are one document (a run spanning two deployments fails); the runner's own recorded mismatches
+  (run.json, a line's request_evidence_mismatches); the live service_settings.advanced_enabled equals the policy's
+  advanced_path where its advanced_path exclusions assume it (false) or the policy enables it; a request_evidence
+  that is not {case: {path: live | table | unknown}} (compare's reader would raise on it; the gate states it). The
+  per-line evidence not read live is one problem per reference path and source, naming its cases and executions
+  (v4 replayed: 11 paths, the nine preset-row budgets of traverse.bounds_budget_above_preset_row on 14 executions,
+  service_settings.advanced_enabled on T-labels-0004/0006's 4, service_settings.resolve.budget_ceiling_ms on
+  R-edge-0021's 2); the gate checks that compare's per-line count and its aggregation agree.
 - **run_suite.sh --gate POLICY**: without --ids / --areas / --limit the selection is the policy's (less what is
   excluded on every arm the invocation runs); merge_run.py --strict-identity, then compare, then gate.py, then the
   report (a "Deploy gate" section); the exit status is the gate's. `--reevaluate RUN_DIR --gate POLICY` judges the
