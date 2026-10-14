@@ -3119,9 +3119,19 @@ def check_walk_in_record(sc, ans, a, arm):
         elif unstopped:
             probs.append("a stated stop that cannot have happened: %s, the record followed for %d of %d bp" % (
                 unstopped, best, expected))
-        elif ends & _RESOURCE_ENDS or (armo.get("status") == "truncated" and trig in _RESOURCE_ENDS):
+        elif ends & _RESOURCE_ENDS or (armo.get("status") == "truncated" and trig in _RESOURCE_ENDS and
+                                       not (_finite(armo.get("complete_to_bp")) and best < armo["complete_to_bp"])):
+            # the cap stopped the record's route only where it reaches the depth the cap left incomplete: a path
+            # that ended before complete_to_bp ended for its own stated reason (SPEC-labeled-traversal-core §6.10)
             stopped.append("%s: the record followed for %d of %d bp, stopped by %s" % (
                 side, best, expected, sorted(ends & _RESOURCE_ENDS)[0] if ends & _RESOURCE_ENDS else trig))
+        elif _outside_alphabet(frames, side, following, best):
+            # the record's next base is no base of the graph's alphabet ($ACGT, SPEC-pattern-search §8.2): no k-mer
+            # holds it, so the record's route ends there, which the truth's minimum did not count
+            searched.append("%s: the record followed for %d of %d bp, ended by %s before the record's base %r, "
+                            "which no k-mer of the graph holds: a truth gap" % (
+                                side, best, expected, sorted(ends) or "nothing stated",
+                                _outside_alphabet(frames, side, following, best)))
         else:
             probs.append("%s: the record followed for only %d of %d bp, the path ended by %s%s" % (
                 side, best, expected, sorted(ends) or "nothing stated", how))
@@ -3141,6 +3151,21 @@ def check_walk_in_record(sc, ans, a, arm):
     if stopped or searched:
         return INCONCLUSIVE, "; ".join(stopped + searched + notes)
     return PASS, "; ".join(notes)
+
+
+def _outside_alphabet(frames: Sequence[Tuple[Callable[[int], str], int, int]], side: str,
+                      following: Sequence[Tuple[dict, str]], best: int) -> Optional[str]:
+    """The record's base right after a longest route (|best| bp) along one of |frames| when it is no base the graph
+    holds (not A, C, G or T: an IUPAC code of the record), else None."""
+    longest = set(f for _, f in following if len(f) == best)
+    for cont, room, _ in frames:
+        if room <= best or cont(best) not in longest:
+            continue
+        nxt = cont(best + 1)
+        base = (nxt[-1] if side == "right" else nxt[0]).upper() if nxt else ""
+        if base and base not in "ACGT":
+            return base
+    return None
 
 
 def _first_branch_bp(armo: dict) -> Optional[int]:

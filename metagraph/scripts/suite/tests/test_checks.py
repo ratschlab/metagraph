@@ -1819,6 +1819,44 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, failed, "walk_in_record")[0], "fail")
         self.assertEqual(outcome(sc, failed, "walk_in_record", if_walked=True)[0], "inconclusive")
 
+    def test_walk_judged_by_its_own_end_below_the_frontier(self):
+        # the v4 triage's V03: a cap that truncated the arm stopped the record's route only where the route reaches
+        # complete_to_bp; one that ended before it ended for its own stated reason (SPEC-labeled-traversal-core
+        # §6.10), and where that is the record's base outside A, C, G, T (T-walk-0018's 'S'), the truth's gap
+        import random
+        rnd = random.Random(17)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+
+        def scen(rec, direction):
+            t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+                 "strand": "+", "window": rec[start:start + L], "flank": rec, "flank_start": 0}
+            return {"route": "POST /traverse", "truth": t, "request": {
+                "seeds": [{"sequence": t["window"]}],
+                "strategy": {"direction": direction, "bounds": {"max_extension_bp": 100, "time_budget_ms": 15000}}}}
+        right, left = record[start + L:start + L + 30], record[start - 30:start]
+        stopped = dict(status="truncated", trig="time_budget", reason="label_lost")
+        sc = scen(record, "right")
+        o, d = outcome(sc, self.walk({"right": right}, **stopped), "walk_in_record")
+        self.assertEqual(o, "inconclusive")      # the route reaches complete_to_bp (30): the cap may have ended it
+        self.assertIn("stopped by time_budget", d)
+        o, d = outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
+        self.assertEqual(o, "fail")
+        self.assertIn("the record followed for only 30 of 100 bp, the path ended by ['label_lost']", d)
+        # the record's next base an IUPAC code: no k-mer holds it, the route ends there (a truth gap)
+        sc_s = scen(record[:start + L + 30] + "S" + record[start + L + 31:], "right")
+        o, d = outcome(sc_s, self.walk({"right": right}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("before the record's base 'S', which no k-mer of the graph holds: a truth gap", d)
+        o, d = outcome(sc_s, self.walk({"right": right}, reason="label_lost"), "walk_in_record")
+        self.assertEqual(o, "inconclusive")      # also on a complete arm
+        sc_l = scen(record[:start - 31] + "N" + record[start - 30:], "left")
+        o, d = outcome(sc_l, self.walk({"left": left}, extra={"complete_to_bp": 60}, **stopped), "walk_in_record")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("'N'", d)
+        self.assertEqual(outcome(scen(record, "left"), self.walk({"left": left}, extra={"complete_to_bp": 60},
+                                                                 **stopped), "walk_in_record")[0], "fail")
+
     def merged_walk(self, record, start, L, other):
         """A right arm whose displayed path (first parents) passes a merge through another record's allele |other| at
         30 bp, while the record's own allele is the merge's second parent (SPEC §7.1, on_reconverge merge)."""

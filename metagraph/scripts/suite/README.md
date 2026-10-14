@@ -1408,3 +1408,15 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   another occurrence outside its record. All 14,298 recorded occurrences of v3 and v4 lie in their records, and
   every one of the truth's record states its seq_id and length. (L-long-0006's `path_spells` for its '+' path is a
   manifest change, left to the v5 lane.)
+- /traverse, walk_in_record attributes a cap to the record's route only at the stop frontier (the v4 triage's
+  V03, confirmed by VERIFY-V4): an arm `truncated` by a resource cap stopped the longest route along the record only
+  where that route reaches the arm's `complete_to_bp` (or the arm states none, or the route's own leaf states the
+  resource end); a route that ended before it ended for its own stated reason (SPEC-labeled-traversal-core §6.10:
+  "every path that ended before complete_to_bp ended for the reported semantic reason") and is judged by it, so a
+  `label_lost` short of the minimum fails instead of reading "stopped by time_budget". Where the record's next base
+  after that route is no base of the graph (an IUPAC code: no k-mer holds it), the route ends there legitimately
+  and the truth's minimum did not count it: inconclusive, "a truth gap" (the manifest's cut of the flank at such a
+  base is the v5 lane's). Measured: T-walk-0018's left arm (the record's 'S' 4,899 bp from the seed, its route
+  ending label_lost at 4,898 bp below complete_to_bp 5,250 / 7,378 / 8,748) on v4 L0, R0, M1 and v3 R0, M1: the
+  detail now names the gap instead of the time budget, the outcome (inconclusive, its right arm time-stopped) is
+  unchanged; the same answers against the record with an A there fail. No other recorded verdict or detail moves.
