@@ -1115,3 +1115,21 @@ follows, and each rule is one function here, aligned when it arrives).
   refused, by any spelling (`manifest_path`).
 - A2-06: run_direct appends "-<run id>-<arm>" to a run_unique field, so each arm runs its own attempt;
   T-attempts-0002 repeats twice (r1 meets its arm's retained 409 and exercises the 409 shape check).
+
+### Validation on the recorded full run (offline)
+A new copy of the full run (lane-s5c/reeval-S5c: full-run-1-final-copy with lane S5b's re-normalised MCP arm, inputs
+byte-identical to lane S5b's reeval-S5b-2) re-evaluated with this branch: every outcome and class equals lane
+S5b's but T-edge-0008's two MCP lines (B5b-07): the invariants detail now reads "1 results for 2 seeds (1
+distinct)", which the table's current traverse.duplicate_seeds regex does not match, so they read fail and the
+pair disagree (service_by_design 134 -> 132, MCP fail 2 -> 4, MCP disagree 15 -> 16) until async's table carries
+the tightened entry; with it (a scratch copy of the table) both lines read service_by_design again, E = the one
+invariants item. Line fields: explained_items on the 344 MCP lines a case matched (B5b-06); the 3 recorded
+resolve_timeout lines (~30.4 s) stay host states, their verdict_detail naming the legacy rule (item 4); nothing
+else changed (no recorded budget-less /resolve deadline, no bounds count in a timing pair, the one undecidable line,
+N-realrep-0002 r0, stays undecidable: its client wall 22,522 ms is not below 19,750 ms). The direct T-attempts-0002
+disagreement stays in this v3 run (its 409 fails v3's answer_fields); A2-06 applies to runs of v4.
+A provisional v4 (snapshot 6f945db4, lane-s5c/build/, not manifest/) has content_sha256 3a7417d6... (relations
+cfba509f..., unchanged; smoke 8e944aeb...), deterministic under PYTHONHASHSEED 1 and 777; against lane S5b's
+provisional (695acdd7...) it changes 12 scenarios and nothing else: the 10 statuses of A2-02 (R-twin-0002..0005
+also tagged machine-dependent), R-edge-0021's cap_ms (A2-03) and T-attempts-0002's repeat 2 (A2-06), plus the
+conventions' run_unique text.
