@@ -929,6 +929,36 @@ class ReviewFixesTest(unittest.TestCase):
                                 cases, self.dir)
         self.assertEqual((res["class"], res["by"]), ("not_implemented_mcp", "table"))
 
+    def test_named_case_reads_every_direct_repeat(self):
+        # a named refusal case's direct side is judged on every repeat of both direct arms, as an answer-triggered
+        # case's is (before, only the reference arm's first repeat): a contradiction on any repeat disagrees (a 503
+        # deadline too: the side states the host's answer), the arm and repeat named; a transport error reads
+        # neither way
+        st = [{"check": "status", "outcome": "pass", "detail": ""}]
+        refused = self.raw_line("R-1", "mcp", 0, http=400, outcome="service_by_design", checks=st,
+                                error={"code": "sequence_too_short", "text": "short"})
+        l400 = self.raw_line("R-1", "direct-local", 0, http=400, checks=st, error={"text": "short"})
+        r400 = self.raw_line("R-1", "direct-remote", 0, http=400, checks=st, error={"text": "short"})
+        r200 = self.raw_line("R-1", "direct-remote", 1, checks=st)
+        res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: l400}, "direct-remote": {0: r400, 1: r200}},
+                                self.resolve(["job", "short"]), self.CASES, self.dir)
+        self.assertEqual((res["class"], res["side"], res["case"]), ("disagree", "direct", "short"))
+        self.assertEqual(res["direct_detail"], "direct-remote repeat 1: http 200, the case expects 400; 2 other direct "
+                                               "repeat(s) match")
+        dead = self.raw_line("R-1", "direct-remote", 1, http=503, outcome="inconclusive", checks=st,
+                             error={"code": "deadline", "text": "late"})
+        gone = dict(self.raw_line("R-1", "direct-remote", 2, http=0, outcome="error", checks=[],
+                                  error={"code": "transport", "text": "reset"}))
+        res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: l400}, "direct-remote": {0: r400, 2: gone}},
+                                self.resolve(["job", "short"]), self.CASES, self.dir)
+        self.assertEqual((res["class"], res["verified"]), ("service_by_design", True))
+        res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: l400}, "direct-remote": {0: r400, 1: dead}},
+                                self.resolve(["job", "short"]), self.CASES, self.dir)
+        self.assertEqual((res["class"], res["direct_detail"][:28]), ("disagree", "direct-remote repeat 1: http"))
+        # one execution as before
+        self.assertEqual(cmp.by_design_class(self.CASES["short"], l400, [refused], self.dir)["class"],
+                         "service_by_design")
+
     def answer_case(self, direct, dm, http=None):
         case = {"id": "a", "agreement": "by_design", "direct_expectation": {},
                 "service_answer": {"outcome": "refused_at_submit", "code": "pattern_out_of_bounds"},

@@ -1008,6 +1008,47 @@ def _direct_side(case, direct_line, run_dir):
     return ok, detail, None
 
 
+def _direct_lines(direct):
+    """The direct executions a case's direct side is judged on: |direct| one line, or {arm: {repeat: line}} (every
+    repeat of both arms, direct-local first, in repeat order), or None."""
+    if direct is None:
+        return []
+    if isinstance(direct, dict) and ("arm" in direct or "scenario" in direct or "http" in direct):
+        return [direct]
+    out = []
+    for arm in ("direct-local", "direct-remote"):
+        lines = (direct or {}).get(arm) or {}
+        out.extend(x for _, x in sorted(lines.items(), key=lambda kv: kv[0] if isinstance(kv[0], int) else -1))
+    return out
+
+
+def _direct_sides(case, direct, run_dir):
+    """(True / False / None, detail, by) of a case's direct side on EVERY direct execution of |direct|
+    (_direct_lines), as answer_class reads every repeat of both arms: a repeat that contradicts the side wins over
+    the ones that hold ("<arm> repeat <r>: <why>", the others counted; a named case's side states the host's answer,
+    so any other HTTP answer, a 503 deadline included, contradicts it, as on the reference execution before); a
+    direct execution without an HTTP answer (transport) reads neither way; one that holds verifies (the first one's
+    detail); else unverified."""
+    lines = _direct_lines(direct)
+    if not lines:
+        return _direct_side(case, None, run_dir)
+    held, unknown, bad = [], [], []
+    for x in lines:
+        if _transport_line(x):
+            continue
+        ok, detail, by = _direct_side(case, x, run_dir)
+        (held if ok is True else bad if ok is False else unknown).append((x, detail, by))
+    if bad:
+        x, detail, by = bad[0]
+        more = "; %d other direct repeat(s) match" % len(held) if held else ""
+        return False, "%s repeat %s: %s%s" % (x.get("arm"), x.get("repeat"), detail, more), by
+    if held:
+        return True, held[0][1], held[0][2]
+    if unknown:
+        return None, unknown[0][1], unknown[0][2]
+    return None, "no direct answer to compare (transport errors only)", None
+
+
 def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None, refs=None):
     """The MCP outcome class a refused / relayed / service-only table case gives the MCP executions it names
     (DESIGN §1.3), with the pair's verification.
@@ -1016,9 +1057,11 @@ def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None, refs=N
     the MCP side for `service_only` (no host counterpart); a side with nothing to compare leaves it False
     (counted as an unverified by-design pair in the report). A case that states no host answer (no http, code,
     text, ... in its direct_expectation) has its direct side judged by the scenario's own status check on the
-    reference direct execution (G11: pass verified, fail a disagreement, else unverified). An MCP execution that is
-    inconclusive by a host state (host_state_line) is skipped: it reads neither for nor against the case; with none
-    left the pair is not comparable (B-09)."""
+    reference direct execution (G11: pass verified, fail a disagreement, else unverified). |direct_line| is one
+    direct execution or {arm: {repeat: line}}: the direct side is judged on every repeat of both arms
+    (_direct_sides), as an answer-triggered case's is. An MCP execution that is inconclusive by a host state
+    (host_state_line) is skipped: it reads neither for nor against the case; with none left the pair is not
+    comparable (B-09)."""
     agreement = case.get("agreement")
     base = {"case": case.get("id"), "case_agreement": agreement,
             "service_outcome": (case.get("service_answer") or {}).get("outcome")}
@@ -1039,7 +1082,7 @@ def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None, refs=N
         d_ok = True
         base["direct_detail"] = "no host counterpart"
     else:
-        d_ok, d_detail, by = _direct_side(case, direct_line, run_dir)
+        d_ok, d_detail, by = _direct_sides(case, direct_line, run_dir)
         if by:
             base["direct_by"] = by
         base.update({"direct_verified": d_ok, "direct_detail": d_detail})
@@ -1809,10 +1852,7 @@ def not_implemented_class(case, hit, how, direct_lines, direct_ref, run_dir, sce
            "repeats": [r.get("repeat") for r in hit], "pair": dict((k, pair[k]) for k in keep if k in pair)}
     am = case.get("answer_match") if isinstance(case.get("answer_match"), dict) else {}
     if pair.get("class") == "disagree" and pair.get("side") == "direct" and am.get("direct_mismatch") == "disagree":
-        detail = str(pair.get("direct_detail") or "")
-        if how != "answer-triggered" and direct_ref is not None:
-            # by_design_class judges the reference direct execution: name it as answer_class names its repeat
-            detail = "%s repeat %s: %s" % (direct_ref.get("arm"), direct_ref.get("repeat"), detail)
+        detail = str(pair.get("direct_detail") or "")   # names the direct arm and repeat (both judges)
         out.update({"class": "disagree", "side": "direct", "direct_verified": False, "direct_mismatch": "disagree",
                     "direct_detail": "%s; the MCP execution(s) %s read not_implemented_mcp (case %s, "
                                      "answer_match.mcp_outcome)" % (detail, out["repeats"], case.get("id"))})
@@ -2074,11 +2114,11 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     for key in order:
         case, hit = groups[key]
         if key[0] == "not_implemented":
-            parts.append(not_implemented_class(case, hit, key[2], direct_lines, k_ref0, run_dir, scenario, refs))
+            parts.append(not_implemented_class(case, hit, key[2], direct_lines, kept, run_dir, scenario, refs))
         elif key[0] == "answer-triggered":
             parts.append(answer_class(case, hit, direct_lines, run_dir))
         else:
-            parts.append(by_design_class(case, k_ref0, hit, run_dir, scenario, refs))
+            parts.append(by_design_class(case, kept, hit, run_dir, scenario, refs))
     rest = None
     if plain:
         unmatched = [r for r in plain if r.get("repeat") not in answered]
@@ -2105,7 +2145,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             rest["explained_items"] = dict((str(k), v) for k, v in sorted(explained.items()) if v)
             if rest["class"] == "service_by_design" and rest.get("explained_differences"):
                 case = cases.get(answered.get(rest["explained_differences"][0].get("repeat"))) or {}
-                d_ok, d_detail, by = _direct_side(case, k_ref0, run_dir)
+                d_ok, d_detail, by = _direct_sides(case, kept, run_dir)
                 rest.update({"by": "explains_checks", "case": case.get("id"), "case_agreement": case.get("agreement"),
                              "service_outcome": (case.get("service_answer") or {}).get("outcome"),
                              "mcp_verified": True, "direct_verified": d_ok, "direct_detail": d_detail,
