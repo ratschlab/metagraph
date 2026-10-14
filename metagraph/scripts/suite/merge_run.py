@@ -365,15 +365,18 @@ def checks_identity(run_dir, arm_runs):
                 if e["checks_sha256"]:
                     stated.setdefault((e["checks_sha256"], None), []).append("arms/%s" % arm)
             if snap is not None:
-                other = [e for e in entries if (e["checks_sha256"] and e["checks_sha256"] != files.get("checks.py")) or
-                         (not e["checks_sha256"] and e["checks_dir"] and not sc.snapshot_pins(e["checks_dir"], run_dir))]
+                other = [e for e in entries
+                         if (e["checks_sha256"] and e["checks_sha256"] != files.get("checks.py")) or
+                         (not e["checks_sha256"] and e["checks_dir"]
+                          and not sc.snapshot_pins(e["checks_dir"], run_dir))]
                 if other:
                     differs.append("arms/%s: %d of %d invocation(s) judged with other checks than the run's snapshot "
                                    "(e.g. %s)" % (arm, len(other), len(entries), other[0]["checks_sha256"] or
                                                   other[0]["checks_dir"]))
     if snap is None and len(set(k[0] for k in stated)) > 1:
         differs.append("the arms were judged with different checks: %s" % "; ".join(
-            "%s: %s" % (str(k[0])[:12], ", ".join(v[:3]) + (" ..." if len(v) > 3 else "")) for k, v in sorted(stated.items())))
+            "%s: %s" % (str(k[0])[:12], ", ".join(v[:3]) + (" ..." if len(v) > 3 else ""))
+            for k, v in sorted(stated.items())))
     return {"snapshot": {"created_utc": snap.get("created_utc"), "files": files} if snap is not None else None,
             "arms": arms, "differs": differs, "unverified": unverified,
             "errors": differs + (unverified if snap is not None else [])}

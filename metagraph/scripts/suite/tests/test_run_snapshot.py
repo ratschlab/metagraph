@@ -89,8 +89,8 @@ class SnapshotHelpersTest(unittest.TestCase):
                                               "--out", out, "--pause", "0", "--quiet", "--checks", "checks",
                                               "--warm-every", "0"]), 0)
         run = sc.read_json(os.path.join(out, "run.json"))
-        want = (sc.file_sha256(os.path.join(SUITE, "checks.py")), sc.file_sha256(os.path.join(SUITE, "suite_common.py")),
-                SUITE)
+        want = (sc.file_sha256(os.path.join(SUITE, "checks.py")),
+                sc.file_sha256(os.path.join(SUITE, "suite_common.py")), SUITE)
         sess = run["sessions"][0]
         self.assertEqual((sess["checks_sha256"], sess["suite_common_sha256"], sess["checks_dir"]), want)
         self.assertEqual((run["checks_sha256"], run["suite_common_sha256"], run["checks_dir"]), want)
@@ -170,7 +170,8 @@ class MergeChecksIdentityTest(unittest.TestCase):
         run["checks_module"] = {"file": "x/checks.py", "stub": False, "sha256": "b" * 64}
         sc.write_json_atomic(os.path.join(self.run_dir, "arms", "mcp", "run.json"), run)
         merged = merge_run.merge(self.run_dir)
-        self.assertTrue(merged["checks_identity"]["differs"][0].startswith("the arms were judged with different checks"))
+        self.assertTrue(merged["checks_identity"]["differs"][0].startswith(
+            "the arms were judged with different checks"))
 
     def test_the_merge_judges_with_the_snapshot(self):
         # checks.scenario_outcome makes outcomes stricter: the run's snapshot's, not the live tree's

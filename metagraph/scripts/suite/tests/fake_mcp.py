@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A stand-in for the async session's MCP runner (scripts/bench/suite_mcp_runner.py) with its per-id CLI, for
-the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M [--checks-dir DIR]. It appends one execution line
-per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
+the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M [--checks-dir DIR]. It appends one
+execution line per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
 scenario so) to DIR/executions.jsonl and its job to DIR/jobs.jsonl, skips what is recorded (resumable), and
 logs each call to DIR/calls.log with whether the environment variable SUITE_TEST_SECRET reached it (the value
 itself is never written). No request is made.
