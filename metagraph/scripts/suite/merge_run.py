@@ -24,6 +24,10 @@ of an earlier runner), are left out: triage-2 B-01), the runner's own under
 `outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
 from the generic ones (an execution whose property checks are all not exposed is inconclusive, not pass).
 
+An outcome outside the vocabulary every arm shares (suite_common.outcome_known: a runner's mark not agreed first, or
+none) is read as `error`, never as a pass: the line's outcome becomes error, `outcome_runner` keeps the recorded
+one, a warning counts them per arm (run.json `outcomes_unknown`).
+
 --reevaluated (lane S4): merges the re-evaluated set of reevaluate.py instead, each arm's
 executions.reevaluated.jsonl into RUN_DIR/executions.reevaluated.jsonl and run.reevaluated.json (with the set's
 mark, RUN_DIR/reevaluated.json, under `reevaluation`); scenario_outcome is the re-evaluation's checks'; an arm
@@ -120,6 +124,21 @@ def by_design_decided(row):
     / clamped case's execution states the checks it explains (explained_checks) and is judged on the others."""
     return row.get("arm") == "mcp" and bool(row.get("service_by_design_case")) and \
         row.get("outcome") in ("service_by_design", "finding") and not row.get("explained_checks")
+
+
+def unknown_outcomes(rows):
+    """Reads every line whose outcome is outside the shared vocabulary (suite_common.outcome_known) as `error`, the
+    recorded outcome kept under `outcome_runner`; returns {arm: {recorded outcome: lines}}."""
+    seen = {}
+    for row in rows:
+        if sc.outcome_known(row.get("outcome")):
+            continue
+        recorded = row.get("outcome")
+        row.setdefault("outcome_runner", recorded)
+        row["outcome"] = "error"
+        per_arm = seen.setdefault(str(row.get("arm")), {})
+        per_arm[str(recorded)] = per_arm.get(str(recorded), 0) + 1
+    return seen
 
 
 def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
@@ -492,6 +511,11 @@ def merge(run_dir, reevaluated=False):
     manifest = sc.read_json(manifest_copy) if manifest_copy else sc.read_json(os.path.join(run_dir, "manifest.json"))
     scenarios = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict)) \
         if isinstance(manifest, dict) else {}
+    unknown = unknown_outcomes(merged_rows)
+    for arm, counts in sorted(unknown.items()):
+        warnings.append("arms/%s: %d line(s) with an outcome outside the shared vocabulary (%s) read as error "
+                        "(outcome_runner keeps the recorded one)" % (arm, sum(counts.values()), ", ".join(
+                            "%s %d" % kv for kv in sorted(counts.items()))))
     rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir), scenarios, run_dir)
     for arm, n in sorted(rederived.items()):
         warnings.append("arms/%s: %d outcome(s) made stricter by checks.scenario_outcome (outcome_runner keeps the "
@@ -574,6 +598,7 @@ def merge(run_dir, reevaluated=False):
         "host_cache": {"warm_window_s": sc.HOST_CACHE_WARM_S, "clock_offsets_s": offsets},
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
         "outcomes_rederived": rederived,
+        "outcomes_unknown": unknown,
         "manifest_identity": identity,
         "release_identity": releases,
         "mixed_releases": bool(releases["changed"]),

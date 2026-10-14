@@ -818,7 +818,8 @@ MCP_ERRORS=0    # MCP executions in a row that ended in error (or that the runne
 MCP_MISSING=()  # the MCP executions a runner step did not record, as SCENARIO:rREPEAT
 # After an MCP step of the paired loop (async's rules): stop on the runner's exit 2 / 3 (a start refusal: key
 # file, the queue wait ran out) or 130 (interrupted), or on three executions in a row that ended `error` (a
-# runner-level failure: transport, poll deadline, busy past the retries) or were not recorded; never on `fail`
+# runner-level failure: transport, poll deadline, busy past the retries), were not recorded, or recorded an outcome
+# outside the shared vocabulary (suite_common.outcome_known: `unknown`, never a success); never on `fail`
 # (exit 1 also means a failing scenario, which is a result). An execution that ended `error` with its job
 # cancelled may still run on the host briefly: wait until jobs.jsonl shows it terminal or its time budget has
 # passed since the cancellation, so one request is in flight at a time. Returns 1 to stop the loop.
@@ -840,13 +841,14 @@ mcp_after() {  # mcp_after IDS REPEAT RC
   done
   ids=(${1//,/ })
   for o in ${outcomes//,/ }; do
-    if [[ $o == error || $o == missing ]]; then MCP_ERRORS=$((MCP_ERRORS + 1)); else MCP_ERRORS=0; fi
+    if [[ $o == error || $o == missing || $o == unknown ]]; then MCP_ERRORS=$((MCP_ERRORS + 1)); else MCP_ERRORS=0; fi
     [[ $o != missing ]] || MCP_MISSING+=("${ids[$i]:-?}:r$2")
+    [[ $o != unknown ]] || log "mcp: ${ids[$i]:-?} r$2 recorded an outcome outside the shared vocabulary (merge_run reads it as error)"
     i=$((i + 1))
   done
   if (( MCP_ERRORS >= 3 )); then
     LOOP_REASON=mcp_errors
-    log "error: $MCP_ERRORS MCP executions in a row ended in error or were not recorded: stopping the loop"
+    log "error: $MCP_ERRORS MCP executions in a row ended in error, were not recorded or recorded an unknown outcome: stopping the loop"
     return 1
   fi
   return 0

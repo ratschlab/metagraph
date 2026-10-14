@@ -1957,3 +1957,14 @@ by lane S6c; everything below was open.
 - compare.py, report.py and gate.py's property reading still load this directory's checks.py and table for a
   recorded set (lane S-verdict's files; noted for the integrator).
 
+### An outcome outside the vocabulary is never a success on the runner side (P6-end-to-end-02, hand-off of lane S7v)
+- merge_run.stricter_outcomes skipped a line whose outcome is outside the shared vocabulary (it kept it as
+  recorded), and the paired loop's mcp_after reset its error counter on one: six MCP lines with the outcome
+  `skipped_by_runner` merged as such, and three in a row did not stop the loop. `suite_common.outcome_known` is the
+  shared test (defined identically to lane S7v's, gr/suite-s-verdict 9a12a6c9). merge_run reads such a line (or one
+  without an outcome) as `error`, `outcome_runner` keeping the recorded one, with a warning per arm and run.json
+  `outcomes_unknown` {arm: {recorded outcome: lines}}; mcp_step_result reports it as `unknown`, which mcp_after
+  counts like `error` towards the stop after three in a row and logs. (Lane S7v's comparator counts an unknown
+  outcome apart and reads it as a failure; after this merge a merged set holds none, the warning and outcome_runner
+  name them.)
+

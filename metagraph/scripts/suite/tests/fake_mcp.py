@@ -10,7 +10,7 @@ FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
 `canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal); `crash` writes a traceback
 to stderr and no line for any id (exit 1, a runner defect), only for a call that names FAKE_MCP_CRASH_ID when that
-is set.
+is set; `unknown` records the outcome `skipped_by_runner`, outside the shared vocabulary (exit 0).
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
 identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
@@ -89,6 +89,8 @@ def main(argv=None):
         elif mode == "fail":
             line.update(outcome="fail", checks=[{"check": "status", "outcome": "fail", "detail": "fake: http 500"}],
                         http=500)
+        elif mode == "unknown":
+            line.update(outcome="skipped_by_runner")
         elif mode == "error_cancel":
             line.update(outcome="error", checks=[], http=0, server=None,
                         error={"code": "runner_error", "text": "fake: not terminal within the deadline"},

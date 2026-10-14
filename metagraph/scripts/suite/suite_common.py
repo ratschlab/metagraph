@@ -43,6 +43,13 @@ DIGEST_DROP_KEYS = frozenset(["timing"])
 CAPABILITY_VOLATILE_PREFIXES = ("measured_", "observed_")
 
 
+def outcome_known(outcome):
+    """Whether an execution line's outcome is in the vocabulary every arm and the comparator share (OUTCOMES). One
+    outside it (a runner's mark not agreed in this vocabulary first) is counted apart and read as a failure by the
+    comparator, the re-evaluation and the report, never as a pass."""
+    return isinstance(outcome, str) and outcome in OUTCOMES
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # time
 
@@ -291,7 +298,8 @@ def request_bound_s(scenario):
 
 def mcp_step_result(out_dir, manifest, ids, repeat, now):
     """What an MCP step (one runner invocation for `ids` and `repeat`) left: (outcomes, wait_s). outcomes: the
-    recorded outcome per id, `missing` when the runner wrote none (a runner failure). wait_s: how long to wait
+    recorded outcome per id, `missing` when the runner wrote none (a runner failure), `unknown` for an outcome outside
+    the shared vocabulary (outcome_known; the paired loop counts both like `error`). wait_s: how long to wait
     before the next step, because an execution ended `error` with its job cancelled rather than seen terminal
     (async's runner cancels at its poll deadline; the cancelled call may still run on the host): until the
     cancellation plus the scenario's request bound (request_bound_s) and a margin, unless jobs.jsonl shows the
@@ -310,7 +318,7 @@ def mcp_step_result(out_dir, manifest, ids, repeat, now):
             outcomes.append("missing")
             continue
         line = mine[-1]
-        outcomes.append(str(line.get("outcome")))
+        outcomes.append(str(line.get("outcome")) if outcome_known(line.get("outcome")) else "unknown")
         if line.get("outcome") != "error":
             continue
         job = line.get("job") if isinstance(line.get("job"), dict) else {}
