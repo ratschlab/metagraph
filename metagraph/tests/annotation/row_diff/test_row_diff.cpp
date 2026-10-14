@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdint>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -227,12 +228,17 @@ TEST(RowDiff, GetRowsFromUnsortedBackingRows) {
 TEST(RowDiff, GetColumnsAcrossValueTypes) {
     using namespace mtg::annot::matrix;
     graph::DBGSuccinct graph(3);
-    graph.add_sequence("AAAT");
+    for (size_t value = 0; value < 37; ++value) {
+        std::string kmer(3, 'A');
+        for (size_t i = 0; i < kmer.size(); ++i)
+            kmer[i] = "ACGT"[(value >> (2 * i)) & 3];
+        graph.add_sequence(kmer);
+    }
     graph.mask_dummy_kmers(1, false);
 
     std::vector<BinaryMatrix::Row> rows;
     graph.call_nodes([&](auto node) { rows.push_back(graph_to_anno_index(node)); });
-    ASSERT_EQ(2u, rows.size());
+    ASSERT_EQ(37u, rows.size());
 
     utils::TempFile anchors;
     anchor_bv_type(sdsl::bit_vector(graph.max_index(), true)).serialize(anchors.ofstream());
@@ -281,6 +287,68 @@ TEST(RowDiff, GetColumnsAcrossValueTypes) {
         &graph, make_columns(), std::vector(values)));
     check_columns(TupleRowDiff<TupleCSCMatrix<ColumnMajor>>(
         &graph, make_columns(), std::move(delimiters), std::move(values)));
+}
+
+TEST(RowDiff, GetColumnsFromCountAndTupleDiffs) {
+    using namespace mtg::annot::matrix;
+    graph::DBGSuccinct graph(3);
+    graph.add_sequence("AAAT");
+    graph.mask_dummy_kmers(1, false);
+    auto first = graph_to_anno_index(graph.kmer_to_node("AAA"));
+    auto second = graph_to_anno_index(graph.kmer_to_node("AAT"));
+    ASSERT_LT(first, second);
+
+    sdsl::bit_vector anchor_bits(graph.max_index(), false);
+    anchor_bits[second] = true;
+    utils::TempFile anchors;
+    anchor_bv_type(anchor_bits).serialize(anchors.ofstream());
+    anchors.ofstream().flush();
+
+    auto make_columns = [&] {
+        std::vector<std::unique_ptr<bit_vector>> columns;
+        for (size_t column = 0; column < 4; ++column) {
+            sdsl::bit_vector bits(graph.max_index(), false);
+            bits[first] = column < 3;
+            bits[second] = column == 1 || column == 2;
+            columns.push_back(std::make_unique<bit_vector_sd>(bits));
+        }
+        return ColumnMajor(std::move(columns));
+    };
+
+    auto check_columns = [&](auto &matrix) {
+        matrix.load_anchor(anchors.name());
+        EXPECT_THAT(matrix.get_column(0), ElementsAre(first));
+        EXPECT_THAT(matrix.get_column(1), ElementsAre(second));
+        EXPECT_THAT(matrix.get_column(2), ElementsAre(first, second));
+        EXPECT_TRUE(matrix.get_column(3).empty());
+    };
+
+    // Counts on the first row are {0: 3, 2: 3}; the -4 removes column 1.
+    IntRowDiff<CSCMatrix<ColumnMajor>> counts(
+        &graph, make_columns(), std::vector<sdsl::int_vector<>>{
+            { encode_diff(3) }, { encode_diff(-4), encode_diff(4) },
+            { encode_diff(1), encode_diff(2) }, sdsl::int_vector<>()
+        });
+    check_columns(counts);
+    const uint64_t row_ids[] = { first, second };
+    auto count_rows = counts.get_row_values(row_ids);
+    EXPECT_THAT(count_rows[0], ElementsAre(Pair(0, 3), Pair(2, 3)));
+    EXPECT_THAT(count_rows[1], ElementsAre(Pair(1, 4), Pair(2, 2)));
+
+    // Empty tuples remove a label; retained coordinates shift by one along the edge.
+    TupleRowDiff<TupleCSCMatrix<ColumnMajor>> tuples(
+        &graph, make_columns(), std::vector<bit_vector_smart>{
+            bit_vector_smart({ 1, 0, 0, 1 }), bit_vector_smart({ 1, 1, 0, 0, 1 }),
+            bit_vector_smart({ 1, 0, 1, 0, 1 }), bit_vector_smart({ 1 })
+        }, std::vector<sdsl::int_vector<>>{
+            { 6, 8 }, { 10, 20 }, { 40, 30 }, sdsl::int_vector<>()
+        });
+    check_columns(tuples);
+    auto tuple_rows = tuples.get_row_tuples(row_ids);
+    EXPECT_THAT(tuple_rows[0], ElementsAre(Pair(0, ElementsAre(5, 7)),
+                                          Pair(2, ElementsAre(29, 39))));
+    EXPECT_THAT(tuple_rows[1], ElementsAre(Pair(1, ElementsAre(10, 20)),
+                                          Pair(2, ElementsAre(30))));
 }
 
 /**

@@ -8,6 +8,7 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
@@ -159,13 +160,18 @@ IRowDiff::get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     std::vector<BinaryMatrix::Row> result;
-    // TODO: implement a more efficient algorithm
+    // Reuse reconstruction paths across a small batch of rows.
+    BatchAccumulator<BinaryMatrix::Row> batch([&](const auto &row_ids) {
+        auto rows = matrix.get_rows(row_ids);
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            if (std::ranges::binary_search(rows[i], column))
+                result.push_back(row_ids[i]);
+        }
+    }, 32 /* rows per batch */);
     graph_->call_nodes([&](auto node) {
-        auto row = graph::AnnotatedDBG::graph_to_anno_index(node);
-        auto rows = matrix.get_rows({ &row, 1 });
-        if (std::ranges::binary_search(rows.front(), column))
-            result.push_back(row);
+        batch.push(graph::AnnotatedDBG::graph_to_anno_index(node));
     });
+    batch.process_all_buffered();
     return result;
 }
 
