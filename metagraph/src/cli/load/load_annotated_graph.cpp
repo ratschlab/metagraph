@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <random>
 #include <stdexcept>
@@ -271,24 +272,39 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
 
 namespace {
 
+// The message of a file of an annotation's load that could not be loaded: |what| (the record
+// mapping, anchor, fork successor bitmap), the file and the likely cause
+std::string load_failure(const std::string &what, const std::string &file) {
+    return fmt::format("Cannot load {} from '{}': {}", what, file,
+                       utils::file_read_failure_detail(file));
+}
+
+// The record mapping (.seqs) loaded with |annotation| (the first annotation of |config|, or an
+// empty annotator of its type), "" when none is looked for: one of a coordinate annotation,
+// beside it, unless the caller does not map (no_coord_mapping) or annotates
+std::string coord_to_header_file(const annot::MultiLabelAnnotation<std::string> &annotation,
+                                 const Config &config) {
+    if (!dynamic_cast<const annot::matrix::MultiIntMatrix *>(&annotation.get_matrix())
+            || config.no_coord_mapping || config.identity == Config::ANNOTATE) {
+        return "";
+    }
+    return utils::remove_suffix(config.infbase_annotators.at(0), annotation.file_extension())
+            + annot::CoordToHeader::kExtension;
+}
+
 std::unique_ptr<annot::CoordToHeader>
 load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                      const Config &config, LoadFailure on_failure) {
     std::unique_ptr<annot::CoordToHeader> coord_to_header;
 
-    if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(&annotation.get_matrix())
-            && !config.no_coord_mapping && config.identity != Config::ANNOTATE) {
+    if (const std::string cth_fname = coord_to_header_file(annotation, config);
+            !cth_fname.empty()) {
         // Load CoordToHeader mapping if exists
-        auto cth_fname = utils::remove_suffix(config.infbase_annotators.at(0),
-                                              annotation.file_extension())
-                                        + annot::CoordToHeader::kExtension;
         if (std::filesystem::exists(cth_fname)) {
             coord_to_header = std::make_unique<annot::CoordToHeader>();
             if (!coord_to_header->load(cth_fname)) {
                 if (on_failure == LoadFailure::THROW) {
-                    throw std::runtime_error(fmt::format(
-                            "Cannot load the record mapping from '{}': {}", cth_fname,
-                            utils::file_read_failure_detail(cth_fname)));
+                    throw std::runtime_error(load_failure("the record mapping", cth_fname));
                 }
                 exit(1);
             }
@@ -329,6 +345,53 @@ std::string annotation_load_failure(const std::vector<std::string> &files,
                            utils::file_read_failure_detail(on_disk[0]));
     }
     return fmt::format("Cannot load annotations from '{}'", fmt::join(on_disk, "', '"));
+}
+
+// Whether |file| opens for reading
+bool opens(const std::string &file) {
+    return std::ifstream(file, std::ios::binary).is_open();
+}
+
+// The files a load of |config|'s annotation that throws (LoadFailure::THROW) reads, each opened
+// before its graph starts loading, in the order the load reads them: the annotation's own (every
+// column file of a column annotation, the first file of any other), the record mapping when it
+// loads one (|loads_mapping|: none is offered to share), and the anchor and the fork successor
+// bitmap of a row_diff column annotation. One that cannot be opened throws what its load would.
+// A failure in the load itself waits for the graph: the loading thread is joined, the graph read
+// to its end, while a server's request holds the memory reserved for the load. A file that opens
+// and still fails to load fails in the load.
+void check_annotation_files_open(const Config &config, bool loads_mapping) {
+    if (config.infbase_annotators.empty()) {
+        return;
+    }
+    // an empty annotator of the annotation's type: its file extension and matrix type
+    const auto annotation = initialize_annotation(config.infbase_annotators.at(0), config);
+    const std::string extension = annotation->file_extension();
+    const bool merged
+            = dynamic_cast<const annot::ColumnCompressed<> *>(annotation.get()) != nullptr;
+    for (size_t i = 0; i < (merged ? config.infbase_annotators.size() : 1); ++i) {
+        if (!opens(utils::make_suffix(config.infbase_annotators[i], extension))) {
+            throw std::runtime_error(annotation_load_failure(config.infbase_annotators,
+                                                             extension));
+        }
+    }
+    if (loads_mapping) {
+        const std::string cth_fname = coord_to_header_file(*annotation, config);
+        if (!cth_fname.empty() && std::filesystem::exists(cth_fname) && !opens(cth_fname)) {
+            throw std::runtime_error(load_failure("the record mapping", cth_fname));
+        }
+    }
+    using namespace annot::matrix;
+    if (dynamic_cast<const RowDiff<ColumnMajor> *>(&annotation->get_matrix())) {
+        const std::string anchor = config.infbase + kRowDiffAnchorExt;
+        if (!opens(anchor)) {
+            throw std::runtime_error(load_failure("anchor", anchor));
+        }
+        const std::string fork_succ = config.infbase + kRowDiffForkSuccExt;
+        if (!opens(fork_succ)) {
+            throw std::runtime_error(load_failure("fork successor bitmap", fork_succ));
+        }
+    }
 }
 
 // Build the AnnotatedDBG from a graph future. Annotation and CTH loads run
@@ -405,13 +468,9 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                     row_diff_column->load_anchor(anchor);
                     row_diff_column->load_fork_succ(fork_succ);
                 } else if (!row_diff_column->try_load_anchor(anchor)) {
-                    throw std::runtime_error(fmt::format(
-                            "Cannot load anchor from '{}': {}", anchor,
-                            utils::file_read_failure_detail(anchor)));
+                    throw std::runtime_error(load_failure("anchor", anchor));
                 } else if (!row_diff_column->try_load_fork_succ(fork_succ)) {
-                    throw std::runtime_error(fmt::format(
-                            "Cannot load fork successor bitmap from '{}': {}", fork_succ,
-                            utils::file_read_failure_detail(fork_succ)));
+                    throw std::runtime_error(load_failure("fork successor bitmap", fork_succ));
                 }
             }
             // Attach the graph (the only annotation step that needs it).
@@ -460,6 +519,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
 std::unique_ptr<AnnotatedDBG>
 initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
                          std::shared_ptr<const annot::CoordToHeader> coord_to_header) {
+    check_annotation_files_open(config, !coord_to_header);
     return build_annotated_dbg(load_dbg_async(config.infbase, prep, LoadFailure::THROW), config,
                                kDefaultMaxChunksOpen, std::move(coord_to_header),
                                LoadFailure::THROW);

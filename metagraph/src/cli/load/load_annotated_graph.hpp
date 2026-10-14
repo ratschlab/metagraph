@@ -83,7 +83,10 @@ async_load_critical_dbg(const std::string &path, const PatternPreparation &prep)
 // '<file>': <cause>", "Cannot load anchor from '<file>': <cause>", "Cannot load fork successor
 // bitmap from '<file>': <cause>", "Graph '<file>' and annotation '<file>' are not compatible"
 // (<cause>: utils::file_read_failure_detail) --, nothing of the index kept. The loaders log
-// their own lines as at start-up.
+// their own lines as at start-up. A file of the annotation that cannot be opened (the
+// annotation's, the record mapping it loads, a row_diff annotation's anchor and fork successor
+// bitmap) fails before the graph starts loading, with the same message and without a loader's
+// line; any other failure waits for the graph's load to end (its thread is joined).
 std::unique_ptr<graph::AnnotatedDBG>
 initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
                          std::shared_ptr<const annot::CoordToHeader> coord_to_header = nullptr);
