@@ -278,8 +278,8 @@ class Admission {
   public:
     explicit Admission(Account &account) : account_(account) {}
 
-    // opens a release whose allowance is what the account has left divided by |share|; what
-    // the previous release still held is released first
+    // opens a release whose allowance is what the account has left divided by |share|; the
+    // previous release was taken over by its caller (take())
     void begin(unsigned share = 1);
     bool admit(uint64_t bytes);
     // closes the admission: what it holds is the caller's from here on (to release)

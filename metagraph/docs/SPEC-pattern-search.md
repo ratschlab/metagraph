@@ -3066,9 +3066,13 @@ stop would not skip them.
 
 The engine's own retention for the raw release (24-byte descriptors, up to `max_predicate_contexts`) is outside
 the account, as the label-free descriptors of §7.6 are (a long pattern's kept walks are in it, §12.1). The result
-objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`) that a pattern's answer keeps
-stay charged until the request ends (§12.1: the bound is the request's, over all its patterns); those of a withheld
-or cut `all_or_count` list are released with it.
+objects that a pattern's answer keeps stay charged until the request ends, with every projection: a selected
+context's result object (with `output.labels: "none"` as with a projection, whose labels hold its descriptor,
+§14.4) and the objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`, §12.1). The bound
+is the request's, over all its patterns: a later pattern finds the account as the earlier ones left it, so its
+results can be cut (`partial`: `cut: max_memory`) or withheld (`all_or_count`: `output_budget`, `stop {output,
+max_memory}`) where the same pattern alone is answered whole, and `work.memory_bytes` grows with what the earlier
+patterns kept. The objects of a withheld or cut `all_or_count` list are released with it.
 
 ### 19.10 The answer
 
@@ -3179,7 +3183,6 @@ Measured with this build's server on the masked copy of the mini (the fixtures o
 - The pass costs a row per distinct row: about 1–4 ms a row on staging refseq33m (the coordinator's measurement of
   2026-10-08), so its compute admission there is the host's `--pattern-max-predicate-contexts` 10,000 (P3).
 - The reverse-complement lookups all come before the first read: `stop_at_threshold` saves reads, not lookups.
-- The result objects of `output.labels: "none"` are held by the account for their pattern only (§19.9).
 
 ### 19.15 What changed
 
@@ -4661,6 +4664,13 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   afterwards: `stop {output, max_memory}` (it stated `{extraction, time}`), `partial` `cut: max_memory` as before,
   `all_or_count` `withheld: output_budget` with `returned` 0 (it stated `deadline`); `determinism: time_limited`
   marks the later time stop either way (§7.6, §12.1; `PatternPaths.TheRouteCutPrecedesALaterTimeStopOfTheRelease`).
+  The result objects of a predicate's selected contexts under `output.labels: "none"` stay charged until the
+  request ends, as with a projection (the owner's decision: the bound is the request's; §19.9, and the §19.14
+  limitation that held them for their pattern only is gone): on a later pattern of such a request the account can
+  now cut the results (`partial`: `cut: max_memory`; `all_or_count`: `withheld: output_budget`; `stop {output,
+  max_memory}`) or stop the selection (`stop {selection, max_memory}`) where it did not, and `work.memory_bytes`
+  grows with the objects the earlier patterns kept
+  (`PatternSelection.ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds`).
 
 ## 28. Changed after the review of 2026-10-12
 

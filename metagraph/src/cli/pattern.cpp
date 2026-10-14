@@ -2164,6 +2164,15 @@ Json::Value process_pattern_request(
         }
         if (s.output_withheld)
             a.results = Json::Value(Json::arrayValue);
+        if (projection == Projection::NONE) {
+            // the result objects the answer keeps stay charged until the request ends (§19.9),
+            // as a projection's descriptors do: the bound is the request's; those of a withheld
+            // list are discarded, their charge with them
+            const uint64_t objects = retrieval->end_release();
+            if (s.output_withheld) {
+                account.release(objects);
+            }
+        }
 
         // ---- the projection of what was built (nothing is read for what is withheld)
         if (projection != Projection::NONE) {

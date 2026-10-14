@@ -816,10 +816,9 @@ const char* PatternRetrieval::placement() const {
 }
 
 void retrieval::Admission::begin(unsigned share) {
-    // a previous release whose charge nobody took over (none: the engine releases nothing to
-    // a refused pattern) is not held further
-    account_.release(held_);
-    held_ = 0;
+    // every release is taken over by its caller (take()) before the next begins: what it
+    // charged stays with the answer's objects or is released by the caller, never here
+    assert(held_ == 0);
     allowance_ = account_.left() / std::max(1u, share);
     open_ = true;
 }

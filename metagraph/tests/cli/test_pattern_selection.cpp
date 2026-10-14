@@ -2101,6 +2101,87 @@ TEST(PatternSelection, AllOrCountDeadlineAfter64ResultObjects) {
     }
 }
 
+// The result objects of a predicate's selected contexts under output.labels "none" (512 + 2k
+// each) stay charged until the request ends (SPEC §19.9: the bound is the request's, over all
+// its patterns), as the labelled descriptors and a label-free path list's objects do: a later
+// pattern finds the account as the earlier ones left it. Two identical patterns: under a large
+// account the second's work.memory_bytes is the first's plus the first's objects; under every
+// account of a band the second is answered as the pattern alone under the account less the
+// first's objects -- not whole where the first is, cut (partial: max_memory) or withheld
+// (all_or_count), and among them a stop at its own result objects (stop {output, max_memory};
+// all_or_count output_budget). Mutation tried: the objects' charge released when the next
+// pattern's release begins: fails.
+TEST(PatternSelection, ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kR1, true);
+    const uint64_t object = 512 + 2 * kK;
+    auto same = [](const Outcome &x, const Outcome &y) {
+        EXPECT_EQ(x.pass, y.pass);
+        EXPECT_EQ(x.stop, y.stop);
+        EXPECT_EQ(x.cut, y.cut);
+        EXPECT_EQ(x.withheld, y.withheld);
+        EXPECT_EQ(keys(x.results), keys(y.results));
+        EXPECT_EQ(compact(x.entry["counts"]), compact(y.entry["counts"]));
+        EXPECT_EQ(x.entry["retrieval_complete"], y.entry["retrieval_complete"]);
+    };
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        SCOPED_TRACE(mode);
+        Ask r;
+        r.mode = mode;
+        r.patterns = { "AC", "AC" };
+        r.max_memory_bytes = uint64_t(1) << 30;
+        const std::vector<Outcome> two = run_all(idx, r);
+        ASSERT_EQ(2u, two.size());
+        ASSERT_TRUE(two[0].entry["retrieval_complete"].asBool());
+        const uint64_t objects = two[0].results.size() * object;
+        ASSERT_LT(0u, objects);
+        same(two[0], two[1]);
+        EXPECT_EQ(two[0].memory + objects, two[1].memory);
+
+        // the pattern alone: an account (in steps of 64 bytes from below its peak) that
+        // answers it whole
+        Ask one = r;
+        one.patterns = { "AC" };
+        uint64_t whole = 0;
+        for (uint64_t bytes = two[0].memory / 2; bytes < 4 * two[0].memory && !whole;
+                bytes += 64) {
+            one.max_memory_bytes = bytes;
+            if (run(idx, one).entry["retrieval_complete"].asBool())
+                whole = bytes;
+        }
+        ASSERT_LT(0u, whole);
+        uint64_t second_short = 0, output_stop = 0;
+        for (uint64_t bytes = whole; bytes < whole + objects + 512; bytes += 16) {
+            SCOPED_TRACE(bytes);
+            r.max_memory_bytes = bytes;
+            const std::vector<Outcome> o = run_all(idx, r);
+            ASSERT_EQ(2u, o.size());
+            EXPECT_LE(o[1].memory, bytes);
+            one.max_memory_bytes = bytes;
+            const Outcome first = run(idx, one);
+            same(first, o[0]);
+            one.max_memory_bytes = bytes - objects;
+            const Outcome alone = run(idx, one);
+            same(alone, o[1]);
+            if (!o[0].entry["retrieval_complete"].asBool()
+                    || o[1].entry["retrieval_complete"].asBool()) {
+                continue;
+            }
+            ++second_short;
+            // said: a memory stop, or a row the account refused
+            EXPECT_TRUE((o[1].stop && o[1].stop->second == "max_memory")
+                        || o[1].entry["rows_refused"].size()) << compact(o[1].entry);
+            if (o[1].stop && *o[1].stop == std::make_pair(std::string("output"),
+                                                          std::string("max_memory"))) {
+                ++output_stop;
+                EXPECT_EQ(mode == "partial" ? "max_memory" : "", o[1].cut);
+                EXPECT_EQ(mode == "partial" ? "" : "output_budget", o[1].withheld);
+            }
+        }
+        EXPECT_LT(0u, second_short);
+        EXPECT_LT(0u, output_stop);
+    }
+}
+
 // A caller that left is not answered: the pass reads the clock (and so asks the abort
 // predicate) before every row it reads, and the work ends there (Aborted). Mutation tried: the
 // clock before a read removed (the paced read still sees the deadline, not the abort): fails.
