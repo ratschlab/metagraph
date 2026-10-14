@@ -51,7 +51,8 @@ import suite_common as sc  # noqa: E402
 DEFAULT_ROUTES = ("POST /resolve", "POST /traverse", "GET /traverse/capabilities")
 # The traverse_fetch overrides the MCP passes on while the advanced strategy path is off (strategy key -> the sub-keys
 # allowed, None = the whole key): the service's _TRAVERSE_BASIC_OVERRIDES (app/mcp_server.py, async's runner branch
-# at e334715b); traverse_fetch's documented presets are walk and trie.
+# at e334715b), only the fallback of a table without the case traverse.advanced_path_disabled, whose request predicate
+# (`overrides.` not_in [...]) is the one list (basic_overrides); traverse_fetch's documented presets are walk and trie.
 MCP_BASIC_OVERRIDES = {"bounds": None, "direction": None, "exhaustive": None,
                        "labels": ("max_labels_per_node", "seed_label_kind")}
 MCP_BASIC_PRESETS = (None, "walk", "trie")
@@ -76,11 +77,34 @@ def not_expressible_moot(case, scenario):
     return len(seq) <= SERVICE_RESOLVE_MAX_QUERY_BP[mode]
 
 
-def advanced_keys(arguments):
-    """The traverse_fetch arguments on the advanced strategy path, as dotted names ([] for none)."""
+ADVANCED_CASE = "traverse.advanced_path_disabled"
+
+
+def basic_overrides(cases):
+    """The override paths the MCP passes on without the advanced path, as the by-design table states them (the
+    not_in list of traverse.advanced_path_disabled's `overrides.` field predicate: dotted paths, "x.*" a whole key),
+    or None when the table has no such predicate."""
+    case = (cases or {}).get(ADVANCED_CASE) or {}
+    for pred in case.get("request") or []:
+        if isinstance(pred, dict) and pred.get("field") == "overrides." and isinstance(pred.get("not_in"), list):
+            return list(pred["not_in"])
+    return None
+
+
+def _allowed(path, allowed):
+    return path in allowed or any(a.endswith(".*") and path.startswith(a[:-1]) for a in allowed)
+
+
+def advanced_keys(arguments, allowed=None):
+    """The traverse_fetch arguments on the advanced strategy path, as dotted names ([] for none): an override path
+    outside |allowed| (basic_overrides; None: MCP_BASIC_OVERRIDES), a preset other than walk / trie, a strategy."""
     out = []
     ov = (arguments or {}).get("overrides")
-    if isinstance(ov, dict):
+    if isinstance(ov, dict) and allowed is not None:
+        for key, value in ov.items():
+            paths = ["%s.%s" % (key, sub) for sub in value] if isinstance(value, dict) and value else [str(key)]
+            out.extend("overrides.%s" % p for p in paths if not _allowed(p, allowed))
+    elif isinstance(ov, dict):
         for key, value in ov.items():
             allowed = MCP_BASIC_OVERRIDES.get(key, "absent")
             if allowed is None:
@@ -123,7 +147,7 @@ def mcp_exclusion(scenario, cases, advanced_path=False, direct_arm=True):
             rules.append("table_not_expressible")
             reasons.append("it names %s, which the by-design table states not expressible via MCP" % cid)
     if mcp.get("tool") == "traverse_fetch" and not advanced_path:
-        keys = advanced_keys(mcp.get("arguments"))
+        keys = advanced_keys(mcp.get("arguments"), basic_overrides(cases))
         if keys:
             rules.append("advanced_path")
             reasons.append("its traverse_fetch arguments need the advanced strategy path (%s), which the deployment "

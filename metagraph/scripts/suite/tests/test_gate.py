@@ -259,6 +259,26 @@ class PolicyTest(GateCase):
         s["request"]["bounds"] = {"max_query_bp": 100}
         self.assertIsNotNone(gate_policy.mcp_exclusion(s, {case["id"]: case}))   # the direct request states a bound
 
+    def test_basic_override_list_comes_from_the_table(self):
+        # traverse.advanced_path_disabled's request predicate (overrides. not_in [...]) is the one list; the module's
+        # copy of the service's list is only the fallback of a table without the case
+        args = {"overrides": {"direction": "right", "bounds": {"max_extension_bp": 9}}}
+        self.assertEqual(gate_policy.advanced_keys(args), [])
+        case = {"id": "traverse.advanced_path_disabled", "agreement": "not_implemented_mcp",
+                "request": [{"service": "service_settings.advanced_enabled", "equals": False},
+                            {"field": "overrides.", "not_in": ["", "bounds.*", "exhaustive", "labels"]}]}
+        allowed = gate_policy.basic_overrides({case["id"]: case})
+        self.assertEqual(allowed, ["", "bounds.*", "exhaustive", "labels"])
+        self.assertEqual(gate_policy.advanced_keys(args, allowed), ["overrides.direction"])
+        s = scenario("T-010", "POST /traverse", arguments=args)
+        ex = gate_policy.mcp_exclusion(s, {case["id"]: case})
+        self.assertEqual(ex["rules"], ["advanced_path"])
+        self.assertIn("overrides.direction", ex["reason"])
+        real = gate_policy.basic_overrides(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[0])
+        self.assertIn("labels.seed_label_kind", real)
+        self.assertEqual(gate_policy.advanced_keys({"overrides": {"labels": {"max_seed_labels": 1}}}, real),
+                         ["overrides.labels.max_seed_labels"])
+
     def test_shipped_v4_policy_is_regenerated_exactly(self):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v4_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v4.json"))

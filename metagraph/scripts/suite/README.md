@@ -1525,6 +1525,11 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
 - `needs_direct_arm`: a policy without a direct arm excludes on the MCP arm every scenario naming an answered or
   clamped case with explains_checks (from the manifest and the table), so a clean MCP-only run passes; v4 MCP-only:
   35 exclusions (R-edge-0009, T-edge-0007, T-edge-0008, C-caps-0001 besides the 31), 187 scenarios, 380 executions.
+- The advanced_path rule reads its list of basic override paths from the by-design table (the request predicate
+  `overrides.` not_in [...] of traverse.advanced_path_disabled, lane S6b), so the policy and the comparator share one
+  list; gate_policy.MCP_BASIC_OVERRIDES (the service's `_TRAVERSE_BASIC_OVERRIDES`) is only the fallback of a table
+  without that case. gate/policy_v4_rt_mcp.json is regenerated after merging lanes S6g1 and S6b: the same
+  selection, exclusions, required executions and relations; the pin is the merged table (sha256 ab4100c9).
 - v4's two-arm policy: 222 selected; MCP 189 scenarios / 384 executions (31 derived exclusions, the declared
   C-caps-0001 and T-budget-0003), direct-local 220 / 253; REL-same_answer-0003 required on both arms, the four
   prefix_equals relations excluded on both.
