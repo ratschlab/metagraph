@@ -45,8 +45,8 @@ warning: on the line's reevaluation.warnings and in the mark).
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
       outcome, answer_digest and time_limited replaced, and `reevaluation`: {checks_sha256, outcome_recorded,
-      checks_changed: the checks whose outcome changed, added or dropped; mcp_auth_assumed, warnings where they
-      apply})
+      checks_changed: the checks whose outcome changed, added or dropped; mcp_auth_assumed, warnings,
+      explained_items_recorded (the runner's recorded explained_items where the replay's differ) where they apply})
   RUN_DIR/reevaluated.json   the re-evaluated set's mark: the checks (directory, commit, `+dirty`, sha256 of
       checks.py and suite_common.py), the recorded checks (each arm's run.json), counts, and every execution whose
       outcome or checks changed
@@ -424,8 +424,13 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
             if "service_by_design_case" in info:
                 row["service_by_design_case"] = info["service_by_design_case"]
                 row["explained_checks"] = info.get("explained_checks") or []
-                # B5b-06: the explained check ITEMS (indices into checks), as the runner's E is keyed
+                # B5b-06: the explained check ITEMS (indices into checks), as the runner's E is keyed (its line and
+                # raw record carry the same field since f386a3c0: [] when E is empty, absent when no case matched)
                 row["explained_items"] = info.get("explained_items") or []
+            if "explained_items" in line and line.get("explained_items") != row.get("explained_items"):
+                # the runner's own list (f386a3c0) that the replay does not reproduce (another table, other checks):
+                # noted, not trusted (compare notes a line's differing list the same way, S5c-05)
+                row["reevaluation"]["explained_items_recorded"] = line.get("explained_items")
             for k in ("verdict_detail", "inconclusive_reason"):
                 if info.get(k):
                     row[k] = info[k]

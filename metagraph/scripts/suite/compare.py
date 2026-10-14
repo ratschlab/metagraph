@@ -30,7 +30,9 @@ execution states them; answered / clamped: no error). A pair that does not hold 
 Each MCP execution is matched as async's runner matches it (f386a3c0; the matcher of e334715b, its wall rule with rule
 2 of 2a8acbaf): the cases the scenario names first, else an answer-triggered case (answer_match) whose wall rule
 holds or cannot be decided; a stated key this comparator does not know leaves its side unverified. The explained
-check items of an answered / clamped case are computed with the table in hand (S5c-05), never read from a line.
+check items of an answered / clamped case are computed with the table in hand (S5c-05), as the runner computes its
+line's explained_items (f386a3c0); a line that records another list (another table or other checks) is noted
+(explained_items_recorded), never trusted.
 """
 
 import argparse
@@ -1114,8 +1116,9 @@ def answered_verdict(matched, checks, rule):
 
 def explained_items(checks, entries):
     """The indices of a line's check items an answered / clamped case's explains_checks entries explain (B5b-06:
-    per ITEM, as async's runner's explained_outcome keys E: an item of outcome fail that an entry explains,
-    entry_explains: a name every item of that check, {check, detail_matches} an item whose detail it matches)."""
+    per ITEM, as async's runner's explained_outcome keys E and its explained_item_indices records them on the line
+    since f386a3c0: an item of outcome fail that an entry explains, entry_explains: a name every item of that check,
+    {check, detail_matches} an item whose detail it matches; in check order)."""
     return [i for i, c in enumerate(checks or []) if str(c.get("outcome")) == "fail"
             and any(entry_explains(entry, c) for entry in entries or [])]
 
@@ -1123,8 +1126,9 @@ def explained_items(checks, entries):
 def line_explained_items(line, matched, recorded=None):
     """The explained items of an MCP line an answered / clamped case matched: explained_items of its checks against
     the matched cases' union, computed with the table in hand as the runner computes E per execution (S5c-05 of the
-    review of lane S5c: a line's recorded explained_items, e.g. of a re-evaluation with another table, is not
-    trusted); |recorded| (a dict, optional) receives {repeat: the recorded list} where the line records another."""
+    review of lane S5c: a line's recorded explained_items, the runner's (f386a3c0) or a re-evaluation's, e.g. with
+    another table, is not trusted); |recorded| (a dict, optional) receives {repeat: the recorded list} where the line
+    records another."""
     items = explained_items(line.get("checks") or [], union_of(matched))
     rec = line.get("explained_items")
     if recorded is not None and "explained_items" in line and rec != items:

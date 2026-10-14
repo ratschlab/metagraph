@@ -1244,3 +1244,15 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   inconclusive_reason. Write and deadline phases keep bound_s x 1000 - 1000 ms (they fire earlier by design); no
   budget known and the legacy path (no stated phase) are unchanged. compare (host_state_line) and merge_run
   (host_state_inconclusive) read the same rule.
+- `explained_items` (f386a3c0): the runner records on a matched case's line, right after explained_checks, and in
+  the raw record the indices into the line's `checks` of the results with outcome fail that an entry of the union of
+  the matched cases' explains_checks explains (explained_item_indices, in check order: the set its
+  explained_outcome's E holds); [] whenever E is empty (a refused / relayed / answer-triggered case, a rule (c)
+  undecidable match, an answered case explaining nothing); absent when no case matched. That is the field and the
+  semantics lane S5c gave the re-evaluation (B5b-06: `compare.explained_items` over `compare.union_of` of the
+  matched cases; the same entry_explains, the same union, the same order), and the re-evaluated line places it
+  after explained_checks as the runner does. reevaluate.py replaces the recorded list by the replay's and notes a
+  recorded one it does not reproduce (`reevaluation.explained_items_recorded`); compare computes the items with the
+  table in hand and notes a differing recorded list (`explained_items_recorded`), never trusting it; merge_run
+  leaves out a line's explained_items (the runner's or the re-evaluation's), and only for a line without the field
+  (a runner before f386a3c0) every failing item of its explained_checks.

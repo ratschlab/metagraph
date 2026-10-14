@@ -789,6 +789,70 @@ class Reevaluate(unittest.TestCase):
                    "error": dict(to["error"], timeout_phase="read", bound_s=bound)}
             self.assertIs(merge_run.host_state_inconclusive(row, res(20000)), host, bound)
 
+    def test_explained_items_as_the_runner(self):
+        # async's f386a3c0: the line (and raw record) records explained_items beside explained_checks, the indices
+        # into checks of the results with outcome fail that an entry of the matched cases' union explains; [] when E
+        # is empty (a refused / relayed case, an answered case explaining nothing); absent when no case matched
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        ok = {"http": 200, "body": {}, "error": None}
+        dup = scenario("T-edge-0008", "POST /traverse", TRAVERSE, mcp={"tool": "traverse_fetch", "arguments": {},
+                                                                     "by_design": ["traverse.duplicate_seeds"]})
+        merged = {"check": "invariants", "outcome": "fail", "detail": "1 results for 2 seeds (1 distinct)"}
+        checks = [{"check": "status", "outcome": "pass", "detail": ""}, merged,
+                  {"check": "traverse_seed_outcome", "outcome": "pass", "detail": ""}]
+
+        def judge(chk, sc_=dup, ans=ok):
+            info = {}
+            out = reevaluate.outcome_of(None, "mcp", sc_, ans, {"outcome": "fail"}, chk, False, cases, None, info)[0]
+            return out, info.get("explained_checks"), info.get("explained_items")
+        self.assertEqual(judge(checks), ("service_by_design", ["invariants"], [1]))
+        # one invariants failure explained, the other not: fail, one item
+        two = checks + [{"check": "invariants", "outcome": "fail", "detail": "result 0 without outcome"}]
+        self.assertEqual(judge(two), ("fail", ["invariants"], [1]))
+        # the older wording (no distinct count) is no merge for the table's regex: nothing explained, [] recorded
+        self.assertEqual(judge([checks[0], dict(merged, detail="1 results for 2 seeds"), checks[2]]),
+                         ("fail", [], []))
+        whole = [{"check": "x", "outcome": "pass"}, {"check": "status", "outcome": "fail"},
+                 {"check": "status", "outcome": "fail"}]
+        self.assertEqual(cmp.explained_items(whole, ["status"]), [1, 2])
+        self.assertEqual(cmp.explained_items(whole, []), [])
+        # no case: nothing recorded
+        self.assertEqual(judge(checks, scenario("P-0001", "POST /pattern", STATUS)), ("fail", None, None))
+        # end to end: resolve.duplicate_labels (explains status) answered 200 where the host refuses; the runner's
+        # recorded list is kept when the replay reproduces it and noted when not
+        run = os.path.join(self.tmp.name, "items")
+        res = scenario("R-dup", "POST /resolve", [{"check": "status", "args": {"http": 400}}],
+                       mcp={"tool": "traverse_resolve", "by_design": ["resolve.duplicate_labels"],
+                            "arguments": {"sequence": "A" * 40, "labels": ["562", "562"]}})
+        manifest = {"manifest_version": 1, "scenarios": [res], "relations": []}
+        d = os.path.join(run, "arms", "mcp")
+        os.makedirs(os.path.join(d, "raw"))
+        sc.write_json_atomic(os.path.join(run, "manifest.json"), manifest)
+        sc.write_json_atomic(os.path.join(d, "manifest.json"), manifest)
+        sc.write_json_atomic(os.path.join(d, "run.json"), {"run_id": "R", "arm": "mcp", "checks_module": "checks"})
+        for rep, items in ((0, [0]), (1, [1]), (2, None)):
+            raw = sc.raw_name(res["id"], "mcp", rep)
+            line = {"run_id": "R", "scenario": res["id"], "arm": "mcp", "repeat": rep, "cache": "cold", "http": 200,
+                    "outcome": "service_by_design", "checks": [], "mcp_phases": {}, "raw": raw, "error": None,
+                    "route": "POST /resolve", "started_utc": sc.iso_utc(T0), "wall_ms": 5.0, "mcp_auth": "anonymous",
+                    "service_by_design_case": "resolve.duplicate_labels", "explained_checks": ["status"]}
+            if items is not None:
+                line["explained_items"] = items
+            sc.append_jsonl(os.path.join(d, "executions.jsonl"), line)
+            sc.write_gz_json(os.path.join(d, raw), {"answer": {"http": 200, "body": {"results": []}, "error": None},
+                                                    "explained_items": items, "mcp_auth": "anonymous"})
+        reevaluate.reevaluate(run)
+        rows = sc.read_jsonl(os.path.join(d, "executions.reevaluated.jsonl"))[0]
+        for row in rows:
+            self.assertEqual((row["outcome"], row["service_by_design_case"], row["explained_checks"],
+                              row["explained_items"]), ("service_by_design", "resolve.duplicate_labels", ["status"],
+                                                        [0]), row["repeat"])
+            self.assertEqual([c["outcome"] for c in row["checks"]], ["fail"])
+            self.assertEqual(list(row).index("explained_items"), list(row).index("explained_checks") + 1)
+        self.assertNotIn("explained_items_recorded", rows[0]["reevaluation"])
+        self.assertEqual(rows[1]["reevaluation"]["explained_items_recorded"], [1])
+        self.assertNotIn("explained_items_recorded", rows[2]["reevaluation"])   # a runner before f386a3c0
+
     def test_by_design_finding_without_a_table(self):
         # B5b-10: with no table a recorded by-design finding (a relayed deadline's budget_respected) is kept, as
         # the runner's service_by_design mark is; with the table it is replayed (finding: a mark never erases one)

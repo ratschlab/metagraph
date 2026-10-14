@@ -18,8 +18,9 @@ inconclusive > pass; a runner's error, not_implemented_mcp or service_by_design 
 the host-state rule made inconclusive where its plausibility rule admits it or cannot decide it (rule (c),
 verdict_detail): suite_common.host_state_verdict on the raw record's service-side wall, and an MCP
 execution a refused / relayed / answer-triggered by-design case decided, a finding included; the failing checks an
-answered / clamped case explains, the line's explained_items (the re-evaluation's, B5b-06), else every failing item
-of its explained_checks, are left out: triage-2 B-01), the runner's own under
+answered / clamped case explains, the line's explained_items (async's runner records them since f386a3c0, the
+re-evaluation since lane S5c, B5b-06: the same indices), else every failing item of its explained_checks (a line
+of an earlier runner), are left out: triage-2 B-01), the runner's own under
 `outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
 from the generic ones (an execution whose property checks are all not exposed is inconclusive, not pass).
 
@@ -116,7 +117,8 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
         items = row.get("explained_items")
         explained = set(row.get("explained_checks") or ())
         if isinstance(items, list) and items:
-            # B5b-06: the explained check items (the re-evaluation's), not every item of an explained name
+            # B5b-06: the explained check items (the runner's since f386a3c0, or the re-evaluation's), not every
+            # item of an explained name
             checks = [c for i, c in enumerate(checks) if not (i in items and c.get("outcome") == "fail")]
         elif explained:
             checks = [c for c in checks if not (c.get("check") in explained and c.get("outcome") == "fail")]
