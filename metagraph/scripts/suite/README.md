@@ -1906,3 +1906,22 @@ by lane S6c; everything below was open.
 - The tests no longer pass the run's own options again on resume (--warm-every, --skip-local, --skip-remote,
   --no-mcp), so they exercise the restore.
 
+### The release at the run's end (P6-end-to-end-07)
+- run_direct kept only `server_instance` from its closing GET /capabilities, and a resume set `run.release` only
+  where it was absent: a deploy during the run, or between an interrupt and its resume, read at most as "the server
+  restarted", and every execution was attributed to the first release. Each session of an arm's run.json records
+  `release_start` / `index_fp_start` (the start's capabilities documents) and `release_end` / `index_fp_end` (the
+  closing GET /capabilities; staging's /capabilities states no index_fp, so index_fp_end is null there and the
+  release, which names the index build and the commit, carries the identity); run.json `releases` lists every
+  release the arm saw in order, `release_changed` whether there was more than one. `run.release` stays the run's
+  first.
+- merge_run.release_identity reads both direct arms' sessions in time order: more than one release or index_fp is a
+  warning naming the first and each later one with the arm, session and time, and run.json `release_identity` /
+  `mixed_releases` state it. merge_run --strict-identity (run_suite.sh --gate) exits 3 on it (identity_errors) and
+  gate.py fails on it (kind identity, one line in gate.py). The report shows the warning; its verdict is report.py's
+  (lane S-verdict's file): it does not yet read `mixed_releases`.
+- A paired step (--only) takes no capabilities GET, so the release is seen at the arm's first step and at each
+  invocation's closing step: a deploy during an invocation shows at its end, one between an interrupt and the resume
+  at the resume's end. In paired mode the first invocation of a run interrupted before its closing step has no end
+  release; its resume's closing step has one.
+

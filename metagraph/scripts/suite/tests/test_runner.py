@@ -516,6 +516,29 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(run["server_instance_changed"])
         self.assertEqual(len(sc.read_jsonl(os.path.join(out, "executions.jsonl"))[0]), 9)
 
+    def test_release_at_each_sessions_start_and_end(self):
+        # the host's identity per session: the start's capabilities and the closing GET; a release that changes
+        # between them (a deploy during the run, or before a resume) is in run.json's releases and release_changed
+        import fake_host
+        make_manifest(self.manifest_path, basic_scenarios()[:2])
+        out = os.path.join(self.dir, "run")
+        old = fake_host.RELEASE
+        try:
+            with FakeHost() as host:
+                self.assertEqual(self.run_direct(host.base, out, "--only", "C-1"), 0)
+                run = sc.read_json(os.path.join(out, "run.json"))
+                self.assertEqual((run["sessions"][0]["release_start"], run["releases"], run["release_changed"]),
+                                 (RELEASE, [RELEASE], False))
+                self.assertEqual(run["sessions"][0]["index_fp_start"], "907ec986aaaa")
+                fake_host.RELEASE = "refseq97-00000000"
+                self.assertEqual(self.run_direct(host.base, out, "--finish"), 0)
+        finally:
+            fake_host.RELEASE = old
+        run = sc.read_json(os.path.join(out, "run.json"))
+        self.assertEqual(run["release"], RELEASE)            # the run's identity: its first release
+        self.assertEqual((run["sessions"][1]["release_end"], run["release_end"]), ("refseq97-00000000",) * 2)
+        self.assertEqual((run["releases"], run["release_changed"]), ([RELEASE, "refseq97-00000000"], True))
+
     def test_sigint_stops_cleanly(self):
         scen = [scenario("S-%d" % i, "S", "POST /slow", {"sleep_s": 0.3}) for i in range(20)]
         make_manifest(self.manifest_path, scen)

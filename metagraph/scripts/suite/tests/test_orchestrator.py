@@ -413,6 +413,33 @@ class RunSuiteOffline(SuiteCase):
         with open(os.path.join(run_dir, "report.md")) as fh:
             self.assertIn("**INCOMPLETE", fh.read())
 
+    def test_a_deploy_during_the_run_is_stated(self):
+        # the host's release changes during a paired run: each direct arm's closing GET records it, the merge warns
+        # and states mixed_releases (and the gate fails on it: test_gate)
+        import fake_host
+        make_manifest(self.mpath, [scenario("S-%02d" % i, "S", "POST /slow", {"sleep_s": 0.2}) for i in range(5)])
+        old = fake_host.RELEASE
+        try:
+            with FakeHost() as host:
+                cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                       "--warm-every", "0", "--checks", "stub"]
+                proc = subprocess.Popen(cmd, env=self.env(host), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        universal_newlines=True, stdin=subprocess.DEVNULL)
+                deadline = time.time() + 60
+                while time.time() < deadline and sum(1 for _, x in host.log if x == "/slow") < 3:
+                    time.sleep(0.02)
+                fake_host.RELEASE = "refseq97-00000000"
+                out, err = proc.communicate(timeout=120)
+        finally:
+            fake_host.RELEASE = old
+        self.assertEqual(proc.returncode, 0, err)
+        run = sc.read_json(os.path.join(out.strip().splitlines()[-1], "run.json"))
+        self.assertTrue(run["mixed_releases"])
+        self.assertEqual(run["release_identity"]["releases"], [old, "refseq97-00000000"])
+        self.assertTrue([w for w in run["warnings"] if w.startswith("the host's release changed during the run")])
+        for arm in ("direct-local", "direct-remote"):
+            self.assertTrue(run["arms"][arm]["release_changed"], arm)
+
     def test_lock_held_stale_and_foreign(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
         os.makedirs(os.path.join(self.mex, "suite-dev"))

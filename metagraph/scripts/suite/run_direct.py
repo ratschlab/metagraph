@@ -14,6 +14,12 @@ index_fp, the three capabilities documents, host load at start and end). The ans
 `checks.evaluate` (checks.py of lane S1, or checks_stub.py, which is refused for a selection whose expectations
 go beyond the HTTP status unless --allow-stub).
 
+The host's identity per session: `release_start` / `index_fp_start` / `server_instance_start` from the start's
+capabilities documents, `release_end` / `index_fp_end` / `server_instance_end` from the closing GET /capabilities
+(index_fp_end only where that document states it); run.json `releases` lists every release a session saw, in order,
+and `release_changed` says whether there was more than one (a deploy during the run, or between an interrupt and its
+resume; merge_run.py and the gate read it).
+
 Timing: one keep-alive connection per invocation, reused while the server keeps it open; `wall_ms` runs from
 sending the request to the last body byte on an established connection, and the connection set-up (TCP, TLS)
 is recorded apart as `client.connect_ms` (null when the request reused the connection).
@@ -691,6 +697,8 @@ class Runner(object):
                 docs, statuses, ident = self.snapshot_capabilities()
                 self.session["capabilities_http"] = statuses
                 self.session["server_instance_start"] = ident["server_instance"]
+                self.session["release_start"] = ident["release"]
+                self.session["index_fp_start"] = ident["index_fp"]
                 if "capabilities" not in self.run or not self.run.get("release"):
                     self.run["capabilities"] = docs
                     self.run["capabilities_http"] = statuses
@@ -723,7 +731,7 @@ class Runner(object):
             self.run.setdefault("warnings", []).append("runner failed: " + traceback.format_exc(limit=5))
             raise
         finally:
-            end_ident = {"server_instance": None}
+            end_ident = {"server_instance": None, "release": None, "index_fp": None}
             if self.closing_get and state != "failed" and STOP.signals < 2:
                 try:
                     _, _, end_ident = self.snapshot_capabilities(at_end=True)
@@ -738,6 +746,11 @@ class Runner(object):
             if self.closing_get:
                 self.session["server_instance_end"] = end_ident.get("server_instance")
                 self.run["server_instance_end"] = end_ident.get("server_instance")
+                self.session["release_end"] = end_ident.get("release")
+                self.session["index_fp_end"] = end_ident.get("index_fp")
+                self.run["release_end"] = end_ident.get("release")
+            self.run["releases"] = session_values(self.run, "release")
+            self.run["release_changed"] = len(self.run["releases"]) > 1
             self.run["ended_utc"] = self.session["ended_utc"]
             self.run["host_load_end"] = self.session["host_load_end"]
             self.run["state"] = state
@@ -750,6 +763,17 @@ class Runner(object):
             self.write_state(state, len(planned), min(done_now, len(planned)))
             self.stop_sampler()
         return state
+
+
+def session_values(run, key):
+    """The distinct values of |key| (release, index_fp) the arm saw, in order: the run's own (its first start's,
+    also of a session before the per-session fields), then each session's start and end."""
+    out = [run[key]] if run.get(key) else []
+    for sess in run.get("sessions") or []:
+        for v in (sess.get(key + "_start"), sess.get(key + "_end")):
+            if v and v not in out:
+                out.append(v)
+    return out
 
 
 def parse_args(argv):

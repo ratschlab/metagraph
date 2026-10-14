@@ -40,6 +40,10 @@ The manifest identity (finding 9 of the outside review): run.json's `manifest_id
 content_sha256 and relations_sha256 and each arm's (manifest_identity); an arm whose hashes differ, or a run manifest
 whose stated hashes its content does not match, is a warning; with --strict-identity (run_suite.sh --gate) it is an
 error: the files are written, then the exit status is 3.
+
+The host's identity (release_identity): the releases and index_fps the direct arms' sessions saw at their starts and
+closing GETs, in order (run.json `release_identity`, `mixed_releases`); more than one release or index_fp (a deploy
+during the run, or between an interrupt and its resume) is a warning, and an error with --strict-identity.
 """
 
 import json
@@ -233,6 +237,44 @@ def manifest_identity(run_dir, arm_runs):
     return {"manifest": manifest, "arms": arms, "differs": differs}
 
 
+def release_identity(arm_runs):
+    """The host's identity over the direct arms' sessions (run_direct.py records release and index_fp at each session's
+    start and its closing GET; an arm of before those fields states its first release only): {releases, index_fps: the
+    distinct values in the order seen, changed: one sentence per value after the first, naming the arm, session and
+    time that saw it}. Executions of a run that spans two deployments are attributed to one release that did not
+    answer them all: merge_run warns, --strict-identity and the gate fail."""
+    seen = []
+    for arm in sc.DIRECT_ARMS:
+        run = arm_runs.get(arm)
+        if not isinstance(run, dict):
+            continue
+        t0 = sc.parse_utc(run.get("started_utc")) or 0.0
+        for key in ("release", "index_fp"):
+            if run.get(key):
+                seen.append((t0, 0, arm, None, "first start", key, run[key]))
+        for i, sess in enumerate(run.get("sessions") or []):
+            for order, (where, tkey) in enumerate((("start", "started_utc"), ("end", "ended_utc"))):
+                for key in ("release", "index_fp"):
+                    v = sess.get("%s_%s" % (key, where))
+                    if v:
+                        seen.append((sc.parse_utc(sess.get(tkey)) or t0, 1 + order, arm, i, where, key, v))
+    seen.sort(key=lambda x: (x[0], x[1], ARM_ORDER.get(x[2], 9)))
+    out = {"releases": [], "index_fps": [], "changed": []}
+    first = {}
+    for t, _, arm, i, where, key, v in seen:
+        values = out["releases" if key == "release" else "index_fps"]
+        if v in values:
+            continue
+        values.append(v)
+        at = "arms/%s %s" % (arm, where if i is None else "session %d %s" % (i, where))
+        if key not in first:
+            first[key] = (v, at)
+            continue
+        out["changed"].append("the host's %s changed during the run: %s (%s) -> %s (%s, %s)" % (
+            key, first[key][0], first[key][1], v, at, sc.iso_utc(t) if t else "time unknown"))
+    return out
+
+
 # renormalised.json keys a re-evaluation states (the renormaliser's revision where it records one)
 RENORMALISED_KEYS = ("source", "out", "at", "normaliser_sha256", "digest", "counts", "skipped_by_kind", "commit",
                      "git_head", "runner_sha256", "client_sha256", "input_sha256")
@@ -392,6 +434,8 @@ def merge(run_dir, reevaluated=False):
         warnings.append("the arms ran different manifests: %s" % "; ".join(identity["differs"]))
     for problem in identity["manifest"]["problems"]:
         warnings.append("manifest.json: %s" % problem)
+    releases = release_identity(arm_runs)
+    warnings.extend(releases["changed"])
     instances = set()
     for run in direct:
         for sess in run.get("sessions", []):
@@ -436,6 +480,8 @@ def merge(run_dir, reevaluated=False):
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
         "outcomes_rederived": rederived,
         "manifest_identity": identity,
+        "release_identity": releases,
+        "mixed_releases": bool(releases["changed"]),
         "renormalisation": renormalised,
         "warnings": warnings,
     }
@@ -449,11 +495,13 @@ def merge(run_dir, reevaluated=False):
 
 
 def identity_errors(merged):
-    """The manifest identity problems of a merged run.json that a gate reads as errors: the arms that ran another
-    manifest than the run's, and the run manifest's stated hashes its content does not match."""
+    """The identity problems of a merged run.json that a gate reads as errors: the arms that ran another manifest than
+    the run's, the run manifest's stated hashes its content does not match, and a host release or index_fp that changed
+    during the run."""
     ident = merged.get("manifest_identity") or {}
     return list(ident.get("differs") or []) + ["manifest.json: %s" % p for p in
-                                               ((ident.get("manifest") or {}).get("problems") or [])]
+                                               ((ident.get("manifest") or {}).get("problems") or [])] + \
+        list((merged.get("release_identity") or {}).get("changed") or [])
 
 
 def main(argv=None):
@@ -471,8 +519,9 @@ def main(argv=None):
         sys.stdout.write("warning: %s\n" % w)
     errors = identity_errors(merged)
     if strict and errors:
+        host = set((merged.get("release_identity") or {}).get("changed") or [])
         for e in errors:
-            sys.stderr.write("merge_run: error: manifest identity: %s\n" % e)
+            sys.stderr.write("merge_run: error: %s identity: %s\n" % ("host" if e in host else "manifest", e))
         return 3
     return 0
 

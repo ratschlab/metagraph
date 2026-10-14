@@ -650,6 +650,31 @@ class JudgeTest(GateCase):
                        dict(pol, by_design_table={"sha256": "another"}))
         self.assertIn("by-design table", " ".join(p["detail"] for p in self.problems(v, "identity")))
 
+    def test_release_changed_during_the_run_fails(self):
+        # a deploy during the run (or between an interrupt and its resume): a session's closing GET states another
+        # release than the run's first; the merge warns and states mixed_releases, --strict-identity exits 3 and the
+        # gate fails on identity
+        d = make_run(self.run_dir(), self.m, mcp_lines(self.m), direct=True)
+        pol = policy_of(self.m, arms=("direct-local", "direct-remote", "mcp"), require_agreement=True)
+        self.assertTrue(gate.judge(d, pol)["passed"])
+        path = os.path.join(d, "arms", "direct-local", "run.json")
+        run = sc.read_json(path)
+        run["sessions"].append({"started_utc": "2026-10-14T10:00:00Z", "ended_utc": "2026-10-14T10:05:00Z",
+                                "release_start": run["release"], "release_end": "refseq97-00000000"})
+        sc.write_json_atomic(path, run)
+        merged = merge_run.merge(d)
+        self.assertTrue(merged["mixed_releases"])
+        self.assertEqual(merged["release_identity"]["releases"], ["refseq97-b7214d29", "refseq97-00000000"])
+        self.assertTrue([w for w in merged["warnings"] if "release changed during the run" in w])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(merge_run.main([d, "--strict-identity"]), 3)
+        self.assertIn("host identity: the host's release changed during the run: refseq97-b7214d29 (arms/direct-local "
+                      "first start) -> refseq97-00000000 (arms/direct-local session 1 end", err.getvalue())
+        v = gate.judge(d, pol)
+        self.assertFalse(v["passed"])
+        self.assertIn("release changed during the run", " ".join(p["detail"] for p in self.problems(v, "identity")))
+
     def test_configuration_evidence(self):
         v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m), caps=None))
         self.assertIn("configuration evidence missing", self.problems(v, "configuration")[0]["detail"])
