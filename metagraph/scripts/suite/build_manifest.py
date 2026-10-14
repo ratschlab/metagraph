@@ -16,15 +16,22 @@ scenarios a smoke validation exercised (the earlier selections).
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
 documents and the scenarios a host capability decides (the protein substitution cap: manifest_lib.HOST_MISMATCH_MAX)
 are built from it, so the frozen manifest is built with a snapshot refreshed from the host it will run against.
-The frozen v3 manifests stay as they are (the builder of v3 is commit 6f945db4).
+The frozen v3 manifests stay as they are (the builder of v3 is commit 6f945db4). Any suite_v*.json /
+suite_smoke_v*.json that exists in manifest/ or that git tracks is refused as an output, by whatever path, and
+--areas (a partial build) needs outputs of its own; the manifest's index records the sha256 of each capabilities
+document beside the snapshot's directory.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import glob
+import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -60,16 +67,32 @@ CONVENTIONS = {
     "mcp.by_design": "case ids of the async session's service-by-design table (service_by_design.json)",
     "mcp.requires_service": "the service increment the MCP mapping needs (I12: max_mismatches)",
     "timing_class": "fast (< ~5 s), slow, long (> 100 s: direct-local only)",
+    "run_unique": "top-level request fields the direct runner makes unique per run (lane S5b, A-10): it appends "
+                  "'-' and the run id (the run directory's name, which the arms of a run share) to each, cut to the "
+                  "id pattern's 128 characters, and records the request it sent; the manifest keeps the base value",
 }
+
+
+CAPABILITY_DOCUMENTS = ("capabilities", "pattern_capabilities", "traverse_capabilities")
 
 
 def load_capabilities(directory: str) -> dict:
     """The three capabilities documents of a snapshot directory."""
     caps = {}
-    for name in ("capabilities", "pattern_capabilities", "traverse_capabilities"):
+    for name in CAPABILITY_DOCUMENTS:
         with open(os.path.join(directory, name + ".json")) as f:
             caps[name] = json.load(f)
     return caps
+
+
+def snapshot_digests(directory: str) -> dict:
+    """{document name: sha256 of its file} of a capabilities snapshot (A-09: the manifest records which snapshot
+    built it, beside the directory's name)."""
+    out = {}
+    for name in CAPABILITY_DOCUMENTS:
+        with open(os.path.join(directory, name + ".json"), "rb") as f:
+            out[name + ".json"] = hashlib.sha256(f.read()).hexdigest()
+    return out
 
 
 def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES) -> dict:
@@ -106,6 +129,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         "index": {"database": DB, "release_at_build": caps["capabilities"].get("release"),
                   "index_fp": tc.get("index_fp"), "index_ns": tc.get("index_ns"), "k": tc.get("k"),
                   "capabilities_snapshot": _snapshot_name(capabilities_dir),
+                  "capabilities_sha256": snapshot_digests(capabilities_dir),
                   "mismatches_max": dict(manifest_lib.HOST_MISMATCH_MAX),
                   "kmers_for_the_chance_model": areas.REFSEQ33M_KMERS},
         "ground_truth": {
@@ -308,9 +332,36 @@ def write(path: str, manifest: dict) -> None:
         f.write("]\n}\n")
 
 
-# the committed manifests of earlier versions: never overwritten
-FROZEN = ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json", "suite_v3.json",
-          "suite_smoke_v3.json")
+# a manifest file of manifest/ (any version): never written over once it exists or git tracks it
+MANIFEST_NAME = re.compile(r"^suite(?:_smoke)?_v[0-9]+\.json$")
+MANIFEST_DIR = os.path.join(HERE, "manifest")
+
+
+def _tracked(path: str) -> bool:
+    """Whether git tracks |path| in this tree."""
+    try:
+        p = subprocess.run(["git", "ls-files", "--error-unmatch", os.path.basename(path)], cwd=os.path.dirname(path),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        return p.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def frozen_target(path: str) -> str:
+    """Why |path| must not be written ('' when it may): an existing or git-tracked suite_v*.json / suite_smoke_v*.json
+    of manifest/, reached by any path (realpath, and samefile against each of manifest/'s manifests: a symbolic link
+    or another spelling is the same file; A-08)."""
+    real = os.path.realpath(path)
+    candidates = [real] + [p for p in glob.glob(os.path.join(MANIFEST_DIR, "suite*_v*.json"))
+                           if os.path.exists(path) and os.path.samefile(p, path)]
+    for c in candidates:
+        if os.path.dirname(c) != os.path.realpath(MANIFEST_DIR) or not MANIFEST_NAME.match(os.path.basename(c)):
+            continue
+        if os.path.exists(c):
+            return "%s is a manifest of manifest/ (%s): build into another file" % (path, os.path.basename(c))
+        if _tracked(c):
+            return "%s is a manifest git tracks: build into another file" % path
+    return ""
 
 
 def main(argv=None) -> int:
@@ -324,11 +375,13 @@ def main(argv=None) -> int:
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
     args = ap.parse_args(argv)
     only = set(args.areas.split(",")) if args.areas else None
+    defaults = (ap.get_default("out"), ap.get_default("smoke_out"))
+    if only and (args.out in defaults or args.smoke_out in defaults):
+        raise SystemExit("--areas builds a partial manifest: give --out and --smoke-out outside manifest/")
     for path in (args.out, args.smoke_out):
-        frozen = os.path.basename(path) in FROZEN and os.path.abspath(os.path.dirname(path)) == \
-            os.path.join(HERE, "manifest")
-        if frozen and os.path.exists(path):
-            raise SystemExit("%s is a frozen manifest: build into another file" % path)
+        why = frozen_target(path)
+        if why:
+            raise SystemExit(why)
     m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities)
     if only:
         m["partial_build"] = True

@@ -981,3 +981,35 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   /traverse: every stopped path a prefix of a complete one; a 503: no content); or (G27) a repeat inconclusive only
   by its determinism check after a time-limited earlier repeat, with the other side's answer the same. Counted
   apart in compare.json (`timing`, `timing_scenarios`) and the report.
+
+### The v4 builder
+- A-02: the M-planted, M-protein and N-nearmiss /pattern scenarios ask for a 200 again (status [200, 503] passed any
+  503: a proxy page, `loading`); they keep the machine-dependent tag, and checks.deadline_allowed admits exactly the
+  SPEC's 503 `deadline` in place of the 200.
+- A-06: `_planted_window` tries, after the first candidate length, only longer ones, shortest first, so the last
+  one, taken whatever its estimate, is the longest (no current window changes).
+- A-07: `_within_kind_caps` leaves out of areas M and N every scenario whose max_mismatches lies above the
+  snapshot's cap of one of its patterns' kinds (a pattern of at most k bases), listed in `skipped` with its id
+  consumed, unless it expects the slot refusal (mismatches_above_cap) or a refusal of the request; D picks come from
+  what is left.
+- A-08: build_manifest.py refuses as an output any suite_v*.json / suite_smoke_v*.json of manifest/ that exists or
+  that git tracks, by whatever path (realpath, samefile: a symbolic link to manifest/ included), and --areas with
+  the default outputs (a partial build needs files of its own).
+- A-09: the manifest's index records `capabilities_sha256`, the sha256 of each capabilities document, beside the
+  snapshot's directory. The snapshot of 6f945db4 is committed in truth/staging_capabilities/ (protein cap 1).
+- A-10: T-attempts-0002 checks the duplicate's 409 shape (answer_fields with `when_http: 409`: attempt.state and
+  attempt.usage present, no response-level usage; on a 200 that check passes, and the usage checks judge it) and
+  states `run_unique: ["attempt_id"]`: run_direct.py appends "-<run id>" to the request's attempt_id (the run
+  directory's name, which both direct arms share, so within a run the first arm takes the 200 path and the second
+  meets the retained id's 409; the next run, a new id), cut to the id pattern's 128 characters, and records the
+  request it sent; the manifest keeps the base value, so its digest stays the same for every run. The MCP arm does
+  not run the scenario (not implemented via MCP).
+- A-12: (a) gen_D adds a complete m = 2 pick: the forward planted window at max_mismatches 2 with the lowest chance
+  estimate (D-M-planted-0005, a 31-mer at level 1); (b) a scenario for each split case of async's table without
+  one: R-edge-0023 (discover.max_labels 150: resolve.discover_limit_above_100_host_answers), R-edge-0024
+  (time_budget_ms 400: resolve.time_budget_above_reserve_below_minimum), Q-motif-0005 (predicate_strands without a
+  predicate: pattern.predicate_options_noop_without_predicate), tagged split-case (never a D pick).
+A provisional v4 with the snapshot of 6f945db4 (lane S5b's directory, not manifest/) differs from suite_v3 in 96
+scenario ids (7 added, 5 dropped, 84 changed; every one mapped to its group) and from lane S5's build with the
+run's capabilities (the same protein cap 1) in the 4 added scenarios, T-attempts-0002 and the 64 statuses of A-02.
+suite_v3.json and suite_smoke_v3.json are unchanged; manifest/suite_v4.json is built once async's table is final.

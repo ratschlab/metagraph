@@ -268,8 +268,81 @@ class V4Builder(unittest.TestCase):
 
     def test_build_refuses_a_frozen_manifest(self):
         import build_manifest as bm
+        import tempfile
         with self.assertRaises(SystemExit):
             bm.main(["--out", os.path.join(SUITE, "manifest", "suite_v3.json"), "--smoke-out", os.devnull])
+        # A-08: any existing or tracked manifest of manifest/, by any path (a symbolic link to the directory); a
+        # partial build (--areas) to the default outputs
+        self.assertIn("manifest of manifest/", bm.frozen_target(os.path.join(SUITE, "manifest", "suite_smoke_v3.json")))
+        with tempfile.TemporaryDirectory() as d:
+            link = os.path.join(d, "mlink")
+            os.symlink(os.path.join(SUITE, "manifest"), link)
+            self.assertTrue(bm.frozen_target(os.path.join(link, "suite_v3.json")))
+            self.assertTrue(bm.frozen_target(os.path.join(link, ".", "suite_smoke_v3.json")))
+            self.assertEqual(bm.frozen_target(os.path.join(d, "suite_v4.json")), "")
+            with self.assertRaises(SystemExit) as ctx:
+                bm.main(["--areas", "M", "--smoke-out", os.path.join(d, "s.json")])
+            self.assertIn("--areas", str(ctx.exception))
+        self.assertEqual(bm.frozen_target(os.path.join(SUITE, "manifest", "suite_v99.json")), "")
+
+    def test_cap_gate_and_lengths(self):
+        # A-07: a scenario above the snapshot's cap of a pattern kind is left out and listed, unless it expects the
+        # slot refusal or a refusal of the request
+        import areas
+        saved = dict(ml.HOST_MISMATCH_MAX)
+        try:
+            ml.HOST_MISMATCH_MAX.update({"dna": 2, "iupac": 2, "protein": 0})
+            ctx = ml.Ctx([], 1)
+            ok = {"check": "status", "args": {"http": 200}}
+            mk = lambda sid, pats, m, exp: {"id": sid, "title": sid, "route": "POST /pattern",  # noqa: E731
+                                            "request": {"patterns": pats, "max_mismatches": m}, "expect": exp}
+            scen = [mk("M-1", [{"dna": "A" * 25}], 3, [ok, {"check": "contains_source_context", "args": {}}]),
+                    mk("M-2", [{"dna": "A" * 25}], 2, [ok, {"check": "contains_source_context", "args": {}}]),
+                    mk("M-3", [{"protein": "A" * 10}], 1, [ok, {"check": "source_absent", "args": {}}]),
+                    mk("M-4", [{"protein": "A" * 10}], 1, [ok, {"check": "pattern_slot_error",
+                                                                 "args": {"code": "mismatches_above_cap"}}]),
+                    mk("M-5", [{"dna": "A" * 25}], 4, [{"check": "status", "args": {"http": 400}}]),
+                    mk("M-6", [{"dna": "A" * 40}], 3, [ok])]
+            kept = [x["id"] for x in areas._within_kind_caps(ctx, "M", scen)]
+            self.assertEqual(kept, ["M-2", "M-4", "M-5", "M-6"])
+            self.assertEqual([x["scenario"].split(" ")[0] for x in ctx.skipped], ["M-1", "M-3"])
+        finally:
+            ml.HOST_MISMATCH_MAX.clear()
+            ml.HOST_MISMATCH_MAX.update(saved)
+        # A-06: after the first candidate only longer ones, the longest last
+        class R:
+            key, seq = "a06-only", "AT" * 500   # its own key: _composition caches by key
+
+        ctx = ml.Ctx([], 1)
+        ctx.window = lambda rng, rec, L: {"window": "AT" * (L // 2) + "A" * (L % 2), "length": L}
+        self.assertEqual(areas._planted_window(ctx, ctx.rng("a"), R(), [31, 25, 31], 1, ctx.rng("b"))["length"], 31)
+        self.assertEqual(areas._planted_window(ctx, ctx.rng("a"), R(), [20, 25, 31], 1, ctx.rng("b"))["length"], 31)
+
+    def test_run_unique_attempt_id(self):
+        # A-10: the duplicate's shape on a 409 only, and an attempt id unique per run (the runner appends the run id)
+        import checks
+        import run_direct
+        s = {"route": "POST /traverse", "request": {"attempt_id": "suite-s1-ACGT", "seeds": []},
+             "run_unique": ["attempt_id"]}
+        r = run_direct.run_unique_request(s, "20261013T165714Z_refseq97-b7214d29")
+        self.assertEqual(r["attempt_id"], "suite-s1-ACGT-20261013T165714Z_refseq97-b7214d29")
+        self.assertEqual(s["request"]["attempt_id"], "suite-s1-ACGT")             # the manifest's value stays
+        self.assertEqual(run_direct.run_unique_request(s, "a b/c")["attempt_id"], "suite-s1-ACGT-a_b_c")
+        self.assertEqual(len(run_direct.run_unique_request(s, "x" * 200)["attempt_id"]), 128)
+        self.assertIs(run_direct.run_unique_request(dict(s, run_unique=None), "r"), s["request"])
+        _, _, body, _, rec = run_direct.build_request(s, "R1")
+        self.assertEqual((json.loads(body)["attempt_id"], rec["body"]["attempt_id"]), ("suite-s1-ACGT-R1",) * 2)
+        shape = {"present": ["attempt.state", "attempt.usage"], "absent": ["usage"], "when_http": 409,
+                 "any_status": True}
+        sc = {"route": "POST /traverse", "request": {}, "expect": [{"check": "status", "args": {"http": [200, 409]}},
+                                                                    {"check": "answer_fields", "args": shape}]}
+        dup = checks.normalise_direct(409, {"error": "retained", "attempt": {"state": "done", "usage": {}}})
+        self.assertEqual(checks.evaluate(sc, dup, "direct-local")[1]["outcome"], "pass")
+        bare = checks.normalise_direct(409, {"error": "conflict"})
+        self.assertEqual(checks.evaluate(sc, bare, "direct-local")[1]["outcome"], "fail")
+        ok = checks.normalise_direct(200, {"usage": {}, "results": []})
+        self.assertEqual(checks.evaluate(sc, ok, "direct-local")[1]["outcome"], "pass")
+        self.assertEqual(checks.validate_expectation({"check": "answer_fields", "args": shape}), [])
 
     def test_m_area_follows_the_snapshot(self):
         # G04, G05, G21 on the M area built from the record cache (skipped without it)
@@ -278,16 +351,32 @@ class V4Builder(unittest.TestCase):
         import truth
         if not os.path.isdir(truth.CACHE_DIR) or not os.listdir(truth.CACHE_DIR):
             self.skipTest("no record cache (SUITE_TRUTH_CACHE or truth/cache)")
-        with tempfile.TemporaryDirectory() as d:
+        def snapshot(d, **caps):
             for name in ("capabilities", "pattern_capabilities", "traverse_capabilities"):
                 with open(os.path.join(SUITE, "truth", "staging_capabilities", name + ".json")) as f:
                     doc = json.load(f)
                 if name == "pattern_capabilities":
-                    doc["mismatches"]["max"]["protein"] = 1
+                    doc["mismatches"]["max"].update(caps)
                 with open(os.path.join(d, name + ".json"), "w") as f:
                     json.dump(doc, f)
-            cap1 = bm.build(20261013, fetch=False, only_areas={"M"}, capabilities_dir=d)
-        cap3 = bm.build(20261013, fetch=False, only_areas={"M"})
+            return d
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d3, \
+                tempfile.TemporaryDirectory() as dlow:
+            cap1 = bm.build(20261013, fetch=False, only_areas={"M"}, capabilities_dir=snapshot(d1, protein=1))
+            cap3 = bm.build(20261013, fetch=False, only_areas={"M"}, capabilities_dir=snapshot(d3, protein=3))
+            # A-07: a dna 2 / protein 0 snapshot builds no positive above its caps (VERIFY-REVIEW's 16 scenarios)
+            low = bm.build(20261013, fetch=False, only_areas={"M", "N"},
+                           capabilities_dir=snapshot(dlow, dna=2, iupac=2, protein=0))
+            for s in low["scenarios"]:
+                if s["route"] == "POST /pattern" and "mismatches_above_cap" not in json.dumps(s["expect"]):
+                    m = s["request"].get("max_mismatches")
+                    if isinstance(m, int) and not isinstance(m, bool) and s["expect"][0]["args"].get("http") == 200:
+                        kinds = [k for p in s["request"]["patterns"] for k in ("dna", "iupac", "protein") if k in p]
+                        self.assertTrue(m <= {"dna": 2, "iupac": 2, "protein": 0}[kinds[0]], s["id"])
+            self.assertTrue(any("above the snapshot's" in x["reason"] for x in low["skipped"]))
+            # A-09: the snapshot's documents by digest
+            self.assertEqual(sorted(cap1["index"]["capabilities_sha256"]),
+                             ["capabilities.json", "pattern_capabilities.json", "traverse_capabilities.json"])
         s1 = dict((s["id"], s) for s in cap1["scenarios"])
         s3 = dict((s["id"], s) for s in cap3["scenarios"])
         self.assertEqual(cap1["index"]["mismatches_max"]["protein"], 1)
@@ -299,10 +388,11 @@ class V4Builder(unittest.TestCase):
         # cap 3 (the stale snapshot): the m = 2 peptides, no cap slot
         self.assertIn("M-protein-0008", s3)
         self.assertNotIn("M-protein-0010", s3)
-        # G21: every planted and protein search allows the 503 deadline and is machine-dependent
+        # G21 / A-02: every planted and protein search is machine-dependent and asks for a 200 (the checks allow the
+        # 503 deadline, and only that 503)
         for sid, s in s1.items():
             if sid.startswith(("M-planted", "M-protein")) and sid != "M-protein-0010":
-                self.assertEqual(s["expect"][0], {"check": "status", "args": {"http": [200, 503]}}, sid)
+                self.assertEqual(s["expect"][0], {"check": "status", "args": {"http": 200}}, sid)
                 self.assertIn("machine-dependent", s["tags"], sid)
             if sid.startswith("M-planted"):
                 self.assertLess(s["truth"]["chance_contexts_estimate"], 1000.0, sid)
@@ -312,6 +402,11 @@ class V4Builder(unittest.TestCase):
             "http": 400, "code": "invalid_request", "text_contains": ["request.predicate.at_least.n"]}}])
         self.assertIn("pattern.predicate_form_other", rq["Q-more-0003"]["mcp"]["by_design"])
         self.assertIn("resolve.unknown_label", rq["R-edge-0008"]["mcp"]["by_design"])
+        # A-12 b: the three split cases of async's table each have a scenario
+        named = [c for s in rq.values() for c in (s.get("mcp") or {}).get("by_design") or []]
+        for case in ("resolve.discover_limit_above_100_host_answers", "resolve.time_budget_above_reserve_below_minimum",
+                     "pattern.predicate_options_noop_without_predicate"):
+            self.assertIn(case, named)
         body = rq["R-edge-0019"]["body_raw"]
         self.assertTrue(body.startswith("{") and not body.rstrip().endswith("}"))
         with self.assertRaises(ValueError):

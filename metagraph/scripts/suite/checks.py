@@ -314,7 +314,11 @@ def check_status(sc, ans, a, arm):
 
 
 def check_answer_fields(sc, ans, a, arm):
-    """Fields of the answer's body by dotted path (any_status: also on an error body, e.g. a 409's state)."""
+    """Fields of the answer's body by dotted path (any_status: also on an error body, e.g. a 409's state). when_http:
+    the fields of an answer of that status only (another status: nothing to check, pass), e.g. the shape of an
+    attempt's duplicate 409 (A-10)."""
+    if "when_http" in a and ans.get("http") != a["when_http"]:
+        return PASS, "http %s: the fields are checked on an http %s only" % (ans.get("http"), a["when_http"])
     body = _body(ans)
     for path, want in (a.get("equals") or {}).items():
         got = _get(body, path)
@@ -3307,7 +3311,7 @@ def evaluate_relation(rel: dict, a_scenario: dict, a_answer: dict, b_scenario: d
 # builder validates every expectation against this table, so that a misspelt argument cannot weaken a check.
 CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "status": ((), ("http", "code", "text", "text_prefix", "text_contains")),
-    "answer_fields": ((), ("equals", "present", "absent")),
+    "answer_fields": ((), ("equals", "present", "absent", "when_http")),
     "entry_fields": ((), ("pattern", "equals", "present", "absent", "tolerance")),
     "deterministic": ((), ()),
     "content_encoding": (("value",), ()),

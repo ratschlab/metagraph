@@ -36,6 +36,7 @@ import http.client
 import json
 import os
 import platform
+import re
 import signal
 import socket
 import ssl
@@ -274,12 +275,33 @@ def http_call(base, method, path, body, headers, timeout):
         client.close()
 
 
-def build_request(scenario):
+# an id field's pattern (SPEC-labeled-traversal-core §5: attempt_id, budget_id, locus_id)
+_ID_UNSAFE = re.compile(r"[^A-Za-z0-9._:-]")
+
+
+def run_unique_request(scenario, run_id):
+    """The scenario's request with each top-level field its `run_unique` lists made unique per run (A-10): '-' and
+    the run id appended (the run directory's name, which the arms of a run share: within a run the first arm's
+    request runs, the later ones meet its retained id's 409), cut to the id pattern's 128 characters. The manifest
+    keeps the base value, so it stays the same for every run; without a run id or a run_unique the request as is."""
+    request = scenario.get("request")
+    fields = scenario.get("run_unique") or []
+    if not run_id or not fields or not isinstance(request, dict):
+        return request
+    out = dict(request)
+    suffix = _ID_UNSAFE.sub("_", str(run_id))
+    for f in fields:
+        if isinstance(out.get(f), str):
+            out[f] = (out[f] + "-" + suffix)[:128]
+    return out
+
+
+def build_request(scenario, run_id=None):
     """(method, path, body bytes or None, headers, the request as recorded) of a scenario.
 
-    The body is the compact JSON of `request` (the exact host body, DESIGN §8.1), or `body_raw` verbatim for
-    protocol cases; `headers` in the scenario override the defaults (a null value removes one). A GET sends no
-    body unless `body_raw` says so.
+    The body is the compact JSON of `request` (the exact host body, DESIGN §8.1; its `run_unique` fields made unique
+    per run with |run_id|: run_unique_request), or `body_raw` verbatim for protocol cases; `headers` in the scenario
+    override the defaults (a null value removes one). A GET sends no body unless `body_raw` says so.
     """
     method, path = sc.parse_route(scenario.get("route", "GET /capabilities"))
     headers = dict(DEFAULT_HEADERS)
@@ -297,8 +319,9 @@ def build_request(scenario):
         body = None
         recorded = {"body": None}
     else:
-        body = json.dumps(scenario.get("request"), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        recorded = {"body": scenario.get("request")}
+        request = run_unique_request(scenario, run_id)
+        body = json.dumps(request, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        recorded = {"body": request}
     if body is None:
         headers.pop("Content-Type", None)
     recorded.update({"method": method, "path": path, "headers": headers})
@@ -450,7 +473,7 @@ class Runner(object):
 
     def execute(self, index, scenario, repeat, cache, after_resume, previous):
         sid = scenario.get("id")
-        method, path, body, headers, recorded = build_request(scenario)
+        method, path, body, headers, recorded = build_request(scenario, self.run["run_id"])
         timeout = timeout_for(scenario, self.args.arm, self.timeouts)
         started = time.time()
         res = self.client.call(method, path, body, headers, timeout)
