@@ -371,6 +371,20 @@ class V4Builder(unittest.TestCase):
         local = json.loads(run_direct.build_request(s, "R1", "direct-local")[2])["attempt_id"]
         remote = json.loads(run_direct.build_request(s, "R1", "direct-remote")[2])["attempt_id"]
         self.assertEqual((local, remote), ("suite-s1-ACGT-R1-direct-local", "suite-s1-ACGT-R1-direct-remote"))
+        # S5c-04 of the review of lane S5c: a long run id is cut and hashed, the arm never cut: the arms stay apart
+        long_s = dict(s, request={"attempt_id": "suite-s1-ACGTACGTACGTACGT", "seeds": []})
+        for n in (100, 128, 300):
+            run_id = "r" * (n - 6) + "-full1"
+            ids = [run_direct.run_unique_request(long_s, run_id, arm)["attempt_id"]
+                   for arm in ("direct-local", "direct-remote")]
+            self.assertEqual([len(i) for i in ids], [128, 128])
+            self.assertEqual([i.endswith("-" + arm) for i, arm in zip(ids, ("direct-local", "direct-remote"))],
+                             [True, True])
+            self.assertNotEqual(*ids)
+        self.assertNotEqual(run_direct.run_unique_request(long_s, "a" * 200 + "1", "x")["attempt_id"],
+                            run_direct.run_unique_request(long_s, "a" * 200 + "2", "x")["attempt_id"])
+        with self.assertRaises(ValueError):
+            run_direct.run_unique_request(dict(s, request={"attempt_id": "z" * 120}), "R1", "direct-remote")
         shape = {"present": ["attempt.state", "attempt.usage"], "absent": ["usage"], "when_http": 409,
                  "any_status": True}
         sc = {"route": "POST /traverse", "request": {}, "expect": [{"check": "status", "args": {"http": [200, 409]}},

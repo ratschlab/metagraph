@@ -31,6 +31,7 @@ mex.
 """
 
 import argparse
+import hashlib
 import inspect
 import http.client
 import json
@@ -275,25 +276,43 @@ def http_call(base, method, path, body, headers, timeout):
         client.close()
 
 
-# an id field's pattern (SPEC-labeled-traversal-core §5: attempt_id, budget_id, locus_id)
+# an id field's pattern (SPEC-labeled-traversal-core §5: attempt_id, budget_id, locus_id): its characters, its length
 _ID_UNSAFE = re.compile(r"[^A-Za-z0-9._:-]")
+_ID_MAX = 128
+
+
+def _unique_id(base, run_id, arm):
+    """|base| + '-' + the run id + '-' + the arm, at most _ID_MAX characters: a run id too long for the room left
+    is cut and ends in '.' + 8 hex of its sha256 (so two long run ids stay apart); the arm is never cut (S5c-04 of
+    the review of lane S5c: a cut arm gave both direct arms one attempt id); ValueError when the base leaves no room
+    for that."""
+    run_part = _ID_UNSAFE.sub("_", str(run_id))
+    tail = "-" + _ID_UNSAFE.sub("_", str(arm)) if arm else ""
+    room = _ID_MAX - len(base) - 1 - len(tail)
+    if len(run_part) > room:
+        digest = hashlib.sha256(str(run_id).encode("utf-8")).hexdigest()[:8]
+        if room < len(digest) + 1:
+            raise ValueError("run_unique: %r leaves no room for the run id and the arm within %d characters" % (
+                base, _ID_MAX))
+        run_part = run_part[:room - len(digest) - 1] + "." + digest
+    return base + "-" + run_part + tail
 
 
 def run_unique_request(scenario, run_id, arm=None):
     """The scenario's request with each top-level field its `run_unique` lists made unique per run AND arm (A-10,
     A2-06 of the review of lane S5b): '-', the run id (the run directory's name, which the arms of a run share) and
-    '-' with the arm appended, cut to the id pattern's 128 characters; so each arm runs its own attempt, and an
-    arm's later repeat meets ITS retained id's 409 (T-attempts-0002 repeats twice: r1 the duplicate). The manifest
-    keeps the base value, so it stays the same for every run; without a run id or a run_unique the request as is."""
+    '-' with the arm appended, within the id pattern's 128 characters (_unique_id: a long run id is cut and hashed,
+    the arm never cut); so each arm runs its own attempt, and an arm's later repeat meets ITS retained id's 409
+    (T-attempts-0002 repeats twice: r1 the duplicate). The manifest keeps the base value, so it stays the same for
+    every run; without a run id or a run_unique the request as is."""
     request = scenario.get("request")
     fields = scenario.get("run_unique") or []
     if not run_id or not fields or not isinstance(request, dict):
         return request
     out = dict(request)
-    suffix = _ID_UNSAFE.sub("_", str(run_id) + ("-" + str(arm) if arm else ""))
     for f in fields:
         if isinstance(out.get(f), str):
-            out[f] = (out[f] + "-" + suffix)[:128]
+            out[f] = _unique_id(out[f], run_id, arm)
     return out
 
 
