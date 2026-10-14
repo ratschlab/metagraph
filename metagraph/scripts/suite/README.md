@@ -2009,12 +2009,28 @@ resolve_time_budget} (the host's block as received, not backends.<db>.resolve.ti
   service_capabilities.host_document", else the table's host_capabilities block, else unknown; a path the live document
   lacks reads the table's block, else unknown (suite_common.References). An MCP-only run's host references, and the
   gate's live / table mismatch check on them, read the service's view of the host instead of the table.
-- A service document's identity (`suite_common.service_document_sha256`, `service_document_view`): sha256 of
-  canonical_json({service_settings, service_maxima, presets, backends: {<db>: {budgets, resolve, effective_maxima,
-  limits}}, host_document}), a key the document lacks null in the view; probe times and counters elsewhere in the
-  document change between the invocations of one deployment and would trip the gate's "spans more than one
-  deployment". gate.py's `_document_sha` (edited for this function only) prefers the recorded sha256, else this view;
-  compare's recorded_documents states the same. The runner vendors suite_common.py and can call the function itself.
+- A service document's identity, ONE definition both sides compute (agreed with async on 2026-10-15: the runner
+  calls the vendored `suite_common.service_document_sha256` and keeps no view of its own): sha256 of
+  canonical_json(`service_document_view`(document, host_document, database)) = {service_settings, service_maxima,
+  presets, each where the document states it; backends: {<the record's database>: {budgets, resolve,
+  effective_maxima, limits}, each where stated}; host_document where recorded}. A key the document lacks is absent,
+  never null; another database's entry is no part of it; a record without its database keeps no backend entry; a
+  read of the host document alone (the traverse read failed) has that document's identity; an empty view (nothing
+  read) has none. Probe times, cached flags, messages and counters elsewhere in the document change between the
+  invocations of one deployment and would trip the gate's "spans more than one deployment". gate.py's
+  `_document_sha` (edited for this function only) prefers the recorded sha256, else this; compare's
+  recorded_documents states the same. On every shape the verification listed (no service_settings, a second
+  database, a backend entry lacking a key, a failed pattern or traverse read) it equals async's 26fd3e7c view over
+  the same host_document.
+- The host's identity (`suite_common.HOST_IDENTITY_KEYS`: release, index_fp, index_meta_fp, agreed with async on
+  2026-10-15): host_document = {pattern: the /pattern/capabilities/<db> capabilities.raw, resolve: {time_budget:
+  backends.<db>.budgets.resolve_time_budget}, release, index_fp, index_meta_fp: from the traverse document's
+  backends.<db>.identity}, each where a read states it (`suite_common.host_document_of`, for the runner too); so a
+  host redeploy with unchanged limits is another deployment by the identity. A paired run's host namespace reads the
+  same paths: the direct arm's /capabilities (release at its top level) with index_fp and index_meta_fp from the
+  identity the arms record (their /traverse/capabilities, else the run.json's index_fp: `compare.direct_host_document`).
+  A host_document without these keys (a runner before them) still resolves: the paths it states read live, the
+  identity falls back to the table's block, else unknown.
 - service_by_design.json, the vocabulary's answer_match.wall_rule entry only: the name budget_minus_reserve is kept,
   its threshold is B - 1 s (B the request's time_budget_ms) on the failing attempt's own wall, no finalisation
   reserve subtracted. The table's sha256 is d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61 (was

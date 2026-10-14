@@ -771,41 +771,104 @@ class HostDocumentTest(unittest.TestCase):
         self.assertEqual(refs.resolve("host", "resolve.time_budget.max_time_ms"), (60000, "table", None))
         self.assertEqual(refs.resolve("host", "resolve.time_budget.nothing_here"), (None, "unknown", None))
 
+    DB = "refseq33m-experimental"
+
+    def record(self, release="refseq97-6f945db4", probed_at="2026-10-14T10:00:00Z", failures=0, other_db=False):
+        """A record shaped as the runner reads it: the traverse document (one backend entry with probe data and the
+        identity), the pattern raw block, host_document built by suite_common.host_document_of."""
+        backend = {"database": self.DB, "probed_at": probed_at, "cached": failures % 2 == 1, "message": None,
+                   "identity": {"index_ns": self.DB, "index_fp": "907ec986", "index_meta_fp": "409ce169",
+                                "release": release},
+                   "limits": {"max_time_ms": 60000}, "effective_maxima": {"time_budget_ms": 60000},
+                   "budgets": {"resolve_time_budget": {"max_time_ms": 60000, "finalize_reserve_ms": 250}},
+                   "resolve": {"time_budget": {"default_ms": 60000}}, "probe": {"failures": failures}}
+        doc = json_copy(self.cases.blocks["service"])
+        doc["backends"] = {self.DB: backend}
+        if other_db:
+            doc["backends"]["other-db"] = dict(json_copy(backend), database="other-db", probed_at="x",
+                                               limits={"max_time_ms": 1})
+        pattern = {"capabilities": {"raw": self.HOST["pattern"]}}
+        return {"document": doc, "host_document": sc.host_document_of(doc, pattern, self.DB), "database": self.DB,
+                "read_at": probed_at, "base": "b", "mismatches": []}
+
+    def test_host_document_shape(self):
+        host = self.record()["host_document"]
+        self.assertEqual(host, {"pattern": self.HOST["pattern"],
+                                "resolve": {"time_budget": {"max_time_ms": 60000, "finalize_reserve_ms": 250}},
+                                "release": "refseq97-6f945db4", "index_fp": "907ec986", "index_meta_fp": "409ce169"})
+        self.assertIsNone(sc.host_document_of(None, None, self.DB))
+
     def test_identity_leaves_probe_times_and_counters_out(self):
-        a = self.service_record(self.HOST, probe={"checked_at": "2026-10-14T10:00:00Z", "count": 3})
-        b = self.service_record(self.HOST, probe={"checked_at": "2026-10-14T12:00:00Z", "count": 9})
-        for rec, when in ((a, "10"), (b, "12")):
-            rec["document"]["backends"] = {"refseq33m-experimental": {
-                "resolve": {"time_budget": {"default_ms": 60000}}, "budgets": {"x": 1},
-                "probe": {"last_ok": "2026-10-14T%s:00:00Z" % when, "failures": int(when)}}}
+        a, b = self.record(), self.record(probed_at="2026-10-14T12:00:00Z", failures=3)
         self.assertEqual(sc.service_document_sha256(a), sc.service_document_sha256(b))
         changed = json_copy(b)
         changed["document"]["service_settings"]["advanced_enabled"] = True
         self.assertNotEqual(sc.service_document_sha256(a), sc.service_document_sha256(changed))
-        moved_host = json_copy(b)
-        moved_host["host_document"]["pattern"]["finalize_reserve_ms"] = 300
-        self.assertNotEqual(sc.service_document_sha256(a), sc.service_document_sha256(moved_host))
-        self.assertEqual(set(sc.service_document_view(a["document"], self.HOST)),
+        self.assertEqual(set(sc.service_document_view(a["document"], a["host_document"], self.DB)),
                          {"service_settings", "service_maxima", "presets", "backends", "host_document"})
-        self.assertIsNone(sc.service_document_sha256({"error": "HTTP 503"}))
         # gate.py: two invocations whose documents differ only there are one deployment; the recorded sha256 wins
         import gate
         os.makedirs(os.path.join(self.d, "arms", "mcp"), exist_ok=True)
-        sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"), {
-            "run_id": "R", "arm": "mcp", "service_capabilities": b,
-            "invocations": [{"started_utc": "a", "service_capabilities": a},
-                            {"started_utc": "b", "service_capabilities": b}]})
-        policy = {"arms": ["mcp"], "exclusions": [], "advanced_path": False}
-        spans = lambda: [p for p in gate.configuration_problems(self.d, [], policy)  # noqa: E731
-                         if "spans more than one deployment" in p["detail"]]
-        self.assertEqual(spans(), [])
-        sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"), {
-            "run_id": "R", "arm": "mcp", "service_capabilities": b,
-            "invocations": [{"started_utc": "a", "service_capabilities": a},
-                            {"started_utc": "b", "service_capabilities": changed}]})
-        self.assertEqual(len(spans()), 1)
+
+        def spans(first, second):
+            sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"), {
+                "run_id": "R", "arm": "mcp", "service_capabilities": second,
+                "invocations": [{"started_utc": "a", "service_capabilities": first},
+                                {"started_utc": "b", "service_capabilities": second}]})
+            return [p for p in gate.configuration_problems(self.d, [], {"arms": ["mcp"], "exclusions": [],
+                                                                         "advanced_path": False})
+                    if "spans more than one deployment" in p["detail"]]
+        self.assertEqual(spans(a, b), [])
+        self.assertEqual(len(spans(a, changed)), 1)
         self.assertEqual(gate._document_sha(dict(a, sha256="recorded")), "recorded")
 
+    def test_a_host_redeploy_with_unchanged_limits_is_another_deployment(self):
+        self.assertNotEqual(sc.service_document_sha256(self.record()),
+                            sc.service_document_sha256(self.record(release="refseq97-0000000")))
+        self.assertEqual(sc.HOST_IDENTITY_KEYS, ("release", "index_fp", "index_meta_fp"))
+
+    def test_deterministic_for_absent_keys_a_second_database_and_a_host_only_read(self):
+        a = self.record()
+        # a second database's entry is no part of the identity
+        self.assertEqual(sc.service_document_sha256(a), sc.service_document_sha256(self.record(other_db=True)))
+        # an absent key is absent from the view, never null: the same record twice, and a key removed, differ
+        lacking = json_copy(a)
+        lacking["document"].pop("presets")
+        lacking["document"]["backends"][self.DB].pop("effective_maxima")
+        view = sc.service_document_view(lacking["document"], lacking["host_document"], self.DB)
+        self.assertNotIn("presets", view)
+        self.assertNotIn("effective_maxima", view["backends"][self.DB])
+        self.assertEqual(sc.service_document_sha256(lacking), sc.service_document_sha256(json_copy(lacking)))
+        self.assertNotEqual(sc.service_document_sha256(lacking), sc.service_document_sha256(a))
+        # a record without its database keeps no backend entry; a host-only read has the host document's identity
+        self.assertNotIn("backends", sc.service_document_view(a["document"], None, None))
+        host_only = {"document": None, "host_document": a["host_document"], "database": self.DB, "error": "HTTP 503"}
+        expected = __import__("hashlib").sha256(sc.canonical_json({"host_document": a["host_document"]})).hexdigest()
+        self.assertEqual(sc.service_document_sha256(host_only), expected)
+        self.assertIsNone(sc.service_document_sha256({"error": "HTTP 503"}))
+
+    def test_paired_run_reads_the_identity_the_arms_record(self):
+        # v4's direct arms: release in /capabilities, index_fp and index_meta_fp in /traverse/capabilities
+        caps = {"/capabilities": dict(self.HOST, release="refseq97-6f945db4"),
+                "/traverse/capabilities": {"release": "refseq97-6f945db4", "index_fp": "907ec986",
+                                           "index_meta_fp": "409ce169"}}
+        os.makedirs(os.path.join(self.d, "arms", "mcp"), exist_ok=True)
+        sc.write_json_atomic(os.path.join(self.d, "arms", "mcp", "run.json"), {"run_id": "R", "arm": "mcp"})
+        sc.write_json_atomic(os.path.join(self.d, "run.json"), {"run_id": "R", "capabilities": caps,
+                                                                 "index_fp": "907ec986"})
+        refs = cmp.refs_of(cmp.bind_run(self.cases, self.d))
+        for path, value in (("release", "refseq97-6f945db4"), ("index_fp", "907ec986"), ("index_meta_fp", "409ce169"),
+                            ("pattern.finalize_reserve_ms", 250)):
+            self.assertEqual(refs.resolve("host", path)[:2], (value, "live"), path)
+
+    def test_a_v4_style_host_document_still_resolves(self):
+        # a host_document without the identity keys (a runner before them): the host paths it states read live, the
+        # identity falls back to the table, else unknown
+        self.write(self.service_record(self.HOST))
+        refs = cmp.refs_of(cmp.bind_run(self.cases, self.d))
+        self.assertEqual(refs.resolve("host", "pattern.finalize_reserve_ms")[:2], (250, "live"))
+        self.assertEqual(refs.resolve("host", "release"), (None, "unknown", None))
+        self.assertEqual(cmp.gate_configuration_problems(self.d, self.cases), [])
 
 def json_copy(obj):
     import json

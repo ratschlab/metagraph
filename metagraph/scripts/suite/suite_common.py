@@ -613,34 +613,70 @@ def same_value(a, b):
     return json_equal(a, b)
 
 
-# The identity of a service configuration document (the MCP runner's record of GET /traverse/capabilities, its
-# run.json service_capabilities and each invocations[].service_capabilities: {document, host_document, sha256,
-# read_at, base, database, mismatches, error}): the sha256 of the canonical JSON of these parts only, agreed with
-# async's runner on 2026-10-14. The rest of the document (probe times, counters) changes between the invocations of
-# one deployment and would read as another deployment. A key the document lacks is null in the view.
-SERVICE_DOCUMENT_KEYS = ("service_settings", "service_maxima", "presets")
-SERVICE_BACKEND_KEYS = ("budgets", "resolve", "effective_maxima", "limits")
+# The host's identity, a part of the host namespace and of a service document's identity (agreed with async's runner
+# on 2026-10-15): the MCP runner's host_document states it beside its pattern and resolve parts (from the traverse
+# document's backends.<db>.identity: {index_ns, index_fp, index_meta_fp, release}); a paired run's direct arms record
+# release in the host's /capabilities and index_fp, index_meta_fp in its /traverse/capabilities. A host redeploy with
+# unchanged limits is another deployment.
+HOST_IDENTITY_KEYS = ("release", "index_fp", "index_meta_fp")
+# The identity of a service configuration record (the MCP runner's run.json service_capabilities and each
+# invocations[].service_capabilities: {document (GET /traverse/capabilities), host_document, sha256, read_at, base,
+# database, mismatches, error}): the sha256 of the canonical JSON of its configuration view, ONE definition both the
+# suite and async's runner (which vendors this module) compute (service_document_sha256). The rest of the document
+# (probe times, cached flags, messages, counters) changes between the invocations of one deployment.
+SERVICE_DOCUMENT_VIEW_KEYS = ("service_settings", "service_maxima", "presets")
+SERVICE_BACKEND_VIEW_KEYS = ("budgets", "resolve", "effective_maxima", "limits")
 
 
-def service_document_view(document, host_document=None):
-    """{service_settings, service_maxima, presets, backends: {<db>: {budgets, resolve, effective_maxima, limits}},
-    host_document} of a service configuration document and the host document recorded beside it (absent keys null)."""
+def host_document_of(traverse_doc, pattern_doc, database):
+    """The host's configuration as the service states it, in the shape of the host's /capabilities document (the
+    {"host": path} namespace): {pattern: GET /pattern/capabilities/<db>'s capabilities.raw, resolve: {time_budget: GET
+    /traverse/capabilities' backends.<db>.budgets.resolve_time_budget}, release, index_fp, index_meta_fp: from
+    backends.<db>.identity (HOST_IDENTITY_KEYS)}, each part where a read states it (an identity value that is null is
+    absent); None when none does."""
+    out = {}
+    caps = pattern_doc.get("capabilities") if isinstance(pattern_doc, dict) else None
+    raw = caps.get("raw") if isinstance(caps, dict) else None
+    if isinstance(raw, dict):
+        out["pattern"] = raw
+    backends = traverse_doc.get("backends") if isinstance(traverse_doc, dict) else None
+    backend = backends.get(database) if isinstance(backends, dict) and database else None
+    budgets = backend.get("budgets") if isinstance(backend, dict) else None
+    terms = budgets.get("resolve_time_budget") if isinstance(budgets, dict) else None
+    if isinstance(terms, dict):
+        out["resolve"] = {"time_budget": terms}
+    identity = backend.get("identity") if isinstance(backend, dict) else None
+    for key in HOST_IDENTITY_KEYS:
+        if isinstance(identity, dict) and identity.get(key) is not None:
+            out[key] = identity[key]
+    return out or None
+
+
+def service_document_view(document, host_document=None, database=None):
+    """What a service configuration record's identity covers: {service_settings, service_maxima, presets (each where
+    the document states it), backends: {<database>: {budgets, resolve, effective_maxima, limits} (where stated)} of
+    the record's database only, host_document (where recorded: its pattern and resolve parts and the host's identity,
+    HOST_IDENTITY_KEYS)}. A key the document lacks is absent from the view, never null; another database's entry is
+    no part of it."""
     doc = document if isinstance(document, dict) else {}
+    view = dict((k, doc[k]) for k in SERVICE_DOCUMENT_VIEW_KEYS if k in doc)
     backends = doc.get("backends")
-    view = dict((k, doc.get(k)) for k in SERVICE_DOCUMENT_KEYS)
-    view["backends"] = dict((db, dict((k, b.get(k) if isinstance(b, dict) else None) for k in SERVICE_BACKEND_KEYS))
-                            for db, b in backends.items()) if isinstance(backends, dict) else None
-    view["host_document"] = host_document if isinstance(host_document, dict) else None
+    backend = backends.get(database) if isinstance(backends, dict) and database else None
+    if isinstance(backend, dict):
+        view["backends"] = {database: dict((k, backend[k]) for k in SERVICE_BACKEND_VIEW_KEYS if k in backend)}
+    if isinstance(host_document, dict):
+        view["host_document"] = host_document
     return view
 
 
 def service_document_sha256(record):
-    """The identity of a service_capabilities record's document: sha256 of canonical_json(service_document_view(its
-    document, its host_document)); None when it records no document (a failed read)."""
-    if not isinstance(record, dict) or not isinstance(record.get("document"), dict):
+    """The identity of a service_capabilities record: sha256 of canonical_json(service_document_view(its document,
+    its host_document, its database)); None when the view is empty (nothing was read). A read of the host document
+    alone (the traverse read failed) has the identity of that document."""
+    if not isinstance(record, dict):
         return None
-    view = service_document_view(record["document"], record.get("host_document"))
-    return hashlib.sha256(canonical_json(view)).hexdigest()
+    view = service_document_view(record.get("document"), record.get("host_document"), record.get("database"))
+    return hashlib.sha256(canonical_json(view)).hexdigest() if view else None
 
 
 class References(object):

@@ -584,11 +584,29 @@ SERVICE_HOST_DOCUMENT_KEY = "host_document"
 HOST_CAPABILITIES_PATH = "/capabilities"
 
 
+def direct_host_document(caps, run=None):
+    """The host namespace's document of a run with a direct arm: the host's recorded /capabilities, with the host's
+    identity (suite_common.HOST_IDENTITY_KEYS) it does not state at its top level taken from the identity the arm
+    recorded: its /traverse/capabilities (index_fp, index_meta_fp), else the run.json's own release / index_fp;
+    the same paths as the MCP runner's host_document."""
+    doc = dict(caps.get(HOST_CAPABILITIES_PATH) or {})
+    traverse = caps.get("/traverse/capabilities") if isinstance(caps.get("/traverse/capabilities"), dict) else {}
+    for key in sc.HOST_IDENTITY_KEYS:
+        if doc.get(key) is None:
+            value = traverse.get(key)
+            if value is None and isinstance(run, dict):
+                value = run.get(key)
+            if value is not None:
+                doc[key] = value
+    return doc
+
+
 def recorded_documents(run_dir):
     """{namespace: {document, origin, read_at, sha256} or None} of a run: "service" the MCP arm's run.json
     service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp; sha256 the recorded one,
     else suite_common.service_document_sha256), "host" the /capabilities document a direct arm recorded (the merged
-    run.json's capabilities, else arms/<direct>/run.json), else the host document the MCP runner recorded beside the
+    run.json's capabilities, else arms/<direct>/run.json; with the host's identity: direct_host_document), else the
+    host document the MCP runner recorded beside the
     service's (service_capabilities.host_document: an MCP-only run reads the host's references live from it); None
     where the run recorded none (a run before async's runner read it, or a failed read: then `error` says why). A
     path the live document lacks reads the table's block, else unknown (suite_common.References)."""
@@ -606,18 +624,18 @@ def recorded_documents(run_dir):
                           "base": rec.get("base"),
                           "error": rec.get("error") if not isinstance(doc, dict) else None}
     caps = merged.get("capabilities") if isinstance(merged.get("capabilities"), dict) else None
-    origin = "run.json capabilities"
+    origin, owner = "run.json capabilities", merged
     if not (caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict)):
         caps = None
         for name in sc.DIRECT_ARMS:
             arm_run = sc.read_json(os.path.join(run_dir, "arms", name, "run.json"), None)
             if isinstance(arm_run, dict) and isinstance((arm_run.get("capabilities") or {}).get(
                     HOST_CAPABILITIES_PATH), dict):
-                caps, origin = arm_run["capabilities"], "arms/%s/run.json capabilities" % name
+                caps, origin, owner = arm_run["capabilities"], "arms/%s/run.json capabilities" % name, arm_run
                 break
     if caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict):
-        out["host"] = {"document": caps[HOST_CAPABILITIES_PATH], "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH),
-                       "read_at": None, "sha256": None}
+        out["host"] = {"document": direct_host_document(caps, owner),
+                       "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH), "read_at": None, "sha256": None}
     elif isinstance(rec, dict) and isinstance(rec.get(SERVICE_HOST_DOCUMENT_KEY), dict):
         out["host"] = {"document": rec[SERVICE_HOST_DOCUMENT_KEY],
                        "origin": "arms/mcp/run.json %s.%s" % (SERVICE_CAPABILITIES_KEY, SERVICE_HOST_DOCUMENT_KEY),
