@@ -219,6 +219,13 @@ def verdict_section(run, comp, rows, samples, reevaluated=False):
                          md(arm), t.get("executions", 0), o.get("pass", 0), o.get("fail", 0), o.get("error", 0),
                          o.get("finding", 0), o.get("inconclusive", 0), o.get("not_implemented_mcp", 0),
                          o.get("service_by_design", 0)))
+    ibr = s.get("inconclusive_by_reason") or {}
+    if any(ibr.values()):
+        # an inconclusive execution tested nothing: by its class (undecidable plausibility, a host state, the
+        # checks), so a run with many such lines does not read clean
+        lines.append("- Inconclusive executions by reason: %s." % "; ".join(
+            "%s: %s" % (md(arm), ", ".join("%d %s" % (n, md(why)) for why, n in v.items()))
+            for arm, v in ibr.items() if v))
     ma = s["mcp_agreement"]
     if ma.get("compared"):
         lines.append("- MCP agreement: %d agree, %d not comparable (no check both arms evaluated), %d disagree; "

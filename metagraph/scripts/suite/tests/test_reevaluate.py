@@ -288,70 +288,121 @@ class Reevaluate(unittest.TestCase):
 
     def test_answer_triggered_outcome(self):
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)  # the real table: pattern.deadline_ends_task
-        sc_ = scenario("N-0001", "POST /pattern", STATUS)
+        sc_ = scenario("N-0001", "POST /pattern", STATUS, request={"patterns": [], "time_budget_ms": 60000},
+                       mcp={"tool": "pattern_search", "arguments": {}})
         relayed = {"http": 502, "body": None,
                    "error": {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be "
-                                                             "written within time_budget_ms; retry"}}
+                                                             "written within time_budget_ms (60000 ms, the "
+                                                             "finalisation reserve of 250 ms included); retry"}}
         fail = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
-        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases)
+        at = lambda ms: {"outcome": "fail", "wall_ms": 99999.0, "mcp_phases": {"backend_ms": ms}}  # noqa: E731
+        info = {}
+        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, at(60055.0), fail, False, cases, None, info)
         self.assertEqual((out, kept), ("service_by_design",
                                        "the table's answer-triggered case pattern.deadline_ends_task"))
+        self.assertIn(">= time_budget_ms 60000 - reserve 250 (stated) = 59750 ms", info["verdict_detail"])
+        # R1 (wall_rule budget_minus_reserve): a known wall below budget - reserve holds the case back (the checks
+        # judge); rule (c): no service-side wall, or no request budget: inconclusive, the case recorded
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at(400.0), fail, False, cases)[0], "fail")
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail", "wall_ms": 61000.0},
+                                               fail, False, cases, None, info)[0], "inconclusive")
+        self.assertEqual((info["inconclusive_reason"], info["service_by_design_case"]),
+                         ("no service-side timing: plausibility undecidable", "pattern.deadline_ends_task"))
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", dict(sc_, request={}), relayed, at(61000.0), fail, False,
+                                               cases, None, info)[0], "inconclusive")
+        self.assertEqual(info["inconclusive_reason"], "no threshold known: plausibility undecidable")
+        finding = fail + [{"check": "budget_respected", "outcome": "finding", "detail": ""}]
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, finding, False,
+                                               cases)[0], "finding")
+        # the wall of the deadline-ended task's one HTTP try (the diagnostic log's held-slot line)
+        slot = "\u29d7 Slot held for search s 61.0s (att 1, ok, acq 0.1, rel 61.1, http 1 fail 1 60.10s backoff 0.0s, " \
+               "released)"
+        doc = {"calls": [{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
+            {"error": "pattern_deadline: late", "diagnostic_log": ["x", slot]}]}}]}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
+                                               None, None, doc)[0], "service_by_design")
+        two = dict(doc, calls=[{"tool": "GET /searches/s/diagnostic-log", "payload": {"regular_tasks": [
+            {"error": "pattern_deadline: late", "diagnostic_log": [slot.replace("http 1 fail 1", "http 2 fail 1")]}]}}])
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases,
+                                               None, None, two)[0], "inconclusive")
         # another failed search, a direct arm, another route or no table: judged by the checks
         other = dict(relayed, error={"code": "search_failed", "text": "backend_down"})
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, other, {"outcome": "fail"}, fail, False, cases)[0],
-                         "fail")
-        self.assertEqual(reevaluate.outcome_of(None, "direct-local", sc_, relayed, {"outcome": "fail"}, fail, False,
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, other, at(61000.0), fail, False, cases)[0], "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "direct-local", sc_, relayed, at(61000.0), fail, False,
                                                cases)[0], "fail")
         res = scenario("R-0009", "POST /resolve", STATUS)
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, relayed, {"outcome": "fail"}, fail, False, cases)[0],
-                         "fail")
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False)[0], "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, relayed, at(61000.0), fail, False, cases)[0], "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at(61000.0), fail, False)[0], "fail")
 
     def test_host_state_and_answer_case_order(self):
         cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         fail = [{"check": "status", "outcome": "fail", "detail": "http 504"}]
-        # G23: the service's resolve_timeout is a host state (inconclusive) unless the scenario expects the code
-        res = scenario("R-0009", "POST /resolve", STATUS)
+        finding = fail + [{"check": "budget_respected", "outcome": "finding", "detail": ""}]
+        res = scenario("R-0009", "POST /resolve", STATUS, mcp={"tool": "traverse_resolve",
+                                                               "arguments": {"time_budget_ms": 20000}})
         to = {"http": 504, "body": None, "error": {"code": "resolve_timeout",
                                                    "text": "the backend did not answer within 30.25 s"}}
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, {"outcome": "fail", "wall_ms": 30979.5},
-                                               fail, False, cases),
-                         ("inconclusive", "the MCP runner's host-state rule (resolve_timeout)"))
-        # A-11: plausible only after the request's budget + 250 ms (R-pos-0027: 30,979.5 ms on 20,000 ms); else, and
-        # without any time to check it, the checks judge it, saying why
-        res20 = scenario("R-0009", "POST /resolve", STATUS, request={"query": "A" * 60,
-                                                                     "bounds": {"time_budget_ms": 20000}})
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res20, to, {"outcome": "fail", "wall_ms": 30979.5},
-                                               fail, False, cases)[0], "inconclusive")
+        at = lambda ms: {"outcome": "fail", "wall_ms": 99999.0, "mcp_phases": {"backend_ms": ms}}  # noqa: E731
+        # R2: least = max(20000 + 250 + 10000, 30.25 s) - 1000 ms = 29,250 ms on the service-side wall (R3)
         info = {}
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res20, to, {"outcome": "fail", "wall_ms": 800.0},
-                                               fail, False, cases, None, info), ("fail", None))
-        self.assertIn("before the request's budget", info["note"])
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, {"outcome": "fail"}, fail, False, cases)[0],
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(30375.2), fail, False, cases, None, info),
+                         ("inconclusive", "the MCP runner's host-state rule (resolve_timeout)"))
+        self.assertEqual(info["inconclusive_reason"], "resolve_timeout")
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, at(800.0), fail, False, cases, None, info),
+                         ("fail", None))
+        self.assertIn("before max(time_budget_ms 20000 + reserve 250 + allowance 10000", info["verdict_detail"])
+        # R3: the settled attempt's span, then the job's finished_at - started_at; never the client's wall
+        line = {"outcome": "fail", "wall_ms": 30979.5}
+        job = {"phase_sources": {"started_at": "2026-10-13T17:02:44.567542+00:00",
+                                 "finished_at": "2026-10-13T17:03:14.942774+00:00"}}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, line, fail, False, cases, None, None, job)[0],
+                         "inconclusive")
+        span = {"phase_sources": dict(job["phase_sources"], attempts=[{"span_ms": 900.0}, {"span_ms": 1200.0}])}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, line, fail, False, cases, None, None, span)[0],
                          "fail")
-        # G22: the relayed /resolve deadline (N-realrep-0002: 22,522 ms on 20,000 ms less the 250 ms reserve)
+        # rule (c): no service-side wall, or no threshold (no budget, no stated timeout): inconclusive, the reason
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, line, fail, False, cases, None, info)[0],
+                         "inconclusive")
+        self.assertEqual((info["inconclusive_reason"], info["host_state"]),
+                         ("no service-side timing: plausibility undecidable", "resolve_timeout"))
+        bare = dict(to, error={"code": "resolve_timeout", "text": "the backend did not answer"})
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", scenario("R-0011", "POST /resolve", STATUS), bare,
+                                               at(30000.0), fail, False, cases, None, info)[0], "inconclusive")
+        self.assertEqual(info["inconclusive_reason"], "no threshold known: plausibility undecidable")
+        # an unbudgeted one judged against the timeout it states (N s - 1 s)
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", scenario("R-0011", "POST /resolve", STATUS), to,
+                                               at(29300.0), fail, False, cases)[0], "inconclusive")
+        # addendum 11 (a divergence from async's runner, which returns inconclusive first): an undecidable host
+        # state never swallows a finding
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, line, finding, False, cases)[0], "finding")
+        # G22: the relayed /resolve deadline: budget (the tool error's, else the request's) - reserve
         rdl = {"http": 503, "body": None, "error": {"code": "traversal_resolve_deadline", "text": "the backend could "
                                                     "not build and write its answer within bounds.time_budget_ms "
                                                     "(20000 ms, the finalisation reserve of 250 ms included)"}}
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res20, rdl, {"outcome": "fail", "wall_ms": 22522.2},
-                                               fail, False, cases)[0], "inconclusive")
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res20, rdl, {"outcome": "fail", "wall_ms": 19700.0},
-                                               fail, False, cases)[0], "fail")
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res20, rdl, {"outcome": "fail", "wall_ms": 30000.0,
-                                                                        "mcp_phases": {"backend_ms": 900.0}},
-                                               fail, False, cases)[0], "fail")   # the backend time first
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(22522.2), fail, False, cases)[0],
+                         "inconclusive")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(19700.0), fail, False, cases)[0], "fail")
+        te = {"code": "traversal_resolve_deadline", "time_budget_ms": 5000, "finalize_reserve_ms": 250}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(5000.0), fail, False, cases, te)[0],
+                         "inconclusive")
+        info = {}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, {"outcome": "fail", "wall_ms": 22522.2}, fail,
+                                               False, cases, None, info)[0], "inconclusive")   # N-realrep-0002 r0
+        self.assertEqual(info["inconclusive_reason"], "no service-side timing: plausibility undecidable")
         named = scenario("R-0010", "POST /resolve", [{"check": "status", "args": {"http": 504,
                                                                                  "code": "resolve_timeout"}}])
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", named, to, {"outcome": "fail"}, fail, False, cases)[0],
-                         "fail")
-        # the answer-triggered case of a scenario that names none
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", named, to, at(30375.2), fail, False, cases)[0], "fail")
+        # the R20 lockout answers at once: no wall rule
+        lock = {"http": 503, "body": None, "error": {"code": "uninterruptible_overrun_exceeds_allowance", "text": "x"}}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, lock, {"outcome": "fail"}, fail, False, cases)[0],
+                         "inconclusive")
+        # B-06 and a runner error
         sc_ = scenario("N-0001", "POST /pattern", STATUS)
-        relayed = {"http": 502, "body": None,
-                   "error": {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be"}}
-        out, kept = reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "service_by_design"}, fail, False,
-                                          cases)
-        self.assertEqual((out, kept), ("service_by_design",
-                                       "the table's answer-triggered case pattern.deadline_ends_task"))
         info = {}
         out, kept = reevaluate.outcome_of(None, "mcp", sc_, {"http": 400, "error": {"code": "x"}},
                                           {"outcome": "service_by_design"}, fail, False, cases, None, info)
@@ -361,8 +412,7 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, {"http": 400, "error": {"code": "x"}},
                                                {"outcome": "service_by_design"}, fail, False, {})[0],
                          "service_by_design")
-        # a runner error stays one
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "error"}, fail, False, cases)[0],
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, to, {"outcome": "error"}, fail, False, cases)[0],
                          "error")
 
     def test_named_cases_replayed(self):
@@ -450,13 +500,14 @@ class Reevaluate(unittest.TestCase):
         sc_ = scenario("N-0002", "POST /pattern", STATUS, mcp={"tool": "x", "by_design": ["x.relayed"]})
         relayed = {"http": 502, "body": None, "error": {"code": "search_failed", "text": "pattern_deadline: late"}}
         fail = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, {"outcome": "fail"}, fail, False, cases),
+        at = {"outcome": "fail", "mcp_phases": {"backend_ms": 60100.0}}
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", sc_, relayed, at, fail, False, cases),
                          ("service_by_design", "the table's named case x.relayed"))
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", dict(sc_, mcp={}), relayed, {"outcome": "fail"}, fail,
-                                               False, cases),
+        unnamed = dict(sc_, mcp={}, request={"time_budget_ms": 60000})
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", unnamed, relayed, at, fail, False, cases),
                          ("service_by_design", "the table's answer-triggered case pattern.deadline_ends_task"))
         # a relayed deadline whose budget_respected is a finding keeps it (Q1 of VERIFY-REVIEW)
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", dict(sc_, mcp={}), relayed, {"outcome": "fail"},
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", unnamed, relayed, at,
                                                fail + [{"check": "budget_respected", "outcome": "finding"}], False,
                                                cases)[0], "finding")
 

@@ -436,8 +436,8 @@ class CompareTest(unittest.TestCase):
 
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 130)   # async's vendored table at 48dcbc1d
-        self.assertEqual(info["sha256"], "c49478c26e486a7fef62b172a070f4ea213802ab522f619f996d7cb52fad50e8")
+        self.assertEqual(info["cases"], 130)   # async's vendored table at e334715b
+        self.assertEqual(info["sha256"], "0fcf7e7d69140ac6ab9fe141ab6933a89871da5f8a246e3d9ad0044f84ddfb0c")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         self.assertEqual(cases["pattern.unknown_field"]["agreement"], "not_implemented_mcp")
         self.assertEqual(sorted(c["id"] for c in cmp.answer_cases(cases)),
@@ -610,7 +610,7 @@ class TriageFixesTest(unittest.TestCase):
         self.assertEqual(cmp.match_service(dict(dotted, field="caps.<cap>"), [q], None)[0], False)
 
     def test_direct_http_lists_and_text_prefix(self):
-        # B3 (G09, G10): http as a list (a host answering 200 or 503), text_prefix with digits ignored
+        # B3 (G09, G10): http as a list (a host answering 200 or 503), text_prefix as is (no digit folding)
         d200 = self.raw_line("P-1", "direct-local", 0, http=200, body={"patterns": []})
         d503 = self.raw_line("P-1", "direct-local", 1, http=503, error={"code": "deadline", "text": "late"})
         self.assertEqual(cmp.match_direct({"http": [200, 503]}, d200, self.dir)[0], True)
@@ -698,6 +698,24 @@ class TriageFixesTest(unittest.TestCase):
                           error={"code": "other", "text": "x"}), checks=st_fail)]
         changed = merge_run.stricter_outcomes(rows, {}, lambda c: "fail")
         self.assertEqual(([r["outcome"] for r in rows], changed), (["inconclusive", "fail"], {"mcp": 1}))
+        # the runner's (or the re-evaluation's) inconclusive_reason, a by-design decision with its finding, and the
+        # checks an answered case explains are left as decided (lane S5b)
+        rule = lambda c: "fail" if any(x["outcome"] == "fail" for x in c) else (  # noqa: E731
+            "finding" if any(x["outcome"] == "finding" for x in c) else "pass")
+        found = [{"check": "status", "outcome": "fail", "detail": ""},
+                 {"check": "budget_respected", "outcome": "finding", "detail": ""}]
+        rows = [dict(line("R-2", "mcp", 0, T0, 1.0, outcome="inconclusive", checks=st_fail),
+                     inconclusive_reason="no service-side timing: plausibility undecidable"),
+                dict(line("R-2", "mcp", 1, T0, 1.0, outcome="inconclusive", checks=st_fail),
+                     inconclusive_reason="checks"),
+                dict(line("N-2", "mcp", 0, T0, 1.0, outcome="finding", checks=found),
+                     service_by_design_case="pattern.deadline_ends_task", explained_checks=[]),
+                dict(line("P-2", "mcp", 0, T0, 1.0, outcome="finding", checks=found),
+                     service_by_design_case="dup", explained_checks=["status"]),
+                dict(line("P-3", "mcp", 0, T0, 1.0, outcome="pass", checks=found),
+                     service_by_design_case="job", explained_checks=[])]
+        merge_run.stricter_outcomes(rows, {}, rule)
+        self.assertEqual([r["outcome"] for r in rows], ["inconclusive", "fail", "finding", "finding", "fail"])
 
     def deadline_cases(self, **am):
         case = {"id": "pattern.deadline_ends_task", "agreement": "by_design",
@@ -850,6 +868,23 @@ class ReviewFixesTest(unittest.TestCase):
                                 self.dir)
         self.assertEqual((res["class"], res["case"], res["verified"]), ("service_by_design", "short", True))
 
+    def test_not_expressible_named_case(self):
+        # a scenario naming a not_implemented_mcp case (resolve.not_expressible.bounds_max_query_bp): a difference
+        # between the arms is the expressibility gap, the class not_implemented_mcp (R-budget-0001, R-twin-0002..5)
+        cases = dict(self.CASES, nim={"id": "nim", "agreement": "not_implemented_mcp",
+                                      "service_answer": {"outcome": "not_expressible"}})
+        st = [{"check": "status", "outcome": "pass", "detail": ""}]
+        refused = self.raw_line("R-1", "mcp", 0, http=400, outcome="service_by_design", checks=st,
+                                error={"code": "sequence_too_short", "text": "short"})
+        d200 = self.raw_line("R-1", "direct-local", 0, checks=st)
+        res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: d200}}, self.resolve(["job", "short", "nim"]),
+                                cases, self.dir)
+        self.assertEqual((res["class"], res["by"], res["disagreement"]["case"]), ("not_implemented_mcp", "table", "short"))
+        d400 = self.raw_line("R-1", "direct-local", 0, http=400, checks=st, error={"text": "short"})
+        res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: d400}}, self.resolve(["job", "short", "nim"]),
+                                cases, self.dir)
+        self.assertEqual((res["class"], res["case"]), ("service_by_design", "short"))
+
     def answer_case(self, direct, dm, http=None):
         case = {"id": "a", "agreement": "by_design", "direct_expectation": {},
                 "service_answer": {"outcome": "refused_at_submit", "code": "pattern_out_of_bounds"},
@@ -935,27 +970,56 @@ class ReviewFixesTest(unittest.TestCase):
 
     def test_host_states(self):
         # B-09: all MCP executions host-state inconclusive: not comparable; a code the scenario expects is no host
-        # state; A-11: an implausible one (before the budget) is judged
-        s = {"id": "R-1", "route": "POST /resolve", "request": {"bounds": {"time_budget_ms": 20000}}, "mcp": {},
+        # state; A-11 / R2 / R3: judged on the service-side wall: a known wall below the threshold is judged by the
+        # checks; no service-side wall: undecidable (rule (c)), read neither way
+        s = {"id": "R-1", "route": "POST /resolve", "request": {"bounds": {"time_budget_ms": 20000}},
+             "mcp": {"tool": "traverse_resolve", "arguments": {"time_budget_ms": 20000}},
              "expect": [{"check": "status", "args": {"http": 200}}]}
         d = self.raw_line("R-1", "direct-local", 0)
         to = self.raw_line("R-1", "mcp", 0, http=504, outcome="inconclusive",
                            error={"code": "resolve_timeout", "text": "the backend did not answer within 30.25 s"},
-                           checks=[{"check": "status", "outcome": "fail", "detail": "http 504"}], wall_ms=30979.5)
+                           checks=[{"check": "status", "outcome": "fail", "detail": "http 504"}], wall_ms=30979.5,
+                           mcp_phases={"backend_ms": 30375.0})
         self.assertTrue(cmp.host_state_line(to, self.dir, s))
         res = cmp.mcp_agreement({0: to}, {"direct-local": {0: d}}, s, {}, self.dir)
         self.assertEqual((res["class"], res["host_state_repeats"]), ("not_comparable", [0]))
         expects = dict(s, expect=[{"check": "status", "args": {"http": 504, "code": "resolve_timeout"}}])
         self.assertFalse(cmp.host_state_line(to, self.dir, expects))
-        early = dict(to, wall_ms=800.0)
+        early = dict(to, mcp_phases={"backend_ms": 800.0})
         self.assertFalse(cmp.host_state_line(early, self.dir, s))
         self.assertEqual(cmp.mcp_agreement({0: early}, {"direct-local": {0: d}}, s, {}, self.dir)["class"],
                          "disagree")
+        untimed = dict(to, mcp_phases={})    # the client wall is never the wall: undecidable
+        self.assertTrue(cmp.host_state_line(untimed, self.dir, s))
+        self.assertEqual(cmp.inconclusive_reason(untimed, s, self.dir),
+                         "no service-side timing: plausibility undecidable")
+        self.assertEqual(cmp.inconclusive_reason(to, s, self.dir), "resolve_timeout")
+        self.assertEqual(cmp.inconclusive_reason(dict(to, inconclusive_reason="checks"), s, self.dir), "checks")
         # G22: the relayed /resolve deadline is a host state at budget - reserve or later
         rdl = dict(to, error={"code": "traversal_resolve_deadline", "text": "within bounds.time_budget_ms (20000 ms"},
-                   wall_ms=22522.2)
+                   mcp_phases={"backend_ms": 22522.2})
         self.assertTrue(cmp.host_state_line(rdl, None, s))
-        self.assertFalse(cmp.host_state_line(dict(rdl, wall_ms=5000.0), None, s))
+        self.assertFalse(cmp.host_state_line(dict(rdl, mcp_phases={"backend_ms": 5000.0}), None, s))
+
+    def test_wall_rule_in_the_comparison(self):
+        # R1: pattern.deadline_ends_task (wall_rule budget_minus_reserve) applies only at a plausible service-side wall
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        s = dict(scen("N-1", "N"), request={"time_budget_ms": 60000})
+        st = [{"check": "status", "outcome": "fail", "detail": "http 502"}]
+        err = {"code": "search_failed", "text": "pattern_deadline: pattern: the answer could not be written"}
+        dead = self.raw_line("N-1", "direct-local", 0, http=503, error={"code": "deadline", "text": "late"},
+                             outcome="inconclusive", checks=[{"check": "status", "outcome": "inconclusive",
+                                                              "detail": ""}])
+        relay = lambda ms: self.raw_line("N-1", "mcp", 0, http=502, error=err, outcome="fail", checks=st,  # noqa: E731
+                                         mcp_phases={"backend_ms": ms} if ms else {})
+        res = cmp.mcp_agreement({0: relay(60055.0)}, {"direct-local": {0: dead}}, s, cases, self.dir)
+        self.assertEqual((res["class"], res["by"], res["verified"]), ("service_by_design", "answer", True))
+        ok = self.raw_line("N-1", "direct-local", 0, checks=[{"check": "status", "outcome": "pass", "detail": ""}])
+        res = cmp.mcp_agreement({0: relay(400.0)}, {"direct-local": {0: ok}}, s, cases, self.dir)
+        self.assertEqual(res["class"], "disagree")   # held back: compared by its checks
+        res = cmp.mcp_agreement({0: dict(relay(None), outcome="inconclusive")}, {"direct-local": {0: dead}}, s,
+                                cases, self.dir)
+        self.assertEqual((res["class"], res["undecidable_repeats"]), ("not_comparable", [0]))
 
     def test_table_of_the_reevaluation(self):
         # B-10: compare --reevaluated reads the table the re-evaluation replayed and warns on another one

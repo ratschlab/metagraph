@@ -33,10 +33,6 @@ CHECK_OUTCOMES = ("pass", "fail", "not_exposed", "inconclusive", "finding")
 # traversal_resolve_deadline: the host's /resolve 503 deadline the service relays (G22, VERIFY-2 item 3: the request's
 # budget under load, SPEC-labeled-traversal-core §4.5, not a result)
 MCP_HOST_STATE_CODES = ("uninterruptible_overrun_exceeds_allowance", "resolve_timeout", "traversal_resolve_deadline")
-# the plausibility rules' margins (A-11, VERIFY-2 item 3): the service's resolve client waits the request's budget plus
-# 250 ms before resolve_timeout; /resolve's fixed finalisation reserve (capabilities resolve.finalize_reserve_ms)
-RESOLVE_TIMEOUT_MARGIN_MS = 250.0
-RESOLVE_FINALIZE_RESERVE_MS = 250.0
 TIMING_CLASSES = ("fast", "slow", "long")
 
 # Keys left out of the answer digest. `timing` varies by run (DESIGN §8.3); `headers` is transport metadata
@@ -381,63 +377,248 @@ def scenario_budget_ms(scenario):
     return budget if budget is not None else _number_or_none(req.get("time_budget_ms"))
 
 
-def mcp_host_state(scenario, line, error=None, tool_error=None):
-    """(code, problem) of an MCP execution answered with a host-state code (MCP_HOST_STATE_CODES) the scenario does
-    not expect: problem None when the rule applies (the execution is inconclusive), else why the answer cannot be that
-    host state (it is judged by its checks); (None, None) for any other answer. The plausibility rules (A-11,
-    VERIFY-2 item 3, the coordinator's addendum), on the service-measured backend time (mcp_phases.backend_ms) where
-    the line has it, else the call's wall time:
-    - resolve_timeout: the service's resolve client gave up only after the request's budget plus 250 ms (a scenario
-      stating no budget: after the wait its text states, "did not answer within 30.25 s");
-    - traversal_resolve_deadline: the host's 503 deadline came at the earliest at the budget (the relay's, its text's,
-      else the request's) less the finalisation reserve (the relay's, else 250 ms);
-    - uninterruptible_overrun_exceeds_allowance (the overrun lockout answers at once by design): no wall rule."""
+# ---------------------------------------------------------------------------------------------------------------
+# The service-side walls and the plausibility rules of async's MCP runner (suite_mcp_runner.py at 1b33afe8: peer
+# review R1-R3, host_state_plausible, wall_rule_holds, service_wall, resolve_timeout_least), mirrored for the offline
+# re-evaluation and the comparator, with the design lead's rule (c): where no threshold or no service-side wall is
+# known the plausibility is undecidable, and the execution is inconclusive for that reason (not a host state, not by
+# design, not failed on that ground). Each threshold is one function, so a changed bound changes one place.
+
+# /resolve's finalisation reserve when the refusal states none (app/traversal/resolve.py DEFAULT_FINALIZE_RESERVE_MS)
+RESOLVE_RESERVE_MS = 250.0
+# the least allowance the service's client timeout of a budgeted /resolve keeps over budget + reserve
+# (app/traversal/resolve.py client_timeout_s, MIN_BUDGET_ALLOWANCE_S = 10 s)
+RESOLVE_MIN_ALLOWANCE_MS = 10000.0
+# the timeout a resolve_timeout states it applied: the first "within <N> s" of its text
+STATED_TIMEOUT = re.compile(r"\bwithin ([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?) s\b")
+# the slack a resolve_timeout's least wall gets (clock and phase differences between the service and the client)
+STATED_TIMEOUT_SLACK_MS = 1000.0
+# the host's pattern finalisation reserve when the relayed text states none (SPEC-pattern §10.2: 250 in version 1)
+PATTERN_RESERVE_MS = 250.0
+# the reserve the host's deadline text states ("... (60000 ms, the finalisation reserve of 250 ms included)")
+STATED_RESERVE = re.compile(r"finali[sz]ation reserve of ([0-9]+(?:\.[0-9]+)?) ms")
+# a pattern task's held-slot line (the service's app/queue/held_span.py LINE_FORMAT)
+SLOT_LINE = re.compile(r"^\u29d7 Slot held for .+? ([0-9.]+)s \(att ([^,]+), (\w+), acq ([0-9.]+), rel ([0-9.]+), "
+                       r"http (\d+) fail (\d+) ([0-9.]+)s backoff ([0-9.]+)s, (\w+)\)")
+WALL_BACKEND = "mcp_phases.backend_ms"
+WALL_DEADLINE_TASK = "the deadline-ended task's one failed HTTP try (diagnostic log 'Slot held ... http 1 fail 1')"
+WALL_ATTEMPT = "the settled attempt's settled_at - dispatched_at (GET /admin/traversal/jobs/{id} attempts[])"
+WALL_JOB = "the job's finished_at - started_at (traverse_status)"
+WALL_NONE = "no service-side timing"
+# rule (c): the verdict_detail of an execution whose plausibility cannot be decided
+UNDECIDABLE_NO_WALL = "no service-side timing: plausibility undecidable"
+UNDECIDABLE_NO_THRESHOLD = "no threshold known: plausibility undecidable"
+UNDECIDABLE = (UNDECIDABLE_NO_WALL, UNDECIDABLE_NO_THRESHOLD)
+WALL_RULE_VALUES = ("budget_minus_reserve",)
+
+
+def tool_error_of(doc, answer):
+    """The MCP tool's own error object behind an answer's error (its field, budget, reserve, ...), from the recorded
+    calls' payloads of a raw MCP record, as async's runner reads it (suite_mcp_runner.py raw_error), else None."""
+    code = ((answer or {}).get("error") or {}).get("code") if isinstance((answer or {}).get("error"), dict) else None
+    for call in reversed((doc or {}).get("calls") or []):
+        payload = call.get("payload") if isinstance(call, dict) else None
+        err = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(err, dict) and err.get("code") == code:
+            return err
+        rerr = payload.get("resolve_error") if isinstance(payload, dict) else None
+        detail = rerr.get("detail") if isinstance(rerr, dict) else None
+        if isinstance(detail, dict) and detail.get("code") == code:
+            return detail
+    return None
+
+
+def mcp_tool_of(scenario):
+    """The scenario's MCP tool, else the tool its route is executed with."""
+    tool = ((scenario or {}).get("mcp") or {}).get("tool")
+    if tool:
+        return str(tool)
+    return {"POST /pattern": "pattern_search", "POST /resolve": "traverse_resolve",
+            "POST /traverse": "traverse_fetch"}.get(str((scenario or {}).get("route") or ""), "")
+
+
+def mcp_budget_ms(scenario):
+    """The time budget the MCP arm sent (mcp.arguments.time_budget_ms), or None."""
+    return _number_or_none((((scenario or {}).get("mcp") or {}).get("arguments") or {}).get("time_budget_ms"))
+
+
+def request_budget_ms(scenario):
+    """A pattern scenario's request time_budget_ms: the MCP arguments' (what the arm sent), else the direct
+    request's top-level one."""
+    asked = mcp_budget_ms(scenario)
+    if asked is not None:
+        return asked
+    req = (scenario or {}).get("request")
+    return _number_or_none(req.get("time_budget_ms")) if isinstance(req, dict) else None
+
+
+def _diag_tasks(diag):
+    if not isinstance(diag, dict):
+        return []
+    tasks = [t for t in diag.get("regular_tasks") or [] if isinstance(t, dict)]
+    for group in diag.get("split_task_groups") or []:
+        tasks.extend(t for t in (group or {}).get("children") or [] if isinstance(t, dict))
+    return tasks
+
+
+def _slot_figures(task):
+    found = None
+    for line in task.get("diagnostic_log") or []:
+        m = SLOT_LINE.match(line) if isinstance(line, str) else None
+        if m:
+            found = {"http_tries": int(m.group(6)), "failed_tries": int(m.group(7)),
+                     "failed_post_s": float(m.group(8))}
+    return found
+
+
+def deadline_task_ms(doc):
+    """A pattern search's deadline-ended task wall (R1's fallback): of the recorded diagnostic log, each task whose
+    error starts pattern_deadline, its last held-slot line's failed POST seconds when that attempt sent one HTTP try
+    and it failed; the smallest; None when no task ended so or any lacks such a line."""
+    diag = next((c.get("payload") for c in reversed((doc or {}).get("calls") or []) if isinstance(c, dict)
+                 and str(c.get("tool") or "").startswith("GET /searches/")
+                 and str(c.get("tool")).endswith("/diagnostic-log")), None)
+    ended = [t for t in _diag_tasks(diag) if str(t.get("error") or "").startswith("pattern_deadline")]
+    walls = []
+    for task in ended:
+        fig = _slot_figures(task)
+        if fig is None or fig["http_tries"] != 1 or fig["failed_tries"] != 1:
+            return None
+        walls.append(fig["failed_post_s"] * 1000.0)
+    return min(walls) if walls else None
+
+
+def settled_attempt_ms(sources):
+    """The span_ms of the last settled attempt in a raw record's phase_sources.attempts, else None."""
+    rows = (sources or {}).get("attempts")
+    spans = [_number_or_none(r.get("span_ms")) for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+    known = [x for x in spans if x is not None]
+    return known[-1] if known else None
+
+
+def service_wall(scenario, line, doc=None):
+    """(the service-side wall of an MCP execution in ms, its source) for a host-state or wall rule (R3, R1), in
+    order: the line's mcp_phases.backend_ms; for a pattern search the deadline-ended task's HTTP try
+    (deadline_task_ms of the raw record); for a traversal job the last settled attempt's span, then the job's
+    finished_at - started_at (the raw record's phase_sources); else (None, WALL_NONE). Never the client's wall."""
+    backend = _number_or_none(((line or {}).get("mcp_phases") or {}).get("backend_ms"))
+    if backend is None:
+        backend = _number_or_none(((doc or {}).get("mcp_phases") or {}).get("backend_ms"))
+    if backend is not None:
+        return backend, WALL_BACKEND
+    sources = (doc or {}).get("phase_sources") if isinstance((doc or {}).get("phase_sources"), dict) else {}
+    tool = mcp_tool_of(scenario)
+    if tool == "pattern_search":
+        task = deadline_task_ms(doc)
+        if task is not None:
+            return task, WALL_DEADLINE_TASK
+    if tool in ("traverse_resolve", "traverse_fetch"):
+        span = settled_attempt_ms(sources)
+        if span is not None:
+            return span, WALL_ATTEMPT
+        t0, t1 = parse_utc(sources.get("started_at")), parse_utc(sources.get("finished_at"))
+        if t0 is not None and t1 is not None:
+            return (t1 - t0) * 1000.0, WALL_JOB
+    return None, WALL_NONE
+
+
+def resolve_timeout_least(scenario, error, tool_error):
+    """(the least plausible wall of a resolve_timeout, the rule as stated), R2: max(A, B) - 1000 ms of whichever is
+    known, A = time_budget_ms (the MCP arguments', else the tool error's) + reserve (the tool error's, else 250 ms)
+    + 10,000 ms, B = the timeout the refusal states ("within <N> s" of its text, else of the tool error's message)
+    x 1000; (None, why) with neither."""
+    te = tool_error if isinstance(tool_error, dict) else {}
+    asked = mcp_budget_ms(scenario)
+    budget = asked if asked is not None else _number_or_none(te.get("time_budget_ms"))
+    reserve = _number_or_none(te.get("finalize_reserve_ms"))
+    reserve = RESOLVE_RESERVE_MS if reserve is None else reserve
+    text = str((error or {}).get("text") or "") if isinstance(error, dict) else ""
+    m = STATED_TIMEOUT.search(text) or STATED_TIMEOUT.search(str(te.get("message") or ""))
+    terms = []
+    if budget is not None:
+        a = budget + reserve + RESOLVE_MIN_ALLOWANCE_MS
+        terms.append((a, "time_budget_ms %g + reserve %g + allowance %g = %g ms" % (
+            budget, reserve, RESOLVE_MIN_ALLOWANCE_MS, a)))
+    if m is not None:
+        terms.append((float(m.group(1)) * 1000.0, "the stated timeout %s s" % m.group(1)))
+    if not terms:
+        return None, "no time budget known and no stated timeout"
+    top = max(t for t, _ in terms)
+    named = terms[0][1] if len(terms) == 1 else "max(%s)" % ", ".join(why for _, why in terms)
+    return top - STATED_TIMEOUT_SLACK_MS, "%s - 1000 ms" % named
+
+
+def resolve_deadline_least(scenario, tool_error):
+    """(the least plausible wall of a relayed /resolve deadline, the rule as stated): time_budget_ms (the tool
+    error's, else the MCP arguments') - finalize_reserve_ms (the tool error's, else 250 ms); (None, why) without a
+    budget."""
+    te = tool_error if isinstance(tool_error, dict) else {}
+    budget = _number_or_none(te.get("time_budget_ms"))
+    budget = mcp_budget_ms(scenario) if budget is None else budget
+    if budget is None:
+        return None, "no time budget known"
+    reserve = _number_or_none(te.get("finalize_reserve_ms"))
+    return budget - (RESOLVE_RESERVE_MS if reserve is None else reserve), "time_budget_ms - finalize_reserve_ms"
+
+
+def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None):
+    """(code, state, detail) of an MCP execution answered with a host-state code (MCP_HOST_STATE_CODES) the scenario
+    does not expect: state "host_state" (inconclusive by the runner's host-state rule), "undecidable" (rule (c): no
+    threshold or no service-side wall known; inconclusive, detail UNDECIDABLE_NO_THRESHOLD / UNDECIDABLE_NO_WALL) or
+    "not_plausible" (a known wall below the threshold: the checks judge); (None, None, None) for any other answer.
+    resolve_timeout: resolve_timeout_least; traversal_resolve_deadline: resolve_deadline_least; the wall:
+    service_wall; uninterruptible_overrun_exceeds_allowance (the R20 lockout answers at once): no wall rule."""
     err = error if isinstance(error, dict) else (line or {}).get("error")
     err = err if isinstance(err, dict) else {}
     code = err.get("code")
     if code is None or str(code) not in MCP_HOST_STATE_CODES:
-        return None, None
+        return None, None, None
     code = str(code)
     if code in json.dumps((scenario or {}).get("expect") or []):
-        return None, None   # the scenario expects the code: its checks judge it
-    if code == "uninterruptible_overrun_exceeds_allowance":
-        return code, None
-    line = line or {}
-    wall = _number_or_none((line.get("mcp_phases") or {}).get("backend_ms"))
-    what = "the backend time"
+        return None, None, None   # the scenario expects the code: its checks judge it
+    if code not in ("resolve_timeout", "traversal_resolve_deadline"):
+        return code, "host_state", ""
+    if tool_error is None:
+        tool_error = tool_error_of(doc, {"error": err})
+    if code == "traversal_resolve_deadline":
+        least, rule = resolve_deadline_least(scenario, tool_error)
+    else:
+        least, rule = resolve_timeout_least(scenario, err, tool_error)
+    if least is None:
+        return code, "undecidable", UNDECIDABLE_NO_THRESHOLD
+    wall, which = service_wall(scenario, line, doc)
     if wall is None:
-        wall, what = _number_or_none(line.get("wall_ms")), "the call's wall time"
+        return code, "undecidable", UNDECIDABLE_NO_WALL
+    if wall < least:
+        return code, "not_plausible", "%s after %.0f ms (%s), before %s = %.0f ms: not a host state" % (
+            code, wall, which, rule, least)
+    return code, "host_state", "%s after %.0f ms (%s) >= %s = %.0f ms" % (code, wall, which, rule, least)
+
+
+def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None):
+    """(state, detail) of an answer-triggered case's answer_match.wall_rule for an MCP execution (R1; async's
+    wall_rule_holds at e334715b): budget_minus_reserve: the service-side wall (service_wall) >= the request's
+    time_budget_ms (request_budget_ms) - the finalisation reserve the answer's error text states, else 250 ms. state
+    "holds", "held_back" (a known wall below the threshold, or an unknown rule: the case does not apply, matching
+    continues) or "undecidable" (rule (c): no request budget, UNDECIDABLE_NO_THRESHOLD, or no service-side wall,
+    UNDECIDABLE_NO_WALL: the case matched, the execution is inconclusive)."""
+    if rule not in WALL_RULE_VALUES:
+        return "held_back", "%s: unknown wall_rule %r: the case does not apply" % (case_id, rule)
+    budget = request_budget_ms(scenario)
+    if budget is None:
+        return "undecidable", UNDECIDABLE_NO_THRESHOLD
+    err = (answer or {}).get("error")
+    m = STATED_RESERVE.search(str((err or {}).get("text") or "")) if isinstance(err, dict) else None
+    reserve = float(m.group(1)) if m else PATTERN_RESERVE_MS
+    least = budget - reserve
+    terms = "time_budget_ms %g - reserve %g (%s) = %g ms" % (budget, reserve, "stated" if m else "default", least)
+    wall, which = service_wall(scenario, line, doc)
     if wall is None:
-        return code, "no time of the call to check %s against" % code
-    te = tool_error if isinstance(tool_error, dict) else {}
-    text = str(err.get("text") or "")
-    if code == "resolve_timeout":
-        budget = scenario_budget_ms(scenario)
-        if budget is not None:
-            if wall >= budget + RESOLVE_TIMEOUT_MARGIN_MS:
-                return code, None
-            return code, "resolve_timeout after %.0f ms (%s), before the request's budget %.0f ms plus %.0f ms: the " \
-                         "service's resolve client cannot have waited for the host" % (
-                             wall, what, budget, RESOLVE_TIMEOUT_MARGIN_MS)
-        m = re.search(r"within ([0-9]+(?:\.[0-9]+)?) s", text)
-        if m and wall >= float(m.group(1)) * 1000.0:
-            return code, None
-        return code, "resolve_timeout after %.0f ms (%s), and neither a request budget nor a stated wait it reached" % (
-            wall, what)
-    m = re.search(r"time_budget_ms \(([0-9]+(?:\.[0-9]+)?) ms", text)
-    budget = _number_or_none(te.get("time_budget_ms"))
-    if budget is None and m:
-        budget = float(m.group(1))
-    if budget is None:
-        budget = scenario_budget_ms(scenario)
-    reserve = _number_or_none(te.get("finalize_reserve_ms"))
-    reserve = RESOLVE_FINALIZE_RESERVE_MS if reserve is None else reserve
-    if budget is None:
-        return code, "no budget stated to check the relayed deadline against"
-    if wall >= budget - reserve:
-        return code, None
-    return code, "the relayed /resolve deadline after %.0f ms (%s), before the budget %.0f ms less its %.0f ms " \
-                 "finalisation reserve: not SPEC-labeled-traversal-core §4.5's deadline" % (wall, what, budget, reserve)
+        return "undecidable", UNDECIDABLE_NO_WALL
+    if wall < least:
+        return "held_back", "%s (wall_rule %s): after %.0f ms (%s), before %s: the case does not apply" % (
+            case_id, rule, wall, which, terms)
+    return "holds", "%s (wall_rule %s): after %.0f ms (%s) >= %s" % (case_id, rule, wall, which, terms)
 
 
 def raw_name(scenario_id, arm, repeat):

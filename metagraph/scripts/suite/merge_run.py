@@ -15,7 +15,8 @@ arms, every arm's own run.json under `arms`). Re-running it rewrites the same fi
 Outcomes (lane S3): every execution judged by lane S1's checks (not the stub) gets the outcome of
 checks.scenario_outcome over its checks when that is stricter than the one its runner recorded (fail > finding >
 inconclusive > pass; a runner's error, not_implemented_mcp or service_by_design is kept, and so is an MCP execution
-the host-state rule made inconclusive where its plausibility rule admits it: suite_common.mcp_host_state, and an MCP
+the host-state rule made inconclusive where its plausibility rule admits it or cannot decide it (rule (c),
+verdict_detail): suite_common.host_state_verdict on the raw record's service-side wall, and an MCP
 execution a refused / relayed / answer-triggered by-design case decided, a finding included; the failing checks an
 answered / clamped case explains, the line's explained_checks, are left out: triage-2 B-01), the runner's own under
 `outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
@@ -62,14 +63,30 @@ def judged_by_stub(run):
     return mod == "stub" or (isinstance(mod, dict) and bool(mod.get("stub")))
 
 
-def host_state_inconclusive(row, scenario=None):
+def host_state_inconclusive(row, scenario=None, run_dir=None):
     """An MCP execution the host-state rule made inconclusive (an answer refused with one of
-    suite_common.MCP_HOST_STATE_CODES the scenario does not expect, which the plausibility rule of
-    suite_common.mcp_host_state admits): its failing checks judge an environmental state, not a result."""
+    suite_common.MCP_HOST_STATE_CODES the scenario does not expect, whose service-side wall, read from the raw record
+    under |run_dir|, the plausibility rule of suite_common.host_state_verdict admits or cannot decide), or that rule
+    (c) made inconclusive (its inconclusive_reason: a host-state code or plausibility undecidable; a line of an
+    earlier runner without one is judged here): its failing checks judge an environmental state or an undecidable
+    one, not a result."""
     if row.get("arm") != "mcp" or row.get("outcome") != "inconclusive":
         return False
-    code, problem = sc.mcp_host_state(scenario or {}, row)
-    return code is not None and problem is None
+    why = row.get("inconclusive_reason")   # the runner's (e334715b) or the re-evaluation's class of it
+    if why is not None:
+        return why in sc.UNDECIDABLE or str(why) in sc.MCP_HOST_STATE_CODES
+    err = row.get("error") if isinstance(row.get("error"), dict) else {}
+    if str(err.get("code")) not in sc.MCP_HOST_STATE_CODES:
+        return False
+    doc = None
+    raw = row.get("raw")
+    if run_dir and isinstance(raw, str) and raw:
+        try:
+            doc = sc.read_gz_json(raw if os.path.isabs(raw) else os.path.join(run_dir, raw))
+        except (OSError, ValueError, EOFError):
+            doc = None
+    code, state, _ = sc.host_state_verdict(scenario or {}, row, doc if isinstance(doc, dict) else None)
+    return code is not None and state in ("host_state", "undecidable")
 
 
 def by_design_decided(row):
@@ -80,7 +97,7 @@ def by_design_decided(row):
         row.get("outcome") in ("service_by_design", "finding") and not row.get("explained_checks")
 
 
-def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None):
+def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
     """Applies checks.scenario_outcome where it is stricter than the runner's outcome (module docstring); returns
     {arm: executions changed}. A re-evaluated line (`reevaluation`) was judged by checks.py whatever its runner
     ran. |scenarios| (id -> scenario) gives the host-state rule its budgets."""
@@ -93,7 +110,7 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None):
         if old not in _STRICTNESS or not checks or (
                 judged_by_stub(arm_runs.get(row.get("arm"))) and "reevaluation" not in row):
             continue
-        if host_state_inconclusive(row, (scenarios or {}).get(row.get("scenario"))) or by_design_decided(row):
+        if host_state_inconclusive(row, (scenarios or {}).get(row.get("scenario")), run_dir) or by_design_decided(row):
             continue   # the runner's host-state or by-design rule (or the re-evaluation's) decided it, not the checks
         explained = set(row.get("explained_checks") or ())
         if explained:
@@ -233,7 +250,7 @@ def merge(run_dir, reevaluated=False):
     manifest = sc.read_json(manifest_copy) if manifest_copy else sc.read_json(os.path.join(run_dir, "manifest.json"))
     scenarios = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict)) \
         if isinstance(manifest, dict) else {}
-    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir), scenarios)
+    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir), scenarios, run_dir)
     for arm, n in sorted(rederived.items()):
         warnings.append("arms/%s: %d outcome(s) made stricter by checks.scenario_outcome (outcome_runner keeps the "
                         "runner's)" % (arm, n))

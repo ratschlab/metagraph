@@ -64,25 +64,53 @@ class TableError(ValueError):
 # The table's vocabulary as async's runner validates it at load (suite_mcp_runner.py ServiceByDesign.problems at
 # 48dcbc1d, triage-2 B-08: one semantics for the runner and this comparator): what an answer_match may state, what
 # each of its sides may state, the direct_mismatch values, the service_answer outcomes the checks judge.
-ANSWER_MATCH_TOP_KEYS = ("routes", "direct", "mcp", "direct_mismatch")
+ANSWER_MATCH_TOP_KEYS = ("routes", "direct", "mcp", "direct_mismatch", "wall_rule")
 ANSWER_MATCH_KEYS = ("http", "code", "text_contains", "field", "slot_code")
 DIRECT_MISMATCH_VALUES = ("disagree", "timing")
+WALL_RULE_VALUES = sc.WALL_RULE_VALUES
 ANSWERED_OUTCOMES = ("answered", "clamped")
+EXPLAINS_ENTRY_KEYS = ("check", "detail_matches")
+
+
+def entry_problem(entry):
+    """What is wrong with one explains_checks entry ('' when nothing): a non-empty check name, or an object stating
+    check (a non-empty name) and detail_matches (a regex that compiles) and nothing else (peer review R4)."""
+    if isinstance(entry, str):
+        return "" if entry else "an empty check name"
+    if not isinstance(entry, dict):
+        return "%r is neither a check name nor an object" % (entry,)
+    unknown = sorted(set(entry) - set(EXPLAINS_ENTRY_KEYS))
+    if unknown:
+        return "unknown key(s) %s (an entry states %s)" % (unknown, list(EXPLAINS_ENTRY_KEYS))
+    if not isinstance(entry.get("check"), str) or not entry["check"]:
+        return "an object entry without check (a check name)"
+    rx = entry.get("detail_matches")
+    if not isinstance(rx, str) or not rx:
+        return "an object entry without detail_matches (a regex; a whole check is a plain name)"
+    try:
+        re.compile(rx, re.S)
+    except re.error as exc:
+        return "detail_matches %r is not a valid regex (%s)" % (rx, exc)
+    return ""
 
 
 def table_problems(cases):
-    """What the load validation refuses, each naming its case (async's ServiceByDesign.problems, mirrored): an
-    answer_match without routes (a non-empty list of route strings), a key of it outside ANSWER_MATCH_TOP_KEYS, a side
-    that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose http is not one integer or
-    that states slot_code (a direct-side key), a direct_mismatch outside DIRECT_MISMATCH_VALUES; an explains_checks
-    that is not a list of check names or sits on a case other than answered / clamped."""
+    """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at 1b33afe8,
+    mirrored): an answer_match without routes (a non-empty list of route strings), a key of it outside
+    ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose
+    http is not one integer, that states slot_code (a direct-side key) or that states no code (peer review R5), a
+    direct_mismatch outside DIRECT_MISMATCH_VALUES, a wall_rule outside WALL_RULE_VALUES; an explains_checks that is
+    not a list of entries (entry_problem) or sits on a case other than answered / clamped."""
     out = []
     for case in cases:
         cid = "case %r" % (case.get("id"),)
         explains = case.get("explains_checks")
         if explains is not None:
-            if not isinstance(explains, list) or not all(isinstance(x, str) and x for x in explains):
+            if not isinstance(explains, list):
                 out.append("%s: explains_checks must be a list of check names" % cid)
+            else:
+                out.extend("%s: explains_checks[%d]: %s" % (cid, i, entry_problem(x)) for i, x in enumerate(explains)
+                           if entry_problem(x))
             if not judged_by_checks(case):
                 out.append("%s: explains_checks on a %s case (only answered / clamped cases leave the outcome to the "
                            "checks)" % (cid, (case.get("service_answer") or {}).get("outcome")))
@@ -112,9 +140,14 @@ def table_problems(cases):
             out.append("%s: answer_match.mcp.http must be one integer, not %r" % (cid, http))
         if "slot_code" in mcp:
             out.append("%s: answer_match.mcp states slot_code (a direct-side key)" % cid)
+        if isinstance(am.get("mcp"), dict) and not (isinstance(mcp.get("code"), str) and mcp["code"].strip()):
+            out.append("%s: answer_match.mcp states no code (a side without one would make every answer on the "
+                       "route that matches the rest by design)" % cid)
         if "direct_mismatch" in am and am["direct_mismatch"] not in DIRECT_MISMATCH_VALUES:
             out.append("%s: answer_match.direct_mismatch %r is not one of %s" % (
                 cid, am["direct_mismatch"], list(DIRECT_MISMATCH_VALUES)))
+        if "wall_rule" in am and am["wall_rule"] not in WALL_RULE_VALUES:
+            out.append("%s: answer_match.wall_rule %r is not one of %s" % (cid, am["wall_rule"], list(WALL_RULE_VALUES)))
     return out
 
 
@@ -170,8 +203,36 @@ def judged_by_checks(case):
 
 
 def explains(case):
-    """A case's explains_checks (the checks whose failure the service's path explains), [] when it states none."""
-    return [str(x) for x in case.get("explains_checks") or [] if isinstance(x, str)]
+    """A case's explains_checks entries (the checks whose failure the service's path explains: a name, or {check,
+    detail_matches}), [] when it states none."""
+    out = []
+    for x in case.get("explains_checks") or []:
+        if isinstance(x, str):
+            out.append(x)
+        elif isinstance(x, dict) and isinstance(x.get("check"), str) and isinstance(x.get("detail_matches"), str):
+            out.append({"check": x["check"], "detail_matches": x["detail_matches"]})
+    return out
+
+
+def entry_explains(entry, check):
+    """Whether one explains_checks entry explains a check item: a name, every item of that check; an object {check,
+    detail_matches} (peer review R4), an item of that check whose detail the regex matches completely (re.fullmatch,
+    re.S)."""
+    name = str(check.get("check"))
+    if isinstance(entry, str):
+        return entry == name
+    if str(entry.get("check")) != name:
+        return False
+    try:
+        return re.fullmatch(str(entry.get("detail_matches")), str(check.get("detail") or ""), re.S) is not None
+    except re.error:
+        return False
+
+
+def union_of(cases):
+    """The union of the matched cases' explains_checks entries (several named answered cases apply together)."""
+    entries = [x for c in cases for x in explains(c)]
+    return list(dict((json.dumps(x, sort_keys=True), x) for x in entries).values())
 
 
 def _digits_free(text):
@@ -188,7 +249,7 @@ SERVICE_NOTES = ("tool", "http", "stage", "detail", "keys", "missing_argument", 
 ANSWER_DIRECT_KEYS = ("http", "code", "slot_code", "text_contains")
 ANSWER_MCP_KEYS = ("http", "code", "text_contains", "field")
 # the MCP runner's host-state codes (suite_common): inconclusive (reevaluate.py, merge_run.py) where the plausibility
-# rule admits them (suite_common.mcp_host_state), and read neither for nor against a case here
+# rule admits them, or cannot decide (suite_common.host_state_verdict), and read neither for nor against a case here
 MCP_HOST_STATE_CODES = sc.MCP_HOST_STATE_CODES
 
 
@@ -270,31 +331,19 @@ def mcp_error(line, run_dir):
     return None
 
 
-def tool_error(doc, answer):
-    """The MCP tool's own error object behind the answer's error (its field, ...), from the recorded calls' payloads,
-    as async's runner reads it (suite_mcp_runner.py raw_error), else None."""
-    code = ((answer or {}).get("error") or {}).get("code")
-    for call in reversed((doc or {}).get("calls") or []):
-        payload = call.get("payload") if isinstance(call, dict) else None
-        err = payload.get("error") if isinstance(payload, dict) else None
-        if isinstance(err, dict) and err.get("code") == code:
-            return err
-        rerr = payload.get("resolve_error") if isinstance(payload, dict) else None
-        detail = rerr.get("detail") if isinstance(rerr, dict) else None
-        if isinstance(detail, dict) and detail.get("code") == code:
-            return detail
-    return None
+# the MCP tool's own error object behind an answer's error (async's runner raw_error), suite_common's
+tool_error = sc.tool_error_of
 
 
-def mcp_view(line, run_dir):
-    """(the MCP answer as the runner's matcher reads it: {http, error, body}, the tool's error object) of an MCP
-    execution: its raw answer where recorded, else its line's http and error."""
+def mcp_view(line, run_dir, with_doc=False):
+    """(the MCP answer as the runner's matcher reads it: {http, error, body}, the tool's error object[, the raw
+    record]) of an MCP execution: its raw answer where recorded, else its line's http and error."""
     doc = _raw_doc(line, run_dir)
     ans = (doc or {}).get("answer") if isinstance((doc or {}).get("answer"), dict) else None
     if ans is None:
         err = line.get("error") if isinstance(line.get("error"), dict) and line["error"] else None
         ans = {"http": line.get("http"), "error": err, "body": None}
-    return ans, tool_error(doc, ans)
+    return (ans, tool_error(doc, ans), doc) if with_doc else (ans, tool_error(doc, ans))
 
 
 def _direct_problems(side, http, top, slots, texts):
@@ -387,12 +436,16 @@ def _field_matches(observed, case_field):
 
 def host_state_line(line, run_dir, scenario=None):
     """Whether an MCP execution is inconclusive by a host state (MCP_HOST_STATE_CODES) that the scenario does not
-    expect and the plausibility rule admits (suite_common.mcp_host_state, B-09, A-11): it reads neither for nor
-    against a case or the direct arm."""
+    expect and whose wall the plausibility rule admits, or cannot decide (rule (c)) (suite_common.host_state_verdict
+    on the raw record's service-side wall; B-09, A-11): it reads neither for nor against a case or the direct arm."""
     if line.get("outcome") != "inconclusive":
         return False
-    code, problem = sc.mcp_host_state(scenario or {}, line, mcp_error(line, run_dir) or {})
-    return code is not None and problem is None
+    why = line.get("inconclusive_reason")
+    if why is not None:
+        return why in sc.UNDECIDABLE or str(why) in MCP_HOST_STATE_CODES
+    ans, terr, doc = mcp_view(line, run_dir, with_doc=True)
+    code, state, _ = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error") or mcp_error(line, run_dir), terr)
+    return code is not None and state in ("host_state", "undecidable")
 
 
 def match_service(service_answer, lines, run_dir):
@@ -869,18 +922,23 @@ def service_answers(want, answer, tool_error=None):
         return False
     if want.get("code") is not None and str(err.get("code")) not in _alternatives(want["code"]):
         return False
-    if want.get("text_contains") and str(want["text_contains"]) not in str(err.get("text") or ""):
-        return False
+    text = str(err.get("text") or "")
+    if want.get("text_contains") and not any(part.strip() in text for part in str(want["text_contains"]).split("|")):
+        return False   # "a | b" = either (triage-2 B-07: pattern.predicate_form_other, one text per fault)
     if want.get("field") is None:
         return True
     return _field_matches((tool_error or {}).get("field", err.get("field")), want["field"])
 
 
-def case_matches(cases, scenario, answer, tool_error=None):
-    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches at 48dcbc1d: every case the
-    scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches either
-    refusals or answers, never both, and several named answered cases apply together); else the first answer-
-    triggered case (table order) on its route whose MCP side it matches ("answer-triggered"); ([], None)."""
+def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None):
+    """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why at e334715b: every case
+    the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
+    either refusals or answers, never both, and several named answered cases apply together); else the first
+    answer-triggered case (table order) on its route whose MCP side it matches and whose answer_match.wall_rule (if
+    any) holds for the execution or cannot be decided (|line| and its raw record |doc|: suite_common.wall_rule_verdict,
+    peer review R1, rule (c); a case a known wall holds back does not apply and matching continues)
+    ("answer-triggered"); ([], None). |walls| (a list) receives each wall rule's (state, detail, case id): an
+    undecidable one last, with its case returned."""
     if answer is None:
         return [], None
     named = [c for c in named_cases(cases, scenario) if service_answers(c.get("service_answer"), answer, tool_error)]
@@ -889,8 +947,20 @@ def case_matches(cases, scenario, answer, tool_error=None):
     err = answer.get("error") if isinstance(answer.get("error"), dict) else {}
     if isinstance(tool_error, dict) and "field" in tool_error:
         err = dict(err, field=tool_error.get("field"))
-    case = answer_case_of(cases, (scenario or {}).get("route"), answer.get("http"), err)
-    return ([case], "answer-triggered") if case is not None else ([], None)
+    held = set()
+    while True:
+        case = answer_case_of(cases, (scenario or {}).get("route"), answer.get("http"), err, skip=held)
+        if case is None:
+            return [], None
+        rule = case["answer_match"].get("wall_rule")
+        if rule is None:
+            return [case], "answer-triggered"
+        state, detail = sc.wall_rule_verdict(str(rule), str(case.get("id")), scenario, answer, line, doc)
+        if walls is not None:
+            walls.append((state, detail, case.get("id")))
+        if state in ("holds", "undecidable"):
+            return [case], "answer-triggered"
+        held.add(case.get("id"))
 
 
 def named_case_of(cases, scenario, answer, tool_error=None):
@@ -904,14 +974,15 @@ def named_case_of(cases, scenario, answer, tool_error=None):
 
 def explained_outcome(checks, explains_names, rule):
     """(the outcome, E) of an execution an answered / clamped case matched (triage-2 B-01; async's runner
-    explained_outcome at 48dcbc1d, mirrored): F = the failing checks (outcome fail, or one outside the checks'
-    vocabulary), E = those of F with outcome fail whose name the case explains (explains_checks), U = F - E. fail when
+    explained_outcome at 1b33afe8, mirrored): F = the failing checks (outcome fail, or one outside the checks'
+    vocabulary), E = those of F with outcome fail that an entry of the case's explains_checks explains
+    (entry_explains: a name, or {check, detail_matches}), U = F - E. fail when
     U is non-empty; else r = |rule| over the checks without E: finding when r is finding (a by-design mark never
     erases one), service_by_design when E is non-empty, else r (a case explaining nothing leaves the checks' outcome).
     E lists each explained check's name once, in check order."""
-    wanted = set(explains_names)
     failing = [c for c in checks if str(c.get("outcome")) == "fail" or str(c.get("outcome")) not in sc.CHECK_OUTCOMES]
-    e_items = [c for c in failing if str(c.get("outcome")) == "fail" and str(c.get("check")) in wanted]
+    e_items = [c for c in failing if str(c.get("outcome")) == "fail"
+               and any(entry_explains(entry, c) for entry in explains_names)]
     explained = list(dict.fromkeys(str(c.get("check")) for c in e_items))
     if len(e_items) < len(failing):
         return "fail", explained
@@ -922,6 +993,17 @@ def explained_outcome(checks, explains_names, rule):
     if e_items:
         return "service_by_design", explained
     return r, explained
+
+
+def answered_verdict(matched, checks, rule):
+    """(the outcome, E, the recorded case's id) of an execution answered / clamped cases matched (async's judge at
+    1b33afe8): explained_outcome against the union of their explains_checks; the case recorded is the first matched
+    one that explains an item of E, else the first matched."""
+    outcome, explained = explained_outcome(checks, union_of(matched), rule)
+    e_items = [c for c in checks if str(c.get("outcome")) == "fail" and str(c.get("check")) in explained]
+    noted = next((c for c in matched if any(entry_explains(entry, item) for entry in explains(c)
+                                            for item in e_items)), matched[0])
+    return outcome, explained, noted.get("id")
 
 
 def case_ids(scenario):
@@ -1104,14 +1186,17 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                                  str((mcp_error(x, run_dir) or {}).get("code")) for x in host))})
     # the runner's matcher, per execution
     groups, order, answered, explained, plain = {}, [], {}, {}, []
+    undecided = []
     for r in judged:
-        ans, terr = mcp_view(r, run_dir)
-        matched, how = case_matches(cases, scenario, ans, terr)
+        ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
+        walls = []
+        matched, how = case_matches(cases, scenario, ans, terr, r, doc, walls)
+        if matched and walls and walls[-1][0] == "undecidable":
+            undecided.append(r)   # rule (c): its case's wall rule cannot be decided: neither for nor against
+            continue
         if matched and judged_by_checks(matched[0]):
-            union = list(dict.fromkeys(x for c in matched for x in explains(c)))
-            _, e = explained_outcome(r.get("checks") or [], union, sc.outcome_from_checks)
-            noted = next((c for c in matched if set(explains(c)) & set(e)), matched[0])
-            answered[r.get("repeat")] = noted.get("id")
+            _, e, noted = answered_verdict(matched, r.get("checks") or [], sc.outcome_from_checks)
+            answered[r.get("repeat")] = noted
             explained[r.get("repeat")] = e
             plain.append(r)
         elif matched:
@@ -1122,6 +1207,11 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             groups[key][1].append(r)
         else:
             plain.append(r)
+    if undecided:
+        note["undecidable_repeats"] = [r.get("repeat") for r in undecided]
+        if not groups and not plain:
+            return dict(note, **{"class": "not_comparable", "by": "undecidable plausibility",
+                                 "detail": "every MCP execution's plausibility is undecidable (rule (c))"})
     sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"]
     kept = _unexplained_direct(direct_lines, sides, run_dir)
     k_arm, k_ref = _direct_ref(kept)
@@ -1164,6 +1254,12 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                     rest["direct_by"] = by
         parts.append(rest)
     dis = [p for p in parts if p.get("class") == "disagree"]
+    nim = [c for c in named if c.get("agreement") == "not_implemented_mcp"]
+    if dis and nim:
+        # the table states that the request is not expressible via MCP (e.g. bounds.max_query_bp): a difference
+        # between the arms is that gap, as before lane S5b (the first named case not disagreeing decided)
+        return dict(note, **{"class": "not_implemented_mcp", "by": "table", "case": nim[0].get("id"),
+                             "disagreement": dict(dis[0])})
     if dis:
         out = dict(dis[0])
         trig = [p for p in parts if p.get("by") == "answer"]
@@ -1518,6 +1614,25 @@ def resources(lines, index):
 # ---------------------------------------------------------------------------------------------------------------
 # the comparison
 
+def inconclusive_reason(line, scenario, run_dir):
+    """An inconclusive execution's class (async's runner at e334715b, the line's inconclusive_reason): rule (c)'s
+    text (no service-side timing / no threshold known: plausibility undecidable), the host-state code, or "checks"
+    (the checks decided); for a line recorded without the field the same, read from the raw record; None for any
+    other outcome."""
+    if line.get("outcome") != "inconclusive":
+        return None
+    if line.get("inconclusive_reason"):
+        return str(line["inconclusive_reason"])
+    if line.get("arm") == "mcp":
+        ans, terr, doc = mcp_view(line, run_dir, with_doc=True)
+        code, state, detail = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error"), terr)
+        if state == "host_state":
+            return code
+        if state == "undecidable":
+            return detail
+    return "checks"
+
+
 def reevaluation_checks_dir(run_dir):
     """The directory of the checks a run's re-evaluated set was judged with (reevaluated.json), when still there."""
     mark = merge_run.reevaluation_mark(run_dir) or {}
@@ -1668,6 +1783,12 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     for area, by_arm in lines_by_area_arm.items():
         for arm, lines in by_arm.items():
             resources_out.setdefault(area, {})[arm] = resources(lines, index)
+    by_reason = {}
+    for r in rows:
+        why = inconclusive_reason(r, scen_by_id.get(r.get("scenario")), run_dir)
+        if why is not None:
+            arm_counts = by_reason.setdefault(r.get("arm"), {})
+            arm_counts[why] = arm_counts.get(why, 0) + 1
     totals = {}
     for arm in arms_present:
         arm_lines = [r for r in rows if r.get("arm") == arm]
@@ -1699,6 +1820,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             "relations": relations_summary,
             "per_area": per_area, "totals": totals,
             "direct_agreement": direct_summary, "mcp_agreement": mcp_summary,
+            "inconclusive_by_reason": dict((a, dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))))
+                                           for a, v in sorted(by_reason.items())),
             "timing": timing,
             "front_overhead": {"warm": dict((k, sc.summarise(v)) for k, v in front_vals.items()),
                                "per_area_wall": dict((a, sc.summarise(v)) for a, v in front_area.items()),

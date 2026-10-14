@@ -23,8 +23,11 @@ failing check is not one the matched cases explain, else finding, service_by_des
 explained, else the checks' outcome); the line records the case (`service_by_design_case`) and the explained
 checks (`explained_checks`) whenever a case matched. A runner's service_by_design mark the current table does not
 reproduce is judged by the checks (B-06), and says so. Then the host-state rule (an unexpected
-compare.MCP_HOST_STATE_CODES answer the plausibility rule of suite_common.mcp_host_state admits is inconclusive;
-one it rejects is judged by the checks, and says why), then a new exception of the checks (fail).
+compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of suite_common.host_state_verdict
+admits is inconclusive; one it rejects is judged by the checks; rule (c): where no threshold or no service-side wall
+is known, for a host state or an answer-triggered case's wall_rule, the execution is inconclusive with verdict_detail
+"no threshold known / no service-side timing: plausibility undecidable"), then a new exception of the checks (fail).
+The line records verdict_detail (why a wall rule or a host state held or not) as async's runner at 1b33afe8 does.
 
 Writes, keeping every original file:
   RUN_DIR/arms/<arm>/executions.reevaluated.jsonl   the re-evaluated lines (the recorded fields, with checks,
@@ -166,52 +169,92 @@ def evaluate_raised(checks):
     return bool(checks) and all(c.get("check") == "evaluate" for c in checks)
 
 
-def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None, info=None):
-    """The re-evaluated outcome (module docstring) and why it was kept (decided without the checks), if it was;
-    |info| (a dict) receives what the line records: service_by_design_case, explained_checks, by_design_cases,
-    host_state, and `note` (a matched case the checks decided, a mark the table does not reproduce, a host state the
-    plausibility rule rejects)."""
+def _finding(checks):
+    return any(str(c.get("outcome")) == "finding" for c in checks or [])
+
+
+def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases=None, tool_err=None, info=None,
+               doc=None):
+    """The re-evaluated outcome (module docstring; async's judge at e334715b) and why it was kept (decided without
+    the checks), if it was; |info| (a dict) receives what the line records as async's runner records it:
+    service_by_design_case and explained_checks (whenever a case matched), verdict_detail (why a wall rule or a host
+    state held or not, or rule (c)'s text), inconclusive_reason (an inconclusive outcome's class: rule (c)'s text, the
+    host-state code, or "checks"); and for the re-evaluation's record by_design_cases, host_state and `note` (a mark
+    the table does not reproduce, a matched case the checks decided). |doc| is the execution's raw record (the
+    service-side walls: suite_common.service_wall). One divergence from the runner (the coordinator's addendum 11):
+    an undecidable /resolve host state never swallows a finding of the checks."""
     info = {} if info is None else info
-    notes = []
+    outcome, kept = _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info,
+                                doc)
+    if outcome == "inconclusive":
+        info.setdefault("inconclusive_reason", "checks")
+    else:
+        info.pop("inconclusive_reason", None)
+    return outcome, kept
+
+
+def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info, doc):
     recorded = line.get("outcome")
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
     if kept and recorded != "service_by_design":
         return recorded, "decided by the runner without the checks"
     rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
+    notes = []
     if arm == "mcp" and cases:
-        # async's runner (judge at 48dcbc1d): the named cases first, else an answer-triggered case
-        matched, how = compare.case_matches(cases, scenario, answer, tool_err)
+        # async's runner (judge at e334715b): the named cases first, else an answer-triggered case whose wall rule
+        # holds or cannot be decided (rule (c)); a case a known wall holds back does not apply
+        walls = []
+        matched, how = compare.case_matches(cases, scenario, answer, tool_err, line, doc, walls)
+        notes = [d for state, d, _ in walls if state != "undecidable"]
         if matched:
             info["by_design_cases"] = [c.get("id") for c in matched]
+            if walls and walls[-1][0] == "undecidable":
+                # rule (c): the case's answer matched, its wall rule cannot be decided: inconclusive, the case
+                # recorded; a finding is never erased
+                cid, why = matched[0].get("id"), walls[-1][1]
+                info.update(service_by_design_case=cid, explained_checks=[], verdict_detail="; ".join(notes + [why]))
+                if _finding(new_checks):
+                    return "finding", "the table's %s case %s, its wall rule undecidable; a check is a finding" % (
+                        how, cid)
+                info["inconclusive_reason"] = why
+                return "inconclusive", "the table's %s case %s: %s (rule (c))" % (how, cid, why)
             if compare.judged_by_checks(matched[0]):
-                union = list(dict.fromkeys(x for c in matched for x in compare.explains(c)))
-                outcome, explained = compare.explained_outcome(new_checks, union, rule)
-                noted = next((c for c in matched if set(compare.explains(c)) & set(explained)), matched[0])
-                info.update(service_by_design_case=noted.get("id"), explained_checks=explained)
-                info["note"] = "the table's %s case %s (%s): judged by the checks%s" % (
-                    how, noted.get("id"), (noted.get("service_answer") or {}).get("outcome"),
-                    ", %s explained" % explained if explained else "")
+                outcome, explained, noted = compare.answered_verdict(matched, new_checks, rule)
+                info.update(service_by_design_case=noted, explained_checks=explained)
+                info["note"] = "the table's %s case %s: judged by the checks%s" % (
+                    how, noted, ", %s explained" % explained if explained else "")
                 return outcome, None
             cid = matched[0].get("id")
             info.update(service_by_design_case=cid, explained_checks=[])
-            if any(str(c.get("outcome")) == "finding" for c in new_checks):
+            if notes:
+                info["verdict_detail"] = "; ".join(notes)
+            if _finding(new_checks):
                 return "finding", "the table's %s case %s; a check is a finding (a by-design mark never erases " \
                                   "one)" % (how, cid)
             return "service_by_design", "the table's %s case %s" % (how, cid)
     if kept:
         if not cases:
             return recorded, "decided by the runner without the checks (no table to replay its mark)"
-        notes.append("the runner's service_by_design mark is not reproduced by the current table: judged by the "
-                     "checks")
+        info["note"] = "the runner's service_by_design mark is not reproduced by the current table: judged by the " \
+                       "checks"
     if arm == "mcp":
-        code, problem = sc.mcp_host_state(scenario, line, (answer or {}).get("error"), tool_err)
-        if code and problem is None:
-            info["host_state"] = code
+        code, state, detail = sc.host_state_verdict(scenario, line, doc, (answer or {}).get("error"), tool_err)
+        if detail:
+            notes.append(detail)
+        if notes:
+            info["verdict_detail"] = "; ".join(notes)
+        if state == "host_state":
+            info.update(host_state=code, inconclusive_reason=code)
             return "inconclusive", "the MCP runner's host-state rule (%s)" % code
-        if code:
-            notes.append("not the host state %s: %s" % (code, problem))
-    if notes:
-        info["note"] = "; ".join(notes)
+        if state == "undecidable":
+            info["host_state"] = code
+            if _finding(new_checks):   # addendum 11: an undecidable host state never swallows a finding
+                return "finding", "the MCP runner's host-state rule (%s): %s (rule (c)); a check is a finding" % (
+                    code, detail)
+            info["inconclusive_reason"] = detail
+            return "inconclusive", "the MCP runner's host-state rule (%s): %s (rule (c))" % (code, detail)
+    elif notes:
+        info["verdict_detail"] = "; ".join(notes)
     if raised:
         return ("fail" if arm == "mcp" else "error"), None
     return rule(new_checks), None
@@ -310,10 +353,11 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                 new_checks = [{"check": "evaluate", "outcome": "fail",
                                "detail": "exception in checks.evaluate: %s: %s" % (type(exc).__name__, exc)}]
                 raised = True
-            terr = tool_error(raw_doc(arm_dir, line), answer) if name == "mcp" else None
+            doc = raw_doc(arm_dir, line) if name == "mcp" else None
+            terr = tool_error(doc, answer) if name == "mcp" else None
             info = {}
             outcome, kept = outcome_of(checks_mod, name, scenario, answer, line, new_checks, raised, cases, terr,
-                                       info)
+                                       info, doc)
             diff = changed_checks(line.get("checks"), new_checks)
             entry = entries.get(key) or {"digest": line.get("answer_digest"), "time_limited": line.get("time_limited")}
             row.update({"checks": new_checks, "outcome": outcome, "answer_digest": entry["digest"],
@@ -324,15 +368,19 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None):
                                    "checks_changed": [c["check"] for c in diff]}
             if kept:
                 row["reevaluation"]["kept"] = kept
-            if info.get("note"):
-                row["reevaluation"]["note"] = info["note"]
             # as async's runner records them: the matched case and the failing checks it explains, whenever a case
             # matched (the replay's, not the recorded run's)
-            for k in ("service_by_design_case", "explained_checks"):
+            for k in ("service_by_design_case", "explained_checks", "verdict_detail", "inconclusive_reason"):
                 row.pop(k, None)
             if "service_by_design_case" in info:
                 row["service_by_design_case"] = info["service_by_design_case"]
                 row["explained_checks"] = info.get("explained_checks") or []
+            for k in ("verdict_detail", "inconclusive_reason"):
+                if info.get(k):
+                    row[k] = info[k]
+            for k in ("by_design_cases", "host_state", "note"):
+                if info.get(k):
+                    row["reevaluation"][k] = info[k]
             counts["kept" if kept else "reevaluated"] += 1
             if outcome != line.get("outcome"):
                 counts["outcome_changed"] += 1

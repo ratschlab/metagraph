@@ -13,18 +13,20 @@
   },
   "service_answer.stage": "where the answer is decided: mcp_local (tool body, no REST call), fastmcp_args (MCP SDK argument validation/coercion), mcp_schema (no argument), rest_model (the REST pydantic model, mapped to 400 by the route class), rest_validator (app.pattern.validate), rest_planner (app.traversal planner/presets), route (the REST route), plan (the request the service builds), job (after the backend call)",
   "service_answer.http": "the HTTP status of the REST route behind the tool (the MCP result itself has none: compare error.code / error.field); null for mcp_local / fastmcp_args / answered",
+  "service_answer.text_contains": "the stable part of the service's error text (contained in it). ADDED 2026-10-14 (triage-2 B-07): `a | b` lists alternatives, any one of which holds (each part stripped), as for code and field: pattern.predicate_form_other states one text per form fault",
   "agreement": {
    "by_design": "a mapped pair counts as agreement",
    "not_implemented_mcp": "the scenario is 'not implemented yet via MCP'",
    "service_only": "no host counterpart (service behaviour only)"
   },
-  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`; a direct answer outside `direct` is read by `direct_mismatch` (ADDED 2026-10-14). Load validation (ADDED 2026-10-14, triage-2 B-08; the async runner's ServiceByDesign.problems refuses the table, naming the case): `routes` is required (a non-empty list of routes); answer_match states only routes, direct, mcp, direct_mismatch; a side only http, code, text_contains, field, slot_code; on the mcp side `http` is one integer and `slot_code` is not allowed (a direct-side key: a host 200 body's slot refusal); direct_mismatch is disagree or timing",
+  "answer_match": "ADDED 2026-10-13: an answer-triggered case: it applies to any scenario on one of `routes` whose MCP answer matches `mcp` (http, code, text_contains, field), whatever the scenario names; the comparator marks the pair verified when a direct execution of the scenario matches `direct`; a direct answer outside `direct` is read by `direct_mismatch` (ADDED 2026-10-14). Load validation (ADDED 2026-10-14, triage-2 B-08; the async runner's ServiceByDesign.problems refuses the table, naming the case): `routes` is required (a non-empty list of routes); answer_match states only routes, direct, mcp, direct_mismatch, wall_rule; a side only http, code, text_contains, field, slot_code; on the mcp side `http` is one integer, `slot_code` is not allowed (a direct-side key: a host 200 body's slot refusal) and `code` is required (ADDED 2026-10-14, peer review R5: an mcp side with only an http would make every answer on the route with that status by design); direct_mismatch is disagree or timing; wall_rule is budget_minus_reserve",
   "answer_match.mcp.field": "ADDED 2026-10-14 (optional): the refused argument's field (the MCP error's `field`) as a pattern: `<...>` placeholders match anything, `a | b` lists alternatives (each part stripped), matched like a named case's service_answer.field; an MCP answer that names no field does not match. It tells apart refusals of one code and text whose host answers differ (pattern.caps_zero: a cap of 0 the host answers, against time_budget_ms 0 with the same REST text, which the host refuses)",
   "answer_match.direct.slot_code": "ADDED 2026-10-14 (optional): a pattern slot's error code: the direct answer (a 200) holds a pattern whose slot is refused with it (body.patterns[].error.code; `a | b` lists alternatives), where the service refuses the whole submit (mismatch.above_kind_cap: the host's mismatches_above_cap slot)",
   "answer_match.direct_mismatch": "ADDED 2026-10-14 (triage-2 B-03; stated on every answer_match of the table; the comparator reads it, the MCP runner has no direct arm): what a direct answer outside answer_match.direct means for the pair. \"disagree\": any direct HTTP answer outside the direct side disagrees (pattern.caps_zero, mismatch.above_kind_cap, traverse.empty_seeds: validation or a stale cap, no timing involved). \"timing\": a direct 200 or a direct 503 deadline (code deadline) reads unverified, a timing difference (the same request, the host finished at another time); any other direct answer (e.g. a 4xx refusal) disagrees (pattern.deadline_ends_task). A direct transport error or a missing direct answer is always unverified, whatever the value. The MCP execution's own checks still count: a finding is never erased by the mark (see explains_checks)",
+  "answer_match.wall_rule": "ADDED 2026-10-14 (optional; peer review R1, the design lead's threshold; judged on the MCP execution, its mcp_phases and raw calls): \"budget_minus_reserve\" = the answer-triggered case applies only when the MCP execution's service-side wall reaches the request's time_budget_ms less the finalisation reserve (the reserve the MCP answer's error text states, \"finalisation reserve of <N> ms\", else 250 ms: app/pattern/validate.py DEFAULT_FINALIZE_RESERVE_MS): the host sends its deadline at budget - reserve at the earliest, so a relayed deadline before it is no host deadline (a budget bug the case would hide). The wall, in order: mcp_phases.backend_ms (the service-measured backend call); for a pattern search, the deadline-ended task's HTTP try (its diagnostic log's last held-slot line, http 1 fail 1 <s>s: the failed POST's seconds, app/queue/held_span.py; the smallest over such tasks; a task without one, or with more than one try, gives none). The request's time_budget_ms is the MCP arguments' (else the direct request's). A KNOWN wall below the threshold: the case does not apply, matching continues with the other cases and, when none applies, the checks judge. CHANGED 2026-10-14 (rule (c), the design lead): no wall (no backend_ms, no usable slot line) or no threshold (no request budget): plausibility undecidable: the case matched (recorded) and the execution is inconclusive with verdict_detail \"no service-side timing: plausibility undecidable\" or \"no threshold known: plausibility undecidable\", never the checks' fail (a finding still wins). The line's verdict_detail says why. pattern.deadline_ends_task states it",
   "direct_expectation.http": "the host's HTTP status: an integer, or (ADDED 2026-10-14) a list of statuses any one of which holds, e.g. [200, 503] where the host accepts the request and may still overrun its budget (pattern.time_budget_below_minimum); null: not stated",
   "direct_expectation.text_prefix": "ADDED 2026-10-14 (optional): the host's error text starts with it, for a text whose tail varies with the request (resolve.unknown_label names the label); `text` is then null. Compared as is (no digit folding)",
-  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)"
+  "explains_checks": "ADDED 2026-10-14 (triage-2 B-01; answered / clamped cases only, stated on each of them): the checks (checks.py names) whose failure the service's path explains. An entry is a check name (it explains every failure of that check) or (ADDED 2026-10-14, peer review R4) an object {\"check\": <name>, \"detail_matches\": <regex>}: it explains a failure of that check only when the check's detail matches the regex completely (Python re.fullmatch with re.S; checks.py joins several violations of one check with \"; \" into one detail, so a detail carrying another violation beside the explained one is not matched). Load validation: a list; an object states check (a non-empty name) and detail_matches (a regex that compiles) and no other key (traverse.duplicate_seeds explains only the merged-seed count message of invariants, \"1 results for 2 seeds\"). An answered or clamped match never decides before the checks: F = the execution's failing checks, E = F ∩ explains_checks, U = F - E; U non-empty -> fail; else r = checks.scenario_outcome over the checks without E: r finding -> finding, E non-empty -> service_by_design, else r. [] (or absent) explains nothing: the checks decide and the case is a note (the line records service_by_design_case and explained_checks = E). A refused, relayed or answer-triggered match stays service_by_design (the host never answered), except that any check that is a finding makes it finding: a by-design mark never erases a finding (e.g. a relayed deadline's budget_respected)"
  },
  "assumptions": [
   "staging settings at their code defaults: PATTERN_DB_BUDGETS_MS empty, PATTERN_DEFAULT_MAX_ANCHORS unset, TRAVERSAL_ADVANCED_ENABLED false, IDEMPOTENCY_REUSE_DONE true, BACKEND_CACHE_MAX_ANSWER_AGE_SECS 604800, PATTERN_MAX_* / TRAVERSAL_* as in app/settings.py",
@@ -1712,10 +1714,10 @@
     "outcome": "refused_at_submit",
     "http": 400,
     "code": "pattern_invalid",
-    "text_contains": "predicate",
-    "field": "predicate<path of the first fault>",
+    "text_contains": "a predicate is an object with exactly one operator | unknown operator | a list of at least one name (a column label, a string) is required | a name is a non-empty string | is listed twice in this list | an object of exactly n (an integer) and labels (a list of names) | an integer from 1 to the list's length | and / or / not nest at most | a non-empty list of predicates is required | does not serve the predicate operator",
+    "field": "predicate | predicate.<path of the first fault>",
     "stage": "rest_validator",
-    "detail": "Row 4b names the path of the first fault (e.g. predicate.and[1].none[0]); the service also refuses an operator the host's predicate.operators does not list."
+    "detail": "Row 4b names the path of the first fault (e.g. predicate.and[1].none[0]); the service also refuses an operator the host's predicate.operators does not list. text_contains lists the service's text of each form fault (alternatives, app/pattern/validate.py _predicate_form / _predicate_names) and the host-operator refusal; field is predicate for a fault of the whole predicate (or an operator the host does not list), else predicate.<path>: never predicate_scope, predicate_strands or predicates (triage-2 B-07)"
    },
    "agreement": "by_design",
    "source": [
@@ -3234,7 +3236,10 @@
     "detail": "The service merges identical (sequence, labels) seeds onto the first before sending; the receipt lists duplicate_seeds [{submitted, kept}]."
    },
    "explains_checks": [
-    "invariants"
+    {
+     "check": "invariants",
+     "detail_matches": "[1-9][0-9]* results for (?:[2-9]|[1-9][0-9]+) seeds"
+    }
    ],
    "agreement": "by_design",
    "source": [
@@ -4057,7 +4062,8 @@
      "code": "search_failed",
      "text_contains": "pattern_deadline"
     },
-    "direct_mismatch": "timing"
+    "direct_mismatch": "timing",
+    "wall_rule": "budget_minus_reserve"
    }
   },
   {

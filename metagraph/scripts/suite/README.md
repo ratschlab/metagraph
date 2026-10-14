@@ -249,12 +249,13 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   by design when the MCP executions match `service_answer`, else `disagree` side mcp; `by_design` ->
   service-side by design when the pair holds: the direct answer matches `direct_expectation` (http, code, text
   with digits ignored, each where stated; the code may also be a pattern slot's) and the MCP executions match
-  `service_answer` (`refused_at_submit` / `relayed`: error.code (alternatives written `a | b`),
-  `text_contains` and `field` where the MCP line states them, a line without an error only when the MCP
-  runner marked it service_by_design; `answered` / `clamped`: no error, and verified only by a line that
-  records the service's answer, a 2xx status or a backend call: review N11). A pair that does not hold is
-  `disagree` with the side (direct / mcp / table for an unknown case id). With a list of cases the first
-  whose pair holds decides. `verified` is true only when every side the case has was checked and held; the
+  `service_answer` as async's runner decides each MCP execution (lane S5b, B-02: `refused_at_submit` /
+  `relayed`: error.code (alternatives written `a | b`), the text containing `text_contains` (`a | b` = either)
+  and the field of the tool's error object matching `field`, each a requirement whether or not the line states
+  it; `answered` / `clamped`: no error, and verified only by a line that records the service's answer, a 2xx
+  status or a backend call: review N11; since lane S5b an answered / clamped case is a note, the checks are
+  compared: "Lane S5b" below). A pair that does not hold is `disagree` with the side (direct / mcp / table for an
+  unknown case id). The MCP executions are matched one by one as the runner matches them (lane S5b). `verified` is true only when every side the case has was checked and held; the
   report counts verified and unverified by-design pairs. The MCP arm's execution lines should carry `error`
   {code, text, field}.
 - Answer-triggered cases (`answer_match` {routes, direct, mcp}, each side {http, code (or `a | b`),
@@ -708,7 +709,9 @@ lock, the ssh connection or the release GET).
   kept: `error` (no answer, transport, decode, a busy deployment; but an `error` whose recorded checks are the
   checks module's own exception is judged again), `not_implemented_mcp`, `service_by_design` (async's table; also
   an MCP answer an answer-triggered case of the table matches, `--by-design PATH`, default this directory's), and
-  async's host-state rule (an MCP answer refused with `uninterruptible_overrun_exceeds_allowance` the scenario does
+  async's host-state rule (lanes S5 and S5b: the named-case and answer-case replay, `resolve_timeout` and
+  `traversal_resolve_deadline` with their plausibility rules, below; an MCP answer refused with
+  `uninterruptible_overrun_exceeds_allowance` the scenario does
   not expect is inconclusive). A new exception in checks.evaluate is `error` on a direct arm and `fail` on the MCP
   arm, as the runners record it.
 - Output, beside the recorded files, which all stay: `arms/<arm>/executions.reevaluated.jsonl` (the recorded line
@@ -799,9 +802,9 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   503 deadline, says nothing about the rest's pair); a disagreement of the rest is the class, with `answer_case`.
   reevaluate.py applies the answer case before keeping a runner's named-case mark, so the execution names the
   answer case. answer_match sides: direct {http (a status or a list), code (top-level or slot), slot_code (the
-  codes of body.patterns[].error), text_contains}, mcp {http (a status or a list), code, text_contains, field (as
-  above; an MCP answer that names no field does not match)}, as async's runner reads them (`answer_matches`); the
-  runner applies the named cases first, the comparator the answer cases first (B6).
+  codes of body.patterns[].error), text_contains}, mcp {http (one status: lane S5b, async's runner compares it by
+  equality), code, text_contains, field (as above; an MCP answer that names no field does not match)}, as async's
+  runner reads them (`answer_matches`); since lane S5b both apply the named cases first.
 - The runner's matcher replayed (VERIFY-RP G08 point 3; the coordinator's second addendum asks the re-evaluation to
   reproduce async's own replay). reevaluate.py applies the current table to every recorded MCP answer as async's
   runner at 789fb5f0 does (`compare.named_cases`, `compare.service_answers`: the named cases with their
@@ -918,3 +921,63 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   min_bp, with that reason, is the same truth gap. The regime is the answer's capabilities or the graphlet's H
   record (basic on this index).
 
+
+### The MCP verdict, the comparator and the merge (async's runner at e334715b is the reference)
+- The table: async's e334715b (`git -C /Users/raetsch/tmp/mgss/wt-suite2 show
+  e334715b:scripts/bench/vendor_suite/service_by_design.json`, 154,008 bytes, sha256 0fcf7e7d..., 130 cases):
+  `explains_checks` on every answered / clamped case (a check name, or {check, detail_matches}: only a failure whose
+  detail the regex matches completely), `answer_match.direct_mismatch` (disagree | timing) on the four answer-
+  triggered cases, `answer_match.wall_rule` (budget_minus_reserve) on pattern.deadline_ends_task, text_contains
+  alternatives on pattern.predicate_form_other. `compare.load_by_design` refuses what async's runner refuses at load
+  (`table_problems`: an answer_match without routes, an unknown key of it or of a side, an MCP side with an http
+  list, a slot_code or no code, an unknown direct_mismatch or wall_rule, an explains_checks that is not a list of
+  valid entries or sits on a refused / relayed case): `TableError`, compare.py and reevaluate.py exit 4.
+- The verdict (reevaluate.outcome_of replays the runner's `judge`): the cases the scenario names whose
+  service_answer the MCP answer matches (in the order named; several answered ones apply together), else the first
+  answer-triggered case whose MCP side matches and whose wall rule holds or cannot be decided. A refused / relayed /
+  answer-triggered match is service_by_design, `finding` when a check is a finding (a by-design mark never erases
+  one). An answered / clamped match never decides before the checks (B-01): F = the failing checks (fail, or an
+  outcome outside the vocabulary), E = those of F with outcome fail that an entry of the union of the matched cases'
+  explains_checks explains, U = F - E: fail when U is non-empty, else r = the checks' rule without E: finding, or
+  service_by_design when E is non-empty, else r. The line records `service_by_design_case` (the first matched case
+  explaining an item of E, else the first matched) and `explained_checks` (E) whenever a case matched; the outcome a
+  runner's mark the current table does not reproduce is the checks' (B-06, said in `reevaluation.note`); '' = no
+  table (then a runner's mark is kept).
+- Walls and plausibility (suite_common, each threshold one function): the service-side wall only, never the
+  client's (`service_wall`: mcp_phases.backend_ms; for a pattern search the deadline-ended task's one failed HTTP try
+  from the diagnostic log's held-slot line; for a traversal job the last settled attempt's span, then the job's
+  finished_at - started_at, from the raw record's phase_sources). pattern.deadline_ends_task (R1) applies when that
+  wall >= the request's time_budget_ms (the MCP arguments', else the request's) - the finalisation reserve its
+  text states (else 250 ms); a known wall below holds the case back (matching continues, the checks judge).
+  resolve_timeout (R2): wall >= max(budget + reserve + 10,000 ms, the stated "within N s") - 1,000 ms;
+  traversal_resolve_deadline (G22): wall >= budget (the tool error's, else the MCP arguments') - reserve; the R20
+  lockout has no wall rule. Rule (c): an unknown threshold or wall makes the verdict inconclusive with
+  verdict_detail "no threshold known: plausibility undecidable" / "no service-side timing: plausibility
+  undecidable" (the case, or the host-state code, recorded); a finding wins on the wall-rule path and, here only
+  (the coordinator's addendum 11; async's runner returns inconclusive first), on the host-state path too.
+- `inconclusive_reason` on every inconclusive line (rule (c)'s text, the host-state code, or "checks"); compare.json
+  sums it per arm (`summary.inconclusive_by_reason`, from the line or, for a line recorded without it, from the
+  raw record), the report's verdict section lists it, so a run whose deadlines are undecidable does not read clean.
+- merge_run leaves a line the host-state rule or rule (c) made inconclusive (its inconclusive_reason; else the raw
+  record's wall), a by-design decision (refused / relayed / answer-triggered, a finding included) and the checks an
+  answered case explains out of its stricter outcome.
+- compare.mcp_agreement matches each MCP execution as the runner does: an answer-triggered match judges its direct
+  side (`answer_class`; direct_mismatch B-03: "disagree": any direct HTTP answer outside the direct side disagrees,
+  "timing": a direct 200 or 503 deadline is unverified, another answer disagrees; a transport error or no direct
+  answer is unverified; without the key unverified), a refused / relayed named match its pair (`by_design_class`,
+  against the direct executions no answer-triggered case explains), and the executions an answered case matched or
+  none did are compared check by check (`check_agreement`), the explained checks apart: their difference alone is
+  service_by_design (`by: explains_checks`, verified by the case's direct side), any other difference disagrees, and
+  the case is a note (`by_design_notes`). Host-state and undecidable executions read neither way; all of them is
+  not_comparable (B-09). A disagreement anywhere is the class, except when the scenario names a not_implemented_mcp
+  case (resolve.not_expressible.bounds_max_query_bp: the difference is the expressibility gap, as the first named
+  case not disagreeing decided before); a by-design class is verified only when every other part agrees (B-04).
+  Known keys are checked before an unknown one makes a side unverified (B-05). `--reevaluated` reads the table the
+  re-evaluation replayed and warns on another (B-10).
+- The direct arms' class `timing` (VERIFY-2 item 5, all its conditions): the outcomes of a repeat differ only
+  because one side's own answer states a time limitation (a stop by time, a 503 deadline), that side reads
+  inconclusive, the other pass or inconclusive, no check both evaluated differs, and the stopped answer is
+  consistent with the complete one (/pattern: every exact count equal, at_least <= exact, at_most >= exact;
+  /traverse: every stopped path a prefix of a complete one; a 503: no content); or (G27) a repeat inconclusive only
+  by its determinism check after a time-limited earlier repeat, with the other side's answer the same. Counted
+  apart in compare.json (`timing`, `timing_scenarios`) and the report.
