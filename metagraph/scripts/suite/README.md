@@ -1880,3 +1880,13 @@ failing on 14552938.
   strings; on the MCP side one string (the MCP side's code stays the "states no code" rule). The shipped table
   passes, so nothing recorded moves. The runner reads the MCP side with str() and validates no type: it should
   refuse the same values (MIRROR, to agree with async).
+
+### A runner's rule (c) without a table (for async: the no-table handling)
+- With `--by-design ''` (no table), a runner's rule (c) inconclusive on a by-design case (inconclusive, its
+  service_by_design_case, inconclusive_reason an undecidable plausibility) was not kept: reevaluate judged it by its
+  checks (fail) and compare compared it check by check (disagree), while a runner's service_by_design mark and a
+  by-design finding are kept in the same situation. `compare.runner_rule_c_by_design` names such a line; without a
+  table reevaluate keeps it inconclusive ("decided by the runner's by-design case X by rule (c) (...); no table to
+  replay it", the case, the runner's record and its inconclusive_reason kept) and compare sets it aside as
+  undecidable (not_comparable when nothing else is judged; another repeat still decides). With a table nothing
+  changes (the case is replayed); the recorded runs are re-evaluated with the table, so nothing moves.

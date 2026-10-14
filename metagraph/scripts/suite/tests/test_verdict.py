@@ -227,5 +227,67 @@ class TextContainsGrammarTest(unittest.TestCase):
         self.assertTrue(cases)
 
 
+class RuleCWithoutTableTest(unittest.TestCase):
+    """With no table, a runner's rule (c) inconclusive on its by-design case is kept: inconclusive in the
+    re-evaluation, neither for nor against the direct arm in the comparison."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        os.makedirs(os.path.join(self.dir, "raw"))
+        self.s = {"id": "M-1", "route": "POST /pattern", "request": {"patterns": [], "time_budget_ms": 60000},
+                  "mcp": {"tool": "pattern_search", "arguments": {"time_budget_ms": 60000}},
+                  "expect": [{"check": "status", "args": {"http": 200}}]}
+        self.ok = [st("pass"), st("pass", "invariants"), st("pass", "count_relation")]
+        self.bad = [st("fail"), st("fail", "invariants"), st("fail", "count_relation")]
+        self.err = {"code": "search_failed",
+                    "text": "pattern_deadline: pattern: the answer could not be written within time_budget_ms (60000 ms)"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def raw_line(self, arm, repeat, http=200, error=None, outcome="pass", checks=None, **extra):
+        ln = line("M-1", arm, repeat, T0, 10.0, outcome=outcome, http=http, error=error, checks=checks)
+        ln.update(extra)
+        sc.write_gz_json(os.path.join(self.dir, ln["raw"]), {"answer": {"http": http, "body": None, "error": error}})
+        return ln
+
+    def rule_c(self, **extra):
+        return self.raw_line("mcp", 0, http=502, error=self.err, outcome="inconclusive", checks=list(self.bad),
+                             inconclusive_reason=sc.UNDECIDABLE_NO_WALL,
+                             service_by_design_case="pattern.deadline_ends_task", explained_checks=[],
+                             verdict_detail=sc.UNDECIDABLE_NO_WALL, **extra)
+
+    def test_compare_without_table_is_not_comparable(self):
+        d = {"direct-local": {0: self.raw_line("direct-local", 0, checks=list(self.ok))}}
+        res = cmp.mcp_agreement({0: self.rule_c()}, d, self.s, {}, self.dir)
+        self.assertEqual((res["class"], res["by"]), ("not_comparable", "undecidable plausibility"))
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        self.assertEqual(cmp.mcp_agreement({0: self.rule_c()}, d, self.s, cases, self.dir)["class"], "not_comparable")
+        # another repeat failing its checks still decides
+        broken = self.raw_line("mcp", 1, outcome="fail", checks=[st("pass"), st("fail", "invariants", "x"),
+                                                                   st("pass", "count_relation")])
+        res = cmp.mcp_agreement({0: self.rule_c(), 1: broken}, d, self.s, {}, self.dir)
+        self.assertEqual(res["class"], "disagree")
+
+    def test_reevaluate_without_table_keeps_it(self):
+        import reevaluate
+
+        class Checks(object):
+            scenario_outcome = staticmethod(sc.outcome_from_checks)
+        info = {}
+        ans = {"http": 502, "error": self.err, "body": None}
+        out, kept = reevaluate.outcome_of(Checks(), "mcp", self.s, ans, self.rule_c(), self.bad, False, {}, None,
+                                          info, None)
+        self.assertEqual(out, "inconclusive")
+        self.assertIn("rule (c)", kept)
+        self.assertEqual(info["inconclusive_reason"], sc.UNDECIDABLE_NO_WALL)
+        self.assertEqual(info["service_by_design_case"], "pattern.deadline_ends_task")
+        # an inconclusive line naming no case is judged by its checks as before
+        plain = dict(self.rule_c(), service_by_design_case=None)
+        self.assertEqual(reevaluate.outcome_of(Checks(), "mcp", self.s, ans, plain, self.bad, False, {}, None, {},
+                                               None)[0], "fail")
+
+
 if __name__ == "__main__":
     unittest.main()

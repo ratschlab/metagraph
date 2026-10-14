@@ -1872,6 +1872,16 @@ def line_explained_items(line, matched, recorded=None):
     return items
 
 
+def runner_rule_c_by_design(line):
+    """Whether an MCP execution records the runner's rule (c) on a by-design case: inconclusive, the case recorded
+    (service_by_design_case), inconclusive_reason an undecidable plausibility (suite_common.UNDECIDABLE: the case's
+    answer matched, its wall rule could not be decided). With no table to replay the case, the runner's decision
+    is kept as such: inconclusive in a re-evaluation, neither for nor against the direct arm in the comparison, as a
+    runner's service_by_design mark and a by-design finding are kept without a table."""
+    return line.get("arm", "mcp") == "mcp" and line.get("outcome") == "inconclusive" and \
+        bool(line.get("service_by_design_case")) and line.get("inconclusive_reason") in sc.UNDECIDABLE
+
+
 def case_ids(scenario):
     """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
     ids = ((scenario or {}).get("mcp") or {}).get("by_design")
@@ -2196,6 +2206,9 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
     undecided, recorded_items = [], {}
     for r in judged:
+        if not cases and runner_rule_c_by_design(r):
+            undecided.append(r)   # the runner's rule (c) on its case, no table to replay it: neither for nor against
+            continue
         ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
         walls = []
         matched, how = case_matches(cases, scenario, ans, terr, r, doc, walls)

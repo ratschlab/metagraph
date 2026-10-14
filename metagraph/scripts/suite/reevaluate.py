@@ -31,7 +31,8 @@ when a failing check item is not one the matched cases explain, else finding, se
 item is explained, else the checks' outcome); the line records the case (`service_by_design_case`), the explained
 checks (`explained_checks`, names) and items (`explained_items`, indices into checks: B5b-06) whenever a case
 matched. A runner's service_by_design mark the current table does not reproduce is judged by the checks (B-06), and
-says so; with no table a runner's mark, and a by-design finding (B5b-10), are kept. Then the host-state rule (an
+says so; with no table a runner's mark, a by-design finding (B5b-10) and a rule (c) inconclusive on its case
+(compare.runner_rule_c_by_design) are kept. Then the host-state rule (an
 unexpected compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of
 suite_common.host_state_verdict admits is inconclusive; one it rejects is judged by the checks, and so is a relayed
 /resolve deadline on a discovery that sent no budget (rule 1) and an answer the client's own wall proves premature
@@ -244,6 +245,13 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         _recorded_mark(line, info)
         return recorded, "decided by the runner's by-design case %s (a finding the mark never erases); no table " \
                          "to replay it" % line.get("service_by_design_case")
+    if arm == "mcp" and not cases and compare.runner_rule_c_by_design(dict(line, arm=arm)):
+        # with no table the runner's rule (c) on its case (the wall rule undecidable) is its decision, kept as its
+        # service_by_design mark is: inconclusive, the case and the class recorded
+        _recorded_mark(line, info)
+        info["inconclusive_reason"] = line.get("inconclusive_reason")
+        return recorded, "decided by the runner's by-design case %s by rule (c) (%s); no table to replay it" % (
+            line.get("service_by_design_case"), line.get("inconclusive_reason"))
     rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
     notes = []
     warnings = info.setdefault("warnings", [])
