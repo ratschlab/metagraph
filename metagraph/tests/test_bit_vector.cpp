@@ -2,6 +2,10 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <numeric>
+#include <random>
+#include <sstream>
+#include <streambuf>
 
 #include "test_helpers.hpp"
 
@@ -487,6 +491,88 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
     }
 }
 */
+
+// The first |size| bytes of |data| as a stream (no copy)
+class PrefixBuffer : public std::streambuf {
+  public:
+    PrefixBuffer(const std::string &data, size_t size) {
+        char *begin = const_cast<char *>(data.data());
+        setg(begin, begin, begin + size);
+    }
+};
+
+// Whether |Vector| refuses every serialization of |bits| cut at a length of |cuts|: the load
+// answers false, and the part it read is never queried (a build with asserts aborts at a
+// query of a half-read vector). The whole serialization loads.
+template <class Vector>
+void expect_every_cut_refused(const sdsl::bit_vector &bits, const std::vector<size_t> &cuts) {
+    std::ostringstream out;
+    Vector(bits).serialize(out);
+    const std::string serialized = out.str();
+    {
+        PrefixBuffer buffer(serialized, serialized.size());
+        std::istream in(&buffer);
+        Vector whole;
+        ASSERT_TRUE(whole.load(in));
+        ASSERT_EQ(bits.size(), whole.size());
+    }
+    for (size_t cut : cuts) {
+        if (cut >= serialized.size()) {
+            continue;
+        }
+        PrefixBuffer buffer(serialized, cut);
+        std::istream in(&buffer);
+        Vector vector;
+        EXPECT_FALSE(vector.load(in)) << "cut at " << cut << " of " << serialized.size();
+    }
+}
+
+sdsl::bit_vector random_bits(uint64_t size, double density, uint32_t seed) {
+    std::mt19937_64 rng(seed);
+    std::bernoulli_distribution bit(density);
+    sdsl::bit_vector bits(size, 0);
+    for (uint64_t i = 0; i < size; ++i) {
+        bits[i] = bit(rng);
+    }
+    return bits;
+}
+
+template <typename Bitmap>
+class BitVectorCutTest : public ::testing::Test { };
+
+typedef ::testing::Types<bit_vector_stat,
+                         bit_vector_sd,
+                         bit_vector_rrr<>,
+                         bit_vector_il<>,
+                         bit_vector_il<4096>,
+                         bit_vector_hyb<>>
+        CutBitVectorTypes;
+
+TYPED_TEST_SUITE(BitVectorCutTest, CutBitVectorTypes);
+
+// a serialization cut at any length, in its header or in its data, is refused
+TYPED_TEST(BitVectorCutTest, EveryCutOfASerializationIsRefused) {
+    for (double density : { 0.5, 0.05, 0.0 }) {
+        const sdsl::bit_vector bits = random_bits(700, density, 43);
+        std::vector<size_t> cuts(4096);
+        std::iota(cuts.begin(), cuts.end(), 0);
+        expect_every_cut_refused<TypeParam>(bits, cuts);
+    }
+}
+
+// the same on a vector of 2^28 bits (several superblocks of every support): every cut in its
+// first 4 KB and 64 cuts across the rest
+TEST(BitVectorCut, CutsOfALargeSerializationAreRefused) {
+    const sdsl::bit_vector bits = random_bits(1llu << 28, 0.5, 47);
+    std::vector<size_t> cuts(4096);
+    std::iota(cuts.begin(), cuts.end(), 0);
+    // the serializations are about 2^25 to 2^26 bytes: 64 cuts spaced by 2^20 cover them
+    for (size_t i = 1; i <= 64; ++i) {
+        cuts.push_back(i << 20);
+    }
+    expect_every_cut_refused<bit_vector_rrr<>>(bits, cuts);
+    expect_every_cut_refused<bit_vector_il<>>(bits, cuts);
+}
 
 TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
     std::vector<std::initializer_list<bool>> init_lists = {

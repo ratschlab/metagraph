@@ -252,8 +252,13 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
         rk1_.load(in, &vector_);
         slct1_.load(in, &vector_);
         slct0_.load(in, &vector_);
+        // a stream cut short leaves the vector and its supports partly read: they are not
+        // queried
+        if (!in.good()) {
+            return false;
+        }
         num_set_bits_ = rk1_(vector_.size());
-        return in.good();
+        return true;
 
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load "

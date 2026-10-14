@@ -9,6 +9,7 @@
 #include <memory>
 #include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -34,6 +35,7 @@
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "common/serialization.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
@@ -1155,6 +1157,26 @@ TEST(MultiGraphInRam, AFailedLoadThrowsForTheRequest) {
         EXPECT_EQ("Cannot load " + what + " from '" + file + "': could not read contents "
                   "(possibly corrupted or incompatible)", failure(*rd_config));
         fs::copy_file(file + ".kept", file, fs::copy_options::overwrite_existing);
+    }
+    EXPECT_EQ("", failure(*rd_config));
+    // an anchors file of the rrr representation, cut past its tag in its data: refused as
+    // well, its half-read vector never queried (a build with asserts aborts at such a query)
+    {
+        fs::copy_file(anchor, anchor + ".kept", fs::copy_options::overwrite_existing);
+        std::ostringstream rrr;
+        serialize_number(rrr, bit_vector_adaptive::VectorCode::RRR_VECTOR);
+        bit_vector_rrr<>(rd.anchor().to_vector()).serialize(rrr);
+        const std::string serialized = rrr.str();
+        auto write_anchor = [&](size_t length) {
+            std::ofstream out(anchor, std::ios::binary);
+            out.write(serialized.data(), length);
+        };
+        write_anchor(serialized.size());
+        EXPECT_EQ("", failure(*rd_config));
+        write_anchor(8 + (serialized.size() - 8) / 2);
+        EXPECT_EQ("Cannot load anchor from '" + anchor + "': could not read contents "
+                  "(possibly corrupted or incompatible)", failure(*rd_config));
+        fs::copy_file(anchor + ".kept", anchor, fs::copy_options::overwrite_existing);
     }
     EXPECT_EQ("", failure(*rd_config));
 

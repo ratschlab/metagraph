@@ -43,8 +43,9 @@ namespace matrix {
 
 namespace {
 
-// |vector| loaded from |in|: a file cut short, whose load throws (a number read short), fails
-// as any other file it cannot load
+// |vector| loaded from |in|, false when it cannot be: a file cut inside its representation
+// tag makes the load throw (the tag read short), a cut anywhere after the tag makes it return
+// false; both fail as any other file the load refuses
 bool load_bit_vector(bit_vector *vector, std::istream &in) {
     try {
         return vector->load(in);
