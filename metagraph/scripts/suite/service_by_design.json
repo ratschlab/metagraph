@@ -2314,7 +2314,7 @@
     "outcome": "refused_at_submit",
     "http": 400,
     "code": "pattern_out_of_bounds",
-    "text_contains": "is above the maximum 1 for protein patterns on the host of database",
+    "text_contains": "for protein patterns on the host of database",
     "field": "max_mismatches",
     "keys": {
      "requested": 2,
@@ -3545,12 +3545,36 @@
      ]
     },
     {
-     "path": "sequence",
-     "absent": true
+     "any": [
+      [
+       {
+        "path": "sequence",
+        "absent": true
+       }
+      ],
+      [
+       {
+        "path": "sequence",
+        "equals": ""
+       }
+      ]
+     ]
     },
     {
-     "path": "sequence_id",
-     "absent": true
+     "any": [
+      [
+       {
+        "path": "sequence_id",
+        "absent": true
+       }
+      ],
+      [
+       {
+        "path": "sequence_id",
+        "equals": ""
+       }
+      ]
+     ]
     }
    ]
   },
@@ -3936,7 +3960,7 @@
     "http": 400,
     "code": "strategy_out_of_bounds",
     "text_contains": "exceeds its maximum",
-    "field": "bounds.max_extension_bp | bounds.max_steps | bounds.max_paths | bounds.max_output_bp | labels.max_labels_per_node",
+    "field": "bounds.max_extension_bp | bounds.max_steps | bounds.max_paths | bounds.max_output_bp | bounds.max_live_paths | labels.max_labels_per_node",
     "keys": {
      "requested": "<n>",
      "max": "<service maximum>"
@@ -4009,6 +4033,20 @@
         "path": "overrides.bounds.max_output_bp",
         "gt": {
          "service": "service_maxima.max_output_bp"
+        }
+       }
+      ],
+      [
+       {
+        "field": "",
+        "in": [
+         "bounds.max_live_paths"
+        ]
+       },
+       {
+        "path": "overrides.bounds.max_live_paths",
+        "gt": {
+         "service": "service_maxima.max_live_paths"
         }
        }
       ],
@@ -4702,9 +4740,11 @@
     {
      "field": "overrides.",
      "not_in": [
+      "",
       "bounds.*",
       "direction",
       "exhaustive",
+      "labels",
       "labels.max_labels_per_node",
       "labels.seed_label_kind"
      ]

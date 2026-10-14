@@ -1095,7 +1095,7 @@ class Reevaluate(unittest.TestCase):
                                      text=text.replace("labels.max_seed_labels", "bounds.max_extension_bp")))
         out, info = judge(t4, basic, cases)
         self.assertEqual(out, "fail")
-        self.assertIn('request predicate {"field": "overrides.", "not_in": ["bounds.*"', info["verdict_detail"])
+        self.assertIn('request predicate {"field": "overrides.", "not_in": ["", "bounds.*"', info["verdict_detail"])
         # a deployment whose recorded live document enables the advanced path: the case does not apply (judged with
         # the live value, the mismatch with the table's block recorded)
         live = cmp.ByDesignCases(cases, cases.blocks, sc.References(cases.blocks, {"service": {

@@ -438,7 +438,7 @@ class CompareTest(unittest.TestCase):
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         self.assertEqual(info["cases"], 131)   # async's vendored table at 31a2e41f (e427d503's edit, case 131)
-        self.assertEqual(info["sha256"], "e133f6eee21ac511cd556a984d9ccf93924d2012e01bb650d395cb617791dead")
+        self.assertEqual(info["sha256"], "f956503884ad68c7aefc16f8a8b3ac4a783089b9f13845e016284597149b4b60")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
         entry, = cases["traverse.duplicate_seeds"]["explains_checks"]
@@ -1724,10 +1724,19 @@ class RequestPredicatesTest(unittest.TestCase):
                          (["traverse.advanced_path_disabled"], "answer-triggered"))
         self.assertEqual(ev.sources, {"traverse.advanced_path_disabled": {"service_settings.advanced_enabled":
                                                                           "table"}})
+        # a refused field the tool never produces for a basic-only request ("overrides." alone, "overrides.labels"
+        # of a labels section): no refusal of the advanced path (T-labels-0003 sends only basic labels keys)
+        for field in ("overrides.", "overrides.labels"):
+            self.assertEqual(self.match("T-labels-0003", dict(unsent, field=field))[0], [], field)
         # empty seeds for a scenario that sent one; a dna pattern within its cap refused as above the kind's cap
         empty = {"code": "invalid_arguments", "text": "provide `seeds` (a list) or one `sequence` / `sequence_id`"}
         self.assertEqual(self.match("T-walk-0001", empty)[0], [])
         self.assertEqual(self.match("T-edge-0016", empty)[:2], (["traverse.empty_seeds"], "named"))
+        # the tool reads an empty sequence as none
+        self.assertEqual(self.match("T-edge-0016", empty, args=dict(self.v4["T-edge-0016"]["mcp"]["arguments"],
+                                                                    sequence=""))[0], ["traverse.empty_seeds"])
+        self.assertEqual(self.match("T-edge-0016", empty, args=dict(self.v4["T-edge-0016"]["mcp"]["arguments"],
+                                                                    sequence="ACGT"))[0], [])
         kind = {"code": "pattern_out_of_bounds", "field": "max_mismatches",
                 "text": "max_mismatches 2 is above the maximum 1 for protein patterns on the host of database 'x'"}
         self.assertEqual(self.match("M-protein-0010", kind)[:2], (["mismatch.above_kind_cap"], "named"))
@@ -1747,6 +1756,19 @@ class RequestPredicatesTest(unittest.TestCase):
         self.assertEqual(named, [])
         self.assertTrue(walls[0][1].startswith("traverse.bounds_budget_above_preset_row: request predicate "
                                                '{"any": '), walls)
+        # the service maximum of bounds.max_live_paths (1000; presets._check_knobs, outside SERVICE_BOUNDED)
+        live = {"code": "strategy_out_of_bounds", "field": "bounds.max_live_paths",
+                "text": "bounds.max_live_paths = 1001 exceeds its maximum 1000 (the service maximum)"}
+        knob_args = dict(self.v4["T-end-0001"]["mcp"]["arguments"], overrides={"bounds": {"max_live_paths": 1001}})
+        knob = dict(self.v4["T-end-0001"], mcp=dict(self.v4["T-end-0001"]["mcp"], arguments=knob_args,
+                                                    by_design=["traverse.bounds_knob_above_service_maximum"]))
+        self.v4["T-knob"] = dict(knob, id="T-knob")
+        self.assertEqual(self.match("T-knob", live)[:2], (["traverse.bounds_knob_above_service_maximum"], "named"))
+        self.assertEqual(self.match("T-knob", live, args=dict(knob_args, overrides={"bounds": {
+            "max_live_paths": 1000}}))[0], [])
+        # above the kind's cap with a host whose protein cap is another: the service text states the live cap
+        two = dict(kind, text=kind["text"].replace("maximum 1", "maximum 2"))
+        self.assertEqual(self.match("M-protein-0010", two)[0], ["mismatch.above_kind_cap"])
         # trie's row (30000) on a trie request
         trie = dict(self.v4["T-end-0001"]["mcp"]["arguments"], preset="trie",
                     overrides={"bounds": {"time_budget_ms": 20000}})
