@@ -3066,13 +3066,17 @@ stop would not skip them.
 
 The engine's own retention for the raw release (24-byte descriptors, up to `max_predicate_contexts`) is outside
 the account, as the label-free descriptors of §7.6 are (a long pattern's kept walks are in it, §12.1). The result
-objects that a pattern's answer keeps stay charged until the request ends, with every projection: a selected
-context's result object (with `output.labels: "none"` as with a projection, whose labels hold its descriptor,
-§14.4) and the objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`, §12.1). The bound
-is the request's, over all its patterns: a later pattern finds the account as the earlier ones left it, so its
-results can be cut (`partial`: `cut: max_memory`) or withheld (`all_or_count`: `output_budget`, `stop {output,
-max_memory}`) where the same pattern alone is answered whole, and `work.memory_bytes` grows with what the earlier
-patterns kept. The objects of a withheld or cut `all_or_count` list are released with it.
+objects that a pattern's answer keeps stay charged until the request ends, whatever the projection: the result
+object of a context the pass selected (with `output.labels: "none"` as with a projection, whose labels hold its
+descriptor, §14.4) and the objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`,
+§12.1). A constant `true` normal form has no pass: its contexts are answered as the unfiltered request (§19.6) and
+charged as that request charges them, so only under `output.labels: "all"`, whose descriptors are charged as in
+§14.4. The bound is the request's, over all its patterns: a later pattern finds the account as the earlier ones
+left it. Where the same pattern alone is answered whole, its selection can then stop on the account (`stop
+{selection, max_memory}`, or a row it had to read refused, `rows_refused`; `all_or_count`: `predicate_budget`), and
+its results can be cut (`partial`: `cut: max_memory`) or withheld (`all_or_count`: `output_budget`) with `stop
+{output, max_memory}`; `work.memory_bytes` grows with what the earlier patterns kept. The objects of a withheld or
+cut `all_or_count` list are released with it.
 
 ### 19.10 The answer
 
