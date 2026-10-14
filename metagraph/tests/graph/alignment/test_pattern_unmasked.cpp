@@ -219,8 +219,8 @@ struct Twin {
 Twin build_twin(size_t k, const std::vector<std::string> &records, DeBruijnGraph::Mode mode,
                 bool batch = false) {
     Twin twin { build(k, records, mode, batch), build(k, records, mode, batch) };
-    DBGSuccinct &unmasked = const_cast<DBGSuccinct&>(base_dbg(*twin.unmasked));
-    unmasked.reset_mask();
+    twin.unmasked = mtg::test::without_mask(twin.unmasked);
+    const DBGSuccinct &unmasked = base_dbg(*twin.unmasked);
     const DBGSuccinct &masked = base_dbg(*twin.masked);
     EXPECT_TRUE(masked.get_mask());
     EXPECT_FALSE(unmasked.get_mask());
@@ -1225,6 +1225,39 @@ void for_random_unmasked_cases(uint32_t seeds, Visit visit) {
             visit(twin, records, mode, text, kind, make_request(scope, strands));
         }
     }
+}
+
+// the dummy edges ('$') the wrapper of |graph| reports, over both strands of its k-mers
+size_t sentinel_edges(const DeBruijnGraph &graph) {
+    const auto &canonical = dynamic_cast<const CanonicalDBG&>(graph);
+    const DBGSuccinct &stored = base_dbg(graph);
+    const node_index offset = stored.max_index();
+    size_t sentinels = 0;
+    for (node_index node = 1; node <= canonical.max_index(); ++node) {
+        // the k-mers the graph holds (the masked twin's dummy k-mers are not among them)
+        if (!stored.in_graph(node > offset ? node - offset : node)) {
+            continue;
+        }
+        const std::string kmer = canonical.get_node_sequence(node);
+        if (kmer.find('$') != std::string::npos) {
+            continue;
+        }
+        canonical.call_outgoing_kmers(node, kmer, [&](node_index, char c) {
+            sentinels += c == BOSS::kSentinel;
+        });
+        canonical.call_incoming_kmers(node, kmer, [&](node_index, char c) {
+            sentinels += c == BOSS::kSentinel;
+        });
+    }
+    return sentinels;
+}
+
+TEST(PatternUnmasked, TheTwinOfAPrimaryGraphIsWrappedWithoutItsMask) {
+    // the wrapper of the unmasked twin reports the dummy edges of the record ends, as the
+    // wrapper of a graph loaded without its mask does; the masked twin's reports none
+    const Twin twin = build_twin(5, { "ACGTTGCA", "GGATCCTTAG" }, DeBruijnGraph::PRIMARY);
+    EXPECT_EQ(0u, sentinel_edges(*twin.masked));
+    EXPECT_LT(0u, sentinel_edges(*twin.unmasked));
 }
 
 TEST(PatternUnmasked, RandomPatternsAgainstOracles) {

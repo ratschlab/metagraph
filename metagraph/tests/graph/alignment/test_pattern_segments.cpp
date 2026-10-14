@@ -500,7 +500,7 @@ TEST(PatternSegments, GraphsWithoutTheMaskAnswerTheMaskedTwins) {
         const std::string what = "round " + std::to_string(round) + ": " + describe(c);
         auto masked = build_graph<DBGSuccinct>(c.k, c.records, c.mode);
         auto unmasked = build_graph<DBGSuccinct>(c.k, c.records, c.mode);
-        const_cast<DBGSuccinct&>(oracle_base_dbg(*unmasked)).reset_mask();
+        unmasked = mtg::test::without_mask(unmasked);
         ASSERT_FALSE(oracle_base_dbg(*unmasked).get_mask());
         const Pattern pattern = Pattern::parse(c.kind, c.text);
         const Request request = segment_request(c.plan, c.strands, c.max_anchors);
@@ -885,7 +885,7 @@ TEST(PatternSegments, WindowsNotAdmitted) {
         EXPECT_GT(not_admitted, 0u);
 
         auto unmasked = build_graph<DBGSuccinct>(11, records, DeBruijnGraph::BASIC);
-        const_cast<DBGSuccinct&>(oracle_base_dbg(*unmasked)).reset_mask();
+        unmasked = mtg::test::without_mask(unmasked);
         ASSERT_FALSE(oracle_base_dbg(*unmasked).get_mask());
         const SegmentRunResult twin = run_segments(*unmasked, Pattern::parse(PatternKind::IUPAC,
                                                                              text),
