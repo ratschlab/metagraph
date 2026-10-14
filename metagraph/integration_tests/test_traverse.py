@@ -2495,6 +2495,10 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(409, dup.status_code, dup.text)
         self.assertNotIn('usage', dup.json())
         self.assertEqual('finished', dup.json()['attempt']['state'])
+        # the other attempt's state as GET states it: a finished id has no tombstone member
+        self.assertNotIn('tombstone', dup.json()['attempt'])
+        self.assertEqual(sorted(requests.get(url + '/traverse/attempt/api-ok').json()),
+                         sorted(dup.json()['attempt']))
         # nothing left to cancel
         cancel = self._post('traverse/cancel', {'attempt_id': 'api-ok'})
         self.assertEqual(404, cancel.status_code, cancel.text)
