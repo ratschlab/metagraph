@@ -1341,9 +1341,13 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   (every path of every requested arm), on the full and the graphlet form alike. A structural reason the path counts
   has a label_end event of it on its leaf at the path's end (judged where the leaf states its events). `branch`:
   max_label_branches finite, the lineage's branches at the end equal to it (an ambiguous source ends `branch` once
-  branches + 1 exceeds the allowance, and no lineage holds more), a route to the leaf through at least that many
-  ambiguous splits (each branch taken is one; a split whose kind is not stated counts as ambiguous), and two or
-  more structural successors where the event states them. `minority` (also `branch` with that text):
+  branches + 1 exceeds the allowance, and no lineage holds more), and two or more structural successors where the
+  event states them; without a quorum knob also a route to the leaf through at least that many ambiguous splits
+  (each branch taken is then a split; a split whose kind is not stated counts as ambiguous). Under a quorum knob
+  (min_successor_labels >= 2, min_successor_fraction > 0 or min_live_labels > 1) a branch can be taken without a
+  split: the walker raises the lineage's branches on every admissible successor before the quorum drops the
+  minority ones, and a single followed successor records no split (walker.cpp at fe563f38), so the split count is
+  not required there. `minority` (also `branch` with that text):
   min_successor_labels >= 2 or min_successor_fraction > 0; `below_min_labels`: min_live_labels > 1;
   `split_limit`: max_splits_per_path finite and a route through that many splits; `edge_reuse`, `edge_reuse_rc`,
   `rejoined_seed`: a blocked event of that reason on the leaf at the path's end ("blocked continuations are

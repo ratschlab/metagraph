@@ -2736,8 +2736,11 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[s
       (judged where the leaf states its events);
     - `branch`: the lineage was ambiguous with its allowance spent (branches + 1 > max_label_branches, and a lineage
       never has more): max_label_branches finite, the label's branches (end_labels, or runs[] at the leaf) equal to
-      it, a route to the leaf passing at least that many ambiguous splits (each branch taken is one), and two or
-      more structural successors where the event states them;
+      it, and two or more structural successors where the event states them; without a quorum knob also a route to
+      the leaf passing at least that many ambiguous splits (each branch taken is a split there). Under a quorum
+      knob a branch can be taken without a split: the walker raises the lineage's branches on every admissible
+      successor before the quorum drops the minority ones, and one followed successor records no split
+      (walker.cpp, the ambiguity before the quorum);
     - `minority`: a quorum knob set (min_successor_labels >= 2 or min_successor_fraction > 0); `below_min_labels`:
       min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route to the leaf through that many
       splits;
@@ -2767,6 +2770,7 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[s
     msl = _strategy_knob(sc, ans, "branching", "min_successor_labels")
     msf = _strategy_knob(sc, ans, "branching", "min_successor_fraction")
     mll = _strategy_knob(sc, ans, "bounds", "min_live_labels")
+    quorum = (_finite(msl) and msl >= 2) or (isinstance(msf, (int, float)) and msf > 0) or (_finite(mll) and mll > 1)
     amb_n, split_n = _route_splits(armo)(chain[-1])
     lineage = {x.get("label"): x.get("branches") for x in armo.get("runs") or []
                if isinstance(x, dict) and x.get("segment") == chain[-1] and x.get("to_bp") == L}
@@ -2780,7 +2784,7 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[s
                 out.append("%s: a branch end with max_label_branches %r" % (lab, mlb))
             elif _finite(br) and br != mlb:
                 out.append("%s: a branch end after %d branch(es) of max_label_branches %d" % (lab, br, mlb))
-            elif amb_n < mlb:
+            elif amb_n < mlb and not quorum:
                 out.append("%s: a branch end after %d ambiguous split(s) on any route to it, max_label_branches %d"
                            % (lab, amb_n, mlb))
             elif _finite(ev.get("structural_successors")) and ev["structural_successors"] < 2:

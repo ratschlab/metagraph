@@ -2182,6 +2182,39 @@ class TraverseChecks(unittest.TestCase):
         # a structural reason the path counts without its label_end event at the leaf
         self.assertEqual(judge(*self.structural_walk(strategy=mlb2, events=False)), ("fail", "fail"))
 
+    def test_branch_taken_without_a_split_under_a_quorum(self):
+        # under a quorum knob the walker raises a lineage's branches on every admissible successor before the
+        # quorum drops the minority ones; one followed successor records no split. Label 0 is ambiguous at 4 bp
+        # within its allowance (max_label_branches 1), its other successor a minority: no split; at 10 bp it is
+        # ambiguous again over its allowance (branch, branches 1), label 1's only successor a minority
+        def walk(msl, branches=1):
+            armo = {"status": "complete", "complete_to_bp": 10,
+                    "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 10, "sequence": "ACGTACGTAC",
+                                  "events": [{"at_bp": 4, "type": "label_end", "label": 0, "reason": "minority",
+                                              "structural_successors": 2},
+                                             {"at_bp": 10, "type": "label_end", "label": 0, "reason": "branch",
+                                              "structural_successors": 2},
+                                             {"at_bp": 10, "type": "label_end", "label": 1, "reason": "minority",
+                                              "structural_successors": 2}]}],
+                    "splits": [],
+                    "paths": [{"id": 0, "segments": [0], "length_bp": 10, "end_reasons": {"branch": 2},
+                               "end_labels": [{"label": 0, "branches": branches, "loss": 0.0},
+                                              {"label": 1, "branches": 0, "loss": 0.0}]}]}
+            strategy = {"direction": "right", "bounds": {"max_extension_bp": 10},
+                        "branching": {"max_label_branches": 1, "min_successor_labels": msl}}
+            sc = {"route": "POST /traverse", "truth": {},
+                  "request": {"seeds": [{"sequence": "A" * 31}], "strategy": strategy}}
+            return sc, ok_answer({"results": [{"outcome": {"walks": "complete"}, "arms": {"right": armo}}],
+                                  "strategy": strategy})
+        self.assertEqual(outcome(*walk(2), "invariants")[0], "pass")
+        o, d = outcome(*walk(2, branches=0), "invariants")
+        self.assertEqual(o, "fail")                 # the allowance is still the lineage's count at the end
+        self.assertIn("a branch end after 0 branch(es) of max_label_branches 1", d)
+        sc, ans = walk(1)                           # no quorum: every branch taken is a split, and no minority
+        o, d = outcome(sc, ans, "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("0 ambiguous split(s)", d)
+
     def test_zero_extension_branch_stop(self):
         # the zero-extension mutation of T-derived-0001: both arms a 0 bp root whose every label ends
         # `branch` with branches 0 under max_label_branches 2; the dead_end control fails as well
