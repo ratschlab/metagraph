@@ -184,5 +184,48 @@ class RelayedDeadlineHostCacheTest(unittest.TestCase):
         self.assertTrue(rows[1]["host_cache_after_interrupted"])
 
 
+class TextContainsGrammarTest(unittest.TestCase):
+    """An answer_match side's text_contains: a list on the direct side (every fragment within one text), one string
+    on the MCP side as the runner reads it; other types refused at load."""
+
+    TEXTS = ["request.seeds: expected a non-empty array"]
+
+    def test_direct_list_matches_and_does_not_without_raising(self):
+        side = {"http": 400, "text_contains": ["request.seeds", "non-empty"]}
+        self.assertTrue(cmp.answer_side_matches(side, 400, set(), self.TEXTS, slot_codes=set(),
+                                                known=cmp.ANSWER_DIRECT_KEYS))
+        side = {"http": 400, "text_contains": ["request.seeds", "at least one"]}
+        self.assertFalse(cmp.answer_side_matches(side, 400, set(), self.TEXTS, slot_codes=set(),
+                                                 known=cmp.ANSWER_DIRECT_KEYS))
+        # the fragments must be within ONE text
+        self.assertFalse(cmp.answer_text_contains(["seeds", "slot"], ["seeds here", "slot there"]))
+
+    def test_mcp_list_is_one_string(self):
+        side = {"code": "invalid_arguments", "text_contains": ["request.seeds"]}
+        self.assertFalse(cmp.answer_side_matches(side, 400, {"invalid_arguments"}, self.TEXTS,
+                                                 known=cmp.ANSWER_MCP_KEYS, http_list=False))
+        self.assertTrue(cmp.answer_text_contains(["a"], ["x ['a'] y"], mcp_side=True))
+
+    def test_table_names_a_bad_type(self):
+        case = {"id": "x.y", "agreement": "by_design", "direct_expectation": {"http": 400},
+                "service_answer": {"outcome": "refused_at_submit", "code": "invalid_arguments"},
+                "answer_match": {"routes": ["POST /traverse"], "wall_rule": "budget_minus_reserve",
+                                 "direct": {"http": 400, "text_contains": 7, "code": ["a", "b"], "slot_code": [""]},
+                                 "mcp": {"code": "invalid_arguments", "text_contains": ["provide"], "field": 3}}}
+        probs = cmp.table_problems([case])
+        self.assertTrue(any("answer_match.direct.text_contains must be" in p for p in probs), probs)
+        self.assertTrue(any("answer_match.direct.slot_code must be" in p for p in probs), probs)
+        self.assertFalse(any("answer_match.direct.code" in p for p in probs), probs)
+        self.assertTrue(any("answer_match.mcp.text_contains must be one non-empty string" in p for p in probs), probs)
+        self.assertTrue(any("answer_match.mcp.field must be" in p for p in probs), probs)
+
+    def test_shipped_table_loads(self):
+        # the shipped table passes the load validation (TableError otherwise), with v4's scenarios too
+        manifest = sc.read_json(os.path.join(os.path.dirname(HERE), "manifest", "suite_v4.json"))
+        cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN, manifest["scenarios"])
+        self.assertEqual(info["cases"], len(cases))
+        self.assertTrue(cases)
+
+
 if __name__ == "__main__":
     unittest.main()

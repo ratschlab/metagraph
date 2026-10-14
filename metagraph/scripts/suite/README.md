@@ -1869,3 +1869,14 @@ failing on 14552938.
 - Moves (timing only; no outcome, check, class or verdict): v4 39 MCP lines not_reached -> cold (27) / warm (12), the
   27 direct-local r0 after them cold -> warm with since_prev_s; 70 lines gain host_cache_after_interrupted; warm
   pairs 527 -> 537 (32 after an interrupted execution). v3: 10 MCP lines, 8 direct-local r0 cold -> warm.
+
+### The text_contains grammar of an answer_match side (for async: the runner's load validation)
+- A list-valued text_contains on an answer_match side raised TypeError in compare and reevaluate, and the load
+  validation did not refuse it. The matcher (`compare.answer_text_contains`): on the direct side a string, or a list
+  whose fragments must all be within one text (as a direct_expectation's text_contains); on the MCP side one string
+  read as the runner reads it, str(text_contains) within the error's text (a list never matches there).
+- The load validation (`compare.answer_value_problems`, in table_problems) refuses a side's code, text_contains,
+  field or slot_code of another type: a non-empty string, on the direct side also a non-empty list of non-empty
+  strings; on the MCP side one string (the MCP side's code stays the "states no code" rule). The shipped table
+  passes, so nothing recorded moves. The runner reads the MCP side with str() and validates no type: it should
+  refuse the same values (MIRROR, to agree with async).

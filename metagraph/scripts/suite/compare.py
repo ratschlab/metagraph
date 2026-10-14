@@ -128,7 +128,8 @@ def entry_problem(entry):
 def table_problems(cases, blocks=None):
     """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at 31a2e41f,
     mirrored): an answer_match without routes (a non-empty list of route strings), a key of it outside
-    ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose
+    ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, a side whose code,
+    text_contains, field or slot_code is of another type than the side reads (answer_value_problems), an MCP side whose
     http is not one integer, that states slot_code (a direct-side key) or that states no code (peer review R5), a
     direct_mismatch outside DIRECT_MISMATCH_VALUES, a wall_rule outside WALL_RULE_VALUES, an mcp_outcome outside
     MCP_OUTCOME_VALUES, on an answered / clamped case, or stated as a case key instead of in answer_match; an
@@ -171,6 +172,7 @@ def table_problems(cases, blocks=None):
             unknown = sorted(set(want) - set(ANSWER_MATCH_KEYS))
             if unknown:
                 out.append("%s: unknown answer_match.%s key(s) %s" % (cid, side, unknown))
+            out.extend("%s: %s" % (cid, x) for x in answer_value_problems(side, want))
         mcp = am.get("mcp") if isinstance(am.get("mcp"), dict) else {}
         http = mcp.get("http")
         if http is not None and (isinstance(http, bool) or not isinstance(http, int)):
@@ -192,6 +194,31 @@ def table_problems(cases, blocks=None):
             if judged_by_checks(case):
                 out.append("%s: answer_match.mcp_outcome on a %s case (the checks decide an answered / clamped case)"
                            % (cid, (case.get("service_answer") or {}).get("outcome")))
+    return out
+
+
+# The text keys of an answer_match side and the values each side takes: a non-empty string, or (direct side) a
+# non-empty list of non-empty strings (code / slot_code: alternatives, text_contains: fragments within one text);
+# the MCP side reads each as one string (async's runner: str()), so a list there would never match.
+ANSWER_TEXT_KEYS = ("code", "text_contains", "field", "slot_code")
+
+
+def answer_value_problems(side, want):
+    """What is wrong with the value types of an answer_match side (|side| "direct" or "mcp"): ANSWER_TEXT_KEYS each a
+    non-empty string, on the direct side also a non-empty list of non-empty strings; a stated null is absent. The
+    MCP side's code is the "states no code" rule's."""
+    out = []
+    for key in ANSWER_TEXT_KEYS:
+        v = want.get(key)
+        if v is None or (side == "mcp" and key == "code"):
+            continue
+        ok_str = isinstance(v, str) and bool(v.strip())
+        ok_list = side == "direct" and isinstance(v, list) and bool(v) and all(
+            isinstance(x, str) and x.strip() for x in v)
+        if not (ok_str or ok_list):
+            out.append("answer_match.%s.%s must be %s, not %r" % (
+                side, key, "a non-empty string or a non-empty list of them" if side == "direct"
+                else "one non-empty string (the MCP runner reads it as one)", v))
     return out
 
 
@@ -1611,7 +1638,9 @@ def answer_side_matches(side, http, codes, texts, field=None, slot_codes=None, k
     a field the answer does not name does not match; slot_code the codes of body.patterns[].error; on the MCP side
     http is one status compared by equality, |http_list| False): True or False; None when the known keys hold but the
     side states a key outside |known| (default: the union of both sides' keys), which is never ignored silently. A
-    side that states nothing never matches."""
+    side that states nothing never matches. text_contains (answer_text_contains): on the direct side a string, or a
+    list whose fragments must all be within one text; on the MCP side (|http_list| False) one string, read as the
+    runner reads it (str())."""
     if not isinstance(side, dict):
         return False
     known = known or tuple(sorted(set(ANSWER_DIRECT_KEYS) | set(ANSWER_MCP_KEYS)))
@@ -1627,9 +1656,18 @@ def answer_side_matches(side, http, codes, texts, field=None, slot_codes=None, k
     if side.get("field") is not None and "field" in known and not _field_matches(field, side["field"]):
         return False
     tc = side.get("text_contains")
-    if tc and not any(tc in (t or "") for t in texts):
+    if tc and not answer_text_contains(tc, texts, mcp_side=not http_list):
         return False
     return None if unknown_keys(side, known) else True
+
+
+def answer_text_contains(want, texts, mcp_side=False):
+    """Whether an answer_match side's text_contains holds on an answer's texts: on the MCP side the value read as one
+    string (async's runner: str(text_contains) in the error's text); on the direct side a string, or a list whose
+    fragments must all be within one text (as a direct_expectation's text_contains)."""
+    if mcp_side or not isinstance(want, list):
+        want = [str(want)]
+    return any(all(str(f) in (t or "") for f in want) for t in texts)
 
 
 def answer_case_of(cases, route, http, error, skip=()):
