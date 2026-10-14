@@ -1,6 +1,7 @@
 #ifndef __BOSS_HPP__
 #define __BOSS_HPP__
 
+#include <memory>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
@@ -161,7 +162,7 @@ class BOSS {
         // make one traversal step
         edge = fwd(edge);
         // pick the row-diff successor
-        if (&rd_succ != last_ && !get_last(edge - 1)) {
+        if (&rd_succ != last_.get() && !get_last(edge - 1)) {
             while (!rd_succ[edge]) {
                 assert(edge > 0);
                 edge--;
@@ -502,14 +503,14 @@ class BOSS {
     // k-mer size
     size_t k_;
     // the bit array indicating the last outgoing edge of a node
-    bit_vector *last_;
+    std::unique_ptr<bit_vector> last_;
     // offsets for the boss edges with a given penultimate character
     // F_[c] points to the last boss edge with its penultimate character < c
     std::vector<edge_index> F_;
     // node offsets: NF_[c] = rank_last(F_[c]), a helper array
     std::vector<node_index> NF_;
     // the array containing the edge labels
-    wavelet_tree *W_;
+    std::unique_ptr<wavelet_tree> W_;
 
     State state = State::DYN;
 
