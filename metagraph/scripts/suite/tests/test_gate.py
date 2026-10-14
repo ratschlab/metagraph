@@ -594,6 +594,33 @@ class JudgeTest(GateCase):
         self.assertEqual(subprocess.run(cmd + [d, pol], capture_output=True, text=True).returncode, 2)
 
 
+class StaleGateTest(GateCase):
+    """A gate verdict no longer describes a run that changed after it (a later resume without --gate): the report
+    shows it as stale, never as GATE PASS."""
+
+    def test_report_marks_a_stale_verdict(self):
+        d = make_run(self.run_dir(), self.m, mcp_lines(self.m))
+        verdict = gate.judge(d, policy_of(self.m))
+        self.assertTrue(verdict["passed"])
+        self.assertEqual(set(verdict["inputs"]), {"executions.jsonl", "compare.json", "manifest.json", "plan.json"})
+        sc.write_json_atomic(os.path.join(d, "gate.json"), verdict)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertIn("**GATE PASS**", report.build_report(d))
+        # a later invocation changed the run: one MCP line fails now, merged and compared again
+        rows, _ = sc.read_jsonl(os.path.join(d, "arms", "mcp", "executions.jsonl"))
+        rows[0]["outcome"] = "fail"
+        os.remove(os.path.join(d, "arms", "mcp", "executions.jsonl"))
+        for r in rows:
+            sc.append_jsonl(os.path.join(d, "arms", "mcp", "executions.jsonl"), r)
+        merge_run.merge(d)
+        sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
+        with contextlib.redirect_stdout(io.StringIO()):
+            text = report.build_report(d)
+        self.assertNotIn("**GATE PASS**", text)
+        self.assertIn("**GATE verdict STALE**", text)
+        self.assertIn("executions.jsonl", text.split("# Deploy gate", 1)[1].split("\n# ", 1)[0])
+
+
 class ReportPlanTest(GateCase):
     """report.py's verdict reconciles the run's plan: a planned execution no arm recorded is never a pass."""
 

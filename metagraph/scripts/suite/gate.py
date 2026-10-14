@@ -522,7 +522,8 @@ def judge(run_dir, policy, reevaluated=False):
                        "recorded": len(recorded)},
             "policy": {"name": policy.get("name"), "policy_version": policy.get("policy_version"),
                        "sha256": policy_sha256(policy)},
-            "run_dir": os.path.abspath(run_dir), "reevaluated": reevaluated, "judged_utc": sc.iso_utc(time.time())}
+            "run_dir": os.path.abspath(run_dir), "reevaluated": reevaluated, "judged_utc": sc.iso_utc(time.time()),
+            "inputs": inputs_digest(run_dir, reevaluated)}
 
 
 def uncompared_properties(sid, recorded, ref_arm, scenario, is_property):
@@ -572,6 +573,30 @@ def load_compare(run_dir, reevaluated=False):
         data = cmp.compare(run_dir, cmp.load_by_design(table), reevaluated=reevaluated, warnings=warnings)
         sc.write_json_atomic(path, data)
     return data
+
+
+def inputs_digest(run_dir, reevaluated=False):
+    """{file: sha256 or None} of what a verdict judged: the merged lines, the comparison, the manifest and the plan
+    (a report compares it with the files it reads: a run changed after the verdict, e.g. by a later resume without
+    --gate, makes the verdict stale)."""
+    out = {}
+    for name in (sc.reevaluated_name("executions.jsonl", reevaluated), sc.reevaluated_name("compare.json", reevaluated),
+                 "manifest.json", PLAN_FILE):
+        path = os.path.join(run_dir, name)
+        try:
+            with open(path, "rb") as fh:
+                out[name] = hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            out[name] = None
+    return out
+
+
+def stale_inputs(run_dir, verdict, reevaluated=False):
+    """The files whose content differs from what |verdict| judged ([] when it is current; every file for a verdict
+    that records none)."""
+    now = inputs_digest(run_dir, reevaluated)
+    was = verdict.get("inputs") if isinstance(verdict.get("inputs"), dict) else {}
+    return [name for name in now if was.get(name, "unrecorded") != now[name]]
 
 
 def policy_sha256(policy):

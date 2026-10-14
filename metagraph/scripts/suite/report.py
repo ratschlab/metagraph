@@ -274,6 +274,14 @@ def gate_section(run_dir, reevaluated=False, max_items=200):
         return ""
     probs = verdict.get("problems") or []
     pol = verdict.get("policy") or {}
+    stale = gate_mod.stale_inputs(run_dir, verdict, reevaluated)
+    if stale:
+        # the run changed after the verdict (a later invocation without --gate): it no longer describes this run
+        return "\n".join(["# Deploy gate", "",
+                          "**GATE verdict STALE**: the verdict of %s (policy %s, %s) judged other contents of %s than "
+                          "this run has now; run gate.py on the run again for a current verdict." % (
+                              md(verdict.get("judged_utc")), md(pol.get("name")),
+                              "PASS" if verdict.get("passed") else "FAIL", md(", ".join(stale))), ""])
     by_kind = {}
     for p in probs:
         by_kind[p.get("kind")] = by_kind.get(p.get("kind"), 0) + 1

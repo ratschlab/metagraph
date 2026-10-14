@@ -1419,7 +1419,9 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   excluded on every arm the invocation runs); merge_run.py --strict-identity, then compare, then gate.py, then the
   report (a "Deploy gate" section); the exit status is the gate's. `--reevaluate RUN_DIR --gate POLICY` judges the
   re-evaluated set (gate.reevaluated.json) and exits with the gate's status. Without --gate nothing changes: the
-  exit status is the orchestration's (a FAIL report exits 0).
+  exit status is the orchestration's (a FAIL report exits 0). gate.json records the sha256 of what it judged (the
+  merged lines, the comparison, the manifest, plan.json); a report whose files differ, e.g. after a later resume
+  without --gate, shows "GATE verdict STALE" with the files that changed, never the old PASS.
 
 ### A re-evaluation of re-normalised answers says so (finding 10)
 - reevaluate.py judges the answers a run recorded and never re-runs a normaliser; a normaliser fix (G06: a pattern
