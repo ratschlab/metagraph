@@ -1762,8 +1762,66 @@ class ResolveChecks(unittest.TestCase):
         a = self.body([[0, 70]])
         self.assertEqual(outcome(sc, a, "resolve_discover_contains", label="562")[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_discover_contains", label="1")[0], "fail")
-        a["body"]["labels_truncated"] = {"kept": 2, "total": 9}
-        self.assertEqual(outcome(sc, a, "resolve_discover_contains", label="1")[0], "pass")
+        # SPEC-labeled-traversal-core §4.2: a truncated list keeps the top max_labels by supported k-mers; the
+        # source supports every in-graph k-mer, so it may be dropped only in a tie at that support (the recorded
+        # R-discover-0001: 713600 kept, the source 107806 one of 7 dropped at full length)
+        disc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "discover": {"kind": "column",
+                                                                                          "max_labels": 1}},
+                "truth": {}}
+
+        def listed(label, n, trunc):
+            return ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels_truncated": trunc,
+                              "labels": [{"label": label, "kind": "column", "kmers_supported": n, "runs": [[0, n]]}]})
+        tie = listed("713600", 70, {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 70,
+                                    "dropped_full_length": 7})
+        o, d = outcome(disc, tie, "resolve_discover_contains", label="107806")
+        self.assertEqual(o, "pass")
+        self.assertIn("ties the kept labels at all 70 in-graph k-mers", d)
+        self.assertNotIn("index order", d)
+        self.assertEqual(outcome(disc, tie, "invariants")[0], "pass")
+        self.assertEqual(outcome(disc, tie, "resolve_discover_contains", label="713600")[0], "pass")
+        # an index-order host: a label with 3 of 70 k-mers kept, one with 70 dropped
+        index_order = listed("670", 3, {"kept": 1, "total": 9, "min_kept_kmers": 3, "max_dropped_kmers": 70,
+                                        "dropped_full_length": 1})
+        self.assertEqual(outcome(disc, index_order, "resolve_discover_contains", label="107806")[0], "fail")
+        self.assertEqual(outcome(disc, index_order, "invariants")[0], "fail")
+        # the kept label below full support, or no dropped label at full support: the source would be kept
+        below = listed("670", 60, {"kept": 1, "total": 9, "min_kept_kmers": 60, "max_dropped_kmers": 60,
+                                   "dropped_full_length": 0})
+        o, d = outcome(disc, below, "resolve_discover_contains", label="107806")
+        self.assertEqual(o, "fail")
+        self.assertIn("supports all 70 in-graph k-mers and a kept label only 60", d)
+        self.assertEqual(outcome(disc, below, "invariants")[0], "pass")
+        none_full = listed("713600", 70, {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 69,
+                                          "dropped_full_length": 0})
+        self.assertEqual(outcome(disc, none_full, "resolve_discover_contains", label="107806")[0], "fail")
+        self.assertEqual(outcome(disc, none_full, "invariants")[0], "pass")
+        # labels_truncated without its fields: not exposed on the MCP arm, a failure on a direct one
+        bare = listed("713600", 70, {"kept": 1, "total": 9})
+        self.assertEqual(outcome(disc, bare, "resolve_discover_contains", label="107806")[0], "fail")
+        self.assertEqual(outcome(disc, bare, "resolve_discover_contains", label="107806", _arm="mcp")[0],
+                         "not_exposed")
+        # the invariants: kept is the list's length, below total; the last kept label states min_kept_kmers; a
+        # full-length drop has every in-graph k-mer; the list is ranked by supported k-mers, at most max_labels
+        for trunc in ({"kept": 2, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 7},
+                      {"kept": 1, "total": 1, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 0},
+                      {"kept": 1, "total": 9, "min_kept_kmers": 69, "max_dropped_kmers": 69, "dropped_full_length": 0},
+                      {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 60, "dropped_full_length": 2},
+                      {"kept": 1, "total": 3, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 3}):
+            self.assertEqual(outcome(disc, listed("713600", 70, trunc), "invariants")[0], "fail", trunc)
+        two = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels_truncated": None, "labels": [
+            {"label": "a", "kind": "column", "kmers_supported": 10, "runs": [[0, 10]]},
+            {"label": "b", "kind": "column", "kmers_supported": 70, "runs": [[0, 70]]}]})
+        many = dict(disc, request=dict(disc["request"], discover={"kind": "column", "max_labels": 5}))
+        o, d = outcome(many, two, "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("not ranked by supported k-mers", d)
+        self.assertEqual(outcome(disc, two, "invariants")[0], "fail")          # 2 labels, max_labels 1
+        two["body"]["labels"].reverse()
+        self.assertEqual(outcome(many, two, "invariants")[0], "pass")
+        trace = dict(many, request=dict(many["request"], support="trace"))
+        two["body"]["labels"].reverse()
+        self.assertEqual(outcome(trace, two, "invariants")[0], "pass")         # trace states trace runs, not the rank
 
 
 class TraverseChecks(unittest.TestCase):

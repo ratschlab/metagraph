@@ -2267,16 +2267,99 @@ def check_resolve_graph_runs(sc, ans, a, arm):
     return PASS, "graph_runs %s" % gr
 
 
+def _in_graph_kmers(body: dict) -> int:
+    """The query's k-mers in the graph (the resolved prefix's under a stop): the lengths of graph_runs summed."""
+    return sum(r[1] - r[0] for r in body.get("graph_runs") or [] if isinstance(r, list) and len(r) == 2)
+
+
 def check_resolve_discover_contains(sc, ans, a, arm):
+    """The discovery lists the scenario's source label (SPEC-labeled-traversal-core §4.2: the labels of the query's
+    in-graph k-mers; more than max_labels of them keep the top max_labels by supported k-mers, ties by column id, then
+    seq_id, and state labels_truncated). The source record's own label supports every in-graph k-mer of a query taken
+    from it (the graph_runs summed; under a stop, the resolved prefix's), so a truncated list may leave it out only
+    in a tie at that support: min_kept_kmers and max_dropped_kmers equal to it and dropped_full_length at least 1.
+    Such an answer passes, the ranking being all an answer can show (the tie's column ids are not in it); a list that
+    keeps a label with fewer k-mers, ranks a dropped label above a kept one or drops none at full support fails, as
+    does a complete list without the label."""
     body = _body(ans)
     names = [l.get("label") for l in _get(body, "labels")]
     trunc = body.get("labels_truncated")
     if a["label"] in names:
         return PASS, "%s discovered (%d labels%s)" % (a["label"], len(names), ", truncated" if trunc else "")
-    if trunc:
-        return PASS, "%s not listed, the list is truncated (kept %s of %s; index order, not best-supported)" % (
-            a["label"], trunc.get("kept"), trunc.get("total"))
-    return FAIL, "%s not discovered in a complete list of %d labels" % (a["label"], len(names))
+    if not trunc:
+        return FAIL, "%s not discovered in a complete list of %d labels" % (a["label"], len(names))
+    if not isinstance(trunc, dict):
+        return FAIL, "labels_truncated %r, not the SPEC's object" % (trunc,)
+    vals = {}
+    for f in ("kept", "total", "min_kept_kmers", "max_dropped_kmers", "dropped_full_length"):
+        if f not in trunc:
+            raise Missing("labels_truncated." + f)
+        vals[f] = _number(trunc[f])
+    full = _in_graph_kmers(body)
+    stated = "kept %s of %s, min_kept_kmers %s, max_dropped_kmers %s, dropped_full_length %s" % (
+        trunc["kept"], trunc["total"], trunc["min_kept_kmers"], trunc["max_dropped_kmers"],
+        trunc["dropped_full_length"])
+    if None in vals.values():
+        return FAIL, "%s not listed, labels_truncated not numeric (%s)" % (a["label"], stated)
+    if vals["max_dropped_kmers"] > vals["min_kept_kmers"]:
+        return FAIL, "%s not listed, and the truncation is not by support: a dropped label has more supported " \
+                     "k-mers than a kept one (%s; SPEC-labeled-traversal-core §4.2)" % (a["label"], stated)
+    if vals["min_kept_kmers"] < full:
+        return FAIL, "%s not listed, but it supports all %d in-graph k-mers and a kept label only %s (%s): the " \
+                     "top max_labels by supported k-mers hold it (SPEC-labeled-traversal-core §4.2)" % (
+                         a["label"], full, trunc["min_kept_kmers"], stated)
+    if vals["dropped_full_length"] < 1 or vals["max_dropped_kmers"] < full:
+        return FAIL, "%s not listed, but no dropped label supports all %d in-graph k-mers as it does (%s)" % (
+            a["label"], full, stated)
+    return PASS, "%s not listed: it ties the kept labels at all %d in-graph k-mers (%s), a tie decided by column " \
+                 "id, then seq_id (SPEC-labeled-traversal-core §4.2), which the answer does not state" % (
+                     a["label"], full, stated)
+
+
+def _discovery_problems(req: dict, body: dict) -> List[str]:
+    """A discovery's list and labels_truncated as SPEC-labeled-traversal-core §4.2 ranks them: the labels by
+    supported k-mers, most first (each label's kmers_supported is that count unless support is trace, whose count
+    is of trace runs), at most max_labels; a truncated list states kept (its length) of total (more), the least
+    support kept at least the most dropped, and full-length drops only where a dropped label has every in-graph
+    k-mer, none of which is more than the query has."""
+    probs: List[str] = []
+    labels = body.get("labels") or []
+    trunc = body.get("labels_truncated")
+    want = _number((req.get("discover") or {}).get("max_labels"))
+    full = _in_graph_kmers(body)
+    ranked = req.get("support") != "trace"
+    ks = [_number(l.get("kmers_supported")) for l in labels]
+    if want is not None and len(labels) > want:
+        probs.append("%d labels discovered, max_labels %d" % (len(labels), want))
+    if ranked and None not in ks and any(x < y for x, y in zip(ks, ks[1:])):
+        probs.append("discovered labels not ranked by supported k-mers: %s" % ks[:8])
+    if any(x is not None and x > full for x in ks):
+        probs.append("a discovered label supports more k-mers than the %d in the graph" % full)
+    if trunc is None:
+        return probs
+    if not isinstance(trunc, dict):
+        return probs + ["labels_truncated %r, not the SPEC's object" % (trunc,)]
+    v = {f: _number(trunc.get(f)) for f in ("kept", "total", "min_kept_kmers", "max_dropped_kmers",
+                                            "dropped_full_length")}
+    if None in v.values():
+        return probs + ["labels_truncated %s, a field missing or not numeric" % json.dumps(trunc, sort_keys=True)]
+    if v["kept"] != len(labels) or v["total"] <= v["kept"]:
+        probs.append("labels_truncated kept %s of total %s for %d labels listed" % (
+            trunc["kept"], trunc["total"], len(labels)))
+    if v["max_dropped_kmers"] > v["min_kept_kmers"]:
+        probs.append("labels_truncated max_dropped_kmers %s above min_kept_kmers %s: not truncated by support" % (
+            trunc["max_dropped_kmers"], trunc["min_kept_kmers"]))
+    if v["min_kept_kmers"] > full:
+        probs.append("labels_truncated min_kept_kmers %s above the %d in-graph k-mers" % (trunc["min_kept_kmers"], full))
+    if not 0 <= v["dropped_full_length"] <= v["total"] - v["kept"] or (
+            v["dropped_full_length"] > 0 and v["max_dropped_kmers"] != full):
+        probs.append("labels_truncated dropped_full_length %s with max_dropped_kmers %s, %d in-graph k-mers, %s "
+                     "dropped" % (trunc["dropped_full_length"], trunc["max_dropped_kmers"], full,
+                                  v["total"] - v["kept"]))
+    if ranked and labels and None not in ks and ks[-1] != v["min_kept_kmers"]:
+        probs.append("labels_truncated min_kept_kmers %s, the last kept label supports %s" % (
+            trunc["min_kept_kmers"], ks[-1]))
+    return probs
 
 
 def _resolve_invariants(sc, ans, a, arm):
@@ -2321,6 +2404,8 @@ def _resolve_invariants(sc, ans, a, arm):
                 if not any(g[0] <= r[0] and r[1] <= g[1] for g in gr):
                     probs.append("label %s: run %s outside the graph runs" % (lab.get("label"), r))
                     break
+    if isinstance(req, dict) and isinstance(req.get("discover"), dict):
+        probs += _discovery_problems(req, body)
     if isinstance(req, dict) and req.get("labels") and not probs:
         names = [l.get("label") for l in body.get("labels") or []]
         missing = [l for l in req["labels"] if l not in names]

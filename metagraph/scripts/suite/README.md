@@ -1843,3 +1843,22 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   every inexact count of v3 and v4 without a stop is a supported-path search's after a predicate's pruning (the
   L-supported scenarios, at_least 1 >= their min 1) or a selection's (bounds, pass stopped); no recorded
   count_relation outcome moves, two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.
+- /resolve, resolve_discover_contains and the invariants test the discovery's ranking (SPEC-labeled-traversal-core
+  §4.2: the top max_labels by supported k-mers, ties by column id, then seq_id; `labels_truncated` {kept, total,
+  min_kept_kmers, max_dropped_kmers, dropped_full_length}). A truncated list without the source label passed as
+  "index order, not best-supported", a misreading of the SPEC: R-discover-0001 / -0004 (limit 1, always truncated)
+  could never fail. The source record's label supports every in-graph k-mer of a query taken from it (graph_runs
+  summed; under a stop, the prefix's), so a truncated list may leave it out only in a tie at that support:
+  min_kept_kmers and max_dropped_kmers equal to it and dropped_full_length >= 1. That answer passes (the tie's column
+  ids are not in the answer; inconclusive would block the strict gate on a correct host every run, since limit 1
+  with a seven-way tie always hides the source): the recorded R-discover-0001 (713600 kept, 70 of 70, 7 dropped at
+  full length) passes with a detail that names the tie. A kept label below full support, a dropped label above a
+  kept one or no full-length drop fails (the index-order host of the finding: 670 kept with 3 of 70, max_dropped
+  70). labels_truncated without its fields is not_exposed on the MCP arm and fails on a direct one. The invariants of
+  a discovery: at most max_labels labels, ranked by kmers_supported (not under support trace, whose count is of trace
+  runs), none above the in-graph k-mers; a truncation states kept = the list's length < total, max_dropped_kmers <=
+  min_kept_kmers = the last kept label's count, min_kept_kmers within the in-graph k-mers, and full-length drops
+  (at most total - kept) only with max_dropped_kmers = the in-graph k-mers. Measured on every recorded discovery of
+  v3 and v4 (R-discover, N-usecase-0010 / -0012, R-edge-0023 with 150 kept of 2,753, N-negative): none violates a
+  rule; R-discover-0001's eight passes keep their outcome with the new detail. DESIGN-test-suite.md's R-discover
+  line still states the caveat ("index order, not best-supported"): a docs change for the integrator.
