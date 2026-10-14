@@ -1410,8 +1410,11 @@ def check_predicate_either_mirror(sc, ans, a, arm):
     """Under predicate_strands "either": every returned '-' context whose reverse complement is a record k-mer
     of the truth is selected by the label with selection strand reverse_complement or both (SPEC §19.5), and at
     least args.min (default 1) such contexts are returned (the builder picks windows of inverted copies, whose
-    mirrors the record holds)."""
-    e = _entry(ans, a.get("pattern", 0))
+    mirrors the record holds); INCONCLUSIVE below that when a legitimate withheld list or cut hides them."""
+    i = a.get("pattern", 0)
+    e = _entry(ans, i)
+    if "error" in e:
+        return FAIL, "entry refused (%s)" % e["error"].get("code")
     t = sc["truth"]
     rec_kmers = {km for km, _ in source_contexts(t)}
     col = a.get("label", t["taxid"])
@@ -1424,11 +1427,16 @@ def check_predicate_either_mirror(sc, ans, a, arm):
                 raise Missing("selection_labels")
             if col not in labs:
                 return FAIL, "mirror context %s not selected by %s" % (r["kmer"], col)
-            if r["selection_strands"][labs.index(col)] not in ("reverse_complement", "both"):
-                return FAIL, "mirror context selected with strand %r" % r["selection_strands"][labs.index(col)]
+            ss = r.get("selection_strands")
+            if ss is None:
+                raise Missing("selection_strands")
+            if ss[labs.index(col)] not in ("reverse_complement", "both"):
+                return FAIL, "mirror context selected with strand %r" % ss[labs.index(col)]
     if checked < a.get("min", 1):
-        return FAIL, "%d mirror context(s) returned, at least %d expected (the record holds the window's reverse " \
-                     "complement in a longer inverted copy)" % (checked, a.get("min", 1))
+        # a withheld list or a cut can hide the mirrors, as in predicate_selected
+        detail = "%d mirror context(s) returned, at least %d expected (the record holds the window's reverse " \
+                 "complement in a longer inverted copy)" % (checked, a.get("min", 1))
+        return _hidden_outcome(sc, ans, i, e, detail + "; the list is not complete (%s)", detail)
     return PASS, "%d mirror context(s) selected through their reverse complement" % checked
 
 

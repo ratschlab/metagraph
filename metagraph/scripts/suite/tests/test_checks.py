@@ -638,6 +638,25 @@ class MoreChecks(unittest.TestCase):
         none = copy.deepcopy(ans)
         none["patterns"][0]["results"] = [r for r in none["patterns"][0]["results"] if r["strand"] != "-"]
         self.assertEqual(outcome(sc, ok_answer(none), "predicate_either_mirror", label="546")[0], "fail")
+        # a list withheld at the deadline hides the mirrors (MCP Q-strands-0001 r0 of the full v4 run)
+        late = copy.deepcopy(ans)
+        late["patterns"][0].update(results=[], returned=0, retrieval_complete=False, withheld={"reason": "deadline"},
+                                   stop={"phase": "selection", "reason": "time"}, determinism="time_limited")
+        late["timing"] = dict(late.get("timing") or {}, elapsed_ms=59850.0)
+        self.assertEqual(outcome(sc, ok_answer(late), "predicate_either_mirror", label="546")[0], "inconclusive")
+        self.assertEqual(outcome(sc, ok_answer(late), "predicate_selected", selected=True, label="546")[0],
+                         "inconclusive")
+        unstated = copy.deepcopy(late)
+        unstated["patterns"][0].update(stop=None, determinism="full")
+        self.assertEqual(outcome(sc, ok_answer(unstated), "predicate_either_mirror", label="546")[0], "fail")
+        refused = copy.deepcopy(ans)
+        refused["patterns"][0] = {"id": "w", "error": {"code": "predicate_too_large"}}
+        self.assertEqual(outcome(sc, ok_answer(refused), "predicate_either_mirror", label="546")[0], "fail")
+        nostrand = copy.deepcopy(ans)
+        for r in nostrand["patterns"][0]["results"]:
+            r.pop("selection_strands", None)
+        self.assertEqual(outcome(sc, ok_answer(nostrand), "predicate_either_mirror", label="546"),
+                         ("fail", "field not in the answer: selection_strands"))
 
     def test_argument_schema(self):
         self.assertEqual(checks.validate_expectation({"check": "count_relation", "args": {"relation": "exact", "min": 1}}), [])
