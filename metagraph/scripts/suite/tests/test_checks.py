@@ -2244,20 +2244,34 @@ class TraverseChecks(unittest.TestCase):
         self.assertIn("0 ambiguous split(s)", d)
 
     def test_structural_knobs_of_the_mcp_arm(self):
-        # the MCP arm asks for its preset with the overrides of the scenario's MCP arguments: its knobs are those
-        # overrides, else the answer's echo (the preset's values), not the direct request's
-        sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 1}},
-                                       echo={"branching": {"max_label_branches": 2}})
-        sc["mcp"] = {"tool": "traverse_fetch", "arguments": {"preset": "walk", "overrides": {
-            "bounds": {"max_extension_bp": 100}, "direction": "right"}}}
-        self.assertEqual(outcome(sc, ans, "invariants", _arm="mcp")[0], "pass")
-        self.assertEqual(outcome(sc, ans, "walk_in_record", _arm="mcp")[0], "pass")
-        self.assertEqual(outcome(sc, ans, "invariants")[0], "fail")          # the direct request's 1
-        sc["mcp"]["arguments"]["overrides"]["branching"] = {"max_label_branches": 1}
-        o, d = outcome(sc, ans, "invariants", _arm="mcp")
-        self.assertEqual(o, "fail")                                          # an override the service dropped
-        self.assertIn("a branch end after 2 branch(es) of max_label_branches 1", d)
-        # the trie preset's echo states the exhaustive walk: no branch end can have happened on either arm
+        # the MCP arm asks for its preset with the overrides of the scenario's MCP arguments; the preset mirrors the
+        # scenario's direct request. Its knobs are those overrides, else the direct request, never the echo alone:
+        # a service that lowers the preset's max_label_branches and echoes what it walked (T-walk-0017's MCP answer
+        # with the echo and the branches lowered together) fails, named as a preset mismatch
+        def mcp(branches, echo_mlb, overrides=None):
+            sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 2}}, branches=branches,
+                                           echo={"branching": {"max_label_branches": echo_mlb}})
+            sc["mcp"] = {"tool": "traverse_fetch", "arguments": {"preset": "walk", "overrides": dict(
+                {"bounds": {"max_extension_bp": 100}, "direction": "right"}, **(overrides or {}))}}
+            return sc, ans
+        for check in ("invariants", "walk_in_record"):
+            self.assertEqual(outcome(*mcp(2, 2), check, _arm="mcp")[0], "pass", check)
+            for lowered in (1, 0):
+                o, d = outcome(*mcp(lowered, lowered), check, _arm="mcp")
+                self.assertEqual(o, "fail", (check, lowered))
+                self.assertIn("the service walked with branching.max_label_branches %d, the scenario declares 2: a "
+                              "preset mismatch" % lowered, d)
+            # an override the scenario states is the MCP arm's own declaration; one the service did not apply fails
+            self.assertEqual(outcome(*mcp(1, 1, {"branching": {"max_label_branches": 1}}), check, _arm="mcp")[0],
+                             "pass", check)
+            o, d = outcome(*mcp(1, 1, {"branching": {"max_label_branches": 2}}), check, _arm="mcp")
+            self.assertEqual(o, "fail", check)
+            self.assertIn("the scenario's MCP overrides state 2: an override not applied", d)
+        # a direct arm is held to its request; its echo differing is judged by the end it states
+        o, d = outcome(*mcp(1, 1), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("a branch end after 1 branch(es) of max_label_branches 2", d)
+        # the trie preset mirrors an exhaustive request: no branch end can have happened on either arm
         sc_trie, a_trie = self.structural_walk(strategy={"exhaustive": True}, echo={"exhaustive": True})
         sc_trie["mcp"] = {"arguments": {"preset": "trie", "overrides": {"bounds": {"max_extension_bp": 100}}}}
         self.assertEqual(outcome(sc_trie, a_trie, "invariants", _arm="mcp")[0], "fail")

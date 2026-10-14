@@ -2702,37 +2702,92 @@ _PRESET_KNOBS = {("branching", "max_label_branches"): "unlimited", ("branching",
                  ("bounds", "min_live_labels"): 1}
 
 
-def _requested_strategy(sc: dict, arm: Optional[str]) -> dict:
-    """The strategy an arm asked for: the request's on a direct arm; on the MCP arm the overrides of the scenario's
-    MCP arguments, the knobs it states beside its preset (the preset's own reach the walk unstated, and the answer's
-    echo states them)."""
+def _requested_strategies(sc: dict, arm: Optional[str]) -> List[Tuple[str, dict]]:
+    """The strategies that declare the walk an arm asked for, in order, each (whose, strategy): on the MCP arm the
+    overrides of the scenario's MCP arguments (the knobs it sends beside its preset), then the scenario's direct
+    request, the walk the preset mirrors; on a direct arm the request."""
+    out: List[Tuple[str, dict]] = []   # ("overrides" | "request", strategy)
     if arm == "mcp":
         args = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
-        st = args.get("overrides") if isinstance(args, dict) else None
-    else:
-        st = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
-    return st if isinstance(st, dict) else {}
+        ov = args.get("overrides") if isinstance(args, dict) else None
+        if isinstance(ov, dict):
+            out.append(("overrides", ov))
+    st = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
+    if isinstance(st, dict):
+        out.append(("request", st))
+    return out
 
 
-def _strategy_knob(sc: dict, ans: dict, group: str, name: str, arm: Optional[str] = None) -> Any:
-    """The value of strategy.<group>.<name> the walk ran with (SPEC-labeled-traversal-core §5): a clamp's effective
-    value (strategy.clamped), else the arm's request's (_requested_strategy), else the default of that request's
-    exhaustive preset or annotate mode (§6.9), else the answer's echo, else the default (the echo's preset or mode,
-    else §5's). The request comes before the echo: a knob a service dropped or rewrote without a clamp is held to
-    what the arm asked, never excused by its own echo, and so is a preset's knob the request implies."""
+def _declared_knob(sc: dict, group: str, name: str, arm: Optional[str]) -> Tuple[Optional[str], Any]:
+    """(whose, value) of strategy.<group>.<name> as the arm's requests declare it (_requested_strategies, whose
+    "overrides" or "request"): a knob
+    one states, else the default of the first one's exhaustive preset or annotate mode (§6.9); (None, None) where
+    none declares it."""
+    reqs = _requested_strategies(sc, arm)
+    for whose, st in reqs:
+        g = st.get(group)
+        if isinstance(g, dict) and name in g:
+            return whose, g[name]
+    for whose, st in reqs:
+        if st.get("exhaustive") is True or (st.get("labels") or {}).get("mode") == "annotate":
+            return whose, _PRESET_KNOBS.get((group, name))
+    return None, None
+
+
+def _clamped_knob(ans: dict, group: str, name: str) -> Tuple[bool, Any]:
     body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
     echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
     for c in echo.get("clamped") or []:
         if isinstance(c, dict) and c.get("field") == "%s.%s" % (group, name) and "effective" in c:
-            return c["effective"]
-    req = _requested_strategy(sc, arm)
-    for st in (req, echo):
-        g = st.get(group)
-        if isinstance(g, dict) and name in g:
-            return g[name]
-        if st.get("exhaustive") is True or (st.get("labels") or {}).get("mode") == "annotate":
-            return _PRESET_KNOBS.get((group, name))
+            return True, c["effective"]
+    return False, None
+
+
+def _strategy_knob(sc: dict, ans: dict, group: str, name: str, arm: Optional[str] = None) -> Any:
+    """The value of strategy.<group>.<name> the walk is held to (SPEC-labeled-traversal-core §5): a clamp's
+    effective value (strategy.clamped), else what the arm's requests declare (_declared_knob: on the MCP arm its
+    overrides, then the scenario's direct request, whose walk the preset mirrors), else the answer's echo, else the
+    default (the echo's preset or mode, else §5's). The declaration comes before the echo: a knob a service dropped
+    or rewrote without a clamp, a preset's included, is held to what the scenario asked, never excused by its own
+    echo (_preset_mismatch names such a difference)."""
+    clamped, value = _clamped_knob(ans, group, name)
+    if clamped:
+        return value
+    whose, value = _declared_knob(sc, group, name, arm)
+    if whose is not None:
+        return value
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    g = echo.get(group)
+    if isinstance(g, dict) and name in g:
+        return g[name]
+    if echo.get("exhaustive") is True or (echo.get("labels") or {}).get("mode") == "annotate":
+        return _PRESET_KNOBS.get((group, name))
     return _STRUCTURAL_KNOBS.get((group, name))
+
+
+def _preset_mismatch(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
+    """On the MCP arm, every structural walk knob whose echo differs from what the scenario declares for it (its MCP
+    overrides, else its direct request, _declared_knob) without a clamp: the service walked another strategy than
+    the scenario's, a preset or override it changed or dropped (a deliberate preset change needs the manifest to
+    follow it)."""
+    if arm != "mcp":
+        return []
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    out = []
+    for group, name in _STRUCTURAL_KNOBS:
+        g = echo.get(group)
+        if not isinstance(g, dict) or name not in g or _clamped_knob(ans, group, name)[0]:
+            continue
+        whose, declared = _declared_knob(sc, group, name, arm)
+        if whose == "overrides" and g[name] != declared:
+            out.append("the service walked with %s.%s %r, the scenario's MCP overrides state %r: an override not "
+                       "applied" % (group, name, g[name], declared))
+        elif whose == "request" and g[name] != declared:
+            out.append("the service walked with %s.%s %r, the scenario declares %r: a preset mismatch" % (
+                group, name, g[name], declared))
+    return out
 
 
 def _route_splits(armo: dict) -> Callable[[Any], Tuple[int, int]]:
@@ -3080,6 +3135,7 @@ def check_walk_in_record(sc, ans, a, arm):
         copies += t.get("copies", [])
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     probs, notes, stopped, searched = [], [], [], []
+    mismatch = _preset_mismatch(sc, ans, arm)
     branching = False
     for side in a.get("arms") or _arms_of(sc, i):
         armo = r["arms"].get(side)
@@ -3180,6 +3236,10 @@ def check_walk_in_record(sc, ans, a, arm):
         if ends & _STATED_STRUCTURAL_ENDS and exact is None and possible:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
                 side, best, sorted(possible)[0], expected))
+        elif ends & _STATED_STRUCTURAL_ENDS and exact is None and mismatch:
+            # the walk ran another strategy than the scenario's: its stop is that strategy's, named as such
+            probs.append("%s: %s; the record followed for %d of %d bp to a stated %s" % (
+                side, mismatch[0], best, expected, sorted(ends & _STATED_STRUCTURAL_ENDS)[0]))
         elif ends & _STATED_STRUCTURAL_ENDS and exact is None:
             probs.append("a stated stop that cannot have happened: %s: %s; the record followed for %d of %d bp" % (
                 side, disproved[0], best, expected))
@@ -3522,6 +3582,8 @@ def _traverse_invariants(sc, ans, a, arm):
         # only); a lost or a surplus result is no merge
         probs.append("%d results for %d seeds%s" % (len(res), len(seeds), " (%d distinct)" % distinct
                                                     if distinct < len(seeds) else ""))
+    # the MCP walk ran the strategy the scenario declares (§5): a changed or dropped preset knob is named
+    probs += _preset_mismatch(sc, ans, arm)
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     echoed = ((body.get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     radius = echoed if isinstance(echoed, int) else maxbp

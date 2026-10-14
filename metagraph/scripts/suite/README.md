@@ -1351,23 +1351,26 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
   `below_min_labels`: min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route through that many
   splits; `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's
   end ("blocked continuations are always reported"). The knobs are the walk's: a stated clamp's effective value, else
-  the arm's request's (a direct arm: the scenario's request; the MCP arm: the overrides of the scenario's MCP
-  arguments, which it sends beside its preset), else the default of that request's exhaustive preset or annotate mode
-  ("unlimited" branches and splits, no quorum: §5, §6.9), else the echo's (on the MCP arm the preset's values reach
-  the walk unstated and the echo states them), else the default (the echo's preset or mode, else §5's). The request
-  comes before the echo, so a service that drops or rewrites an override, or a preset's knob the request implies, is
-  held to the request, not excused by its own echo; a change of an MCP preset's own values is the preset's, not a
-  failure of the walk. A leaf with an end that cannot have happened shows none of its ends: walk_in_record fails "a
-  stated stop that cannot have happened". The graphlet reader takes the lineage's values from the R records
-  (structural_successors on the label_end events, `end_labels` with the branches at each leaf), as the full result
-  states them. The arm's route split table is built once per arm (a 4,096-leaf trie: 0.05 s for the invariants, 5.4 s
-  when it was built per path). Closed: GPT's zero-extension mutation of T-derived-0001 (both arms a 0 bp root, every
-  label `branch` with branches 0 under max_label_branches 2; the dead_end control fails as before), branches 0 or 1
-  of 2, branches 2 on a route without ambiguous splits, an echo of max_label_branches 0 under a request of 2, a
-  quorum or split-limit end without its knob, a re-entry without its blocked event, a graphlet's R branches or G
-  split flags zeroed. Measured on every recorded /traverse answer of v3 and v4 (647, all arms: 447 branch, 16
-  below_min_labels, 32 edge_reuse, 12 rejoined_seed label ends) and on the engine's stored traverse fixtures (tests:
-  every stored answer states possible structural ends): none violates a rule.
+  what the arm's requests declare (a direct arm: the scenario's request; the MCP arm: the overrides of the scenario's
+  MCP arguments, which it sends beside its preset, then the scenario's direct request, whose walk the preset
+  mirrors), else the default of that request's exhaustive preset or annotate mode ("unlimited" branches and splits,
+  no quorum: §5, §6.9), else the echo's, else the default (the echo's preset or mode, else §5's). The declaration
+  comes before the echo, so a service that drops or rewrites an override, a preset's knob or a knob the request
+  implies, and echoes what it walked, is held to the scenario, not excused by its own echo. On the MCP arm an echoed
+  knob that differs from the declared one fails the invariants and walk_in_record by name: "the service walked with
+  branching.max_label_branches 1, the scenario declares 2: a preset mismatch" ("... the scenario's MCP overrides
+  state 2: an override not applied"); a deliberate preset change needs the manifest to follow it. A leaf with an end
+  that cannot have happened shows none of its ends: walk_in_record fails "a stated stop that cannot have happened".
+  The graphlet reader takes the lineage's values from the R records (structural_successors on the label_end events,
+  `end_labels` with the branches at each leaf), as the full result states them. The arm's route split table is built
+  once per arm (a 4,096-leaf trie: 0.05 s for the invariants, 5.4 s when it was built per path). Closed: GPT's
+  zero-extension mutation of T-derived-0001 (both arms a 0 bp root, every label `branch` with branches 0 under
+  max_label_branches 2; the dead_end control fails as before), branches 0 or 1 of 2, branches 2 on a route without
+  ambiguous splits, an echo of max_label_branches 0 under a request of 2, a quorum or split-limit end without its
+  knob, a re-entry without its blocked event, a graphlet's R branches or G split flags zeroed. Measured on every
+  recorded /traverse answer of v3 and v4 (647, all arms: 447 branch, 16 below_min_labels, 32 edge_reuse, 12
+  rejoined_seed label ends) and on the engine's stored traverse fixtures (tests: every stored answer states possible
+  structural ends): none violates a rule.
 - /pattern, a stated reason tied to the request and the phase that allow it (SPEC-pattern-search §7.4-§7.7, §12.1,
   §14, §19.6-§19.8, §20.5, §20.9; `_pattern_reason_problems`, which the invariants and every check that turns a
   missing result into inconclusive read: contains_source_context, source_absent, source_label, source_placement,
