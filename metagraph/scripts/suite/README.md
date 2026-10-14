@@ -1826,16 +1826,22 @@ rule below changed because a recorded or probed input read wrong; tests/test_ver
 failing on 14552938.
 
 ### The direct arms' class with equal digests
-- `identical` was decided from equal digests before the checks and outcomes were read, so two byte-identical 503
-  bodies, one delivered before its budget (budget_respected fail) and one at it, read identical and were left out of
-  `direct_summary.disagreeing`. The order is now disagree (a check differs, or the outcomes differ other than by timing
-  or a planned 409 duplicate), identical, timing, not_comparable, same_checks. Deviation from the review's suggested
-  order (timing before identical): equal digests whose outcomes differ only by the determinism extension of timing
-  (G27: an earlier repeat was time-limited) stay identical, as test_compare_report pins it; no recorded run has such a
-  pair.
-- v4 moves (the defect's own instances): R-budget-0002 and R-twin-0002, byte-identical 503 deadline bodies on both
-  direct arms, direct-local inconclusive (its deadline within the budget's tolerance), direct-remote a finding
-  (budget_respected: the deadline delivered 9.5 s / 25.5 s after the budget), were identical and are disagree.
+- `identical` was decided from equal digests before the checks and outcomes were read, so two byte-identical answers
+  whose checks of the answer differed read identical and were left out of `direct_summary.disagreeing`. The order is
+  disagree, identical, timing, not_comparable, same_checks, with one exception on a repeat whose answers are the same:
+  a difference only in the execution checks (`compare.EXECUTION_CHECKS`: budget_respected, which reads the client's
+  wall, holding the network and any wait for a request thread; deterministic, which reads the arm's earlier
+  repeats) is no disagreement of the answers. It is recorded per repeat as `execution_differs` [{repeat, checks:
+  [{check, local, remote}]}] (`compare.execution_only_difference`), the class stays identical, and the arm's own
+  finding or failure counts in its totals (FINDINGS / FAIL through that execution; the strict gate blocks it there).
+  Any other difference with equal digests (a check of the answer, e.g. arms judged by different checks.py; an outcome
+  difference with no check differing; an outcome outside the vocabulary) disagrees. compare's direct summary lists
+  `execution_differs`; the report's direct section names each with its checks.
+- The verification of the lane (VERIFY-S-VERDICT (1)) refuted the first form of this rule, which made v4's
+  R-budget-0002 and R-twin-0002 (byte-identical 503 deadline bodies; direct-local's budget_respected inconclusive,
+  direct-remote's a finding: its client wall 9.5 s / 25.5 s past the budget) direct disagreements and v4's verdict
+  FAIL: with both arms late the same pair read identical, so a worse host read better. They are identical with
+  execution_differs budget_respected inconclusive / finding, and v4 reads FINDINGS as at 14552938.
 
 ### The MCP arm's reference, per repeat and check item
 - check_agreement compared every MCP execution with one whole direct arm (direct-local whenever it had a line) and

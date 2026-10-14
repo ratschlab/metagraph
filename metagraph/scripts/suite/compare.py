@@ -1575,34 +1575,63 @@ def planned_duplicate(a, b, scenario):
         dup.get("arm"), scenario.get("run_unique"), dup.get("repeat") or 0, why)
 
 
+# The checks that judge an execution beyond its answer: the client's wall time (budget_respected, e.g. of an allowed
+# 503 deadline: the wall holds the network and any wait for a request thread) and the arm's earlier repeats
+# (deterministic). Two arms' executions with the same answer may differ there; each arm's own result counts in its
+# totals, the answers agree.
+EXECUTION_CHECKS = ("budget_respected", "deterministic")
+
+
+def execution_only_difference(a, b):
+    """For two direct executions of one repeat: [{check, local, remote}] of the execution checks (EXECUTION_CHECKS)
+    whose outcomes differ when their answers are the same (equal digests) and nothing else differs, [] when nothing
+    differs at all; None when the answers differ, another check differs, or the outcomes differ with no check
+    differing."""
+    if not a.get("answer_digest") or a.get("answer_digest") != b.get("answer_digest"):
+        return None
+    ca, cb = check_outcomes(a.get("checks")), check_outcomes(b.get("checks"))
+    diff = [n for n in sorted(set(ca) | set(cb), key=str) if ca.get(n) != cb.get(n)]
+    if any(n not in EXECUTION_CHECKS for n in diff):
+        return None
+    if not diff and a.get("outcome") != b.get("outcome"):
+        return None
+    return [{"check": n, "local": ca.get(n), "remote": cb.get(n)} for n in diff]
+
+
 def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, scenario=None):
     """Agreement of the two direct arms on every repeat both ran, in this order: disagree (a check differs, the
-    outcomes differ other than by timing or a planned 409 duplicate, or an outcome is outside the vocabulary,
-    sc.outcome_known), identical (equal digests), timing (the
-    outcomes differ only on repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no
-    check compared), same_checks. Equal digests never hide a differing check or an outcome difference no timing
-    explains (two byte-identical 503 bodies, one delivered before its budget and one at it, disagree); equal
-    digests whose outcomes differ by the determinism extension of timing_repeat stay identical. A repeat whose
-    outcomes differ by a planned 409 duplicate (planned_duplicate, A2-06) is listed under planned_duplicates and
-    reads neither way."""
+    outcomes differ other than by timing, a planned 409 duplicate or the execution checks of the same answer, or an
+    outcome is outside the vocabulary, sc.outcome_known), identical (equal digests), timing (the outcomes differ only
+    on repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no check compared),
+    same_checks. On a repeat whose answers are the same (equal digests), a difference only in the execution checks
+    (EXECUTION_CHECKS: execution_only_difference, e.g. one arm's client wall making budget_respected a finding or a
+    failure) is no disagreement of the answers: it is listed under execution_differs and counts in that arm's own
+    totals; any other difference with equal digests disagrees. A repeat whose outcomes differ by a planned 409
+    duplicate (planned_duplicate, A2-06) is listed under planned_duplicates and reads neither way."""
     common = sorted(set(local) & set(remote))
     if not common:
         return None
     digest_equal = all(local[r].get("answer_digest") == remote[r].get("answer_digest") for r in common)
     differing = []
     compared = 0
-    timing, untimed, planned = [], [], []
+    timing, untimed, planned, execution = [], [], [], []
     for r in common:
         d, _, n, _, _ = compare_checks(local[r].get("checks"), remote[r].get("checks"))
         compared += n
         for x in d:
             x["repeat"] = r
-        differing.extend(d)
         outside = [x for x in (local[r], remote[r]) if not sc.outcome_known(x.get("outcome"))]
         if outside:
+            differing.extend(d)
             untimed.append({"repeat": r, "detail": "; ".join("%s: outcome %r outside the vocabulary" % (
                 x.get("arm"), x.get("outcome")) for x in outside)})
             continue
+        own = execution_only_difference(local[r], remote[r])
+        if own is not None:
+            if own:
+                execution.append({"repeat": r, "checks": own})
+            continue
+        differing.extend(d)
         if local[r].get("outcome") != remote[r].get("outcome"):
             dup = planned_duplicate(local[r], remote[r], scenario)
             if dup and not d:
@@ -1627,6 +1656,8 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
         out["timing_repeats"] = timing
     if planned:
         out["planned_duplicates"] = planned
+    if execution:
+        out["execution_differs"] = execution
     if untimed and cls == "disagree":
         out["outcome_differs"] = untimed
     return out
@@ -2881,7 +2912,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     connect_vals = {}
     cold_vals = {}
     direct_summary = {"compared": 0, "identical": 0, "same_checks": 0, "not_comparable": 0, "disagree": 0,
-                      "timing": 0, "disagreeing": [], "timing_scenarios": [], "checks_compared": 0}
+                      "timing": 0, "disagreeing": [], "timing_scenarios": [], "checks_compared": 0,
+                      "execution_differs": []}
     mcp_summary = {"compared": 0, "checks_compared": 0, "checks_not_exposed": 0, "checks_inconclusive": 0,
                    "by_design_verified": 0, "by_design_unverified": 0}
     lines_by_area_arm = {}
@@ -2934,6 +2966,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                 direct_summary["disagreeing"].append(sid)
             elif agree["class"] == "timing":
                 direct_summary["timing_scenarios"].append(sid)
+            if agree.get("execution_differs"):
+                direct_summary["execution_differs"].append(sid)
             fo = front_overhead(local, remote)
             entry["front_overhead"] = fo
             if fo is None:

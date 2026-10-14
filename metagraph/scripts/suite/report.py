@@ -680,6 +680,16 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0):
                        "a time-limited earlier repeat. A systematic speed gap between the arms shows here: %s." % (
                            ", ".join(md(x) for x in da.get("timing_scenarios", [])[:100])))
             out.append("")
+        ed = da.get("execution_differs") or []
+        if ed:
+            out.append("Identical answers whose execution checks differ by arm (budget_respected reads the client's "
+                       "wall, deterministic the arm's earlier repeats; each arm's own finding or failure counts in its "
+                       "totals, not as a disagreement of the answers): %s.\n" % "; ".join(
+                           "%s %s" % (md(sid), "; ".join("r%s %s" % (x.get("repeat"), ", ".join(
+                               "%s local %s remote %s" % (md(c["check"]), md(c["local"]), md(c["remote"]))
+                               for c in x.get("checks") or []))
+                               for x in (comp["scenarios"][sid].get("direct_agreement") or {}).get(
+                                   "execution_differs") or [])) for sid in ed[:100]))
         rows = []
         for sid in da.get("disagreeing", [])[:100]:
             a = comp["scenarios"][sid].get("direct_agreement") or {}

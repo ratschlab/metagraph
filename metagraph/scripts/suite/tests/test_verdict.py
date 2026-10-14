@@ -33,22 +33,42 @@ class DirectIdenticalTest(unittest.TestCase):
                       checks=[st("inconclusive"), st(remote_budget, "budget_respected")])
         return {0: local}, {0: remote}
 
-    def test_identical_bodies_one_premature_disagree(self):
+    def test_identical_bodies_one_premature_recorded_per_arm(self):
+        # the same 503 body, one arm's delivered before its budget: the answers agree, the arm's budget_respected
+        # failure is its own (counted in its totals), recorded as an execution difference
         local, remote = self.pair("fail")
         local[0]["checks"][1] = st("pass", "budget_respected")
         local[0]["outcome"] = "pass"
         res = cmp.direct_agreement(local, remote)
-        self.assertEqual(res["class"], "disagree")
+        self.assertEqual(res["class"], "identical")
         self.assertTrue(res["digest_equal"])
-        self.assertEqual([d["check"] for d in res["differing_checks"]], ["budget_respected"])
+        self.assertEqual(res["execution_differs"], [{"repeat": 0, "checks": [
+            {"check": "budget_respected", "local": ["pass"], "remote": ["fail"]}]}])
 
-    def test_identical_bodies_outcomes_differ_untimed_disagree(self):
-        # as v4's R-budget-0002: the same 503 body, one arm's deadline late (a finding), the other's in time
+    def test_identical_bodies_one_late_finding_recorded_per_arm(self):
+        # as v4's R-budget-0002: the same 503 body, one arm's deadline late by its client wall (a finding), the
+        # other's in time: identical, the finding direct-remote's own
         local, remote = self.pair("finding")
         remote[0]["outcome"] = "finding"
         res = cmp.direct_agreement(local, remote)
+        self.assertEqual(res["class"], "identical")
+        self.assertEqual(res["execution_differs"][0]["checks"],
+                         [{"check": "budget_respected", "local": ["inconclusive"], "remote": ["finding"]}])
+        self.assertNotIn("outcome_differs", res)
+
+    def test_equal_digests_with_another_check_differing_disagree(self):
+        # equal digests, a check of the answer differing (e.g. arms judged by different checks): a disagreement
+        local, remote = self.pair("inconclusive")
+        local[0]["checks"].append(st("pass", "invariants"))
+        remote[0]["checks"].append(st("fail", "invariants", "x"))
+        remote[0]["outcome"] = "fail"
+        res = cmp.direct_agreement(local, remote)
         self.assertEqual(res["class"], "disagree")
-        self.assertEqual(res["outcome_differs"][0]["repeat"], 0)
+        self.assertEqual([d["check"] for d in res["differing_checks"]], ["invariants"])
+        # outcomes differing with no check differing: no execution difference either
+        a, b = self.pair("inconclusive")
+        b[0]["outcome"] = "fail"
+        self.assertIsNone(cmp.execution_only_difference(a[0], b[0]))
 
     def test_equal_control_stays_identical(self):
         local, remote = self.pair("inconclusive")
