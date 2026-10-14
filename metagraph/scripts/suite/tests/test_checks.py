@@ -39,15 +39,34 @@ def outcome(sc, ans, check, _arm="direct-local", previous=None, **args):
 _REASON_CODE = dict((v, k) for k, v in checks._END_CODES.items())
 
 
+def _ranges(ids):
+    """MGT RANGES of a set of ids (SPEC §7.5.1)."""
+    ids = sorted(ids)
+    if not ids:
+        return "."
+    out, lo = [], ids[0]
+    for a, b in zip(ids, ids[1:] + [None]):
+        if b != a + 1:
+            out.append(str(lo) if lo == a else "%d-%d" % (lo, a))
+            lo = b
+    return ",".join(out)
+
+
 def mcp_shaped(answer, json_arms=True):
     """A `detail: full` /traverse answer in the shape the MCP's export (and `detail: graphlet`) gives: each result's
-    segments and paths as an MGT graphlet (SPEC-labeled-traversal-core §7.5: A, G, T and R records), the arms' other
-    fields (status, cap_trigger, limitations, counters, ...) as JSON beside it (none with json_arms False)."""
+    segments and paths as an MGT graphlet (SPEC-labeled-traversal-core §7.5: A, G, T and R records; with the label
+    dictionary as L records and the segments' labels as explicit G entry / end sets where the result states them),
+    the arms' other fields (status, cap_trigger, limitations, counters, ...) as JSON beside it (none with json_arms
+    False)."""
     out = copy.deepcopy(answer)
     for r in out["body"]["results"]:
         if "arms" not in r:
             continue
-        lines = ["H mgt 1 31 basic"]
+        lines = ["H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *"]
+        ld = r.pop("label_dict", None)
+        prev = ""
+        for x in ld or []:
+            lines.append("L %s 0 * 0 %s" % ("h" if x.get("kind") == "header" else "c", x["name"]))
         for side, arm in r["arms"].items():
             trig = arm.get("cap_trigger")
             cap = "%s,%s,0,1,1,1,0" % (_REASON_CODE[trig["reason"]], trig.get("at_bp", 0)) if trig else "*"
@@ -59,7 +78,13 @@ def mcp_shaped(answer, json_arms=True):
             for seg in arm["segments"]:
                 parents = ",".join(str(x) for x in seg["parents"]) or "*"
                 bases = seg["sequence"] if side == "right" else seg["sequence"][::-1]
-                lines.append("G %s %d %d * * * * * * %s" % (parents, seg["from_bp"], seg["length_bp"], bases or "."))
+                sets = "* * *" if "labels" not in seg else "%s %s %s" % (
+                    _ranges(seg["labels"]), seg.get("labels_total", "*") if seg.get("labels_truncated") else "*",
+                    _ranges(seg["labels"]))
+                lines.append("G %s %d %d %s * * * %s" % (parents, seg["from_bp"], seg["length_bp"], sets, bases or "."))
+                for ev in seg.get("events") or []:
+                    if ev.get("type") == "blocked":
+                        lines.append("E %d b %s %s 1 0" % (ev["at_bp"], ev["char"], _REASON_CODE[ev["reason"]]))
                 p = leaves.get(seg["id"])
                 if p is not None:
                     lines.append("T %s" % (_REASON_CODE.get(p.get("path_reason"), "*")))
@@ -169,10 +194,35 @@ class Generic(unittest.TestCase):
                          "inconclusive")
         self.assertEqual(checks.evaluate(sc_b, dl, "direct-local", client={"wall_ms": 9000.0})[2]["outcome"],
                          "finding")
+        # A-01: a 503 deadline BEFORE its budget is not the SPEC's (it answers one only when the answer cannot be
+        # written by the budget): v3's M-planted-0014 answered so at a wall of 5 ms against 60,000 ms fails
+        sc_m = dict(sc, request={"patterns": [], "time_budget_ms": 60000}, expect=sc_b["expect"])
+        res = checks.evaluate(sc_m, dl, "direct-local", client={"wall_ms": 5.0})
+        self.assertEqual([r["outcome"] for r in res], ["inconclusive", "inconclusive", "fail"])
+        self.assertIn("before the 60000 ms budget", res[2]["detail"])
+        self.assertEqual(checks.scenario_outcome(res), "fail")
+        self.assertEqual(checks.evaluate(sc_m, dl, "direct-local", client={"wall_ms": 59999.5})[2]["outcome"],
+                         "inconclusive")
+        self.assertEqual(checks.evaluate(sc_m, dl, "direct-local", client={"wall_ms": 60012.9})[2]["outcome"],
+                         "inconclusive")
+        # G22 (VERIFY-2 item 3): a /resolve 503 deadline in place of its 200 is SPEC-core §4.5's answer too, before
+        # the budget less the finalisation reserve (250 ms) it fails
+        rsc = {"route": "POST /resolve", "request": {"query": "A" * 60, "bounds": {"time_budget_ms": 20000}},
+               "truth": {}, "expect": [{"check": "status", "args": {"http": 200}},
+                                       {"check": "invariants", "args": {}}, {"check": "budget_respected", "args": {}}]}
+        rdl = checks.normalise_direct(503, b'{"error": "resolve: the answer could not be built", "code": "deadline"}')
+        res = checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 22522.0})
+        self.assertEqual([r["outcome"] for r in res], ["inconclusive", "inconclusive", "inconclusive"])
+        self.assertIn("SPEC-labeled-traversal-core §4.5", res[0]["detail"])
+        self.assertEqual(checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 19800.0})[2]["outcome"],
+                         "inconclusive")
+        res = checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 800.0})
+        self.assertEqual(res[2]["outcome"], "fail")
+        self.assertIn("finalisation reserve", res[2]["detail"])
         # another code, another route, or a scenario expecting a refusal: as stated
         res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "loading"}'), "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
-        res = checks.evaluate(dict(sc, route="POST /resolve"), dl, "direct-local")
+        res = checks.evaluate(dict(sc, route="POST /traverse"), dl, "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
         sc["expect"][0]["args"] = {"http": 400, "code": "invalid_request"}
         res = checks.evaluate(sc, dl, "direct-local")
@@ -181,6 +231,7 @@ class Generic(unittest.TestCase):
         sc["expect"][0]["args"] = {"http": 200, "text_contains": ["deadline"]}
         self.assertEqual(checks.evaluate(sc, dl, "direct-local")[0]["outcome"], "fail")
         self.assertFalse(checks.pattern_deadline_allowed(sc, dl))
+        self.assertFalse(checks.deadline_allowed(sc, dl))
 
     def test_deterministic(self):
         a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})
@@ -210,6 +261,41 @@ class Generic(unittest.TestCase):
         self.assertIn("before the work time", d)
         early["body"]["timing"]["elapsed_ms"] = 59900.0
         self.assertEqual(outcome(psc, early, "deterministic", previous=["0" * 64])[0], "inconclusive")
+
+    def test_deterministic_after_a_deadline(self):
+        # G27 / A-03 (VERIFY-2 item 1, variant B): D-M-planted-0015, r0 the host's 503 deadline (or the MCP's relayed
+        # 502), r1 and r2 complete and equal: a 503 deadline is time-limited, and a repeat is compared only with the
+        # earlier repeats no time budget limited
+        sc = {"route": "POST /pattern", "request": {}, "truth": {}}
+        dl = checks.normalise_direct(503, b'{"error": "pattern: the answer could not be written", "code": "deadline"}')
+        relay = {"http": 502, "body": None, "error": {"code": "search_failed",
+                                                     "text": "pattern_deadline: pattern: the answer could not be written"}}
+        rdl = {"http": 503, "body": None, "error": {"code": "traversal_resolve_deadline", "text": "the backend could not"}}
+        for x, why in ((dl, "a 503 deadline"), (relay, "/pattern 503 deadline relayed"), (rdl, "/resolve 503 deadline")):
+            self.assertIn(why, checks.time_limited(x))
+        a = ok_answer({"x": 1, "timing": {"elapsed_ms": 3}})
+        b = ok_answer({"x": 2, "timing": {"elapsed_ms": 3}})
+        da, db, ddl = checks.answer_digest(a), checks.answer_digest(b), checks.answer_digest(dl)
+        prev_dl = {"digest": ddl, "time_limited": checks.time_limited(dl)}
+        # r1 after a deadline r0: nothing unlimited to compare with
+        o, d = outcome(sc, a, "deterministic", previous=[prev_dl])
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("no earlier repeat without a time limitation", d)
+        # r2 equal to r1: pass; r2 differing from r1 (a real non-determinism) still fails (variant A masked it)
+        self.assertEqual(outcome(sc, a, "deterministic", previous=[prev_dl, {"digest": da, "time_limited": ""}])[0],
+                         "pass")
+        o, d = outcome(sc, b, "deterministic", previous=[prev_dl, {"digest": da, "time_limited": ""}])
+        self.assertEqual(o, "fail", d)
+        # the same with the earlier time limitation in a 200 (the masking of before)
+        tl = {"digest": "1" * 64, "time_limited": "pattern 0 time-limited"}
+        self.assertEqual(outcome(sc, b, "deterministic", previous=[tl, {"digest": da, "time_limited": ""}])[0], "fail")
+        # a deadline answer after complete ones is time-limited itself: inconclusive
+        dsc = dict(sc, expect=[{"check": "status", "args": {"http": [200, 503]}},
+                               {"check": "deterministic", "args": {}}])
+        res = checks.evaluate(dsc, dl, "direct-local", previous=[da, da])
+        self.assertEqual(res[1]["outcome"], "inconclusive", res[1]["detail"])
+        # the MCP runner's plain digests count as unlimited, as before
+        self.assertEqual(outcome(sc, a, "deterministic", previous=[da])[0], "pass")
 
     def test_fields_encoding_capabilities_clamped(self):
         req, ans = fixture("clamped")
@@ -1526,6 +1612,184 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(o, "fail")
         self.assertIn("no route through the segments follows the record", d)
 
+    def labelled_merge(self, own_labels, other_labels, truncated=False):
+        """merged_walk with segment labels: label 0 the record's header (label_dict), 1 another record's; the record's
+        allele (segment 2) carries |own_labels|, the other allele (segment 1) |other_labels|."""
+        import random
+        rnd = random.Random(11)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "NC_X.1", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}], "strategy": {"direction": "right",
+                                                                   "bounds": {"max_extension_bp": 100}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+        own = record[start + L + 30]
+        ans = self.merged_walk(record, start, L, "A" if own != "A" else "C")
+        r = ans["body"]["results"][0]
+        r["label_dict"] = [{"name": "NC_X.1", "kind": "header"}, {"name": "NC_Y.1", "kind": "header"}]
+        segs = r["arms"]["right"]["segments"]
+        for sg, labs in zip(segs, ([0, 1], other_labels, own_labels, [0, 1])):
+            sg["labels"] = labs
+            sg["labels_total"] = len(labs)
+            sg["labels_truncated"] = False
+        if truncated:
+            segs[2].update(labels_total=5, labels_truncated=True)
+        return sc, ans
+
+    def test_walk_routes_carry_the_record_label(self):
+        # A-04: the record's sequence pieced together from another label's segment (its own allele carries only label
+        # 1, the other allele label 0) does not follow the record; it passed on the sequence alone
+        sc, ans = self.labelled_merge([1], [0])
+        o, d = outcome(sc, ans, "walk_in_record", label_scope="derived")
+        self.assertEqual(o, "fail", d)
+        self.assertNotIn("sequence only", d)
+        # the record's label on its own allele, or the own allele's list cut by the cap: the route follows the record
+        for own, trunc in (([0, 1], False), ([1], True)):
+            sc, ans = self.labelled_merge(own, [0], trunc)
+            o, d = outcome(sc, ans, "walk_in_record", label_scope="derived")
+            self.assertEqual(o, "pass", d)
+        # the record not in the label dictionary (G14's cut), or no segment labels: the sequence alone, said so
+        sc, ans = self.labelled_merge([1], [0])
+        ans["body"]["results"][0]["label_dict"] = [{"name": "NC_Z.1", "kind": "header"}]
+        o, d = outcome(sc, ans, "walk_in_record", label_scope="derived")
+        self.assertEqual(o, "pass", d)
+        self.assertIn("sequence only: the record's label is not in the seed's label dictionary", d)
+        sc, ans = self.labelled_merge([1], [0])
+        for sg in ans["body"]["results"][0]["arms"]["right"]["segments"]:
+            del sg["labels"]
+        self.assertIn("sequence only: the segments state no labels", outcome(sc, ans, "walk_in_record")[1])
+        # a column label names the record too (its taxid)
+        sc, ans = self.labelled_merge([1], [0])
+        ans["body"]["results"][0]["label_dict"] = [{"name": "1", "kind": "column"}, {"name": "NC_Y.1", "kind": "header"}]
+        self.assertEqual(outcome(sc, ans, "walk_in_record", label_scope="column")[0], "fail")
+        # walk_end reads the same rule
+        t_end = dict(sc["truth"], record_length=sc["truth"]["start"] + 40 + 100)
+        sc, ans = self.labelled_merge([1], [0])
+        self.assertEqual(outcome(dict(sc, truth=t_end), ans, "walk_end", arm="right", reasons_in=["dead_end"])[0], "fail")
+        sc, ans = self.labelled_merge([0, 1], [0])
+        self.assertEqual(outcome(dict(sc, truth=t_end), ans, "walk_end", arm="right", reasons_in=["dead_end"])[0], "pass")
+        # the graphlet (the MCP's export): the G records' entry sets and the L records' names
+        sc, ans = self.labelled_merge([1], [0])
+        self.assertEqual(outcome(sc, mcp_shaped(ans), "walk_in_record", _arm="mcp", label_scope="derived")[0], "fail")
+        sc, ans = self.labelled_merge([0, 1], [0])
+        o, d = outcome(sc, mcp_shaped(ans), "walk_in_record", _arm="mcp", label_scope="derived")
+        self.assertEqual(o, "pass", d)
+        self.assertNotIn("sequence only", d)
+
+    def test_route_search_is_memoised(self):
+        # A-05: a DAG whose split children spell the same base (SPEC-violating) doubles the routes per diamond; the
+        # memo on (segment, copies followed) searches each state once, so a divergent leaf fails instead of hitting the
+        # bound (inconclusive before)
+        import random
+        rnd = random.Random(5)
+        record = "".join(rnd.choice("ACGT") for _ in range(400))
+        start, L = 100, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 400, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        cont = record[start + L:]
+        segs, last, bp = [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 1, "sequence": cont[0]}], 0, 1
+        for _ in range(20):
+            a, b, m = len(segs), len(segs) + 1, len(segs) + 2
+            segs += [{"id": a, "parents": [last], "from_bp": bp, "length_bp": 1, "sequence": cont[bp]},
+                     {"id": b, "parents": [last], "from_bp": bp, "length_bp": 1, "sequence": cont[bp]},
+                     {"id": m, "parents": [a, b], "from_bp": bp + 1, "length_bp": 1, "sequence": cont[bp + 1]}]
+            last, bp = m, bp + 2
+        wrong = "A" if cont[bp] != "A" else "C"
+        segs.append({"id": len(segs), "parents": [last], "from_bp": bp, "length_bp": 1, "sequence": wrong})
+        chain, cur = [len(segs) - 1], len(segs) - 1
+        while segs[cur]["parents"]:
+            cur = segs[cur]["parents"][0]
+            chain.append(cur)
+        arm = {"status": "complete", "complete_to_bp": bp + 1, "segments": segs,
+               "paths": [{"id": 0, "segments": chain[::-1], "length_bp": bp + 1, "path_reason": "dead_end",
+                          "end_reasons": {"dead_end": 1}}]}
+        ans = ok_answer({"results": [{"outcome": {"walks": "complete"}, "arms": {"right": arm}}],
+                         "strategy": {"bounds": {"max_extension_bp": 100}}})
+        sc = {"route": "POST /traverse", "truth": t,
+              "request": {"seeds": [{"sequence": t["window"]}], "strategy": {"direction": "right",
+                                                                              "bounds": {"max_extension_bp": 100}}}}
+        frames = [checks._seed_frame(t, {"start": start, "flank": record, "flank_start": 0}, "right", L)]
+        routes, beyond, capped = checks._record_routes(arm, "right", frames, cap=200)
+        self.assertEqual((routes, capped), ([], False))
+        o, d = outcome(sc, ans, "walk_in_record")
+        self.assertEqual(o, "fail", d)
+
+    def repeat_walk(self, flank_end=None, record_scope=True):
+        """N-realrep-0006's shape (G28): a seed inside a (GTTGGC)n repeat whose record's next base re-enters the seed
+        (rejoined_seed at 0 bp, SPEC §6.6); the walk continues from the repeat's exit."""
+        import random
+        rnd = random.Random(3)
+        pre = "".join(rnd.choice("ACGT") for _ in range(300))
+        rep = ("GTTGGC" * 13)[:76]
+        post = "".join(rnd.choice("ACT") for _ in range(1)) + "".join(rnd.choice("ACGT") for _ in range(400))
+        record = pre + rep + post
+        start, L = 306, 40
+        flank = record if flank_end is None else record[:flank_end]
+        t = {"record": "NC_R.1", "taxid": "1", "seq_id": 0, "record_length": len(record), "start": start,
+             "length": L, "strand": "+", "window": record[start:start + L], "flank": flank, "flank_start": 0,
+             "walk": {"right": {"min_bp": 0, "branch_by_bp": 0, "first": "ambiguous"}}}
+        path = record[376:476]
+        arm = {"status": "complete", "complete_to_bp": 100,
+               "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 100, "sequence": path,
+                             "events": [{"at_bp": 0, "type": "blocked", "char": record[start + L],
+                                         "reason": "rejoined_seed"},
+                                        {"at_bp": 100, "type": "label_end", "label": 0, "reason": "max_extension_bp"}]}],
+               "paths": [{"id": 0, "segments": [0], "length_bp": 100, "path_reason": "max_extension_bp",
+                          "end_reasons": {"max_extension_bp": 1}}]}
+        ans = ok_answer({"capabilities": {"regime": "basic"}, "results": [{"outcome": {"walks": "complete"},
+                                                                           "arms": {"right": arm}}],
+                         "strategy": {"bounds": {"max_extension_bp": 100}}})
+        sc = {"route": "POST /traverse", "truth": t,
+              "request": {"seeds": [{"sequence": t["window"]}], "strategy": {"direction": "right",
+                                                                              "bounds": {"max_extension_bp": 100}}}}
+        return sc, ans, record
+
+    def test_walk_blocked_by_its_seed(self):
+        # G28 (VERIFY-2 item 2, the strict rule): the record's own continuation re-enters the seed at 0 bp, the walk
+        # states that block and continues from the repeat's exit: it follows the record
+        self.assertEqual(checks._first_block("A" * 5 + "C" * 40, "C" * 3, "right", False), (0, "rejoined_seed"))
+        import random
+        rnd = random.Random(9)
+        seed = "".join(rnd.choice("ACGT") for _ in range(31))
+        x = "".join(rnd.choice("ACGT") for _ in range(60))
+        self.assertEqual(checks._first_block(seed, x + x, "right", False), (60 + 31, "edge_reuse"))
+        self.assertIsNone(checks._first_block(seed, x, "right", False))
+        sc, ans, record = self.repeat_walk()
+        o, d = outcome(sc, ans, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "pass", d)
+        self.assertIn("followed for 0 bp, then blocked by rejoined_seed", d)
+        self.assertEqual(outcome(sc, mcp_shaped(ans), "walk_in_record", _arm="mcp", label_scope="record")[0], "pass")
+        seg = lambda a: a["body"]["results"][0]["arms"]["right"]["segments"][0]  # noqa: E731
+        # the stated reason must be the computed one, the char the record's base, the block stated at all
+        for change in ({"reason": "edge_reuse"}, {"char": "T" if record[346] != "T" else "A"}, {"at_bp": 1}):
+            bad = copy.deepcopy(ans)
+            seg(bad)["events"][0].update(change)
+            self.assertEqual(outcome(sc, bad, "walk_in_record", label_scope="record")[0], "fail", change)
+        bad = copy.deepcopy(ans)
+        seg(bad)["events"] = seg(bad)["events"][1:]
+        self.assertEqual(outcome(sc, bad, "walk_in_record", label_scope="record")[0], "fail")
+        # the continuation past the block must spell the record from the repeat's exit
+        bad = copy.deepcopy(ans)
+        s = seg(bad)["sequence"]
+        seg(bad)["sequence"] = s[:50] + ("A" if s[50] != "A" else "C") + s[51:]
+        self.assertEqual(outcome(sc, bad, "walk_in_record", label_scope="record")[0], "fail")
+        # a block before the truth's minimum is a truth gap: inconclusive
+        gap = dict(sc, truth=dict(sc["truth"], walk={"right": {"min_bp": 10}}))
+        o, d = outcome(gap, ans, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertIn("truth gap", d)
+        # past the truth's flank: not verifiable (inconclusive); past the record's end with the record as the only
+        # label: fail
+        sc_short, ans_short, _ = self.repeat_walk(flank_end=420)
+        o, d = outcome(sc_short, ans_short, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertIn("not verifiable", d)
+        sc_end = dict(sc_short, truth=dict(sc_short["truth"], record_length=420))
+        o, d = outcome(sc_end, ans_short, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("past the record's end", d)
+
     def test_paths_end(self):
         sc = {"route": "POST /traverse", "truth": {},
               "request": {"seeds": [{"sequence": "A" * 40}], "strategy": {"direction": "right"}}}
@@ -1649,7 +1913,7 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(dict(sc, truth=dict(t, record="NOPE")), ok_answer(full), "trace_coordinates")[0], "fail")
 
     def test_graphlet_reader_matches_full(self):
-        n = label_ends = 0
+        n = label_ends = label_sets = 0
         for name in sorted(os.listdir(self.MINI)):
             if not name.endswith(".graphlet.json.gz"):
                 continue
@@ -1670,8 +1934,20 @@ class TraverseChecks(unittest.TestCase):
                                                 for e in x.get("events") or [] if e.get("type") == "label_end")
                         self.assertEqual(ends(sf), ends(sg), cell)
                         label_ends += len(ends(sf))
+                        # A-04: the entry sets derived from the G records (SPEC §7.5.3) are the segments' labels
+                        self.assertEqual((sf.get("labels"), bool(sf.get("labels_truncated"))),
+                                         (sg["labels"][:len(sf.get("labels") or [])] if sf.get("labels_truncated")
+                                          else sg["labels"], sg["labels_truncated"]), cell)
+                        label_sets += 1
+                self.assertEqual([x["name"] for x in checks.graphlet_label_dict(rg["graphlet"])],
+                                 [x["name"] for x in rf.get("label_dict") or []], cell)
         self.assertGreater(n, 4)
         self.assertGreater(label_ends, 50)
+        self.assertGreater(label_sets, 100)
+        # a body whose sets the rules cannot read leaves them out (the route search falls back to the sequence)
+        arms = checks.graphlet_arms("H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *\nA r c 10 u 0 0 1 0 0 x *\n"
+                                    "G * 0 10 !3 * * * * * ACGTACGTAC\nT X\n")
+        self.assertNotIn("labels", arms["right"]["segments"][0])
 
 
 if __name__ == "__main__":

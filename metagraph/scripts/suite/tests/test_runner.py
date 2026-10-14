@@ -96,7 +96,7 @@ class RunnerTest(unittest.TestCase):
             self.assertNotEqual(by[("D-T", 0)]["answer_digest"], by[("D-T", 1)]["answer_digest"])
             det = [c for c in by[("D-T", 1)]["checks"] if c["check"] == "deterministic"][0]
             self.assertEqual(det["outcome"], "inconclusive", det["detail"])
-            self.assertIn("time budget limited it", det["detail"])
+            self.assertIn("no earlier repeat without a time limitation", det["detail"])
             self.assertEqual(by[("D-T", 1)]["outcome"], "inconclusive")
             budget = [c for c in by[("R-late", 0)]["checks"] if c["check"] == "budget_respected"][0]
             self.assertEqual(budget["outcome"], "finding", budget["detail"])

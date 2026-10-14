@@ -384,8 +384,8 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   never in the smoke manifest), `until-next-deploy` (m = 2 peptides, answered under today's protein cap of 3 and
   refused after that restart), `code-derived` (set by the builder on every exact error text no smoke run exercised,
   and by hand on expectations read from the source: treat a first failure there as a possible suite error),
-  `machine-dependent` (time budgets: 200 or 503, stop or not; for /pattern the checks hold this for every scenario
-  that expects a 200, tagged or not: lane S5, below), `expected-miss`, `retention-dependent` (an attempt id
+  `machine-dependent` (time budgets: 200 or 503, stop or not; for /pattern and /resolve the checks hold this for
+  every scenario that expects a 200, tagged or not: lanes S5 and S5b, below), `expected-miss`, `retention-dependent` (an attempt id
   meets its own 409 within the host's retention of an hour), `last-record-verified` (above), `relation` (a twin
   scenario made for a relation).
 - `deterministic` compares the answer's digest (suite_common.answer_digest) with `previous`, the digests of the
@@ -864,4 +864,56 @@ group. Fails: direct-local 32 -> 8, direct-remote 28 -> 9 (G21: 29 direct 503 de
 MCP 49 -> 2 (G06 12, the table's cases replayed G02/G05/G08/G19 18, G23 1, G13/G16 16); MCP disagreements 42 -> 15,
 unverified by-design pairs 8 -> 0. What is left waits for the v4 manifest (G04, G07, G10, G12, G14, G15, G17) or a
 re-run of the MCP arm on the fixed service (G01), or is the load (G21, G22, G24).
+
+## Lane S5b: the verified review of lane S5 and the triage's second part (2026-10-14)
+
+From the review of lane S5 (review-s5/FINDINGS-A.md A-01..A-12, FINDINGS-B.md B-01..B-11) as VERIFY-REVIEW amends it,
+the second part of the triage (triage-2 G27, G28, G22) as VERIFY-2 amends it, and the coordinator's addendum of the
+semantics agreed with async (explains_checks, direct_mismatch, the table's validation, the host states).
+
+### Checks
+- A premature deadline (A-01). A 503 `deadline` arrives only when the answer cannot be written by the budget, and the
+  deadline starts at the parsed body, inside the client's interval: `_budget_503` (budget_respected on an allowed
+  503) fails one whose client wall time is below the budget less 1 ms (/resolve: below the budget less its fixed
+  finalisation reserve of 250 ms, SPEC-labeled-traversal-core §4.5). A /pattern scenario where the deadline can be
+  allowed carries budget_respected (v3: 426), as do the 85 budgeted /resolve scenarios that ask for a 200.
+- The /resolve deadline (G22 as VERIFY-2 item 3 has it). `checks.deadline_allowed` (formerly
+  `pattern_deadline_allowed`, kept as an alias) allows a POST /resolve 503 `deadline` as it allows the /pattern one
+  (SPEC-core §4.5: past the budget the answer is a 503, never partial), on the direct arms (the MCP relays it as
+  `traversal_resolve_deadline`: a host state, below).
+- Determinism after a deadline (A-03 / G27, VERIFY-2 item 1, variant B). `time_limited` states a deadline answer
+  first: the host's 503 `deadline` (/pattern, /resolve), the service's relay of a /pattern deadline (502
+  `search_failed` whose text starts `pattern_deadline`) and of a /resolve one (503 `traversal_resolve_deadline`).
+  `deterministic` compares a repeat only with the earlier repeats no time budget limited: none left is inconclusive
+  ("no earlier repeat without a time limitation"), and a time-limited repeat is inconclusive unless its stated
+  limitation cannot have happened. A repeat after an earlier time-limited one is still compared with the other
+  complete ones (variant A, which only counted the deadline, masked a real difference between r1 and r2). The
+  MCP runner passes plain digests (no time_limited): async passes {digest, time_limited} as run_direct.py does.
+- Routes carry the record's label (A-04). Where the segments state their labels (`segments[].labels` of `detail:
+  full`; a graphlet's G records' entry sets, which `graphlet_arms` now derives as SPEC §7.5.3 states, the library's
+  derive.py being the reference: G.entry against parent[0]'s end set or a merge's union, `*` the seed labels at the
+  root and a merge's partition union, G.end with the runs ending before the segment's last node removed and the
+  switch targets added, annotate's last P set), the route search passes only segments carrying the record's own
+  label (its header or its taxid's column by the label dictionary, a graphlet's L records), and a segment whose list
+  the cap cut (`labels_truncated`) passes. Without the record in the dictionary (G14's cut) or without segment
+  labels the search stays sequence-only, and the check's detail says so (`[sequence only: ...]`). On the mini-index
+  fixtures and on the 714 recorded MCP graphlet segments of the full run whose direct-local twin has the same shape,
+  the derived sets equal the full result's labels.
+- The route search is memoised (A-05) on (segment, the seed copies still followed, whether the stated event was seen):
+  every route to a segment has the same length and the copies it still follows fix its flank, so each state is
+  searched once; `_MAX_ROUTE_STATES` (100,000 states) is a safeguard. A route counted "beyond the truth flank" now
+  follows the flank to its end before it runs past it.
+- A walk blocked by its own seed or edges (G28, VERIFY-2 item 2: the strict rule; the triage's loose rule accepted a
+  relabelled reason, a continuation off the record and a fabricated block). An arm with no route that follows the
+  record over its whole length still follows it when (1) a route spells the record for exactly its first d bases,
+  where (2) d is the first depth at which the record's own continuation is inadmissible by SPEC-core §6.6,
+  computed from the truth's flank and the request's seed (`_first_block`: rejoined_seed, a seed k-mer, either
+  orientation in a canonical/primary regime; else edge_reuse_rc / edge_reuse, the step's (k+1)-mer or its reverse
+  complement already used on the walk), (3) one of its segments states the blocked event at at_bp d with the
+  record's base and that reason, and (4) past d it spells the record from a collapsed repeat's exit (an occurrence
+  of the junction's k-1 bases in the flank followed by another base) for every base the flank holds. A block before
+  the truth's min_bp is a truth gap (inconclusive), so is a continuation past the flank; past the record's end with
+  the record as the only label it fails. A following route that ends at the computed block before the truth's
+  min_bp, with that reason, is the same truth gap. The regime is the answer's capabilities or the graphlet's H
+  record (basic on this index).
 

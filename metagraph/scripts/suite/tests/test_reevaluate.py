@@ -172,7 +172,7 @@ class Reevaluate(unittest.TestCase):
         # previous as {digest, time_limited}: the time-limited cold repeat explains the warm one's difference
         self.assertEqual(mcp[("D-0001", 1)]["outcome"], "inconclusive")
         det = [c for c in mcp[("D-0001", 1)]["checks"] if c["check"] == "deterministic"][0]
-        self.assertIn("time budget limited it", det["detail"])
+        self.assertIn("no earlier repeat without a time limitation", det["detail"])
         self.assertEqual(mcp[("D-0001", 0)]["time_limited"], "pattern 0 time-limited")
         # the digest by these checks, the recorded one kept beside it
         self.assertEqual(mcp[("D-0001", 0)]["answer_digest"],

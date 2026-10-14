@@ -260,14 +260,15 @@ def _instance_matches(kind: str, pattern: str, instance: str, strand: str, table
 
 
 # ---------------------------------------------------------------------------------------------- generic checks
-def pattern_deadline_allowed(sc: dict, ans: dict) -> bool:
-    """Whether |ans| is a /pattern 503 `deadline` that the scenario's status expectation allows implicitly: a search
-    whose answer could not be written within its time_budget_ms answers 503 deadline whatever the budget
-    (SPEC-pattern-search §6, §7.6), so on a loaded host any /pattern request that searches may get it in place of its
-    200 (the README's `machine-dependent`: time budgets give 200 or 503). Allowed where the status expectation asks
-    for a 200 and does not itself name the deadline (an http 503, the code `deadline` or a text naming it): a
-    scenario that names it is judged as it states."""
-    if sc.get("route") != "POST /pattern" or ans.get("http") != 503 or \
+def deadline_allowed(sc: dict, ans: dict) -> bool:
+    """Whether |ans| is a 503 `deadline` of /pattern or /resolve that the scenario's status expectation allows
+    implicitly: an answer that could not be written within its time budget is a 503 deadline whatever the budget
+    (SPEC-pattern-search §6, §7.6; SPEC-labeled-traversal-core §4.5: never a partial answer), so on a loaded host any
+    such request may get it in place of its 200 (the README's `machine-dependent`: time budgets give 200 or 503).
+    Allowed where the status expectation asks for a 200 and does not itself name the deadline (an http 503, the code
+    `deadline` or a text naming it): a scenario that names it is judged as it states. A deadline before its budget
+    fails budget_respected (_budget_503)."""
+    if sc.get("route") not in ("POST /pattern", "POST /resolve") or ans.get("http") != 503 or \
             (ans.get("error") or {}).get("code") != "deadline":
         return False
     for exp in sc.get("expect", []):
@@ -281,16 +282,21 @@ def pattern_deadline_allowed(sc: dict, ans: dict) -> bool:
     return True
 
 
+# the name of before (lane S5, /pattern only)
+pattern_deadline_allowed = deadline_allowed
+
+
 def check_status(sc, ans, a, arm):
     http = ans.get("http")
     want = a.get("http", 200)
     wants = want if isinstance(want, list) else [want]
     if http not in wants:
         err = ans.get("error") or {}
-        if pattern_deadline_allowed(sc, ans):
-            return INCONCLUSIVE, "http 503 deadline in place of %s: the search could not answer within its " \
-                                 "time_budget_ms, an answer SPEC-pattern-search §6/§7.6 allows on any host (%s)" % (
-                                     want, (err.get("text") or "")[:200])
+        if deadline_allowed(sc, ans):
+            return INCONCLUSIVE, "http 503 deadline in place of %s: the answer could not be written within its " \
+                                 "time budget, which %s allows on any host (%s)" % (
+                                     want, "SPEC-pattern-search §6/§7.6" if sc.get("route") == "POST /pattern"
+                                     else "SPEC-labeled-traversal-core §4.5", (err.get("text") or "")[:200])
         return FAIL, "http %s, expected %s (error %s: %s)" % (http, want, err.get("code"), (err.get("text") or "")[:300])
     err = ans.get("error") or {}
     if "code" in a:
@@ -348,7 +354,17 @@ def check_entry_fields(sc, ans, a, arm):
 
 def _time_limited(ans: dict) -> str:
     """What makes an answer time-limited (SPEC-labeled-traversal-core §6.8: determinism holds provided no time
-    budget tripped; SPEC-pattern-search §7.9: determinism "time_limited"); '' when nothing did."""
+    budget tripped; SPEC-pattern-search §7.9: determinism "time_limited", and "a 503 deadline depends on the machine
+    too"); '' when nothing did. A deadline answer first: the host's 503 deadline (/pattern, /resolve) and its relays
+    by the service (a failed search whose error starts pattern_deadline, traversal_resolve_deadline)."""
+    err = ans.get("error") if isinstance(ans.get("error"), dict) else {}
+    http, code = ans.get("http"), err.get("code")
+    if http == 503 and code == "deadline":
+        return "a 503 deadline: nothing written within the time budget"
+    if http == 502 and code == "search_failed" and str(err.get("text") or "").startswith("pattern_deadline"):
+        return "the host's /pattern 503 deadline relayed by the service"
+    if http == 503 and code == "traversal_resolve_deadline":
+        return "the host's /resolve 503 deadline relayed by the service"
     body = ans.get("body")
     if not isinstance(body, dict):
         return ""
@@ -376,25 +392,35 @@ def _time_limited(ans: dict) -> str:
 
 def check_deterministic(sc, ans, a, arm, previous=None):
     """The answer's digest equals the earlier repeats' (`previous`: their digests, or {"digest", "time_limited"}
-    objects). An answer a time budget limited, this one or an earlier one, need not repeat: inconclusive."""
+    objects; a bare digest counts as not time-limited). Only earlier repeats no time budget limited are compared (a
+    time-limited answer, a 503 deadline included, need not repeat: SPEC-pattern-search §7.9,
+    SPEC-labeled-traversal-core §6.8): with none left the check is inconclusive, and an answer that is itself
+    time-limited is inconclusive unless its stated time limitation cannot have happened (fail)."""
     d = answer_digest(ans, sc.get("route"))
     if not previous:
         return INCONCLUSIVE, "first repeat: nothing to compare yet (digest %s)" % d[:16]
-    tl = _time_limited(ans) or next((p.get("time_limited") for p in previous
-                                     if isinstance(p, dict) and p.get("time_limited")), "")
-    previous = [p.get("digest") if isinstance(p, dict) else p for p in previous]
-    diff = [p for p in previous if p != d]
-    if diff and _time_limited(ans):
-        bad = _time_limitation_problem(sc, ans, arm)
-        if bad:
-            return FAIL, "digest %s differs from %d earlier repeat(s); its time limitation cannot have happened: %s" % (
-                d[:16], len(diff), bad)
-    if diff and tl:
-        return INCONCLUSIVE, "digest %s differs from %d earlier repeat(s), but a time budget limited it (%s)" % (
-            d[:16], len(diff), tl)
+    prev = [{"digest": p.get("digest"), "time_limited": p.get("time_limited") or ""} if isinstance(p, dict)
+            else {"digest": p, "time_limited": ""} for p in previous]
+    own = _time_limited(ans)
+    clean = [p for p in prev if not p["time_limited"]]
+    diff = [p for p in clean if p["digest"] != d]
+    if own:
+        if diff:
+            bad = _time_limitation_problem(sc, ans, arm)
+            if bad:
+                return FAIL, "digest %s differs from %d earlier repeat(s); its time limitation cannot have happened: " \
+                             "%s" % (d[:16], len(diff), bad)
+        return INCONCLUSIVE, "a time budget limited this repeat (%s): it need not repeat (digest %s%s)" % (
+            own, d[:16], ", differs from %d earlier repeat(s) without one" % len(diff) if diff else "")
+    if not clean:
+        return INCONCLUSIVE, "no earlier repeat without a time limitation (%s): nothing to compare (digest %s)" % (
+            prev[0]["time_limited"], d[:16])
     if diff:
-        return FAIL, "digest %s differs from %d earlier repeat(s) (%s)" % (d[:16], len(diff), diff[0][:16])
-    return PASS, "digest %s equal to %d earlier repeat(s)" % (d[:16], len(previous))
+        return FAIL, "digest %s differs from %d earlier repeat(s) without a time limitation (%s)" % (
+            d[:16], len(diff), str(diff[0]["digest"])[:16])
+    skipped = len(prev) - len(clean)
+    return PASS, "digest %s equal to %d earlier repeat(s)%s" % (
+        d[:16], len(clean), " (%d time-limited one(s) not compared)" % skipped if skipped else "")
 
 
 def check_content_encoding(sc, ans, a, arm):
@@ -1440,12 +1466,18 @@ _TAIL_PIECES = 2
 # SPEC-labeled-traversal-core §4.5); the client's wall time also holds the network, the front and any wait for a
 # request-pool thread, so a 503 is judged "long past" its budget only beyond max(1 s, the budget again).
 _LATE_503_MIN_MS = 1000.0
+# /resolve's finalisation reserve (SPEC-labeled-traversal-core §4.5, capabilities resolve.finalize_reserve_ms: fixed
+# 250 ms in this build): its work deadline is the budget less the reserve, so a 503 deadline before that is premature
+_RESOLVE_FINALIZE_RESERVE_MS = 250.0
 
 
 def _budget_503(sc, ans, client):
     """budget_respected on an allowed 503 `deadline` of /pattern or /resolve: the client's wall time (the runner's
-    `client`) against the budget. FINDING when the refusal came long past it (an unpolled piece of that length,
-    which the SPECs' deadline rule answers at its next reading), else INCONCLUSIVE (nothing in the body to judge)."""
+    `client`) against the budget. FAIL when it came before the budget (/resolve: before the budget less its
+    finalisation reserve): the SPECs answer it only when the answer cannot be written by the budget, and the deadline
+    starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core
+    §4.5); FINDING when it came long past it (an unpolled piece of that length, which the SPECs' deadline rule
+    answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
     route = sc.get("route", "")
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     budget = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
@@ -1456,6 +1488,12 @@ def _budget_503(sc, ans, client):
         return INCONCLUSIVE, "not testable: http %s (%s), no client wall time against a budget" % (
             ans.get("http"), code)
     late = wall - budget
+    floor = budget - (_RESOLVE_FINALIZE_RESERVE_MS if route == "POST /resolve" else 0.0)
+    if wall < floor - 1.0:
+        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %.0f ms budget%s: the answer is a 503 "
+                      "only when it cannot be written by the budget, and the client's interval holds the host's" % (
+                          wall, budget, " less its %.0f ms finalisation reserve" % _RESOLVE_FINALIZE_RESERVE_MS
+                          if route == "POST /resolve" else ""))
     if late > max(_LATE_503_MIN_MS, budget):
         return FINDING, ("503 deadline delivered %.0f ms after the %.0f ms budget (client wall %.0f ms): the deadline "
                          "is read where the work and the delivery poll it, so an unpolled piece of about that length "
@@ -2004,21 +2042,133 @@ _END_QUALIFIERS = {"Rm": "minority", "Rb": "below_min_labels", "Rs": "split_limi
                    "Ls": "superseded", "Lx": "switch_sources", "Lw": "label_lost"}
 
 
+def _mgt_ranges(tok: str, bound: Optional[int]) -> set:
+    """An MGT RANGES token (SPEC §7.5.1): ascending ids, runs `a-b`, `.` empty; every id below |bound| (the number of
+    L records) checked before a run is expanded."""
+    if tok == ".":
+        return set()
+    out: set = set()
+    for item in tok.split(","):
+        a, dash, b = item.partition("-")
+        lo = int(a)
+        hi = int(b) if dash else lo
+        if hi < lo or (bound is not None and hi >= bound) or hi - lo > 10 ** 7:
+            raise ValueError("RANGES item %r" % item)
+        out.update(range(lo, hi + 1))
+    return out
+
+
+def _mgt_setexpr(tok: str, base: Optional[set], bound: Optional[int]) -> set:
+    """An MGT SETEXPR (SPEC §7.5.1): RANGES, or a delta `!`, `!R`, `!+A`, `!R+A` against |base|."""
+    if not tok.startswith("!"):
+        return _mgt_ranges(tok, bound)
+    if base is None:
+        raise ValueError("a SETEXPR delta without a base: %r" % tok)
+    removed, plus, added = tok[1:].partition("+")
+    out = set(base)
+    if removed:
+        out -= _mgt_ranges(removed, bound)
+    if plus:
+        out |= _mgt_ranges(added, bound)
+    return out
+
+
+def _mgt_unescape(text: str) -> str:
+    return text.replace("%0A", "\n").replace("%0D", "\r").replace("%25", "%")
+
+
+def graphlet_label_dict(mgt: str) -> List[dict]:
+    """The label dictionary of an MGT v1 body, from its L records (SPEC §7.5.2: name = the previous name's first
+    prefix_len UTF-8 bytes + the suffix; label id = ordinal): [{name, kind header|column, column, seq_id}]."""
+    out: List[dict] = []
+    prev = b""
+    for line in mgt.split("\n"):
+        if not line.startswith("L "):
+            continue
+        f = line.split(" ", 5)
+        if len(f) < 6:
+            raise Missing("L record of %d fields" % len(f))
+        name = prev[:int(f[4])] + _mgt_unescape(f[5]).encode("utf-8")
+        prev = name
+        out.append({"name": name.decode("utf-8", "replace"), "kind": "header" if f[1] == "h" else "column",
+                    "column": int(f[2]) if f[2].isdigit() else f[2], "seq_id": None if f[3] == "*" else int(f[3])})
+    return out
+
+
+def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bound: Optional[int]) -> None:
+    """Each segment's entry set as `labels` (and labels_total, labels_truncated) of a `detail: full` segment (SPEC
+    §7.1: the names live at the segment's first step), derived from the G records as §7.5.3 states it (the
+    reference: the library's derive.py): G.entry against its base (parent[0]'s end set, a merge's the union of its
+    parents' end sets, the root none), `*` the seed labels at the root and a merge's partition union (constrain);
+    G.end against the entry, `*` the entry with, by position and run ends before switch-ins, every run anchored on
+    the segment ending before its last node removed and every switch target added (constrain), the last P set or the
+    entry (annotate). Raises ValueError on a body the rules do not read."""
+    segs = a["segments"]
+    runs_on: Dict[int, List[dict]] = {}
+    for r in a["_runs"]:
+        runs_on.setdefault(r["segment"], []).append(r)
+    end: Dict[int, set] = {}
+    for sg in segs:
+        g = sg.pop("_g")
+        parents = sg["parents"]
+        if any(p >= sg["id"] or p not in end for p in parents):
+            raise ValueError("segment %d: a parent not before it" % sg["id"])
+        base = None if not parents else set().union(*(end[p] for p in parents))
+        if g["entry"] == "*":
+            if not parents and mode == "c" and num_seed_labels is not None:
+                entry = set(range(num_seed_labels))
+            elif len(parents) > 1 and mode == "c" and g["partition"] != "*":
+                entry = set().union(*(_mgt_ranges(x, bound) for x in g["partition"].split("|")))
+            else:
+                raise ValueError("segment %d: G.entry '*' without its rule" % sg["id"])
+        else:
+            entry = _mgt_setexpr(g["entry"], base, bound)
+        total = len(entry) if g["entry_total"] == "*" else int(g["entry_total"])
+        if g["end"] != "*":
+            e = _mgt_setexpr(g["end"], entry, bound)
+        elif mode == "c":
+            stop = sg["from_bp"] + sg["length_bp"]
+            ops = [(r["to_bp"], 0, r["label"]) for r in runs_on.get(sg["id"], []) if r["to_bp"] < stop]
+            ops += [(at, 1, to) for at, to in g["switches"]]
+            e = set(entry)
+            for _, kind, label in sorted(ops, key=lambda o: (o[0], o[1])):
+                if kind == 0:
+                    e.discard(label)
+                else:
+                    e.add(label)
+        else:
+            e = set(entry)
+            for ptok in g["presence"]:
+                e = _mgt_setexpr(ptok, e, bound)
+        end[sg["id"]] = e
+        sg["labels"] = sorted(entry)
+        sg["labels_total"] = total
+        sg["labels_truncated"] = total > len(entry)
+
+
 def graphlet_arms(mgt: str) -> Dict[str, dict]:
     """The arms of an MGT v1 body (SPEC-labeled-traversal-core.md §7.5) in the shape of a `detail: full` arm, as
     far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation, events:
-    the blocked successors of the E records and the label_end events of the R records), splits (non-empty when a
-    segment ends in a split), branch_events (the V records), and paths (one per leaf, the chain through parents[0],
-    length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf with to_bp = the path length,
-    path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
+    the blocked successors of the E records and the label_end events of the R records; labels, labels_total and
+    labels_truncated: the entry sets of the G records, _graphlet_label_sets, left out when the body's sets cannot be
+    read), splits (non-empty when a segment ends in a split), branch_events (the V records), and paths (one per leaf,
+    the chain through parents[0], length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf
+    with to_bp = the path length, path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
     arms: Dict[str, dict] = {}
     cur = None
     seg = None
+    mode, num_seed_labels, n_labels = "c", None, 0
     for line in mgt.split("\n"):
         if not line:
             continue
         f = line.split(" ")
         rec = f[0]
+        if rec == "H" and len(f) > 6:
+            mode = f[6]
+        elif rec == "S" and len(f) > 4 and f[4].isdigit():
+            num_seed_labels = int(f[4])
+        elif rec == "L":
+            n_labels += 1
         if rec == "A":
             side = "left" if f[1] == "l" else "right"
             cur = {"status": {"c": "complete", "t": "truncated", "p": "pruned"}.get(f[2], f[2]),
@@ -2049,7 +2199,8 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             bases = "" if f[10] in (".", "*") else f[10]
             natural = bases if cur["_side"] == "right" else bases[::-1]
             seg = {"id": len(cur["segments"]), "parents": parents, "from_bp": int(f[2]), "length_bp": int(f[3]),
-                   "sequence": natural}
+                   "sequence": natural, "_g": {"entry": f[4], "entry_total": f[5], "end": f[6], "partition": f[7],
+                                               "switches": [], "presence": []}}
             if f[10] == "*":
                 del seg["sequence"]
             cur["segments"].append(seg)
@@ -2057,6 +2208,10 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
                 cur["splits"].append({"segment": seg["id"], "ambiguous": f[8] == "1"})
         elif rec == "V":
             cur["branch_events"].append({"at_bp": int(f[1]), "segment": int(f[2])})
+        elif rec == "E" and seg is not None and len(f) >= 5 and f[2] == "s":
+            seg["_g"]["switches"].append((int(f[1]), int(f[4])))   # a switch: E <at_bp> s <from> <to> <cost>
+        elif rec == "P" and seg is not None and len(f) >= 5:
+            seg["_g"]["presence"].append(f[4])   # an annotate run: P <from_bp> <to_bp> <total> <SETEXPR>
         elif rec == "E" and seg is not None and len(f) >= 5 and f[2] == "b":
             # a blocked successor: E <at_bp> b <char> <reason code> ... (SPEC §7.5)
             seg.setdefault("events", []).append({"at_bp": int(f[1]), "type": "blocked", "char": f[3],
@@ -2068,6 +2223,12 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
                                  "end": f[5]})
     for side, a in arms.items():
         segs = a["segments"]
+        try:
+            _graphlet_label_sets(a, mode, num_seed_labels, n_labels or None)
+        except (ValueError, KeyError, IndexError, TypeError):
+            for sg in segs:   # no label sets: the checks that read them fall back to the sequence alone
+                for key in ("_g", "labels", "labels_total", "labels_truncated"):
+                    sg.pop(key, None)
         # the label_end events (SPEC §7.5.6: derived from the R records with a code end, on their segment at to_bp,
         # reason = the qualifier's text or the code's enum; `Lw` ends silently and `m` is closed by a merge)
         for r in a["_runs"]:
@@ -2106,6 +2267,11 @@ def _result(ans: dict, i: int) -> dict:
     if isinstance(r.get("graphlet"), str) and not any("segments" in a for a in (r.get("arms") or {}).values()):
         r = dict(r)
         parsed = graphlet_arms(r["graphlet"])
+        if "label_dict" not in r:
+            try:
+                r["_mgt_label_dict"] = graphlet_label_dict(r["graphlet"])
+            except (ValueError, Missing):
+                pass
         arms = {}
         for side, a in parsed.items():
             merged = dict((r.get("arms") or {}).get(side) or {})
@@ -2159,20 +2325,51 @@ def _leaf_ends(armo: dict, p: dict, path_reason: bool = True) -> set:
 # memory budget in tree / full detail), so after a split that several records (or repeat copies of one) carry, the
 # displayed path may be another record's allele while the record's own route passes the merge through another parent.
 # The walk checks therefore search the arm's segment DAG through segments[].parents, taking ANY parent at a merge
-# (labels_via_parent is not followed: a label's kept entry may come through the other allele's parent). The search
-# is pruned at the first base that departs from the record, so it visits a segment at most once per copy of the seed
-# (the children of a split differ in their first base); it still stops after _MAX_ROUTE_STATES visits, and a check
-# that could not finish it is inconclusive, never failed.
+# (labels_via_parent is not followed: a label's kept entry may come through the other allele's parent). Where the
+# segments state their labels (segments[].labels of `detail: full`, the G records' entry sets of a graphlet) a route
+# passes only segments that carry the record's own label (its header or its column, by the label dictionary; a
+# segment whose list the cap cut, labels_truncated, passes): the record's sequence must not be pieced together from
+# other labels' segments (A-04). The search is pruned at the first base that departs from the record and memoised on
+# (segment, the seed copies still followed): every route to a segment has the same length, and the copies it still
+# follows fix the spelled flank, so each such state is searched once (A-05). _MAX_ROUTE_STATES bounds the states as a
+# safeguard; a check that could not finish the search is inconclusive, never failed.
 _MAX_ROUTE_STATES = 100000
 
 
+def _record_label_ids(r: dict, t: dict) -> Optional[set]:
+    """The label ids of the truth's record in a seed result's label dictionary (its header, or its taxid's column),
+    the graphlet's L records where the result has no label_dict; None without any (the label rule then does not
+    apply, see _route_labels)."""
+    ld = r.get("label_dict")
+    if not isinstance(ld, list):
+        ld = r.get("_mgt_label_dict")
+    if not isinstance(ld, list):
+        return None
+    names = set(str(t[k]) for k in ("record", "taxid") if t.get(k) is not None)
+    return set(i for i, x in enumerate(ld) if isinstance(x, dict) and str(x.get("name")) in names)
+
+
+def _route_labels(r: dict, t: dict, armo: dict) -> Tuple[Optional[set], str]:
+    """(the record's label ids the route search requires, or None for the sequence-only rule, and why it is
+    sequence-only: '' when the label rule applies)."""
+    ids = _record_label_ids(r, t)
+    if not ids:
+        return None, "sequence only: the record's label is not in the seed's label dictionary"
+    if not any(isinstance(x.get("labels"), list) for x in armo.get("segments") or []):
+        return None, "sequence only: the segments state no labels"
+    return ids, ""
+
+
 def _record_routes(armo: dict, side: str, frames: Sequence[Tuple[Callable[[int], str], int, int]],
-                   cap: Optional[int] = None) -> Tuple[List[Tuple[dict, str]], int, bool]:
+                   cap: Optional[int] = None, labels: Optional[set] = None,
+                   event: Optional[Tuple[int, str, str]] = None) -> Tuple[List[Tuple[dict, str]], int, bool]:
     """The root-to-leaf routes of arm |armo| through segments[].parents, any parent at a merge, whose spelled flank
     (natural orientation: a right flank root -> leaf, a left flank leaf -> root) is, for its whole length, the
-    continuation of one of |frames| (_seed_frame: one per copy of the seed). Returns (routes as (the leaf's paths[]
-    entry, flank), the number of prefixes that ran past every frame's truth flank, whether the search stopped at
-    |cap| visits, default _MAX_ROUTE_STATES)."""
+    continuation of one of |frames| (_seed_frame: one per copy of the seed; (cont, room, end)). With |labels| (label
+    ids), a segment that lists its labels without the cap having cut them must carry one of them. With |event|
+    (at_bp, char, reason), a route counts only once one of its segments states that blocked event. Returns (routes as
+    (the leaf's paths[] entry, flank), the number of routes that followed a frame to the end of its truth flank and
+    ran past it, whether the search stopped at |cap| states, default _MAX_ROUTE_STATES)."""
     cap = _MAX_ROUTE_STATES if cap is None else cap
     segs = dict((x.get("id"), x) for x in armo.get("segments") or [])
     children: Dict[Any, List[Any]] = {}
@@ -2180,35 +2377,47 @@ def _record_routes(armo: dict, side: str, frames: Sequence[Tuple[Callable[[int],
         for par in x.get("parents") or []:
             children.setdefault(par, []).append(x.get("id"))
     leaves = dict((p["segments"][-1], p) for p in armo.get("paths") or [] if p.get("segments"))
-    stack = [(x.get("id"), "", tuple(range(len(frames)))) for x in reversed(armo.get("segments") or [])
-             if not x.get("parents")]
+    stack = [(x.get("id"), "", tuple(range(len(frames))), event is None)
+             for x in reversed(armo.get("segments") or []) if not x.get("parents")]
     routes: List[Tuple[dict, str]] = []
     beyond = visits = 0
+    seen = set()
     while stack:
+        sid, flank, alive, stated = stack.pop()
+        if (sid, alive, stated) in seen:
+            continue   # the same segment, copies and statement: the same flank and subtree (A-05)
+        seen.add((sid, alive, stated))
         visits += 1
         if visits > cap:
             return routes, beyond, True
-        sid, flank, alive = stack.pop()
         sg = segs.get(sid)
         if sg is None or "sequence" not in sg:
             raise Missing("segment sequences")
+        if labels is not None and isinstance(sg.get("labels"), list) and not sg.get("labels_truncated") and \
+                not labels.intersection(sg["labels"]):
+            continue
+        if not stated:
+            stated = any(ev.get("type") == "blocked" and ev.get("at_bp") == event[0] and ev.get("char") == event[1]
+                         and ev.get("reason") == event[2] for ev in sg.get("events") or [])
         flank = flank + sg["sequence"] if side == "right" else sg["sequence"] + flank
         n = len(flank)
         keep, past = [], False
         for fi in alive:
             cont, room, _ = frames[fi]
             if room < n:
-                past = True
+                # the part inside the truth flank follows it: the route runs past what the truth can judge
+                inside = flank[:room] if side == "right" else flank[n - room:]
+                past = past or inside == cont(room)
             elif flank == cont(n):
                 keep.append(fi)
         if not keep:
-            beyond += 1 if past else 0
+            beyond += 1 if past and stated else 0
             continue
         kids = children.get(sid) or []
-        if not kids:
+        if not kids and stated:
             routes.append((leaves.get(sid) or {"id": None, "segments": [sid], "length_bp": n}, flank))
         for c in reversed(kids):
-            stack.append((c, flank, tuple(keep)))
+            stack.append((c, flank, tuple(keep), stated))
     return routes, beyond, False
 
 
@@ -2246,6 +2455,141 @@ def _seed_frame(t: dict, c: dict, side: str, L: int) -> Tuple[Callable[[int], st
             return revcomp(x) if minus else x
         room, end = s0, start
     return cont, room, end
+
+
+def _regime(ans: dict, r: dict) -> str:
+    """The graph regime of the answer's index (basic, canonical, primary): the body's capabilities, else the graphlet's
+    H record; basic when neither states it."""
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    reg = (body.get("capabilities") or {}).get("regime") if isinstance(body.get("capabilities"), dict) else None
+    if not reg and isinstance(r.get("graphlet"), str):
+        head = r["graphlet"].split("\n", 1)[0].split(" ")
+        reg = head[4] if len(head) > 4 and head[0] == "H" else None
+    return str(reg or "basic")
+
+
+def _first_block(seed: str, out: str, side: str, canonical: bool, k: int = K) -> Optional[Tuple[int, str]]:
+    """(d, reason) of the first outward depth d at which the step from the seed's arm along |out| (the record's bases
+    in walking order) to out[d] is inadmissible by SPEC-labeled-traversal-core §6.6, or None: rejoined_seed (the
+    step's target k-mer is a seed k-mer, either orientation in canonical/primary), else edge_reuse_rc / edge_reuse
+    (the step's (k+1)-mer, or its reverse complement in canonical/primary, is an earlier step of the walk);
+    precedence rejoined_seed > edge_reuse_rc > edge_reuse."""
+    if len(seed) < k:
+        return None
+    seedk = set(seed[j:j + k] for j in range(len(seed) - k + 1))
+    if canonical:
+        seedk |= set(revcomp(x) for x in seedk)
+    used: set = set()
+    win = seed[-k:] if side == "right" else seed[:k]   # the walk's node, natural orientation
+    for d, b in enumerate(out):
+        kmer, edge = (win[1:] + b, win + b) if side == "right" else (b + win[:-1], b + win)
+        if kmer in seedk:
+            return d, "rejoined_seed"
+        if canonical and revcomp(edge) in used:
+            return d, "edge_reuse_rc"
+        if edge in used:
+            return d, "edge_reuse"
+        used.add(edge)
+        win = kmer
+    return None
+
+
+def _record_view(t: dict, c: dict, L: int) -> Tuple[str, int, int, Callable[[int], int]]:
+    """For one copy |c| of the truth window: (the truth flank in the seed's orientation O, the seed's span [p0, p1) in
+    O, the record coordinate of O[x])."""
+    fl = c["flank"]
+    s0 = c["start"] - c["flank_start"]
+    if t.get("strand", "+") == "-":
+        return revcomp(fl), len(fl) - (s0 + L), len(fl) - s0, lambda x: c["flank_start"] + len(fl) - 1 - x
+    return fl, s0, s0 + L, lambda x: c["flank_start"] + x
+
+
+def _occurrences(text: str, word: str) -> List[int]:
+    out, j = [], text.find(word)
+    while j >= 0:
+        out.append(j)
+        j = text.find(word, j + 1)
+    return out
+
+
+_MAX_REPEAT_EXITS = 64
+
+
+def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side: str, L: int) -> Optional[dict]:
+    """The first depth at which the record's own continuation from the seed is inadmissible (_first_block), computed
+    from the truth's flank and the request's seed, never read from the answer: {d, reason, char (the record's base
+    there), exits: [(the record coordinate of the exit base, the outward bases from it)] (the junction's other
+    successors in the flank: where the walk leaves a collapsed repeat), reaches_end (the flank holds the record's end
+    in the walking direction)}, or None."""
+    seeds = sc["request"].get("seeds") or []
+    seed = str((seeds[i] if i < len(seeds) and isinstance(seeds[i], dict) else {}).get("sequence") or "").upper()
+    O, p0, p1, coord = _record_view(t, c, L)
+    out = O[p1:] if side == "right" else O[:p0][::-1]
+    blk = _first_block(seed, out, side, _regime(ans, r) in ("canonical", "primary"))
+    if blk is None or blk[0] >= len(out):
+        return None
+    d, why = blk
+    own = out[d]
+    exits = []
+    if side == "right":
+        junction = (seed + out[:d])[-(K - 1):]
+        for x in _occurrences(O, junction):
+            if x + K - 1 < len(O) and O[x + K - 1] != own:
+                exits.append((coord(x + K - 1), O[x + K - 1:]))
+        x_end = len(O) - 1
+    else:
+        junction = (out[:d][::-1] + seed)[:K - 1]
+        for x in _occurrences(O, junction):
+            if x >= 1 and O[x - 1] != own:
+                exits.append((coord(x - 1), O[:x][::-1]))
+        x_end = 0
+    return {"d": d, "reason": why, "char": own, "out": out, "exits": exits[:_MAX_REPEAT_EXITS],
+            "reaches_end": coord(x_end) in (0, t["record_length"] - 1)}
+
+
+def _blocked_walk(sc: dict, ans: dict, r: dict, i: int, t: dict, armo: dict, side: str, copies: List[dict], L: int,
+                  labels: Optional[set], exact: Optional[dict], record_scope: bool) -> Optional[Tuple[str, str]]:
+    """G28 (VERIFY-2 item 2, the strict rule): an arm with no route that follows the record for its whole length
+    still follows it when the record's own continuation is blocked (SPEC-labeled-traversal-core §6.6: a step into a
+    seed node or along a used edge is not taken but reported as a `blocked` event): some route (any parent at a
+    merge; the label rule as _record_routes) spells the record for exactly its first d bases, where d is the first
+    inadmissible depth computed from the truth's flank and the request's seed (_computed_block); one of its segments
+    states the blocked event at at_bp d with the record's base and the computed reason; and past d it spells the
+    record from a collapsed repeat's exit (an occurrence of the junction in the flank followed by another base) for
+    every base the flank holds. (outcome, detail): pass; inconclusive when d lies before the truth's min_bp (a truth
+    gap), when such a route runs past the flank (not verifiable), or when the search stopped at its bound; fail when
+    it runs past the record's end with the record as its only label; None when no copy has such a route."""
+    for c in copies:
+        blk = _computed_block(sc, ans, r, i, t, c, side, L)
+        if blk is None or not blk["exits"]:
+            continue
+        d, out = blk["d"], blk["out"]
+        frames = []
+        for pos, tail in blk["exits"]:
+            walk = out[:d] + tail
+            frames.append(((lambda n, w=walk: w[:n]) if side == "right" else (lambda n, w=walk: w[:n][::-1]),
+                           len(walk), len(walk)))
+        routes, beyond, capped = _record_routes(armo, side, frames, labels=labels, event=(d, blk["char"], blk["reason"]))
+        what = "the record's own continuation blocked at %d bp by %s (computed from the record and the seed)" % (
+            d, blk["reason"])
+        if capped:
+            return INCONCLUSIVE, "%s; the route search stopped at %d states" % (what, _MAX_ROUTE_STATES)
+        if routes:
+            longest = max(len(f) for _, f in routes)
+            exit_at = sorted(set(pos for pos, tail in blk["exits"] if any(
+                f == (out[:d] + tail)[:len(f)] if side == "right" else f[::-1] == (out[:d] + tail)[:len(f)]
+                for _, f in routes)))
+            if exact is not None and d < exact.get("min_bp", 0):
+                return INCONCLUSIVE, "%s, before the truth's minimum of %d bp: a truth gap" % (what, exact["min_bp"])
+            return PASS, "followed for %d bp, then blocked by %s (computed from the record and the seed, stated at " \
+                         "%d bp); %d route(s) continue along the record from its exit at %s (longest %d bp)" % (
+                             d, blk["reason"], d, len(routes), exit_at[:3], longest)
+        if beyond:
+            if record_scope and blk["reaches_end"]:
+                return FAIL, "%s; %d route(s) continue from a repeat exit past the record's end" % (what, beyond)
+            return INCONCLUSIVE, "%s; %d route(s) continue from a repeat exit past the truth's flank (not " \
+                                 "verifiable)" % (what, beyond)
+    return None
 
 
 def check_walk_in_record(sc, ans, a, arm):
@@ -2313,10 +2657,21 @@ def check_walk_in_record(sc, ans, a, arm):
                 if len(f) > own_end:
                     probs.append("%s path %s runs %d bp, past the record's end (%d bp)" % (
                         side, p.get("id"), len(f), own_end))
-        # the routes that follow the record, through any parent at a merge (_record_routes)
-        following, beyond, capped = _record_routes(armo, side, frames)
+        # the routes that follow the record, through any parent at a merge, on segments carrying its label where they
+        # state labels (_record_routes, _route_labels)
+        labels, seq_only = _route_labels(r, t, armo)
+        how = " [%s]" % seq_only if seq_only else ""
+        following, beyond, capped = _record_routes(armo, side, frames, labels=labels)
         if a.get("label_scope") == "record":
             following = [(p, f) for p, f in following if len(f) <= own_end]
+        if not following and not capped:
+            blocked = _blocked_walk(sc, ans, r, i, t, armo, side, copies, L, labels, exact,
+                                    a.get("label_scope") == "record")
+            if blocked is not None:
+                kind, text = blocked
+                (notes if kind == PASS else searched if kind == INCONCLUSIVE else probs).append(
+                    "%s: %s%s" % (side, text, how))
+                continue
         if not following:
             lens = [len(f) for _, f in fl]
             if capped:
@@ -2324,8 +2679,9 @@ def check_walk_in_record(sc, ans, a, arm):
                                 "following the record was found (paths of %s bp)" % (side, _MAX_ROUTE_STATES, lens[:6]))
                 continue
             probs.append("%s: no route of the arm's %d segment(s) follows the record, any parent taken at a merge "
-                         "(%d path(s) of %s bp%s)" % (side, len(armo.get("segments") or []), len(fl), lens[:6],
-                                                      "; %d route(s) beyond the truth flank" % beyond if beyond else ""))
+                         "(%d path(s) of %s bp%s)%s" % (side, len(armo.get("segments") or []), len(fl), lens[:6],
+                                                        "; %d route(s) beyond the truth flank" % beyond if beyond else "",
+                                                        how))
             continue
         for sg in [x for x in armo.get("segments", []) if not x.get("parents")]:
             rs = sg.get("sequence", "")
@@ -2336,8 +2692,8 @@ def check_walk_in_record(sc, ans, a, arm):
         merged = "" if any(f in shown for _, f in following if len(f) == best) else \
             ", through a non-first parent of a merge"
         if best >= expected:
-            notes.append("%s: %d route(s) follow the record (longest %d bp of %d expected%s)" % (
-                side, len(following), best, expected, merged))
+            notes.append("%s: %d route(s) follow the record (longest %d bp of %d expected%s)%s" % (
+                side, len(following), best, expected, merged, how))
             continue
         if capped:
             searched.append("%s: the record followed for %d of %d bp when the route search stopped at %d visits" % (
@@ -2349,9 +2705,14 @@ def check_walk_in_record(sc, ans, a, arm):
                 ends |= _leaf_ends(armo, p)
         # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
         unstopped = _resource_end_problem(r, armo, side, ends)
+        gap = _computed_block(sc, ans, r, i, t, copies[0], side, L) if exact is not None else None
         if ends & _STATED_STRUCTURAL_ENDS and exact is None:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
                 side, best, sorted(ends & _STATED_STRUCTURAL_ENDS)[0], expected))
+        elif gap is not None and gap["d"] == best and gap["reason"] in ends:
+            # the record's own continuation is inadmissible there (§6.6), which the truth's minimum did not count
+            searched.append("%s: the record followed for %d of %d bp, ended by %s, which the record and the seed "
+                            "compute there: a truth gap" % (side, best, expected, gap["reason"]))
         elif unstopped:
             probs.append("a stated stop that cannot have happened: %s, the record followed for %d of %d bp" % (
                 unstopped, best, expected))
@@ -2359,8 +2720,8 @@ def check_walk_in_record(sc, ans, a, arm):
             stopped.append("%s: the record followed for %d of %d bp, stopped by %s" % (
                 side, best, expected, sorted(ends & _RESOURCE_ENDS)[0] if ends & _RESOURCE_ENDS else trig))
         else:
-            probs.append("%s: the record followed for only %d of %d bp, the path ended by %s" % (
-                side, best, expected, sorted(ends) or "nothing stated"))
+            probs.append("%s: the record followed for only %d of %d bp, the path ended by %s%s" % (
+                side, best, expected, sorted(ends) or "nothing stated", how))
     if a.get("expect_branching") and not branching:
         bys = [((t.get("walk") or {}).get(x) or {}).get("branch_by_bp") for x in a.get("arms") or _arms_of(sc, i)]
         if stopped:
@@ -2514,8 +2875,9 @@ def check_walk_end(sc, ans, a, arm):
     frames = [_seed_frame(t, {"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]}, side,
                           t["length"])]
     capped = False
+    labels, seq_only = _route_labels(r, t, armo)
     if frames[0][1] >= want:
-        routes, _, capped = _record_routes(armo, side, frames)
+        routes, _, capped = _record_routes(armo, side, frames, labels=labels)
         at_end = [(p, f) for p, f in routes if len(f) == want]
     else:
         at_end = [(p, f) for p, f in fl if len(f) == want]
@@ -2541,7 +2903,7 @@ def check_walk_end(sc, ans, a, arm):
         reasons = _leaf_ends(armo, p, path_reason=False)
         if a.get("reasons_in") and not reasons & set(a["reasons_in"]):
             return FAIL, "path at the record's end ended by %s, expected one of %s" % (sorted(reasons), a["reasons_in"])
-    return PASS, "%s arm ends at the record's end (%d bp)" % (side, want)
+    return PASS, "%s arm ends at the record's end (%d bp)%s" % (side, want, " [%s]" % seq_only if seq_only else "")
 
 
 def check_traverse_seed_outcome(sc, ans, a, arm):
@@ -3135,8 +3497,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
         if exp.get("check") == "status":
             w = exp.get("args", {}).get("http", 200)
             allowed = w if isinstance(w, list) else [w]
-    if pattern_deadline_allowed(scenario, answer):
-        allowed = list(allowed) + [503]   # a /pattern 503 deadline: the other checks cannot test their property
+    if deadline_allowed(scenario, answer):
+        allowed = list(allowed) + [503]   # a 503 deadline: the other checks cannot test their property
     # the seeds the attempt's duration bound stopped (_attempt_stops): their own checks are inconclusive (or fail
     # when the stated bound cannot have been reached), the other seeds keep theirs
     stops = _attempt_stops(scenario, answer, arm, client)
