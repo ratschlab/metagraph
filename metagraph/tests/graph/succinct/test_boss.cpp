@@ -10,6 +10,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
+#include "common/serialization.hpp"
 
 
 namespace {
@@ -246,6 +247,38 @@ TEST(BOSS, Serialization) {
     EXPECT_FALSE(BOSS() == loaded_graph);
 
     delete graph;
+}
+
+TEST(BOSS, FailedLoadCanBeRetried) {
+    BOSS reference(3);
+    reference.add_sequence("ACGTACGTT");
+    const auto valid_path = test_dump_basename + "_valid.boss";
+    {
+        std::ofstream out(valid_path, std::ios::binary);
+        reference.serialize(out);
+    }
+
+    // Unknown representations and valid headers with missing vector payloads.
+    for (uint64_t representation : { uint64_t{0}, uint64_t{5}, uint64_t{99}, UINT64_MAX,
+                                     uint64_t{BOSS::DYN}, uint64_t{BOSS::STAT},
+                                     uint64_t{BOSS::FAST}, uint64_t{BOSS::SMALL} }) {
+        SCOPED_TRACE(representation);
+        const auto invalid_path = test_dump_basename + "_invalid.boss";
+        {
+            std::ofstream out(invalid_path, std::ios::binary);
+            serialize_number_vector_raw(out, std::vector<BOSS::edge_index>(reference.alph_size, 0));
+            serialize_number(out, reference.get_k());
+            serialize_number(out, representation);
+        }
+        BOSS graph;
+        {
+            std::ifstream in(invalid_path, std::ios::binary);
+            EXPECT_FALSE(graph.load(in));
+        }
+        std::ifstream in(valid_path, std::ios::binary);
+        ASSERT_TRUE(graph.load(in));
+        EXPECT_TRUE(reference.equals_internally(graph));
+    }
 }
 
 TEST(BOSS, AddSequenceSimplePath) {
