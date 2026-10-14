@@ -903,6 +903,13 @@ class ReviewFixesTest(unittest.TestCase):
         res = cmp.mcp_agreement({0: refused}, {"direct-local": {0: d400}}, self.resolve(["job", "short", "nim"]),
                                 cases, self.dir)
         self.assertEqual((res["class"], res["case"]), ("service_by_design", "short"))
+        # only a named case's DIRECT side is the expressibility gap; a check-level disagreement (an MCP
+        # backend_fault against a direct pass, as R-twin-0003 / R-edge-0013 were probed) stays a disagreement
+        fault = self.raw_line("R-1", "mcp", 0, http=502, outcome="fail", error={"code": "backend_fault", "text": "x"},
+                              checks=[{"check": "status", "outcome": "fail", "detail": "http 502"}])
+        for named in (["job", "nim"], ["job", "short", "nim"]):
+            res = cmp.mcp_agreement({0: fault}, {"direct-local": {0: d200}}, self.resolve(named), cases, self.dir)
+            self.assertEqual((res["class"], res.get("side")), ("disagree", None), named)
 
     def answer_case(self, direct, dm, http=None):
         case = {"id": "a", "agreement": "by_design", "direct_expectation": {},
