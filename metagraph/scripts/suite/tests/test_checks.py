@@ -649,6 +649,17 @@ class MoreChecks(unittest.TestCase):
         unstated = copy.deepcopy(late)
         unstated["patterns"][0].update(stop=None, determinism="full")
         self.assertEqual(outcome(sc, ok_answer(unstated), "predicate_either_mirror", label="546")[0], "fail")
+        # a hiding the request cannot have (lane S6g1: anchor labels without labels all; a selection threshold
+        # stop that left the selected count exact) fails the mirror and the selection alike
+        for withheld, extra in (("anchor_labels_truncated", {"anchors_truncated": [{"cap": 2, "total": 9}]}),
+                                ("threshold_crossed", {"stop": {"phase": "selection", "reason": "max_contexts"}})):
+            hid = copy.deepcopy(ans)
+            hid["patterns"][0].update(results=[], returned=0, retrieval_complete=False,
+                                      withheld={"reason": withheld}, **extra)
+            hid.setdefault("limits", {})["stop_at_threshold"] = True
+            self.assertEqual(outcome(sc, ok_answer(hid), "predicate_either_mirror", label="546")[0], "fail", withheld)
+            self.assertEqual(outcome(sc, ok_answer(hid), "predicate_selected", selected=True, label="546")[0],
+                             "fail", withheld)
         refused = copy.deepcopy(ans)
         refused["patterns"][0] = {"id": "w", "error": {"code": "predicate_too_large"}}
         self.assertEqual(outcome(sc, ok_answer(refused), "predicate_either_mirror", label="546")[0], "fail")
@@ -922,7 +933,7 @@ class StatedReasons(unittest.TestCase):
               "finalize_reserve_ms": 250, "stop_at_threshold": False, "max_predicate_contexts": 50}
 
     def problems(self, counts, withheld=None, cut=None, stop=None, det="full", steps=1000, limits=None,
-                 elapsed=1000.0, req=None, mode=None, **extra):
+                 elapsed=1000.0, req=None, mode=None, index=None, **extra):
         e = {"id": "w", "mode": mode or ("partial" if cut else "all_or_count"), "counts": counts,
              "withheld": {"reason": withheld} if withheld else None, "cut": {"reason": cut} if cut else None,
              "stop": {"phase": stop[0], "reason": stop[1]} if stop else None, "determinism": det, "results": [],
@@ -931,6 +942,8 @@ class StatedReasons(unittest.TestCase):
         lim = dict(self.LIMITS)
         lim.update(limits or {})
         body = {"patterns": [e], "limits": lim, "timing": {"elapsed_ms": elapsed}}
+        if index is not None:
+            body["index"] = index
         sc = {"route": "POST /pattern", "request": req or {"patterns": [{"dna": "A" * 25, "id": "w"}]}, "truth": {}}
         return checks._pattern_reason_problems(sc, body, 0, e)
 
@@ -984,10 +997,11 @@ class StatedReasons(unittest.TestCase):
                 req=labels)
         self.ok(ctx("exact", 24), withheld="annotation_budget", rows_refused=[{"row": 1}], req=labels)
         self.bad("without an annotation stop", ctx("exact", 24), withheld="annotation_budget", req=labels)
-        self.ok(ctx("exact", 24), withheld="anchor_labels_truncated", anchors_truncated=[{"cap": 2, "total": 9}])
-        self.bad("without anchors_truncated", ctx("exact", 24), withheld="anchor_labels_truncated")
-        self.ok(ctx("exact", 24), withheld="output_budget", stop=("output", "max_memory"))
-        self.bad("without a memory stop", ctx("exact", 24), withheld="output_budget")
+        self.ok(ctx("exact", 24), withheld="anchor_labels_truncated", anchors_truncated=[{"cap": 2, "total": 9}],
+                req=labels)
+        self.bad("without anchors_truncated", ctx("exact", 24), withheld="anchor_labels_truncated", req=labels)
+        self.ok(ctx("exact", 24), withheld="output_budget", stop=("output", "max_memory"), req=labels)
+        self.bad("without a memory stop", ctx("exact", 24), withheld="output_budget", req=labels)
         pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
         self.ok(ctx("exact", 60), withheld="predicate_above_threshold", req=pred)
         self.bad("not above max_predicate_contexts 50", ctx("exact", 10), withheld="predicate_above_threshold", req=pred)
@@ -999,6 +1013,104 @@ class StatedReasons(unittest.TestCase):
         self.bad("without a predicate stop", ctx("exact", 24), withheld="predicate_budget", req=pred)
         self.bad("does not list", ctx("exact", 24), withheld="no_such_reason")
 
+    def test_withheld_reasons_need_their_request(self):
+        # lane S6g1 (the review of 2026-10-14, finding 4): a reason the request cannot have, whatever else the
+        # answer states; the label-free short pattern of P-scope-0001 hides its source behind none of them
+        ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
+        refused = [{"row": 1, "phase": "label_discovery", "reason": "max_memory"}]
+        self.bad("reads no annotation", ctx("exact", 19), withheld="annotation_budget", rows_refused=refused)
+        self.bad("reads no annotation", ctx("exact", 19), withheld="annotation_budget",
+                 stop=("label_discovery", "max_annotation_work"))
+        self.bad("reads no annotation", ctx("exact", 19), rows_refused=refused)
+        self.bad("without labels all", ctx("exact", 19), withheld="anchor_labels_truncated",
+                 anchors_truncated=[{"cap": 2, "total": 9}])
+        self.bad("without a memory account", ctx("exact", 19), withheld="output_budget",
+                 stop=("output", "max_memory"))
+        self.bad("without a predicate", ctx("exact", 19), withheld="predicate_budget",
+                 stop=("selection", "max_predicate_work"))
+        self.bad("without a predicate", ctx("exact", 60), withheld="predicate_above_threshold")
+        self.bad("without a predicate", {"contexts": self.c("exact", 500), "selected": self.c("exact", 101)},
+                 withheld="selected_above_threshold")
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred)
+        # discovery_budget: the count the step stop interrupted is not exact (§7.4)
+        self.bad("not exact", ctx("exact", 19), withheld="discovery_budget", stop=("discovery", "max_steps"))
+        self.ok(ctx("bounds", 2, lower=2, upper=24), withheld="discovery_budget", stop=("mask_scan", "max_steps"))
+        # only all_or_count withholds (patterns longer than k: also partial's anchors_above_threshold)
+        self.bad("in mode partial", ctx("unknown"), withheld="deadline", stop=("discovery", "time"),
+                 det="time_limited", elapsed=59900.0, mode="partial")
+        long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 1001), "paths": self.c("unknown")}, withheld="anchors_above_threshold",
+                req=long_req, mode="partial")
+        # paths_later_increment needs anchors to extend; anchors_above_threshold a path search
+        self.bad("anchors exact 0", {"anchors": self.c("exact", 0), "paths": self.c("exact", 0)},
+                 withheld="paths_later_increment", req={"patterns": [{"dna": "A" * 40, "id": "w"}]})
+        self.bad("without a path search", {"anchors": self.c("exact", 1001), "paths": self.c("unknown")},
+                 withheld="anchors_above_threshold", req={"patterns": [{"dna": "A" * 40, "id": "w"}]})
+
+    def test_threshold_stops(self):
+        # a stop_at_threshold stop leaves the count it interrupted not exact (§7.4) and, on a masked BASIC or
+        # CANONICAL graph, past its threshold: discovery stops once the running lower bound passes it, and the
+        # at_least value is that bound (pattern_search.cpp threshold_crossed / running_lower / tally)
+        ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
+        thr = {"stop_at_threshold": True}
+        masked = {"graph_mode": "basic"}
+        self.ok(ctx("at_least", 101), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr,
+                index=masked)
+        self.ok(ctx("at_least", 4), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                limits=dict(thr, max_contexts=3), index={"graph_mode": "canonical"})   # P-modes-0005
+        self.bad("not exact", ctx("exact", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                 limits=thr, index=masked)                                             # GPT's exact-zero mutation
+        self.bad("not exact", ctx("exact", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"),
+                 limits=thr)
+        self.bad("not past max_contexts 100", ctx("at_least", 2), withheld="threshold_crossed",
+                 stop=("discovery", "max_contexts"), limits=thr, index=masked)
+        self.bad("not past max_contexts 100", ctx("at_least", 100), cut="max_contexts",
+                 stop=("discovery", "max_contexts"), limits=thr, index=masked)
+        # the value rule is not judged where the bound need not be the value
+        self.ok(ctx("at_least", 0), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr,
+                index={"graph_mode": "basic", "counting": "upper_bound"})   # fixture unmasked_stop_at_threshold
+        self.ok(ctx("at_least", 2), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr,
+                index={"graph_mode": "primary"})                            # an even-k wrapped PRIMARY union
+        self.ok(ctx("at_least", 2), withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr)
+        self.bad("without a stop_at_threshold stop", ctx("at_least", 101), withheld="threshold_crossed", limits=thr)
+        self.bad("without a stop_at_threshold stop", ctx("at_least", 101), withheld="threshold_crossed",
+                 stop=("discovery", "max_steps"), limits=thr)
+        # with a predicate: the raw discovery's stop at max_predicate_contexts, the selection's at max_contexts
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        self.ok({"contexts": self.c("at_least", 51), "selected": self.c("unknown")}, withheld="threshold_crossed",
+                stop=("discovery", "max_predicate_contexts"), limits=thr, req=pred, index=masked)
+        self.bad("not past max_predicate_contexts 50", {"contexts": self.c("at_least", 50),
+                                                        "selected": self.c("unknown")},
+                 withheld="threshold_crossed", stop=("discovery", "max_predicate_contexts"), limits=thr, req=pred,
+                 index=masked)
+        self.ok({"contexts": self.c("exact", 500), "selected": self.c("bounds", 101, lower=101, upper=300)},
+                withheld="threshold_crossed", stop=("selection", "max_contexts"), limits=thr, req=pred, index=masked)
+        self.bad("not exact", {"contexts": self.c("exact", 500), "selected": self.c("exact", 101)},
+                 withheld="threshold_crossed", stop=("selection", "max_contexts"), limits=thr, req=pred)
+        # a constant normal form runs the engine's own threshold in discovery: the raw count, never the selected
+        self.ok({"contexts": self.c("at_least", 101), "selected": self.c("exact", 0)}, withheld="threshold_crossed",
+                stop=("discovery", "max_contexts"), limits=thr, req=pred, index=masked)
+        self.bad("without a predicate", ctx("at_least", 101), stop=("discovery", "max_predicate_contexts"),
+                 limits=thr, mode="count")
+        # max_anchors: the threshold of a pattern longer than k, with or without a path search (§7.7, §12.1)
+        anchors_only = {"patterns": [{"dna": "A" * 40, "id": "w"}]}
+        self.ok({"anchors": self.c("at_least", 1001), "paths": self.c("unknown")}, withheld="paths_later_increment",
+                stop=("discovery", "max_anchors"), limits=thr, req=anchors_only)
+        self.bad("not exact", {"anchors": self.c("exact", 2), "paths": self.c("unknown")},
+                 withheld="paths_later_increment", stop=("discovery", "max_anchors"), limits=thr, req=anchors_only)
+        self.bad("L <= k", ctx("at_least", 101), stop=("discovery", "max_anchors"), limits=thr, mode="count")
+        # max_paths: the extension's threshold, a path search only; its paths at_least (§12.1)
+        long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("at_least", 11)}, withheld="threshold_crossed",
+                stop=("extension", "max_paths"), limits=thr, req=long_req)
+        self.bad("not exact", {"anchors": self.c("exact", 2), "paths": self.c("exact", 11)},
+                 withheld="threshold_crossed", stop=("extension", "max_paths"), limits=thr, req=long_req)
+        self.bad("without a path search", {"anchors": self.c("exact", 2), "paths": self.c("at_least", 11)},
+                 withheld="threshold_crossed", stop=("extension", "max_paths"), limits=thr, req=anchors_only)
+        self.bad("longer than k", {"anchors": self.c("at_least", 2), "paths": self.c("unknown")},
+                 stop=("discovery", "max_contexts"), limits=thr, req=long_req, mode="count")
+
     def test_cut_reasons(self):
         ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
         self.ok(ctx("exact", 101), cut="max_contexts")
@@ -1008,8 +1120,14 @@ class StatedReasons(unittest.TestCase):
         self.ok(ctx("at_least", 0), cut="time", stop=("discovery", "time"), det="time_limited", elapsed=59900.0)
         self.ok(ctx("at_least", 9), cut="time", stop=("discovery", "max_steps"), det="time_limited", elapsed=59900.0)
         self.bad("without a time stop", ctx("exact", 9), cut="time")
-        self.ok(ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"))
-        self.bad("without a memory stop", ctx("exact", 2000), cut="max_memory")
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        self.ok(ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"), req=labels)
+        self.bad("without a memory stop", ctx("exact", 2000), cut="max_memory", req=labels)
+        self.bad("without a memory account", ctx("exact", 2000), cut="max_memory", stop=("output", "max_memory"))
+        self.bad("without a predicate", ctx("exact", 1828), cut="max_predicate_contexts")
+        self.bad("without a path search", ctx("exact", 11), cut="max_paths")
+        self.bad("without a supported-path search", ctx("exact", 24), cut="max_annotation_work",
+                 stop=("label_discovery", "max_annotation_work"), req=labels)
         long_req = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
         self.ok({"anchors": self.c("exact", 2), "paths": self.c("exact", 11)}, cut="max_paths", req=long_req)
         self.bad("within max_paths 10", {"anchors": self.c("exact", 2), "paths": self.c("exact", 3)}, cut="max_paths",
@@ -1046,7 +1164,11 @@ class StatedReasons(unittest.TestCase):
         self.ok(ctx, stop=("selection", "max_predicate_work"), mode="count",
                 req={"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}})
         self.bad("without a predicate", ctx, stop=("selection", "max_predicate_work"), mode="count")
-        self.ok(ctx, stop=("output", "max_memory"), mode="count")
+        self.ok(ctx, stop=("output", "max_memory"), mode="count",
+                req={"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}})
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("at_least", 1)}, stop=("extension", "max_memory"),
+                mode="count", req={"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"})
+        self.bad("without a memory account", ctx, stop=("output", "max_memory"), mode="count")
         self.bad("does not list", ctx, stop=("discovery", "no_such_reason"), mode="count")
         # a low-complexity diagnostic the work time cut (stop null, determinism time_limited)
         self.ok({"contexts": self.c("exact", 3)}, det="time_limited", elapsed=59900.0, mode="count")

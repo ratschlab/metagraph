@@ -563,8 +563,10 @@ def _count_text(c: Any) -> str:
 
 def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]:
     """What is wrong with entry i's stated withheld reason, cut reason, stop and time limitation: each must be one
-    SPEC-pattern-search §7.5 / §7.6 lists, and must have happened by what the answer shows (README, "Stated
-    reasons"). Nothing is judged where the answer does not show the quantity (a missing cap, work or timing)."""
+    SPEC-pattern-search §7.5 / §7.6 lists, possible for the request (its mode, whether it reads annotation, has a
+    memory account, a predicate, a path search) and must have happened by what the answer shows (README, "Stated
+    reasons"; lane S6g1). Nothing is judged where the answer does not show the quantity (a missing cap, work or
+    timing)."""
     probs: List[str] = []
     if not isinstance(e, dict) or "counts" not in e or "error" in e:
         return probs
@@ -591,56 +593,97 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     steps_sum = sum(steps) if steps and all(isinstance(v, int) for v in steps) else None
     steps_short = max_steps is not None and steps_sum is not None and steps_sum < max_steps
     where = "p%d" % i
+    # what the request reads and holds: annotation rows are read only with labels all (§14.1), a supported-path
+    # search (§20.3) or a predicate (§19.6); the label-free path has a memory account only for a path search, labels
+    # all and a predicate add one (§7.6 "Memory", §14.4, §19.9)
+    mode = e.get("mode", req.get("mode", "all_or_count"))
+    ls = req.get("long_search")
+    path_search = long_ and ls in ("paths", "supported_paths")
+    reads_annotation = labels == "all" or (long_ and ls == "supported_paths") or predicate
+    memory_account = labels == "all" or predicate or path_search
+    nothing_read = "a request that reads no annotation (labels %r, no predicate, long_search %r)" % (labels, ls)
+    no_account = "a request without a memory account (labels %r, no predicate, no path search: §7.6)" % labels
+    if e.get("rows_refused") and not reads_annotation:
+        probs.append("%s: rows_refused on %s" % (where, nothing_read))
 
     w = e.get("withheld")
     wr = w.get("reason") if isinstance(w, dict) else (w if isinstance(w, str) else None)
+    if wr not in (None, "paths_later_increment", "anchors_above_threshold") and mode != "all_or_count":
+        # only all_or_count withholds, but for these two of patterns longer than k (§7.5, §12.1)
+        probs.append("%s: withheld %r in mode %s" % (where, wr, mode))
     if wr == "count_above_threshold":
         # exact (or, without the mask, bounds) and above the threshold: a lower bound is threshold_crossed's
-        if main_cap is not None and not ((main or {}).get("relation") in ("exact", "bounds") and
-                                         _count_above(main, main_cap)):
+        if predicate and not long_:
+            probs.append("%s: withheld count_above_threshold with a predicate on L <= k (§19.8: its raw threshold "
+                         "is predicate_above_threshold)" % where)
+        elif main_cap is not None and not ((main or {}).get("relation") in ("exact", "bounds") and
+                                           _count_above(main, main_cap)):
             probs.append("%s: withheld count_above_threshold with %s, not above the threshold %s" % (
                 where, _count_text(main), int(main_cap)))
     elif wr == "threshold_crossed":
         if not threshold:
             probs.append("%s: withheld threshold_crossed without stop_at_threshold" % where)
+        elif sr not in _THRESHOLD_STOPS:
+            probs.append("%s: withheld threshold_crossed without a stop_at_threshold stop (stop %r)" % (where, sr))
     elif wr == "discovery_budget":
         if sr != "max_steps":
             probs.append("%s: withheld discovery_budget without a max_steps stop (stop %r)" % (where, sr))
         elif steps_short:
             probs.append("%s: withheld discovery_budget after %d steps of max_steps %d" % (where, steps_sum, max_steps))
+        elif (main or {}).get("relation") == "exact":
+            probs.append("%s: withheld discovery_budget with %s: a count the stop interrupted is not exact (§7.4)" % (
+                where, _count_text(main)))
     elif wr == "deadline":
         if not time_limited:
             probs.append("%s: withheld deadline without a time stop or time limitation (stop %r)" % (where, sr))
     elif wr == "paths_later_increment":
-        if not long_ or req.get("long_search") in ("paths", "supported_paths"):
+        if not long_ or ls in ("paths", "supported_paths"):
             probs.append("%s: withheld paths_later_increment for a pattern of L <= k or with long_search %r" % (
-                where, req.get("long_search")))
+                where, ls))
+        elif (cnt("anchors") or {}).get("relation") == "exact" and (cnt("anchors") or {}).get("value") == 0:
+            probs.append("%s: withheld paths_later_increment with the anchors exact 0 (§7.7: that empty answer is "
+                         "complete)" % where)
     elif wr == "anchors_above_threshold":
         cap = _number(_limit(sc, body, "max_anchors"))
-        if cap is not None and not _count_above(cnt("anchors"), cap):
+        if not path_search:
+            probs.append("%s: withheld anchors_above_threshold without a path search (long_search %r: §12.1)" % (
+                where, ls))
+        elif cap is not None and not _count_above(cnt("anchors"), cap):
             probs.append("%s: withheld anchors_above_threshold with anchors %s, not above max_anchors %s" % (
                 where, _count_text(cnt("anchors")), int(cap)))
     elif wr == "annotation_budget":
-        if sr not in ("max_annotation_work", "max_memory") and not e.get("rows_refused"):
+        if not reads_annotation:
+            probs.append("%s: withheld annotation_budget on %s" % (where, nothing_read))
+        elif sr not in ("max_annotation_work", "max_memory") and not e.get("rows_refused"):
             probs.append("%s: withheld annotation_budget without an annotation stop or a refused row" % where)
     elif wr == "anchor_labels_truncated":
-        if not e.get("anchors_truncated"):
+        if labels != "all":
+            probs.append("%s: withheld anchor_labels_truncated without labels all (labels %r: §14.6)" % (where, labels))
+        elif not e.get("anchors_truncated"):
             probs.append("%s: withheld anchor_labels_truncated without anchors_truncated" % where)
     elif wr == "output_budget":
-        if sr != "max_memory" and e.get("labels_status") != "output_budget":
+        if not memory_account:
+            probs.append("%s: withheld output_budget on %s" % (where, no_account))
+        elif sr != "max_memory" and e.get("labels_status") != "output_budget":
             probs.append("%s: withheld output_budget without a memory stop" % where)
     elif wr == "predicate_above_threshold":
         cap = _number(_limit(sc, body, "max_predicate_contexts"))
-        if cap is not None and not any(_count_above(cnt(n), cap) for n in ("contexts", "paths", "supported_paths")):
+        if not predicate:
+            probs.append("%s: withheld predicate_above_threshold without a predicate" % where)
+        elif cap is not None and not any(_count_above(cnt(n), cap) for n in ("contexts", "paths", "supported_paths")):
             probs.append("%s: withheld predicate_above_threshold with %s, not above max_predicate_contexts %s" % (
                 where, _count_text(raw), int(cap)))
     elif wr == "selected_above_threshold":
         cap = _number(_limit(sc, body, "max_paths" if long_ else "max_contexts"))
-        if cap is not None and not _count_above(cnt("selected"), cap):
+        if not predicate:
+            probs.append("%s: withheld selected_above_threshold without a predicate" % where)
+        elif cap is not None and not _count_above(cnt("selected"), cap):
             probs.append("%s: withheld selected_above_threshold with selected %s, not above %s" % (
                 where, _count_text(cnt("selected")), int(cap)))
     elif wr == "predicate_budget":
-        if sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused"):
+        if not predicate:
+            probs.append("%s: withheld predicate_budget without a predicate" % where)
+        elif sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused"):
             probs.append("%s: withheld predicate_budget without a predicate stop or a refused row" % where)
     elif wr is not None:
         probs.append("%s: withheld %r, a reason SPEC-pattern-search §7.5 does not list" % (where, wr))
@@ -661,19 +704,29 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         if not time_limited:
             probs.append("%s: cut time without a time stop or time limitation (stop %r)" % (where, sr))
     elif cr == "max_memory":
-        if sr != "max_memory" and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
+        if not memory_account:
+            probs.append("%s: cut max_memory on %s" % (where, no_account))
+        elif sr != "max_memory" and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
             probs.append("%s: cut max_memory without a memory stop or a refused row" % where)
     elif cr == "max_paths":
         cap = _number(_limit(sc, body, "max_paths"))
         c = cnt("selected") if predicate and cnt("selected") else main
-        if cap is not None and sr != "max_paths" and _count_above(c, cap) is False:
+        if not path_search:
+            probs.append("%s: cut max_paths without a path search (long_search %r)" % (where, ls))
+        elif cap is not None and sr != "max_paths" and _count_above(c, cap) is False:
             probs.append("%s: cut max_paths with %s, within max_paths %s" % (where, _count_text(c), int(cap)))
     elif cr == "max_annotation_work":
-        if sr != "max_annotation_work":
+        if not (long_ and ls == "supported_paths"):
+            # labels all states an annotation stop without a cut (§7.5); only the supported-path search cuts so
+            probs.append("%s: cut max_annotation_work without a supported-path search (long_search %r: §20.5)" % (
+                where, ls))
+        elif sr != "max_annotation_work":
             probs.append("%s: cut max_annotation_work without that stop (stop %r)" % (where, sr))
     elif cr == "max_predicate_contexts":
         cap = _number(_limit(sc, body, "max_predicate_contexts"))
-        if cap is not None and sr != "max_predicate_contexts" and _count_above(raw, cap) is False:
+        if not predicate:
+            probs.append("%s: cut max_predicate_contexts without a predicate" % where)
+        elif cap is not None and sr != "max_predicate_contexts" and _count_above(raw, cap) is False:
             probs.append("%s: cut max_predicate_contexts with %s, within %s" % (where, _count_text(raw), int(cap)))
     elif cr == "max_predicate_work":
         if sr != "max_predicate_work":
@@ -688,9 +741,28 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         if steps_short:
             probs.append("%s: a max_steps stop after %d steps of max_steps %d (the steps of all patterns reach it: "
                          "SPEC-pattern-search §7.6)" % (where, steps_sum, max_steps))
-    elif sr in ("max_contexts", "max_anchors", "max_paths", "max_predicate_contexts"):
+    elif sr in _THRESHOLD_STOPS:
+        stopped = _threshold_stop_count(sr, stop.get("phase"), cnt, main, predicate, long_)
         if not threshold:
             probs.append("%s: a %s stop (stop_at_threshold) without stop_at_threshold" % (where, sr))
+        elif sr == "max_predicate_contexts" and not predicate:
+            probs.append("%s: a max_predicate_contexts stop without a predicate" % where)
+        elif sr == "max_paths" and not path_search:
+            probs.append("%s: a max_paths stop without a path search (long_search %r)" % (where, ls))
+        elif sr == "max_anchors" and not long_:
+            probs.append("%s: a max_anchors stop of a pattern of L <= k" % where)
+        elif sr == "max_contexts" and long_ and not predicate:
+            probs.append("%s: a max_contexts stop of a pattern longer than k" % where)
+        elif (stopped or {}).get("relation") == "exact":
+            # §7.4: exact means no step, time or threshold stop touched the count
+            probs.append("%s: a %s stop (stop_at_threshold) with %s: a count the stop interrupted is not exact "
+                         "(§7.4)" % (where, sr, _count_text(stopped)))
+        else:
+            m = _threshold_value_problem(sc, body, sr, stop.get("phase"), stopped, predicate, long_)
+            if m:
+                probs.append("%s: %s" % (where, m))
+    elif sr == "max_memory" and not memory_account:
+        probs.append("%s: a max_memory stop of %s" % (where, no_account))
     elif sr == "max_annotation_work":
         if labels != "all" and req.get("long_search") != "supported_paths" and not predicate:
             probs.append("%s: a max_annotation_work stop of a search that reads no annotation" % where)
@@ -704,6 +776,54 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         if m:
             probs.append(m)
     return probs
+
+
+# the stops of stop_at_threshold (SPEC-pattern-search §7.6, §12.1, §19.8, §20.5, §20.9)
+_THRESHOLD_STOPS = ("max_contexts", "max_anchors", "max_paths", "max_predicate_contexts")
+
+
+def _threshold_stop_count(reason: str, phase: Any, cnt: Callable[[str], Optional[dict]], main: Optional[dict],
+                          predicate: bool, long_: bool) -> Optional[dict]:
+    """The count a stop_at_threshold stop of |reason| interrupted: max_contexts the raw contexts in discovery (a
+    constant normal form runs the engine's own threshold), the selected ones in the selection (§19.6);
+    max_predicate_contexts the raw contexts in discovery, the supported paths whose walks it held (§20.9);
+    max_anchors the anchors; max_paths the paths (with a predicate the selected supported paths, §20.9)."""
+    if reason == "max_contexts":
+        return cnt("selected") if phase == "selection" else cnt("contexts")
+    if reason == "max_predicate_contexts":
+        return cnt("contexts") if not long_ else (cnt("supported_paths") or cnt("paths"))
+    if reason == "max_anchors":
+        return cnt("anchors")
+    if reason == "max_paths":
+        return cnt("selected") if predicate and cnt("selected") else main
+    return None
+
+
+def _threshold_value_problem(sc: dict, body: dict, reason: str, phase: Any, stopped: Optional[dict],
+                             predicate: bool, long_: bool) -> Optional[str]:
+    """Why a discovery stop of stop_at_threshold on the contexts of a pattern of L <= k cannot have happened with the
+    count it states, or None: on a masked BASIC or CANONICAL graph discovery stops once its running lower bound
+    passes the threshold (max_contexts, with a predicate max_predicate_contexts: §7.5, §19.6), and the `at_least`
+    value is that bound (the engine's threshold_crossed compares the sum of the counted ranges' lower bounds, which
+    the halted count states: pattern_search.cpp running_lower, tally). Not judged on a graph without its mask (the
+    running upper bound decides, the value is the lower parts only: fixture unmasked_stop_at_threshold, at_least 0)
+    or on a PRIMARY graph (an even-k wrapped union's bound need not be the stated value: §18 E2-02)."""
+    idx = body.get("index") if isinstance(body.get("index"), dict) else {}
+    if long_ or phase not in (None, "discovery") or idx.get("counting") == "upper_bound" or \
+            idx.get("graph_mode") not in ("basic", "canonical"):
+        return None
+    if reason == "max_contexts" and not predicate:
+        cap_name = "max_contexts"
+    elif reason == "max_predicate_contexts" and predicate:
+        cap_name = "max_predicate_contexts"
+    else:
+        return None
+    cap = _number(_limit(sc, body, cap_name))
+    if cap is None or not isinstance(stopped, dict) or stopped.get("relation") != "at_least" or \
+            not isinstance(stopped.get("value"), (int, float)) or stopped["value"] > cap:
+        return None
+    return "a %s stop (stop_at_threshold) with contexts %s, not past %s %d (§7.5: the running lower bound passed " \
+           "it)" % (reason, _count_text(stopped), cap_name, int(cap))
 
 
 def _hiding(sc: dict, ans: dict, i: int, e: dict) -> Tuple[str, List[str]]:
