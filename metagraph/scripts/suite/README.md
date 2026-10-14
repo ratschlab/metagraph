@@ -1877,3 +1877,15 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   max_memory}, which the engine counts as budget stops). Measured: no recorded answer of v3 or v4 and no stored
   fixture states the note beside any stop, and no exact pattern sdust flags meets a later-phase stop there (14
   fixture and 11 recorded later-phase stops, none of a flagged pattern); no recorded outcome or detail moves.
+- /resolve, resolve_runs on a stopped answer without prefix_if_stopped / unless_stopped: a stop answers the resolve
+  of a prefix of resolved_kmers k-mers (SPEC-labeled-traversal-core §4.5), so an expectation about the whole query
+  was judged on the prefix and passed ("3 of 3 k-mers" for `full`), against the suite's rule that a stop before the
+  property is never a pass. Each argument is now decided only where the prefix decides it: it fails where the
+  prefix contradicts it (`full`: a hole in the prefix; `covers`: an uncovered part inside the prefix; `run_end_in`:
+  the run from 0 ending inside the prefix outside the range, or reaching the prefix's end past it; `run_start_in`:
+  no run to the prefix's end starting in the range when the range lies inside the prefix; `runs`: the prefix's runs
+  other than the expected ones cut at the prefix; `kmers` / `max_kmers` / `min_kmers`: more support than allowed,
+  or too few k-mers left to reach the count), passes where the prefix proves it (a covered interval or a run end
+  inside the prefix, a minimum already reached), and is inconclusive otherwise (a stop before the first k-mer
+  shows nothing). 68 `full` expectations of v4 and 31 others are at risk only beyond 19.75 s of work on at most
+  2,000 bp: no recorded /resolve answer of v3 or v4 states a stop, so no outcome moves.

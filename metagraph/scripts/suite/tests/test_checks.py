@@ -1808,6 +1808,42 @@ class ResolveChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, empty, "resolve_absent")[0], "pass")
         self.assertEqual(outcome(sc, self.body([[0, 70]]), "resolve_absent")[0], "fail")
 
+    def test_runs_on_a_stopped_answer_without_a_prefix_argument(self):
+        # a stop answers the resolve of a prefix (SPEC-labeled-traversal-core §4.5); an expectation about the whole
+        # query (no prefix_if_stopped / unless_stopped) is decided only where the prefix decides it
+        sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "labels": ["562", "9606"],
+                                                    "bounds": {"time_budget_ms": 20000}}, "truth": {}}
+        late = {"limits": {"time_budget_ms": 20000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": 19900.0}}
+
+        def stopped(x, runs):
+            stop = {"phase": "rows", "reason": "time", "resolved_kmers": x, "query_kmers": 70,
+                    "resolved_bp": x + 30 if x else 0, "query_bp": 100, "remainder_from_bp": x}
+            a = self.body(runs, num=x, graph=[[0, x]] if x else [], stop=stop)
+            a["body"].update(late)
+            return a
+        prefix = stopped(40, [[0, 40]])
+        self.assertEqual(outcome(sc, prefix, "invariants")[0], "pass")
+        o, d = outcome(sc, prefix, "resolve_runs", label="562", full=True)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("full support of the query untested", d)
+        self.assertEqual(outcome(sc, stopped(40, [[0, 20], [25, 40]]), "resolve_runs", label="562", full=True)[0],
+                         "fail")
+        self.assertEqual(outcome(sc, stopped(0, []), "resolve_runs", label="562", full=True)[0], "inconclusive")
+        holed = stopped(40, [[0, 20], [25, 40]])
+        for args, want in (({"covers": [0, 20]}, "pass"), ({"covers": [10, 30]}, "fail"),
+                           ({"covers": [30, 60]}, "inconclusive"), ({"covers": [10, 60]}, "fail"),
+                           ({"covers": [45, 60]}, "inconclusive"),
+                           ({"run_end_in": [15, 25]}, "pass"), ({"run_end_in": [30, 35]}, "fail"),
+                           ({"run_start_in": [20, 30]}, "inconclusive"), ({"run_start_in": [0, 10]}, "fail"),
+                           ({"runs": [[0, 20], [25, 70]]}, "inconclusive"), ({"runs": [[0, 20], [30, 70]]}, "fail"),
+                           ({"kmers": 60}, "inconclusive"), ({"kmers": 30}, "fail"), ({"kmers": 70}, "fail"),
+                           ({"max_kmers": 30}, "fail"), ({"max_kmers": 50}, "inconclusive"),
+                           ({"min_kmers": 30}, "pass"), ({"min_kmers": 66}, "fail"), ({"min_kmers": 50}, "inconclusive"),
+                           ({"covers": [0, 20], "kmers": 60}, "inconclusive")):
+            self.assertEqual(outcome(sc, holed, "resolve_runs", label="562", **args)[0], want, args)
+        self.assertEqual(outcome(sc, prefix, "resolve_runs", label="562", run_end_in=[30, 50])[0], "inconclusive")
+        self.assertEqual(outcome(sc, prefix, "resolve_runs", label="562", run_end_in=[10, 30])[0], "fail")
+
     def test_discover(self):
         sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "discover": {}}, "truth": {}}
         a = self.body([[0, 70]])

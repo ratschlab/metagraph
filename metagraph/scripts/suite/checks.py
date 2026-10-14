@@ -2236,12 +2236,103 @@ def check_resolve_runs(sc, ans, a, arm):
                 x, a["label"], ks, runs[:4], (body.get("graph_runs") or [])[:4], x)
         return PASS, "stopped after %s of %s k-mers: the prefix fully supported by %s" % (
             x, stop.get("query_kmers"), a["label"])
+    if stop:
+        # the answer is the resolve of a prefix (SPEC-labeled-traversal-core §4.5), not of the query the expectation
+        # is about: each argument is decided only where the prefix decides it
+        return _resolve_prefix_profile(a, lab, runs, stop)
     outcome, detail = _resolve_profile(a, lab, runs, num, ks)
     if a.get("prefix_if_stopped") and not stop and outcome != FAIL:
         # the scenario's property is the stated stop (SPEC §4.5: a stop answers the resolve of a prefix): a complete
         # answer holds the profile but never exercised it
         return INCONCLUSIVE, "no stop happened: the prefix property was not tested (%s)" % detail
     return outcome, detail
+
+
+def _resolve_prefix_profile(a: dict, lab: dict, runs: list, stop: dict) -> Tuple[str, str]:
+    """resolve_runs' assertions about the whole query on a stopped answer, which resolves the prefix of the first
+    resolved_kmers = x k-mers (SPEC-labeled-traversal-core §4.5: the profile of the prefix, a run that reaches the
+    prefix's end cut there). An argument fails where the prefix contradicts it (a hole in a full support, a run end
+    before the range, more support than allowed, too little left to reach a count), passes where the prefix alone
+    proves it (a covered interval inside the prefix, a run end inside it, a minimum already reached) and is
+    inconclusive otherwise; a stop before the first k-mer shows nothing."""
+    label = a["label"]
+    x = _number(stop.get("resolved_kmers"))
+    if not x:
+        return INCONCLUSIVE, "stopped before the first k-mer (resolved_kmers %r): nothing of label %s to check" % (
+            stop.get("resolved_kmers"), label)
+    x = int(x)
+    qk = _number(stop.get("query_kmers"))
+    rest = int(qk) - x if qk is not None and qk >= x else None
+    ks = _number(lab.get("kmers_supported"))
+    clean = [r for r in runs if isinstance(r, list) and len(r) == 2]
+    head = "stopped at %d of %s k-mers: label %s" % (x, stop.get("query_kmers"), label)
+    results: List[Tuple[str, str]] = []
+    if a.get("full"):
+        if ks != x or clean != [[0, x]]:
+            results.append((FAIL, "%s supports %s, runs %s: the full support expected is broken in the prefix" % (
+                head, lab.get("kmers_supported"), clean[:4])))
+        else:
+            results.append((INCONCLUSIVE, "%s supports the whole prefix; full support of the query untested" % head))
+    if "covers" in a:
+        lo, hi = a["covers"]
+        if hi <= x:
+            ok = any(r[0] <= lo and hi <= r[1] for r in clean)
+            results.append((PASS if ok else FAIL, "%s: [%d, %d) %scovered in the prefix (runs %s)" % (
+                head, lo, hi, "" if ok else "not ", clean[:6])))
+        elif lo < x and not any(r[0] <= lo and r[1] == x for r in clean):
+            results.append((FAIL, "%s: no run covers [%d, %d) of the prefix, so none covers [%d, %d) (runs %s)" % (
+                head, lo, x, lo, hi, clean[:6])))
+        else:
+            results.append((INCONCLUSIVE, "%s: [%d, %d) reaches past the prefix" % (head, lo, hi)))
+    if "run_end_in" in a:
+        lo, hi = a["run_end_in"]
+        first = next((r for r in clean if r[0] == 0), None)
+        if first is None:
+            results.append((FAIL, "%s: no run starts at the first k-mer (runs %s)" % (head, clean[:6])))
+        elif first[1] < x:
+            ok = lo <= first[1] <= hi
+            results.append((PASS if ok else FAIL, "%s: the run [0, %d) ends inside the prefix, %s [%d, %d]" % (
+                head, first[1], "in" if ok else "not in", lo, hi)))
+        elif x > hi:
+            results.append((FAIL, "%s: the run from 0 reaches the prefix's end %d, past [%d, %d]" % (head, x, lo, hi)))
+        else:
+            results.append((INCONCLUSIVE, "%s: the run from 0 reaches the prefix's end %d, before [%d, %d] ends" % (
+                head, x, lo, hi)))
+    if "run_start_in" in a:
+        lo, hi = a["run_start_in"]
+        if x > hi and not any(r[1] == x and lo <= r[0] <= hi for r in clean):
+            results.append((FAIL, "%s: no run [b, %d) with b in [%d, %d], so none reaches the query's end from "
+                                  "there (runs %s)" % (head, x, lo, hi, clean[:6])))
+        else:
+            results.append((INCONCLUSIVE, "%s: a run to the query's end is past the prefix" % head))
+    if "runs" in a:
+        want = [[r[0], min(r[1], x)] for r in a["runs"] if r[0] < x]
+        if clean != want:
+            results.append((FAIL, "%s: runs %s, the expected %s cut at the prefix are %s" % (
+                head, clean[:6], a["runs"][:6], want[:6])))
+        else:
+            results.append((INCONCLUSIVE, "%s: runs %s as expected in the prefix" % (head, clean[:6])))
+    for arg, bad, good in (("kmers", lambda v: ks > v or (rest is not None and ks + rest < v), None),
+                           ("max_kmers", lambda v: ks > v, None),
+                           ("min_kmers", lambda v: rest is not None and ks + rest < v, lambda v: ks >= v)):
+        if arg not in a or ks is None:
+            continue
+        if bad(a[arg]):
+            results.append((FAIL, "%s supports %s k-mers of the prefix, %s k-mers left: %s %s cannot hold" % (
+                head, lab.get("kmers_supported"), rest, arg, a[arg])))
+        elif good is not None and good(a[arg]):
+            results.append((PASS, "%s supports %s k-mers of the prefix, %s %s reached" % (
+                head, lab.get("kmers_supported"), arg, a[arg])))
+        else:
+            results.append((INCONCLUSIVE, "%s supports %s k-mers of the prefix; %s %s untested" % (
+                head, lab.get("kmers_supported"), arg, a[arg])))
+    for want in (FAIL, INCONCLUSIVE):
+        hit = [d for o, d in results if o == want]
+        if hit:
+            return want, "; ".join(hit[:3])
+    if results:
+        return PASS, "; ".join(d for _, d in results[:3])
+    return INCONCLUSIVE, "%s: nothing of the query's profile asked" % head
 
 
 def _resolve_profile(a: dict, lab: dict, runs: list, num: Any, ks: Any) -> Tuple[str, str]:
