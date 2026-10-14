@@ -42,8 +42,8 @@ def renormalise(run_dir, changed_key):
     sc.write_json_atomic(os.path.join(arm, "renormalised.json"), {
         "source": "/x/arms/mcp", "out": "/x/mcp-renormalised", "at": "2026-10-14T02:07:28.559Z",
         "normaliser_sha256": "db1bd7b6" * 8, "digest": "suite_common.answer_digest of /x",
-        "counts": {"lines": len(rows), "renormalised": len(rows), "changed": 1, "unchanged": len(rows) - 1,
-                   "skipped": 0}, "skipped_by_kind": {}, "changed": changed, "skipped": []})
+        "counts": {"lines": len(rows), "renormalised": len(rows), "changed": len(changed),
+                   "unchanged": len(rows) - len(changed), "skipped": 0}, "skipped_by_kind": {}, "changed": changed, "skipped": []})
     return rows
 
 
@@ -89,6 +89,35 @@ class RenormalisedProvenanceTest(unittest.TestCase):
         moved = sum(1 for c in changes if c["before"] != c["after"])
         self.assertIn("%d execution record(s) changed: %d changed their outcome, %d only their checks" % (
             len(changes), moved, len(changes) - moved), text)
+
+
+    def test_wording_without_a_changed_answer(self):
+        renormalise(self.run_dir, None)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            reevaluate.reevaluate(self.run_dir)
+            merge_run.merge(self.run_dir, reevaluated=True)
+            text = report.build_report(self.run_dir, reevaluated=True)
+        sentence = [x for x in text.splitlines() if x.startswith("**arms/mcp was re-normalised")][0]
+        self.assertIn("0 changed", sentence)
+        self.assertNotIn("other totals", sentence)
+        self.assertIn("no answer changed: the re-evaluation of the recorded answers gives the same totals", sentence)
+        # the summary records the normaliser's sha256 only: the renormaliser's own revision is said to be missing
+        self.assertIn("its own revision (commit, runner and client sha256) is not recorded", sentence)
+
+    def test_wording_with_the_revision_recorded(self):
+        renormalise(self.run_dir, ("T-0001", 1))
+        path = os.path.join(self.run_dir, "arms", "mcp", "renormalised.json")
+        summary = sc.read_json(path)
+        summary.update(commit="7a65e913aaaa", runner_sha256="ab" * 32)
+        sc.write_json_atomic(path, summary)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            reevaluate.reevaluate(self.run_dir)
+            merge_run.merge(self.run_dir, reevaluated=True)
+            text = report.build_report(self.run_dir, reevaluated=True)
+        sentence = [x for x in text.splitlines() if x.startswith("**arms/mcp was re-normalised")][0]
+        self.assertIn("commit 7a65e913aaaa", sentence)
+        self.assertNotIn("is not recorded", sentence)
+        self.assertIn("the recorded arm re-evaluated alone gives other totals", sentence)
 
 
 if __name__ == "__main__":

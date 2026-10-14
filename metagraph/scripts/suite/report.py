@@ -893,7 +893,9 @@ def warm_wall(summary, area, arm):
 
 def renormalised_text(arm, info):
     """One sentence on an arm whose answers were re-normalised before the re-evaluation (merge_run.renormalisation):
-    by what and when where the summary records it, how many answers were rebuilt and changed, which."""
+    by what and when where the summary records it (and that the renormaliser's own revision is missing when it
+    records only the normaliser's sha256), how many answers were rebuilt and changed, which, and whether the
+    re-evaluation of the recorded answers would give other totals (only when an answer changed)."""
     summ = info.get("summary") or {}
     lines = info.get("lines") or {}
     raw = info.get("raw") or {}
@@ -901,24 +903,28 @@ def renormalised_text(arm, info):
     rev = ", ".join("%s %s" % (md(k), md(short(summ[k], 16))) for k in ("commit", "git_head", "normaliser_sha256",
                                                                       "runner_sha256", "client_sha256", "input_sha256")
                     if summ.get(k))
+    own = any(summ.get(k) for k in ("commit", "git_head", "runner_sha256", "client_sha256"))
     changed = summ.get("changed") or lines.get("changed_executions") or []
-    return ("**arms/%s was re-normalised before this re-evaluation** (%s%s%s): %s of %s answer(s) rebuilt from the "
+    n_changed = counts.get("changed", lines.get("changed", 0))
+    return ("**arms/%s was re-normalised before this re-evaluation** (%s%s%s%s): %s of %s answer(s) rebuilt from the "
             "recorded tool payloads, %d changed%s; %s not rebuilt%s; %d of %d raw record(s) read keep the recorded "
-            "answer as `answer_recorded`. The answers judged here are not the ones the run recorded: the recorded arm "
-            "re-evaluated alone gives other totals." % (
+            "answer as `answer_recorded`. %s" % (
                 md(arm),
                 "async's suite_mcp_renormalise.py at %s" % md(summ.get("at")) if summ.get("at") else
                 "no renormalised.json: the lines' and raw records' marks only",
-                ("; " + rev) if rev else ("; its revision not recorded" if summ else ""),
+                ("; " + rev) if rev else "",
+                "" if own or not summ else "; its own revision (commit, runner and client sha256) is not recorded",
                 ("; digest %s; from %s" % (md(summ.get("digest"), 120), md(summ.get("source"), 160)))
                 if summ.get("source") else "",
-                counts.get("renormalised", lines.get("rebuilt", 0)), counts.get("lines", "?"),
-                counts.get("changed", lines.get("changed", 0)),
+                counts.get("renormalised", lines.get("rebuilt", 0)), counts.get("lines", "?"), n_changed,
                 (" (%s)" % md(", ".join(changed[:40]) + (" ..." if len(changed) > 40 else ""))) if changed else "",
                 counts.get("skipped", lines.get("skipped", 0)),
                 (" (%s)" % md(", ".join("%s %s" % kv for kv in sorted((summ.get("skipped_by_kind") or {}).items()))))
                 if summ.get("skipped_by_kind") else "",
-                raw.get("answer_recorded", 0), raw.get("read", 0)))
+                raw.get("answer_recorded", 0), raw.get("read", 0),
+                "The answers judged here are not the ones the run recorded: the recorded arm re-evaluated alone gives "
+                "other totals." if n_changed else
+                "As no answer changed: the re-evaluation of the recorded answers gives the same totals."))
 
 
 def reevaluation_section(run_dir, max_items=200, run=None):
