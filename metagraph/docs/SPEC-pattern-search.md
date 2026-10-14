@@ -1480,6 +1480,18 @@ occurrences of blaNDM-1; with J; and 14 residues without `long_search`: anchors 
 `4596bb3b`, is answered since §18) and `genetic_code_unknown` (the 400 for table 7). The nine capabilities bodies of the single-graph servers gained the
 fields of §17; no other stored body changed.
 
+After the review of 2026-10-14 (§27): a label-free `long_search: "paths"` list in the request's memory account
+(§12.1, §28), `max_memory_mb` 1, three copies of `GCGGCGGCGGCG` + N × 88 on `+` (47 paths of L = 100 each; a
+result object 14,314 bytes, a kept walk 788): `paths_memory` (`partial`: the first copy whole, its objects kept;
+the second's list ended by the route at 24, `stop {output, max_memory}`, `cut: max_memory`, the paths `exact`;
+the third's extension stopped by its kept walks, `stop {extension, max_memory}`, the paths `at_least` 21, the one
+object that fits beside the 20 walks kept released) and `paths_memory_withheld` (`all_or_count`: the second and
+the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it); and
+`paths_memory_named` (`max_memory_mb` named alone: NDM-40's paths answered as without it, the entry of `paths`;
+NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10) and `paths_memory_count` (the
+same request in mode `count`, where nothing is kept or built: both entries keep `annotation_not_read`, NDM-40's
+paths counted as in `paths_count`).
+
 After the review of 2026-10-10 (§26): `utf8_label_refused`, `utf8_label_count` and `utf8_label_predicate`, on the
 server `utf8_labels` (a BASIC graph at k = 31 of two records written as bytes, A × 40 under the raw header
 `label\xff`, which is not UTF-8, and C × 40 under the valid header `label�`, what a replacement of the bad
@@ -3066,9 +3078,17 @@ stop would not skip them.
 
 The engine's own retention for the raw release (24-byte descriptors, up to `max_predicate_contexts`) is outside
 the account, as the label-free descriptors of §7.6 are (a long pattern's kept walks are in it, §12.1). The result
-objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`) that a pattern's answer keeps
-stay charged until the request ends (§12.1: the bound is the request's, over all its patterns); those of a withheld
-or cut `all_or_count` list are released with it.
+objects that a pattern's answer keeps stay charged until the request ends, whatever the projection: the result
+object of a context the pass selected (with `output.labels: "none"` as with a projection, whose labels hold its
+descriptor, §14.4) and the objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`,
+§12.1). A constant `true` normal form has no pass: its contexts are answered as the unfiltered request (§19.6) and
+charged as that request charges them, so only under `output.labels: "all"`, whose descriptors are charged as in
+§14.4. The bound is the request's, over all its patterns: a later pattern finds the account as the earlier ones
+left it. Where the same pattern alone is answered whole, its selection can then stop on the account (`stop
+{selection, max_memory}`, or a row it had to read refused, `rows_refused`; `all_or_count`: `predicate_budget`), and
+its results can be cut (`partial`: `cut: max_memory`) or withheld (`all_or_count`: `output_budget`) with `stop
+{output, max_memory}`; `work.memory_bytes` grows with what the earlier patterns kept. The objects of a withheld or
+cut `all_or_count` list are released with it.
 
 ### 19.10 The answer
 
@@ -3179,7 +3199,6 @@ Measured with this build's server on the masked copy of the mini (the fixtures o
 - The pass costs a row per distinct row: about 1–4 ms a row on staging refseq33m (the coordinator's measurement of
   2026-10-08), so its compute admission there is the host's `--pattern-max-predicate-contexts` 10,000 (P3).
 - The reverse-complement lookups all come before the first read: `stop_at_threshold` saves reads, not lookups.
-- The result objects of `output.labels: "none"` are held by the account for their pattern only (§19.9).
 
 ### 19.15 What changed
 
@@ -3469,7 +3488,9 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   label for the selection's ids (freed with the pattern) and 32 + the names' lengths + 32 + 24 per label for
   their strings in the answer (§19.9's model), which stay with the result object until the request ends as every
   label built does (§14.4); when they do not fit, the list ends before the path (`partial`: `cut: max_memory`,
-  `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`).
+  `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`, `stop {output, max_memory}`, and what the
+  list held — the listed paths' selection labels and the paths kept for them — is given back to the account at
+  once, so that the rest of the search has it, as under `"either"` below).
 - **`"either"` on a BASIC graph**: the decision of a walk needs its mirror's support, which only the end of the
   search gives, so the supported walks are **held** (at most `max_predicate_contexts`, each charged before it is
   held: 192 + 2L + 8 per predicate label of its support) and decided after the search, never pruned by the
@@ -3484,8 +3505,10 @@ the one or the other, never a mix of the two strands within a walk). With `long_
   looked up (L units of `max_annotation_work`; `work.predicate_lookups`), a
   k-mer not in the graph giving it no support, and its rows read by a search of its own over that one walk, as
   §20.7 reads (n rows, the first twice at `record_verified`; under `max_annotation_work`, the account and the
-  deadline; `work.mirror_rows`, part of `work.annotation_rows`); the search's row cache is given back to the
-  account before, so the mirrors' allotment replaces it. A walk whose mirror is not known (the search stopped
+  deadline; `work.mirror_rows`, part of `work.annotation_rows`). The search's row cache is given back to the
+  account when the search ends, before the held walks' index by sequence (8 bytes a walk) is charged and any
+  mirror is read, whether or not the mirrors were searched: no later step reads it, so the index finds that room
+  and a mirror read's allotment replaces it. A walk whose mirror is not known (the search stopped
   before it, `partial` held the first walks only, the mirror reads stopped on `max_annotation_work` or the
   account: no mirror is read after such a stop, and every later walk is decided on its own support alone, or the
   account refused the held walks' index by sequence: no mirror is then found among them nor read) is
@@ -4655,6 +4678,42 @@ most k bases on the engine of the round G merge. Contract version 1 stays (addit
   carries `annotation_not_read` (§4.1, §8.10: the field acts on it;
   `PatternPaths.MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry`). §28 states what the half rule costs, and §21.16
   names the count-only continuation of the extension.
+- **After the review of 2026-10-14** (branch at `3daea97a`; contract version 1 stays). A label-free
+  `long_search: "paths"` list that the account ended states the route's cut as its first stop also when the
+  engine's release, which goes on after the refusal and reads the clock every 64 paths, met the work time
+  afterwards: `stop {output, max_memory}` (it stated `{extraction, time}`), `partial` `cut: max_memory` as before,
+  `all_or_count` `withheld: output_budget` with `returned` 0 (it stated `deadline`); `determinism: time_limited`
+  marks the later time stop either way (§7.6, §12.1; `PatternPaths.TheRouteCutPrecedesALaterTimeStopOfTheRelease`).
+  The result objects of a predicate's selected contexts under `output.labels: "none"` stay charged until the
+  request ends, as with a projection (the owner's decision: the bound is the request's; §19.9, and the §19.14
+  limitation that held them for their pattern only is gone): on a later pattern of such a request the account can
+  now cut the results (`partial`: `cut: max_memory`; `all_or_count`: `withheld: output_budget`; `stop {output,
+  max_memory}`) or stop the selection (`stop {selection, max_memory}`) where it did not, and `work.memory_bytes`
+  grows with the objects the earlier patterns kept
+  (`PatternSelection.ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds`).
+  Supported paths decided at completion (§20.9): `all_or_count` gives back what its list holds (the listed paths'
+  selection labels and the paths kept) as soon as the account refuses a listed path's selection labels, as it did
+  on its other cuts; a later row or frame of the search that then fits no longer stops it, where the answer was
+  `withheld: annotation_budget` with `stop {extension, max_memory}`, `rows_refused` and `at_least` counts
+  (`counts.supported_paths`, `counts.selected`): it is now `withheld: output_budget` with `stop {output,
+  max_memory}`, exact counts and no refused row
+  (`PatternSupportedRoute.AllOrCountGivesBackItsListWhenALabelChargeIsRefused`).
+  Under `"either"` with the mirrors searched (`strands: "both"`, or a palindromic pattern), the search's row cache
+  is given back before the held walks' index is charged, as it was when the mirrors are read (§20.9): an account
+  that holds every walk no longer refuses the index for want of the cache's dead allotment, where the answer was
+  `stop {selection, max_memory}`, `selection.pass: "stopped"`, every walk decided on its own support alone
+  (`counts.tested` short of the walks, `counts.selected` bounds) and `all_or_count` `withheld: predicate_budget`:
+  it now completes (exact counts, `all_or_count` listing the selected walks); `work.memory_bytes` is lower where the
+  account's peak came after the search
+  (`PatternSupportedRoute.TheRowCacheIsGivenBackBeforeTheIndexOfTheHeldWalks`; the index refused, below the route:
+  `WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused`).
+  Fixtures (§11; 175 in all, no stored body changed): `paths_memory`, `paths_memory_withheld`,
+  `paths_memory_named` and `paths_memory_count` store the account's stops of a label-free path list (the
+  engine's at a kept walk, the route's at a result object) and `max_memory_mb` named alone, inside and outside
+  mode `count`, which no stored body held, so that the validator's rules for them (§12.1, §8.10) decide a stored
+  answer. The validator compares §23.2's gate caps (the list in the `caps` row) with its own list, the server's
+  `kPatternGateCaps` and every stored `/traverse` block, as §23.2 said it did, and reads the server's gate lists
+  without their comments.
 
 ## 28. Changed after the review of 2026-10-12
 

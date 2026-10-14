@@ -185,11 +185,12 @@ class PathTracker final : public graph::pattern::SupportTracker {
     // cache
     void end_pattern();
     /**
-     * After the pattern's search, before end_pattern, when other reads follow it (the mirror
-     * walks of a predicate's selection, pattern_supported.hpp): empties the row cache, returns
-     * its allotment to the account and restores the oracle's path cache, so that the next
-     * reader's allotment replaces this one instead of adding to it. The dictionary stays (the
-     * labels' answer names its labels); no row of the pattern is read after it.
+     * After the pattern's search, before end_pattern, when other work follows it (the decisions
+     * of a predicate's held walks and their mirror reads, pattern_supported.hpp): empties the
+     * row cache, returns its allotment to the account and restores the oracle's path cache, so
+     * that what follows finds that room (a mirror reader's allotment replacing this one instead
+     * of adding to it). The dictionary stays (the labels' answer names its labels); no row of
+     * the pattern is read after it.
      */
     void release_rows();
 

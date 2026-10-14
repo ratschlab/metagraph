@@ -816,10 +816,9 @@ const char* PatternRetrieval::placement() const {
 }
 
 void retrieval::Admission::begin(unsigned share) {
-    // a previous release whose charge nobody took over (none: the engine releases nothing to
-    // a refused pattern) is not held further
-    account_.release(held_);
-    held_ = 0;
+    // every release is taken over by its caller (take()) before the next begins: what it
+    // charged stays with the answer's objects or is released by the caller, never here
+    assert(held_ == 0);
     allowance_ = account_.left() / std::max(1u, share);
     open_ = true;
 }
@@ -856,6 +855,8 @@ bool PatternRetrieval::admit_context() {
 bool PatternRetrieval::admit_path(size_t length) {
     return impl_->admission.admit(path_descriptor_bytes(impl_->oracle.get_k(), length));
 }
+
+uint64_t PatternRetrieval::end_release() { return impl_->admission.take(); }
 
 uint64_t PatternRetrieval::memory_peak() const { return impl_->account.peak(); }
 const RetrievalCounters& PatternRetrieval::counters() const { return impl_->counters; }

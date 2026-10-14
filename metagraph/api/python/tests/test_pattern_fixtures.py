@@ -522,8 +522,10 @@ CAPABILITIES_MAX_BYTES = 32 * 1024
 CAPABILITIES_ROOM = 1024
 
 
-def spec_tables(text):
-    """{name: [field, ...]}: the first column of the table after each schema marker."""
+def spec_table_rows(text):
+    """{name: [[cell, ...], ...]}: the rows of the table after each schema marker, past its
+    header and separator, each split into its cells at the unescaped `|` (a type reads
+    `boolean \\| null`)."""
     out = {}
     lines = text.split('\n')
     for i, line in enumerate(lines):
@@ -537,13 +539,63 @@ def spec_tables(text):
         for row in lines[j + 2:]:       # past the header and the separator
             if not row.startswith('|'):
                 break
-            first = row.split('|')[1].strip()
-            name = re.fullmatch(r'`([^`]+)`', first)
-            assert name, f'schema {m.group(1)}: first column {first!r} is not a `field`'
-            rows.append(name.group(1))
+            rows.append([c.strip() for c in re.split(r'(?<!\\)\|', row)[1:-1]])
         assert m.group(1) not in out, f'schema {m.group(1)} twice'
         out[m.group(1)] = rows
     return out
+
+
+def spec_tables(text):
+    """{name: [field, ...]}: the first column of the table after each schema marker."""
+    out = {}
+    for table, rows in spec_table_rows(text).items():
+        out[table] = []
+        for cells in rows:
+            name = re.fullmatch(r'`([^`]+)`', cells[0])
+            assert name, f'schema {table}: first column {cells[0]!r} is not a `field`'
+            out[table].append(name.group(1))
+    return out
+
+
+def spec_gate_caps(text):
+    """The gate caps of SPEC §23.2, in the order listed: the backticked names of the meaning
+    column of the gate block table's `caps` row before its parenthesis (`max_patterns`, ...
+    (§10.2; the other caps are the full block's))."""
+    rows = [cells for cells in spec_table_rows(text).get('pattern_gate', [])
+            if cells[0] == '`caps`']
+    assert len(rows) == 1, f'SPEC §23.2: {len(rows)} `caps` rows in the gate block table'
+    listed = rows[0][-1].split('(')[0]
+    names = re.findall(r'`([^`]+)`', listed)
+    assert names and re.fullmatch(r'(\s*`[^`]+`\s*,)*\s*`[^`]+`\s*', listed), \
+        f'SPEC §23.2: the `caps` row lists no caps before its parenthesis: {listed!r}'
+    return names
+
+
+# a C++ string literal (raw or not), a character literal (a ' after a digit separates digits) or
+# a comment, for strip_cpp_comments
+CPP_TOKEN = re.compile(r'R"([^()\\\s]{0,16})\(.*?\)\1"|"(?:\\.|[^"\\\n])*"'
+                       r'|(?<![0-9A-Fa-f])\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?\*/', re.S)
+CPP_STRING = re.compile(r'"((?:\\.|[^"\\\n])*)"')
+
+
+def strip_cpp_comments(source):
+    """|source| with each comment replaced by a space, its string and character literals kept
+    (a string inside a comment is not code)."""
+    return CPP_TOKEN.sub(lambda m: ' ' if m.group(0)[0] == '/' else m.group(0), source)
+
+
+def cpp_string_array(source, name):
+    """The strings of the C++ array |name| (`const char *[const ]name[] = {...};`) in |source|,
+    in order, its comments left out (a string commented out is not in the list); None when the
+    source has no such array."""
+    m = re.search(r'const char \*(?:const )?' + re.escape(name) + r'\[\] = \{(.*?)\};',
+                  strip_cpp_comments(source), re.S)
+    if m is None:
+        return None
+    body = m.group(1)
+    assert re.fullmatch(r'[\s,]*', CPP_STRING.sub('', body)), \
+        f'{name}: an entry that is not a string literal: {body!r}'
+    return CPP_STRING.findall(body)
 
 
 def predicate_names(p):
@@ -3305,6 +3357,59 @@ class TestPatternFixtures(unittest.TestCase):
             for v in values:
                 self.assertIn(f'`{v}`', text, f'the SPEC does not name `{v}`')
 
+    def check_spec_gate_caps(self, text, source=None):
+        """The gate caps SPEC §23.2 lists in |text| (spec_gate_caps) are GATE_CAPS and the
+        server's kPatternGateCaps (in |source|, else pattern.cpp where the sources are in the
+        checkout), in order, and the caps of every stored gate block (GET
+        /traverse/capabilities)."""
+        listed = spec_gate_caps(text)
+        self.assertEqual(len(listed), len(set(listed)), 'SPEC §23.2: a gate cap twice')
+        self.assertEqual(GATE_CAPS, listed, 'SPEC §23.2: the gate caps')
+        if source is None and os.path.isfile(PATTERN_CPP):
+            with open(PATTERN_CPP, encoding='utf-8') as f:
+                source = f.read()
+        if source is not None:
+            self.assertEqual(listed, cpp_string_array(source, 'kPatternGateCaps'),
+                             'SPEC §23.2: the server\'s gate caps')
+        probes = [name for name, f in self.fixtures.items()
+                  if f['path'].split('?')[0] == '/traverse/capabilities' and f['status'] == 200]
+        self.assertTrue(probes, 'no stored gate block')
+        for name in probes:
+            self.assertEqual(sorted(listed), sorted(self.pattern_block(name)['caps']),
+                             f'{name}: SPEC §23.2\'s gate caps')
+
+    def test_spec_names_the_gate_caps(self):
+        """SPEC §23.2 lists the gate caps in the meaning column of its table's `caps` row (prose,
+        so test_spec_names_the_fields, which reads first columns, does not see them); that list
+        is the validator's, the server's and the stored probes'."""
+        if not os.path.isfile(SPEC):
+            self.skipTest('docs/SPEC-pattern-search.md is not in this checkout')
+        with open(SPEC, encoding='utf-8') as f:
+            self.check_spec_gate_caps(f.read())
+
+    def test_a_changed_spec_gate_caps_list_fails(self):
+        """check_spec_gate_caps is not vacuous: the SPEC with its gate caps changed (a cap
+        renamed, left out, added, listed twice, reordered, or moved behind the parenthesis)
+        fails it."""
+        if not os.path.isfile(SPEC):
+            self.skipTest('docs/SPEC-pattern-search.md is not in this checkout')
+        with open(SPEC, encoding='utf-8') as f:
+            text = f.read()
+        lines = text.split('\n')
+        marker = lines.index('<!-- schema: pattern_gate -->')
+        row = next(line for line in lines[marker:] if line.startswith('| `caps` |'))
+        for old, new in (('`max_labels_per_anchor` (', '`max_labels` ('),
+                         ('`max_steps`, ', ''),
+                         ('`max_labels_per_anchor` (', '`max_labels_per_anchor`, `max_labels` ('),
+                         ('`max_labels_per_anchor` (',
+                          '`max_labels_per_anchor`, `max_patterns` ('),
+                         ('`max_paths`, `max_steps`', '`max_steps`, `max_paths`'),
+                         (', `max_labels_per_anchor` (', ' (`max_labels_per_anchor`; ')):
+            with self.subTest(old=old, new=new):
+                self.assertEqual(1, row.count(old))
+                with self.assertRaises(AssertionError):
+                    self.check_spec_gate_caps(text.replace(row, row.replace(old, new)))
+
     def test_files(self):
         listed = set(self.fixtures)
         on_disk = {d for d in os.listdir(DATA) if os.path.isdir(os.path.join(DATA, d))}
@@ -3532,13 +3637,56 @@ class TestPatternFixtures(unittest.TestCase):
         if not os.path.isfile(PATTERN_CPP):
             self.skipTest('the server sources are not in this checkout')
         with open(PATTERN_CPP, encoding='utf-8') as f:
-            source = f.read()
-        for name, expected in (('kPatternGateKeys', GATE_KEYS), ('kPatternGateCaps', GATE_CAPS)):
-            m = re.search(r'const char \*const ' + name + r'\[\] = \{(.*?)\};', source, re.S)
-            self.assertTrue(m, name)
-            self.assertEqual(expected, re.findall(r'"([a-z_]+)"', m.group(1)), name)
-        self.assertIn('"' + DETAILS + '"', source)
+            self.check_server_gate_lists(f.read())
         self.assertEqual(GATE_KEYS + ['details'], SCHEMA['pattern_gate'])
+
+    def check_server_gate_lists(self, source):
+        """kPatternGateKeys and kPatternGateCaps in |source| (pattern.cpp), their comments left
+        out, are GATE_KEYS and GATE_CAPS in order, and the source names the route of the full
+        block."""
+        for name, expected in (('kPatternGateKeys', GATE_KEYS), ('kPatternGateCaps', GATE_CAPS)):
+            self.assertEqual(expected, cpp_string_array(source, name), name)
+        self.assertIn('"' + DETAILS + '"', source)
+
+    def test_a_gate_list_entry_commented_out_fails(self):
+        """The server's gate lists are read without their comments: pattern.cpp with a gate key
+        or a gate cap commented out (in /* */ or on a // line) fails check_server_gate_lists, and
+        such a cap check_spec_gate_caps; a comment that only names a string passes both."""
+        if not (os.path.isfile(PATTERN_CPP) and os.path.isfile(SPEC)):
+            self.skipTest('the server sources or the SPEC are not in this checkout')
+        with open(PATTERN_CPP, encoding='utf-8') as f:
+            source = f.read()
+        with open(SPEC, encoding='utf-8') as f:
+            spec = f.read()
+        self.check_server_gate_lists(source)
+        self.check_spec_gate_caps(spec, source)
+        arrays = {}
+        for name in ('kPatternGateKeys', 'kPatternGateCaps'):
+            m = re.search(r'const char \*const ' + name + r'\[\] = \{.*?\};', source, re.S)
+            self.assertTrue(m, name)
+            arrays[name] = m.group(0)
+        for name, old, new, fails in (
+                ('kPatternGateCaps', '"max_steps", ', '/* "max_steps", */ ', True),
+                ('kPatternGateCaps', '\n    "min_information_bits", ',
+                 '\n    // "min_information_bits",\n    ', True),
+                ('kPatternGateKeys', '"counting",', '/* "counting", */', True),
+                ('kPatternGateKeys', '\n    "caps",', '\n    // "caps",', True),
+                ('kPatternGateCaps', '\n};', '\n    // "max_labels" is the full block\'s\n};', False),
+                ('kPatternGateCaps', '"max_paths", ', '"max_paths", /* "max_labels", */ ', False)):
+            with self.subTest(name=name, new=new):
+                array = arrays[name]
+                self.assertEqual(1, array.count(old))
+                mutated = source.replace(array, array.replace(old, new))
+                self.assertNotEqual(source, mutated)
+                checks = [lambda: self.check_server_gate_lists(mutated)]
+                if name == 'kPatternGateCaps':
+                    checks.append(lambda: self.check_spec_gate_caps(spec, mutated))
+                for run in checks:
+                    if fails:
+                        with self.assertRaises(AssertionError):
+                            run()
+                    else:
+                        run()
 
     def test_every_probed_server_has_its_full_block(self):
         """The probe's block is the gate block (SPEC §23.2), so the answers of a server are
@@ -3923,6 +4071,36 @@ class TestPatternFixtures(unittest.TestCase):
                               ('output', 'max_memory')}, stops)
         self.assertIn('extension', phases)
         self.assertTrue(pruned and mirrors)
+        # label-free paths in the memory account (SPEC §12.1): the engine's stop at a kept walk
+        # and the route's cut at a result object, partial and all_or_count; max_memory_mb named
+        # alone acts on a paths entry outside mode count (no annotation_not_read), and not on a
+        # pattern of at most k bases beside it nor on any entry in mode count (SPEC §8.10)
+        path_memory, path_notes = set(), set()
+        for name, f in self.fixtures.items():
+            request, answer = self.bodies[name]
+            if (f['method'] != 'POST' or f['status'] != 200 or 'max_memory_mb' not in request
+                    or request.get('long_search') != 'paths' or 'predicate' in request
+                    or request.get('output', {}).get('labels', 'none') != 'none'):
+                continue
+            alone = not any(x in request for x in LIMITS_LABELS + ['allow_unbudgeted_annotation',
+                                                                   'require_support']
+                            if x != 'max_memory_mb')
+            for e in answer['patterns']:
+                if 'error' in e:
+                    continue
+                longer = e['length'] > answer['index']['k']
+                if longer and e['stop'] and e['stop']['reason'] == 'max_memory':
+                    path_memory.add((answer['mode'], e['stop']['phase'],
+                                     (e['withheld'] or e['cut'] or {}).get('reason')))
+                if alone:
+                    path_notes.add((answer['mode'] == 'count', longer,
+                                    'annotation_not_read' in e['notes']))
+        self.assertLessEqual({('partial', 'output', 'max_memory'),
+                              ('partial', 'extension', 'max_memory'),
+                              ('all_or_count', 'output', 'output_budget')}, path_memory)
+        # (counted, longer than k, noted): the note everywhere but on a paths entry outside count
+        self.assertEqual({(False, True, False), (False, False, True), (True, True, True),
+                          (True, False, True)}, path_notes)
         self.assertLessEqual({('every_context', None), ('tested_contexts', 'selection'),
                               ('no_instance', None), (None, 'not_started')}, motifs)
         # bounded mismatches (SPEC §21): every max_mismatches, each kind answered within
@@ -4240,6 +4418,64 @@ class TestPatternFixtures(unittest.TestCase):
         ]
         self.assertRefusesMutations(cases)
 
+    def test_label_free_path_memory_rules_refuse_what_v1_never_answers(self):
+        """Label-free paths in the memory account (SPEC §12.1, §8.10): the stored answers pass
+        the rules that admit the account's stops on a long_search "paths" entry without labels
+        (the engine's in the extension, the route's in the output) and the note of max_memory_mb
+        named alone, and each rule refuses an answer that breaks it: a labels phase or an
+        annotation budget for the stop, a stopped extension stated exact, annotation_not_read on
+        a paths entry the field acts on, none on a pattern of at most k bases it does not act
+        on, or none on a paths entry in mode count, where it acts on nothing. The paths of a
+        request the account holds are answered as without it, and counted alike in mode count."""
+        for name in ('paths_memory', 'paths_memory_withheld', 'paths_memory_named',
+                     'paths_memory_count'):
+            self.check_stored(name)
+        cases = [
+            ('paths_memory', lambda a: a['patterns'][1]['stop'].update(phase='placement'),
+             'an annotation phase without labels'),
+            ('paths_memory_withheld',
+             lambda a: a['patterns'][1]['stop'].update(phase='label_discovery'),
+             'an annotation phase without labels'),
+            ('paths_memory',
+             lambda a: a['patterns'][2]['stop'].update(reason='max_annotation_work'),
+             'an annotation budget stopping a search that reads none'),
+            ('paths_memory', lambda a: a['patterns'][2]['counts']['paths'].update(
+                relation='exact'), 'for an extension stopped|an exact total has exact parts'),
+            ('paths_memory', lambda a: a['patterns'][1]['notes'].append('annotation_not_read'),
+             'annotation_not_read exactly where'),
+            ('paths_memory_named',
+             lambda a: a['patterns'][0]['notes'].append('annotation_not_read'),
+             'annotation_not_read exactly where'),
+            ('paths_memory_named', lambda a: a['patterns'][1].update(notes=[]),
+             'annotation_not_read exactly where'),
+            ('paths_memory_count', lambda a: a['patterns'][0].update(notes=[]),
+             'annotation_not_read exactly where'),
+        ]
+        self.assertRefusesMutations(cases)
+
+        def untimed(v):
+            if isinstance(v, dict):
+                return {k: untimed(x) for k, x in v.items() if k != 'timing'}
+            if isinstance(v, list):
+                return [untimed(x) for x in v]
+            return v
+
+        request, answer = self.bodies['paths_memory_named']
+        plain_request, plain = self.bodies['paths']
+        self.assertNotIn('max_memory_mb', plain_request)
+        self.assertEqual(plain_request['patterns'][0], request['patterns'][0])
+        self.assertEqual(plain['limits'], answer['limits'])
+        self.assertEqual(untimed(plain['patterns'][0]), untimed(answer['patterns'][0]))
+        # in mode count the field acts on nothing: the paths counted as without it, the note added
+        request, answer = self.bodies['paths_memory_count']
+        plain_request, plain = self.bodies['paths_count']
+        self.assertNotIn('max_memory_mb', plain_request)
+        self.assertEqual(plain_request['patterns'][0]['dna'], request['patterns'][0]['dna'])
+        self.assertEqual(plain['limits'], answer['limits'])
+        expected = dict(untimed(plain['patterns'][0]), id=request['patterns'][0]['id'],
+                        notes=['annotation_not_read'])
+        self.assertEqual(expected, untimed(answer['patterns'][0]))
+
     def test_hand_made_bodies_are_the_codes(self):
         """The hand-made bodies are written by the code as stored here: the two 503s, and the
         full block while the index loads (the loaded masked server's block with what
@@ -4255,9 +4491,8 @@ class TestPatternFixtures(unittest.TestCase):
                          hand_made)
 
         # the graph fields the code sets to null without the graph, read from its source
-        m = re.search(r'const char \*graph_fields\[\] = \{(.*?)\};', pattern_cpp, re.S)
-        self.assertTrue(m, 'pattern_capabilities_json graph_fields')
-        self.assertEqual(list(GRAPH_FIELDS), re.findall(r'"([a-z_]+)"', m.group(1)))
+        self.assertEqual(list(GRAPH_FIELDS), cpp_string_array(pattern_cpp, 'graph_fields'),
+                         'pattern_capabilities_json graph_fields')
         loading = self.bodies['pattern_capabilities_loading'][1]
         loaded = self.bodies['pattern_capabilities'][1]
         self.assertTrue(loaded['available'])

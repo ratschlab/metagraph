@@ -1267,9 +1267,13 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
         out = answer(idx, long_name, "all_or_count");
         const Json::Value &w = out["patterns"][0];
         EXPECT_EQ("output_budget", w["withheld"]["reason"].asString());
+        EXPECT_EQ("output", w["stop"]["phase"].asString());
         EXPECT_EQ("max_memory", w["stop"]["reason"].asString());
         EXPECT_EQ(0u, w["results"].size());
+        EXPECT_EQ("exact", w["counts"]["selected"]["relation"].asString());
         EXPECT_EQ(256u, w["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ("exact", w["counts"]["supported_paths"]["relation"].asString());
+        EXPECT_EQ(0u, w["rows_refused"].size());
         EXPECT_GT(256u * 1024, compact(out).size());
     }
     {
@@ -1281,6 +1285,183 @@ TEST(PatternSupportedRoute, SelectionLabelNamesAreCharged) {
             EXPECT_TRUE(e["withheld"].isNull()) << mode;
             EXPECT_EQ(256u, e["results"].size()) << mode;
         }
+    }
+}
+
+// all_or_count lists every selected path or none: once the account refuses a listed path's
+// selection labels (a path decided at completion), nothing can be listed, so what the list
+// holds -- the listed paths' selection labels and the sink's paths -- is given back at once,
+// before the search goes on (SPEC §20.9), as the sink's own cut and the held walks' are.
+// Driven below the route, so that the account is seen between the search and finish(): on the
+// graph of all 64 3-mers under a 64 KiB label name (SelectionLabelNamesAreCharged's), each of
+// NNNN's 256 forward walks is selected and listed with that name until the 1 MiB account
+// refuses one; then the sink keeps nothing and the account holds what count mode's holds (the
+// search's own), and finish() withholds output_budget with stop {output, max_memory} and exact
+// counts. Mutation tried: the charges kept until finish(): fails.
+TEST(PatternSupportedRoute, AllOrCountGivesBackItsListWhenALabelChargeIsRefused) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const std::string long_name(64 * 1024, 'x');
+    const Index idx = build_rd(3, { { long_name, "h0", record } });
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    struct Seen {
+        bool searched = false;
+        size_t kept = 0;
+        uint64_t held = 0;
+        PathSelectionAnswer answer;
+    };
+    const uint64_t max_memory = 1 << 20;
+    auto run = [&](gp::Mode mode) {
+        Seen seen;
+        graph::traversal::LabelOracle oracle(*idx.anno, nullptr);
+        retrieval::Account account(max_memory);
+        gp::Budget budget(1'000'000'000,
+                          gp::Deadline(Clock::now(), std::numeric_limits<double>::infinity(),
+                                       0, std::function<Clock::time_point()>(&Clock::now)));
+        uint64_t units = 0;
+        RetrievalLimits limits;
+        limits.max_memory_bytes = max_memory;
+        PathSupportEnv env { oracle, budget, account, units, limits,
+                             gp::PatternSearch::support(graph).mode, oracle.decode_charged(),
+                             nullptr, nullptr };
+        PathSupportOptions o;
+        o.level = graph::traversal::Support::KMER;
+        o.labels = true;
+        PathTracker tracker(env, o);
+        SupportedPathSink sink(tracker);
+        Json::Value p;
+        p["any"].append(long_name);
+        const predicate::Binding binding = predicate::Bound::bind(
+                predicate::Predicate::parse(p, 1'000), oracle, budget);
+        PathSelection selection(tracker, sink, *binding.bound);
+        gp::PatternSearch search(graph);
+        gp::Request rq;
+        rq.mode = mode;
+        rq.strands = gp::Strands::FORWARD;
+        rq.extend_paths = true;
+        rq.max_paths = std::numeric_limits<uint64_t>::max();
+        rq.min_information_bits = 0;
+        rq.support = &selection;
+        rq.sink = &selection;
+        PathSelectionOptions so;
+        so.mode = mode;
+        so.max_paths = 1'000;
+        so.either = false;
+        so.selection_labels = true;
+        const gp::Pattern pattern = gp::Pattern::parse(gp::PatternKind::IUPAC, "NNNN");
+        tracker.begin_pattern(pattern.length());
+        sink.begin_pattern(PathSelection::sink_mode(so), PathSelection::sink_threshold(so));
+        selection.begin_pattern(so, pattern.length());
+        const gp::Result result = search.count(pattern, rq, budget);
+        seen.searched = result.anchors
+                && result.anchors->extension == gp::Extension::COMPLETED;
+        seen.kept = sink.paths().size();
+        seen.held = account.held();
+        seen.answer = selection.finish(result);
+        selection.end_pattern();
+        sink.end_pattern(0);
+        tracker.end_pattern();
+        return seen;
+    };
+    const Seen count = run(gp::Mode::COUNT);
+    ASSERT_TRUE(count.searched);
+    EXPECT_EQ(0u, count.kept);
+    EXPECT_EQ(256u, count.answer.selected.value);
+    const Seen all = run(gp::Mode::ALL_OR_COUNT);
+    ASSERT_TRUE(all.searched);
+    EXPECT_EQ(0u, all.kept);
+    EXPECT_EQ(count.held, all.held);
+    EXPECT_EQ("output_budget", all.answer.withheld.value_or(""));
+    ASSERT_TRUE(all.answer.stop);
+    EXPECT_EQ("output", all.answer.stop->first);
+    EXPECT_EQ("max_memory", all.answer.stop->second);
+    EXPECT_EQ(SelectionPass::COMPLETED, all.answer.pass);
+    EXPECT_EQ(gp::Relation::EXACT, all.answer.tested.relation);
+    EXPECT_EQ(256u, all.answer.tested.value);
+    EXPECT_EQ(gp::Relation::EXACT, all.answer.selected.relation);
+    EXPECT_EQ(256u, all.answer.selected.value);
+    EXPECT_EQ(0u, all.answer.listed);
+    // partial under the same account lists the paths whose labels fit, its cut the account's
+    const Seen part = run(gp::Mode::PARTIAL);
+    EXPECT_LT(0u, part.answer.listed);
+    EXPECT_GT(256u, part.answer.listed);
+    EXPECT_EQ("max_memory", part.answer.cut.value_or(""));
+}
+
+// The same refusal through the route at the record level (the route's default on an index with
+// coordinates and its record mapping, whose search rows carry coordinates): the graph of all 64
+// 3-mers under a 64 KiB label name and 5,000 coordinates of TTT in a column m (50 records of
+// 102 T); NNNN, any(name), predicate_strands context, output.labels all or predicate_only,
+// occurrences false, max_labels 0, a 1 MiB account that holds count mode's search. all_or_count
+// lists the selected paths with that name until the account refuses one; given back at once,
+// the search reaches TTT's row (last in A < C < G < T order) with the room count mode has and
+// ends as count mode's: withheld output_budget, stop {output, max_memory}, counts.selected
+// exact, counts.supported_paths count mode's (its search completed), no refused row. Mutation
+// tried: the charges kept until finish(): withheld annotation_budget, stop {extension,
+// max_memory}, TTT's row refused, the counts at_least: fails.
+TEST(PatternSupportedRoute, AllOrCountGivesBackItsListBeforeTheSearchReadsOn) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const std::string long_name(64 * 1024, 'x');
+    std::vector<Record> records = { { long_name, "h0", record } };
+    for (size_t i = 0; i < 50; ++i) {
+        records.push_back({ "m", "m" + std::to_string(i), std::string(102, 'T') });
+    }
+    const Index idx = build_rd(3, records);
+    auto answer = [&](const std::string &mode, const std::string &labels) {
+        const std::string body
+                = "{\"patterns\": [{\"iupac\": \"NNNN\"}], \"mode\": \"" + mode + "\", "
+                  "\"strands\": \"forward\", \"long_search\": \"supported_paths\", "
+                  "\"predicate\": {\"any\": [\"" + long_name + "\"]}, \"predicate_strands\": "
+                  "\"context\", \"output\": {\"labels\": \"" + labels + "\", \"occurrences\": "
+                  "false}, \"max_labels\": 0, \"max_paths\": 1000}";
+        RetrievalHooks hooks;
+        hooks.coord_to_header = idx.cth.get();
+        hooks.max_memory_bytes = 1 << 20;
+        return process_pattern_request(parse_pattern_body(body), *idx.anno, route_limits(),
+                                       "rel", nullptr, nullptr, nullptr, &hooks)["patterns"][0];
+    };
+    for (const std::string labels : { "all", "predicate_only" }) {
+        SCOPED_TRACE(labels);
+        const Json::Value count = answer("count", labels);
+        ASSERT_FALSE(count.isMember("error")) << compact(count["error"]);
+        EXPECT_EQ("record_verified", count["selection"]["support"].asString());
+        EXPECT_TRUE(count["stop"].isNull()) << compact(count["stop"]);
+        EXPECT_EQ(0u, count["rows_refused"].size());
+        ASSERT_EQ("exact", count["counts"]["selected"]["relation"].asString());
+        const uint64_t selected = count["counts"]["selected"]["value"].asUInt64();
+        ASSERT_LT(0u, selected);
+        EXPECT_EQ("completed", count["counts"]["supported_paths"]["search"].asString());
+
+        const Json::Value e = answer("all_or_count", labels);
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        EXPECT_EQ("output_budget", e["withheld"]["reason"].asString());
+        EXPECT_EQ("output", e["stop"]["phase"].asString());
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+        EXPECT_EQ(0u, e["rows_refused"].size()) << compact(e["rows_refused"]);
+        EXPECT_EQ("exact", e["counts"]["selected"]["relation"].asString());
+        EXPECT_EQ(selected, e["counts"]["selected"]["value"].asUInt64());
+        EXPECT_EQ(compact(count["counts"]["supported_paths"]),
+                  compact(e["counts"]["supported_paths"]));
+        EXPECT_EQ(0u, e["results"].size());
+        EXPECT_EQ(0u, e["returned"].asUInt64());
+        EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), 1u << 20);
     }
 }
 
@@ -1858,22 +2039,17 @@ TEST(PatternSupportedRoute, AllOrCountGivesBackItsListOnceItCannotList) {
     EXPECT_LT(0u, decided);
 }
 
-// When the account refuses the index of the held walks by sequence after the search, no mirror
-// is found among the held walks nor read, and every walk is decided on its own support alone,
-// as after a mirror read stopped on the account (SPEC §20.9), instead of none. The graph of all
-// 64 3-mers with the label shared and TTTTTTTT with the label other, ANNNNN on both strands
-// under "either" (the mirrors searched, so the search's row cache stays in the account): 2,048
-// short walks held, whose index (8 bytes a walk) is larger than what the search needs beyond
-// the walks it holds at its end, so a band of accounts holds every walk and refuses the index.
-// In count mode, from below the smallest account that completes: a selection stopped on the
-// account after the search counted every supported walk either refused a held walk (none
-// decided) or the index; then any(shared), a definite true on every walk's own support,
-// decides every walk (selected bounds [2048, 2048]), and any(other) decides the palindromes
-// (their own support is their mirror's) and the walks carrying other only, its bounds holding
-// the complete answer's count (a walk whose mirror carries other is not decided as if its
-// mirror had no support). Mutation tried: the decisions ended at the refused index (tested
-// 0): fails.
-TEST(PatternSupportedRoute, WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused) {
+// The search's row cache is given back to the account once the search ends, before the held
+// walks' index by sequence is charged (SPEC §20.9): no later step reads it, also when the
+// mirrors were searched and none is read. The graph of all 64 3-mers with the label shared and
+// TTTTTTTT with the label other, ANNNNN on both strands under "either" (the mirrors searched):
+// 2,048 short walks held, whose index (8 bytes a walk) is far smaller than the row cache's
+// allotment (a quarter of what the account had when the search began). In count mode, from
+// below the smallest account that completes: a selection stopped on the account after the
+// search counted every supported walk refused a held walk (none decided), never the index: an
+// account that holds every walk completes. Mutation tried: the allotment kept while the index
+// is charged: fails (the index refused in the band).
+TEST(PatternSupportedRoute, TheRowCacheIsGivenBackBeforeTheIndexOfTheHeldWalks) {
     std::string record;
     for (char a : std::string("ACGT")) {
         for (char b : std::string("ACGT")) {
@@ -1901,8 +2077,6 @@ TEST(PatternSupportedRoute, WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefuse
         ASSERT_EQ("completed", full["selection"]["pass"].asString()) << compact(full["stop"]);
         const uint64_t walks = full["counts"]["supported_paths"]["value"].asUInt64();
         ASSERT_EQ(2048u, walks);
-        const uint64_t selected = full["counts"]["selected"]["value"].asUInt64();
-        EXPECT_EQ(own ? walks : 2u, selected);
         auto at = [&](const std::string &mode, uint64_t bytes) {
             Ask q = r;
             q.mode = mode;
@@ -1916,7 +2090,7 @@ TEST(PatternSupportedRoute, WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefuse
             }
         }
         ASSERT_LT(32768u, completes);
-        uint64_t held_refused = 0, index_refused = 0, withheld = 0;
+        uint64_t held_refused = 0;
         for (uint64_t bytes = completes - 32768; bytes < completes; bytes += 256) {
             SCOPED_TRACE(bytes);
             const Json::Value e = at("count", bytes);
@@ -1927,37 +2101,202 @@ TEST(PatternSupportedRoute, WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefuse
             }
             ASSERT_EQ(walks, e["counts"]["supported_paths"]["value"].asUInt64());
             EXPECT_EQ("stopped", e["selection"]["pass"].asString());
-            ASSERT_EQ("bounds", e["counts"]["selected"]["relation"].asString());
-            const uint64_t tested = e["counts"]["tested"]["value"].asUInt64();
-            const uint64_t lower = e["counts"]["selected"]["lower"].asUInt64();
-            const uint64_t upper = e["counts"]["selected"]["upper"].asUInt64();
-            EXPECT_LE(lower, selected);
-            EXPECT_GE(upper, selected);
-            if (tested == 0) {
-                ++held_refused;
-                continue;
-            }
-            ++index_refused;
-            if (own) {
-                EXPECT_EQ(walks, tested);
-                EXPECT_EQ(walks, lower);
-            } else {
-                EXPECT_GT(walks, tested);
-            }
-            // all_or_count, where it refuses the index too, withholds it as before
-            // (predicate_budget)
-            const Json::Value f = at("all_or_count", bytes);
-            if (f["stop"] == e["stop"] && f["counts"]["tested"] == e["counts"]["tested"]) {
-                EXPECT_EQ("predicate_budget", f["withheld"]["reason"].asString());
-                EXPECT_EQ(compact(e["counts"]["selected"]), compact(f["counts"]["selected"]));
-                ++withheld;
-            }
+            EXPECT_EQ(0u, e["counts"]["tested"]["value"].asUInt64());
+            ++held_refused;
         }
-        EXPECT_LT(0u, index_refused);
-        EXPECT_LT(0u, withheld);
         if (own) {
             EXPECT_LT(0u, held_refused);
         }
+    }
+}
+
+// The same in all_or_count, which lists the selected walks: the paths it keeps for them (half
+// of the account at most) are larger than the walks held, so the index is refused beside the
+// row cache's allotment only where each held walk is charged for many predicate labels (8 bytes
+// a label). 64 columns carrying the record of all 64 3-mers, ANNNN on both strands at the label
+// level under "either" (the mirrors searched), any() of the 64: 512 walks held, each with its
+// 64 labels, all selected and listed. From below the smallest account that lists them: a
+// selection stopped on the account after the search refused a held walk (none decided,
+// predicate_budget), never the index. Mutation tried: the allotment kept while the index is
+// charged: fails (the index refused in the band: every walk decided on its own support,
+// predicate_budget where the walks can be listed).
+TEST(PatternSupportedRoute, TheRowCacheIsGivenBackBeforeTheIndexWhereAllOrCountLists) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    std::vector<Record> records;
+    Json::Value predicate;
+    for (int i = 0; i < 64; ++i) {
+        const std::string column = "c" + std::to_string(100 + i);
+        records.push_back({ column, column + "_r0", record });
+        predicate["any"].append(column);
+    }
+    const Index idx = build_rd(3, records);
+    Ask r;
+    r.patterns = { "ANNNN" };
+    r.kind = "iupac";
+    r.mode = "all_or_count";
+    r.strands = "both";
+    r.level = "label_intersection";
+    r.predicate = compact(predicate);
+    r.predicate_strands = "either";
+    const Json::Value full = answer_of(idx, r)["patterns"][0];
+    ASSERT_FALSE(full.isMember("error")) << compact(full["error"]);
+    ASSERT_EQ("completed", full["selection"]["pass"].asString()) << compact(full["stop"]);
+    const uint64_t walks = full["counts"]["supported_paths"]["value"].asUInt64();
+    ASSERT_EQ(512u, walks);
+    ASSERT_EQ(walks, full["counts"]["selected"]["value"].asUInt64());
+    ASSERT_EQ(walks, full["results"].size());
+    auto at = [&](uint64_t bytes) {
+        Ask q = r;
+        q.max_memory_bytes = bytes;
+        return answer_of(idx, q)["patterns"][0];
+    };
+    uint64_t completes = 0;
+    for (uint64_t bytes = 1 << 14; bytes <= (1 << 24) && !completes; bytes += 4096) {
+        const Json::Value e = at(bytes);
+        if (e["selection"]["pass"] == "completed" && e["withheld"].isNull()) {
+            completes = bytes;
+            EXPECT_EQ(walks, e["results"].size());
+        }
+    }
+    ASSERT_LT(32768u, completes);
+    uint64_t held_refused = 0;
+    for (uint64_t bytes = completes - 32768; bytes < completes; bytes += 128) {
+        SCOPED_TRACE(bytes);
+        const Json::Value e = at(bytes);
+        ASSERT_FALSE(e.isMember("error")) << compact(e["error"]);
+        if (e["stop"]["phase"] != "selection" || e["stop"]["reason"] != "max_memory"
+                || e["counts"]["supported_paths"]["relation"] != "exact") {
+            continue;
+        }
+        EXPECT_EQ("stopped", e["selection"]["pass"].asString());
+        EXPECT_EQ(0u, e["counts"]["tested"]["value"].asUInt64());
+        EXPECT_EQ("predicate_budget", e["withheld"]["reason"].asString());
+        ++held_refused;
+    }
+    EXPECT_LT(0u, held_refused);
+}
+
+// When the account refuses the index of the held walks by sequence after the search, no mirror
+// is found among the held walks nor read, and every walk is decided on its own support alone,
+// as after a mirror read stopped on the account (SPEC §20.9), instead of none. Driven below the
+// route, so that the account can be filled between the search and finish() to leave less than
+// the index needs (the search's row cache given back first, as finish() gives it back): the
+// graph of all 64 3-mers with the label shared and TTTTTTTT with
+// the label other, ANNNNN on both strands under "either" (the mirrors searched), 2,048 walks
+// held. any(shared), a definite true on every walk's own support, decides every walk (selected
+// bounds [2048, 2048]); any(other) decides the palindromes (their own support is their
+// mirror's) and the walks carrying other only, its bounds holding the complete answer's count
+// (a walk whose mirror carries other is not decided as if its mirror had no support);
+// all_or_count withholds predicate_budget with the same counts.
+TEST(PatternSupportedRoute, WalksAreDecidedOnTheirOwnSupportWhenTheIndexIsRefused) {
+    std::string record;
+    for (char a : std::string("ACGT")) {
+        for (char b : std::string("ACGT")) {
+            for (char c : std::string("ACGT")) {
+                record += a;
+                record += b;
+                record += c;
+            }
+        }
+    }
+    const Index idx = build_rd(3, { { "shared", "h0", record }, { "other", "o0", "TTTTTTTT" } });
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    const uint64_t walks = 2048;
+    // |fill|: the account left with one byte less than the held walks' index after the search
+    auto run = [&](gp::Mode mode, const std::string &label, bool fill) {
+        graph::traversal::LabelOracle oracle(*idx.anno, nullptr);
+        retrieval::Account account(uint64_t(1) << 26);
+        gp::Budget budget(1'000'000'000,
+                          gp::Deadline(Clock::now(), std::numeric_limits<double>::infinity(),
+                                       0, std::function<Clock::time_point()>(&Clock::now)));
+        uint64_t units = 0;
+        RetrievalLimits limits;
+        limits.max_memory_bytes = account.left();
+        PathSupportEnv env { oracle, budget, account, units, limits,
+                             gp::PatternSearch::support(graph).mode, oracle.decode_charged(),
+                             nullptr, nullptr };
+        PathSupportOptions o;
+        o.level = graph::traversal::Support::KMER;
+        o.labels = false;
+        PathTracker tracker(env, o);
+        SupportedPathSink sink(tracker);
+        Json::Value p;
+        p["any"].append(label);
+        const predicate::Binding binding = predicate::Bound::bind(
+                predicate::Predicate::parse(p, 1'000), oracle, budget);
+        PathSelection selection(tracker, sink, *binding.bound);
+        gp::PatternSearch search(graph);
+        gp::Request rq;
+        rq.mode = mode;
+        rq.strands = gp::Strands::BOTH;
+        rq.extend_paths = true;
+        rq.max_paths = std::numeric_limits<uint64_t>::max();
+        rq.min_information_bits = 0;
+        rq.support = &selection;
+        rq.sink = &selection;
+        PathSelectionOptions so;
+        so.mode = mode;
+        so.max_paths = 1'000'000;
+        so.either = true;
+        so.mirrors_searched = true;
+        const gp::Pattern pattern = gp::Pattern::parse(gp::PatternKind::IUPAC, "ANNNNN");
+        tracker.begin_pattern(pattern.length());
+        sink.begin_pattern(PathSelection::sink_mode(so), PathSelection::sink_threshold(so));
+        selection.begin_pattern(so, pattern.length());
+        const gp::Result result = search.count(pattern, rq, budget);
+        EXPECT_TRUE(result.anchors && result.anchors->extension == gp::Extension::COMPLETED);
+        if (result.anchors) {
+            EXPECT_EQ(walks, result.anchors->supported.value);
+        }
+        if (fill) {
+            tracker.release_rows();
+            EXPECT_TRUE(account.charge(account.left() - (8 * walks - 1)));
+        }
+        PathSelectionAnswer answer = selection.finish(result);
+        selection.end_pattern();
+        sink.end_pattern(0);
+        tracker.end_pattern();
+        return answer;
+    };
+    for (const std::string label : { "shared", "other" }) {
+        SCOPED_TRACE(label);
+        const bool own = label == "shared";
+        const PathSelectionAnswer full = run(gp::Mode::COUNT, label, false);
+        ASSERT_EQ(SelectionPass::COMPLETED, full.pass);
+        EXPECT_EQ(walks, full.tested.value);
+        ASSERT_EQ(gp::Relation::EXACT, full.selected.relation);
+        const uint64_t selected = full.selected.value;
+        EXPECT_EQ(own ? walks : 2u, selected);
+        const PathSelectionAnswer e = run(gp::Mode::COUNT, label, true);
+        ASSERT_TRUE(e.stop);
+        EXPECT_EQ("selection", e.stop->first);
+        EXPECT_EQ("max_memory", e.stop->second);
+        EXPECT_EQ(SelectionPass::STOPPED, e.pass);
+        ASSERT_EQ(gp::Relation::BOUNDS, e.selected.relation);
+        EXPECT_LE(e.selected.lower, selected);
+        EXPECT_GE(e.selected.upper, selected);
+        if (own) {
+            EXPECT_EQ(walks, e.tested.value);
+            EXPECT_EQ(walks, e.selected.lower);
+        } else {
+            EXPECT_LT(0u, e.tested.value);
+            EXPECT_GT(walks, e.tested.value);
+        }
+        const PathSelectionAnswer f = run(gp::Mode::ALL_OR_COUNT, label, true);
+        EXPECT_EQ("predicate_budget", f.withheld.value_or(""));
+        EXPECT_EQ(e.stop, f.stop);
+        EXPECT_EQ(e.tested.value, f.tested.value);
+        EXPECT_EQ(e.selected.lower, f.selected.lower);
+        EXPECT_EQ(e.selected.upper, f.selected.upper);
     }
 }
 
