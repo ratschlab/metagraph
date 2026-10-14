@@ -1884,6 +1884,46 @@ def line_explained_items(line, matched, recorded=None):
     return items
 
 
+def mcp_exposes(scenario):
+    """The checks the manifest states the MCP arm exposes for a scenario (mcp.exposes, a list of check names built
+    from a baseline run by mcp_exposure), or []."""
+    v = ((scenario or {}).get("mcp") or {}).get("exposes")
+    return [x for x in v if isinstance(x, str) and x] if isinstance(v, list) else []
+
+
+def mcp_exposure(rows):
+    """{scenario: [check names]} the MCP arm decided (pass, fail, finding) on at least one execution of the scenario
+    in a run's lines |rows|: what a baseline run shows the MCP surface exposes, the content of a manifest's
+    mcp.exposes."""
+    out = {}
+    for r in rows:
+        if r.get("arm") != "mcp":
+            continue
+        for c in r.get("checks") or []:
+            if c.get("outcome") in ("pass", "fail", "finding"):
+                out.setdefault(r.get("scenario"), set()).add(c.get("check"))
+    return dict((k, sorted(v, key=str)) for k, v in out.items())
+
+
+def exposure_drops(scenario, lines):
+    """The class of the MCP executions compared check by check (|lines|) on which a check the scenario lists in
+    mcp.exposes reads not_exposed: a field the MCP surface exposed in the baseline and no longer does is a
+    disagreement (side mcp, by exposes), never an inconclusive that agrees; None when there is none."""
+    listed = set(mcp_exposes(scenario))
+    if not listed:
+        return None
+    hits = [(r.get("repeat"), c.get("check")) for r in lines for c in r.get("checks") or []
+            if c.get("check") in listed and c.get("outcome") == "not_exposed"]
+    if not hits:
+        return None
+    checks = sorted(set(h[1] for h in hits), key=str)
+    reps = sorted(set(h[0] for h in hits), key=lambda x: x if isinstance(x, int) else -1)
+    return {"class": "disagree", "side": "mcp", "by": "exposes", "repeats": reps, "checks": checks,
+            "mcp_verified": False,
+            "mcp_detail": "check(s) %s read not_exposed on repeat(s) %s; the manifest lists them as exposed via MCP "
+                          "(mcp.exposes): a field the MCP surface no longer exposes" % (checks, reps)}
+
+
 def outside_vocabulary_part(lines):
     """The class of MCP executions whose outcome is outside the vocabulary (sc.outcome_known: a runner's mark not
     agreed first): disagree, side mcp, by outcome, the repeats and outcomes named; never compared as a pass."""
@@ -2219,7 +2259,9 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     agreement, and with a table judged by its checks like any other (B5b-05, B-06); one it marked not_implemented_mcp
     makes the rest not_implemented_mcp with no table, with a named not_implemented_mcp case, or on a scenario the
     manifest does not map, and else is a disagreement on the MCP side (unmatched_not_implemented_mark); with no table a rule (c) inconclusive the runner decided on its case
-    (runner_rule_c_by_design) is undecidable. A case id the scenario names that
+    (runner_rule_c_by_design) is undecidable; a check the scenario lists in mcp.exposes that reads not_exposed on an
+    execution compared check by check is a disagreement on the MCP side (exposure_drops). A case id the scenario
+    names that
     the table lacks, with no named case matched, is a disagreement (side table). A disagreement anywhere is the class
     (the first in execution order, the checks last); else a by-design class, verified only when every part held
     (B-04: other parts that do not agree make it unverified, shown as `other_repeats`); else the checks' class,
@@ -2311,6 +2353,9 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         else:
             parts.append(by_design_class(case, kept, hit, run_dir, scenario, refs))
     rest = None
+    dropped = exposure_drops(scenario, plain)
+    if dropped:
+        parts.append(dropped)
     if plain:
         unmatched = [r for r in plain if r.get("repeat") not in answered]
         # B5b-05: the runner's marks no case reproduces: with no table each stays an unverified by-design part of

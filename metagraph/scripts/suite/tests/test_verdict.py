@@ -455,5 +455,70 @@ class LoadCaveatTest(unittest.TestCase):
         self.assertIn("**Load caveat:**", report.load_caveat(lf))
 
 
+class UntestedAndExposureTest(unittest.TestCase):
+    """A field the MCP drops: with mcp.exposes a disagreement; an area or route x arm where nothing passed and
+    something was inconclusive keeps the verdict from PASS."""
+
+    NE = [st("pass"), st("not_exposed", "contains_source_context", "field not in the answer: patterns")]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        self.S = [scen("P-001", "P"), scen("P-002", "P"), scen("P-003", "P")]
+        self.orch = {"sessions": [{"mode": "paired", "mcp_cmd": "x {ids} {out}", "checks": "checks",
+                                   "warm_every": "0",
+                                   "loop": {"mode": "paired", "state": "done", "scenarios": 3, "completed": 3}}]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def rows(self, mcp_checks):
+        direct = dict((arm, [line(x["id"], arm, 0, T0 + i * 10 + k, 20.0) for i, x in enumerate(self.S)])
+                      for k, arm in enumerate(("direct-local", "direct-remote")))
+        direct["mcp"] = [line(x["id"], "mcp", r, T0 + i * 10 + 5 * r, 40.0, checks=list(mcp_checks))
+                         for i, x in enumerate(self.S) for r in (0, 1)]
+        return direct
+
+    def test_dropped_field_is_not_pass(self):
+        # the review's case (c): every MCP property check not_exposed, the runner says pass
+        run_dir_with(self.d, self.S, self.rows(self.NE), self.orch)
+        text, v = verdict_of(self.d)
+        self.assertTrue(v.startswith("**INCONCLUSIVE (no execution passed in"), v)
+        self.assertIn("area P on mcp (6 inconclusive)", v)
+        self.assertIn("route POST /pattern on mcp", v)
+
+    def test_dropped_field_listed_as_exposed_fails(self):
+        for x in self.S:
+            x["mcp"]["exposes"] = ["status", "contains_source_context"]
+        run_dir_with(self.d, self.S, self.rows(self.NE), self.orch)
+        comp = sc.read_json(os.path.join(self.d, "compare.json"))
+        ma = comp["scenarios"]["P-001"]["mcp_agreement"]
+        self.assertEqual((ma["class"], ma["side"], ma["by"], ma["checks"]),
+                         ("disagree", "mcp", "exposes", ["contains_source_context"]))
+        _, v = verdict_of(self.d)
+        self.assertTrue(v.startswith("**FAIL"), v)
+        self.assertIn("3 MCP disagreement(s)", v)
+
+    def test_exposure_of_a_baseline(self):
+        rows = self.rows([st("pass"), st("pass", "contains_source_context")])["mcp"]
+        rows[0]["checks"][1] = st("not_exposed", "contains_source_context")
+        self.assertEqual(cmp.mcp_exposure(rows)["P-001"], ["contains_source_context", "status"])
+        self.assertIsNone(cmp.exposure_drops(self.S[0], rows))   # no mcp.exposes: nothing to judge
+
+    def test_clean_run_and_marks_still_pass(self):
+        run_dir_with(self.d, self.S, self.rows([st("pass"), st("pass", "contains_source_context")]), self.orch)
+        _, v = verdict_of(self.d)
+        self.assertTrue(v.startswith("**PASS"), v)
+
+    def test_one_untested_area_beside_a_tested_one(self):
+        import report
+        rows = [line("P-001", "mcp", 0, T0, 10.0), line("C-001", "mcp", 0, T0, 10.0, outcome="inconclusive"),
+                line("X-001", "mcp", 0, T0, 10.0, outcome="not_implemented_mcp", checks=[])]
+        manifest = {"scenarios": [{"id": "P-001", "route": "POST /pattern"}, {"id": "C-001", "route": "GET /c"},
+                                  {"id": "X-001", "route": "GET /x"}]}
+        groups = report.untested_groups(rows, manifest)
+        self.assertEqual([(g[0], g[1], g[2]) for g in groups], [("area", "C", "mcp"), ("route", "GET /c", "mcp")])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -176,9 +176,40 @@ def load_figures(samples):
             "first_error": str(errors[0]) if errors else None}
 
 
-def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None):
+def untested_groups(rows, manifest):
+    """[(kind "area" | "route", name, arm, {outcome: executions})] of every area and route x arm whose executions
+    include an inconclusive one and none passed: what that part of the run tested is nothing (a field the MCP no
+    longer exposes leaves every execution inconclusive). Executions not implemented via MCP or by design alone are
+    explicit marks, counted elsewhere, and do not make a group untested."""
+    route_of = dict((s.get("id"), s.get("route")) for s in (manifest or {}).get("scenarios", []) if isinstance(s, dict))
+    groups = {}
+    for r in rows:
+        arm = r.get("arm")
+        for kind, name in (("area", r.get("area") or str(r.get("scenario") or "").split("-", 1)[0]),
+                           ("route", route_of.get(r.get("scenario")) or r.get("route"))):
+            if name:
+                c = groups.setdefault((kind, name, arm), {})
+                c[r.get("outcome")] = c.get(r.get("outcome"), 0) + 1
+    out = []
+    for (kind, name, arm), c in groups.items():
+        if c.get("inconclusive") and not c.get("pass"):
+            out.append((kind, name, arm, c))
+    arm_pos = dict((a, i) for i, a in enumerate(sc.ARMS))
+    out.sort(key=lambda g: (g[0], area_sort_key(g[1]) if g[0] == "area" else (0, str(g[1])), arm_pos.get(g[2], 9)))
+    return out
+
+
+def untested_text(groups, limit=12):
+    return "; ".join("%s %s on %s (%s)" % (kind, name, arm, ", ".join(
+        "%d %s" % (n, o) for o, n in sorted(c.items(), key=lambda kv: (-kv[1], str(kv[0]))))) for kind, name, arm, c
+        in groups[:limit]) + ("; ..." if len(groups) > limit else "")
+
+
+def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None):
     """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
-    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement."""
+    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
+    x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
+    from PASS."""
     s = comp["summary"]
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
@@ -210,6 +241,7 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     modules = sorted(set(checks_name(info) for info in (run.get("arms") or {}).values() if checks_name(info)))
     # a re-evaluated set is judged by checks.py whatever the runners ran
     stub = "stub" in modules and not reevaluated
+    untested = untested_groups(rows, manifest)
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
     elif failing or other or dis_direct or dis_mcp or rel_failed:
@@ -223,6 +255,10 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         # Nothing was shown to hold: never PASS (review N5).
         verdict = ("INCONCLUSIVE (no execution passed: %d inconclusive execution(s), where no check could test its "
                    "property; no failure, no disagreement)" % inconclusive)
+    elif untested:
+        # a part of the run tested nothing (e.g. a field the MCP stopped exposing): never PASS
+        verdict = ("INCONCLUSIVE (no execution passed in %d area / route x arm group(s): %s; no failure, no "
+                   "disagreement)" % (len(untested), untested_text(untested)))
     elif not executions:
         verdict = "EMPTY (no execution recorded)"
     elif stub:
@@ -251,6 +287,9 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
             md(", ".join(sc.OUTCOMES)), md("; ".join("%s %s r%s %r" % (x.get("arm"), x.get("scenario"), x.get("repeat"),
                                                                       x.get("outcome")) for x in outside[:20])),
             " ..." if len(outside) > 20 else ""))
+    if untested and not verdict.startswith("INCONCLUSIVE (no execution passed in"):
+        lines.append("- No execution passed in %d area / route x arm group(s) (only inconclusive ones, beside marks): "
+                     "%s." % (len(untested), md(untested_text(untested))))
     ibr = s.get("inconclusive_by_reason") or {}
     if any(ibr.values()):
         # an inconclusive execution tested nothing: by its class (undecidable plausibility, a host state, the
@@ -1046,8 +1085,8 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
     is_property = gate_mod._is_property_fn(cmp.reevaluation_checks_dir(run_dir) if reevaluated else None)
     depth = agreement_depth(comp, rows, is_property)
-    parts.append(verdict_section(run, comp, rows, samples, reevaluated,
-                                 gate_mod.missing_planned(run_dir, manifest, rows), depth))
+    missing = gate_mod.missing_planned(run_dir, manifest, rows)
+    parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest))
     parts.append(gate_section(run_dir, reevaluated, max_failures))
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures, run))

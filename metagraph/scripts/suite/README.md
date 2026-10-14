@@ -1926,3 +1926,28 @@ failing on 14552938.
   section says "**Load not measured:** ..." with the figures and the failures, never the positive sentence; a busy
   host keeps the Load caveat (with the failures named); the resource section names the failed samples. The recorded
   runs have no failed sample (v3 12,756, v4 8,693, all with sra_all): their sentence is unchanged.
+
+### A field the MCP drops, and a part of the run that tested nothing
+- A field the MCP answer lacks makes its check `not_exposed`; an execution whose property checks all read so is
+  inconclusive, the pair agrees on the checks both arms evaluated, and the verdict was INCOMPLETE only when nothing
+  passed at all: a service regression dropping `counts` or `results` read PASS with a footnote (the review's case:
+  every MCP property check not exposed -> 6 inconclusive, class agree, PASS). Three layers judge it now:
+  - **The strict deploy gate (lane G3)** already fails such a run: every inconclusive execution blocks, and a
+    property check the scenario expects that is not passed on a passing execution (not exposed included) is a
+    "property" problem unless the policy's declared file says it is not required on that arm (v4: label_dict_contains
+    on T-labels-0003 / -0005 and answer_fields on T-edge-0008 via MCP). The declared list is the gate's record of what
+    the MCP surface does not expose; anything else not exposed blocks.
+  - **The report (exploratory runs)**: `report.untested_groups` names every area and route x arm whose executions
+    include an inconclusive one and none passed (executions only not implemented via MCP or by design are marks,
+    counted elsewhere). Such a group keeps the verdict from PASS: "INCONCLUSIVE (no execution passed in N area / route
+    x arm group(s): ...)" after FAIL and FINDINGS; under another verdict a line names them. The agreement split of
+    lane G3 (Agreement: generic checks only, partial) still names the scenarios whose properties were not compared.
+    Consequence: v3 and v4 name area C on mcp (C-caps-0001 inconclusive via MCP: capabilities_doc not exposed, the
+    10 others not implemented via MCP) and the routes GET /capabilities and GET /traverse/capabilities on mcp, so a
+    clean exploratory run on v4 with the MCP arm reads INCONCLUSIVE, not PASS (the gate excludes C-caps-0001 on the
+    MCP arm by the owner's declared entry); their recorded verdicts are FAIL and do not move.
+  - **The comparator, with a baseline**: a scenario may state `mcp.exposes` (check names the MCP arm decided in a
+    baseline run: `compare.mcp_exposure(rows)` builds it from a run's lines, for the v5 builder); a listed check that
+    reads not_exposed on an MCP execution compared check by check is `disagree` (side mcp, by exposes, the checks and
+    repeats named; `compare.exposure_drops`), so a dropped field fails the report and the gate's disagreement rule.
+    No frozen manifest states it, so nothing recorded moves.
