@@ -260,7 +260,7 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
             if _finding(new_checks):
                 return "finding", "the table's %s case %s; a check is a finding (a by-design mark never erases " \
                                   "one)" % (how, cid)
-            return "service_by_design", "the table's %s case %s" % (how, cid)
+            return compare.match_mark(matched[0], how), "the table's %s case %s" % (how, cid)
     if kept:
         if not cases:
             return recorded, "decided by the runner without the checks (no table to replay its mark)"

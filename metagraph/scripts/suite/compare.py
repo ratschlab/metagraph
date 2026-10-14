@@ -1037,6 +1037,15 @@ def service_answers(want, answer, tool_error=None):
     return _field_matches((tool_error or {}).get("field", err.get("field")), want["field"])
 
 
+def match_mark(case, how=None):
+    """The mark a refused / relayed (named) or answer-triggered (|how|) match gives the MCP execution, as async's
+    runner gives it at f386a3c0: service_by_design (finding when a check is one; the callers decide that). One place
+    for a case's own statement of its mark: async announced answer_match.mcp_outcome ("service_by_design" |
+    "not_implemented_mcp") for an answer-triggered case (addendum 1 to lane S5e); the table at f386a3c0 states none,
+    and load_by_design refuses the key until it is mirrored here."""
+    return "service_by_design"
+
+
 def case_matches(cases, scenario, answer, tool_error=None, line=None, doc=None, walls=None, warnings=None):
     """(the cases an MCP answer matches, how): async's runner's ServiceByDesign.matches_why (f386a3c0): every case
     the scenario names whose service_answer the answer matches, in the order named ("named"; an answer matches
@@ -1165,7 +1174,8 @@ def answer_class(case, hit, direct_lines, run_dir):
     am = case["answer_match"]
     side = am.get("direct")
     dm = am.get("direct_mismatch")
-    res = {"class": "service_by_design", "by": "answer", "case": case["id"], "case_agreement": case.get("agreement"),
+    res = {"class": match_mark(case, "answer-triggered"), "by": "answer", "case": case["id"],
+           "case_agreement": case.get("agreement"),
            "service_outcome": (case.get("service_answer") or {}).get("outcome"),
            "repeats": [r.get("repeat") for r in hit], "mcp_verified": True}
     lines = [x for arm in ("direct-local", "direct-remote")
