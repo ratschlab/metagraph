@@ -911,6 +911,23 @@ class ReviewFixesTest(unittest.TestCase):
         for named in (["job", "nim"], ["job", "short", "nim"]):
             res = cmp.mcp_agreement({0: fault}, {"direct-local": {0: d200}}, self.resolve(named), cases, self.dir)
             self.assertEqual((res["class"], res.get("side")), ("disagree", None), named)
+        # every disagreement must be the gap, not the first: the named case's direct-side gap on one repeat and a
+        # backend fault on another, in either order, stay a disagreement (the fault's)
+        refused = self.raw_line("R-1", "mcp", 0, http=400, outcome="service_by_design", checks=st,
+                                error={"code": "sequence_too_short", "text": "short"})
+        f1 = self.raw_line("R-1", "mcp", 1, http=502, outcome="fail", error={"code": "backend_fault", "text": "x"},
+                           checks=[{"check": "status", "outcome": "fail", "detail": "http 502"}])
+        for reps in ({0: refused, 1: f1}, {0: f1, 1: refused}):
+            res = cmp.mcp_agreement(reps, {"direct-local": {0: d200}}, self.resolve(["job", "short", "nim"]), cases,
+                                    self.dir)
+            self.assertEqual(res["class"], "disagree", res)
+            self.assertNotEqual(res.get("by"), "table")
+        # the gap alone, on both repeats: not_implemented_mcp by table
+        r1 = self.raw_line("R-1", "mcp", 1, http=400, outcome="service_by_design", checks=st,
+                           error={"code": "sequence_too_short", "text": "short"})
+        res = cmp.mcp_agreement({0: refused, 1: r1}, {"direct-local": {0: d200}}, self.resolve(["job", "short", "nim"]),
+                                cases, self.dir)
+        self.assertEqual((res["class"], res["by"]), ("not_implemented_mcp", "table"))
 
     def answer_case(self, direct, dm, http=None):
         case = {"id": "a", "agreement": "by_design", "direct_expectation": {},

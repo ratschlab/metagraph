@@ -2102,12 +2102,13 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         return dict(note, **out)
     dis = [p for p in parts if p.get("class") == "disagree"]
     nim = [c for c in named if c.get("agreement") == "not_implemented_mcp"]
-    if dis and nim and dis[0].get("side") == "direct" and dis[0].get("by") != "answer" \
-            and dis[0].get("case") in [c.get("id") for c in named]:
+    named_ids = [c.get("id") for c in named]
+    if dis and nim and all(d.get("side") == "direct" and d.get("by") != "answer" and d.get("case") in named_ids
+                           for d in dis):
         # the table states that the request is not expressible via MCP (e.g. bounds.max_query_bp): the direct side of
         # a case the scenario names that does not hold is that gap (the host saw a request the MCP cannot send, e.g.
-        # resolve.sequence_too_long without max_query_bp); any other disagreement (a check, an MCP side, an
-        # answer-triggered case) is no such gap and stays a disagreement
+        # resolve.sequence_too_long without max_query_bp); EVERY disagreement must be such a gap: any other (a check,
+        # an MCP side, an answer-triggered case, on any repeat) is no such gap and stays a disagreement
         return dict(note, **{"class": "not_implemented_mcp", "by": "table", "case": nim[0].get("id"),
                              "disagreement": dict(dis[0])})
     if dis:
