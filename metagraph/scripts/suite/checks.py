@@ -2186,11 +2186,12 @@ def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bou
 def graphlet_arms(mgt: str) -> Dict[str, dict]:
     """The arms of an MGT v1 body (SPEC-labeled-traversal-core.md §7.5) in the shape of a `detail: full` arm, as
     far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation, events:
-    the blocked successors of the E records and the label_end events of the R records; labels, labels_total and
-    labels_truncated: the entry sets of the G records, _graphlet_label_sets, left out when the body's sets cannot be
-    read), splits (non-empty when a segment ends in a split), branch_events (the V records), and paths (one per leaf,
-    the chain through parents[0], length_bp = from_bp + length_bp, end_reasons from the runs anchored at the leaf
-    with to_bp = the path length, path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
+    the blocked successors of the E records and the label_end events of the R records with their structural
+    successors; labels, labels_total and labels_truncated: the entry sets of the G records, _graphlet_label_sets,
+    left out when the body's sets cannot be read), splits (non-empty when a segment ends in a split), branch_events
+    (the V records), and paths (one per leaf, the chain through parents[0], length_bp = from_bp + length_bp,
+    end_reasons and end_labels (label, branches) from the runs anchored at the leaf with to_bp = the path length,
+    path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
     arms: Dict[str, dict] = {}
     cur = None
     seg = None
@@ -2256,8 +2257,13 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
         elif rec == "T" and seg is not None:
             cur["_leaves"][seg["id"]] = None if f[1] == "*" else _END_CODES.get(f[1][0], f[1])
         elif rec == "R":
-            cur["_runs"].append({"segment": int(f[1]), "label": int(f[2]), "from_bp": int(f[3]), "to_bp": int(f[4]),
-                                 "end": f[5]})
+            run = {"segment": int(f[1]), "label": int(f[2]), "from_bp": int(f[3]), "to_bp": int(f[4]), "end": f[5]}
+            # R ... <structural_successors|*> <branches> <loss>: the lineage's values when the run ended (§7.5.2)
+            if len(f) > 10 and f[9].isdigit():
+                run["structural_successors"] = int(f[9])
+            if len(f) > 10 and f[10].isdigit():
+                run["branches"] = int(f[10])
+            cur["_runs"].append(run)
     for side, a in arms.items():
         segs = a["segments"]
         try:
@@ -2272,9 +2278,11 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             end = r["end"]
             if end in ("m", "Lw") or not 0 <= r["segment"] < len(segs):
                 continue
-            segs[r["segment"]].setdefault("events", []).append(
-                {"at_bp": r["to_bp"], "type": "label_end", "label": r["label"],
-                 "reason": _END_QUALIFIERS.get(end) or _END_CODES.get(end[0], end)})
+            ev = {"at_bp": r["to_bp"], "type": "label_end", "label": r["label"],
+                  "reason": _END_QUALIFIERS.get(end) or _END_CODES.get(end[0], end)}
+            if "structural_successors" in r:
+                ev["structural_successors"] = r["structural_successors"]
+            segs[r["segment"]].setdefault("events", []).append(ev)
         for leaf, reason in sorted(a["_leaves"].items()):
             chain = [leaf]
             while segs[chain[-1]]["parents"]:
@@ -2282,13 +2290,15 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             chain.reverse()
             length = segs[leaf]["from_bp"] + segs[leaf]["length_bp"]
             ends: Dict[str, int] = {}
+            end_labels = []
             for r in a["_runs"]:
                 if r["segment"] == leaf and r["to_bp"] == length and r["end"] != "m":
                     # the label's end reason as the full result counts it: the code's enum (Dh -> dead_end)
                     name = _END_CODES.get(r["end"][0], r["end"])
                     ends[name] = ends.get(name, 0) + 1
+                    end_labels.append({"label": r["label"], "branches": r.get("branches")})
             a["paths"].append({"id": len(a["paths"]), "segments": chain, "length_bp": length, "end_reasons": ends,
-                               "path_reason": reason})
+                               "end_labels": sorted(end_labels, key=lambda x: x["label"]), "path_reason": reason})
         for k in ("_runs", "_leaves", "_side"):
             a.pop(k, None)
     return arms
@@ -2464,12 +2474,152 @@ def _arms_of(sc: dict, i: int) -> List[str]:
 
 
 # path ends that may legitimately stop a walk along its record short of the radius and the record's end: a stated
-# branch (a split the strategy does not follow further) or the walk meeting its own edges again (a repeat)
+# branch (a split the strategy does not follow further) or the walk meeting its own edges again (a repeat), each
+# only where it can have happened (_structural_end_problems)
 _STATED_STRUCTURAL_ENDS = {"branch", "edge_reuse", "edge_reuse_rc", "rejoined_seed", "minority", "below_min_labels",
                            "split_limit"}
 # a stated resource limit: the walk stopped before it could show the property (inconclusive, never a pass)
 _RESOURCE_ENDS = {"max_steps", "max_live_paths", "max_paths", "max_output_bp", "time_budget", "resource_limit",
                   "beam_pruned"}
+# the quorum and split-limit ends of SPEC-labeled-traversal-core §6.4: a path counts them as `branch`
+# (end_reasons; §13 I3 note 2), its label_end event names the stop (`reason`, or `text` beside reason `branch`; a
+# graphlet's R qualifier Rm / Rb / Rs)
+_QUORUM_ENDS = {"minority", "below_min_labels", "split_limit"}
+# the ends of a step not taken (§6.6), each stated by a blocked event of its reason where the label ended:
+# "blocked continuations are always reported"
+_BLOCKED_ENDS = {"edge_reuse", "edge_reuse_rc", "rejoined_seed"}
+# the defaults (§5) of the knobs a structural end needs
+_STRUCTURAL_KNOBS = {("branching", "max_label_branches"): 0, ("branching", "max_splits_per_path"): 64,
+                     ("branching", "min_successor_labels"): 1, ("branching", "min_successor_fraction"): 0.0,
+                     ("bounds", "min_live_labels"): 1}
+
+
+def _strategy_knob(sc: dict, ans: dict, group: str, name: str) -> Any:
+    """The value of strategy.<group>.<name> the walk ran with (SPEC-labeled-traversal-core §5): a clamp's effective
+    value (strategy.clamped), else the request's, else the answer's echo, else the default. The request comes before
+    the echo: a knob a service dropped or rewrote without a clamp is held to what the request asked, never excused
+    by its own echo. The exhaustive preset (§6.9) and annotate mode default the branch allowance and the split limit
+    to "unlimited"."""
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    for c in echo.get("clamped") or []:
+        if isinstance(c, dict) and c.get("field") == "%s.%s" % (group, name) and "effective" in c:
+            return c["effective"]
+    req = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
+    req = req if isinstance(req, dict) else {}
+    for st in (req, echo):
+        g = st.get(group)
+        if isinstance(g, dict) and name in g:
+            return g[name]
+    if (group, name) in (("branching", "max_label_branches"), ("branching", "max_splits_per_path")) and any(
+            st.get("exhaustive") is True or (st.get("labels") or {}).get("mode") == "annotate" for st in (req, echo)):
+        return "unlimited"
+    return _STRUCTURAL_KNOBS.get((group, name))
+
+
+def _route_splits(armo: dict) -> Callable[[Any], Tuple[int, int]]:
+    """segment id -> (the most ambiguous splits, the most splits) any root-to-segment route passes before reaching
+    the segment, through any parent at a merge. A split sits at the end of its segment (SPEC §7.1 splits[].segment;
+    a graphlet's G split flag); a split whose kind is not stated counts as ambiguous."""
+    segs = {s.get("id"): s for s in armo.get("segments") or [] if isinstance(s, dict)}
+    amb: Dict[Any, bool] = {}
+    for sp in armo.get("splits") or []:
+        if not isinstance(sp, dict):
+            continue
+        kind = sp.get("kind")
+        amb[sp.get("segment")] = kind != "divergence" if kind is not None else sp.get("ambiguous") is not False
+    memo: Dict[Any, Tuple[int, int]] = {}
+
+    def most(sid: Any) -> Tuple[int, int]:
+        if sid in memo:
+            return memo[sid]
+        memo[sid] = (0, 0)   # a cycle (never in a valid answer) counts nothing
+        a = n = 0
+        for par in (segs.get(sid) or {}).get("parents") or []:
+            pa, pn = most(par)
+            if par in amb:
+                pa, pn = pa + (1 if amb[par] else 0), pn + 1
+            a, n = max(a, pa), max(n, pn)
+        memo[sid] = (a, n)
+        return memo[sid]
+    return most
+
+
+def _finite(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict) -> List[str]:
+    """Why the structural ends stated at path |p|'s leaf cannot have happened, judged from the request, the strategy
+    (_strategy_knob) and the arm (SPEC-labeled-traversal-core §6.4, §6.6, §6.7):
+    - a structural reason the path counts (end_reasons) has a label_end event of it on its leaf at the path's end
+      (judged where the leaf states its events);
+    - `branch`: the lineage was ambiguous with its allowance spent (branches + 1 > max_label_branches, and a lineage
+      never has more): max_label_branches finite, the label's branches (end_labels, or runs[] at the leaf) equal to
+      it, a route to the leaf passing at least that many ambiguous splits (each branch taken is one), and two or
+      more structural successors where the event states them;
+    - `minority`: a quorum knob set (min_successor_labels >= 2 or min_successor_fraction > 0); `below_min_labels`:
+      min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route to the leaf through that many
+      splits;
+    - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end."""
+    out: List[str] = []
+    chain = p.get("segments") or []
+    if not chain:
+        return out
+    leaf = next((x for x in armo.get("segments") or [] if isinstance(x, dict) and x.get("id") == chain[-1]), None)
+    if leaf is None:
+        return out
+    L = p.get("length_bp")
+    where = "path %s at %s bp" % (p.get("id"), L)
+    evs = [x for x in leaf.get("events") or [] if isinstance(x, dict) and x.get("at_bp") == L]
+    ends = [x for x in evs if x.get("type") == "label_end"]
+
+    def named(ev: dict) -> Any:
+        text = ev.get("text")
+        return text if ev.get("reason") == "branch" and text in _QUORUM_ENDS else ev.get("reason")
+    if isinstance(leaf.get("events"), list):
+        stated = {named(x) for x in ends}
+        stated |= {"branch" for x in stated if x in _QUORUM_ENDS}
+        for reason in sorted(set(p.get("end_reasons") or {}) & _STATED_STRUCTURAL_ENDS - stated):
+            out.append("%s ends by %s without a label_end event of it on its leaf" % (where, reason))
+    mlb = _strategy_knob(sc, ans, "branching", "max_label_branches")
+    msp = _strategy_knob(sc, ans, "branching", "max_splits_per_path")
+    msl = _strategy_knob(sc, ans, "branching", "min_successor_labels")
+    msf = _strategy_knob(sc, ans, "branching", "min_successor_fraction")
+    mll = _strategy_knob(sc, ans, "bounds", "min_live_labels")
+    amb_n, split_n = _route_splits(armo)(chain[-1])
+    lineage = {x.get("label"): x.get("branches") for x in armo.get("runs") or []
+               if isinstance(x, dict) and x.get("segment") == chain[-1] and x.get("to_bp") == L}
+    lineage.update({x.get("label"): x.get("branches") for x in p.get("end_labels") or [] if isinstance(x, dict)})
+    for ev in ends:
+        what = named(ev)
+        lab = "%s label %s" % (where, ev.get("label"))
+        if what == "branch":
+            br = lineage.get(ev.get("label"))
+            if not _finite(mlb):
+                out.append("%s: a branch end with max_label_branches %r" % (lab, mlb))
+            elif _finite(br) and br != mlb:
+                out.append("%s: a branch end after %d branch(es) of max_label_branches %d" % (lab, br, mlb))
+            elif amb_n < mlb:
+                out.append("%s: a branch end after %d ambiguous split(s) on any route to it, max_label_branches %d"
+                           % (lab, amb_n, mlb))
+            elif _finite(ev.get("structural_successors")) and ev["structural_successors"] < 2:
+                out.append("%s: a branch end at %d structural successor(s)" % (lab, ev["structural_successors"]))
+        elif what == "minority":
+            if not ((_finite(msl) and msl >= 2) or (isinstance(msf, (int, float)) and msf > 0)):
+                out.append("%s: a minority end with min_successor_labels %r and min_successor_fraction %r" % (
+                    lab, msl, msf))
+        elif what == "below_min_labels":
+            if not (_finite(mll) and mll > 1):
+                out.append("%s: a below_min_labels end with min_live_labels %r" % (lab, mll))
+        elif what == "split_limit":
+            if not _finite(msp) or split_n < msp:
+                out.append("%s: a split_limit end after %d split(s) on any route to it, max_splits_per_path %r" % (
+                    lab, split_n, msp))
+        elif what in _BLOCKED_ENDS:
+            if not any(x.get("type") == "blocked" and x.get("reason") == what for x in evs):
+                out.append("%s: ended by %s without a blocked event of it there" % (lab, what))
+    return out
 
 
 def _seed_frame(t: dict, c: dict, side: str, L: int) -> Tuple[Callable[[int], str], int, int]:
@@ -2773,15 +2923,26 @@ def check_walk_in_record(sc, ans, a, arm):
                 side, best, expected, _MAX_ROUTE_STATES))
             continue
         ends = set()
+        possible = set()   # the structural ends of the longest routes' leaves that can have happened
+        disproved = []     # why a stated structural end of such a leaf cannot have happened
         for p, f in following:
             if len(f) == best:
-                ends |= _leaf_ends(armo, p)
+                pe = _leaf_ends(armo, p)
+                ends |= pe
+                bad = _structural_end_problems(sc, ans, armo, p)
+                if bad:   # a leaf with an end that cannot have happened shows none of its ends
+                    disproved += bad
+                else:
+                    possible |= pe & _STATED_STRUCTURAL_ENDS
         # a resource end needs an arm a cap stopped (G2 of the verification of lane S3)
         unstopped = _resource_end_problem(r, armo, side, ends)
         gap = _computed_block(sc, ans, r, i, t, copies[0], side, L) if exact is not None else None
-        if ends & _STATED_STRUCTURAL_ENDS and exact is None:
+        if ends & _STATED_STRUCTURAL_ENDS and exact is None and possible:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
-                side, best, sorted(ends & _STATED_STRUCTURAL_ENDS)[0], expected))
+                side, best, sorted(possible)[0], expected))
+        elif ends & _STATED_STRUCTURAL_ENDS and exact is None:
+            probs.append("a stated stop that cannot have happened: %s: %s; the record followed for %d of %d bp" % (
+                side, disproved[0], best, expected))
         elif gap is not None and gap["d"] == best and gap["reason"] in ends:
             # the record's own continuation is inadmissible there (§6.6), which the truth's minimum did not count
             searched.append("%s: the record followed for %d of %d bp, ended by %s, which the record and the seed "
@@ -3137,6 +3298,11 @@ def _traverse_invariants(sc, ans, a, arm):
                     probs.append("result %d %s path %s: %s bp above max_extension_bp %s" % (i, side, p.get("id"), p.get("length_bp"), maxbp))
         # a path ended by a resource reason lies on an arm that cap stopped (§7.0)
         probs += _path_resource_problems(sc, r, i)
+        # a structural end lies where the request, the strategy and the arm let it happen (§6.4, §6.6)
+        for side in _arms_of(sc, i):
+            armo = r["arms"].get(side)
+            for p in (armo.get("paths") or []) if isinstance(armo, dict) else []:
+                probs += ["result %d %s %s" % (i, side, m) for m in _structural_end_problems(sc, ans, armo, p)]
     probs += _traverse_reason_problems(sc, ans)
     return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
 

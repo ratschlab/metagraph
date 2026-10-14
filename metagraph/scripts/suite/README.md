@@ -1328,3 +1328,35 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   no inconclusive_reason; compare's class not_implemented_mcp (by mcp_outcome, the pair verified by the direct
   200s); both judges agree on all four lines.
 - 251 tests (SUITE_TRUTH_CACHE=lane S5's truth cache) pass.
+
+## Lane S6g1: checks that accept wrong answers (2026-10-14)
+
+The verified findings 3-6 of the outside review of 2026-10-14 (VERIFY-C), the check part of the v4 triage's V03
+and V05 (VERIFY-V4): each rule below closes a one-property corruption of a valid recorded answer that the checks
+of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-vendoring.
+
+- /traverse, a structural end (SPEC-labeled-traversal-core §6.4, §6.6, §6.7; `_structural_end_problems`): a path's
+  `branch`, quorum, split-limit or re-entry end is accepted only where the answer shows it can have happened, in
+  `walk_in_record` (a route along the record ending short of its minimum at such an end) and in the invariants
+  (every path of every requested arm), on the full and the graphlet form alike. A structural reason the path counts
+  has a label_end event of it on its leaf at the path's end (judged where the leaf states its events). `branch`:
+  max_label_branches finite, the lineage's branches at the end equal to it (an ambiguous source ends `branch` once
+  branches + 1 exceeds the allowance, and no lineage holds more), a route to the leaf through at least that many
+  ambiguous splits (each branch taken is one; a split whose kind is not stated counts as ambiguous), and two or
+  more structural successors where the event states them. `minority` (also `branch` with that text):
+  min_successor_labels >= 2 or min_successor_fraction > 0; `below_min_labels`: min_live_labels > 1;
+  `split_limit`: max_splits_per_path finite and a route through that many splits; `edge_reuse`, `edge_reuse_rc`,
+  `rejoined_seed`: a blocked event of that reason on the leaf at the path's end ("blocked continuations are
+  always reported"). The knobs are the walk's: a stated clamp's effective value, else the request's, else the
+  echo's, else the default (SPEC §5; "unlimited" branches and splits under the exhaustive preset and in annotate
+  mode). The request comes before the echo, so a service that drops or rewrites an override is held to the
+  request, not excused by its own echo. A leaf with an end that cannot have happened shows none of its ends:
+  walk_in_record fails "a stated stop that cannot have happened". The graphlet reader takes the lineage's values
+  from the R records (structural_successors on the label_end events, `end_labels` with the branches at each
+  leaf), as the full result states them. Closed: GPT's zero-extension mutation of T-derived-0001 (both arms a
+  0 bp root, every label `branch` with branches 0 under max_label_branches 2; the dead_end control fails as
+  before), branches 0 or 1 of 2, branches 2 on a route without ambiguous splits, an echo of max_label_branches 0
+  under a request of 2, a quorum or split-limit end without its knob, a re-entry without its blocked event, a
+  graphlet's R branches or G split flags zeroed. Measured on every recorded /traverse answer of v3 and v4 (647,
+  all arms: 447 branch, 16 below_min_labels, 32 edge_reuse, 12 rejoined_seed label ends) and on the engine's
+  stored traverse fixtures (tests: every stored answer states possible structural ends): none violates a rule.

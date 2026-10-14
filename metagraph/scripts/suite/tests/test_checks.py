@@ -1828,6 +1828,224 @@ class TraverseChecks(unittest.TestCase):
                                                                               "bounds": {"max_extension_bp": 100}}}}
         return sc, ans, record
 
+    def structural_walk(self, end="branch", branches=2, text=None, blocked=True, kinds=("ambiguous", "ambiguous"),
+                        strategy=None, echo=None, events=True):
+        """(scenario, answer): a right arm whose route along the record passes two splits (|kinds|) at 10 and 20 bp
+        and ends at 30 bp by the label end |end| (a label_end event, with |text| beside it; the lineage's |branches|
+        in end_labels; a blocked event of a re-entry when |blocked|); each split's other child is one base off the
+        record, ended dead_end. The request's strategy adds |strategy|, the answer's echo is |echo|."""
+        import random
+        rnd = random.Random(11)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        st = {"direction": "right", "bounds": {"max_extension_bp": 100}}
+        for group, knobs in (strategy or {}).items():
+            if isinstance(knobs, dict):
+                st.setdefault(group, {}).update(knobs)
+            else:
+                st[group] = knobs
+        sc = {"route": "POST /traverse", "request": {"seeds": [{"sequence": t["window"]}], "strategy": st},
+              "truth": t}
+        cont = record[start + L:start + L + 100]
+        off = lambda b: "A" if b != "A" else "C"  # noqa: E731
+        ev = {"at_bp": 30, "type": "label_end", "label": 0, "reason": end, "structural_successors": 2}
+        if text:
+            ev["text"] = text
+        leaf_events = [ev]
+        if end in ("edge_reuse", "edge_reuse_rc", "rejoined_seed") and blocked:
+            leaf_events.insert(0, {"at_bp": 30, "type": "blocked", "char": cont[30], "reason": end})
+        segs = [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 10, "sequence": cont[:10], "events": []},
+                {"id": 1, "parents": [0], "from_bp": 10, "length_bp": 10, "sequence": cont[10:20], "events": []},
+                {"id": 2, "parents": [0], "from_bp": 10, "length_bp": 1, "sequence": off(cont[10]),
+                 "events": [{"at_bp": 11, "type": "label_end", "label": 0, "reason": "dead_end",
+                             "structural_successors": 0}]},
+                {"id": 3, "parents": [1], "from_bp": 20, "length_bp": 10, "sequence": cont[20:30],
+                 "events": leaf_events if events else []},
+                {"id": 4, "parents": [1], "from_bp": 20, "length_bp": 1, "sequence": off(cont[20]),
+                 "events": [{"at_bp": 21, "type": "label_end", "label": 0, "reason": "dead_end",
+                             "structural_successors": 0}]}]
+        counted = "branch" if end in checks._QUORUM_ENDS or text else end
+        arm = {"status": "complete", "complete_to_bp": 100, "segments": segs,
+               "splits": [{"at_bp": 10, "segment": 0, "children": [1, 2], "kind": kinds[0]},
+                          {"at_bp": 20, "segment": 1, "children": [3, 4], "kind": kinds[1]}],
+               "paths": [{"id": 0, "segments": [0, 1, 3], "length_bp": 30, "end_reasons": {counted: 1},
+                          "end_labels": [{"label": 0, "branches": branches, "loss": 0.0}]},
+                         {"id": 1, "segments": [0, 1, 4], "length_bp": 21, "end_reasons": {"dead_end": 1},
+                          "end_labels": [{"label": 0, "branches": branches, "loss": 0.0}]},
+                         {"id": 2, "segments": [0, 2], "length_bp": 11, "end_reasons": {"dead_end": 1},
+                          "end_labels": [{"label": 0, "branches": 1, "loss": 0.0}]}]}
+        body = {"results": [{"outcome": {"walks": "complete"}, "arms": {"right": arm}}],
+                "strategy": echo if echo is not None else {"bounds": {"max_extension_bp": 100}}}
+        return sc, ok_answer(body)
+
+    def test_structural_ends_need_their_conditions(self):
+        # SPEC-labeled-traversal-core §6.4 / §6.6: a structural end short of the radius passes walk_in_record only
+        # where the request, the strategy and the arm show it can have happened; the invariants fail otherwise
+        def judge(sc, ans):
+            return outcome(sc, ans, "walk_in_record")[0], outcome(sc, ans, "invariants")[0]
+        mlb2 = {"branching": {"max_label_branches": 2}}
+        self.assertEqual(judge(*self.structural_walk(strategy=mlb2)), ("pass", "pass"))
+        # the allowance unspent (an off-by-one, a lost lineage counter), or spent on no ambiguous split
+        for kw in ({"branches": 0}, {"branches": 1}, {"kinds": ("ambiguous", "divergence")}):
+            sc, ans = self.structural_walk(strategy=mlb2, **kw)
+            o, d = outcome(sc, ans, "walk_in_record")
+            self.assertEqual((o, outcome(sc, ans, "invariants")[0]), ("fail", "fail"), kw)
+            self.assertIn("a stated stop that cannot have happened", d)
+        # the request's allowance over the echo: a service that dropped the override is not excused by its echo
+        sc, ans = self.structural_walk(strategy=mlb2, branches=0, kinds=("divergence", "divergence"),
+                                       echo={"branching": {"max_label_branches": 0}})
+        self.assertEqual(judge(sc, ans), ("fail", "fail"))
+        sc, ans = self.structural_walk(branches=0, kinds=("divergence", "divergence"),
+                                       echo={"branching": {"max_label_branches": 0}})
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))     # no request value: the echo's 0, nothing to spend
+        sc, ans = self.structural_walk(strategy=mlb2, echo={"branching": {"max_label_branches": 0},
+                                                            "clamped": [{"field": "branching.max_label_branches",
+                                                                         "requested": 2, "effective": 0}]},
+                                       branches=0, kinds=("divergence", "divergence"))
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))     # a stated clamp is the allowance
+        self.assertEqual(judge(*self.structural_walk(strategy={"branching": {"max_label_branches": "unlimited"}})),
+                         ("fail", "fail"))
+        self.assertEqual(judge(*self.structural_walk(strategy={"exhaustive": True})), ("fail", "fail"))
+        # the quorum and split-limit ends need their knob, in either form of the event
+        for end, text in (("minority", None), ("branch", "minority")):
+            self.assertEqual(judge(*self.structural_walk(end=end, text=text)), ("fail", "fail"))
+            self.assertEqual(judge(*self.structural_walk(end=end, text=text, strategy={
+                "branching": {"min_successor_labels": 2}})), ("pass", "pass"))
+            self.assertEqual(judge(*self.structural_walk(end=end, text=text, strategy={
+                "branching": {"min_successor_fraction": 0.2}})), ("pass", "pass"))
+        self.assertEqual(judge(*self.structural_walk(end="below_min_labels")), ("fail", "fail"))
+        self.assertEqual(judge(*self.structural_walk(end="below_min_labels", strategy={
+            "bounds": {"min_live_labels": 2}})), ("pass", "pass"))
+        self.assertEqual(judge(*self.structural_walk(end="split_limit")), ("fail", "fail"))   # 2 of 64 splits
+        self.assertEqual(judge(*self.structural_walk(end="split_limit", strategy={
+            "branching": {"max_splits_per_path": 2}})), ("pass", "pass"))
+        self.assertEqual(judge(*self.structural_walk(end="split_limit", strategy={
+            "branching": {"max_splits_per_path": 3}})), ("fail", "fail"))
+        # a re-entry states its blocked event where the label ended
+        for end in ("edge_reuse", "edge_reuse_rc", "rejoined_seed"):
+            self.assertEqual(judge(*self.structural_walk(end=end)), ("pass", "pass"))
+            self.assertEqual(judge(*self.structural_walk(end=end, blocked=False)), ("fail", "fail"))
+        # a structural reason the path counts without its label_end event at the leaf
+        self.assertEqual(judge(*self.structural_walk(strategy=mlb2, events=False)), ("fail", "fail"))
+
+    def test_zero_extension_branch_stop(self):
+        # GPT's mutation of T-derived-0001 (review of 2026-10-14, finding 3): both arms a 0 bp root whose every
+        # label ends `branch` with branches 0 under max_label_branches 2; the dead_end control fails as well
+        import random
+        rnd = random.Random(5)
+        record = "".join(rnd.choice("ACGT") for _ in range(3000))
+        start, L = 1000, 100
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 3000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}],
+               "strategy": {"direction": "both", "bounds": {"max_extension_bp": 1000},
+                            "branching": {"max_label_branches": 2}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+
+        def zero(reason, branches=0):
+            arms = {}
+            for side in ("left", "right"):
+                labels = list(range(8))
+                seg = {"id": 0, "parents": [], "from_bp": 0, "length_bp": 0, "sequence": "", "labels": labels,
+                       "events": [{"at_bp": 0, "type": "label_end", "label": x, "reason": reason,
+                                   "structural_successors": 2} for x in labels]}
+                arms[side] = {"status": "complete", "complete_to_bp": 1000, "segments": [seg], "splits": [],
+                              "paths": [{"id": 0, "segments": [0], "length_bp": 0, "end_reasons": {reason: 8},
+                                         "end_labels": [{"label": x, "branches": branches, "loss": 0.0}
+                                                        for x in labels]}]}
+            return ok_answer({"results": [{"outcome": {"walks": "partial"}, "arms": arms}],
+                              "strategy": {"bounds": {"max_extension_bp": 1000},
+                                           "branching": {"max_label_branches": 2}}})
+        for ans in (zero("branch"), zero("branch", branches=2), zero("dead_end")):
+            self.assertEqual(outcome(sc, ans, "walk_in_record")[0], "fail")
+        o, d = outcome(sc, zero("branch"), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("a branch end after 0 branch(es) of max_label_branches 2", d)
+        o, d = outcome(sc, zero("branch", branches=2), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("0 ambiguous split(s)", d)
+        self.assertEqual(outcome(sc, zero("dead_end"), "invariants")[0], "pass")
+
+    def test_structural_ends_in_a_graphlet(self):
+        # the graphlet's R records state the lineage's structural successors and branches (SPEC §7.5.2), its G
+        # records the splits: the same conditions as the full result
+        import random
+        rnd = random.Random(13)
+        record = "".join(rnd.choice("ACGT") for _ in range(1000))
+        start, L = 400, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 1000, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        req = {"seeds": [{"sequence": t["window"]}],
+               "strategy": {"direction": "right", "bounds": {"max_extension_bp": 100},
+                            "branching": {"max_label_branches": 2}}}
+        sc = {"route": "POST /traverse", "request": req, "truth": t}
+        cont = record[start + L:start + L + 100]
+        off = lambda b: "A" if b != "A" else "C"  # noqa: E731
+
+        def mgt(branches=2, split="1", successors="2"):
+            return "\n".join([
+                "H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *",
+                "A r c 100 u 0 0 1 1 0 steps=31 * 0 * 5 3 3 2 0 32",
+                "G * 0 10 * * * * %s * %s" % (split, cont[:10]),
+                "G 0 10 10 * * * * %s * %s" % (split, cont[10:20]),
+                "G 0 10 1 * * * * * * %s" % off(cont[10]), "T *",
+                "G 1 20 10 * * * * * * %s" % cont[20:30], "T *",
+                "G 1 20 1 * * * * * * %s" % off(cont[20]), "T *",
+                "R 2 0 0 11 D 0 * * 0 1 0",
+                "R 3 0 0 30 R 0 * * %s %d 0" % (successors, branches),
+                "R 4 0 0 21 D 0 * * 0 2 0"]) + "\n"
+
+        def ans(**kw):
+            return ok_answer({"results": [{"outcome": {"walks": "complete"}, "graphlet": mgt(**kw)}],
+                              "strategy": {"bounds": {"max_extension_bp": 100}}})
+        arms = checks.graphlet_arms(mgt())
+        leaf = arms["right"]["paths"][1]
+        self.assertEqual((leaf["length_bp"], leaf["end_reasons"], leaf["end_labels"]),
+                         (30, {"branch": 1}, [{"label": 0, "branches": 2}]))
+        self.assertEqual(arms["right"]["segments"][3]["events"],
+                         [{"at_bp": 30, "type": "label_end", "label": 0, "reason": "branch",
+                           "structural_successors": 2}])
+        for a in ({}, ):
+            self.assertEqual(outcome(sc, ans(**a), "walk_in_record", _arm="mcp")[0], "pass")
+            self.assertEqual(outcome(sc, ans(**a), "invariants", _arm="mcp")[0], "pass")
+        for bad in ({"branches": 0}, {"split": "0"}, {"successors": "1"}):
+            self.assertEqual(outcome(sc, ans(**bad), "walk_in_record", _arm="mcp")[0], "fail", bad)
+            self.assertEqual(outcome(sc, ans(**bad), "invariants", _arm="mcp")[0], "fail", bad)
+
+    def test_every_stored_traverse_answer_states_possible_structural_ends(self):
+        # the engine's stored answers (CLI documents of tiny indexes, full and graphlet, and the mini index's
+        # cells) state only structural ends that can have happened
+        n = ends = 0
+        dirs = [os.path.join(DATA, x) for x in ("documents", os.path.join("documents", "budgets"), "coords",
+                                                 "review3", "r21")] + [self.MINI]
+        for d in dirs:
+            for name in sorted(os.listdir(d)):
+                if not (name.endswith(".full.json") or name.endswith(".graphlet.json") or
+                        name.endswith(".full.json.gz") or name.endswith(".graphlet.json.gz")):
+                    continue
+                stem = name.split(".")[0]
+                opener = (lambda f: gzip.open(f, "rt")) if name.endswith(".gz") else open
+                with opener(os.path.join(d, name)) as f:
+                    doc = json.load(f)
+                req = {}
+                for rq in (stem + ".request.json", stem + ".request.json.gz"):
+                    if os.path.exists(os.path.join(d, rq)):
+                        with ((lambda f: gzip.open(f, "rt")) if rq.endswith(".gz") else open)(os.path.join(d, rq)) as f:
+                            req = json.load(f)
+                sc = {"route": "POST /traverse", "request": req, "truth": {}}
+                ans = ok_answer(doc)
+                for i in range(len(doc.get("results") or [])):
+                    r = checks._result(ans, i)
+                    for side, armo in (r.get("arms") or {}).items():
+                        for p in armo.get("paths") or []:
+                            self.assertEqual(checks._structural_end_problems(sc, ans, armo, p), [], name)
+                            ends += len(set(p.get("end_reasons") or {}) & checks._STATED_STRUCTURAL_ENDS)
+                            n += 1
+        self.assertGreater(n, 500)
+        self.assertGreater(ends, 100)
+
     def test_walk_blocked_by_its_seed(self):
         # G28 (VERIFY-2 item 2, the strict rule): the record's own continuation re-enters the seed at 0 bp, the walk
         # states that block and continues from the repeat's exit: it follows the record
@@ -1960,7 +2178,9 @@ class TraverseChecks(unittest.TestCase):
         arms = checks.graphlet_arms(mgt)
         self.assertEqual(arms["right"]["paths"][0]["end_reasons"], {"branch": 1})
         self.assertEqual(arms["right"]["segments"][0]["events"],
-                         [{"at_bp": 0, "type": "label_end", "label": 0, "reason": "below_min_labels"}])
+                         [{"at_bp": 0, "type": "label_end", "label": 0, "reason": "below_min_labels",
+                           "structural_successors": 1}])
+        self.assertEqual(arms["right"]["paths"][0]["end_labels"], [{"label": 0, "branches": 0}])
 
     def test_traverse_stop(self):
         sc = {"route": "POST /traverse", "truth": {},
@@ -2068,8 +2288,14 @@ class TraverseChecks(unittest.TestCase):
                                      [x for _, x in checks._arm_flanks(arms[side], side)], cell)
                     n += 1
                     # the label_end events derived from the R records (SPEC §7.5.6) are the full result's
+                    # the lineage's branches at each leaf (end_labels) are the full result's
+                    self.assertEqual([[(x["label"], x["branches"]) for x in p.get("end_labels") or []]
+                                      for p in fa["paths"]],
+                                     [[(x["label"], x["branches"]) for x in p["end_labels"]]
+                                      for p in arms[side]["paths"]], cell)
                     for sf, sg in zip(fa["segments"], arms[side]["segments"]):
-                        ends = lambda x: sorted((e["at_bp"], e.get("label"), e["reason"])  # noqa: E731
+                        ends = lambda x: sorted((e["at_bp"], e.get("label"), e["reason"],  # noqa: E731
+                                                 e.get("structural_successors"))
                                                 for e in x.get("events") or [] if e.get("type") == "label_end")
                         self.assertEqual(ends(sf), ends(sg), cell)
                         label_ends += len(ends(sf))
