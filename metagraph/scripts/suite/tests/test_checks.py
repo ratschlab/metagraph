@@ -1101,6 +1101,11 @@ class StatedReasons(unittest.TestCase):
                  withheld="selected_above_threshold")
         pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
         self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred)
+        # a constant `true` normal form is the unfiltered request under the engine's own max_contexts (§19.6)
+        self.ok({"contexts": self.c("exact", 101), "selected": self.c("exact", 101)}, withheld="count_above_threshold",
+                req=pred, selection={"pass": "constant", "support": "kmer", "access": "rows"})
+        self.bad("with a predicate on L <= k", ctx("exact", 101), withheld="count_above_threshold", req=pred,
+                 selection={"pass": "not_admitted"})
         # discovery_budget: the count the step stop interrupted is not exact (§7.4)
         self.bad("not exact", ctx("exact", 19), withheld="discovery_budget", stop=("discovery", "max_steps"))
         self.ok(ctx("bounds", 2, lower=2, upper=24), withheld="discovery_budget", stop=("mask_scan", "max_steps"))

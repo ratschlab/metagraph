@@ -613,7 +613,9 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         probs.append("%s: withheld %r in mode %s" % (where, wr, mode))
     if wr == "count_above_threshold":
         # exact (or, without the mask, bounds) and above the threshold: a lower bound is threshold_crossed's
-        if predicate and not long_:
+        if predicate and not long_ and (e.get("selection") or {}).get("pass") != "constant":
+            # a normal form that is a constant runs the unfiltered request with the engine's own thresholds (§19.6:
+            # `true` is the unfiltered request), whose count_above_threshold stands
             probs.append("%s: withheld count_above_threshold with a predicate on L <= k (§19.8: its raw threshold "
                          "is predicate_above_threshold)" % where)
         elif main_cap is not None and not ((main or {}).get("relation") in ("exact", "bounds") and
