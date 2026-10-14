@@ -1866,16 +1866,27 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   (at most total - kept) only with max_dropped_kmers = the in-graph k-mers. Measured on every recorded discovery of
   v3 and v4 (R-discover, N-usecase-0010 / -0012, R-edge-0023 with 150 kept of 2,753, N-negative): none violates a
   rule; R-discover-0001's eight passes keep their outcome with the new detail. DESIGN-test-suite.md's R-discover
-  line still states the caveat ("index order, not best-supported"): a docs change for the integrator.
+  line is corrected.
+- /resolve, the truncation's size (the lane's verification): only more than max_labels labels are truncated, to
+  exactly max_labels (SPEC-labeled-traversal-core §4.2; the request's max_labels, else the host's default 1000, with
+  no server cap). A list cut to another size (max_labels 100, kept 1 of 18 at 70 of 70: R-discover-0003's shape,
+  where a correct host lists all 18) passed resolve_discover_contains and the invariants as a tie; both now fail it
+  (kept != max_labels, or total <= max_labels). The tie pass rests on the builder's premise that the source supports
+  every in-graph k-mer: the answer cannot show the dropped source's own support. A discovery stopped before it read
+  an in-graph k-mer (§4.5: the resolve of a prefix without one) has no profile to rank: resolve_discover_contains
+  reads it inconclusive (it failed "not discovered in a complete list of 0 labels"; latent, no discovery scenario
+  has a budget). Every recorded discovery of v3 and v4 states max_labels and keeps exactly that many when
+  truncated: no outcome or detail moves.
 - /pattern, low_complexity_note and the invariants read the stop's phase (SPEC-pattern-search §7.8, §8.10, §20.5):
   the note is the engine's, diagnosed after a search that completed or stopped at a threshold
   (pattern_search.cpp decides it on engine.stop()), so only a budget stop of the search in an engine phase
   (discovery, mask_scan, extraction, extension; max_steps, time, max_annotation_work, max_memory; a stop without a
   phase counts as the engine's) leaves it out. A stop of a later phase (label_discovery, placement, output, a
   predicate's selection) leaves the note as the engine decided it: the note follows sdust there (present and
-  expected passes, absent and expected fails), where both checks failed a present note beside {output, time},
-  {output, max_memory}, {label_discovery, max_annotation_work} or {placement, max_memory} and read a missing one
-  inconclusive. A supported-path search's selection stop can be its own refusal of a held walk inside the search
+  expected passes, absent and expected fails). There low_complexity_note failed a present note beside {output,
+  time}, {output, max_memory}, {label_discovery, max_annotation_work} or {placement, max_memory} and read a missing
+  one inconclusive; the invariants, whose vocabulary was max_steps and time, failed it beside {output, time}. A
+  supported-path search's selection stop can be its own refusal of a held walk inside the search
   (§20.9) or come after it: a present note passes only where sdust flags the pattern, a missing one is inconclusive.
   The invariants fail a note beside every engine-phase budget stop (before: max_steps and time only; now also the
   supported-path search's {extension, max_annotation_work | max_memory} and the path extension's {extension,
@@ -1899,9 +1910,10 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   up to 250 ms before the budget read inconclusive; the host throws ResolveDeadline only once the elapsed time
   reaches the budget (Deadline::respond_expired, elapsed >= budget; the reserve ends the work earlier, not the
   answer), its clock starting inside the client's interval, so a correct host cannot answer one there. Budget
-  1,000 ms: wall 900 or 999 fails (was inconclusive), 1,000 inconclusive, 600 fails as before. Every recorded 503
-  deadline of v3 and v4 (R-budget, R-twin, R-pos-0027, the /pattern ones) came at or after its budget (the earliest
-  /resolve one 6,064 ms for 3,000): no outcome moves. README lines of lanes S5 and S5b corrected.
+  1,000 ms: wall 900 (any wall below 999 ms) fails, where it read inconclusive; 999 and 1,000 are inconclusive (the
+  1 ms slack); 600 fails as before. Every recorded 503 deadline of v3 and v4 (R-budget, R-twin, R-pos-0027, the
+  /pattern ones) came at or after its budget (the smallest /resolve margin: R-twin-0004's 20,776 ms for 20,000, v3
+  direct-local): no outcome moves. README lines of lanes S5 and S5b corrected.
 - /traverse, traverse_stop with cap_reason: some requested arm of the walked seed must be truncated (or pruned) by
   that cap and every other one either so or `complete`; it required every arm truncated by the cap, a false FAIL
   under direction both, where an arm whose walks all ended for a semantic reason before the cap stays complete
@@ -1912,9 +1924,10 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
 
 ### Validation (offline)
 - The findings' failing inputs with their controls (lane-s-checks/scratch/probes/findings.py, 37 probes): at
-  14552938 15 read as they must, here all 37. The tests that state these rules (four new, four extended or
+  14552938 15 read as they must, here all 37. The tests that state these rules (five new, four extended or
   corrected, among them test_error_answer_skips_other_checks, which asserted the 250 ms floor) fail at 14552938
-  (8 of 76 in test_checks) and pass here.
+  (9 of 77 in test_checks) and pass here; the verification's amendments (the truncation's size, a discovery stopped
+  before an in-graph k-mer) fail at the lane's first head f07a2fd3 too.
 - Every recorded answer of v3 and v4 (5,716 answers, all arms) judged by the checks of 14552938 and these, check by
   check: no outcome moves. Every inexact count of v3, v4 and the stored pattern fixtures judged against a minimum
   one above it and relation exact (stress_count.py): no failure the checks of 14552938 did not give.
@@ -1925,5 +1938,6 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   timestamps and the checks' provenance; the v4 deploy gate (gate/policy_v4_rt_mcp.json on the re-evaluated set)
   states the same 45 problems. Detail changes only: R-discover-0001's resolve_discover_contains (direct-local and
   direct-remote r0, MCP r0 and r1, both runs) names the tie, and count_relation's inconclusive on M-planted-0017
-  (v3 MCP r0) and M-planted-0016 (v4 MCP r0) names the relation expected.
-- 349 tests pass (1 skipped).
+  (v3 MCP r0) and M-planted-0016 (v4 MCP r0) names the relation expected. The verification's amendments move
+  nothing more (re-evaluated again at their head: the same five detail changes per run, the same 45 gate problems).
+- 350 tests pass (1 skipped).
