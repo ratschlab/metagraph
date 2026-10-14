@@ -1,6 +1,7 @@
 {
  "advanced_path": false,
  "arms": [
+  "direct-local",
   "mcp"
  ],
  "by_design_table": {
@@ -22,22 +23,32 @@
    "POST /resolve": 118,
    "POST /traverse": 103
   },
-  "excluded": 31,
+  "excluded": 32,
   "exclusions_by_rule": {
    "advanced_path": 2,
+   "declared": 1,
    "manifest_not_implemented": 22,
    "table_not_expressible": 26
   },
-  "properties_not_required": 0,
+  "properties_not_required": 3,
   "relations_excluded": 21,
-  "relations_required": 1,
+  "relations_required": 5,
   "required": {
+   "direct-local": {
+    "executions": 256,
+    "scenarios": 222
+   },
    "mcp": {
-    "executions": 388,
-    "scenarios": 191
+    "executions": 386,
+    "scenarios": 190
    }
   },
   "selected": 222
+ },
+ "declared": {
+  "declared_version": 1,
+  "file": "gate/declared_v4_rt.json",
+  "sha256": "7a043d15a6dd2e06e6c93b624e8bab73d294118280ea381e3ba8dbc0e3566ebe"
  },
  "exclusions": [
   {
@@ -333,6 +344,16 @@
    "arms": [
     "mcp"
    ],
+   "reason": "the MCP's traverse_capabilities answers the service's view (gate, backends, service_maxima, presets), not the host's document (table case capabilities.traverse_capabilities_document: 'the raw document and its gate-block projection are not exposed'), so its one property check, capabilities_doc, is not exposed ('field not in the answer: release') and every MCP execution is inconclusive; nothing else is tested there. Tested on direct-local.",
+   "rules": [
+    "declared"
+   ],
+   "scenario": "C-caps-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
    "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
    "rules": [
     "table_not_expressible"
@@ -371,7 +392,7 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-14T14:50:34.137Z",
+ "generated_utc": "2026-10-14T14:52:57.731Z",
  "manifest": {
   "content_sha256": "3a7417d60e4eb5d0e54433c76139df7ed1221ae35bcccf814b7fca2cf913f113",
   "file": "manifest/suite_v4.json",
@@ -383,23 +404,95 @@
  "policy": "suite deploy gate (gate.py)",
  "policy_version": 1,
  "properties": {
-  "not_required": [],
+  "not_required": [
+   {
+    "arms": [
+     "mcp"
+    ],
+    "check": "label_dict_contains",
+    "reason": "the MCP's traverse records carry no label dictionary ('field not in the answer: results[0].label_dict' on every MCP execution of v3 and v4, VERIFY-B); the walk itself (walk_in_record) stays required on the MCP arm, label_dict_contains on direct-local.",
+    "rules": [
+     "declared"
+    ],
+    "scenario": "T-labels-0003"
+   },
+   {
+    "arms": [
+     "mcp"
+    ],
+    "check": "label_dict_contains",
+    "reason": "the MCP's traverse records carry no label dictionary ('field not in the answer: results[0].label_dict', VERIFY-B); walk_in_record stays required on the MCP arm, label_dict_contains on direct-local.",
+    "rules": [
+     "declared"
+    ],
+    "scenario": "T-labels-0005"
+   },
+   {
+    "arms": [
+     "mcp"
+    ],
+    "check": "answer_fields",
+    "reason": "the service merges identical seeds before sending (table case traverse.duplicate_seeds), so the duplicate's result (results.1.duplicate) cannot exist in the MCP answer; the merge itself is the by-design pair direct-local verifies, answer_fields stays required on direct-local.",
+    "rules": [
+     "declared"
+    ],
+    "scenario": "T-edge-0008"
+   }
+  ],
   "required": "every property check the scenario expects (checks.is_property)"
  },
  "relations": [
   {
    "a": "R-edge-0007",
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "b": "R-twin-0001",
    "relation": "REL-same_answer-0003",
    "type": "same_answer"
+  },
+  {
+   "a": "R-budget-0001",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0002",
+   "relation": "REL-prefix_equals-0001",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "R-twin-0003",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0002",
+   "relation": "REL-prefix_equals-0002",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "R-budget-0002",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0004",
+   "relation": "REL-prefix_equals-0003",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "R-twin-0005",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0004",
+   "relation": "REL-prefix_equals-0004",
+   "type": "prefix_equals"
   }
  ],
  "relations_excluded": [
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "M-refusal-0012, M-twin-0001 not in the selection",
@@ -407,6 +500,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "M-twin-0001, M-twin-0002 not in the selection",
@@ -414,6 +508,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-edge-0004, P-twin-0001 not in the selection",
@@ -449,6 +544,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "N-zero-0001 not in the selection",
@@ -456,6 +552,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "N-zero-0003 not in the selection",
@@ -463,6 +560,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "N-zero-0005 not in the selection",
@@ -470,6 +568,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "N-zero-0007 not in the selection",
@@ -477,6 +576,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "N-zero-0009 not in the selection",
@@ -484,6 +584,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-scope-0004, P-scope-0003 not in the selection",
@@ -491,6 +592,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-scope-0006, P-scope-0005 not in the selection",
@@ -498,6 +600,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-twin-0002, P-iupac-0001 not in the selection",
@@ -505,6 +608,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-twin-0003, P-iupac-0003 not in the selection",
@@ -512,6 +616,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-twin-0004, P-iupac-0005 not in the selection",
@@ -519,6 +624,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "P-modes-0002, P-modes-0004 not in the selection",
@@ -526,6 +632,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "C-caps-0003 not in the selection",
@@ -533,6 +640,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "C-caps-0002, C-caps-0003 not in the selection",
@@ -540,6 +648,7 @@
   },
   {
    "arms": [
+    "direct-local",
     "mcp"
    ],
    "reason": "C-caps-0002 not in the selection",
@@ -549,7 +658,7 @@
  "require_agreement": false,
  "required": [
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -562,7 +671,29 @@
     0,
     1
    ],
+   "scenario": "R-pos-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-pos-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0003"
   },
   {
    "arm": "mcp",
@@ -573,12 +704,26 @@
    "scenario": "R-pos-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0004"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0005"
   },
   {
    "arm": "mcp",
@@ -589,12 +734,26 @@
    "scenario": "R-pos-0005"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0006"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0007"
   },
   {
    "arm": "mcp",
@@ -605,12 +764,26 @@
    "scenario": "R-pos-0007"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0008"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0009"
   },
   {
    "arm": "mcp",
@@ -621,6 +794,13 @@
    "scenario": "R-pos-0009"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0010"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -629,7 +809,7 @@
    "scenario": "R-pos-0010"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -642,7 +822,29 @@
     0,
     1
    ],
+   "scenario": "R-pos-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-pos-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0013"
   },
   {
    "arm": "mcp",
@@ -653,12 +855,26 @@
    "scenario": "R-pos-0013"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0014"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0015"
   },
   {
    "arm": "mcp",
@@ -669,12 +885,26 @@
    "scenario": "R-pos-0015"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0016"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0017"
   },
   {
    "arm": "mcp",
@@ -685,12 +915,26 @@
    "scenario": "R-pos-0017"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0018"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0019"
   },
   {
    "arm": "mcp",
@@ -701,6 +945,13 @@
    "scenario": "R-pos-0019"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0020"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -709,7 +960,7 @@
    "scenario": "R-pos-0020"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -722,7 +973,29 @@
     0,
     1
    ],
+   "scenario": "R-pos-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-pos-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0023"
   },
   {
    "arm": "mcp",
@@ -733,12 +1006,26 @@
    "scenario": "R-pos-0023"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0024"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0025"
   },
   {
    "arm": "mcp",
@@ -749,12 +1036,26 @@
    "scenario": "R-pos-0025"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0026"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0027"
   },
   {
    "arm": "mcp",
@@ -765,12 +1066,26 @@
    "scenario": "R-pos-0027"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0028"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-pos-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0001"
   },
   {
    "arm": "mcp",
@@ -781,6 +1096,13 @@
    "scenario": "R-multi-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -789,7 +1111,7 @@
    "scenario": "R-multi-0002"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -802,7 +1124,29 @@
     0,
     1
    ],
+   "scenario": "R-multi-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-multi-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0005"
   },
   {
    "arm": "mcp",
@@ -813,12 +1157,26 @@
    "scenario": "R-multi-0005"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0006"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-multi-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0001"
   },
   {
    "arm": "mcp",
@@ -829,12 +1187,26 @@
    "scenario": "R-junction-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-junction-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0003"
   },
   {
    "arm": "mcp",
@@ -845,12 +1217,26 @@
    "scenario": "R-junction-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0004"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-junction-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0001"
   },
   {
    "arm": "mcp",
@@ -861,6 +1247,13 @@
    "scenario": "R-discover-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -869,7 +1262,7 @@
    "scenario": "R-discover-0002"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -882,7 +1275,29 @@
     0,
     1
    ],
+   "scenario": "R-discover-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-discover-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0005"
   },
   {
    "arm": "mcp",
@@ -893,12 +1308,61 @@
    "scenario": "R-discover-0005"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0006"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-discover-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-trace-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-trace-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-trace-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-budget-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-budget-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0001"
   },
   {
    "arm": "mcp",
@@ -909,7 +1373,7 @@
    "scenario": "R-edge-0001"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -922,7 +1386,43 @@
     0,
     1
    ],
+   "scenario": "R-edge-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-edge-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0006"
   },
   {
    "arm": "mcp",
@@ -933,12 +1433,26 @@
    "scenario": "R-edge-0006"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0007"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-edge-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0008"
   },
   {
    "arm": "mcp",
@@ -949,12 +1463,26 @@
    "scenario": "R-edge-0008"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0009"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-edge-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0010"
   },
   {
    "arm": "mcp",
@@ -965,6 +1493,13 @@
    "scenario": "R-edge-0010"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0011"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -973,7 +1508,7 @@
    "scenario": "R-edge-0011"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -986,7 +1521,29 @@
     0,
     1
    ],
+   "scenario": "R-edge-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-edge-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0014"
   },
   {
    "arm": "mcp",
@@ -997,12 +1554,61 @@
    "scenario": "R-edge-0014"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0020"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-edge-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0021"
   },
   {
    "arm": "mcp",
@@ -1013,7 +1619,7 @@
    "scenario": "R-edge-0021"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1026,7 +1632,29 @@
     0,
     1
    ],
+   "scenario": "R-edge-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "R-edge-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0024"
   },
   {
    "arm": "mcp",
@@ -1037,12 +1665,26 @@
    "scenario": "R-edge-0024"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-rc-0001"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-rc-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-rc-0002"
   },
   {
    "arm": "mcp",
@@ -1053,12 +1695,26 @@
    "scenario": "R-rc-0002"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-order-0001"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "R-order-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0001"
   },
   {
    "arm": "mcp",
@@ -1069,12 +1725,26 @@
    "scenario": "T-walk-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0003"
   },
   {
    "arm": "mcp",
@@ -1085,6 +1755,13 @@
    "scenario": "T-walk-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0004"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1093,7 +1770,7 @@
    "scenario": "T-walk-0004"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1106,7 +1783,29 @@
     0,
     1
    ],
+   "scenario": "T-walk-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-walk-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0007"
   },
   {
    "arm": "mcp",
@@ -1117,12 +1816,26 @@
    "scenario": "T-walk-0007"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0008"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0009"
   },
   {
    "arm": "mcp",
@@ -1133,12 +1846,26 @@
    "scenario": "T-walk-0009"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0010"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0011"
   },
   {
    "arm": "mcp",
@@ -1149,12 +1876,26 @@
    "scenario": "T-walk-0011"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0012"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0013"
   },
   {
    "arm": "mcp",
@@ -1165,6 +1906,13 @@
    "scenario": "T-walk-0013"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0014"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1173,7 +1921,7 @@
    "scenario": "T-walk-0014"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1186,7 +1934,29 @@
     0,
     1
    ],
+   "scenario": "T-walk-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-walk-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0017"
   },
   {
    "arm": "mcp",
@@ -1197,12 +1967,26 @@
    "scenario": "T-walk-0017"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0018"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0019"
   },
   {
    "arm": "mcp",
@@ -1213,12 +1997,26 @@
    "scenario": "T-walk-0019"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0020"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0021"
   },
   {
    "arm": "mcp",
@@ -1229,12 +2027,26 @@
    "scenario": "T-walk-0021"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0022"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0023"
   },
   {
    "arm": "mcp",
@@ -1245,6 +2057,13 @@
    "scenario": "T-walk-0023"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0024"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1253,7 +2072,7 @@
    "scenario": "T-walk-0024"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1266,7 +2085,29 @@
     0,
     1
    ],
+   "scenario": "T-walk-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-walk-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0027"
   },
   {
    "arm": "mcp",
@@ -1277,12 +2118,26 @@
    "scenario": "T-walk-0027"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0028"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0029"
   },
   {
    "arm": "mcp",
@@ -1293,12 +2148,26 @@
    "scenario": "T-walk-0029"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0030"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0030"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0031"
   },
   {
    "arm": "mcp",
@@ -1309,12 +2178,26 @@
    "scenario": "T-walk-0031"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0032"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-walk-0032"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0033"
   },
   {
    "arm": "mcp",
@@ -1325,6 +2208,13 @@
    "scenario": "T-walk-0033"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0034"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1333,7 +2223,7 @@
    "scenario": "T-walk-0034"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1346,7 +2236,29 @@
     0,
     1
    ],
+   "scenario": "T-walk-0035"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-walk-0036"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0036"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0001"
   },
   {
    "arm": "mcp",
@@ -1357,12 +2269,26 @@
    "scenario": "T-derived-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-derived-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0003"
   },
   {
    "arm": "mcp",
@@ -1373,12 +2299,26 @@
    "scenario": "T-derived-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0004"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-derived-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0005"
   },
   {
    "arm": "mcp",
@@ -1389,12 +2329,26 @@
    "scenario": "T-derived-0005"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0006"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-derived-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0001"
   },
   {
    "arm": "mcp",
@@ -1405,6 +2359,13 @@
    "scenario": "T-end-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1413,7 +2374,7 @@
    "scenario": "T-end-0002"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1426,7 +2387,29 @@
     0,
     1
    ],
+   "scenario": "T-end-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-end-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0005"
   },
   {
    "arm": "mcp",
@@ -1437,12 +2420,26 @@
    "scenario": "T-end-0005"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0006"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-end-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0001"
   },
   {
    "arm": "mcp",
@@ -1453,12 +2450,26 @@
    "scenario": "T-repeat-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-repeat-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0003"
   },
   {
    "arm": "mcp",
@@ -1469,6 +2480,13 @@
    "scenario": "T-repeat-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0004"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1477,7 +2495,21 @@
    "scenario": "T-repeat-0004"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0002"
+  },
+  {
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1490,7 +2522,43 @@
     0,
     1
    ],
+   "scenario": "T-labels-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-labels-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-labels-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0007"
   },
   {
    "arm": "mcp",
@@ -1501,12 +2569,26 @@
    "scenario": "T-labels-0007"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-exhaustive-0001"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-exhaustive-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-exhaustive-0002"
   },
   {
    "arm": "mcp",
@@ -1517,12 +2599,48 @@
    "scenario": "T-exhaustive-0002"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-exhaustive-0003"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-exhaustive-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-coords-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-coords-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-coords-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0001"
   },
   {
    "arm": "mcp",
@@ -1533,12 +2651,26 @@
    "scenario": "T-budget-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-budget-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0003"
   },
   {
    "arm": "mcp",
@@ -1549,12 +2681,41 @@
    "scenario": "T-budget-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0004"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-budget-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-attempts-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-attempts-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0001"
   },
   {
    "arm": "mcp",
@@ -1565,12 +2726,26 @@
    "scenario": "T-edge-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-edge-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0003"
   },
   {
    "arm": "mcp",
@@ -1581,12 +2756,48 @@
    "scenario": "T-edge-0003"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0007"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-edge-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0008"
   },
   {
    "arm": "mcp",
@@ -1597,12 +2808,40 @@
    "scenario": "T-edge-0008"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0010"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-edge-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0012"
   },
   {
    "arm": "mcp",
@@ -1613,6 +2852,13 @@
    "scenario": "T-edge-0012"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0013"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1621,7 +2867,7 @@
    "scenario": "T-edge-0013"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1634,7 +2880,36 @@
     0,
     1
    ],
+   "scenario": "T-edge-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "T-edge-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-seeds-0001"
   },
   {
    "arm": "mcp",
@@ -1645,12 +2920,26 @@
    "scenario": "T-seeds-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-graphlet-0001"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-graphlet-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-graphlet-0002"
   },
   {
    "arm": "mcp",
@@ -1661,12 +2950,26 @@
    "scenario": "T-graphlet-0002"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-caps-0001"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-caps-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-quorum-0001"
   },
   {
    "arm": "mcp",
@@ -1677,12 +2980,26 @@
    "scenario": "T-quorum-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-strand-0001"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "T-strand-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0007"
   },
   {
    "arm": "mcp",
@@ -1693,7 +3010,7 @@
    "scenario": "N-negative-0007"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1706,7 +3023,29 @@
     0,
     1
    ],
+   "scenario": "N-negative-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-negative-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0013"
   },
   {
    "arm": "mcp",
@@ -1717,12 +3056,26 @@
    "scenario": "N-negative-0013"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0014"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-negative-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0015"
   },
   {
    "arm": "mcp",
@@ -1733,12 +3086,26 @@
    "scenario": "N-negative-0015"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0016"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-negative-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0017"
   },
   {
    "arm": "mcp",
@@ -1749,12 +3116,26 @@
    "scenario": "N-negative-0017"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0033"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-nearmiss-0033"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0034"
   },
   {
    "arm": "mcp",
@@ -1765,12 +3146,26 @@
    "scenario": "N-nearmiss-0034"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0035"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-nearmiss-0035"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0036"
   },
   {
    "arm": "mcp",
@@ -1781,12 +3176,26 @@
    "scenario": "N-nearmiss-0036"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0037"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-nearmiss-0037"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0038"
   },
   {
    "arm": "mcp",
@@ -1797,7 +3206,7 @@
    "scenario": "N-nearmiss-0038"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1810,7 +3219,29 @@
     0,
     1
    ],
+   "scenario": "N-nearmiss-0039"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-nearmiss-0040"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0040"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0041"
   },
   {
    "arm": "mcp",
@@ -1821,12 +3252,26 @@
    "scenario": "N-nearmiss-0041"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0019"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-hard-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0021"
   },
   {
    "arm": "mcp",
@@ -1837,12 +3282,26 @@
    "scenario": "N-hard-0021"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0022"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-hard-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0002"
   },
   {
    "arm": "mcp",
@@ -1853,12 +3312,26 @@
    "scenario": "N-realrep-0002"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0003"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-realrep-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0005"
   },
   {
    "arm": "mcp",
@@ -1869,7 +3342,7 @@
    "scenario": "N-realrep-0005"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -1882,7 +3355,29 @@
     0,
     1
    ],
+   "scenario": "N-realrep-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-realrep-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0011"
   },
   {
    "arm": "mcp",
@@ -1893,12 +3388,26 @@
    "scenario": "N-realrep-0011"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0013"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-realrep-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0015"
   },
   {
    "arm": "mcp",
@@ -1909,12 +3418,26 @@
    "scenario": "N-realrep-0015"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0017"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-realrep-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0019"
   },
   {
    "arm": "mcp",
@@ -1925,12 +3448,26 @@
    "scenario": "N-realrep-0019"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0021"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-realrep-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0023"
   },
   {
    "arm": "mcp",
@@ -1941,12 +3478,26 @@
    "scenario": "N-realrep-0023"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0025"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-realrep-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0010"
   },
   {
    "arm": "mcp",
@@ -1957,12 +3508,26 @@
    "scenario": "N-usecase-0010"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0012"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
     1
    ],
    "scenario": "N-usecase-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0014"
   },
   {
    "arm": "mcp",
@@ -1973,12 +3538,18 @@
    "scenario": "N-usecase-0014"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "C-caps-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0001"
   },
   {
    "arm": "mcp",
@@ -1989,6 +3560,41 @@
    "scenario": "R-twin-0001"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0002"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -1997,7 +3603,7 @@
    "scenario": "N-zero-0002"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1
@@ -2010,7 +3616,29 @@
     0,
     1
    ],
+   "scenario": "N-zero-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-zero-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0008"
   },
   {
    "arm": "mcp",
@@ -2021,6 +3649,13 @@
    "scenario": "N-zero-0008"
   },
   {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0010"
+  },
+  {
    "arm": "mcp",
    "repeats": [
     0,
@@ -2029,7 +3664,7 @@
    "scenario": "N-zero-0010"
   },
   {
-   "arm": "mcp",
+   "arm": "direct-local",
    "repeats": [
     0,
     1,
@@ -2044,10 +3679,28 @@
     1,
     2
    ],
+   "scenario": "D-R-pos-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
    "scenario": "D-R-pos-0013"
   },
   {
    "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0013"
+  },
+  {
+   "arm": "direct-local",
    "repeats": [
     0,
     1,
@@ -2062,6 +3715,15 @@
     1,
     2
    ],
+   "scenario": "D-R-pos-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
    "scenario": "D-R-junction-0003"
   },
   {
@@ -2071,7 +3733,34 @@
     1,
     2
    ],
+   "scenario": "D-R-junction-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
    "scenario": "D-T-walk-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-T-walk-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-T-derived-0006"
   },
   {
    "arm": "mcp",

@@ -1,0 +1,18 @@
+{
+ "declared_version": 1,
+ "about": "Owner-declared entries of the v4 resolve / traverse deploy gate (gate_policy.py --declared): what the MCP surface cannot show, decided by the owner, never inferred from an answer a run received. Each entry names its evidence. Pending the owner's review before the policy is pinned.",
+ "manifest": {"file": "manifest/suite_v4.json",
+              "content_sha256": "3a7417d60e4eb5d0e54433c76139df7ed1221ae35bcccf814b7fca2cf913f113"},
+ "exclusions": [
+  {"scenario": "C-caps-0001", "arms": ["mcp"],
+   "reason": "the MCP's traverse_capabilities answers the service's view (gate, backends, service_maxima, presets), not the host's document (table case capabilities.traverse_capabilities_document: 'the raw document and its gate-block projection are not exposed'), so its one property check, capabilities_doc, is not exposed ('field not in the answer: release') and every MCP execution is inconclusive; nothing else is tested there. Tested on direct-local."}
+ ],
+ "not_required": [
+  {"scenario": "T-labels-0003", "arms": ["mcp"], "check": "label_dict_contains",
+   "reason": "the MCP's traverse records carry no label dictionary ('field not in the answer: results[0].label_dict' on every MCP execution of v3 and v4, VERIFY-B); the walk itself (walk_in_record) stays required on the MCP arm, label_dict_contains on direct-local."},
+  {"scenario": "T-labels-0005", "arms": ["mcp"], "check": "label_dict_contains",
+   "reason": "the MCP's traverse records carry no label dictionary ('field not in the answer: results[0].label_dict', VERIFY-B); walk_in_record stays required on the MCP arm, label_dict_contains on direct-local."},
+  {"scenario": "T-edge-0008", "arms": ["mcp"], "check": "answer_fields",
+   "reason": "the service merges identical seeds before sending (table case traverse.duplicate_seeds), so the duplicate's result (results.1.duplicate) cannot exist in the MCP answer; the merge itself is the by-design pair direct-local verifies, answer_fields stays required on direct-local."}
+ ]
+}

@@ -1371,7 +1371,7 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   Before, only the direct arms' state was read, the MCP arm was excluded and compare iterated the observed scenarios,
   so a missing MCP execution or a scenario absent from every arm read PASS. A complete selective MCP-only run still
   reads PASS (it fulfils its plan).
-- **The policy** (`gate_policy.py MANIFEST [--routes] [--arms] [--require-agreement] [--not-required FILE]
+- **The policy** (`gate_policy.py MANIFEST [--routes] [--arms] [--require-agreement] [--declared FILE]
   [--advanced-path] --out POLICY`, versioned `policy_version` 1) selects by ROUTE: POST /resolve, POST /traverse and
   GET /traverse/capabilities by default, i.e. 222 scenarios of v4 (81 R + 93 T + 41 N + 6 D + C-caps-0001; areas R/T
   alone miss the 47 N and D scenarios on those routes). The scenarios an arm cannot express are explicit exclusions
@@ -1385,12 +1385,13 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   other than walk / trie, a strategy object: T-labels-0004/0006). It lists the executions each arm must record (v4,
   MCP: 191 scenarios, 388 executions), the relations required per arm (both scenarios selected and not excluded there: v4 REL-same_answer-0003;
   the prefix_equals relations of the excluded R-budget / R-twin and the N-zero / C-caps relations with a partner
-  outside the selection are listed as excluded), the property checks not required (none unless --not-required), and
+  outside the selection are listed as excluded), the property checks not required (none unless declared, below), and
   pins content_sha256, relations_sha256, index_fp and the by-design table's sha256. gate/policy_v4_rt_mcp.json is
-  the v4 policy for the MCP arm (`gate_policy.py manifest/suite_v4.json --name v4-rt-mcp --out
+  the v4 deploy gate's policy, two arms with the owner's declared entries (below; `gate_policy.py
+  manifest/suite_v4.json --name v4-rt-mcp --arms mcp,direct-local --declared gate/declared_v4_rt.json --out
   gate/policy_v4_rt_mcp.json`; a test regenerates it and compares). A v5 policy is one command on the v5 manifest,
   which prints the counts (selected by route and area, exclusions by rule with each reason, required executions per
-  arm, relations required and excluded); `--ids-out FILE` writes the ids the policy's arms run (v4, MCP: 191), for
+  arm, relations required and excluded); `--ids-out FILE` writes the ids the policy's arms run (v4: 222), for
   run_suite.sh --ids or async's runner standalone (`gate.py policy-ids POLICY` prints them comma-separated).
 - **The gate** (`gate.py RUN_DIR POLICY [--reevaluated]`: exit 0 PASS, 1 FAIL, 2 usage; RUN_DIR/gate.json) fails,
   listing every problem by kind, on: identity (either manifest hash not the policy's, a stated hash not verified, an
@@ -1402,8 +1403,11 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   exposed, or evaluated on no repeat; a check of later repeats only, determinism, is judged over the repeats);
   disagreement (MCP vs direct when the MCP arm is gated, direct-local vs direct-remote when both are); agreement (with
   --require-agreement: an MCP class other than agree or a verified pair, a required property not compared); relation
-  (a required relation not pass on a gated arm); configuration (below); nothing passed. An intentionally MCP-only
-  selection needs no direct arm: its by-design scenarios are verified on the MCP side and say so in a note.
+  (a required relation not pass on a gated arm); configuration (below); nothing passed. An MCP-only policy needs no
+  direct arm, but it cannot verify every by-design pair: a refused or relayed case is verified on its MCP side (a note
+  says so), while an answered or clamped case that explains checks (the service answers what the host refuses:
+  R-edge-0009, T-edge-0007, T-edge-0008) is verified only against a direct execution, so an MCP-only policy excludes
+  those scenarios (`needs_direct_arm`, below) and the deploy gate runs two arms.
 - **Configuration evidence** (agreed with async's runner on 2026-10-14): with the MCP arm gated, arms/mcp/run.json
   must record `service_capabilities` (the runner's read of the live GET /traverse/capabilities: a document, no
   error) with no `mismatches` against the by-design table, and no MCP line may record `request_evidence` with a
@@ -1473,7 +1477,8 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   is 0 for both (the as-run v4 copy misses one direct-remote execution, which its verdict already showed). The v3
   report now states its re-normalised MCP arm (1,128 of 1,330 rebuilt, 16 changed: the G06 lines) and "353 records:
   334 outcomes, 19 checks only".
-- `run_suite.sh --reevaluate v4-copy --gate gate/policy_v4_rt_mcp.json` exits 1, GATE FAIL with 29 problems: the
+- With c73f0f12's MCP-only policy, `run_suite.sh --reevaluate v4-copy --gate POLICY` exits 1, GATE FAIL with 29
+  problems (the two-arm policy's verdict is in the next section): the
   MCP arm's run.json records no service_capabilities (a runner of before the record); 23 inconclusive MCP executions
   (R-pos-0027 r0 resolve_timeout; N-hard-0021 r0, N-realrep-0002 r0, N-realrep-0025 r0 traversal_resolve_deadline;
   checks: T-walk-0004 r0, -0006 r0 r1, -0012 r0 r1, -0014 r0, -0018 r0 r1, -0022 r0, -0036 r0 r1, T-repeat-0002 r0,
@@ -1488,3 +1493,26 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   manifest_identity / manifest_problems are available (its load_manifests compares the scenarios' hash only). No
   verdict rule of the mirror changes. gate.py reads the runner's agreed records (run.json service_capabilities,
   the lines' request_evidence) and renormalised.json's commit / runner / client / input hashes where it records them.
+
+### The two-arm gate and the owner's declared list (the verification of lane S6c, VERIFY-G3)
+- The MCP-only policy could pass no MCP-only run: the answered pairs R-edge-0009 (resolve.duplicate_labels),
+  T-edge-0007 (traverse.seeds_above_host_max_seeds) and T-edge-0008 (traverse.duplicate_seeds) are compared check by
+  check and verified only against a direct execution, C-caps-0001 is inconclusive via MCP (its one property check,
+  capabilities_doc, is not exposed: the MCP answers the service's view, without `release`), and label_dict_contains
+  (T-labels-0003/0005) and answer_fields (T-edge-0008) are never exposed via MCP. Design decision (coordinator and
+  design lead, 2026-10-14): **the deploy gate runs two arms, mcp and direct-local (paired)**. direct-local verifies
+  the answered pairs and lets the gate catch an MCP vs direct disagreement; the properties the MCP never exposes stay
+  required on direct-local and are declared not required on the MCP arm.
+- `gate_policy.py --declared FILE` reads the owner's entries, a versioned JSON file beside the policy
+  (gate/declared_v4_rt.json: `declared_version` 1, the manifest's content_sha256, `exclusions` [{scenario, arms,
+  reason}], `not_required` [{scenario, arms, check, reason}]). Each entry needs a reason, a selected scenario and (not
+  required) a check the scenario expects; a file for another manifest is refused. An exclusion has the rule
+  `declared`; describe() prints every declared entry with its reason. v4: C-caps-0001 excluded on the MCP arm;
+  label_dict_contains on T-labels-0003 and T-labels-0005 and answer_fields on T-edge-0008 not required on the MCP
+  arm. The owner reviews the list (lane G3's DECLARED.md) before the policy is pinned.
+- `needs_direct_arm`: a policy without a direct arm excludes on the MCP arm every scenario naming an answered or
+  clamped case with explains_checks (from the manifest and the table), so a clean MCP-only run passes; v4 MCP-only:
+  35 exclusions (R-edge-0009, T-edge-0007, T-edge-0008, C-caps-0001 besides the 31), 187 scenarios, 380 executions.
+- v4's two-arm policy: 222 selected; MCP 190 scenarios / 386 executions (31 derived exclusions and the declared
+  C-caps-0001), direct-local 222 / 256; relations REL-same_answer-0003 on both arms and the four prefix_equals
+  relations on direct-local (their R-budget / R-twin partners are excluded on MCP only).

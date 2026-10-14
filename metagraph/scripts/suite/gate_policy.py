@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Writes a deploy-gate policy for gate.py from a manifest, and prints its counts.
 
-    gate_policy.py MANIFEST [--routes R1,R2] [--arms mcp] [--by-design PATH] [--advanced-path]
-                   [--warm-every 10] [--require-agreement] [--not-required FILE] [--name NAME] [--out POLICY]
+    gate_policy.py MANIFEST [--routes R1,R2] [--arms mcp,direct-local] [--by-design PATH] [--advanced-path]
+                   [--warm-every 10] [--require-agreement] [--declared FILE] [--name NAME] [--out POLICY]
                    [--ids-out FILE]
 
 The selection is by ROUTE (default: POST /resolve, POST /traverse and GET /traverse/capabilities: every scenario the
@@ -16,10 +16,19 @@ table, never from an answer a run received:
                             service's own cap);
   advanced_path             traverse_fetch arguments on the advanced strategy path (an `overrides` key outside the
                             MCP's basic list, a preset other than walk / trie, a `strategy` object), which a deployment
-                            without TRAVERSAL_ADVANCED_ENABLED refuses; --advanced-path for one that enables it.
+                            without TRAVERSAL_ADVANCED_ENABLED refuses; --advanced-path for one that enables it;
+  needs_direct_arm          a policy without a direct arm only: a named answered / clamped case that explains checks
+                            (the service answers what the host refuses, e.g. resolve.duplicate_labels): compare
+                            verifies such a pair only against a direct execution.
+The deploy gate runs two arms, mcp and direct-local (paired): direct-local verifies the answered pairs and lets the
+gate catch an MCP vs direct disagreement. Owner-declared entries come from --declared FILE, a versioned JSON file
+beside the policy: {declared_version 1, manifest {content_sha256}, exclusions [{scenario, arms, reason}],
+not_required [{scenario, arms, check, reason}]}; an exclusion has the rule `declared`, a not_required entry exempts a
+property check the scenario expects on those arms (the MCP never exposes it: it stays required on direct-local); each
+entry needs a reason, names a selected scenario and (not_required) a check the scenario expects, and the file names
+the manifest it was written for. No property check is exempt otherwise.
 A relation is required on an arm when both of its scenarios are selected and neither is excluded there; the others are
-listed with the reason. No property check is exempt unless --not-required FILE (a JSON list of {scenario (an id or
-"*"), arms, check, reason}) says so. The policy pins the manifest's content_sha256, relations_sha256 and index_fp and
+listed with the reason. The policy pins the manifest's content_sha256, relations_sha256 and index_fp and
 the by-design table's sha256 (gate.py fails on another), and lists the executions each arm must record (the paired
 plan: suite_common.mcp_repeats for the MCP arm, plan_executions for a direct arm, with --warm-every). --ids-out writes
 the ids the policy's arms run (the selection less what is excluded on all of them), one per line in manifest order:
@@ -88,8 +97,20 @@ def advanced_keys(arguments):
     return out
 
 
-def mcp_exclusion(scenario, cases, advanced_path=False):
-    """The MCP arm's exclusion of a scenario ({scenario, arms, rules, reason}) or None."""
+def explaining_answered_cases(scenario, cases):
+    """The answered / clamped cases the scenario names that explain checks (compare verifies their pair only
+    against a direct execution)."""
+    out = []
+    for cid in cmp.case_ids(scenario):
+        case = cases.get(cid) or {}
+        if cmp.judged_by_checks(case) and cmp.explains(case):
+            out.append(cid)
+    return out
+
+
+def mcp_exclusion(scenario, cases, advanced_path=False, direct_arm=True):
+    """The MCP arm's exclusion of a scenario ({scenario, arms, rules, reason}) or None; |direct_arm|: the policy runs
+    a direct arm (else needs_direct_arm applies)."""
     mcp = scenario.get("mcp") or {}
     rules, reasons = [], []
     if mcp.get("not_implemented"):
@@ -106,35 +127,90 @@ def mcp_exclusion(scenario, cases, advanced_path=False):
             rules.append("advanced_path")
             reasons.append("its traverse_fetch arguments need the advanced strategy path (%s), which the deployment "
                            "does not enable" % ", ".join(keys))
+    answered = [] if direct_arm else explaining_answered_cases(scenario, cases)
+    if answered:
+        rules.append("needs_direct_arm")
+        reasons.append("it names %s, answered by the service where the host refuses: compare verifies that pair only "
+                       "against a direct execution, which this policy does not run" % ", ".join(answered))
     if not rules:
         return None
     return {"scenario": scenario.get("id"), "arms": ["mcp"], "rules": sorted(set(rules), key=rules.index),
             "reason": "; ".join(reasons)}
 
 
+DECLARED_VERSIONS = (1,)
+
+
+def check_declared(declared, manifest, selected):
+    """The owner-declared entries (module docstring), validated: a ValueError names every problem."""
+    problems = []
+    if not isinstance(declared, dict):
+        raise ValueError("the declared file is not a JSON object")
+    if declared.get("declared_version") not in DECLARED_VERSIONS:
+        problems.append("declared_version %r is not one of %s" % (declared.get("declared_version"), DECLARED_VERSIONS))
+    want = (declared.get("manifest") or {}).get("content_sha256")
+    if want != sc.manifest_identity(manifest)["content_sha256"]:
+        problems.append("it was written for the manifest content_sha256 %s, not this one" % want)
+    scen = dict((s.get("id"), s) for s in manifest.get("scenarios", []))
+    for kind in ("exclusions", "not_required"):
+        for i, e in enumerate(declared.get(kind) or []):
+            where = "%s[%d]" % (kind, i)
+            if not isinstance(e, dict):
+                problems.append("%s is not an object" % where)
+                continue
+            if not str(e.get("reason") or "").strip():
+                problems.append("%s states no reason" % where)
+            if e.get("scenario") not in selected:
+                problems.append("%s: %s is not a selected scenario" % (where, e.get("scenario")))
+            arms = e.get("arms")
+            if not isinstance(arms, list) or not arms or any(a not in sc.ARMS for a in arms):
+                problems.append("%s: arms %r (one or more of %s)" % (where, arms, ", ".join(sc.ARMS)))
+            if kind == "not_required":
+                expected = [x.get("check") for x in (scen.get(e.get("scenario")) or {}).get("expect") or []
+                            if isinstance(x, dict)]
+                if e.get("check") not in expected:
+                    problems.append("%s: %s expects no check %r" % (where, e.get("scenario"), e.get("check")))
+    if problems:
+        raise ValueError("; ".join(problems))
+
+
 def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.DEFAULT_BY_DESIGN,
                  advanced_path=False, warm_every=10, require_agreement=False, not_required=None, name=None,
-                 manifest_file=None, table=None):
-    """The policy (module docstring); |table| (cases by id, info) in place of reading |table_path|."""
+                 manifest_file=None, table=None, declared=None, declared_file=None):
+    """The policy (module docstring); |table| (cases by id, info) in place of reading |table_path|; |declared| the
+    owner's entries (check_declared), |not_required| more property exemptions given directly."""
     cases, info = table if table is not None else cmp.load_by_design(table_path)
     routes = list(routes)
     arms = [a for a in sc.ARMS if a in arms]
+    direct_arm = any(a in sc.DIRECT_ARMS for a in arms)
+    chosen = [s.get("id") for s in manifest.get("scenarios", []) if s.get("route") in routes]
+    if declared is not None:
+        check_declared(declared, manifest, set(chosen))
+    declared_ex = {}
+    for e in (declared or {}).get("exclusions") or []:
+        declared_ex.setdefault(e["scenario"], []).append(e)
     selected, exclusions, required = [], [], []
     for index, scen in enumerate(manifest.get("scenarios", [])):
         if scen.get("route") not in routes:
             continue
         sid = scen.get("id")
         selected.append(sid)
-        ex = mcp_exclusion(scen, cases, advanced_path) if "mcp" in arms else None
+        ex = mcp_exclusion(scen, cases, advanced_path, direct_arm) if "mcp" in arms else None
         if ex:
             exclusions.append(ex)
+        for d in declared_ex.get(sid) or []:
+            on = [a for a in arms if a in d["arms"] and not (a == "mcp" and ex)]
+            if on:
+                exclusions.append({"scenario": sid, "arms": on, "rules": ["declared"], "reason": d["reason"]})
         for arm in arms:
-            if arm == "mcp" and ex:
+            if any(e["scenario"] == sid and arm in e["arms"] for e in exclusions):
                 continue
             reps = gate.planned_executions(manifest, None, None, [sid], warm_every, [arm])
             if reps:
                 required.append({"scenario": sid, "arm": arm, "repeats": [r for _, _, r in reps]})
-    excluded_on = dict((ex["scenario"], set(ex["arms"])) for ex in exclusions)
+    excluded_on = {}
+    for ex in exclusions:
+        excluded_on.setdefault(ex["scenario"], set()).update(ex["arms"])
     chosen = set(selected)
     relations, rel_excluded = [], []
     for rel in manifest.get("relations", []) or []:
@@ -171,7 +247,11 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
         "required": required,
         "relations": relations, "relations_excluded": rel_excluded,
         "properties": {"required": "every property check the scenario expects (checks.is_property)",
-                       "not_required": list(not_required or [])},
+                       "not_required": [dict(e, rules=["declared"]) for e in (declared or {}).get("not_required") or []]
+                       + list(not_required or [])},
+        "declared": None if declared is None else {"file": declared_file,
+                                                   "declared_version": declared.get("declared_version"),
+                                                   "sha256": hashlib.sha256(sc.canonical_json(declared)).hexdigest()},
     }
     policy["counts"] = counts(manifest, policy)
     return policy
@@ -207,10 +287,13 @@ def describe(policy):
     out.append("  selected by route: %d (%s); by area %s" % (
         c["selected"], ", ".join("%s %d" % kv for kv in sorted(c["by_route"].items())),
         ", ".join("%s %d" % kv for kv in sorted(c["by_area"].items()))))
-    out.append("  excluded on the MCP arm: %d (%s)" % (
+    out.append("  excluded: %d (%s)" % (
         c["excluded"], ", ".join("%s %d" % kv for kv in sorted(c["exclusions_by_rule"].items())) or "none"))
     for ex in policy["exclusions"]:
-        out.append("    %s: %s" % (ex["scenario"], ex["reason"]))
+        if "declared" in ex["rules"]:
+            out.append("    declared: %s excluded on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
+        else:
+            out.append("    %s on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
     for arm, v in sorted(c["required"].items()):
         out.append("  required on %s: %d scenario(s), %d execution(s)" % (arm, v["scenarios"], v["executions"]))
     out.append("  relations: %d required, %d excluded" % (c["relations_required"], c["relations_excluded"]))
@@ -219,6 +302,10 @@ def describe(policy):
     for r in policy["relations_excluded"]:
         out.append("    excluded %s on %s: %s" % (r["relation"], ", ".join(r["arms"]), r["reason"]))
     out.append("  property checks not required: %d" % c["properties_not_required"])
+    for nr in policy["properties"]["not_required"]:
+        out.append("    %s%s %s not required on %s: %s" % ("declared: " if "declared" in (nr.get("rules") or ()) else "",
+                                                       nr.get("scenario"), nr.get("check"),
+                                                       ", ".join(nr.get("arms") or sc.ARMS), nr.get("reason")))
     return "\n".join(out) + "\n"
 
 
@@ -233,7 +320,7 @@ def main(argv=None):
     ap.add_argument("--warm-every", type=int, default=10)
     ap.add_argument("--require-agreement", action="store_true",
                     help="the MCP arm must agree with a direct arm on every required property")
-    ap.add_argument("--not-required", default=None, help="a JSON list of {scenario, arms, check, reason}")
+    ap.add_argument("--declared", default=None, help="the owner's declared exclusions and not-required properties")
     ap.add_argument("--name", default=None)
     ap.add_argument("--out", default=None, help="write the policy here (default: print the counts only)")
     ap.add_argument("--ids-out", default=None, help="write the ids the policy's arms run here, one per line")
@@ -251,14 +338,21 @@ def main(argv=None):
     if bad or not arms:
         sys.stderr.write("gate_policy.py: --arms takes %s\n" % ", ".join(sc.ARMS))
         return 2
-    not_required = sc.read_json(a.not_required) if a.not_required else []
-    if not isinstance(not_required, list):
-        sys.stderr.write("gate_policy.py: --not-required is not a JSON list\n")
-        return 2
+    declared = None
+    if a.declared:
+        declared = sc.read_json(a.declared)
+        if declared is None:
+            sys.stderr.write("gate_policy.py: --declared %s is not a JSON file\n" % a.declared)
+            return 2
     rel = os.path.relpath(os.path.abspath(a.manifest), HERE)
-    policy = build_policy(manifest, [x.strip() for x in a.routes.split(",") if x.strip()], arms, a.by_design,
-                          a.advanced_path, a.warm_every, a.require_agreement, not_required, a.name,
-                          rel if not rel.startswith("..") else os.path.abspath(a.manifest))
+    try:
+        policy = build_policy(manifest, [x.strip() for x in a.routes.split(",") if x.strip()], arms, a.by_design,
+                              a.advanced_path, a.warm_every, a.require_agreement, None, a.name,
+                              rel if not rel.startswith("..") else os.path.abspath(a.manifest),
+                              declared=declared, declared_file=a.declared)
+    except ValueError as e:
+        sys.stderr.write("gate_policy.py: --declared %s: %s\n" % (a.declared, e))
+        return 2
     sys.stdout.write(describe(policy))
     if a.out:
         sc.write_json_atomic(a.out, policy)

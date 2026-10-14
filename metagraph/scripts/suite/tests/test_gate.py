@@ -26,8 +26,12 @@ import report  # noqa: E402
 import suite_common as sc  # noqa: E402
 from test_compare_report import CASES, T0, line, write_arm  # noqa: E402
 
-TABLE = (dict((k, v) for k, v in CASES.items()), {"sha256": "table-sha", "cases": len(CASES), "version": 1,
-                                                    "service_commit": "x"})
+# an answered case explaining a check (the service answers what the host refuses, as resolve.duplicate_labels)
+ANSWERED = {"id": "case.answered_explains", "agreement": "by_design",
+            "direct_expectation": {"http": 400, "code": "invalid_request", "text": None},
+            "service_answer": {"outcome": "answered", "code": None}, "explains_checks": ["status"]}
+TABLE = (dict(list(CASES.items()) + [(ANSWERED["id"], ANSWERED)]),
+         {"sha256": "table-sha", "cases": len(CASES) + 1, "version": 1, "service_commit": "x"})
 REFUSED = {"code": "pattern_invalid", "text": "more than 64 per search (PATTERN_MAX_PATTERNS_PER_SEARCH)",
            "field": "patterns"}
 CAPS = {"document": {"service_settings": {"advanced_enabled": False}}, "sha256": "c", "read_at": "t", "base": "b",
@@ -95,6 +99,11 @@ def mcp_lines(m, skip=(), change=None):
                 continue
             if (s.get("mcp") or {}).get("not_implemented"):
                 r = line(s["id"], "mcp", rep, t, 1.0, outcome="not_implemented_mcp", checks=[])
+            elif s["id"] == "R-008":
+                # the service answers what the host refuses: the status fails, explained by the named answered case
+                r = line(s["id"], "mcp", rep, t, 5.0, outcome="service_by_design",
+                         checks=[{"check": "status", "outcome": "fail", "detail": "http 200, expected 400"}])
+                r.update(service_by_design_case=ANSWERED["id"], explained_checks=["status"], explained_items=[0])
             elif s["id"] == "R-003":
                 r = line(s["id"], "mcp", rep, t, 5.0, outcome="service_by_design", reached=False, http=400,
                          error=dict(REFUSED), checks=[{"check": "status", "outcome": "fail", "detail": "400"}])
@@ -111,7 +120,7 @@ def direct_lines(m, arm, change=None):
     for index, s in sc.select_scenarios(m):
         for p in sc.plan_executions([(index, s)], arm, 0)[0]:
             t += 1
-            if s["id"] == "R-003":
+            if s["id"] in ("R-003", "R-008"):
                 r = line(s["id"], arm, p[2], t, 3.0, http=400, error={"code": "invalid_request", "text": "x"},
                          checks=[{"check": "status", "outcome": "pass", "detail": "400"}])
             else:
@@ -128,15 +137,17 @@ def bodies(rows):
 
 def make_run(d, m, mcp_rows, direct=False, caps=CAPS, plan=True, arm_manifest=None, direct_change=None):
     """A gated run directory as run_suite.sh leaves it: the manifest, the orchestrator's session, plan.json, the
-    arms (the MCP arm with its manifest copy and service_capabilities), merged and compared with TABLE."""
+    arms (the MCP arm with its manifest copy and service_capabilities; |direct| True both direct arms, or a tuple of
+    them), merged and compared with TABLE."""
     os.makedirs(d, exist_ok=True)
     sc.write_json_atomic(os.path.join(d, "manifest.json"), m)
-    skip = "0" if direct else "1"
+    direct = ("direct-local", "direct-remote") if direct is True else tuple(direct or ())
     sc.write_json_atomic(os.path.join(d, "orchestrator.json"), {"sessions": [{
-        "areas": "", "limit": "", "skip_local": skip, "skip_remote": skip, "mode": "paired", "warm_every": "0",
+        "areas": "", "limit": "", "skip_local": "0" if "direct-local" in direct else "1",
+        "skip_remote": "0" if "direct-remote" in direct else "1", "mode": "paired", "warm_every": "0",
         "mcp_cmd": "runner {ids} {out}", "mcp_run": "",
         "loop": {"mode": "paired", "state": "done", "reason": ""}}]})
-    arms = ["mcp"] + (["direct-local", "direct-remote"] if direct else [])
+    arms = ["mcp"] + list(direct)
     if plan:
         gate.write_plan(d, gate.plan_entry(m, None, None, None, 0, arms, "paired", 0))
     run_extra = {"manifest": {"computed_sha256": m["content_sha256"]}}
@@ -145,7 +156,7 @@ def make_run(d, m, mcp_rows, direct=False, caps=CAPS, plan=True, arm_manifest=No
     write_arm(d, "mcp", mcp_rows, run_extra=run_extra, raw_bodies=bodies(mcp_rows))
     sc.write_json_atomic(os.path.join(d, "arms", "mcp", "manifest.json"), arm_manifest or m)
     if direct:
-        for arm in ("direct-local", "direct-remote"):
+        for arm in direct:
             rows = direct_lines(m, arm, direct_change)
             write_arm(d, arm, rows, raw_bodies=bodies(rows))
             sc.write_json_atomic(os.path.join(d, "arms", arm, "manifest.json"), m)
@@ -196,17 +207,31 @@ class PolicyTest(GateCase):
 
     def test_v4_route_policy_counts(self):
         # the frozen v4: 222 scenarios on the resolve / traverse routes (221 POST + GET /traverse/capabilities), 31 the
-        # MCP cannot express (22 manifest, 7 more by a named not-expressible case, 2 on the advanced path)
+        # MCP cannot express (22 manifest, 7 more by a named not-expressible case, 2 on the advanced path); an
+        # MCP-only policy also leaves out the 4 explaining answered pairs it cannot verify
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v4.json"))
         pol = gate_policy.build_policy(m, manifest_file="manifest/suite_v4.json")
         c = pol["counts"]
         self.assertEqual(c["selected"], 222)
         self.assertEqual(c["by_area"], {"C": 1, "D": 6, "N": 41, "R": 81, "T": 93})
-        self.assertEqual(c["excluded"], 31)
+        self.assertEqual(c["excluded"], 35)
         self.assertEqual(c["exclusions_by_rule"], {"manifest_not_implemented": 22, "table_not_expressible": 26,
-                                                   "advanced_path": 2})
-        self.assertEqual(c["required"], {"mcp": {"scenarios": 191, "executions": 388}})
+                                                   "advanced_path": 2, "needs_direct_arm": 4})
+        self.assertEqual(sorted(e["scenario"] for e in pol["exclusions"] if "needs_direct_arm" in e["rules"]),
+                         ["C-caps-0001", "R-edge-0009", "T-edge-0007", "T-edge-0008"])
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 187, "executions": 380}})
         self.assertEqual([r["relation"] for r in pol["relations"]], ["REL-same_answer-0003"])
+        # the deploy gate's two arms with the owner's declared entries
+        two = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v4.json",
+                                       declared=sc.read_json(os.path.join(SUITE, "gate", "declared_v4_rt.json")))
+        c = two["counts"]
+        self.assertEqual(c["exclusions_by_rule"], {"manifest_not_implemented": 22, "table_not_expressible": 26,
+                                                   "advanced_path": 2, "declared": 1})
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 190, "executions": 386},
+                                         "direct-local": {"scenarios": 222, "executions": 256}})
+        self.assertEqual(sorted((n["scenario"], n["check"]) for n in two["properties"]["not_required"]),
+                         [("T-edge-0008", "answer_fields"), ("T-labels-0003", "label_dict_contains"),
+                          ("T-labels-0005", "label_dict_contains")])
 
     def test_query_cap_not_expressible_is_moot_below_the_cap(self):
         # the service always sends its own bounds.max_query_bp (2,000 bp with labels, 500 for a discovery): a query
@@ -234,7 +259,9 @@ class PolicyTest(GateCase):
     def test_shipped_v4_policy_is_regenerated_exactly(self):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v4_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v4.json"))
-        fresh = gate_policy.build_policy(m, manifest_file="manifest/suite_v4.json", name="v4-rt-mcp")
+        fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v4.json",
+                                         name="v4-rt-mcp", declared_file="gate/declared_v4_rt.json",
+                                         declared=sc.read_json(os.path.join(SUITE, "gate", "declared_v4_rt.json")))
         for p in (shipped, fresh):
             p.pop("generated_utc")
         self.assertEqual(shipped, fresh)
@@ -245,7 +272,7 @@ class PolicyTest(GateCase):
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(gate_policy.main([mpath, "--by-design", "", "--warm-every", "0", "--out", pol,
                                                "--ids-out", ids]), 0)
-        self.assertIn("excluded on the MCP arm: 2 (advanced_path 1, manifest_not_implemented 1)", out.getvalue())
+        self.assertIn("excluded: 2 (advanced_path 1, manifest_not_implemented 1)", out.getvalue())
         self.assertIn("required on mcp: 4 scenario(s), 9 execution(s)", out.getvalue())
         self.assertEqual(gate.read_ids(ids, self.m), ["T-001", "R-002", "R-003", "D-007"])
         self.assertEqual(gate.load_policy(pol)["counts"]["selected"], 6)
@@ -265,6 +292,96 @@ class PolicyTest(GateCase):
         with self.assertRaises(ValueError) as ctx:
             gate.read_ids(path, self.m)
         self.assertIn("T-999", str(ctx.exception))
+
+
+def with_answered(m):
+    """|m| with R-008, a refusal of the host that the service answers by design (an explaining answered case)."""
+    scen = m["scenarios"] + [scenario("R-008", "POST /resolve", by_design=[ANSWERED["id"]], tool="traverse_resolve",
+                                      refusal=True)]
+    return manifest_of(scen, m["relations"])
+
+
+class TwoArmAndDeclaredTest(GateCase):
+    """The answered by-design pairs need a direct arm: an MCP-only policy excludes them (needs_direct_arm, from the
+    manifest and the table), the two-arm policy (mcp + direct-local) verifies them; owner-declared exclusions and
+    MCP-not-required properties come from a versioned file with a reason each."""
+
+    def setUp(self):
+        super(TwoArmAndDeclaredTest, self).setUp()
+        self.m = with_answered(self.m)
+
+    def declared(self, **kw):
+        d = {"declared_version": 1, "manifest": {"content_sha256": self.m["content_sha256"]},
+             "exclusions": [{"scenario": "T-001", "arms": ["mcp"], "reason": "its capabilities document lacks release"}],
+             "not_required": [{"scenario": "R-002", "arms": ["mcp"], "check": "answer_fields",
+                               "reason": "the MCP never exposes the field"}]}
+        d.update(kw)
+        return d
+
+    def test_mcp_only_policy_excludes_answered_explaining_pairs(self):
+        pol = policy_of(self.m)
+        ex = dict((e["scenario"], e) for e in pol["exclusions"])
+        self.assertEqual(ex["R-008"]["rules"], ["needs_direct_arm"])
+        self.assertIn(ANSWERED["id"], ex["R-008"]["reason"])
+        v = gate.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m)), pol)
+        self.assertTrue(v["passed"], gate.render(v))
+
+    def test_mcp_only_run_fails_an_answered_pair_it_cannot_verify(self):
+        # the same run judged by a policy that requires R-008 on the MCP arm without a direct arm
+        pol = policy_of(self.m)
+        pol["exclusions"] = [e for e in pol["exclusions"] if e["scenario"] != "R-008"]
+        pol["required"].append({"scenario": "R-008", "arm": "mcp", "repeats": [0, 1]})
+        v = gate.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m)), pol)
+        self.assertIn("R-008", [p["scenario"] for p in v["problems"]], gate.render(v))
+
+    def test_two_arm_policy_verifies_answered_pairs(self):
+        pol = policy_of(self.m, arms=("mcp", "direct-local"))
+        self.assertNotIn("R-008", [e["scenario"] for e in pol["exclusions"]])
+        self.assertIn({"scenario": "R-008", "arm": "direct-local", "repeats": [0]}, pol["required"])
+        v = gate.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m), direct=("direct-local",)), pol)
+        self.assertTrue(v["passed"], gate.render(v))
+        # without the direct arm the two-arm policy's direct-local executions are missing
+        v = gate.judge(make_run(self.run_dir("b"), self.m, mcp_lines(self.m)), pol)
+        self.assertIn("missing", [p["kind"] for p in v["problems"]])
+
+    def test_declared_entries(self):
+        pol = policy_of(self.m, arms=("mcp", "direct-local"), declared=self.declared())
+        ex = dict((e["scenario"], e) for e in pol["exclusions"])
+        self.assertEqual(ex["T-001"]["rules"], ["declared"])
+        self.assertEqual(ex["T-001"]["arms"], ["mcp"])
+        self.assertEqual(pol["properties"]["not_required"][0]["check"], "answer_fields")
+        self.assertEqual(pol["declared"]["declared_version"], 1)
+        text = gate_policy.describe(pol)
+        self.assertIn("declared: T-001 excluded on mcp: its capabilities document lacks release", text)
+        self.assertIn("declared: R-002 answer_fields not required on mcp: the MCP never exposes the field", text)
+        # T-001 still required on direct-local; its MCP lines are not judged
+        self.assertIn({"scenario": "T-001", "arm": "direct-local", "repeats": [0]}, pol["required"])
+        change = {("T-001", 0): {"outcome": "inconclusive"},
+                  ("R-002", 0): {"checks": checks_for("R-002", 0, prop="not_exposed")}}
+        v = gate.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change=change), direct=("direct-local",)),
+                       pol)
+        self.assertTrue(v["passed"], gate.render(v))
+
+    def test_declared_file_is_validated(self):
+        for bad, why in ((self.declared(declared_version=2), "declared_version"),
+                         (self.declared(exclusions=[{"scenario": "T-001", "arms": ["mcp"]}]), "reason"),
+                         (self.declared(exclusions=[{"scenario": "T-999", "arms": ["mcp"], "reason": "x"}]), "T-999"),
+                         (self.declared(not_required=[{"scenario": "R-002", "arms": ["mcp"], "check": "bogus",
+                                                       "reason": "x"}]), "bogus"),
+                         (self.declared(manifest={"content_sha256": "other"}), "content_sha256")):
+            with self.assertRaises(ValueError) as ctx:
+                policy_of(self.m, declared=bad)
+            self.assertIn(why, str(ctx.exception))
+
+    def test_cli_declared_option(self):
+        mpath, dpath, pol = (os.path.join(self.tmp, n) for n in ("m.json", "declared.json", "p.json"))
+        sc.write_json_atomic(mpath, self.m)
+        sc.write_json_atomic(dpath, self.declared())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(gate_policy.main([mpath, "--by-design", "", "--arms", "mcp,direct-local",
+                                               "--declared", dpath, "--out", pol]), 0)
+        self.assertIn("declared: T-001 excluded on mcp", out.getvalue())
+        self.assertEqual(gate.load_policy(pol)["declared"]["file"], dpath)
 
 
 class PlanTest(GateCase):
