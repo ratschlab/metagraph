@@ -540,6 +540,67 @@ class UntestedAndExposureTest(unittest.TestCase):
         self.assertEqual([(g[0], g[1], g[2]) for g in groups], [("area", "C", "mcp"), ("route", "GET /c", "mcp")])
 
 
+class StatedMcpLimitTest(unittest.TestCase):
+    """An MCP execution inconclusive only because checks that the scenario's named by-design case explains read
+    not_exposed (C-caps-0001's capabilities_doc) is a limit the table states: listed, not untested."""
+
+    CASE = "capabilities.traverse_capabilities_document"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_of(self, by_design, mcp_checks, case_recorded=True):
+        import merge_run
+        caps = {"id": "C-caps-0001", "area": "C", "route": "GET /traverse/capabilities", "request": None,
+                "mcp": {"tool": "traverse_capabilities", "arguments": {}, "by_design": by_design},
+                "expect": [{"check": "status", "args": {"http": 200}}, {"check": "capabilities_doc", "args": {}}]}
+        S = [scen("P-001", "P"), caps]
+        manifest = {"manifest_version": 1, "content_sha256": sc.scenarios_sha256(S), "scenarios": S}
+        rows = {"direct-local": [line(x["id"], "direct-local", 0, T0 + i, 20.0, area=x["area"],
+                                      checks=[st("pass"), st("pass", x["expect"][1]["check"])])
+                                 for i, x in enumerate(S)]}
+        mcp = [line("P-001", "mcp", r, T0 + 10 + r, 20.0) for r in (0, 1)]
+        for r in (0, 1):
+            ln = line("C-caps-0001", "mcp", r, T0 + 20 + r, 20.0, area="C", outcome="inconclusive",
+                      checks=[dict(c) for c in mcp_checks])
+            if case_recorded:
+                ln.update(service_by_design_case=self.CASE, explained_checks=[], explained_items=[])
+            mcp.append(ln)
+        rows["mcp"] = mcp
+        orch = {"sessions": [{"mode": "paired", "mcp_cmd": "x {ids} {out}", "checks": "checks", "warm_every": "0",
+                              "skip_remote": "1",
+                              "loop": {"mode": "paired", "state": "done", "scenarios": 2, "completed": 2}}]}
+        for arm, lines in rows.items():
+            os.makedirs(os.path.join(self.d, "arms", arm), exist_ok=True)
+            sc.write_json_atomic(os.path.join(self.d, "arms", arm, "manifest.json"), manifest)
+            write_arm(self.d, arm, lines)
+        sc.write_json_atomic(os.path.join(self.d, "orchestrator.json"), orch)
+        merge_run.merge(self.d)
+        sc.write_json_atomic(os.path.join(self.d, "compare.json"),
+                             cmp.compare(self.d, cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)))
+        return verdict_of(self.d)
+
+    def test_stated_limit_is_listed_not_untested(self):
+        text, v = self.run_of([self.CASE], [st("pass"), st("not_exposed", "capabilities_doc", "field not in the "
+                                                                                              "answer: release")])
+        self.assertTrue(v.startswith("**PASS"), v)
+        self.assertIn("Inconclusive via MCP by a limit the by-design table states for the scenario (not counted as "
+                      "untested): C-caps-0001 mcp r0,1 (capabilities.traverse\\_capabilities\\_document)", text)
+        self.assertNotIn("No execution passed in", text)
+
+    def test_a_case_the_scenario_does_not_name_or_another_check_stays_untested(self):
+        _, v = self.run_of([], [st("pass"), st("not_exposed", "capabilities_doc", "x")])
+        self.assertTrue(v.startswith("**INCONCLUSIVE (no execution passed in"), v)
+        self.assertIn("area C on mcp", v)
+        # the named case explains capabilities_doc, not the status check
+        _, v = self.run_of([self.CASE], [st("not_exposed", "status", "x"), st("not_exposed", "capabilities_doc")])
+        self.assertTrue(v.startswith("**INCONCLUSIVE (no execution passed in"), v)
+
+
 class PlannedMcpArmTest(unittest.TestCase):
     """A run that planned the MCP arm and recorded no MCP execution (a refusal at start, a crash, the sequential
     mode's exit 3): INCOMPLETE, and the Agreement section never says there was no MCP arm."""

@@ -1949,10 +1949,17 @@ failing on 14552938.
     counted elsewhere). Such a group keeps the verdict from PASS: "INCONCLUSIVE (no execution passed in N area / route
     x arm group(s): ...)" after FAIL and FINDINGS; under another verdict a line names them. The agreement split of
     lane G3 (Agreement: generic checks only, partial) still names the scenarios whose properties were not compared.
-    Consequence: v3 and v4 name area C on mcp (C-caps-0001 inconclusive via MCP: capabilities_doc not exposed, the
-    10 others not implemented via MCP) and the routes GET /capabilities and GET /traverse/capabilities on mcp, so a
-    clean exploratory run on v4 with the MCP arm reads INCONCLUSIVE, not PASS (the gate excludes C-caps-0001 on the
-    MCP arm by the owner's declared entry); their recorded verdicts are FAIL and do not move.
+    An MCP execution that is inconclusive only because checks read not_exposed that the scenario's NAMED by-design
+    case explains (`report.stated_mcp_limit`: the case it matched, among the cases the scenario names, whose
+    explains_checks name every check of the line that did not pass, each not_exposed; with the table compare judged
+    the run with) is a limit the table states: it does not make a group untested, and the verdict section lists it
+    ("Inconclusive via MCP by a limit the by-design table states for the scenario (not counted as untested): ...").
+    v3 and v4: C-caps-0001 (capabilities.traverse_capabilities_document) and C-caps-0003
+    (capabilities.server_capabilities_document), both explaining capabilities_doc, which the MCP answer never
+    carries; so no untested group remains and a clean exploratory run with the MCP arm can read PASS. A field the MCP
+    drops elsewhere (no named case explaining it) still reads untested. The verification of the lane (VERIFY-S-VERDICT
+    (2)) found the first form of the rule counting these by-design limits as untested; the gate is unchanged (its
+    declared file excludes C-caps-0001 on the MCP arm).
   - **The comparator, with a baseline**: a scenario may state `mcp.exposes` (check names the MCP arm decided in a
     baseline run: `compare.mcp_exposure(rows)` builds it from a run's lines, for the v5 builder); a listed check that
     reads not_exposed on an MCP execution compared check by check is `disagree` (side mcp, by exposes, the checks and
