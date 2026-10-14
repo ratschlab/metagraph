@@ -2396,6 +2396,19 @@ def check_resolve_graph_runs(sc, ans, a, arm):
     return PASS, "graph_runs %s" % gr
 
 
+# a discovery's max_labels where the request states none (traverse.cpp parses discover.max_labels with default 1000
+# and no server cap; SPEC-labeled-traversal-core §4.1's example states the same)
+_DISCOVER_MAX_LABELS = 1000
+
+
+def _discover_max_labels(req: dict) -> Optional[float]:
+    """The max_labels a discovery request runs with: the one it states, else the default."""
+    d = req.get("discover") if isinstance(req, dict) else None
+    if not isinstance(d, dict):
+        return None
+    return _number(d["max_labels"]) if "max_labels" in d else float(_DISCOVER_MAX_LABELS)
+
+
 def _in_graph_kmers(body: dict) -> int:
     """The query's k-mers in the graph (the resolved prefix's under a stop): the lengths of graph_runs summed."""
     return sum(r[1] - r[0] for r in body.get("graph_runs") or [] if isinstance(r, list) and len(r) == 2)
@@ -2409,7 +2422,8 @@ def check_resolve_discover_contains(sc, ans, a, arm):
     in a tie at that support: min_kept_kmers and max_dropped_kmers equal to it and dropped_full_length at least 1.
     Such an answer passes, the ranking being all an answer can show (the tie's column ids are not in it); a list that
     keeps a label with fewer k-mers, ranks a dropped label above a kept one or drops none at full support fails, as
-    does a complete list without the label."""
+    does a complete list without the label. Only more than max_labels labels are truncated, to exactly max_labels
+    (the request's, else the default): a list cut to another size fails, tie or not."""
     body = _body(ans)
     names = [l.get("label") for l in _get(body, "labels")]
     trunc = body.get("labels_truncated")
@@ -2430,6 +2444,11 @@ def check_resolve_discover_contains(sc, ans, a, arm):
         trunc["dropped_full_length"])
     if None in vals.values():
         return FAIL, "%s not listed, labels_truncated not numeric (%s)" % (a["label"], stated)
+    want = _discover_max_labels(sc.get("request") if isinstance(sc.get("request"), dict) else {})
+    if want is not None and (vals["kept"] != want or vals["total"] <= want):
+        return FAIL, "%s not listed, and the list is truncated to %s of %s labels for max_labels %d: only more than " \
+                     "max_labels labels are truncated, to exactly max_labels (SPEC-labeled-traversal-core §4.2)" % (
+                         a["label"], trunc["kept"], trunc["total"], want)
     if vals["max_dropped_kmers"] > vals["min_kept_kmers"]:
         return FAIL, "%s not listed, and the truncation is not by support: a dropped label has more supported " \
                      "k-mers than a kept one (%s; SPEC-labeled-traversal-core §4.2)" % (a["label"], stated)
@@ -2448,13 +2467,13 @@ def check_resolve_discover_contains(sc, ans, a, arm):
 def _discovery_problems(req: dict, body: dict) -> List[str]:
     """A discovery's list and labels_truncated as SPEC-labeled-traversal-core §4.2 ranks them: the labels by
     supported k-mers, most first (each label's kmers_supported is that count unless support is trace, whose count
-    is of trace runs), at most max_labels; a truncated list states kept (its length) of total (more), the least
-    support kept at least the most dropped, and full-length drops only where a dropped label has every in-graph
-    k-mer, none of which is more than the query has."""
+    is of trace runs), at most max_labels (the request's, else the default); a truncated list states kept (its length,
+    exactly max_labels) of total (more), the least support kept at least the most dropped, and full-length drops
+    only where a dropped label has every in-graph k-mer, none of which is more than the query has."""
     probs: List[str] = []
     labels = body.get("labels") or []
     trunc = body.get("labels_truncated")
-    want = _number((req.get("discover") or {}).get("max_labels"))
+    want = _discover_max_labels(req)
     full = _in_graph_kmers(body)
     ranked = req.get("support") != "trace"
     ks = [_number(l.get("kmers_supported")) for l in labels]
@@ -2475,6 +2494,10 @@ def _discovery_problems(req: dict, body: dict) -> List[str]:
     if v["kept"] != len(labels) or v["total"] <= v["kept"]:
         probs.append("labels_truncated kept %s of total %s for %d labels listed" % (
             trunc["kept"], trunc["total"], len(labels)))
+    if want is not None and (v["kept"] != want or v["total"] <= want):
+        probs.append("labels_truncated kept %s of total %s with max_labels %d: a discovery truncates only more than "
+                     "max_labels labels, to exactly max_labels (SPEC-labeled-traversal-core §4.2)" % (
+                         trunc["kept"], trunc["total"], want))
     if v["max_dropped_kmers"] > v["min_kept_kmers"]:
         probs.append("labels_truncated max_dropped_kmers %s above min_kept_kmers %s: not truncated by support" % (
             trunc["max_dropped_kmers"], trunc["min_kept_kmers"]))

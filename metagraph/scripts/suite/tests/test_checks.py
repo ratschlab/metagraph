@@ -1922,6 +1922,29 @@ class ResolveChecks(unittest.TestCase):
                       {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 60, "dropped_full_length": 2},
                       {"kept": 1, "total": 3, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 3}):
             self.assertEqual(outcome(disc, listed("713600", 70, trunc), "invariants")[0], "fail", trunc)
+        # only more than max_labels labels are truncated, to exactly max_labels (§4.2; default 1000): a list cut to
+        # another size is no tie, whatever its counts say (R-discover-0003's shape, where a correct host lists all 18)
+        def cut(max_labels, kept, total):
+            sc_ = dict(disc, request=dict(disc["request"], discover={"kind": "column", "max_labels": max_labels}))
+            if max_labels is None:
+                sc_["request"]["discover"] = {"kind": "column"}
+            ans = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels": [
+                {"label": str(1000 + j), "kind": "column", "kmers_supported": 70, "runs": [[0, 70]]}
+                for j in range(kept)], "labels_truncated": {"kept": kept, "total": total, "min_kept_kmers": 70,
+                                                            "max_dropped_kmers": 70, "dropped_full_length": total - kept}})
+            return sc_, ans
+        for max_labels, kept, total in ((100, 1, 18), (20, 5, 18), (None, 1, 9), (20, 20, 20)):
+            sc_, ans = cut(max_labels, kept, total)
+            o, d = outcome(sc_, ans, "resolve_discover_contains", label="272634")
+            self.assertEqual(o, "fail", (max_labels, kept, total))
+            self.assertIn("only more than max_labels labels are truncated", d)
+            o, d = outcome(sc_, ans, "invariants")
+            self.assertEqual(o, "fail", (max_labels, kept, total))
+            self.assertIn("truncates only more than max_labels labels", d)
+        for max_labels, kept, total in ((20, 20, 25), (None, 1000, 1200)):
+            sc_, ans = cut(max_labels, kept, total)
+            self.assertEqual(outcome(sc_, ans, "resolve_discover_contains", label="272634")[0], "pass")
+            self.assertEqual(outcome(sc_, ans, "invariants")[0], "pass")
         two = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels_truncated": None, "labels": [
             {"label": "a", "kind": "column", "kmers_supported": 10, "runs": [[0, 10]]},
             {"label": "b", "kind": "column", "kmers_supported": 70, "runs": [[0, 70]]}]})
