@@ -273,12 +273,17 @@ def gen_R(ctx: Ctx) -> List[dict]:
     # doubling up to 4,096): pae's 10 kb took 343 ms warm (v4 R-twin-0004 direct-remote), so 420 ms (the deadline at
     # 170 ms falls in the 4,096-row batch, which ends at about 276 ms at that rate); eco's 10 kb never completed on
     # this host (v3 and v4: 21-45 s), its second half took 1.37 s warm (R-twin-0003), so the query is that half under
-    # 700 ms (the deadline at 450 ms falls in the 1,024-row batch, which ends at about 546 ms). Whether a stop happens
+    # 480 ms (the owner, 2026-10-15; VERIFY-V5A's re-verification): the work deadline at 230 ms falls in a batch that
+    # ends before the budget for warm totals of about 0.28 to 2.48 s (the batch model's window, stop_window_warm_ms),
+    # where 700 ms gave a stop only for 1.13 to 1.75 s, provided the unpolled k-mer lookup ends within the 230 ms (pae's
+    # whole 10 kb, lookup included, took 343 ms warm). pae's window is about 0.21 to 21.8 s. Whether a stop happens
     # still depends on the batch times, i.e. on the load and on what is warm; a complete answer reads inconclusive (no
     # stop, nothing tested). The scenarios stay in the deploy gate, required on direct-local (the owner, 2026-10-15),
-    # one repeat each: a repeat decides on its own, so a second would double what must stop.
+    # one repeat each: a repeat decides on its own, so a second would double what must stop (the builder keeps them off
+    # the paired plan's warm-repeat index, build_manifest.keep_off_warm_repeat).
     nid = _ids("R-budget")
-    for i, (key, budget, half, warm_ms) in enumerate((("eco", 700, True, 1370), ("pae", 420, False, 343))):
+    for i, (key, budget, half, warm_ms, window) in enumerate((("eco", 480, True, 1370, [284, 2480]),
+                                                              ("pae", 420, False, 343, [209, 21800]))):
         rec = ctx.rec(key)
         t = ctx.window(rng, rec, 10000, unique=False, max_dust=5.0)
         if half:
@@ -288,7 +293,10 @@ def gen_R(ctx: Ctx) -> List[dict]:
         t2 = dict(t, flank="", stop_design={
             "rule": "the work deadline (budget - 250 ms) falls inside the warm work, in a row batch that ends before "
                     "the budget at the warm rate measured",
-            "warm_work_ms": warm_ms, "work_deadline_ms": budget - 250})
+            "warm_work_ms": warm_ms, "work_deadline_ms": budget - 250,
+            "stop_window_warm_ms": window,
+            "window_assumes": "the k-mer lookup, which the deadline does not poll, ends within the work deadline; "
+                              "rows in batches of 64 doubling up to 4,096 at a uniform warm rate"})
         exp = [OK, INV, ex("resolve_runs", label=rec.column, full=True, prefix_if_stopped=True)]
         out.append(scenario(nid(), "R", "%s bp of %s under a %d ms budget after its complete twin: a stated stop answers "
                             "the prefix, the record's own label supporting every k-mer of it" % (format(L, ","), key, budget),

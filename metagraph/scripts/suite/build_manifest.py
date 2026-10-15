@@ -140,6 +140,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     areas.state_chance_bounds(scenarios)
     scenario_level_marks(scenarios)
     scenarios = place_warm_ups(scenarios)
+    keep_off_warm_repeat(scenarios)
     exposure = None
     if exposure_file:
         with open(exposure_file) as f:
@@ -410,18 +411,67 @@ def validate_relations(relations, scenarios) -> list:
 WARM_EVERY = 10
 
 
+def _wants_200(s) -> bool:
+    st = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
+    w = st.get("http", 200)
+    return 200 in (w if isinstance(w, list) else [w])
+
+
+def single_execution(s) -> str:
+    """Why one execution of |s| must decide alone ('' when a warm repeat may follow): a run-unique scenario (run_unique:
+    its id is the run's and the arm's) that expects the attempt's 200, whose repeat would resend the id and meet the
+    retained attempt's 409 (T-attempts-0002; VERIFY-V5A; one that expects the 409, T-attempts-0003, meets it again); a
+    stated-stop design (truth.stop_design: R-budget), whose every repeat must stop for the gate (VERIFY-V5A's
+    re-verification: R-budget-0002 at index 50 had two)."""
+    if s.get("run_unique") and _wants_200(s):
+        return "run-unique"
+    if isinstance(s.get("truth"), dict) and s["truth"].get("stop_design"):
+        return "a stated-stop design"
+    return ""
+
+
 def warm_repeat_problems(scenarios, warm_every: int = WARM_EVERY) -> list:
-    """A run-unique scenario (run_unique: its id is the run's and the arm's) that expects the attempt's 200 must not get
-    the warm repeat: the repeat would resend the id and meet the retained attempt's 409 (T-attempts-0002; VERIFY-V5A).
-    One that expects the 409 (T-attempts-0003) meets it again. Checked on every build, the frozen one included."""
-    def wants_200(s):
-        st = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
-        w = st.get("http", 200)
-        return 200 in (w if isinstance(w, list) else [w])
-    return ["%s: run-unique at manifest index %d, which the warm repeat (every %dth scenario) would repeat" % (
-                s["id"], i, warm_every)
+    """A single-execution scenario (single_execution) must not get the paired plan's warm repeat (every
+    |warm_every|-th scenario by manifest index: suite_common.repeat_count, which async's runner mirrors). Checked on
+    every build, the frozen one included."""
+    return ["%s: %s at manifest index %d, which the warm repeat (every %dth scenario) would repeat" % (
+                s["id"], single_execution(s), i, warm_every)
             for i, s in enumerate(scenarios)
-            if s.get("run_unique") and wants_200(s) and warm_every and i % warm_every == 0]
+            if single_execution(s) and warm_every and i % warm_every == 0]
+
+
+def keep_off_warm_repeat(scenarios: list, warm_every: int = WARM_EVERY) -> list:
+    """Moves |scenarios| (in place, after place_warm_ups) so that no single-execution scenario sits on a warm-repeat
+    index. A scenario may move unless it is a warm-up, a scenario a warm-up warms, run-unique or single-execution; the
+    scenarios around one on that index that may not move form its unit (its warm-ups, a run-unique pair such as
+    T-attempts-0002 / -0003), and the nearest scenario before the unit in its area that may move goes right after the
+    unit, which shifts the unit one index down; the moved one gets the warm repeat. Draws, ids and every pair stay as
+    built. Returns [(moved id, the id it now follows)]."""
+    moved = []
+    for _ in range(len(scenarios)):
+        bad = [i for i, s in enumerate(scenarios) if single_execution(s) and warm_every and i % warm_every == 0]
+        if not bad:
+            return moved
+        i = bad[0]
+        warmed = set(s.get("warms") for s in scenarios if s.get("warms"))
+
+        def free(s):
+            return not (s.get("warms") or s.get("id") in warmed or s.get("run_unique") or single_execution(s)
+                        or "warm-up" in (s.get("tags") or []))
+        first, last = i, i
+        while first > 0 and not free(scenarios[first - 1]):
+            first -= 1
+        while last + 1 < len(scenarios) and not free(scenarios[last + 1]):
+            last += 1
+        j = next((j for j in range(first - 1, -1, -1) if scenarios[j]["area"] == scenarios[i]["area"]
+                  and free(scenarios[j])), None)
+        if j is None:
+            raise SystemExit("%s: on the warm-repeat index %d, and nothing before it in its area can move" % (
+                scenarios[i]["id"], i))
+        x = scenarios.pop(j)
+        scenarios.insert(last, x)
+        moved.append((x["id"], scenarios[last - 1]["id"]))
+    raise SystemExit("keep_off_warm_repeat: no placement found")
 
 
 def _table_cases() -> set:

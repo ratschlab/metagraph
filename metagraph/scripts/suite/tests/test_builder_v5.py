@@ -293,10 +293,21 @@ class ResolveDecisive(unittest.TestCase):
             b = s[sid]
             budget = b["request"]["bounds"]["time_budget_ms"]
             self.assertLess(budget - 250, b["truth"]["stop_design"]["warm_work_ms"])   # the work deadline in the warm work
+            lo, hi = b["truth"]["stop_design"]["stop_window_warm_ms"]
+            self.assertTrue(lo <= b["truth"]["stop_design"]["warm_work_ms"] <= hi, sid)   # the measured warm work inside
             # in the gate, required on direct-local (the owner, 2026-10-15): one repeat, no budget_stress
             self.assertEqual(b["repeat"], 1)
             self.assertNotIn("budget_stress", b["tags"])
         self.assertEqual(len(s["R-budget-0001"]["request"]["sequence"]), 5000)          # eco's second half
+        # the owner, 2026-10-15: 480 ms (the batch model's stop window 0.28-2.48 s of warm work, against 1.13-1.75 s
+        # at 700 ms), pae's 420 ms
+        self.assertEqual([s[x]["request"]["bounds"]["time_budget_ms"] for x in ("R-budget-0001", "R-budget-0002")],
+                         [480, 420])
+        self.assertEqual(s["R-budget-0001"]["truth"]["stop_design"]["stop_window_warm_ms"], [284, 2480])
+        self.assertIn("480 ms budget", s["R-budget-0001"]["title"])
+        # one execution each: off the paired plan's warm-repeat index (the re-verification: -0002 sat at 50)
+        for sid in ("R-budget-0001", "R-budget-0002"):
+            self.assertNotEqual(order.index(sid) % 10, 0, sid)
         for x in m["scenarios"]:
             if x["route"] == "POST /resolve" and isinstance(x["request"], dict) and x["request"].get("labels") \
                     and "budget" not in x["tags"] and "edge" not in x["tags"]:
@@ -823,13 +834,44 @@ class WarmRepeatGuard(unittest.TestCase):
         self.assertEqual(bm.warm_repeat_problems(scs), [])
         self.assertEqual(sc_.repeat_count(20, {"repeat": 1}, bm.WARM_EVERY), 2)   # the rule the guard mirrors
 
+    def test_stop_designs_and_placement(self):
+        # the re-verification: a stated-stop design decides on one execution too; keep_off_warm_repeat moves the
+        # nearest movable scenario of the area from before it to right after it (warm-ups and their targets stay
+        # together, run-unique scenarios stay in place)
+        import build_manifest as bm
+
+        def mk(i, area="R", **kw):
+            return dict({"id": i, "area": area, "tags": []}, **kw)
+        scs = [mk("R-%d" % i) for i in range(9)] + [mk("R-tw", warms="R-b", tags=["warm-up"]),
+                                                     mk("R-b", truth={"stop_design": {"rule": "x"}})] + \
+            [mk("R-%d" % i) for i in range(9, 12)]
+        self.assertEqual(bm.warm_repeat_problems(scs), [
+            "R-b: a stated-stop design at manifest index 10, which the warm repeat (every 10th scenario) would repeat"])
+        self.assertEqual(bm.keep_off_warm_repeat(scs), [("R-8", "R-b")])
+        self.assertEqual([x["id"] for x in scs[6:11]], ["R-6", "R-7", "R-tw", "R-b", "R-8"])
+        self.assertEqual(bm.warm_repeat_problems(scs), [])
+        # a run-unique pair stays together: the moved scenario goes after the pair
+        pair = [mk("T-%d" % i, "T") for i in range(10)] + [mk("T-a", "T", run_unique=["a"]),
+                                                           mk("T-d", "T", run_unique=["a"],
+                                                              expect=[{"check": "status", "args": {"http": 409}}]),
+                                                           mk("T-z", "T")]
+        self.assertEqual(bm.keep_off_warm_repeat(pair), [("T-9", "T-d")])
+        self.assertEqual([x["id"] for x in pair[8:13]], ["T-8", "T-a", "T-d", "T-9", "T-z"])
+        # nothing movable before it in its area: the build fails
+        lone = [mk("T-w%d" % i, "T", warms="T-z", tags=["warm-up"]) for i in range(10)] + \
+            [mk("T-x", "T", truth={"stop_design": {"rule": "x"}})]
+        with self.assertRaises(SystemExit):
+            bm.keep_off_warm_repeat(lone)
+
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_built(self):
         import build_manifest as bm
         m = built()
         self.assertEqual(bm.warm_repeat_problems(m["scenarios"]), [])
-        idx = [x["id"] for x in m["scenarios"]].index("T-attempts-0002")
-        self.assertNotEqual(idx % bm.WARM_EVERY, 0)
+        order = [x["id"] for x in m["scenarios"]]
+        for sid in ("T-attempts-0002", "R-budget-0001", "R-budget-0002"):
+            self.assertNotEqual(order.index(sid) % bm.WARM_EVERY, 0, sid)
+        self.assertLess(order.index("T-attempts-0002"), order.index("T-attempts-0003"))
 
 
 class WarmUpsTravel(unittest.TestCase):
