@@ -2964,8 +2964,8 @@ Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_desig
 
 `build_manifest.py` builds manifest version 5 (`suite_v5.json` / `suite_smoke_v5.json`, smoke tag `smoke-v5`); the
 frozen v1-v4 stay (1387455f rebuilds v4 byte for byte from the record cache it was built from). Phase A builds v5
-dry (lane V5's scratch, content_sha256 a9dd5534..., relations_sha256 39660cfa..., with the owner's amendments and
-VERIFY-V5A's fixes of 2026-10-15); run_suite.sh keeps v4 as its default until the freeze (Phase B: freeze, smoke,
+dry (lane V5's scratch, content_sha256 ff7afbd7..., relations_sha256 39660cfa..., with the owner's amendments and
+VERIFY-V5A's fixes and its re-verification's of 2026-10-15); run_suite.sh keeps v4 as its default until the freeze (Phase B: freeze, smoke,
 default, the gate policy). What changed, by finding:
 
 ### Ground truth and the builder
@@ -3004,11 +3004,15 @@ default, the gate policy). What changed, by finding:
   default), not 20,000 (cold first calls of 21-37 s under the load); the builder refuses a snapshot with a lower cap;
   `resolve.time_budget_above_host_max` names only a budget above the snapshot's cap.
 - **The stated stop** (V05 with VERIFY-V4's amendment): R-budget-0001 resolves eco's 5 kb second half (eco's
-  10 kb never completed here) under 700 ms, R-budget-0002 pae's 10 kb under 420 ms: the work deadline (budget -
-  250 ms) inside the warm work, after each one's complete twin (R-twin-0002 / -0004 at 60,000 ms, the warm-up;
-  truth.stop_design). A stop still depends on batch times; the owner keeps both in the deploy gate, required on
+  10 kb never completed here) under 480 ms (the owner, 2026-10-15, replacing 700), R-budget-0002 pae's 10 kb under
+  420 ms: the work deadline (budget - 250 ms) inside the warm work, after each one's complete twin (R-twin-0002 /
+  -0004 at 60,000 ms, the warm-up; truth.stop_design, with the batch model's stop window of warm work,
+  `stop_window_warm_ms`: eco 284-2,480 ms, assuming the unpolled k-mer lookup ends within the 230 ms deadline; pae
+  209-21,800 ms). A stop still depends on batch times; the owner keeps both in the deploy gate, required on
   direct-local (2026-10-15), one repeat each (a repeat decides on its own); a complete answer reads inconclusive
-  (lane G1's rule).
+  (lane G1's rule). A stated-stop design, like a run-unique scenario expecting its 200, decides on one execution:
+  the builder keeps it off the paired plan's warm-repeat index (`keep_off_warm_repeat` moves the nearest movable
+  scenario of its area from before it to right after it; `warm_repeat_problems` refuses the rest).
 - **Walks** (V06, G24, as the owner amended them on 2026-10-15): the three 1 kb header walks a cold first call left
   inconclusive in v4 (T-walk-0004, -0014, -0022; the MCP's walk preset caps the budget at 15 s, cold rates 36-58
   bp/s) walk 300 bp, the other nine keep 1 kb. T-walk-0006 / -0012 / -0018 / -0036, the gate's walks, ask the host's
@@ -3024,12 +3028,16 @@ default, the gate policy). What changed, by finding:
   ids, areas, limit, a resume's ids): a resolve of the rows the target reads (under its header: tuples; under its
   column: rows), itself a positive check. A walk's warm-up reads what the walk must reach to decide walk_in_record:
   the seed and each arm's exact minimum plus 45 bp (`minimum_warm_up`; VERIFY-V5A: a cold multi-copy region costs
-  seconds per row). R-warm-0001..0004 before T-repeat-0001..0004 (298 / 295 / 320 / 743 bp), R-warm-0005 before
+  seconds per row). R-warm-0001..0004 before T-repeat-0001..0004 (298 / 295 / 320 / 743 bp; T-repeat-0002's 295
+  bp split in two resolves with their own 60,000 ms budget, `areas.SPLIT_WARM_IDS`: R-warm-0002 the seed and its
+  left 46 bp, R-warm-0008 the seed's last 30 bp and its right 149 bp, since its seed rows alone took 17.6-22 s cold
+  in v3 / v4), R-warm-0005 before
   T-labels-0003, R-warm-0006 (the telomere repeat under the human column) before N-hard-0022, R-warm-0007 (the seed
   and 100 bp each side under column 10710) before T-walk-0009, whose seed row took 15.7 s cold in v3; R-twin-0002 /
   -0004 before R-budget. Ids are fixed per target (`areas.WARM_IDS`). This assumes each arm runs scenarios in manifest
   order (the paired loop and the async runner do). The builder refuses a run-unique scenario expecting its 200 on the
-  paired plan's warm-repeat index (`warm_repeat_problems`: T-attempts-0002 would meet its own 409).
+  paired plan's warm-repeat index (`warm_repeat_problems`: T-attempts-0002 would meet its own 409), and a stated-stop
+  design there too (`keep_off_warm_repeat` places both off it).
 - **The resume rule of a warm-up**: after an interruption between a warm-up and its target, a resume runs the warm-up
   again right before the target on every arm that runs the target (`suite_common.paired_plan` `rewarm`, decided
   before anything of the invocation runs; `suite_common.resume_rewarms` inside a runner's scope). The paired loop
@@ -3093,28 +3101,37 @@ default, the gate policy). What changed, by finding:
   scenario expects, a reason, a case of the table, a scenario the MCP runs): `mcp.not_implemented_checks`
   [{check, reason}] for label_dict_contains of T-labels-0003..0006 (not implemented yet via MCP, the walk tested via
   MCP); C-caps-0001 `mcp.not_implemented` as a whole (the MCP's capabilities tool answers the service's view);
-  `mcp.by_design_checks` [{check, case}] for T-edge-0008's answer_fields (traverse.duplicate_seeds, service-side by
-  design). `gate_policy.py` derives the MCP exemptions (rules mcp_not_implemented_check, mcp_by_design_check;
+  `mcp.by_design_checks` [{check, case}] for a property check the service answers otherwise by design.
+  `gate_policy.py` derives the MCP exemptions (rules mcp_not_implemented_check, mcp_by_design_check;
   required on direct-local) and prints them by class; gate/declared_v5_rt.json declares nothing (the v4 file stays
-  v4's); every v4 suite error of its §2 is fixed.
+  v4's); every v4 suite error of its §2 is fixed. A missing MCP feature is marked at the narrowest scope, and when
+  the property-level marks would cover every property check of a scenario that scope is the scenario
+  (`build_manifest.scenario_level_marks`, VERIFY-G (c): such a scenario would pass via MCP on its generic checks
+  alone): `mcp.not_implemented` with the marks' reasons ("service-side by design: ..."; the manifest has no
+  whole-scenario by-design form), and the builder refuses a property-level list that covers them all. T-edge-0008,
+  whose only property check, answer_fields, is service-side by design (traverse.duplicate_seeds), is that case.
+- Every `mcp.by_design` id is a case of the bundled service_by_design.json, else the build fails (a case the table
+  lacks explains nothing). The table is lane F-gate's 422644b7 (sha256 39f87b83..., the renamed discovery cases),
+  bundled here with its v4 policy so the integration meets the same blobs.
 - `gate_policy.py` excludes a scenario tagged `budget_stress` on every arm (rule budget_stress, the manifest's
   truth.budget_stress.reason, printed by describe()): no declared entry; the owner approved it for T-longwalk-0001..0004
   (2026-10-15).
 
 ### Validation (offline, Phase A)
-- The dry v5 against v4 (scenario by scenario): 699 scenarios (18 added: R-warm-0001..0007, T-longwalk-0001..0004,
-  T-attempts-0003, T-caps-0002..0004, T-quorum-0002, T-seeds-0002, R-edge-0025; none dropped); 175 changed beyond
+- The dry v5 against v4 (scenario by scenario; content ff7afbd7..., relations 39660cfa...): 700 scenarios (19
+  added: R-warm-0001..0008, T-longwalk-0001..0004, T-attempts-0003, T-caps-0002..0004, T-quorum-0002, T-seeds-0002,
+  R-edge-0025; none dropped); 175 changed beyond
   mcp.exposes and the smoke tag, each to one finding above; 106 unchanged; 400 only gained mcp.exposes or the smoke
   tag; gen_D's picks are v4's.
 - Every truth re-checked against the cached records (633 windows, 620 flanks, all ACGT, 15 copies; 46 walk minima,
-  12 header runs, 2 trie head counts, 34 chance bounds, 3 reverse negatives recomputed; 9 warm-ups placed, holding
-  their seed and minima; 14 discoveries explicit): 0 problems.
+  12 header runs, 2 trie head counts, 34 chance bounds, 3 reverse negatives recomputed; 10 warm-ups placed, holding
+  their seed and minima, T-repeat-0002's split pair included; 14 discoveries explicit): 0 problems.
 - The v4 answers judged by v5's expectations where the request is v4's (554 scenarios): every new check passes on
   every arm and repeat; N-usecase-0005's MCP executions turn inconclusive -> pass (a property the MCP exposes);
   v4's T-attempts-0002 repeat-1 409 is T-attempts-0003's answer in v5 (pass there); R-edge-0023's v4 MCP answers
   are the service's old refusal above 100, which its cap of 1,000 retires.
-- The v5 gate policy derives from the dry build (no declared entry): 240 selected, 36 excluded (by rule,
-  one exclusion may carry several: manifest_not_implemented 24, table_not_expressible 27, budget_stress 4,
+- The v5 gate policy derives from the dry build (no declared entry): 241 selected, 37 excluded (by rule,
+  one exclusion may carry several: manifest_not_implemented 25, table_not_expressible 27, budget_stress 4,
   advanced_path 1), MCP 204 scenarios / 414
-  executions, direct-local 236 / 270, 5 property checks not required on MCP (derived); REL-same_answer-0003 and
+  executions, direct-local 237 / 273, 4 property checks not required on MCP (derived); REL-same_answer-0003 and
   REL-prefix_equals-0001..0004 required.
