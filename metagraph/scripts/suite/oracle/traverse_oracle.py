@@ -434,9 +434,9 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
                 feeds.setdefault(te.pred, set()).add(c)
         for s, cs in feeds.items():
             if len(cs) >= 2:
+                # an ambiguous source (decided over the non-hairpin successors): every entry
+                # derived from it gets branches + 1, the one on a followed hairpin step too
                 for c, sv in states.items():
-                    if c in hairpin_chars:
-                        continue
                     for te in sv.values():
                         if te.pred == s:
                             te.branches = sigma[s].branches + 1
@@ -565,10 +565,11 @@ def label_walks(w, seed, arm, labels, radius, hairpins='skip'):
                           else 'hairpin' if blocks else 'label_lost')
                 out.add((walk, l.name, reason, branches))
                 return
-            # a followed hairpin step never counts toward ambiguity (SPEC 13, note 11)
+            # a followed hairpin step never counts toward ambiguity (SPEC 13, note 11), but an
+            # ambiguous label's every continuation, the hairpin's too, counts the branch
             plain = [x for x in go if not w.is_hairpin(node, x[1], x[2])]
             nb = branches + (1 if len(plain) >= 2 else 0)
             for c, v, e in go:
-                visit(walk + c, v, used | {w.edge_key(e)}, nb if (c, v, e) in plain else branches)
+                visit(walk + c, v, used | {w.edge_key(e)}, nb)
         visit('', root, frozenset(), 0)
     return out

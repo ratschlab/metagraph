@@ -147,6 +147,16 @@ class Rules(unittest.TestCase):
                           ('GTGCAGCTTTTACACTCTGATTATATATATAT', 'edge_reuse_rc', 0)},
                          {(c[0], c[2], c[3]) for c in res.claims})
 
+    def test_an_ambiguous_label_counts_the_branch_on_its_hairpin_step_too(self):
+        """Final breadth run seed 5 (T-primary_k11-0042): after TA the label holds a followed
+        hairpin (A) and two plain successors (G, T); it is ambiguous over G and T, and every
+        continuation, the hairpin's included, has branches 1."""
+        w = walker('primary', 'records', 11)
+        st = T.Strategy({'exhaustive': True, 'branching': {'hairpins': 'follow'},
+                         'bounds': {'max_extension_bp': 40}})
+        res = T.constrain_walk(w, 'ATATATATTAGTCTCACA', 'left', [w.label('c_zeta')], st)
+        self.assertIn(('TAA', 'edge_reuse_rc', 1), {(c[0], c[2], c[3]) for c in res.claims})
+
     def test_trace_follows_one_coordinate_chain(self):
         kmer = run('trace', {'branching': {'on_reconverge': 'keep'},
                              'bounds': {'max_extension_bp': 45}})
