@@ -221,5 +221,27 @@ class DerivedLabelKinds(unittest.TestCase):
         self.assertIn("advanced_path", gate_policy.mcp_exclusion(eco_h, cases)["rules"])   # stays not implemented
 
 
+class WorkBudget(unittest.TestCase):
+    """triage-v4 G18 (VERIFY-V4: the seed phase's cost is readable only from an attempt's usage): T-budget-0003's work
+    budget lies above its seed's measured seed phase, so the walk stops partway on every arm, never the seed."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_seed_and_budget(self):
+        s = by_id(built({"R", "T"}))
+        b, att = s["T-budget-0003"], s["T-attempts-0002"]
+        self.assertEqual(b["request"]["seeds"], [{k: v for k, v in att["request"]["seeds"][0].items()}])
+        budget = b["request"]["strategy"]["bounds"]["max_work_units"]
+        self.assertGreaterEqual(budget, 2 * b["truth"]["seed_phase"]["work_seed"])
+        stop = [e for e in b["expect"] if e["check"] == "traverse_stop"][0]["args"]
+        self.assertEqual(stop["walks"], ["partial"])
+        failed = checks.normalise_direct(200, {"results": [{"outcome": {"walks": "failed"}, "resource_stop": {
+            "resource": "work", "requested": budget}}]})
+        res = dict((r["check"], r["outcome"]) for r in checks.evaluate(b, failed, "direct-local"))
+        self.assertEqual(res["traverse_stop"], "fail")
+        # the slot keeps its place and every other T-budget scenario its window
+        ids = [x["id"] for x in built({"R", "T"})["scenarios"] if x["id"].startswith("T-budget")]
+        self.assertEqual(ids, ["T-budget-0001", "T-budget-0002", "T-budget-0003", "T-budget-0004"])
+
+
 if __name__ == "__main__":
     unittest.main()

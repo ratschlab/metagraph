@@ -451,15 +451,27 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # each knob's stated stop (SPEC-labeled-traversal-core §5, §7.0): a request budget (time, memory, work) states a
     # resource_stop of its resource and may fail the seed when it cannot hold the seed itself; max_steps is a cap
     # (no resource_stop); the walk so far follows the record
+    # The work budget is a deterministic cap (work is modelled): it must lie above the seed phase's cost, which only an
+    # attempt's usage states (usage.per_seed[].work_seed). Its seed is therefore T-attempts-0002's eco window, whose
+    # seed phase took 148,723 units on both direct arms of v4 (refseq97-6f945db4), the walk about 2,140 units per bp
+    # and arm (876,572 for 200 bp on both arms): 300,000 units hold the seed phase twice over and stop the walk at a
+    # few tens of bp (triage-v4 G18: a lambda seed's validation took at least 435,722 units, so 300,000 failed it on
+    # every arm); the window drawn here for that slot keeps the area's stream as it was.
+    SEED_PHASE_WORK = {"work_seed": 148723, "walk_units_per_bp_and_arm": 2140,
+                       "source": "T-attempts-0002 usage.per_seed[0].work_seed and the arms' counters.work_units, v4 "
+                                 "direct-local and direct-remote (refseq97-6f945db4)"}
     budgets = [("time_budget_ms", 1, "time", "time_budget", ["partial"]),
                ("max_memory_mb", 1, "memory", "resource_limit", ["partial", "failed"]),
-               # well above the 151,383 units the seed's validation took (G18: 10 failed it before any walk) and
-               # below the run's 1,000 bp header walks (105k to 13M units per arm), so the walk stops partway
-               ("max_work_units", 300000, "work", "resource_limit", ["partial", "failed"]),
+               ("max_work_units", 300000, "work", "resource_limit", ["partial"]),
                ("max_steps", 5, None, "max_steps", ["partial"])]
+    work_slot: Dict[str, Any] = {}
     for i, (knob, val, resource, reason, walks) in enumerate(budgets):
         rec = recs[(i * 11 + 5) % len(recs)]
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=1300), 1050)
+        if knob == "max_work_units":
+            work_slot = {"at": len(out), "sid": nid(), "val": val, "resource": resource, "reason": reason,
+                         "walks": walks}
+            continue
         req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 1000, knob: val}})
         stop = {"knob": "bounds." + knob, "walks": walks, "cap_reason": reason}
         if resource:
@@ -497,6 +509,18 @@ def gen_T(ctx: Ctx) -> List[dict]:
                         # A2-06: each arm runs its own attempt (the runner appends the arm too); r0 runs it, r1 meets
                         # its retained duplicate (409) and exercises the shape check; the arms compare like for like
                         repeat=2))
+    # the work budget's slot of T-budget (above): this attempt's seed, whose seed phase v4 measured
+    tw = dict(ctx.flank_for(eco, t, 1050), seed_phase=SEED_PHASE_WORK)
+    w = work_slot
+    req = traverse_request([_tseed(tw["window"], [eco.accession])],
+                           {"bounds": {"max_extension_bp": 1000, "max_work_units": w["val"]}})
+    out.insert(w["at"], scenario(w["sid"], "T", "bounds.max_work_units %s above the seed phase's %d units: its stated "
+                                 "stop (work), the walk so far in the record" % (w["val"], SEED_PHASE_WORK["work_seed"]),
+                                 "POST /traverse", req, tw,
+                                 [OK, INV, ex("traverse_stop", knob="bounds.max_work_units", walks=w["walks"],
+                                              cap_reason=w["reason"], resource=w["resource"]),
+                                  ex("walk_in_record", label_scope="record", prefix_only=True, if_walked=True)],
+                                 tags=["budget"]))
     # T-edge
     nid = _ids("T-edge")
     t = ctx.window(rng, eco, 100, margin=400)
