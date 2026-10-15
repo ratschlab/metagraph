@@ -537,7 +537,7 @@ def judge(run_dir, policy, reevaluated=False):
                                                     "(mcp.by_design %s)" % (case, cmp.case_ids(s)), sid, arm, rep))
                 continue
         else:
-            problems.append(_problem("outcome", "outcome %r" % o, sid, arm, rep))
+            problems.append(_problem("outcome", "outcome %r" % (sc.outcome_value(o),), sid, arm, rep))
             continue
         if o == "pass" or r.get("explained_checks") or r.get("explained_items"):
             # the line's outcome is not trusted: every check the scenario expects has a result here (determinism

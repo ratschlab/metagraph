@@ -1205,7 +1205,7 @@ def aggregate_outcome(outcomes):
     """The outcome of a scenario on one arm over its repeats: the common one, else an outcome outside the vocabulary
     (sc.outcome_known; the first) > error > fail > finding > inconclusive > mixed (a repeat that could not test its
     property keeps the scenario from reading pass)."""
-    vals = [o for o in outcomes if o]
+    vals = [v for v in (sc.outcome_value(o) for o in outcomes) if v]
     if not vals:
         return None
     if len(set(vals)) == 1:

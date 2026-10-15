@@ -2375,6 +2375,11 @@ one lane's verification left to another lane's file.
   error as well (the counts partition the executions). The report's Failures section lists it as "outcome '...'
   outside the vocabulary (read as error)"; the gate's outcome problem names it ("error (outcome '...' outside the
   vocabulary)"). The paired loop counts it as an error (`unknown` from mcp_step_result, lane S7r). FAIL either way.
+- An outcome stored as a JSON list or object (no runner writes one) made compare raise TypeError (an unhashable
+  value in aggregate_outcome's set). `suite_common.outcome_value` reads it as its canonical JSON text, outside the
+  vocabulary: recorded_outcome returns it so, and aggregate_outcome, the report's untested groups and the gate's
+  outcome problem read outcomes through it; such a line is error / FAIL like any other outcome outside the
+  vocabulary, merged or not (VERIFY-SUITE-INT follow-up 2).
 
 ### The re-evaluation's earlier repeats (P3-run-measure-report-01 in reevaluate.py)
 - run_direct.py (lane S7r) and async's runner pass in `previous` only the earlier repeats the host answered (an HTTP

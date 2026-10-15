@@ -2,6 +2,7 @@
 S7r, P6-end-to-end-02's runner side): merge_run reads such a line as error (outcome_runner keeps the recorded one),
 and the paired loop counts it like an error towards its stop."""
 
+import json
 import os
 import sys
 import tempfile
@@ -68,6 +69,46 @@ class MergeUnknownOutcomeTest(unittest.TestCase):
         rows = [{"arm": "mcp", "outcome": o} for o in sc.OUTCOMES]
         self.assertEqual(merge_run.unknown_outcomes(rows), {})
         self.assertEqual([r["outcome"] for r in rows], list(sc.OUTCOMES))
+
+
+class UnhashableOutcomeTest(unittest.TestCase):
+    """An outcome stored as a JSON list or object (no runner writes one) is a string outside the vocabulary for the
+    comparison, the report and the gate: error / FAIL, never a TypeError."""
+
+    def test_list_and_dict_outcomes(self):
+        from test_gate import make_run, manifest_of, mcp_lines, policy_of
+        import gate
+        for value in (["pass"], {"outcome": "pass"}):
+            text = json.dumps(value, sort_keys=True)
+            with tempfile.TemporaryDirectory() as tmp:
+                m = manifest_of()
+                d = make_run(os.path.join(tmp, "run"), m, mcp_lines(m, change={("D-007", 2): {"outcome": value}}),
+                             direct=("direct-local",), direct_change={("R-002", 0): {"outcome": value}})
+                comp = sc.read_json(os.path.join(d, "compare.json"))
+                self.assertEqual(sorted((x["arm"], x["outcome"], x.get("read_as"))
+                                        for x in comp["summary"]["outcomes_outside_vocabulary"]),
+                                 [("direct-local", text, "error"), ("mcp", text, "error")])
+                self.assertEqual(comp["summary"]["totals"]["mcp"]["outcomes"]["other"], 1)
+                v = gate.judge(d, policy_of(m, arms=("mcp", "direct-local")))
+                self.assertFalse(v["passed"])
+                self.assertIn("error (outcome %r outside the vocabulary)" % text,
+                              [p["detail"] for p in v["problems"] if p["kind"] == "outcome"])
+                report_text = report.build_report(d)
+                self.assertIn("2 with an outcome outside the vocabulary", report_text.split("# Environment")[0])
+                # a set compared without the merge (its lines as recorded) reads alike
+                rows, _ = sc.read_jsonl(os.path.join(d, "executions.jsonl"))
+                with open(os.path.join(d, "executions.jsonl"), "w") as fh:
+                    for r in rows:
+                        if r.get("outcome_runner") == value:
+                            r["outcome"] = r.pop("outcome_runner")
+                        fh.write(json.dumps(r) + "\n")
+                comp = cmp.compare(d, ({}, None))
+                outside = comp["summary"]["outcomes_outside_vocabulary"]
+                self.assertEqual(sorted((x["arm"], x["outcome"]) for x in outside),
+                                 [("direct-local", text), ("mcp", text)])
+                self.assertEqual(comp["scenarios"]["D-007"]["arms"]["mcp"]["outcome"], text)
+                self.assertEqual(sc.recorded_outcome({"outcome": "error", "outcome_runner": value}), text)
+                self.assertFalse(sc.outcome_known(sc.recorded_outcome({"outcome": value})))
 
 
 class PairedLoopUnknownOutcomeTest(SuiteCase):

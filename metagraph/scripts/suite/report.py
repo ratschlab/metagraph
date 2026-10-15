@@ -308,7 +308,8 @@ def untested_groups(rows, manifest, cases=None, comp=None):
                            ("route", route_of.get(r.get("scenario")) or r.get("route"))):
             if name:
                 c = groups.setdefault((kind, name, arm), {})
-                c[r.get("outcome")] = c.get(r.get("outcome"), 0) + 1
+                o = sc.outcome_value(r.get("outcome"))
+                c[o] = c.get(o, 0) + 1
     out = []
     for (kind, name, arm), c in groups.items():
         if c.get("inconclusive") and not c.get("pass"):
