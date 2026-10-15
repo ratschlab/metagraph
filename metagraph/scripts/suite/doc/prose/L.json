@@ -1,57 +1,111 @@
 {
+ "_about": "Chapter L (patterns longer than k) of the suite results document: the prose data of DESIGN-DOC.md section 5 in R.json's format, written for the union of manifest v4 (doc/units/suite_v4.json) and manifest v5 (the same 48 scenarios, 8 families and 9 units; v5 adds the property-level `exposes` lists and, on L-long-0005 and -0006, the check `path_spells` on the record's strand, which v4 lacked). `summary` and `coverage_gap` are printed first on the chapter page, `intro` follows; `families` keys on the family id with a title, one paragraph and a `claim`; `units` on the unit id with its one-line property; `mcp_notes.units` keys on the one unit whose MCP column is wholly not exercised (L-memory). EVERY FIGURE OF THE RUN IS A PLACEHOLDER the generator fills from the record (doc/facts.py) and every sentence whose truth depends on the run is a conditional `[[flag ? when true | when false]]`. The literal numbers are constants of SPEC-pattern-search.md, of the manifest and of the service, each listed under `_assumes` with its source. Every claim follows SPEC-pattern-search.md sections 7.7, 7.8, 12.1 and 20, areas.py gen_L, checks.py and service_by_design.json as of 14245fb49. No timing sentence names a cause the run does not isolate.",
+ "_assumes": {
+  "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest (lengths, caps, budgets), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
+  "0": "offset 0 and max_paths 0 (SPEC section 12.1; manifest L-caps-0001, -0002); exact 0 (SPEC section 7.7); a cap of 0 (service_by_design.json pattern.caps_zero)",
+  "1": "L - k + 1 nodes (SPEC section 12.1); at least 1 path (manifest); max_anchors 1 (manifest L-long-0007); max_memory_mb 1 (manifest L-memory-0001); 1-based coordinates (SPEC section 14.3); one base of extension at 32 bp (manifest L-paths)",
+  "2": "the two anchors of A^60 (manifest L-long-0007)",
+  "2.0": "the DUST threshold of a window's first 64 bases (manifest_lib.Ctx.window)",
+  "3": "three windows per length (manifest L-paths); three 45 bp windows (manifest L-anchors); three two-base codes (manifest L-long-0006)",
+  "3.0": "the DUST threshold of the long windows (areas.py gen_L, max_dust)",
+  "10": "max_annotation_work 10 (manifest L-caps-0003, -0004); position 10 (manifest L-long-0006)",
+  "11": "the 11-residue peptide of chapter X (manifest X-edge-0006)",
+  "15": "the 15 records of L-paths (manifest)",
+  "30": "position 30 (manifest L-long-0006)",
+  "31": "k; A^31 and T^31 (manifest L-long-0007)",
+  "32": "the 32 bp window, the shortest pattern longer than k (manifest L-paths)",
+  "40": "the 40 bp window (manifest L-paths, L-verified, L-supported)",
+  "45": "the 45 bp window (manifest L-anchors)",
+  "50": "the 50 bp window (manifest L-caps); position 50 (manifest L-long-0006)",
+  "60": "the 60 bp window (manifest L-paths, L-verified, L-supported, L-long-0006); A^60 (manifest L-long-0007, L-repeat-0001)",
+  "64": "the first 64 bases a window's DUST score reads (manifest_lib.Ctx.window)",
+  "100": "the 100 bp window (manifest L-paths, L-verified, L-supported, L-long-0005); T^100 (manifest L-repeat-0002)",
+  "200": "the 200 bp window (manifest L-paths, L-supported); http 200 (SPEC)",
+  "500": "the 500 bp windows (manifest L-long-0001, -0004)",
+  "503": "http 503 deadline (SPEC section 7.6)",
+  "1,000": "the 1,000 bp window (manifest L-long-0002); the host's default max_anchors (SPEC section 4.5; host capabilities default_max_anchors); the service's limit of 1,000 characters on a pattern (service_by_design.json pattern.length_above_1000)",
+  "1,024": "max_paths 1,024, the host's cap and the service's ceiling (host capabilities caps.max_paths; manifest L-supported, X-peptide-long)",
+  "2,000": "the 2,000 bp window (manifest L-long-0003)",
+  "10,000": "max_contexts 10,000 (manifest_lib.PATTERN_MAX_CONTEXTS; host capabilities caps.max_contexts)",
+  "60,000": "time_budget_ms 60,000, the host's default and the one every request names (manifest_lib.PATTERN_TIME_BUDGET_MS)",
+  "100000": "A^100000 (manifest L-memory-0001)"
+ },
  "chapter": "L",
  "title": "Patterns longer than k",
+ "summary": [
+  "*What held.* [[direct_clean ? On the direct arms every property this chapter asks of /pattern for a pattern longer than k held wherever the host answered: {n_pass_dl} of the {n_tests} tests pass on direct-local and {n_pass_dr} on direct-remote, with no failure, no error and no disagreement between arms ({direct_agreement_text}). | On the direct arms {n_pass_dl} of the {n_tests} tests pass on direct-local and {n_pass_dr} on direct-remote; on {n_direct_failed_tests} test{n_direct_failed_tests:s} a direct arm failed, errored or disagreed with the other ({direct_agreement_text}; the list is in I.1).]] [[claims_held ? Shown: {claims_held}.]] [[claims_unsupported ? Not shown: {claims_unsupported}.]] [[no_200_over_budget ? No 200 exceeded its budget. | A 200 exceeded its budget (a finding: I.1).]] [[n_inconclusive_dl ? {n_inconclusive_dl:Word} test{n_inconclusive_dl:s} read{n_inconclusive_dl:v} inconclusive on direct-local and {n_inconclusive_dr:word} on direct-remote[[n_late503_tests ?; {n_late503_tests:word} test{n_late503_tests:s} answered 503 deadline ({late503_ids}: allowed and inconclusive, a finding only beyond max(1 s, the budget))]]; the detail blocks say why.]] Via MCP {n_mcp_agree} pair{n_mcp_agree:s} agree{n_mcp_agree:v}[[mcp_all_full ?, all fully checked | ({n_mcp_full} fully checked)]][[n_mcp_full_fewer_repeats ?, {n_mcp_full_fewer_repeats:word} of them over fewer repeats than recorded ({mcp_full_fewer_repeats_text})]][[n_mcp_by_design ?, and the {n_mcp_by_design} by-design pair{n_mcp_by_design:s} matched the service's table[[!mcp_by_design_all_verified ? ({n_mcp_by_design_unverified} unverified)]]]][[n_mcp_disagree ?; {n_mcp_disagree} pair{n_mcp_disagree:s} DISAGREE (I.1)]][[n_mcp_not_exercised ?; {n_mcp_not_exercised} test{n_mcp_not_exercised:s} could not be exercised through the tools (a known limit: {mcp_not_exercised_by_family}; I.4 and appendix B) | ; every test was exercised through the tools]].",
+  "*Timing.* Host-warm, a path search answers in {wall_p50_warm_dl} at the median on direct-local (n {n_warm_dl}) and {wall_p50_warm_dr} on direct-remote (n {n_warm_dr})[[n_warm_mcp ?, and in {wall_p50_warm_mcp} via MCP (n {n_warm_mcp}), of which the host call is {backend_p50_warm_mcp} at the median (n {n_backend_warm_mcp}) and the rest the service's submit, queue, terminal lag and paging]]; the server p50 is {server_p50_warm_dl} · {server_p50_warm_dr} · {server_p50_warm_mcp} (n {n_server_warm_dl} · {n_server_warm_dr} · {n_server_warm_mcp})[[n_cold_dl ?; the host-cold direct-local calls (n {n_cold_dl}: {cold_dl_families}) reach {wall_p90_cold_dl} at p90]]. The 1,000 and 2,000 bp windows and the memory-bound homopolymer are the chapter's tests of timing class slow; in this run L-long-0002 (1,000 bp, mja): direct-local {x[L-long-0002][dl][phrase]}; L-long-0003 (2,000 bp, cal): direct-local {x[L-long-0003][dl][phrase]}, direct-remote {x[L-long-0003][dr][phrase]}; L-memory-0001: direct-local {x[L-memory-0001][dl][phrase]}. These are correctness controls; the run does not isolate the length of a window from the record it comes from. [[logan_caveat ? Every figure was taken under the Logan load (I.4).]]"
+ ],
+ "coverage_gap": [
+  "*What remains unsupported.* Three statements of the SPEC are carried by the direct arms alone, the tools having no argument for what they send or refusing it at submit (appendix B): the memory account's stop of a path search (L-memory, no `max_memory_mb` argument), the annotation-work stop of a supported-path search (L-caps-0003 and -0004, no `max_annotation_work` argument), and the anchors-only answer of a pattern longer than k (L-anchors, and the 11-residue peptide of chapter X: the service refuses the request without `long_search`); the 2,000 bp window (L-long-0003) is refused at submit too, above the service's 1,000 characters. [[n_mcp_not_exercised ? In this run {n_mcp_not_exercised} test{n_mcp_not_exercised:s} [[n_mcp_not_exercised = 1 ? is | are]] not exercised through the tools ({mcp_not_exercised_by_family}). | Every test was exercised through the tools.]] Not exercised by this chapter: a walk no record holds whole (every window here is its record's own path, so a `label_intersection` label beside a `record_verified` one, the mosaic section 20.1 describes, is never observed), `stop_at_threshold` on the anchors or on the paths, a `max_anchors` or `max_paths` above the host's caps (the clamp), a predicate under `predicate_strands` `either` on supported paths (the mirror reads of section 20.9; only `context` is sent), `require_support` under `supported_paths`, a time stop inside an extension, and an index without coordinates (placement `global`, `label_intersection_only`), which this index is not.",
+  "[[n_footnoted ? {n_footnoted:Word} test{n_footnoted:s} did not pass on every arm: {footnoted_text}. | Every test passed on every arm it was exercised on.]] [[gate_judged ? [[n_footnoted_gate_blocking ? [[footnoted_all_gate_blocking ? Each of the chapter's {n_footnoted} footnoted test{n_footnoted:s} blocks | {n_footnoted_gate_blocking} of the chapter's {n_footnoted} footnoted test{n_footnoted:s} block]] the deploy gate on a gated arm (I.1, appendix F). | None of the chapter's tests blocks the deploy gate.]] | The deploy gate was not judged for this run (I.1).]]"
+ ],
  "intro": [
-  "(chapter prose: to be written)"
+  "A pattern longer than k is searched in scope `long` (SPEC-pattern-search section 7.7): each orientation anchors on its own window of k bases (P's first k for `forward`, the reverse complement's first k for `reverse`), the anchors are counted (`counts.anchors`) and, without an opt-in, nothing more is done: `counts.paths` is `unknown`, the list withheld with `paths_later_increment` and the entry carries that note (the answer of `long_search: anchors`, the field's default). With `long_search: paths` (section 12.1) the extension is admitted when the anchors are `exact` and at most `max_anchors` (the host's default 1,000) and extends every anchor base by base along the graph's edges, depth first, keeping the bases the pattern allows: every complete walk of L - k + 1 k-mers is a *path*, released when the paths are `exact` and at most `max_paths` (1,024 on this host) in `all_or_count`, the first `max_paths` in `partial`; a path need not lie in one record. `counts.paths.extension` says what the extension did (`completed`, `no_anchors`, `stopped`, `not_started`, `not_admitted`). The stops gain the phase `extension` and the reason `max_memory`: the walks the extension keeps for the release, and without labels each path's result object, are charged to the request's memory account (`max_memory_mb`, section 12.1), and a walk that does not fit stops the extension, `partial` releasing the walks kept before it (`cut` `max_memory`).",
+  "With `output.labels: all` each released path lists the labels on every one of its k-mers, each with its support (section 12.1): `label_intersection` (the label annotates every k-mer; nothing says one record holds the walk) or `record_verified` (one record of the label holds the whole path at consecutive coordinates, placed as an occurrence over the L bases); `require_support: record_verified` lists the verified labels only. A *supported path* (`long_search: supported_paths`, section 20) is a walk some label supports along its whole length, found by a search that carries the support of each branch and prunes a branch whose support runs out, at the `record_verified` level on this index (`supported_paths_level` `best`) or at `label_intersection` on request; its count is `counts.supported_paths`, its rows are read in every mode under `max_annotation_work`, the memory account and the deadline, and a predicate (section 20.9) selects among the supported walks on the support they carry (`predicate_strands` `context`: the walk as spelled, no mirror read). An exact pattern that sdust flags over its whole text carries the note `low_complexity_pattern`, stated beside a completed search or a threshold stop and never beside a budget stop of the search (section 7.8).",
+  "Ground truth: windows of 32 to 2,000 bases cut from the records of I.2 as chapter P cuts them (A, C, G, T only, unique on both strands of the fetched span, a DUST score below 2.0 over their first 64 bases; the long windows below 3.0), so that the record's own path is known: the window's bases on strand `+` as one walk of L - k + 1 k-mers, `instance` equal to `sequence` and `offset` 0 (`path_spells`), verified by the record's taxid at the window's 1-based coordinates (`path_record_verified`). Whether other walks of the graph spell the window (a mosaic through a repeat two records share) is not modelled: the path count is bounded below by one. The homopolymers A^60, T^100 and A^100000 are not record windows: a homopolymer is a self-loop of the graph, one k-mer with an edge to itself, so its path is that node repeated. Every request names `mode`, `max_contexts` 10,000 and `time_budget_ms` 60,000 and the host's defaults as in chapter P; the supported-path requests name `max_paths` 1,024, the service's ceiling and the host's cap. Via MCP (`pattern_search`) a pattern longer than k without `long_search` is refused at submit (the anchors-only answer is not expressible), a pattern above 1,000 characters is refused whatever `long_search` says, `max_annotation_work` and `max_memory_mb` have no argument, a cap of 0 is refused, and the strand words are mapped by the runner; `max_paths` is always sent (the host's cap when the request names none). Each by-design cell names its case; appendix B gives the service's code and text."
  ],
  "families": {
   "L-paths": {
    "title": "paths",
-   "prose": "(family prose: to be written)"
+   "prose": "Windows of 32, 40, 60, 100 and 200 bases of 15 records, three per length (32 bp: sau, hvo, pfa; 40 bp: cel, mtb, mpn; 60 bp: cal, drem, hiv1; 100 bp: cje, sso, ath; 200 bp: lam, sco, ser), with `long_search: paths` in `all_or_count`: a path spells the window on strand `+` with `instance` equal to its `sequence`, `offset` 0 and L - k + 1 nodes (`path_spells`); the path count is `exact` and at least 1 (`count_relation`); `extension` `completed` and `scope` `long` (`entry_fields`). 32 bp is the shortest pattern longer than k, one base of extension beyond the anchor. The rows group the tests by length and the record changes with it: correctness controls across lengths and records, not a runtime-versus-length benchmark. [[n_footnoted ? In this run {n_footnoted} test{n_footnoted:s} did not pass on every arm: {footnoted_text}; the detail block{n_footnoted:s} follow{n_footnoted:v} the table. | In this run every test passed on every arm.]]",
+   "claim": "a window longer than k is spelled by a path of the graph, the extension completed"
   },
   "L-verified": {
    "title": "record-verified",
-   "prose": "(family prose: to be written)"
+   "prose": "Windows of 40, 60 and 100 bp of six records with few relatives in RefSeq (buc, mge, mpn, ser, mja, sso), with `long_search: paths`, `output.labels: all` and `require_support: record_verified`: the path spelling the window lists the record's taxid with support `record_verified` and an occurrence of the record at the window's 1-based coordinates on `+`, every occurrence of that label inside its record (`path_record_verified`). This is the verification of section 12.1, the chains of consecutive coordinates placed record by record, read from the answer; the check never reads a label the answer does not list.",
+   "claim": "a record verifies its own path at the window's coordinates"
   },
   "L-supported": {
    "title": "supported paths",
-   "prose": "(family prose: to be written)"
+   "prose": "Eight windows of 40, 60, 100 and 200 bp (mtb, buc, hvo, scem; hsam, lam, bsu, cje) searched as supported paths with a predicate `any` of the record's taxid (`predicate_only`, `predicate_strands` `context`, `max_paths` 1,024): the record's path is among the selected supported paths, verified by the taxid at the window's coordinates, and `counts.supported_paths` is at least 1; and two 60 bp windows at the `label_intersection` level (`supported_paths_level`): the record's path spelled and the level echoed in the counts. The search reads the annotation in every mode, so these are also the chapter's tests of the row reads under the account and the work budget. The rows group the tests by level and length.",
+   "claim": "the record's walk is a supported path at both levels, selected by the record's taxid"
   },
   "L-anchors": {
    "title": "anchors",
-   "prose": "(family prose: to be written)"
+   "prose": "Three 45 bp windows without `long_search` (the default `anchors`): `counts.anchors` exact and at least 1, `counts.paths` `unknown`, the list withheld `paths_later_increment` and the note stated (section 7.7). Via MCP the service refuses a pattern longer than k without `long_search` at submit, so the anchors-only answer is by design not shown there (appendix B).",
+   "claim": "without an opt-in a long pattern is answered by its anchors only, the paths unknown and withheld"
   },
   "L-caps": {
    "title": "caps",
-   "prose": "(family prose: to be written)"
+   "prose": "On a 50 bp window of H. volcanii: `partial` with `max_paths` 0 (nothing returned, `cut` `max_paths`); `all_or_count` with `max_paths` 0 (`withheld` `count_above_threshold`); `supported_paths` with `max_annotation_work` 10 (the search's reads stop: `stop` in the phase `extension` with the reason `max_annotation_work`, `withheld` `annotation_budget`), and the same in `partial` (`cut` `max_annotation_work`). Via MCP a cap of 0 is refused at submit and `max_annotation_work` has no argument (appendix B).",
+   "claim": "max_paths and max_annotation_work stop, cut or withhold exactly as stated"
   },
   "L-memory": {
    "title": "memory",
-   "prose": "(family prose: to be written)"
+   "prose": "A^100000 with `long_search: paths` in `partial` under `max_memory_mb` 1: one self-loop whose single path has L - k + 1 nodes, which the walks the extension keeps for the release, or the result object built from them, do not fit in one megabyte, so the answer states a stop in the phase `extension` or `output` with the reason `max_memory`, the list cut `max_memory`, and the note `low_complexity_pattern` absent beside a budget stop of the search (sections 7.8 and 12.1). Timing class slow. Not exercised via MCP: the tool has no `max_memory_mb` argument (see B), so no MCP call reaches the host before the direct arms[[n_cold_dl ? ({n_cold_dl} host-cold direct-local execution{n_cold_dl:s} in this run)]].",
+   "claim": "the memory account stops a path search and says so"
   },
   "L-long": {
    "title": "long windows",
-   "prose": "(family prose: to be written)"
+   "prose": "Two units. L-long-length: windows of 500 bp (buc, hvo), 1,000 bp (mja) and 2,000 bp (cal) with paths, drawn with the DUST threshold raised to 3.0, the marker-gene lengths of the verification: the record's path is listed and the path count is exact and at least 1. L-long-other: 100 bp of M. pneumoniae as its reverse complement with `strands` `reverse`, the record's path listed as `-` (the check `path_spells` on `-` is manifest v5's; v4 checked the count alone); a 60 bp IUPAC pattern of S. solfataricus with three two-base codes at positions 10, 30 and 50 with paths, the record's own `+` path among them (v5 adds `path_spells` on `+`); and A^60 with paths and `max_anchors` 1: an exact anchor window is one k-mer per orientation, so its anchors are A^31 on `+` and T^31 on `-`, exactly 2, above the threshold, and the extension is not admitted (`withheld` `anchors_above_threshold`, `extension` `not_admitted`; code-derived). Via MCP the 2,000 bp window is refused at submit, above the service's 1,000 characters (appendix B).",
+   "claim": "long windows, the reverse strand, IUPAC codes and the anchor threshold behave as section 12.1 states"
   },
   "L-repeat": {
    "title": "homopolymers",
-   "prose": "(family prose: to be written)"
+   "prose": "A^60 and T^100 with paths: the note `low_complexity_pattern` stated (sdust flags the whole text; the search completed, no budget stop) and the path count exact and at least 1, the self-loop's path.",
+   "claim": "a homopolymer carries the low-complexity note and its self-loop path"
   }
  },
  "units": {
-  "L-paths": "long_search paths on a 32-200 bp window of the record: a path spells it.",
-  "L-verified": "paths with labels and require_support record_verified: the record's path is verified.",
-  "L-supported": "Supported paths selected by the taxid predicate, and at the label_intersection level: the record verified.",
-  "L-anchors": "A 45 bp pattern without long_search: anchors counted, paths withheld.",
-  "L-caps": "max_paths 0 cuts (partial) or withholds (all_or_count); max_annotation_work 10 stops or cuts the search.",
-  "L-memory": "A 100 kb homopolymer on a self-loop with max_memory_mb 1 stops on {extension, max_memory}.",
-  "L-long-length": "A 500-2000 bp window with paths: exactly one path spells it.",
-  "L-long-other": "A reverse-complement window under strands reverse is the record's path as '-'; a 60 bp IUPAC pattern's paths hold the record's; A^60 with max_anchors 1 lists its two anchors and admits no extension.",
-  "L-repeat": "A homopolymer of 60 / 100 with paths carries the low_complexity_pattern note."
+  "L-paths": {
+   "property": "A 32 to 200 bp window of the record with long_search paths: a path spells it on + (instance equal to sequence, offset 0, L - k + 1 nodes), the path count exact and at least 1, the extension completed.",
+   "note": "The rows group the tests by length; the record changes with the length: correctness controls across lengths and records, not a runtime-versus-length benchmark (latency varies across records; these controls do not isolate the effect of window length)."
+  },
+  "L-verified": "paths with labels all and require_support record_verified: the record's taxid carries the path spelling the window with support record_verified and an occurrence at the window's 1-based coordinates on +.",
+  "L-supported": "Supported paths selected by a predicate any of the record's taxid (predicate_only): the record's path among them, verified by the taxid, counts.supported_paths at least 1; at the label_intersection level the record's path spelled and the level echoed.",
+  "L-anchors": "A 45 bp pattern without long_search: the anchors counted exact (at least 1), the paths unknown, the list withheld paths_later_increment with the note.",
+  "L-caps": "max_paths 0 cuts (partial, cut max_paths) or withholds (all_or_count, count_above_threshold); max_annotation_work 10 stops a supported-path search (stop extension / max_annotation_work: withheld annotation_budget, or cut max_annotation_work in partial).",
+  "L-memory": "A^100000 on a self-loop with paths and max_memory_mb 1 in partial: a stop in the phase extension or output with the reason max_memory, the list cut max_memory, no low-complexity note beside the budget stop.",
+  "L-long-length": "A 500 to 2,000 bp window with paths: the record's path listed, the path count exact and at least 1.",
+  "L-long-other": "A reverse-complement window under strands reverse is the record's path as - (v5: path_spells on -); a 60 bp IUPAC pattern's paths hold the record's + path; A^60 with max_anchors 1 counts its two anchors (A^31, T^31) exactly and admits no extension (anchors_above_threshold).",
+  "L-repeat": "A homopolymer of 60 or 100 with paths carries the note low_complexity_pattern and its path count is exact and at least 1."
  },
- "checks": {
-  "notes": "(check prose: to be written)",
-  "path_record_verified": "(check prose: to be written)",
-  "path_spells": "(check prose: to be written)"
- }
+ "mcp_notes": {
+  "units": {
+   "L-memory": "Not exercised via MCP: the `pattern_search` tool has no `max_memory_mb` argument; see B."
+  }
+ },
+ "checks": {},
+ "coverage_gap_families": []
 }

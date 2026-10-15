@@ -3950,6 +3950,29 @@ re-run as timing evidence. The prose round for v5 must cover, besides the two ne
 `coverage_gap`, the R-budget family prose and unit line and `mcp_notes.units.R-budget`, which assume v4's figures
 (10 kb under 3,000 / 8,000 ms, the full twins at 20 s, the continuation from base 5,000).
 
+The full document (2026-10-15): the nine other chapters' prose (T, P, L, X, M, Q, C, N, D) follows chapter R's rules
+exactly (a chapter page that leads with its conclusion and its coverage gap, family prose plus one property line per
+unit, every run figure a placeholder or a conditional on computed facts, no timing cause the run does not isolate,
+"ok" only for what was tested, a catalogue entry for every check kind and a short reason for every by-design case
+named), written for the union of the v4 and the v5 mapping with `[[manifest_version = 5 ? ... | ...]]` for a sentence
+true in one manifest alone. The facts their prose reads beyond chapter R's (`doc/facts.py`): `manifest_version` at
+every level; per arm the first execution's `time_limited` text and its checks by name
+(`x[<sid>][dl][checks][walk_in_record][detail]`); the time limitations that left a 200 inconclusive, in the three
+readings the chapters use (chapter T's time cuts of a walk, `n_time_cut_tests`, `time_cut_ids`, `time_cut_text`,
+and the tests no arm showed the property on; chapter N's and Q's `n_time_limited` / `time_limited_text`; chapter M's
+/pattern lists the deadline withheld, `n_time_limited_200_tests` / `time_limited_200_ids`); `direct_all_pass`; and at
+the chapter level `unit[<unit id>][...]`, a unit's own counts (chapter M's substituted residues apart from the cap
+slot of the same family). A 200 a time limitation touched but that passed is not counted: the claim it carries was
+shown. `tests/test_doc.py` covers every chapter: no placeholder, no literal run figure, no banned timing wording;
+every placeholder and flag resolvable on the v4 and the v5 mapping (a scenario named outside a family one mapping
+alone holds is one both manifests hold); every chapter's prose rendered on the fake run prints none of the v4
+figures; chapters M and T, like R, rendered on two fixtures whose data differ change their conclusions, their coverage
+gaps and their family prose (`FullDocumentTest`); every check kind of both manifests in the catalogue, every by-design
+case named with its short reason. A check kind without an `expect_text` formatter prints `name(args)` with break
+opportunities after ( , = _ (`blocks._generic`), so the expectation column of a list table wraps instead of running
+into the next column. The 164-page v4 document (every chapter, the replayed d1e040aa by-design table, two builds
+byte-identical) is at `~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4/` with its NOTES.md.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

@@ -11,6 +11,14 @@ text when false]]`, `[[!flag ? ...]]`, `[[x[R-edge-0003][mcp][class] = refused_b
 resolved innermost first; the texts may hold placeholders; the false text is optional. A placeholder or flag the
 values lack stays visible (`{name}`, `(UNRESOLVED CONDITION name)`) and is reported, never silently dropped.
 
+The full document (the chapters T..D, 2026-10-15) adds: `manifest_version` at every level; per arm the first
+execution's `time_limited` text and its `checks` by name ({outcome, detail, evidence}); the time limitations that
+left an execution inconclusive, in three readings the chapters' prose uses (_time_limitations): the time cuts of a
+walk (`n_time_cut_tests`, `time_cut_ids`, `time_cut_text`, `n_time_cut_untested_tests`, `time_cut_untested_ids`),
+every such 200 (`n_time_limited`, `n_time_limited_tests`, `time_limited_ids`, `time_limited_text`) and the /pattern
+ones (`n_time_limited_200`, `n_time_limited_200_tests`, `time_limited_200_ids`, `time_limited_200_text`);
+`direct_all_pass`; and at the chapter level `unit` (every unit's unit_facts, read as `unit[<unit id>][...]`).
+
 Every value is plain text (the prose is escaped afterwards; the inline markup `code` and *emphasis* is allowed),
 a number or a bool; the ids are scenario ids as recorded.
 """
@@ -285,14 +293,17 @@ def arm_facts(ctx, sid, arm):
     """The facts of one arm of a scenario: {standing, pass, present, wall, walls, wall_cold, wall_warm, server,
     backend, http, code, host, host_word (the first execution's host-cache state in words: host-warm, host-cold,
     warm after an interrupted execution), late, phrase, phrase_cold, phrase_warm, detail (the first property check's
-    detail of the first execution), evidence (its clause before the explanation), class, class_word, clean}."""
+    detail of the first execution), evidence (its clause before the explanation), class, class_word, clean,
+    time_limited (the first execution's time limitation as the runner recorded it, '' when none), checks (the first
+    execution's checks by name: {outcome, detail, evidence})}."""
     run = ctx.run
     st = ctx.state(sid)[arm]
     f = {"standing": STANDING_WORD.get(st.glyph_key, str(st.glyph_key)) if st.present else "no execution",
          "pass": bool(st.present and st.glyph_key == "pass"), "present": bool(st.present),
          "wall": "–", "walls": "–", "wall_cold": "–", "wall_warm": "–", "server": "–", "backend": "–",
          "http": "", "code": "", "host": "", "host_word": "", "late": "", "phrase": "", "phrase_cold": "",
-         "phrase_warm": "", "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean)}
+         "phrase_warm": "", "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean),
+         "time_limited": "", "checks": {}}
     if not st.present:
         f["phrase"] = "no execution recorded although the run planned one" if st.missing_planned else "no execution"
         return f
@@ -320,6 +331,12 @@ def arm_facts(ctx, sid, arm):
     lates = [x for x in lates if x is not None]
     if lates:
         f["late"] = fmt_t(max(lates))
+    f["time_limited"] = str(first.get("time_limited") or "")
+    for c in first.get("checks") or []:
+        if isinstance(c, dict) and c.get("check") and c["check"] not in f["checks"]:
+            f["checks"][c["check"]] = {"outcome": str(c.get("outcome") or ""),
+                                       "detail": blocks._balanced(_cut(c.get("detail"), 400)),
+                                       "evidence": _clause(c.get("detail"), 200)}
     props = [c for c in (first.get("checks") or []) if isinstance(c, dict)
              and (c.get("property") is True or (c.get("property") is None and run.is_property(c.get("check"))))]
     if props:
@@ -521,6 +538,74 @@ def _stops(ctx, sids):
     return {"n_stopped": len(per), "stop_observed": bool(per), "stop_observed_text": "; ".join(per)}
 
 
+_TIME_CUT_WORDS = ("time budget", "time_budget", "attempt")
+
+
+def _arm_repeat(run, sid, arm, line):
+    """'direct-local', or 'direct-local r1' where the arm recorded more than one execution of the scenario."""
+    if len(run.arm_lines(sid, arm)) > 1:
+        return "%s r%s" % (arm, line.get("repeat"))
+    return arm
+
+
+def _time_limitations(ctx, sids):
+    """The 200s a time limitation left inconclusive (an execution answered 200, outcome inconclusive, whose
+    `time_limited` is non-empty: a /pattern entry withheld or cut by its deadline, a seed stopped by its time budget
+    or its attempt's bound, a resolve stopped by time); a 200 that passed although limited is not counted, since the
+    claim it carries was shown. Three readings: every such execution ({n_time_limited, n_time_limited_tests,
+    time_limited_ids, time_limited_text: 'sid on arm (the limitation)'}); the /pattern ones, whose limitation names a
+    pattern ({n_time_limited_200, n_time_limited_200_tests, time_limited_200_ids, time_limited_200_text: 'sid wall on
+    arm'}); and the time cuts of a walk, whose limitation names a time budget or the attempt's bound
+    ({n_time_cut_tests, time_cut_ids, time_cut_text: 'sid on arm r<n>: the walk check's detail', and of those the
+    tests no arm passed, n_time_cut_untested_tests and time_cut_untested_ids: the walk property rests on no evidence
+    from the run})."""
+    run = ctx.run
+    all_ids, all_per, pat_ids, pat_per, pat_n, cut_ids, cut_per, untested = [], [], [], [], 0, [], [], []
+    for sid in sids:
+        items, pat_items, cut_items = [], [], []
+        for arm in ARMS:
+            for l in run.arm_lines(sid, arm):
+                tl = str(l.get("time_limited") or "")
+                if not tl or l.get("http") != 200 or l.get("outcome") != "inconclusive":
+                    continue
+                where = _arm_repeat(run, sid, arm, l)
+                items.append((where, tl))
+                if "pattern" in tl:
+                    pat_items.append("%s on %s" % (fmt_t(l.get("wall_ms")), where))
+                if any(w in tl for w in _TIME_CUT_WORDS):
+                    checks = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
+                    walk = next((c for c in checks if c.get("check") in ("walk_in_record", "walk_end")),
+                                checks[0] if checks else None)
+                    cut_items.append("on %s r%s: %s" % (arm, l.get("repeat"), blocks._balanced(_cut(
+                        walk.get("detail"), 200)) if walk else tl))
+        if items:
+            all_ids.append(sid)
+            by_text = {}
+            for where, tl in items:
+                by_text.setdefault(tl, []).append(where)
+            all_per.append("; ".join("%s on %s (%s)" % (sid, _join(wheres), tl) for tl, wheres in by_text.items()))
+        if pat_items:
+            pat_ids.append(sid)
+            pat_n += len(pat_items)
+            pat_per.append("%s %s" % (sid, _join(pat_items)))
+        if cut_items:
+            cut_ids.append(sid)
+            cut_per.append("%s %s" % (sid, _join(cut_items)))
+            if not any(ctx.state(sid)[arm].present and ctx.state(sid)[arm].glyph_key == "pass" for arm in ARMS):
+                untested.append(sid)
+    n_all = 0
+    for sid in all_ids:
+        for arm in ARMS:
+            n_all += sum(1 for l in run.arm_lines(sid, arm) if str(l.get("time_limited") or "") and l.get("http") == 200
+                         and l.get("outcome") == "inconclusive")
+    return {"n_time_limited": n_all, "n_time_limited_tests": len(all_ids), "time_limited_ids": ", ".join(all_ids),
+            "time_limited_text": "; ".join(all_per),
+            "n_time_limited_200": pat_n, "n_time_limited_200_tests": len(pat_ids),
+            "time_limited_200_ids": ", ".join(pat_ids), "time_limited_200_text": "; ".join(pat_per),
+            "n_time_cut_tests": len(cut_ids), "time_cut_ids": ", ".join(cut_ids), "time_cut_text": "; ".join(cut_per),
+            "n_time_cut_untested_tests": len(untested), "time_cut_untested_ids": ", ".join(untested)}
+
+
 def _relations(ctx, rids):
     """The relations' outcomes per arm: rel[rid][dl|dr|mcp], the counts per arm and outcome, and a text that
     groups the relations by their outcome pattern."""
@@ -629,16 +714,31 @@ def _mcp_class_values(x, members):
     return v
 
 
-def unit_facts(ctx, uid):
-    """A unit's values for the line under its table (`mcp_notes.units`): n_tests, the members' facts under `x`,
-    the counts by standing and the MCP classes over its members, as family_facts computes them for a family."""
+def unit_facts(ctx, uid, x=None):
+    """A unit's values for the line under its table (`mcp_notes.units`) and for the chapter prose's `unit[<id>]`:
+    n_tests, the members' facts under `x` (the scenario facts already computed may be passed), the counts by
+    standing, the MCP classes and the time limitations over its members, as family_facts computes them for a
+    family, `direct_all_pass` and `manifest_version`."""
     u = ctx.units.units.get(uid) or {}
     members = list(u.get("members") or [])
-    x = dict((sid, scenario_facts(ctx, sid)) for sid in members)
+    x = dict((sid, (x or {}).get(sid) or scenario_facts(ctx, sid)) for sid in members)
     v = {"id": uid, "n_tests": len(members), "members": ", ".join(members), "x": x}
     v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
+    v.update(_time_limitations(ctx, members))
+    v["n_direct_pass_both"] = _direct_pass_both(x, members)
+    v["direct_all_pass"] = bool(members) and v["n_direct_pass_both"] == len(members)
+    v["manifest_version"] = _manifest_version(ctx)
     return v
+
+
+def _manifest_version(ctx):
+    return (ctx.run.manifest or {}).get("manifest_version")
+
+
+def _direct_pass_both(x, members):
+    """The members that pass on direct-local and on direct-remote where an execution exists."""
+    return sum(1 for sid in members if x[sid]["dl"]["pass"] and (x[sid]["dr"]["pass"] or not x[sid]["dr"]["present"]))
 
 
 def family_facts(ctx, fid):
@@ -646,8 +746,9 @@ def family_facts(ctx, fid):
     the MCP classes as the cells derive them (`n_mcp_<class>`, `mcp_<class>_ids`, `mcp_<class>_variants`,
     `mcp_<class>_codes`, `mcp_classes_text`, `mcp_all_refused_before_host`), the clean and footnoted members with
     their phrases (`clean_text`, `footnoted_text`), every member's phrase, the findings, the 503 deadlines past
-    their budgets, the stated stops, the relations, the owner's declared exemptions, the expected runs, the gate's
-    outcome problems among the members, and `x` (the members' scenario facts)."""
+    their budgets, the stated stops, the time limitations (_time_limitations), the relations, the owner's declared
+    exemptions, the expected runs, the gate's outcome problems among the members, `direct_all_pass`,
+    `manifest_version` and `x` (the members' scenario facts)."""
     f = ctx.units.families.get(fid) or {}
     members = [sid for uid in f.get("units") or [] for sid in ctx.units.units[uid]["members"]]
     rids = [rid for uid in f.get("units") or [] for rid in (ctx.units.units[uid].get("relations") or [])]
@@ -667,14 +768,16 @@ def family_facts(ctx, fid):
     v["clean_ids"] = ", ".join(clean)
     v["clean_text"] = "; ".join(_members_phrase(x[sid]) for sid in clean)
     v["members_text"] = "; ".join(_members_phrase(x[sid]) for sid in members)
-    v["n_direct_pass_both"] = sum(1 for sid in members if x[sid]["dl"]["pass"]
-                                  and (x[sid]["dr"]["pass"] or not x[sid]["dr"]["present"]))
+    v["n_direct_pass_both"] = _direct_pass_both(x, members)
+    v["direct_all_pass"] = bool(members) and v["n_direct_pass_both"] == len(members)
+    v["manifest_version"] = _manifest_version(ctx)
     v["direct_failed"] = any(x[sid][k]["standing"] in ("fail", "error", "other") for sid in members for k in ("dl", "dr")) \
         or any(ctx.state(sid)["direct-remote"].ne for sid in members)
     n_exec, n_tests, text = _findings(ctx, members)
     v["n_finding_executions"], v["n_finding_tests"], v["findings_text"] = n_exec, n_tests, text
     v.update(_late503(ctx, members))
     v.update(_stops(ctx, members))
+    v.update(_time_limitations(ctx, members))
     v.update(_cold_counts(ctx, members))
     v.update(_relations(ctx, rids))
     v.update(_declared(ctx, members, rids))
@@ -724,8 +827,9 @@ def _claims(ctx, ch, fam):
 
 def chapter_facts(ctx, ch):
     """A chapter's values for its `summary` and `coverage_gap` prose: the counts by standing and by agreement, the
-    timing of the summary's sources, the findings, the claims held and unsupported, the footnoted tests, the gate,
-    `fam` (every family's values) and `x` (every scenario's facts)."""
+    timing of the summary's sources, the findings, the time limitations, the claims held and unsupported, the
+    footnoted tests, the gate, `fam` (every family's values), `unit` (every unit's values) and `x` (every scenario's
+    facts)."""
     run = ctx.run
     fams = ctx.units.chapter_families(ch)
     sids = ctx.units.chapter_scenarios(ch)
@@ -739,7 +843,11 @@ def chapter_facts(ctx, ch):
     for fid in fams:
         x.update(fam[fid]["x"])
     v["x"] = x
+    v["unit"] = dict((uid, unit_facts(ctx, uid, x)) for fid in fams for uid in ctx.units.families[fid]["units"])
     v.update(_standing_counts(ctx, sids))
+    v["n_direct_pass_both"] = _direct_pass_both(x, sids)
+    v["direct_all_pass"] = bool(sids) and v["n_direct_pass_both"] == len(sids)
+    v["manifest_version"] = _manifest_version(ctx)
     # the agreement classes, as the chapter's summary block counts them
     direct, mcp = {}, {}
     full, verified, unverified = 0, 0, 0
@@ -814,6 +922,7 @@ def chapter_facts(ctx, ch):
         l.get("http") == 200 and l.get("outcome") == "finding" for sid in sids for arm in ARMS for l in run.arm_lines(sid, arm))
     v.update(_late503(ctx, sids))
     v.update(_stops(ctx, sids))
+    v.update(_time_limitations(ctx, sids))
     # the timing, from the summary's own figures (the chapter's summary block reads the same)
     timing = (run.summary().get("timing") or {}).get(ch) or {}
     for arm in ARMS:

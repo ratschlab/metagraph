@@ -1,57 +1,124 @@
 {
+ "_about": "Chapter M (bounded mismatches) of the suite results document: the prose data of DESIGN-DOC.md section 5 in R.json's format, written for the union of manifest v4 (doc/units/suite_v4.json) and manifest v5 (the same 62 scenarios, 9 families and 10 units; v5 adds the property-level `exposes` lists and the smoke-v5 tags, nothing the prose names). `summary` and `coverage_gap` are printed first on the chapter page, `intro` follows; `families` keys on the family id with a title, one paragraph and a `claim`; `units` on the unit id with its one-line property; no unit's MCP column is wholly not exercised. EVERY FIGURE OF THE RUN IS A PLACEHOLDER the generator fills from the record (doc/facts.py; the chapter's `unit[<unit>]` values and the `n_time_limited_200` family of values are listed in NEEDED-FACTS.md beside this file) and every sentence whose truth depends on the run is a conditional `[[flag ? when true | when false]]`. The literal numbers are constants of SPEC-pattern-search.md section 21, of the manifest (lengths, allowances, caps, the builder's chance model) and of the service, each listed under `_assumes` with its source. Every claim follows SPEC-pattern-search.md sections 21 and 27, areas.py gen_M, checks.py and service_by_design.json as of 14245fb49. No timing sentence names a cause the run does not isolate; the cost statements are the SPEC's own (section 21.10), cited as such.",
+ "_assumes": {
+  "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest (lengths, allowances, caps, the chance model), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
+  "0": "level 0 and max_mismatches 0, the field's absence (SPEC sections 21.2, 21.4, 21.15); the cap 0 of a pattern longer than k (SPEC section 21.16); max_mismatches_within_floor 0 (manifest M-floor-0002)",
+  "1": "max_mismatches 1 and level 1 (manifest); the protein cap of 1 on staging (SPEC section 21; host capabilities mismatches.max.protein); 15 bases at 1 substitution (SPEC section 21.5); max_mismatches_within_floor 1 (manifest M-floor-0001); -1 (manifest M-refusal-0002); the string 1 (manifest M-refusal-0004); k - L + 1 record contexts (checks.source_contexts); at least 1 (manifest M-order-0002)",
+  "1.5": "max_mismatches 1.5 (manifest M-refusal-0003)",
+  "2": "max_mismatches 2 and level 2 (manifest); 2 substitutions (manifest M-planted, M-below); max_mismatches_within_floor 2 (manifest M-floor-0003); 18 bases at 2 substitutions (SPEC section 21.5)",
+  "3": "the contract's maximum of 3 substitutions and staging's dna and iupac cap (SPEC sections 21.1 and 21.12); 3 substitutions (manifest M-planted, M-below); three IUPAC positions (manifest M-iupac); 20 bases at 3 substitutions (SPEC section 21.5); three windows per allowance (manifest M-planted)",
+  "4": "max_mismatches 4 (manifest M-refusal-0001); four reverse windows (manifest M-planted-0019 to -0022)",
+  "5": "max_contexts 5 (manifest M-order-0001)",
+  "7": "the record's 7 contexts of a 25-mer (manifest M-refusal-0010, -0011)",
+  "12": "the record's 12 level-0 contexts of a 20-mer, k - L + 1 (manifest M-order-0001)",
+  "14": "the 14-mer (manifest M-floor-0002)",
+  "15": "15 bases, the shortest exact pattern at 1 substitution (SPEC section 21.5)",
+  "17": "the 17-mer (manifest M-floor-0001)",
+  "18": "the 18-mer (manifest M-suffix); 18 bases at 2 substitutions (SPEC section 21.5)",
+  "19": "the 19-mer (manifest M-floor-0003)",
+  "20": "the 20-mer (manifest M-planted, M-order-0001); 20 bases at 3 substitutions (SPEC section 21.5)",
+  "24": "the floor of 24 bits (SPEC section 21.5; host capabilities min_information_bits)",
+  "24.0": "the floor's value in the slot message (manifest M-floor)",
+  "25": "the 25-mer (manifest)",
+  "31": "the 31-mer (manifest); k",
+  "40": "the 40-mer (manifest M-refusal-0010, -0011)",
+  "58": "about 58 codons a substituted residue admits (SPEC section 21.10)",
+  "11": "table 11 (manifest M-protein)",
+  "200": "http 200 (SPEC)",
+  "400": "http 400 (SPEC section 6)",
+  "503": "http 503 deadline (SPEC section 7.6)",
+  "626": "626 billion k-mers of refseq33m, the builder's chance model (areas.py REFSEQ33M_KMERS)",
+  "700": "about 700 steps at 1 substitution on refseq33m (SPEC section 21.10)",
+  "1,000": "the builder's target of chance contexts, a tenth of max_contexts (areas.py MM_CONTEXTS_TARGET)",
+  "1,500": "max_steps 1,500 (manifest M-order-0002, -0003)",
+  "10,000": "max_contexts 10,000 (manifest_lib.PATTERN_MAX_CONTEXTS)",
+  "14,000": "about 14,000 steps at 2 substitutions on refseq33m (SPEC section 21.10)",
+  "60,000": "time_budget_ms 60,000 (manifest_lib.PATTERN_TIME_BUDGET_MS)",
+  "200,000": "about 200,000 steps at 3 substitutions on refseq33m (SPEC section 21.10)"
+ },
  "chapter": "M",
  "title": "Mismatches",
+ "summary": [
+  "*What held.* [[direct_clean ? On the direct arms every property this chapter asks of `max_mismatches` held wherever the host answered in time: {n_pass_dl} of the {n_tests} tests pass on direct-local and {n_pass_dr} on direct-remote, with no failure, no error and no disagreement between arms ({direct_agreement_text}). | On the direct arms {n_pass_dl} of the {n_tests} tests pass on direct-local and {n_pass_dr} on direct-remote; on {n_direct_failed_tests} test{n_direct_failed_tests:s} a direct arm failed, errored or disagreed with the other ({direct_agreement_text}; the list is in I.1).]] [[claims_held ? Shown: {claims_held}.]] [[claims_unsupported ? Not shown: {claims_unsupported}.]] [[no_200_over_budget ? No 200 exceeded its budget. | A 200 exceeded its budget (a finding: I.1).]] [[n_inconclusive_dl ? {n_inconclusive_dl:Word} test{n_inconclusive_dl:s} read{n_inconclusive_dl:v} inconclusive on direct-local and {n_inconclusive_dr:word} on direct-remote[[n_late503_tests ?; {n_late503_tests:word} test{n_late503_tests:s} answered 503 deadline ({late503_ids}: allowed and inconclusive, a finding only beyond max(1 s, the budget))]][[n_time_limited_200_tests ?, and {n_time_limited_200_tests:word} test{n_time_limited_200_tests:s} answered a 200 whose list the deadline withheld on at least one arm ({time_limited_200_ids})]]; the coverage gap below and the detail blocks say where.]] Via MCP {n_mcp_agree} pair{n_mcp_agree:s} agree{n_mcp_agree:v}[[mcp_all_full ?, all fully checked | ({n_mcp_full} fully checked)]][[n_mcp_full_fewer_repeats ?, {n_mcp_full_fewer_repeats:word} of them over fewer repeats than recorded ({mcp_full_fewer_repeats_text})]][[n_mcp_by_design ?, and the {n_mcp_by_design} by-design pair{n_mcp_by_design:s} matched the service's table[[!mcp_by_design_all_verified ? ({n_mcp_by_design_unverified} unverified)]]]][[n_mcp_disagree ?; {n_mcp_disagree} pair{n_mcp_disagree:s} DISAGREE (I.1)]][[n_mcp_not_exercised ?; {n_mcp_not_exercised} test{n_mcp_not_exercised:s} could not be exercised through the tools (a known limit: {mcp_not_exercised_by_family}; I.4 and appendix B) | ; every test was exercised through the tools]].",
+  "*Timing.* Host-warm, a search with substitutions answers in {wall_p50_warm_dl} at the median on direct-local (n {n_warm_dl}) and {wall_p50_warm_dr} on direct-remote (n {n_warm_dr})[[n_warm_mcp ?, and in {wall_p50_warm_mcp} via MCP (n {n_warm_mcp}), of which the host call is {backend_p50_warm_mcp} at the median (n {n_backend_warm_mcp}) and the rest the service's submit, queue, terminal lag and paging]]; the server p50 is {server_p50_warm_dl} · {server_p50_warm_dr} · {server_p50_warm_mcp} (n {n_server_warm_dl} · {n_server_warm_dr} · {n_server_warm_mcp})[[n_cold_dl ?; the host-cold direct-local calls (n {n_cold_dl}: {cold_dl_families}) reach {wall_p90_cold_dl} at p90]]. The medians mix the refusals and the floor slots, answered without a search, with the level passes of the planted and the protein tests, which section 21.10 prices; the run does not isolate the allowance from the window and the host's load, and the per-arm p90 of the family summary lines is the figure to read for the planted tests. [[logan_caveat ? Every figure was taken under the Logan load (I.4).]]"
+ ],
+ "coverage_gap": [
+  "*What remains unsupported.* The planted substitutions at the largest allowance and the substituted residues are where the budget binds: a 503 deadline at the 60,000 ms budget, or a 200 whose list is withheld `deadline`, is allowed there and reads inconclusive (SPEC section 7.6), so the claim at level 3 and the residue claim rest on the tests that answered in time. [[fam[M-planted][n_inconclusive_dl] ? In this run {fam[M-planted][n_inconclusive_dl]} of the {fam[M-planted][n_tests]} M-planted tests read inconclusive on direct-local and {fam[M-planted][n_inconclusive_dr]} on direct-remote[[fam[M-planted][n_late503_tests] ? ({fam[M-planted][n_late503_tests]:word} by a 503 deadline: {fam[M-planted][late503_ids]})]][[fam[M-planted][n_time_limited_200_tests] ? ({fam[M-planted][n_time_limited_200_tests]:word} answered a 200 whose list was withheld on at least one arm: {fam[M-planted][time_limited_200_ids]})]]; the detail blocks follow the unit's table. | In this run every M-planted test was answered within its budget on the direct arms.]] [[unit[M-protein-level1][n_inconclusive_dl] ? Of the {unit[M-protein-level1][n_tests]} substituted residues {unit[M-protein-level1][n_inconclusive_dl]} read inconclusive on direct-local and {unit[M-protein-level1][n_inconclusive_dr]} on direct-remote[[unit[M-protein-level1][n_pass_dl] ?; {unit[M-protein-level1][n_pass_dl]} pass{unit[M-protein-level1][n_pass_dl]:v} there, so the residue claim rests on {unit[M-protein-level1][n_pass_dl]:word} of {unit[M-protein-level1][n_tests]:word} | ; no substituted residue was found at level 1 on direct-local, so the residue claim rests on no evidence from this host]]. | Every substituted residue was found within its budget on the direct arms.]] SPEC section 21.10 states the cost of the level passes and of a substituted residue; the run does not isolate it from the host's load. The protein cap of 1 on staging leaves the two decapeptides at `max_mismatches` 2 unbuilt (the manifest's skipped list keeps their ids), so a second substituted residue is tested nowhere, and `max_mismatches` 2 and 3 are tested on `dna` and `iupac` patterns only. Not served, hence tested by their refusals alone: substitutions in a pattern longer than k, and with `labels`, a predicate or supported paths (section 21.16); insertions and deletions are not served at all. Not exercised: `stop_at_threshold` under substitutions, a graph without its mask (per-level `bounds`), a palindromic pattern under substitutions, and `max_mismatches` on a request of several patterns of different kinds.",
+  "[[n_footnoted_elsewhere ? Outside M-planted and M-protein, {n_footnoted_elsewhere:word} test{n_footnoted_elsewhere:s} did not pass on every arm: {footnoted_elsewhere_text}. | Outside M-planted and M-protein every test passed on every arm it was exercised on.]] [[gate_judged ? [[n_footnoted_gate_blocking ? [[footnoted_all_gate_blocking ? Each of the chapter's {n_footnoted} footnoted test{n_footnoted:s} blocks | {n_footnoted_gate_blocking} of the chapter's {n_footnoted} footnoted test{n_footnoted:s} block]] the deploy gate on a gated arm (I.1, appendix F). | None of the chapter's tests blocks the deploy gate.]] | The deploy gate was not judged for this run (I.1).]]"
+ ],
  "intro": [
-  "(chapter prose: to be written)"
+  "`max_mismatches` (SPEC-pattern-search section 21) admits at most 3 substitutions per instance of a pattern of at most k bases: per position for `dna` and `iupac` (a base outside the position's set; N holds none), per residue for `protein` (a sense codon of another residue; a stop never substitutes a residue and `*` is never substituted, section 21.3). Insertions and deletions are not served. The levels 0, 1 and so on are searched in turn, so that a stop in the work of level t leaves the levels below t complete (`stop.mismatch_level`, section 21.4); `counts.contexts.by_mismatches` counts per level, each with its own relation, and the answer order puts the closest instances first (section 21.7), so a `partial` list cut at `max_contexts` holds the lowest levels. Each result states `mismatches` (its level) and `substitutions` (position or residue, `expected`, `found`; for a `-` context in P's coordinates with the found base complemented, for a residue the codon in P's reading direction), which the suite recomputes from the instance. The floor gates `mismatch_information_bits`, the bits left within the substitutions, with no exemption (section 21.5): under the default floor of 24 the shortest exact patterns served are 15, 18 and 20 bases at 1, 2 and 3 substitutions, and the slot states `max_mismatches_within_floor`, the largest smaller allowance the floor admits. A value above the kind's cap (`mismatches.max`: on staging 3 for `dna` and `iupac`, 1 for `protein`) answers the pattern's slot `mismatches_above_cap` with `max_mismatches_cap`, never lowered; a pattern longer than k has the cap 0 (a later increment); with `output.labels` `all` or `predicate_only`, a predicate or `long_search: supported_paths` the request is refused 400 `later_increment` (section 21.16). `max_mismatches` 0 is the field's absence, byte for byte apart from timing (section 21.15).",
+  "Ground truth: windows of 18 to 31 bases cut from records with few relatives in RefSeq (buc, mge, mpn, ser, mja, sso, tth, pfa, cal, hvo) with t substitutions planted at spread positions (each a base other than the record's), searched at `max_mismatches` m: the source's contexts are expected at level t with exactly the planted substitutions (`contains_source_context` with `substitutions`), every record context (k - L + 1) listed, and at level t the count exact and at least the record's contexts. A list is released whole only when it fits `max_contexts` 10,000, so a planted window's length (20, 25 or 31) is the shortest whose chance contexts, the strings within m substitutions over 626 billion k-mers and both strands, the builder's model scaled by the window's composition puts below 1,000, and every variant keeps at least 24 bits within m. A protein positive substitutes one residue of a decapeptide by another amino acid and expects the record's codon in the `residue_substitution`. Every request names `mode`, `max_contexts` 10,000 and `time_budget_ms` 60,000 as in chapter P. The level passes cost more than the exact search: section 21.10 states about 700, 14,000 and 200,000 steps at 1, 2 and 3 substitutions on refseq33m and about 58 codons per substituted residue, which is why the planted and the protein tests are tagged machine-dependent: a 503 deadline at the budget, or a 200 whose list is withheld `deadline`, is allowed and reads inconclusive.",
+  "Via MCP (`pattern_search`) the tool sends `max_mismatches` as given except 0 and `null`, which are not sent (the exact search), and the SDK's argument model coerces the string `1` and `true` to 1 and refuses 1.5 before the tool runs, so the four typed refusals are not expressible; 4 and -1 are refused at submit under the service's code, a value above a kind's cap and a pattern longer than k refuse the whole submit (where the host answers the slot), and the three later-increment combinations are refused at submit as `pattern_unsupported`; `max_steps` has no argument. A host 503 deadline ends the job as `pattern_deadline` (`search_failed`), which the table explains. Each by-design cell names its case; appendix B gives the service's code and text."
  ],
  "families": {
   "M-planted": {
    "title": "planted substitutions",
-   "prose": "(family prose: to be written)"
+   "prose": "Eighteen windows with t = 1, 2 or 3 substitutions searched at every allowance m from t to 3, three per pair (1 substitution at m 1, 2 and 3; 2 at m 2 and 3; 3 at m 3; the records mge, mpn, ser, mja, sso and tth in that order), and four windows of mja and hvo with 2 substitutions searched as their reverse complement at m 2: the source a `-` context at level 2, its substitutions mirrored into P's coordinates (position L - 1 - p, the found base complemented, section 21.8). The property: the source at level t with exactly the planted substitutions, every record context listed, and at level t the count exact and at least the record's contexts; a substitution found at another level or at another position fails. The ball grows with m and section 21.10 states its cost; a 503 deadline at the 60,000 ms budget, or a 200 whose list is withheld `deadline`, is allowed and reads inconclusive, and the coverage gap on the chapter page reads the m 3 rows. [[n_footnoted ? In this run {n_footnoted:word} of the {n_tests} tests did not pass on every arm ({footnoted_ids}): {n_inconclusive_dl} inconclusive on direct-local, {n_inconclusive_dr} on direct-remote; the detail blocks follow the table[[n_clean ?, and the {n_clean} other{n_clean:s} passed on every arm exercised]]. | In this run every test passed on every arm exercised.]]",
+   "claim": "a planted substitution is found at its level with its position and bases stated, on both strands"
   },
   "M-below": {
    "title": "below the allowance",
-   "prose": "(family prose: to be written)"
+   "prose": "Six 31-mers (mpn, mge, buc, hvo, cal, pfa) with 2 or 3 planted substitutions searched in `partial` at an allowance one short (2 substitutions at m 1, 3 at m 2): the source's contexts appear at no level (`source_absent`), the list complete; what else the ball meets is not asked. The negative half of M-planted's claim: a level is exactly the number of substitutions, never a bound.",
+   "claim": "a window with more substitutions than allowed is out of reach"
   },
   "M-iupac": {
    "title": "IUPAC with mismatches",
-   "prose": "(family prose: to be written)"
+   "prose": "25-mers of tth, ser, buc and pfa with three IUPAC positions (two two-base codes holding the record's base and one N) and one planted substitution outside them, at `max_mismatches` 1: the source at level 1 with that one substitution, a base inside a code's set being no substitution and N holding none (section 21.3).",
+   "claim": "substitutions and IUPAC codes combine as section 21.3 states"
   },
   "M-protein": {
    "title": "protein mismatches",
-   "prose": "(family prose: to be written)"
+   "prose": "Two units. M-protein-level1: decapeptides of eco, bsu, mtb, pae, sau and buc (table 11) and of ser (table 4, its coding DNA reading differently in table 1) with one residue replaced by another amino acid, at `max_mismatches` 1: the source at level 1 with the `residue_substitution` naming the residue, the expected and the found amino acid and the record's codon in P's reading direction; a stop codon never substitutes (section 21.3). SPEC section 21.10 states the cost of a substituted residue (about 58 codons each); timing class slow and tagged machine-dependent, a 503 deadline or a withheld `deadline` allowed and inconclusive. The two decapeptides at `max_mismatches` 2 are not built: staging's protein cap is 1 (the manifest's skipped list keeps their ids). M-protein-cap: a decapeptide at `max_mismatches` 2, above the protein cap of 1: its slot `mismatches_above_cap` with the exact text and `max_mismatches_cap` 1 (`pattern_slot_error`); via MCP the whole submit is refused at submit (appendix B). [[n_footnoted ? In this run {n_footnoted:word} of the {n_tests} tests did not pass on every arm ({footnoted_ids}); the detail blocks follow the tables. | In this run every test passed on every arm exercised.]]",
+   "claim": "a substituted residue is found at level 1 with its codon, and above the protein cap the slot says so"
   },
   "M-suffix": {
    "title": "suffix scope",
-   "prose": "(family prose: to be written)"
+   "prose": "18-mers of hvo and pfa with one substitution in `suffix` scope at m 1: the source at offset k - L, level 1, with its substitution. One offset, and the floor without exemption (section 21.5): an 18-mer keeps at least 24 bits within one substitution.",
+   "claim": "suffix scope with substitutions finds the source at offset k - L"
   },
   "M-order": {
    "title": "level order",
-   "prose": "(family prose: to be written)"
+   "prose": "An E. coli 20-mer at m 1 in `partial` with `max_contexts` 5: the record alone holds 12 level-0 contexts, so the five released are all level 0 (`results_levels`: mismatches first), the level-0 count exact and at least 12, `cut` `max_contexts` (which five, in node order, the truth cannot say); an E. coli 31-mer at m 2 with `max_steps` 1,500 in mode `count`: a stop in discovery at `max_steps` in level 1 or 2 (`stop.mismatch_level`), the level-0 count exact and at least 1; and the same in `partial`: the lower levels released whole with the source at level 0 (no substitutions), `cut` `max_steps`. Via MCP `max_steps` has no argument (appendix B).",
+   "claim": "the levels are searched and released in order, and a stop inside a level leaves the lower levels exact"
   },
   "M-floor": {
    "title": "the floor",
-   "prose": "(family prose: to be written)"
+   "prose": "E. coli windows of 17, 14 and 19 bases at m 2, 1 and 3: below the floor within the substitutions, refused in the slot with the exact message (the bits within m, below the floor of 24.0 for scope any_offset) and `max_mismatches_within_floor` 1, 0 and 2, the largest smaller allowance the floor admits (0 under the rule without substitutions, its exemption included; section 21.5).",
+   "claim": "the floor under substitutions refuses with the bits within m and names the allowance that fits"
   },
   "M-refusal": {
    "title": "refusals",
-   "prose": "(family prose: to be written)"
+   "prose": "The values the host refuses with one text (`request.max_mismatches: expected an integer from 0 to 3`, `invalid_request`): 4, -1, 1.5, the string `1`, `null` and `true`; the three later-increment combinations at m 1 (`labels: all`, a predicate, `supported_paths`: 400 `later_increment` with the capabilities' text); a 40-mer at m 2 with and without `long_search: paths` beside a 25-mer: the long pattern's slot `mismatches_above_cap` with `max_mismatches_cap` 0 and the exact text, the 25-mer answered at level 0 with at least its 7 contexts; and `max_mismatches` 0: answered as without the field (no `limits.max_mismatches`, no `by_mismatches`, no entry `max_mismatches`, the record found), its byte-for-byte twin in M-twin. The expectation column is the host's; via MCP the typed values are coerced or refused by the SDK (not expressible), 4 and -1 refused at submit, the combinations and the long patterns refused at submit, and 0 never sent, so the host sees the request without the field ({mcp_classes_text}; appendix B).",
+   "claim": "every refusal carries the host's text and code, the long pattern its slot, and 0 is the field's absence"
   },
   "M-twin": {
    "title": "twins",
-   "prose": "(family prose: to be written)"
+   "prose": "M-twin-0001, the window of M-refusal-0012 without the field, with the relation `same_answer` (REL-same_answer-0001: the two bodies equal apart from timing on every arm; via MCP both requests reach the host without the field), and M-twin-0002, the same window at m 1, with the relation `subset` (REL-subset-0001: the exact contexts among its level-0 contexts). [[n_relations ? In this run, of the {n_relations:word} relations, {relations_text}.]]",
+   "claim": "max_mismatches 0 answers as the field's absence, and the exact contexts are the level-0 contexts at m 1"
   }
  },
  "units": {
-  "M-planted": "A window with m planted substitutions at max_mismatches >= m: the source at level m with the substitutions reported (mirrored in the reverse orientation).",
-  "M-below": "More substitutions than max_mismatches: the source at no level.",
-  "M-iupac": "IUPAC codes plus one substitution: level 1, never at an N; a base inside a set is no substitution.",
-  "M-protein-level1": "A decapeptide with one substituted residue at max_mismatches 1: the source at level 1.",
-  "M-protein-cap": "max_mismatches 2 above the protein cap of 1 is refused.",
-  "M-suffix": "An 18-mer with one substitution in suffix scope: the source at offset k-L, level 1.",
-  "M-order": "partial releases the lowest levels first; a max_steps stop inside a level leaves the lower levels exact.",
-  "M-floor": "A short pattern at a mismatch count is below the floor by the stated bits, or within it.",
-  "M-refusal": "Out-of-range or wrongly typed max_mismatches and its later_increment combinations are refused with the host's text; a long pattern gets its slot with cap 0; max_mismatches 0 answers as without the field.",
-  "M-twin": "The m = 0 window answers as without max_mismatches (same_answer); its level 0 at max_mismatches 1 holds the exact contexts (subset)."
- }
+  "M-planted": {
+   "property": "A window with t planted substitutions at max_mismatches m, t at most m: the source at level t with exactly the planted substitutions (position, expected, found), every record context listed, the level-t count exact and at least the record's contexts; the reverse orientation reports the source as a - context with the substitutions mirrored into P's coordinates.",
+   "note": "The rows group the tests by substitutions and allowance; the window length (20, 25 or 31) is the shortest whose chance contexts stay below the builder's target, so it changes with the record's composition."
+  },
+  "M-below": "More substitutions than max_mismatches (2 at m 1, 3 at m 2): the source at no level, the list complete.",
+  "M-iupac": "IUPAC codes plus one substitution at max_mismatches 1: the source at level 1 with that substitution, never at an N; a base inside a code's set is no substitution.",
+  "M-protein-level1": "A decapeptide with one substituted residue at max_mismatches 1: the source at level 1, the residue_substitution naming the residue, the amino acids and the record's codon.",
+  "M-protein-cap": "max_mismatches 2 on a decapeptide, above the protein cap of 1: the slot mismatches_above_cap with the exact text and max_mismatches_cap 1.",
+  "M-suffix": "An 18-mer with one substitution in suffix scope at max_mismatches 1: the source at offset k - L, level 1.",
+  "M-order": "partial releases the lowest levels first (a list cut at 5 holds level 0 only); a max_steps stop inside a level states its level and leaves the lower levels exact, released whole in partial with cut max_steps.",
+  "M-floor": "A short pattern at an allowance is below the floor by the stated bits and the slot names the largest smaller allowance within it (max_mismatches_within_floor).",
+  "M-refusal": "Out-of-range or wrongly typed max_mismatches and its later-increment combinations are refused with the host's text and code; a long pattern gets its slot with max_mismatches_cap 0 beside an answered 25-mer; max_mismatches 0 answers as without the field.",
+  "M-twin": "The m 0 window answers byte for byte as without max_mismatches (relation same_answer); its level 0 at max_mismatches 1 holds the exact contexts (relation subset)."
+ },
+ "mcp_notes": {
+  "units": {}
+ },
+ "checks": {},
+ "coverage_gap_families": [
+  "M-planted",
+  "M-protein"
+ ]
 }

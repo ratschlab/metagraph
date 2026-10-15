@@ -1,7 +1,9 @@
 """Offline tests of the results document generator (doc/make_doc.py; DESIGN-DOC §11): the prose data complete for
-every unit and family of the v4 mapping, the mapping complete over the v4 manifest, every check kind described,
-the generator on the fake run of test_compare_report (the .tex, the index, the verdict, the escaping; the PDF when
-xelatex is installed), the cell grammar and the expectation formatters on chapter R's real expectations."""
+every unit and family of the v4 and the v5 mapping, the mappings complete over the frozen manifests, every check kind
+described, every chapter's prose free of placeholders, run figures and banned wordings and resolvable on both
+mappings, the generator on the fake run of test_compare_report (the .tex, the index, the verdict, the escaping; the
+PDF when xelatex is installed), the conclusions of chapters R, M and T on fixtures whose data differ, the cell
+grammar and the expectation formatters on chapter R's real expectations."""
 
 import json
 import os
@@ -39,8 +41,8 @@ V5_MANIFEST = os.path.join(SUITE, "manifest", "suite_v5.json")
 V5_MAPPING = os.path.join(DOC, "units", "suite_v5.json")
 PROSE_DIR = os.path.join(DOC, "prose")
 # the chapters whose prose is written: their files, the overview, the glossary and their check kinds' catalogue
-# entries may hold no placeholder ("to be written"); add a chapter here when its prose lands
-WRITTEN_CHAPTERS = ("R",)
+# entries may hold no placeholder ("to be written"); every chapter since the full document (2026-10-15)
+WRITTEN_CHAPTERS = ("R", "T", "P", "L", "X", "M", "Q", "C", "N", "D")
 PLACEHOLDER = "to be written"
 # Keys whose prose is still pending may carry a placeholder (the generator ships one); empty since the prose of
 # the owner's review (round 2, 2026-10-15) landed. Name a file or "<chapter>.json: <key>" here while prose is awaited.
@@ -227,6 +229,7 @@ class ProseTest(unittest.TestCase):
         closing templates and the case reasons, nor in the catalogue entries of the check kinds they expect; the
         keys of ROUND2_PENDING are tolerated until their prose lands."""
         manifest, mapping, units = v4()
+        v5_manifest = v5()[0]
         problems = []
         for ch in WRITTEN_CHAPTERS:
             data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch)) or {}
@@ -245,7 +248,7 @@ class ProseTest(unittest.TestCase):
             for uid, t in ((data.get("mcp_notes") or {}).get("units") or {}).items():
                 texts.append(("mcp_notes.units.%s" % uid, t or ""))
             problems += ["%s.json: %s" % (ch, key) for key, text in texts if PLACEHOLDER in text or not text.strip()]
-            kinds = set(e.get("check") for s in manifest["scenarios"] if s.get("area") == ch
+            kinds = set(e.get("check") for m in (manifest, v5_manifest) for s in m["scenarios"] if s.get("area") == ch
                         for e in s.get("expect") or [])
             catalogue = (sc.read_json(os.path.join(PROSE_DIR, "checks.json")) or {}).get("checks") or {}
             problems += ["checks.json: %s (expected by chapter %s)" % (k, ch) for k in sorted(kinds)
@@ -649,8 +652,12 @@ class ExpectTextTest(unittest.TestCase):
         self.assertIn("70000", clamped)
         self.assertIn("60000", clamped)
         self.assertIn("budget respected (cap 60 s)", clamped)
-        self.assertEqual(blocks.expect_text("walk_in_record", {"a": 1}), "walk\\_in\\_record(a=1)")
-        self.assertEqual(blocks.expect_text("walk_in_record", {}), "walk\\_in\\_record")
+        # a kind without a formatter: name(args), breakable after ( , = _ so that it wraps in a narrow column
+        self.assertEqual(blocks.expect_text("walk_in_record", {"a": 1}),
+                         "walk\\_\\allowbreak{}in\\_\\allowbreak{}record(\\allowbreak{}a=\\allowbreak{}1)")
+        self.assertEqual(blocks.expect_text("walk_in_record", {}), "walk\\_\\allowbreak{}in\\_\\allowbreak{}record")
+        self.assertEqual(blocks.expect_text("cut", {"reason": "max_paths"}),
+                         "cut(\\allowbreak{}reason=\\allowbreak{}\"\\allowbreak{}max\\_\\allowbreak{}paths\"\\allowbreak{})")
 
     def test_refusal_expected(self):
         text, prev = blocks.refusal_expected(self.scen["R-edge-0012"])
@@ -1373,7 +1380,8 @@ V4_LITERALS = ("76 of the 81", "78 on direct-remote", "79 identical", "27 of 28"
                "completed in 0.4 s", "four times", "five tests", "four tests", "three of the four", "kept 1 of 9",
                "7 of the 8", "70, 70, 71 and 76", "98, 99, 100 and 100", "between 1 and 25 s", "seven edge inputs",
                "six of them")
-PROSE_FILES = ("R.json", "overview.json", "glossary.json", "closing.json", "cases.json", "checks.json")
+PROSE_FILES = tuple("%s.json" % ch for ch in WRITTEN_CHAPTERS) + ("overview.json", "glossary.json", "closing.json",
+                                                                   "cases.json", "checks.json")
 PROSE_SKIP_KEYS = ("_about", "placeholders", "_assumes", "_placeholders")
 # what is not a figure of a run: placeholders, code spans, ids, dates, SPEC and section references, p50 / r0
 # names, ordinals, appendix letters (the conditionals' heads go first, through strip_conditional_heads)
@@ -1510,56 +1518,98 @@ class VerifyRoundThreeTest(unittest.TestCase):
         unresolved = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
         self.assertEqual(unresolved, {"fam", "x"}, sorted(set(ctx.unresolved)))
 
-    def test_prose_placeholders_resolvable_on_v4(self):
-        """Every placeholder and flag of R.json names a value the generator computes: a chapter or family key, a
-        family of the v4 mapping under `fam`, a v4 scenario of chapter R under `x` with an arm and an arm key."""
+    def test_prose_placeholders_resolvable(self):
+        """Every placeholder and flag of a written chapter's prose names a value the generator computes: a chapter,
+        family or unit key, a family of the chapter under `fam`, a unit of the chapter under `unit`, a scenario of
+        the chapter under `x` with an arm and an arm key; a unit's property line reads the run-wide placeholders
+        alone, a unit note under its table the unit's values. Over the v4 and the v5 mapping: a scenario named in
+        the chapter prose or in the prose of a family both mappings hold is one both manifests hold, so that the
+        same prose renders on a run of either (a sentence true in one manifest alone sits under a condition on
+        `manifest_version`); a family one mapping alone holds (R-warm, T-longwalk) may name its own members."""
         import facts
-        manifest, mapping, units = v4()
         ctx = self.ctx({"R": self.R})
         chapter_keys = set(facts.chapter_facts(ctx, "R"))
         family_keys = set(facts.family_facts(ctx, "R-one"))
         unit_keys = set(facts.unit_facts(ctx, "R-one"))
         arm_keys = set(facts.arm_facts(ctx, "R-001", "mcp"))
         scenario_keys = set(facts.scenario_facts(ctx, "R-001"))
-        r_sids = set(units.chapter_scenarios("R"))
-        r_fams = set(units.chapter_families("R"))
+        global_keys = set(ctx.placeholders())
+        loaded = {4: v4()[2], 5: v5()[2]}
         problems = []
+        for ch in WRITTEN_CHAPTERS:
+            data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))
+            sids = dict((v, set(u.chapter_scenarios(ch))) for v, u in loaded.items())
+            fams = dict((v, set(u.chapter_families(ch))) for v, u in loaded.items())
+            uids = dict((v, set(x for f in u.chapter_families(ch) for x in u.families[f]["units"])) for v, u in loaded.items())
+            both_sids = sids[4] & sids[5]
+            any_fams, any_uids = fams[4] | fams[5], uids[4] | uids[5]
 
-        def check(name, scope):
-            root = name.split("[", 1)[0].split(":", 1)[0]
-            idx = re.findall(r"\[([^\]]+)\]", name.split(":", 1)[0])
-            if root == "fam":
-                if scope != "chapter" or not idx or idx[0] not in r_fams:
-                    problems.append("%s: fam[...] needs a v4 family of R in the chapter prose" % name)
-                elif len(idx) >= 2 and idx[1] != "x" and idx[1] not in family_keys:
-                    problems.append("%s: no family value %s" % (name, idx[1]))
-                elif len(idx) >= 2 and idx[1] == "x" and (len(idx) < 3 or idx[2] not in r_sids):
-                    problems.append("%s: no v4 scenario of R" % name)
-            elif root == "x":
-                if not idx or idx[0] not in r_sids:
-                    problems.append("%s: no v4 scenario of R" % name)
-                elif len(idx) == 2 and idx[1] not in scenario_keys:
-                    problems.append("%s: no scenario value %s" % (name, idx[1]))
-                elif len(idx) >= 3 and (idx[1] not in ("dl", "dr", "mcp") or idx[2] not in arm_keys):
-                    problems.append("%s: no arm value %s" % (name, idx[1:3]))
-            else:
-                keys = {"chapter": chapter_keys, "family": family_keys, "unit": unit_keys}[scope]
-                if root not in keys and root not in ctx.placeholders():
-                    problems.append("%s: no %s value %s" % (name, scope, root))
+            def members(fid):
+                """The ids a family's prose may name: both manifests' when both hold the family, else that one's."""
+                holders = [v for v in loaded if fid in fams[v]]
+                if len(holders) == 2:
+                    return both_sids
+                return set(s for v in holders for u in loaded[v].families[fid]["units"] for s in loaded[v].units[u]["members"])
 
-        for path, text in prose_strings(self.R):
-            scope = "chapter" if path.startswith((".summary", ".coverage_gap", ".intro", ".units")) else (
-                "unit" if path.startswith(".mcp_notes") else "family")
-            for name in re.findall(r"\{([^{}]+)\}", text):
-                check(name, scope)
-            for head in strip_conditional_heads(text)[1]:
-                check(head.lstrip("!").split("=", 1)[0].strip(), scope)
+            def check(name, scope, allowed):
+                root = name.split("[", 1)[0].split(":", 1)[0]
+                idx = re.findall(r"\[([^\]]+)\]", name.split(":", 1)[0])
+                where = "%s.json %s" % (ch, name)
+                if root == "fam":
+                    if scope != "chapter" or not idx or idx[0] not in any_fams:
+                        problems.append("%s: fam[...] needs a family of %s in the chapter prose" % (where, ch))
+                    elif len(idx) >= 2 and idx[1] != "x" and idx[1] not in family_keys:
+                        problems.append("%s: no family value %s" % (where, idx[1]))
+                    elif len(idx) >= 2 and idx[1] == "x" and (len(idx) < 3 or idx[2] not in members(idx[0])):
+                        problems.append("%s: no scenario of %s in both manifests" % (where, idx[0]))
+                elif root == "unit":
+                    if scope != "chapter" or not idx or idx[0] not in any_uids:
+                        problems.append("%s: unit[...] needs a unit of %s in the chapter prose" % (where, ch))
+                    elif len(idx) >= 2 and idx[1] != "x" and idx[1] not in unit_keys:
+                        problems.append("%s: no unit value %s" % (where, idx[1]))
+                elif root == "x":
+                    if not idx or idx[0] not in allowed:
+                        problems.append("%s: no scenario of %s in both manifests" % (where, ch))
+                    elif len(idx) == 2 and idx[1] not in scenario_keys:
+                        problems.append("%s: no scenario value %s" % (where, idx[1]))
+                    elif len(idx) >= 3 and (idx[1] not in ("dl", "dr", "mcp") or idx[2] not in arm_keys):
+                        problems.append("%s: no arm value %s" % (where, idx[1:3]))
+                elif root == "rel":
+                    if scope != "family":
+                        problems.append("%s: rel[...] is a family value" % where)
+                else:
+                    keys = {"chapter": chapter_keys, "family": family_keys, "unit": unit_keys, "global": set()}[scope]
+                    if root not in keys and root not in global_keys:
+                        problems.append("%s: no %s value %s" % (where, scope, root))
+
+            for path, text in prose_strings(data):
+                if path.startswith((".summary", ".coverage_gap", ".intro")):
+                    scope, allowed = "chapter", both_sids
+                elif path.startswith(".units"):
+                    scope, allowed = "global", both_sids
+                elif path.startswith(".mcp_notes"):
+                    scope, allowed = "unit", both_sids
+                elif path.startswith(".families."):
+                    fid = path.split(".")[2]
+                    scope, allowed = "family", members(fid)
+                else:
+                    continue
+                for name in re.findall(r"\{([^{}]+)\}", text):
+                    check(name, scope, allowed)
+                for head in strip_conditional_heads(text)[1]:
+                    check(head.lstrip("!").split("=", 1)[0].strip(), scope, allowed)
+            for fid in any_fams:
+                entry = data["families"].get(fid) or {}
+                if not entry.get("claim") and not any(p.startswith("%s.json: families.%s" % (ch, fid)) for p in ROUND2_PENDING):
+                    problems.append("%s.json: %s has no claim" % (ch, fid))
+                for sid in entry.get("claim_members") or []:
+                    if sid not in members(fid):
+                        problems.append("%s.json: claim member %s is not a member of %s" % (ch, sid, fid))
+            for fid in data.get("coverage_gap_families") or []:
+                if fid not in any_fams:
+                    problems.append("%s.json: coverage_gap_families names %s" % (ch, fid))
         self.assertEqual(problems, [], "; ".join(problems))
         self.assertEqual(self.R.get("coverage_gap_families"), ["R-budget"])
-        for fid in r_fams:
-            self.assertTrue(self.R["families"][fid].get("claim"), "%s: no claim" % fid)
-            for sid in self.R["families"][fid].get("claim_members") or []:
-                self.assertIn(sid, r_sids)
 
     def test_prose_numbers_filled_or_assumed(self):
         """A number a prose string carries as text is a constant the file's `_assumes` lists with its source (the
@@ -2523,6 +2573,275 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertEqual(len(run.reruns), 1)
         self.assertIn("Warm-ups run again for a resume", main)
         self.assertEqual(index.count(latex.tt("R-warm-0001")), 1)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the full document (2026-10-15): the chapters T..D written, the facts their prose reads, two more fixture pairs
+
+def mismatch_fixture(run_dir, perturbed):
+    """The fake run with its chapter M read as M.json's M-planted and M-protein families (M-001 the planted window,
+    M-002 the substituted residue), in two versions: as built (both pass on direct-local), or perturbed (both
+    answer a 200 on direct-local whose list the deadline withheld: `time_limited` names the pattern, the property
+    check inconclusive; P-001's second direct-local repeat is time-limited too but passes, so it is not counted)."""
+    from test_compare_report import line
+    manifest = build_run(run_dir)
+    if perturbed:
+        arms_dir = os.path.join(run_dir, "arms")
+        path = os.path.join(arms_dir, "direct-local", "executions.jsonl")
+        rows, _ = sc.read_jsonl(path)
+        os.remove(path)
+        withheld = [{"check": "status", "outcome": "pass", "detail": "ok"},
+                    {"check": "contains_source_context", "outcome": "inconclusive",
+                     "detail": "0 of 3 source contexts listed (withheld deadline): the list is not complete"}]
+        for r in rows:
+            if r["scenario"] in ("M-001", "M-002"):
+                r = dict(r, outcome="inconclusive", wall_ms=60000.0, time_limited="pattern 0 time-limited", checks=withheld)
+            elif r["scenario"] == "P-001" and r["repeat"] == 1:
+                r = dict(r, time_limited="pattern 0 time-limited")
+            sc.append_jsonl(path, r)
+    merge_run.merge(run_dir)
+    sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": len(CASES)})))
+    mapping = json.loads(json.dumps(FAKE_MAPPING))
+    del mapping["_families"]["M-one"]
+    del mapping["_units"]["M-one"]
+    mapping["_families"]["M-planted"] = {"chapter": "M", "title": "planted substitutions", "units": ["M-planted"]}
+    mapping["_families"]["M-protein"] = {"chapter": "M", "title": "protein mismatches", "units": ["M-protein-level1"]}
+    mapping["_units"]["M-planted"] = {"family": "M-planted", "unit_type": "list", "unit_title": "planted",
+                                      "property": "p", "members": ["M-001"]}
+    mapping["_units"]["M-protein-level1"] = {"family": "M-protein", "unit_type": "list", "unit_title": "residues",
+                                             "property": "p", "members": ["M-002"]}
+    mapping["M-001"] = {"chapter": "M", "family": "M-planted", "unit_id": "M-planted", "unit_type": "list", "variant": "slot"}
+    mapping["M-002"] = {"chapter": "M", "family": "M-protein", "unit_id": "M-protein-level1", "unit_type": "list",
+                        "variant": "residue"}
+    return mapping
+
+
+def walk_fixture(run_dir, perturbed):
+    """The fake run with its chapter R read as T.json's T-walk family (R-001 the walk), in two versions: as built
+    (R-001 fails on direct-local, passes on direct-remote), or perturbed (every arm answers a 200 whose seed the
+    time budget stopped before the record's minimum: `walk_in_record` inconclusive on each, so no arm showed the
+    property)."""
+    manifest = build_run(run_dir)
+    if perturbed:
+        arms_dir = os.path.join(run_dir, "arms")
+        cut = [{"check": "status", "outcome": "pass", "detail": "ok"},
+               {"check": "walk_in_record", "outcome": "inconclusive",
+                "detail": "right: the record followed for 656 of 1000 bp, stopped by time_budget: a stated stop the "
+                          "budget allows"}]
+        for arm in ("direct-local", "direct-remote", "mcp"):
+            path = os.path.join(arms_dir, arm, "executions.jsonl")
+            rows, _ = sc.read_jsonl(path)
+            os.remove(path)
+            for r in rows:
+                if r["scenario"] == "R-001":
+                    r = dict(r, outcome="inconclusive", http=200, time_limited="seed 0 stopped by its time budget",
+                             checks=cut, digest="walk")
+                sc.append_jsonl(path, r)
+    merge_run.merge(run_dir)
+    sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": len(CASES)})))
+    mapping = json.loads(json.dumps(FAKE_MAPPING))
+    del mapping["_families"]["R-one"]
+    del mapping["_units"]["R-one"]
+    mapping["_families"]["T-walk"] = {"chapter": "R", "title": "walks", "units": ["T-walk"]}
+    mapping["_units"]["T-walk"] = {"family": "T-walk", "unit_type": "pairs", "unit_title": "the walk", "property": "p",
+                                   "members": ["R-001"]}
+    mapping["R-001"] = {"chapter": "R", "family": "T-walk", "unit_id": "T-walk", "unit_type": "pairs",
+                        "variant": "cje, 1,000 bp"}
+    return mapping
+
+
+class FullDocumentTest(unittest.TestCase):
+    """The chapters T..D written (2026-10-15): every chapter's prose rendered on the fake run prints no figure of
+    its own and leaves nothing unresolved but the scenarios, families, units and relations the fake run lacks; the
+    conclusions of chapters M and T change with the data on two fixtures each, through the facts their prose reads
+    (the time limitations that left a 200 inconclusive, in M's and T's readings, and the unit root); the facts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        build_run(cls.run_dir)
+        merge_run.merge(cls.run_dir)
+        sc.write_json_atomic(os.path.join(cls.run_dir, "compare.json"), cmp.compare(cls.run_dir, (CASES, {"cases": 5})))
+        cls.runobj = reader.Run(cls.run_dir)
+        cls.units = units_mod.resolve(cls.runobj.manifest, FAKE_MAPPING)
+        cls.prose = dict((ch, sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))) for ch in WRITTEN_CHAPTERS)
+        cls.dirs, cls.mappings = {}, {}
+        for name, builder, perturbed in (("m-plain", mismatch_fixture, False), ("m-perturbed", mismatch_fixture, True),
+                                         ("t-plain", walk_fixture, False), ("t-perturbed", walk_fixture, True)):
+            d = os.path.join(cls.tmp, name)
+            os.makedirs(d)
+            cls.mappings[name] = builder(d, perturbed)
+            cls.dirs[name] = d
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def ctx(self, prose, run=None, units=None):
+        import sections
+        run = run or self.runobj
+        units = units or self.units
+        ctx = sections.Context(run, units, prose, {}, {}, list(units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        return ctx
+
+    @staticmethod
+    def parts(text):
+        conclusion = text.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
+        gap = text.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        return conclusion, gap
+
+    def test_every_chapter_renders_from_computed_facts(self):
+        """Each written chapter's page and every family's prose, rendered on the fake run through its chapter P
+        (another run entirely): every flag resolves except those naming a scenario, family, unit or relation the
+        fake run lacks, no run figure of the v4 sample survives on the chapter page, and the fake run's own counts
+        are printed (its four-member family prints 'four tests', which is the point)."""
+        import sections
+        for ch in WRITTEN_CHAPTERS:
+            data = self.prose[ch]
+            for fid, entry in data["families"].items():
+                prose = {"P": dict(data)}
+                prose["P"]["families"] = {"P-pos": dict(entry)}
+                ctx = self.ctx(prose)
+                sections.family_section(ctx, "P", "P-pos")  # the fake run's own four-member family prints its counts
+                roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
+                self.assertTrue(roots <= {"x", "fam", "rel", "unit"}, "%s %s: unresolved %s" % (ch, fid, sorted(set(ctx.unresolved))))
+            prose = {"P": dict(data)}
+            prose["P"]["families"] = {}
+            ctx = self.ctx(prose)
+            whole = sections.chapter(ctx, "P")
+            conclusion, gap = self.parts(whole)
+            for lit in V4_LITERALS:
+                self.assertNotIn(lit, conclusion + gap, "%s: the v4 literal %r survives" % (ch, lit))
+            for name in re.findall(r"\(UNRESOLVED CONDITION ([^)]*)\)", conclusion + gap):
+                self.assertTrue(name.startswith(("x[", "fam[", "rel[", "unit[")), "%s: unresolved %s" % (ch, name))
+            roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
+            self.assertTrue(roots <= {"x", "fam", "rel", "unit"}, "%s: unresolved %s" % (ch, sorted(set(ctx.unresolved))))
+            self.assertIn("5 of the 5 tests pass on direct-local", conclusion.replace("\\", ""), ch)
+            self.assertIn("the deploy gate was not judged", gap.lower(), ch)
+
+    def render(self, name, ch, data, families):
+        """(ctx, the conclusion, the coverage gap, {family: its prose paragraph}) of the fake run's chapter `ch`
+        rendered with a written chapter's prose and the named families' entries."""
+        import sections
+        runobj = reader.Run(self.dirs[name])
+        units = units_mod.resolve(runobj.manifest, self.mappings[name])
+        prose = {ch: dict(data)}
+        prose[ch]["families"] = dict((fid, dict(data["families"][fid])) for fid in families)
+        ctx = self.ctx(prose, runobj, units)
+        text = sections.chapter(ctx, ch)
+        conclusion, gap = self.parts(text)
+        fams = {}
+        for fid in families:
+            fams[fid] = text.split("fam:%s" % fid, 1)[1].split("\\unithead", 1)[0]
+        return ctx, conclusion, gap, fams
+
+    def test_mismatch_fixtures_change_conclusions(self):
+        """Chapter M on two fixtures: the withheld lists the deadline left (a 200 with a time limitation naming the
+        pattern, the property inconclusive) are counted in the conclusion, the coverage gap (the family's and the
+        unit's counts, through `fam[M-planted]` and `unit[M-protein-level1]`) and the family prose; a time-limited
+        200 that passed is not counted."""
+        M = self.prose["M"]
+        ctx_a, conc_a, gap_a, fam_a = self.render("m-plain", "M", M, ["M-planted", "M-protein"])
+        ctx_b, conc_b, gap_b, fam_b = self.render("m-perturbed", "M", M, ["M-planted", "M-protein"])
+        self.assertNotIn("whose list the deadline withheld", conc_a)
+        self.assertIn("In this run every M-planted test was answered within its budget on the direct arms.", gap_a)
+        self.assertIn("Every substituted residue was found within its budget on the direct arms.", gap_a)
+        self.assertIn("Two tests read inconclusive on direct-local and zero on direct-remote, and two tests answered "
+                      "a 200 whose list the deadline withheld on at least one arm (M-001, M-002)", conc_b)
+        self.assertIn("In this run 1 of the 1 M-planted tests read inconclusive on direct-local and 0 on direct-remote "
+                      "(one answered a 200 whose list was withheld on at least one arm: M-001)", gap_b)
+        self.assertIn("Of the 1 substituted residues 1 read inconclusive on direct-local and 0 on direct-remote; no "
+                      "substituted residue was found at level 1 on direct-local, so the residue claim rests on no "
+                      "evidence from this host", gap_b)
+        self.assertIn("In this run every test passed on every arm exercised.", fam_a["M-protein"])
+        self.assertIn("In this run one of the 1 tests did not pass on every arm (M-002); the detail blocks follow the "
+                      "tables.", fam_b["M-protein"])
+        self.assertIn("1 inconclusive on direct-local, 0 on direct-remote; the detail blocks follow the table.", fam_b["M-planted"])
+        for ctx in (ctx_a, ctx_b):
+            roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
+            self.assertTrue(roots <= {"x"}, sorted(set(ctx.unresolved)))
+        v = ctx_b.chapter_values("M")
+        self.assertEqual((v["n_time_limited_200"], v["n_time_limited_200_tests"], v["time_limited_200_ids"]), (2, 2, "M-001, M-002"))
+        self.assertEqual(v["time_limited_200_text"], "M-001 60~s on direct-local; M-002 60~s on direct-local".replace("~", " "))
+        self.assertEqual(v["time_limited_text"], "M-001 on direct-local (pattern 0 time-limited); M-002 on direct-local (pattern 0 time-limited)")
+        self.assertEqual(v["n_time_cut_tests"], 0)
+        self.assertEqual(v["unit"]["M-protein-level1"]["n_inconclusive_dl"], 1)
+        self.assertEqual(v["fam"]["M-planted"]["n_time_limited_200_tests"], 1)
+        self.assertFalse(v["direct_all_pass"])
+        self.assertEqual(v["manifest_version"], 1)
+        self.assertEqual(v["x"]["M-001"]["dl"]["time_limited"], "pattern 0 time-limited")
+        self.assertEqual(v["x"]["M-001"]["dl"]["checks"]["contains_source_context"]["outcome"], "inconclusive")
+        self.assertEqual(v["x"]["M-001"]["dr"]["checks"], {})
+        # a time-limited 200 that passed (P-001 r1) is not a limitation that left the claim untested
+        p = ctx_b.chapter_values("P")
+        self.assertEqual((p["n_time_limited"], p["n_time_limited_200"]), (0, 0))
+        self.assertTrue(ctx_a.chapter_values("M")["direct_all_pass"])
+
+    def test_walk_fixtures_change_conclusions(self):
+        """Chapter T on two fixtures: a walk every arm's time budget stopped before the record's minimum is a time
+        cut the coverage gap counts, named among the tests no arm showed the property on; T-walk's and T-longwalk's
+        prose state it; as built (a failure, no cut) the other branches print."""
+        import sections
+        T = self.prose["T"]
+        ctx_a, conc_a, gap_a, fam_a = self.render("t-plain", "R", T, ["T-walk"])
+        ctx_b, conc_b, gap_b, fam_b = self.render("t-perturbed", "R", T, ["T-walk"])
+        self.assertIn("In this run no walk was cut by its time budget before it showed its property.", gap_a)
+        self.assertIn("In this run 1 test had such an execution (R-001). On one of them (R-001) no arm and no repeat "
+                      "showed the property, so the walk at that radius rests on no evidence from this host", gap_b)
+        self.assertIn("a direct arm failed, errored or disagreed with the other", conc_a)
+        self.assertIn("no failure, no error and no disagreement", conc_b)
+        self.assertIn("In this run 1 test carries a detail block after the table (an arm did not pass, or the arms "
+                      "answered differently: R-001).", fam_a["T-walk"])
+        self.assertIn("(an arm did not pass, or the arms answered differently: R-001); 1 of the family's tests was cut "
+                      "by a time stop before the minimum (R-001).", fam_b["T-walk"])
+        # the long walks' prose reads the cut's evidence
+        prose = {"R": dict(T)}
+        prose["R"]["families"] = {"T-walk": dict(T["families"]["T-longwalk"])}
+        runobj = reader.Run(self.dirs["t-perturbed"])
+        ctx = self.ctx(prose, runobj, units_mod.resolve(runobj.manifest, self.mappings["t-perturbed"]))
+        text = sections.family_section(ctx, "R", "T-walk").split("\\unithead", 1)[0]
+        cut = "right: the record followed for 656 of 1000~bp, stopped by time\\_budget: a stated stop the budget allows"
+        self.assertIn("one of the one walks was stopped by the budget before the record's minimum (R-001 on "
+                      "direct-local r0: %s, on direct-remote r0: %s and on mcp r0: %s); none passed on both direct "
+                      "arms." % (cut, cut, cut), text)
+        v = ctx_b.chapter_values("R")
+        self.assertEqual((v["n_time_cut_tests"], v["time_cut_ids"], v["n_time_cut_untested_tests"], v["time_cut_untested_ids"]),
+                         (1, "R-001", 1, "R-001"))
+        self.assertEqual(v["n_time_limited"], 3)
+        self.assertEqual(v["n_time_limited_200"], 0)
+        self.assertEqual(v["x"]["R-001"]["dl"]["time_limited"], "seed 0 stopped by its time budget")
+        self.assertEqual(v["x"]["R-001"]["dl"]["checks"]["walk_in_record"]["evidence"], "right")  # the clause before ': '
+        self.assertEqual(v["x"]["R-001"]["dl"]["checks"]["walk_in_record"]["detail"],
+                         "right: the record followed for 656 of 1000 bp, stopped by time_budget: a stated stop the budget allows")
+        self.assertEqual(v["fam"]["T-walk"]["n_time_cut_tests"], 1)
+        self.assertEqual(v["unit"]["T-walk"]["n_time_cut_tests"], 1)
+        a = ctx_a.chapter_values("R")
+        self.assertEqual((a["n_time_cut_tests"], a["n_time_limited"]), (0, 0))
+        for ctx in (ctx_a, ctx_b):
+            roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
+            self.assertTrue(roots <= {"x", "fam"}, sorted(set(ctx.unresolved)))
+
+    def test_catalogue_covers_every_check_kind(self):
+        """Every check kind the v4 and the v5 manifest expect has a catalogue entry with its texts, and one entry
+        serves a kind two chapters use (the routes of `invariants` list /resolve, /pattern and /traverse)."""
+        catalogue = (sc.read_json(os.path.join(PROSE_DIR, "checks.json")) or {}).get("checks") or {}
+        kinds = set(e.get("check") for m in (v4()[0], v5()[0]) for s in m["scenarios"] for e in s.get("expect") or [])
+        self.assertEqual(sorted(kinds - set(catalogue)), [])
+        self.assertEqual(sorted(catalogue["invariants"]["routes"]), ["POST /pattern", "POST /resolve", "POST /traverse"])
+        self.assertNotIn("this round lists", catalogue["invariants"]["asserts"])
+        cases = (sc.read_json(os.path.join(PROSE_DIR, "cases.json")) or {}).get("short") or {}
+        named = set()
+        for m in (v4()[0], v5()[0]):
+            for s in m["scenarios"]:
+                bd = (s.get("mcp") or {}).get("by_design")
+                for cid in (bd if isinstance(bd, list) else [bd]):
+                    if cid:
+                        named.add(cid)
+        self.assertEqual(sorted(named - set(cases)), [])
 
 
 if __name__ == "__main__":

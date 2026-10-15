@@ -1,14 +1,24 @@
 {
- "_about": "Appendix A of the suite results document, the check catalogue (round 2, after OWNER-REVIEW-SAMPLE-1.md): one entry per check kind, keyed on the check's name in checks.CHECKS. Written from checks.py's code and docstrings as of c11db9dd, as prose a developer who knows the engine but not the suite can read: `asserts` what the check claims of an answer, `inconclusive` when it cannot test that claim, `fails` when it fails, `args` what its arguments mean, `spec` the SPEC sections it rests on, `generic` whether it is one of checks.GENERIC_CHECKS (status, invariants, counts_consistent, budget_respected: they hold on any answer of the route; every other check is a property check, the scenario's own claim). `routes` splits an entry whose rule differs per route. This round holds the ten kinds chapter R (and chapter D's R copies) use; the other 36 follow with their chapters. Where a function has a docstring too, this prose is the catalogue's text and the docstring the source. The `common` paragraphs state the rules checks.evaluate applies to every check before the check itself runs, and the MCP runner's host-state adjudication that follows the checks; the catalogue prints them once, at the top of the appendix. The words pass and ok are reserved for a property actually tested: a check that could not test its claim reads inconclusive, never pass.",
+ "_about": "Appendix A of the suite results document, the check catalogue (round 2, after OWNER-REVIEW-SAMPLE-1.md): one entry per check kind, keyed on the check's name in checks.CHECKS. Written from checks.py's code and docstrings as of c11db9dd, as prose a developer who knows the engine but not the suite can read: `asserts` what the check claims of an answer, `inconclusive` when it cannot test that claim, `fails` when it fails, `args` what its arguments mean, `spec` the SPEC sections it rests on, `generic` whether it is one of checks.GENERIC_CHECKS (status, invariants, counts_consistent, budget_respected: they hold on any answer of the route; every other check is a property check, the scenario's own claim). `routes` splits an entry whose rule differs per route. It holds every check kind the manifests v4 and v5 expect (the chapters' prose writers added theirs to chapter R's ten; an entry a check used in two chapters has one text naming both uses). Where a function has a docstring too, this prose is the catalogue's text and the docstring the source. The `common` paragraphs state the rules checks.evaluate applies to every check before the check itself runs, and the MCP runner's host-state adjudication that follows the checks; the catalogue prints them once, at the top of the appendix. The words pass and ok are reserved for a property actually tested: a check that could not test its claim reads inconclusive, never pass.",
  "_assumes": {
   "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest v4 (lengths, budgets, expected runs), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
-  "0": "runs 0-based, a stop before the first k-mer, zero k-mers (SPEC section 4)",
-  "1": "L - k + 1, k - 1 (SPEC section 4.1); max(1 s, the budget) (checks.py)",
+  "0": "runs 0-based, a stop before the first k-mer, zero k-mers (SPEC section 4); `from_bp` 0, the seed boundary; 0-based positions (SPEC section 7.1); `nodes_truncated` above 0 (SPEC section 7.0); a result index of 0 (checks.py); exact 0, offset 0, level 0, returned 0 (SPEC sections 7.2, 7.5, 9, 12.1, 21.4); exact 0, level 0, offset 0, a depth of 0 bp (SPEC; checks.py)",
+  "1": "L - k + 1, k - 1 (SPEC section 4.1); max(1 s, the budget) (checks.py); `min_live_labels` 2 with one live label, at most 1 bp (manifest T-quorum-0001); the second result (`results.1`, manifest T-edge-0008); L - k + 1 (SPEC section 12.1; checks.source_contexts); at least 1 (checks.py results_levels, min_returned's default); 1-based coordinates (SPEC section 14.3); contract version 1 (SPEC-pattern-search); L - k + 1 nodes of a path (SPEC-pattern-search section 12.1); 1-based coordinates (section 14.3); at least 1 mirror context (checks.py check_predicate_either_mirror's default)",
   "200": "http 200 (SPEC)",
-  "503": "http 503 deadline (SPEC)",
+  "503": "http 503 deadline (SPEC); http 503 deadline (SPEC section 7.6)",
   "1,000": "the default `max_labels` of a discovery (SPEC section 4.2)",
   "60,000": "the server's cap on staging (host_capabilities)",
-  "70,000": "R-edge-0021's budget (manifest)"
+  "70,000": "R-edge-0021's budget (manifest)",
+  "2": "`min_live_labels` 2 (manifest T-quorum-0001); note 2 of SPEC section 13 I3; the second result index",
+  "4": "step 4 of SPEC section 6.1",
+  "6": "feature level 6 (SPEC section 7.1); the first six problems a detail lists (checks.py)",
+  "409": "http 409 (SPEC section 5)",
+  "10,000": "max_contexts 10,000 lowered from 10,001 (manifest P-modes-0004)",
+  "10,001": "max_contexts 10,001 (manifest P-modes-0004)",
+  "20": "the host's sdust T 20 (SPEC-pattern-search section 7.8; seqtools.sdust_flags)",
+  "64": "the host's sdust window W 64 (SPEC-pattern-search section 7.8; seqtools.sdust_flags); the 64 k-mers of a derivation window (SPEC-labeled-traversal-core section 6.1)",
+  "191": "the longest pattern sdust always diagnoses, 191 bases (SPEC-pattern-search section 7.8)",
+  "32": "the 32 KiB bound on the /traverse/capabilities document (manifest C-caps-0001; SPEC-labeled-traversal-core section 10.3)"
  },
  "common": [
   "Every check reads the normalised answer: the HTTP status, the body, the error (code and text) and, on a direct arm, the headers. The MCP arm's normaliser maps the tool results into the same shape for the fields the service exposes.",
@@ -18,6 +28,55 @@
   "On the MCP arm one rule follows the checks: an execution the service ended by one of its own limits before the host answered (a `resolve_timeout` at the service's deadline for the host call, a relayed `traversal_resolve_deadline`, a relayed /pattern deadline) is adjudicated a host state, inconclusive, when the service's own timing shows the limit was reachable, and a status failure otherwise (the MCP runner's rule, replayed by the re-evaluation). The checks as they read on the raw answer stay in the record as the intermediate evaluation; a detail block states the adjudication first and labels those lines so."
  ],
  "checks": {
+  "budget_respected": {
+   "generic": true,
+   "title": "the server's time against the request's time budget",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.5 (/resolve)",
+    "SPEC-pattern-search sections 6 and 7.6 (/pattern)",
+    "SPEC-labeled-traversal-core section 6.8 (/traverse)"
+   ],
+   "args": "rule: the SPEC rule in one sentence, printed in the detail block of a finding; `cap_ms`: the route's cap on the budget where the request asks more than it (the effective budget is then the cap).",
+   "asserts": "The host kept the request's effective time budget as its SPEC states it, read from the answer's own deadline record and, for a 503, from the client's wall time; no fixed allowance is granted anywhere, since the capabilities state no bound on one uninterruptible piece. The builder adds this check to every scenario that names a time budget and allows a 200. Its breach is a finding, never a failure: the request was answered.",
+   "inconclusive": "On an allowed 503 deadline whose client wall time is within max(1 s, the budget) after the budget: nothing in the body to judge. Without a client wall time, or without a budget to judge against. On /traverse, an answer with no walked seed (the seed phase alone, which the budget does not govern).",
+   "fails": "An allowed 503 deadline that came before the budget (the answer is a 503 only when it cannot be written by the budget, and the client's interval holds the host's). This is the one failure the check can give; every late answer is a finding.",
+   "routes": {
+    "POST /pattern and POST /resolve": "A 200 whose `timing.elapsed_ms` exceeds `limits.time_budget_ms` (the effective budget: the request's, lowered to the cap) is a finding: past the budget the routes answer 503, never a partial answer (/resolve sets its elapsed time before its last deadline check). An allowed 503 deadline is judged by the client's wall time against the effective budget, min(the requested budget, the cap the builder states as `cap_ms`): a 503 delivered more than max(1 s, the budget) after the budget is a finding (the deadline is read where the work and the delivery poll it, so an unpolled piece of about that length ran; the wall also holds the network and any wait for a request thread, hence the margin); within that margin it is inconclusive; before the budget it fails.",
+    "POST /traverse": "Per walked seed, with the deadline the budget on the seed's clock, never read at depth 0 and the depth-0 reads unpaced (walker.cpp): a time stop before the budget is a finding (the walker stops only once the budget has passed); a budget that passed in the seed phase stops the walk at the first depth-1 checkpoint, so a path longer than 1 bp is a finding; a time stop at a checked depth must come within one read and one head piece after max(budget, seed phase), a stop at depth 1 within the depth-0 level's pieces of each requested arm (six per arm), each piece at most the seed's longest piece and at most the time since the seed phase; a walk with no time stop may run past max(budget, seed phase) only by the pieces that may follow the deadline before a reading that would stop a head below the radius, plus the radius level and the finalisation. A stop late within its pieces, or a seed phase longer than the budget, is a performance fact stated in the detail, not a finding."
+   }
+  },
+  "counts_consistent": {
+   "generic": true,
+   "title": "the lists against the counts, and one budget per request",
+   "spec": [
+    "SPEC-pattern-search section 7.5 (modes, `withheld`, `cut`, `retrieval_complete`)",
+    "section 7.6 (one budget per request, a sticky stop)",
+    "section 12.2 (a peptide without instances answers before the budget is read)",
+    "section 8.7 (`work`, `stop`, `withheld`, `cut`)"
+   ],
+   "args": "pattern: judge one entry; none: every entry of the answer. The builder adds this check to every retrieval scenario of /pattern.",
+   "asserts": "Per answered entry in a retrieval mode, against the threshold the answer's `limits` echo (`max_contexts`, or `max_paths` for the paths of a pattern longer than k): no more results than the threshold; in `all_or_count` every result of an exact count released unless withheld, and an exact count above the threshold withheld; in `partial` an exact count above the threshold cut at `max_contexts` or `max_paths` (or `max_memory`) with the threshold's number returned, and an exact count below it returned whole or cut; `retrieval_complete` true only with an exact count equal to the list and nothing withheld. Across the request: after a budget stop (`max_steps` or `time`) of an earlier pattern in an engine phase, every later answered pattern states a stop of the same reason, a peptide without instances (`no_stop_codon`) excepted.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "Any rule broken; the detail lists up to six problems with their entry."
+  },
+  "invariants": {
+   "generic": true,
+   "title": "the route's consistency rules on any 200",
+   "spec": [
+    "SPEC-labeled-traversal-core sections 4.2 and 4.5 (/resolve)",
+    "SPEC-pattern-search sections 7.4 to 7.6 (/pattern)",
+    "SPEC-labeled-traversal-core sections 6.7, 7.0 and 7.1 (/traverse)"
+   ],
+   "args": "none (the route decides the rule set).",
+   "asserts": "On a 200 the answer is consistent with itself and with the request under the route's SPEC, whatever the scenario asks. The rules are listed per route below.",
+   "inconclusive": "Only by the common rule: an answer that is not a 200 and that the scenario allows (an expected refusal, an allowed 503 deadline).",
+   "fails": "Any rule broken; the detail lists up to six problems. A stated stop that cannot have happened (a reason other than time, a time stop before the budget less the reserve) is one of them.",
+   "routes": {
+    "POST /resolve": "`num_kmers` equals L - k + 1 for a query of L bases, or, under a stated stop, equals `stop.resolved_kmers`, with `stop.resolved_bp` equal to `resolved_kmers` + k - 1 (0 for a stop before the first k-mer), `stop.remainder_from_bp` equal to `resolved_kmers`, and `stop.query_kmers` and `query_bp` those of the query; the stop's reason is time and the elapsed time is at or after the budget less the reserve. `graph_runs` are sorted, disjoint and within [0, `num_kmers`). Each label's runs lie within the graph runs and their lengths sum to its `kmers_supported`. A discovery's list is ranked by supported k-mers, most first (not under support trace, whose counts are of trace runs), is at most `max_labels` long (the request's, else the default 1,000), and names no label with more supported k-mers than there are in the graph; its `labels_truncated`, when present, is an object whose kept equals the list's length and `max_labels`, whose total is larger, whose least kept support is at least the most dropped and at most the in-graph k-mer count, whose full-length drops are at most the dropped labels and occur only where the most dropped support equals the in-graph count, and whose least kept support is the last listed label's. With explicit labels every requested label is present in the answer.",
+    "POST /pattern": "One entry per request pattern, in request order, each echoing its request `id`. A refused slot (an `error`) carries no `counts` and no `results`. An answered entry: every count has the shape of SPEC section 8.6 (`value`, `relation`, `unit`; `lower` and `upper` with `bounds` only); for a pattern of at most k bases `counts.contexts.by_offset` has one key per offset of the scope (k - L for `suffix`, 0 to k - L for `any_offset`) and the parts (`by_offset`, `by_strand`) sum to an exact total under section 7.4's algebra; with `max_mismatches` above 0, `by_mismatches` has one key per level from 0 to the allowance, the levels sum to the total's relation and value, no level below a stop's `mismatch_level` is `unknown` and none above it is anything else, and `work.steps_by_mismatches` sums to `work.steps`. Mode `count` carries no `results`, `withheld`, `returned` or `cut` and `retrieval_complete` false; a retrieval mode carries `results` with `returned` equal to their number, no result beside a `withheld` list, and a `cut` only in `partial`. Each result's `instance` is `kmer[offset, offset + L)` with the offset in the scope, and matches the oriented pattern of its strand (an IUPAC code by its set, a peptide by its codons in the request's table; with substitutions, the level equals the substitutions recomputed from the instance against P in P's coordinates and these equal the stated ones, no level above the allowance); a path's `sequence` has L bases, spells the pattern on its strand and has L - k + 1 `nodes`; the results are in the answer order of section 7.9 (level, node, offset, orientation; a path by anchor node, orientation, sequence) and no context or path is listed twice. `retrieval_complete` true needs the primary count exact and equal to the list. The note `low_complexity_pattern` is absent beside a budget stop of the search (`max_steps`, `time`, `max_annotation_work`, `max_memory` in an engine phase). A stop in `discovery`, `mask_scan`, `extraction`, `extension` or `selection` comes with a `cut` or a `withheld` list. Every stated `withheld` reason, `cut` reason, `stop` and time limitation is one sections 7.5 and 7.6 list, possible for the request (its mode, projection, predicate, path search, memory account) and shown possible by the answer (a `max_steps` stop with the steps short of the budget, a time stop before the work time, a threshold stop below its threshold are impossible); nothing is judged where the answer does not show the quantity.",
+    "POST /traverse": "One result per seed (a request of identical seeds states how many are distinct, so that the service's merge of duplicates is told from a lost result). The walk ran the scenario's strategy: a preset knob the MCP arm changed or dropped is named, and `strategy.clamped` states only what the engine can lower. Per walked seed and requested arm: `status` is complete, truncated or pruned; complete exactly when `complete_to_bp` equals `max_extension_bp` (section 6.10), and `outcome.walks` complete only when every requested arm is; every segment carries its events list; each path's segments sum to its `length_bp` and chain parent to child, and no path exceeds the radius. A path ended by a resource reason lies on an arm a cap truncated or pruned, by the cap in `cap_trigger` or a later one its limitations name, and at or past the arm's `complete_to_bp` (every path that ended before it ended for a semantic reason); a structural end (`edge_reuse`, `rejoined_seed`, a hairpin, a label end) lies where the request, the strategy and the arm let it happen (sections 6.4 and 6.6), judged on the segments' events. A stated cap trigger must be possible: a `walk_domain` limitation naming the knob with an observed demand past the limit, the arm's counters at the cap (`output_bp` for `max_output_bp`, the seed's steps for `max_steps`, paths and live heads for `max_paths`), a time stop not before the budget on the seed's clock, `resource_limit` with the seed's `resource_stop`."
+   }
+  },
   "status": {
    "generic": true,
    "title": "the HTTP status, error code and text",
@@ -30,43 +89,152 @@
    "inconclusive": "A 503 with the code deadline in place of an expected 200 on /pattern, or on /resolve when the request names `bounds.time_budget_ms`, where the expectation does not itself name the deadline: the answer could not be built and written within its time budget, which the SPECs allow on any host under load. Every other check of that execution reads inconclusive too, except `budget_respected`, which judges the 503's timing.",
    "fails": "Any other status than the expected one, with the error code and text in the detail; a 503 deadline on a /resolve whose request names no budget (the /resolve deadline is opt-in: without the field there is no deadline whatever the server's cap, so such a 503 is a host defect); an error code or text that differs from the expectation."
   },
-  "invariants": {
-   "generic": true,
-   "title": "the route's consistency rules on any 200",
-   "spec": [
-    "SPEC-labeled-traversal-core sections 4.2 and 4.5 (/resolve)",
-    "SPEC-pattern-search sections 7.4 to 7.6 (/pattern)",
-    "SPEC-labeled-traversal-core sections 6.7, 7.0 and 7.1 (/traverse)"
-   ],
-   "args": "none (the route decides the rule set).",
-   "asserts": "On a 200 the answer is consistent with itself and with the request under the route's SPEC, whatever the scenario asks. The rules are listed per route below; this round lists /resolve's.",
-   "inconclusive": "Only by the common rule: an answer that is not a 200 and that the scenario allows (an expected refusal, an allowed 503 deadline).",
-   "fails": "Any rule broken; the detail lists up to six problems. A stated stop that cannot have happened (a reason other than time, a time stop before the budget less the reserve) is one of them.",
-   "routes": {
-    "POST /resolve": "`num_kmers` equals L - k + 1 for a query of L bases, or, under a stated stop, equals `stop.resolved_kmers`, with `stop.resolved_bp` equal to `resolved_kmers` + k - 1 (0 for a stop before the first k-mer), `stop.remainder_from_bp` equal to `resolved_kmers`, and `stop.query_kmers` and `query_bp` those of the query; the stop's reason is time and the elapsed time is at or after the budget less the reserve. `graph_runs` are sorted, disjoint and within [0, `num_kmers`). Each label's runs lie within the graph runs and their lengths sum to its `kmers_supported`. A discovery's list is ranked by supported k-mers, most first (not under support trace, whose counts are of trace runs), is at most `max_labels` long (the request's, else the default 1,000), and names no label with more supported k-mers than there are in the graph; its `labels_truncated`, when present, is an object whose kept equals the list's length and `max_labels`, whose total is larger, whose least kept support is at least the most dropped and at most the in-graph k-mer count, whose full-length drops are at most the dropped labels and occur only where the most dropped support equals the in-graph count, and whose least kept support is the last listed label's. With explicit labels every requested label is present in the answer."
-   }
-  },
-  "resolve_runs": {
+  "absent": {
    "generic": false,
-   "title": "one label's support profile",
+   "title": "no context of the pattern in the index",
    "spec": [
-    "SPEC-labeled-traversal-core sections 4.2 and 4.5"
+    "SPEC-pattern-search sections 7.2 and 9 (an exact 0 is an absence claim)",
+    "section 12.1 (the paths of a pattern longer than k)"
    ],
-   "args": "label (required): the column or header label to read. On a complete profile: full, the label supports every k-mer as one run [0, `num_kmers`); runs, exactly these runs; covers [lo, hi), some run contains that interval; `run_end_in` [lo, hi], a run from k-mer 0 ends within that range; `run_start_in` [lo, hi], a run to the last k-mer starts within it; kmers, `min_kmers`, `max_kmers` on `kmers_supported`. `prefix_if_stopped`: the scenario's property is a stated stop; `unless_stopped`: a twin of such a scenario, judged on the whole query when complete and on the prefix when stopped.",
-   "asserts": "The label is listed exactly once with its runs, and the arguments hold on its profile. Without a stop they hold on the whole query. With a stated stop (which must be possible: reason time at or after the budget less the reserve) and `prefix_if_stopped` or `unless_stopped`, a full expectation holds on the prefix: the label's `kmers_supported` equals `resolved_kmers`, its runs are [[0, `resolved_kmers`]] and so are the `graph_runs`; the pass reads stopped after x of n k-mers, the prefix fully supported. With a stated stop and neither flag, each argument is decided only where the prefix decides it: it passes where the prefix alone proves it (a covered interval inside the prefix, a run end inside it, a minimum already reached), fails where the prefix contradicts it (a hole in a full support, a run from 0 ending before its range, more support than allowed, too few k-mers left to reach a count) and is inconclusive otherwise.",
-   "inconclusive": "A stop before the first k-mer (`resolved_kmers` 0): nothing of the label to check. With `prefix_if_stopped`, a complete answer: no stop happened, so the prefix property was not tested, although the whole profile holds. Under a stop without the flags, an argument the prefix leaves open (full support of the query, a run that reaches the prefix's end, an interval past it). Also by the common rule on an allowed non-200.",
-   "fails": "The label listed twice or not at all (a missing label is not exposed on the MCP arm); a stop that cannot have happened; on a complete profile any argument broken (the detail names the label, its `kmers_supported` of `num_kmers` and its first runs); on a stopped profile the prefix contradicting an argument, or a full prefix expectation broken."
+   "args": "pattern: the entry's index (0 when absent); count: the count to read (`contexts` by default; `paths` for a pattern longer than k searched as paths; chosen from the entry when absent).",
+   "asserts": "The scope's count is `exact` 0 and, in a retrieval mode, `retrieval_complete` is true and the list empty: no retained k-mer of the index contains the pattern in that scope and strands (no walk spells it, for paths), with the mask or without.",
+   "inconclusive": "Only by the common rule: an answer that is not a 200 and that the scenario allows.",
+   "fails": "The count is not `exact` 0 (the relation and value in the detail); an `exact` 0 beside `retrieval_complete` not true or a non-empty list; the entry refused in its slot."
   },
-  "resolve_graph_runs": {
+  "answer_fields": {
    "generic": false,
-   "title": "the k-mers in the graph",
+   "title": "fields of the answer's body",
    "spec": [
-    "SPEC-labeled-traversal-core section 4.2"
+    "SPEC-pattern-search sections 8.1 to 8.4 and 19.10 (the top level, `limits`, `timing`; the predicate block)",
+    "SPEC-labeled-traversal-core sections 5, 6.1, 7 and 7.3 (the attempt fields and `not_after_ms`; duplicate seeds, dropped labels and `seed_id_mismatch`; `usage`)"
    ],
-   "args": "runs: the expected `graph_runs`, exactly.",
-   "asserts": "`graph_runs` equals the expected list: the query's in-graph k-mers as sorted, disjoint, 0-based half-open runs of k-mer starts. A window cut from a record expects the single run [0, L - k + 1); a window with an N or IUPAC code at position p expects the two runs around the k k-mers that hold it.",
+   "args": "equals: dotted paths of the body with the value each must hold; present: paths that must exist; absent: paths that must not; `when_http`: judge the fields of an answer of that status only (another status passes: nothing to check); `any_status`: read an error body too.",
+   "asserts": "Each named path of the body holds the given value, exists, or is absent, as asked, read on a 200, or on any status when the expectation says so. In chapter T: a 409's `state` expired; `usage` present with `bound.seeds`, `bound.time_budget_ms`, `bound.allowance_ms` and `bound.walk_until_ms` on an attempt's 200; `attempt.state` and `attempt.usage` present and `usage` absent on a duplicate's 409; `results.1.duplicate` true on two identical seeds; a seed's `labels_supporting_total`, `seed_id` and `seed_id_mismatch`. In chapter P `timing.load_ms` 0 on a single-graph server (`in_ram`); in chapter M no `limits.max_mismatches` on a request at 0; in chapter Q `predicate.unknown_labels` naming the unknown name and `predicate.normal_form` false or true.",
+   "inconclusive": "By the common rule only: a non-200 the scenario allows, where the expectation does not read error bodies (`any_status`). An expectation with `when_http` on an answer of another status is not judged and reads as a pass with that note.",
+   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the body (a failure on a direct arm, not exposed on the MCP arm)."
+  },
+  "blocked_event": {
+   "generic": false,
+   "title": "a blocked successor at the seed",
+   "spec": [
+    "SPEC-labeled-traversal-core section 6.6 (edge reuse and seed re-entry)",
+    "section 6.8 (the depth-0 level is processed whatever the budget)"
+   ],
+   "args": "reason (required): the blocked event's reason, `rejoined_seed` (a step into a seed node) or `edge_reuse`; `max_at_bp`: the depth the event must come at or before (0 by default); seed: the result's index; arms: the arms to read (the request's otherwise).",
+   "asserts": "Every requested arm of the walked seed states a `blocked` event of the given reason at a depth of at most `max_at_bp`. A tandem-repeat seed whose period closes a cycle inside the seed re-enters the seed on each arm's first step into the next copy, at 0 bp; since the depth-0 level is processed whatever the budget, no stated stop can hide it, so the check has no inconclusive case of its own.",
+   "inconclusive": "Only by the common rule. An arm without its segments (an MCP answer without the graphlet's tree) is not exposed there.",
+   "fails": "The seed not walked (no arms: the seed's error is in the detail); a requested arm absent; no blocked event of the reason at or before the depth (the detail lists the blocked events seen, reason and depth)."
+  },
+  "capabilities_doc": {
+   "generic": false,
+   "title": "a capabilities document's fields and size",
+   "spec": [
+    "SPEC-pattern-search section 10.2 (the full block) and section 23 (the routes and the gate block)",
+    "SPEC-labeled-traversal-core section 10.3 (the probe document)"
+   ],
+   "args": "required: dotted paths the document must carry; equals: {path: value} it must carry exactly; `max_bytes`: the document's size bound as compact JSON.",
+   "asserts": "The document carries every required path, each `equals` path with exactly the given value (the pinned `index_fp`, `k`, the regime and graph mode, the contract version, availability, `details` naming the full block's route, the pattern routes, `ready`), and its compact JSON is within `max_bytes` where one is given (the 32 KiB bound of the probe document).",
+   "inconclusive": "Only by the common rule. On the MCP arm the capabilities tools answer the service's own view, which lacks the host's fields: a required path missing there is not exposed, so the MCP cell reads inconclusive by design (appendix B).",
+   "fails": "A value that differs; a document above `max_bytes`; on a direct arm a required path missing (the common rule: the field is part of the contract)."
+  },
+  "clamped": {
+   "generic": false,
+   "title": "a bound lowered to the server's cap is stated",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.5 (/resolve's budget)",
+    "section 5 (/traverse's bounds)"
+   ],
+   "args": "field: the request field; requested and effective: the two values; where: limits (the default, /resolve and /pattern) or strategy (/traverse's strategy.clamped).",
+   "asserts": "limits.clamped (or strategy.clamped) holds an entry for the field with exactly the requested and the effective value: the host lowered the request's bound to its cap and said so. In chapter R: `bounds.time_budget_ms` 70,000 lowered to 60,000. In chapter P: `max_contexts` 10,001 lowered to 10,000 (P-modes-0004); on /pattern the list is `limits.clamped`.",
    "inconclusive": "Only by the common rule.",
-   "fails": "`graph_runs` differs from the expected list (the first six runs in the detail)."
+   "fails": "No entry for the field in the clamped list, or an entry with other values; the list missing from the answer (not exposed on the MCP arm)."
+  },
+  "contains_source_context": {
+   "generic": false,
+   "title": "the record's contexts are listed",
+   "spec": [
+    "SPEC-pattern-search sections 7.1 and 7.9 (contexts and the answer order)",
+    "section 12.2 (a peptide's contexts in bases)",
+    "section 21.8 (`mismatches` and `substitutions`)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); strand: the orientation to read (`+`, `-`, or `=` for a palindrome; the truth's strand by default); level: the level the contexts must sit at (with `max_mismatches`); require: `all` (every record context) or `any` (at least one); substitutions: the exact list each found context must state; truth: which of the scenario's truths to read (a request of several patterns).",
+   "asserts": "The record's contexts of the truth window are among the results: for an L-mer every record k-mer holding the window within the truth's flank, k - L + 1 of them, one per offset (the one at offset k - L in `suffix` scope), each matched by its k-mer, its offset, its strand and, when given, its level; with `substitutions` each found context states exactly the planted ones (position or residue, expected, found). The claim is the record's own: what other genomes hold is not asked.",
+   "inconclusive": "A wanted context missing while the entry's list is legitimately shortened: a `withheld` list or a `cut` the answer states, whose reason is one the SPEC lists, possible for the request and shown possible by the answer (a withheld `deadline` with the entry time-limited, a `cut` `max_contexts` above the count); the detail names what hides it. Also by the common rule.",
+   "fails": "A wanted context missing from a list that holds every result (`retrieval_complete` true, or neither withheld nor cut); a missing context beside a stated reason that cannot have happened; a found context whose substitutions differ from the planted ones; the entry refused in its slot; a truth without a record k-mer holding the window (a builder error, stated as such)."
+  },
+  "content_encoding": {
+   "generic": false,
+   "title": "the answer's Content-Encoding",
+   "spec": [
+    "SPEC-pattern-search section 3 (transport: gzip or deflate when asked, error bodies never compressed)"
+   ],
+   "args": "value: the expected `Content-Encoding` header, gzip, deflate or null for none; `any_status`: judge an error answer too.",
+   "asserts": "The answer's `Content-Encoding` header equals the expected value: gzip or deflate when the request's `Accept-Encoding` asked for it on a 200, none on an error body whatever the request asked.",
+   "inconclusive": "Only by the common rule. The headers are read on the direct arms only: the MCP arm's answer carries none, so the check is not exposed there (the protocol scenarios are not expressible through the tools in any case).",
+   "fails": "Another encoding than expected, an encoding on an error body, or none where one was asked and answered 200."
+  },
+  "count_relation": {
+   "generic": false,
+   "title": "a count's relation and value",
+   "spec": [
+    "SPEC-pattern-search section 7.4 (relations and their algebra)",
+    "sections 7.7, 12.1 and 20.4 (anchors, paths, supported paths)",
+    "sections 14.6 and 19.7 (labels, occurrences, tested and selected)",
+    "section 21.6 (the levels)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); count: `contexts` (the default), `anchors`, `paths`, `supported_paths`, `labels`, `occurrences`, `tested` or `selected`; level: read `by_mismatches` at that level; relation: the relation expected, or a list of those accepted; value: the exact value expected; min and max: bounds on the value.",
+   "asserts": "The count has the expected relation and its value lies where the arguments say: an exact count equals `value`, is at least `min` and at most `max`; an `at_least` count at or above `min` passes (the bound decides), a `bounds` count passes when its `lower` is at least `min` and its `upper` at most `max`.",
+   "inconclusive": "An inexact count (`at_least`, `unknown` or `bounds`) the answer explains: a stated stop whose reason can leave the count so (the budgets and the threshold stops; for a graph count not a stop of the labels' reads or of the output, which leave it as the search made it), or, for a graph count without such a stop, a reason the SPEC states (a release that was never counted, an unmasked graph), when the bound stated does not decide the expectation (an `at_least` below `min`, an `unknown`, a `bounds` straddling `min`, a relation other than the one expected). A count of labels, occurrences, tested or selected that is `at_least` below `min` with no stop: such counts have relation rules of their own. Also by the common rule.",
+   "fails": "An exact count below `min`, above `max` or other than `value`; a `bounds` count whose `upper` is below `min` or whose `lower` is above `max`; an inexact count that excludes the exact value expected; a graph count `at_least` below `min`, or `unknown`, with nothing that can leave it so (section 7.4: `at_least` means a stop interrupted it); a relation other than the one expected with no cause; a stop that cannot have happened beside the inexact count; the entry refused in its slot."
+  },
+  "cut": {
+   "generic": false,
+   "title": "a partial list's stated cut",
+   "spec": [
+    "SPEC-pattern-search section 7.5 (`cut.reason`)",
+    "sections 12.1, 19.8, 20.5 (the reasons of paths, predicates and supported paths)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); reason: the reason expected, or a list of those accepted (null among them for no cut).",
+   "asserts": "The entry's `cut` names the expected reason: `max_contexts`, `max_steps`, `time`, `max_memory`, `max_paths`, `max_annotation_work`, or in chapter Q `max_predicate_contexts` (the raw release cut at the admission cap in partial), as the scenario's mode and threshold leave it (whether the reason can have happened is the invariants' question).",
+   "inconclusive": "Only by the common rule.",
+   "fails": "`cut` null or naming another reason; `cut` absent from the entry (a failure on a direct arm, not exposed on the MCP arm)."
+  },
+  "deterministic": {
+   "generic": false,
+   "title": "the same request answers the same",
+   "spec": [
+    "SPEC-labeled-traversal-core section 6.8 (determinism provided no time budget tripped)",
+    "SPEC-pattern-search section 7.9 (determinism time_limited)"
+   ],
+   "args": "none; the runner passes the earlier repeats of the scenario on the same arm as their answer digests and what made each time-limited.",
+   "asserts": "The answer's digest, the sha256 of the canonical JSON of the normalised answer without its headers and without every timing key, equals the digests of the scenario's earlier repeats on the same arm that no time budget limited. It is left out of a scenario's first repeat, which has nothing to compare, so that repeat's outcome rests on the other checks. In chapter R it appears through chapter D's copies of four R scenarios, repeated three times.",
+   "inconclusive": "This answer is itself time-limited (a 503 deadline, a resolve stopped by time, a pattern or seed stopped by its budget, an attempt's bound): it need not repeat; or no earlier repeat is free of a time limitation (then there is nothing to compare).",
+   "fails": "The digest differs from an earlier repeat's that no time budget limited; or this answer is time-limited and differs, and its stated time limitation cannot have happened (a /resolve stop before the budget less the reserve, a /pattern or /traverse stop before its work time or budget)."
+  },
+  "entry_fields": {
+   "generic": false,
+   "title": "fields of a pattern's entry",
+   "spec": [
+    "SPEC-pattern-search sections 8.5, 8.6 and 8.7 (the entry, `counts`, `work` and `stop`)",
+    "section 12.2 (a peptide's `length`, `residues`)",
+    "section 19.10 (the selection block)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); equals: dotted paths of the entry with the value each must hold (a number such as `information_bits` compared up to rounding, `tolerance`); present: paths that must exist; absent: paths that must not.",
+   "asserts": "Each named path of the entry holds the given value, exists, or is absent: `absence_scope`, `scope`, `strands`, `palindromic`, `returned`, `cut`, `information_bits`, `counts.paths.extension`, `counts.paths.relation`, `counts.supported_paths.level`, `length`, `residues`, `work.steps`, `determinism`, `selection.pass` and `counts.selected.value` (chapter Q: a constant false selects nothing), the absence of `error`, `max_mismatches` or `counts.contexts.by_mismatches`, as the scenario names them.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the entry (a failure on a direct arm; not exposed on the MCP arm, whose answer carries no `absence_scope` and no `timing.elapsed_ms`)."
+  },
+  "label_dict_contains": {
+   "generic": false,
+   "title": "a derived set holds the record's own label",
+   "spec": [
+    "SPEC-labeled-traversal-core section 6.1 step 4 (the derived permitted set, `seed_label_kind`)",
+    "section 7.1 (`label_dict`)"
+   ],
+   "args": "name: the record's label (its taxid column or its accession.version); kind: column or header; `only_kind`: no label of another kind may be in the dictionary.",
+   "asserts": "The seed result's `label_dict` names the record's own label with the kind asked, and with `only_kind` every label of the dictionary is of that kind: the permitted set the host derived from the seed (`labels.seed_label_kind`) is of the kind asked and holds the record the seed was cut from.",
+   "inconclusive": "By the common rule. On the MCP arm the dictionary is not in the answer (the service's graphlet export carries none): not exposed, which manifest v5 states as a property-level mark, so the check is not shown via MCP rather than untested.",
+   "fails": "The label missing from the dictionary (the first labels listed in the detail), or a label of another kind beside the kind asked."
   },
   "label_not_full": {
    "generic": false,
@@ -78,6 +246,142 @@
    "asserts": "The named label is listed and does not support every k-mer of the query: its `kmers_supported` differs from `num_kmers` (a query with no k-mer is not judged). It is the negative half of R-multi's claim that labels are answered independently.",
    "inconclusive": "Only by the common rule.",
    "fails": "The unrelated label supports every k-mer; the label missing from the answer (not exposed on the MCP arm)."
+  },
+  "labels_per_node": {
+   "generic": false,
+   "title": "a per-node label cap echoed, its cut stated",
+   "spec": [
+    "SPEC-labeled-traversal-core section 5 (`labels.max_labels_per_node`)",
+    "section 7.0 (the `label_lists` limitation)"
+   ],
+   "args": "cap: the request's `labels.max_labels_per_node`.",
+   "asserts": "On every requested arm `labels_per_node.cap` equals the request's cap, and where some node's list was cut (`nodes_truncated` above 0) a limitation names `labels.max_labels_per_node`: the cap is never silent. The pass states each arm's cap, the largest list seen and the lists cut.",
+   "inconclusive": "By the common rule; the arm's `labels_per_node` block missing is not exposed on the MCP arm.",
+   "fails": "Another cap echoed than requested, a cut list without the limitation naming the knob, or a seed that was not walked."
+  },
+  "low_complexity_note": {
+   "generic": false,
+   "title": "the low-complexity note as sdust says",
+   "spec": [
+    "SPEC-pattern-search section 7.8 (the note, its diagnostic and when a stop leaves it out)",
+    "section 8.10 (notes), section 20.5 (a supported-path search's selection stop)"
+   ],
+   "args": "pattern: the entry's index; expected (required): whether sdust flags the pattern over its whole text, computed by the builder with seqtools.sdust_flags (the host's T 20, W 64).",
+   "asserts": "The entry carries the note `low_complexity_pattern` exactly when sdust flags the pattern, as long as the answer states no budget stop of the search (`max_steps`, `time`, and for supported paths `max_annotation_work` and `max_memory`, in an engine phase, or a stop without a phase); a stop of a later phase (the labels' reads, a predicate's selection, the output) comes after the diagnostic and leaves the note as the engine decided it, so the note follows sdust there too.",
+   "inconclusive": "An expected note left out by a budget stop of the search (the diagnostic does not run after one); a supported-path search's selection stop with the note absent where expected (the selection may run inside the search, refusing a held walk); a pattern of more than 191 bases without the note whose answer states `determinism` `time_limited` (the diagnostic reads the clock between its pieces and may have been cut). Also by the common rule.",
+   "fails": "A refused entry; the note present beside a budget stop of the search; a stop or time limitation that cannot have happened with the note absent; the note present where sdust does not flag the pattern or absent where it does, outside the inconclusive cases. The `notes` field missing from the entry is not exposed on the MCP arm and a failure on a direct arm."
+  },
+  "motif": {
+   "generic": false,
+   "title": "the motif-level verdict",
+   "spec": [
+    "SPEC-pattern-search section 25.3 (the motif block), section 25.4 (what decides it), section 25.6 (what it licenses)"
+   ],
+   "args": "pattern: the entry's index; selected: the expected `motif.selected`; `decided_by_in`: the accepted values of `motif.decided_by` (every_context, tested_contexts, constant, no_instance); `label_present`: a column that must be among `labels_present`.",
+   "asserts": "The entry's `motif` states the expected `selected` and a `decided_by` among the accepted ones, with the named label among `labels_present`; and the block is consistent with its own rules: `tested_contexts` with `labels_absent` null (no absence claim on an incomplete pass), `no_instance` with `labels_present` empty (a verdict on the empty set).",
+   "inconclusive": "Only by the common rule.",
+   "fails": "`selected` or `decided_by` other than expected (the detail states both); the named label not in `labels_present`; `tested_contexts` with a non-null `labels_absent`; `no_instance` with labels present. The `motif` block missing from the entry is not exposed on the MCP arm and a failure on a direct arm."
+  },
+  "notes": {
+   "generic": false,
+   "title": "the entry's notes",
+   "spec": [
+    "SPEC-pattern-search section 8.10 (the notes)",
+    "section 7.8 (`low_complexity_pattern`)",
+    "section 12.2 (`no_stop_codon`)",
+    "section 19.4 (`predicate_constant`)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); has: notes that must be stated; lacks: notes that must not.",
+   "asserts": "The entry's `notes` hold each note expected (`low_complexity_pattern`, `paths_later_increment`, `no_stop_codon`; in chapter Q `predicate_constant` on a normal form folded to a constant) and none of those excluded (`low_complexity_pattern` beside a budget stop).",
+   "inconclusive": "Only by the common rule.",
+   "fails": "An expected note missing (the notes stated in the detail); an excluded note present; `notes` absent from the entry (not exposed on the MCP arm)."
+  },
+  "path_absent": {
+   "generic": false,
+   "title": "no path spells the sequence",
+   "spec": [
+    "SPEC-pattern-search section 12.1 (paths and what a complete list licenses)",
+    "section 9 (an absence needs the complete list)",
+    "section 20.9 (a predicate on supported paths)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); sequence: the bases no path may spell (the truth's `spliced_dna` by default).",
+   "asserts": "No released path's `sequence` equals the given bases, and the list holds every path (neither withheld nor cut): on this index no walk of retained k-mers spells the spliced coding DNA across the exon junction (an index-empirical claim: the truth names the index). Under a predicate `none(A)` on supported paths (chapter Q) the same reading shows the record's own path not selected (section 20.9); nothing is assumed about the other paths.",
+   "inconclusive": "No path spells it, but the list is legitimately shortened (a stated `withheld` or `cut` whose reason can have happened): an absence cannot be read from an incomplete list. Also by the common rule.",
+   "fails": "A path spells the sequence; no path spells it beside a stated reason that cannot have happened; `results` absent from the entry (not exposed on the MCP arm)."
+  },
+  "path_record_verified": {
+   "generic": false,
+   "title": "the record verifies its own path",
+   "spec": [
+    "SPEC-pattern-search section 12.1 (support `record_verified`, the labels and occurrences of a path)",
+    "section 20.6 (the labels of a supported path)",
+    "section 14.3 (an occurrence's record, coordinates and strand)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); strand: the path's strand (the truth's by default).",
+   "asserts": "A released path spells the truth window's bases, and on it the record's taxid is listed with support `record_verified` and an occurrence of the record at the window's 1-based coordinates on the strand, with the index's `seq_id` and the record's length; every occurrence that label lists lies inside its own record (start and end within `nt_length`).",
+   "inconclusive": "No path spells the window while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
+   "fails": "No path spells the window in a complete list; the taxid on none of the paths spelling it; the taxid's support not `record_verified`; no occurrence of the record at the window's coordinates and strand (the label's first occurrences in the detail); an occurrence outside its record, with another `seq_id` than the index's or another `nt_length` than the record's; the paths' labels absent (not exposed on the MCP arm)."
+  },
+  "path_spells": {
+   "generic": false,
+   "title": "a path spells the record's bases",
+   "spec": [
+    "SPEC-pattern-search section 12.1 (a path result: `sequence`, `instance`, `offset`, `nodes`)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); strand: the orientation the path must carry (`+`, `-`; the truth's by default).",
+   "asserts": "Some released path's `sequence` equals the truth window's bases on the given strand, with `instance` equal to its `sequence`, `offset` 0 and L - k + 1 `nodes`: the record's own walk is among the paths.",
+   "inconclusive": "No path spells the window while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
+   "fails": "No path spells the window in a complete list, or beside a stated reason that cannot have happened; a spelling path whose `instance` or `offset` is inconsistent or whose node count is not L - k + 1; `results` absent (not exposed on the MCP arm)."
+  },
+  "paths_end": {
+   "generic": false,
+   "title": "every path ends for the expected reason",
+   "spec": [
+    "SPEC-labeled-traversal-core sections 6.4 and 6.7 (the quorum stops; the termination reasons)",
+    "section 13, I3 note 2 (the deployed engine's `below_min_labels` as a label end under reason branch)"
+   ],
+   "args": "reasons_in: the end reasons accepted; `max_bp`: the longest path allowed.",
+   "asserts": "Every path of every requested arm ends with one of the accepted reasons, read from its `path_reason`, its `end_reasons` or the reason of a `label_end` event on its leaf at its end, and is at most `max_bp` long when a length is given. In chapter T: under `min_live_labels` 2 with one live label every path ends `below_min_labels` at once (at most 1 bp).",
+   "inconclusive": "By the common rule only; the arm's paths missing from the answer is not exposed on the MCP arm.",
+   "fails": "A path ended by another reason (named with the expected ones), a path longer than `max_bp`, an arm without a path, or a seed that was not walked."
+  },
+  "pattern_slot_error": {
+   "generic": false,
+   "title": "a pattern refused in its slot",
+   "spec": [
+    "SPEC-pattern-search section 8.9 (the error slot)",
+    "section 7.8 (`information_below_floor`)",
+    "section 21.8 (`mismatches_above_cap`, `max_mismatches_within_floor`)"
+   ],
+   "args": "pattern: the entry's index; code: the slot's error code; text: the exact message; `text_prefix`: its beginning; `text_contains`: fragments it must hold; fields: dotted paths of the slot with the value each must hold (`max_mismatches_cap`, `max_mismatches_within_floor`).",
+   "asserts": "The entry is a refused slot with the given code and message (`bad_alphabet`, `information_below_floor` in chapters P and N, `mismatches_above_cap`), its named fields hold their values, and it carries no `counts` and no `results`: the slot costs no step, and the other patterns of the request are answered.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "The entry answered (no error slot); another code (the message in the detail); a message other than the exact text, not starting with the prefix or lacking a fragment; a slot field with another value; a refused slot carrying counts or results."
+  },
+  "predicate_either_mirror": {
+   "generic": false,
+   "title": "selection through the mirror's row",
+   "spec": [
+    "SPEC-pattern-search section 19.5 (predicate_strands either: the row of the reverse complement; strand-consistent support)",
+    "section 19.10 (selection_labels, selection_strands)"
+   ],
+   "args": "pattern: the entry's index; label: the column that must select the mirrors (the truth's taxid by default); min: how many mirror contexts must be returned (1 by default).",
+   "asserts": "Under `predicate_strands` either, every returned `-` context whose reverse complement is a k-mer of the record is selected by the label with the selection strand `reverse_complement` or `both`, and at least `min` such contexts are returned. The builder takes windows whose reverse complement the record holds in a longer inverted copy, so the mirrors exist; the check reads only mirrors that are the record's own k-mers, so other records' rows cannot satisfy it.",
+   "inconclusive": "Fewer mirror contexts than `min` on a list that is not complete, where the answer states a withheld list or a cut that can have happened (a selection the time budget cut). Also by the common rule.",
+   "fails": "A mirror context not selected by the label, or selected with the strand `context`; fewer mirrors than `min` on a complete list; a refused entry; a stated hiding that cannot have happened. `selection_labels` or `selection_strands` missing from a result is not exposed on the MCP arm and a failure on a direct arm."
+  },
+  "predicate_selected": {
+   "generic": false,
+   "title": "the record's contexts are selected, or not",
+   "spec": [
+    "SPEC-pattern-search section 19.5 (what is selected, the strands)",
+    "section 19.11 (what a filtered answer licenses)",
+    "section 20.9 (a predicate on supported paths)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); selected: true (every record context in the results) or false (none); strand: the orientation to read; label: the predicate's label to read in `selection_labels` (the record's taxid by default); `selection_strand_in`: the selection strands accepted for it (`context`, `reverse_complement`, `both`).",
+   "asserts": "With `selected` true, every record context of the truth window is among the results (the predicate selected the record's own contexts) and, when asked, the label is in each one's `selection_labels` with a selection strand among those accepted; with `selected` false, none is among them and the filtered list is complete.",
+   "inconclusive": "A record context missing (or, for `selected` false, the list incomplete) while the list is legitimately shortened: a stated `withheld` or `cut` that can have happened. Also by the common rule.",
+   "fails": "A record context missing from a complete filtered list (`selected` true); a record context selected (`selected` false); the label not in `selection_labels`, or its selection strand not among those accepted; a stated reason that cannot have happened; `selection_strands` absent (not exposed on the MCP arm); the entry refused in its slot."
   },
   "resolve_absent": {
    "generic": false,
@@ -102,46 +406,189 @@
    "inconclusive": "The discovery was stopped before it read the row of any in-graph k-mer (a stop with no label listed, no truncation and no in-graph k-mer in the prefix): there is no profile to rank. Also by the common rule.",
    "fails": "The label is not in a complete list; `labels_truncated` is not the SPEC's object or not numeric; the list is truncated to a size other than `max_labels` or at a total not above it; a dropped label has more supported k-mers than a kept one; a kept label supports fewer k-mers than the in-graph count while the source supports them all (the top `max_labels` by support would hold it); no dropped label supports every in-graph k-mer."
   },
-  "clamped": {
+  "resolve_graph_runs": {
    "generic": false,
-   "title": "a bound lowered to the server's cap is stated",
+   "title": "the k-mers in the graph",
    "spec": [
-    "SPEC-labeled-traversal-core section 4.5 (/resolve's budget)",
-    "section 5 (/traverse's bounds)"
+    "SPEC-labeled-traversal-core section 4.2"
    ],
-   "args": "field: the request field; requested and effective: the two values; where: limits (the default, /resolve and /pattern) or strategy (/traverse's strategy.clamped).",
-   "asserts": "limits.clamped (or strategy.clamped) holds an entry for the field with exactly the requested and the effective value: the host lowered the request's bound to its cap and said so. In chapter R: `bounds.time_budget_ms` 70,000 lowered to 60,000.",
+   "args": "runs: the expected `graph_runs`, exactly.",
+   "asserts": "`graph_runs` equals the expected list: the query's in-graph k-mers as sorted, disjoint, 0-based half-open runs of k-mer starts. A window cut from a record expects the single run [0, L - k + 1); a window with an N or IUPAC code at position p expects the two runs around the k k-mers that hold it.",
    "inconclusive": "Only by the common rule.",
-   "fails": "No entry for the field in the clamped list, or an entry with other values; the list missing from the answer (not exposed on the MCP arm)."
+   "fails": "`graph_runs` differs from the expected list (the first six runs in the detail)."
   },
-  "budget_respected": {
-   "generic": true,
-   "title": "the server's time against the request's time budget",
-   "spec": [
-    "SPEC-labeled-traversal-core section 4.5 (/resolve)",
-    "SPEC-pattern-search sections 6 and 7.6 (/pattern)",
-    "SPEC-labeled-traversal-core section 6.8 (/traverse)"
-   ],
-   "args": "rule: the SPEC rule in one sentence, printed in the detail block of a finding; `cap_ms`: the route's cap on the budget where the request asks more than it (the effective budget is then the cap).",
-   "asserts": "The host kept the request's effective time budget as its SPEC states it, read from the answer's own deadline record and, for a 503, from the client's wall time; no fixed allowance is granted anywhere, since the capabilities state no bound on one uninterruptible piece. The builder adds this check to every scenario that names a time budget and allows a 200. Its breach is a finding, never a failure: the request was answered.",
-   "inconclusive": "On an allowed 503 deadline whose client wall time is within max(1 s, the budget) after the budget: nothing in the body to judge. Without a client wall time, or without a budget to judge against. On /traverse, an answer with no walked seed (the seed phase alone, which the budget does not govern).",
-   "fails": "An allowed 503 deadline that came before the budget (the answer is a 503 only when it cannot be written by the budget, and the client's interval holds the host's). This is the one failure the check can give; every late answer is a finding.",
-   "routes": {
-    "POST /pattern and POST /resolve": "A 200 whose `timing.elapsed_ms` exceeds `limits.time_budget_ms` (the effective budget: the request's, lowered to the cap) is a finding: past the budget the routes answer 503, never a partial answer (/resolve sets its elapsed time before its last deadline check). An allowed 503 deadline is judged by the client's wall time against the effective budget, min(the requested budget, the cap the builder states as `cap_ms`): a 503 delivered more than max(1 s, the budget) after the budget is a finding (the deadline is read where the work and the delivery poll it, so an unpolled piece of about that length ran; the wall also holds the network and any wait for a request thread, hence the margin); within that margin it is inconclusive; before the budget it fails.",
-    "POST /traverse": "Per walked seed, with the deadline the budget on the seed's clock, never read at depth 0 and the depth-0 reads unpaced (walker.cpp): a time stop before the budget is a finding (the walker stops only once the budget has passed); a budget that passed in the seed phase stops the walk at the first depth-1 checkpoint, so a path longer than 1 bp is a finding; a time stop at a checked depth must come within one read and one head piece after max(budget, seed phase), a stop at depth 1 within the depth-0 level's pieces of each requested arm (six per arm), each piece at most the seed's longest piece and at most the time since the seed phase; a walk with no time stop may run past max(budget, seed phase) only by the pieces that may follow the deadline before a reading that would stop a head below the radius, plus the radius level and the finalisation. A stop late within its pieces, or a seed phase longer than the budget, is a performance fact stated in the detail, not a finding."
-   }
-  },
-  "deterministic": {
+  "resolve_runs": {
    "generic": false,
-   "title": "the same request answers the same",
+   "title": "one label's support profile",
    "spec": [
-    "SPEC-labeled-traversal-core section 6.8 (determinism provided no time budget tripped)",
-    "SPEC-pattern-search section 7.9 (determinism time_limited)"
+    "SPEC-labeled-traversal-core sections 4.2 and 4.5"
    ],
-   "args": "none; the runner passes the earlier repeats of the scenario on the same arm as their answer digests and what made each time-limited.",
-   "asserts": "The answer's digest, the sha256 of the canonical JSON of the normalised answer without its headers and without every timing key, equals the digests of the scenario's earlier repeats on the same arm that no time budget limited. It is left out of a scenario's first repeat, which has nothing to compare, so that repeat's outcome rests on the other checks. In chapter R it appears through chapter D's copies of four R scenarios, repeated three times.",
-   "inconclusive": "This answer is itself time-limited (a 503 deadline, a resolve stopped by time, a pattern or seed stopped by its budget, an attempt's bound): it need not repeat; or no earlier repeat is free of a time limitation (then there is nothing to compare).",
-   "fails": "The digest differs from an earlier repeat's that no time budget limited; or this answer is time-limited and differs, and its stated time limitation cannot have happened (a /resolve stop before the budget less the reserve, a /pattern or /traverse stop before its work time or budget)."
+   "args": "label (required): the column or header label to read. On a complete profile: full, the label supports every k-mer as one run [0, `num_kmers`); runs, exactly these runs; covers [lo, hi), some run contains that interval; `run_end_in` [lo, hi], a run from k-mer 0 ends within that range; `run_start_in` [lo, hi], a run to the last k-mer starts within it; kmers, `min_kmers`, `max_kmers` on `kmers_supported`. `prefix_if_stopped`: the scenario's property is a stated stop; `unless_stopped`: a twin of such a scenario, judged on the whole query when complete and on the prefix when stopped.",
+   "asserts": "The label is listed exactly once with its runs, and the arguments hold on its profile. Without a stop they hold on the whole query. With a stated stop (which must be possible: reason time at or after the budget less the reserve) and `prefix_if_stopped` or `unless_stopped`, a full expectation holds on the prefix: the label's `kmers_supported` equals `resolved_kmers`, its runs are [[0, `resolved_kmers`]] and so are the `graph_runs`; the pass reads stopped after x of n k-mers, the prefix fully supported. With a stated stop and neither flag, each argument is decided only where the prefix decides it: it passes where the prefix alone proves it (a covered interval inside the prefix, a run end inside it, a minimum already reached), fails where the prefix contradicts it (a hole in a full support, a run from 0 ending before its range, more support than allowed, too few k-mers left to reach a count) and is inconclusive otherwise.",
+   "inconclusive": "A stop before the first k-mer (`resolved_kmers` 0): nothing of the label to check. With `prefix_if_stopped`, a complete answer: no stop happened, so the prefix property was not tested, although the whole profile holds. Under a stop without the flags, an argument the prefix leaves open (full support of the query, a run that reaches the prefix's end, an interval past it). Also by the common rule on an allowed non-200.",
+   "fails": "The label listed twice or not at all (a missing label is not exposed on the MCP arm); a stop that cannot have happened; on a complete profile any argument broken (the detail names the label, its `kmers_supported` of `num_kmers` and its first runs); on a stopped profile the prefix contradicting an argument, or a full prefix expectation broken."
+  },
+  "results_levels": {
+   "generic": false,
+   "title": "the released results' levels",
+   "spec": [
+    "SPEC-pattern-search section 21.7 (the answer order with substitutions: the closest first)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); `max_level`: the highest level a released result may sit at; `min_returned`: how many results at least (1 by default).",
+   "asserts": "At least `min_returned` results are released and every one of them states a level of at most `max_level`: a `partial` list cut inside the lowest level holds that level only, since the answer order puts the closest instances first.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "Fewer results than `min_returned`; a result above `max_level` (the levels found in the detail); `results` absent (not exposed on the MCP arm)."
+  },
+  "retrieval_complete": {
+   "generic": false,
+   "title": "the one flag that licenses an absence",
+   "spec": [
+    "SPEC-pattern-search section 7.5 (`retrieval_complete` per mode)",
+    "section 9 (what it licenses)",
+    "section 14.6 (with labels)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); value: true or false.",
+   "asserts": "The entry's `retrieval_complete` is the value expected: true when every context (or path) was returned, an exact count equal to the list; false in mode `count` (a count returns nothing) and after any stop of the graph search.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "The flag has the other value; the flag absent from the entry (not exposed on the MCP arm)."
+  },
+  "source_absent": {
+   "generic": false,
+   "title": "the record's contexts are out of reach",
+   "spec": [
+    "SPEC-pattern-search section 21.3 and 21.4 (a level is exactly the number of substitutions)",
+    "section 21.11 (what a mismatch answer licenses)",
+    "section 12.2 (a peptide's codons in its table)",
+    "section 9 (an absence needs the complete list)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); strand: the orientation to read (the truth's by default).",
+   "asserts": "None of the record's contexts of the truth window is among the results at any level, and the list holds every result (neither withheld nor cut): the source is out of reach, as it must be with more substitutions than allowed, for a reverse complement searched forward only, or for a decapeptide read in the wrong genetic code; nothing is assumed about the other contexts.",
+   "inconclusive": "The source is not among the results, but the list is legitimately shortened (a stated `withheld` or `cut` that can have happened): an absence cannot be read from an incomplete list. Also by the common rule.",
+   "fails": "A record context among the results (its level in the detail); the source absent beside a stated reason that cannot have happened; the entry refused in its slot."
+  },
+  "source_label": {
+   "generic": false,
+   "title": "the record's taxid among a context's labels",
+   "spec": [
+    "SPEC-pattern-search sections 14.2 and 14.5 (label discovery, a result's labels)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); strand: the orientation to read (the truth's by default).",
+   "asserts": "Some record context of the truth window is among the results and lists the record's taxid column among its `labels`: the row of the record's own k-mer carries the record's column.",
+   "inconclusive": "No record context returned while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
+   "fails": "No record context returned from a complete list; the taxid on none of the record contexts returned (their `labels_status` in the detail); the contexts' `labels` null (not exposed on the MCP arm)."
+  },
+  "source_placement": {
+   "generic": false,
+   "title": "the record is placed at the window",
+   "spec": [
+    "SPEC-pattern-search section 14.3 (placement in records: `seq_id`, `nt_coords`, `nt_length`, the strand)",
+    "section 19.10 (the projection `predicate_only`)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); strand: the orientation to read (the truth's by default).",
+   "asserts": "On a record context of the truth window, the record's taxid label lists an occurrence of the record at the window's 1-based coordinates (start-end) on the given strand, with the index's `seq_id` for the record and the record's length as `nt_length`, the coordinates inside it: the context is placed where the window was cut.",
+   "inconclusive": "No record context returned while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
+   "fails": "No record context returned from a complete list; no occurrence of the record at the window's coordinates and strand under the taxid on any record context; an occurrence with another `seq_id` than the index's, another `nt_length` than the record's or coordinates outside the record; the label's `occurrence_list` absent (not exposed on the MCP arm)."
+  },
+  "stop": {
+   "generic": false,
+   "title": "the entry's stated stop",
+   "spec": [
+    "SPEC-pattern-search section 7.6 (the first stop that touched the pattern)",
+    "section 8.7 (`stop`: phase, reason, `mismatch_level`)",
+    "sections 12.1, 20.5 (the phase `extension`)",
+    "section 19.8 (a predicate's stops)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); null: the entry must state no stop; phase and reason: the stop expected, each one value or a list of those accepted; `mismatch_level_in`: the levels the stop may name.",
+   "asserts": "The entry's `stop` is null, or names a phase and a reason among those expected (`discovery` with `max_steps`, `extension` with `max_annotation_work` or `max_memory`, `output` with `max_memory`; in chapter Q `selection` with `max_predicate_work`) and, when asked, a `mismatch_level` among those accepted; whether the stop can have happened is the invariants' question.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "A stop where none was expected, or none where one was; another phase, reason or level than those accepted; `stop` absent from the entry (not exposed on the MCP arm)."
+  },
+  "stops_stated": {
+   "generic": false,
+   "title": "every pattern within its budget or with a stated stop",
+   "spec": [
+    "SPEC-pattern-search section 7.6 (the deadline, a time stop, one budget per request)",
+    "section 7.4 (a stopped discovery leaves the count inexact)"
+   ],
+   "args": "reasons: the stop reasons accepted (`time` for a time budget).",
+   "asserts": "Every answered entry of the request either kept the budget (`stop` null and its primary count `exact`) or states a stop whose reason is among those accepted; a stop in `discovery` or `mask_scan` never sits beside an exact primary count. The detail counts the stopped entries.",
+   "inconclusive": "Only by the common rule (an allowed 503 deadline: the whole answer could not be written in time).",
+   "fails": "An entry without a stop whose primary count is not exact; a stop of another reason; an exact primary count beside a discovery or mask-scan stop."
+  },
+  "trace_coordinates": {
+   "generic": false,
+   "title": "the reported coordinates are the record's",
+   "spec": [
+    "SPEC-labeled-traversal-core section 7.1 (record coordinates, feature level 6)",
+    "section 6.3 (trace support)"
+   ],
+   "args": "none (the truth gives the record, the seed's start and its length).",
+   "asserts": "With trace support and `output.coordinates` true the coordinates block is present and states the record: the record's label is in the dictionary, its occurrence of the whole seed is exactly [start, start + length) in the record, and each arm's run of that label from the seed boundary (`from_bp` 0) lies adjacent to the seed, [end, end + L) on the right arm and [start - L, start) on the left, L the run's length. The positions are 0-based, half-open, forward strand.",
+   "inconclusive": "By the common rule; the `coordinates` key missing altogether is not exposed on the MCP arm (the tool cannot set `output.coordinates`).",
+   "fails": "`coordinates` null (the detail quotes `coordinates_reason`), the record missing from the dictionary, the seed's occurrence not stated, or a run not at the adjacent position (the detail quotes its first occurrences)."
+  },
+  "traverse_seed_outcome": {
+   "generic": false,
+   "title": "the seed's outcome class",
+   "spec": [
+    "SPEC-labeled-traversal-core sections 7.0 and 7.1 (`outcome.walks`: complete, partial, failed)"
+   ],
+   "args": "walks: the accepted values of `outcome.walks` (a list, or one value: complete, partial, or a failed outcome such as `not_in_graph` where the scenario allows it); seed: the result's index (0 when absent).",
+   "asserts": "The seed result's `outcome.walks` is one of the accepted values: for a walk, complete or partial (a stated limit), never failed (no traversal: a derivation that failed, a budget that did not hold the seed, a stop before it started); for a seed the column may lack (chapter N), the failed outcome the scenario names.",
+   "inconclusive": "By the common rule only; on the MCP arm a seed phase the attempt's own duration bound ended before any walk (the host's AttemptAtBound relayed in a 200) is a time limitation the common rule reads as not testable.",
+   "fails": "Another value, with the result's `error` quoted (a failed seed names its cause)."
+  },
+  "traverse_stop": {
+   "generic": false,
+   "title": "a stated stop of the bound that was set",
+   "spec": [
+    "SPEC-labeled-traversal-core section 7.0 (`resource_stop`, the `walk_domain` limitation)",
+    "section 6.7 (`status`, `cap_trigger`)",
+    "section 6.8 (the scopes of the bounds)"
+   ],
+   "args": "knob: the request field (`bounds.time_budget_ms`, `bounds.max_memory_mb`, `bounds.max_work_units`, `bounds.max_steps`, `bounds.max_output_bp`, `bounds.max_live_paths`, `bounds.max_paths`); walks: the accepted `outcome.walks` (partial by default; failed where a request budget may fail the seed); resource: time, memory or work for a request budget; `cap_reason`: the `cap_trigger` reason expected on a truncated arm.",
+   "asserts": "The bound the request set stopped the walk and the answer says so: `outcome.walks` is among the accepted values; with a resource the seed carries a `resource_stop` of that resource whose `requested` is the request's knob value; with a cap reason some requested arm is truncated (or pruned) with that `cap_trigger` reason and every other requested arm is so or complete (an arm whose walks all ended for a semantic reason before the cap stays complete, section 6.7); and a limitation naming the knob is stated, on the arm (`walk_domain`) or on a failed seed. The pass names the knob, the resource and the limitation kinds.",
+   "inconclusive": "By the common rule only (the invariants, not this check, judge whether the stated stop can have happened).",
+   "fails": "`outcome.walks` outside the accepted values; no `resource_stop`, one of another resource, or one whose `requested` is not the request's value; no requested arm truncated by the cap reason, or an arm neither so nor complete; no limitation naming the knob."
+  },
+  "walk_end": {
+   "generic": false,
+   "title": "the walk stops at the record's end",
+   "spec": [
+    "SPEC-labeled-traversal-core section 6.7 (termination reasons)",
+    "section 6.1 (a header label's support)"
+   ],
+   "args": "arm: the arm walked toward the end (right or left); reasons_in: the end reasons accepted there (`label_lost`, `dead_end`).",
+   "asserts": "Near a record's end, under the record's header as the only label, the route that follows the record (through any parent at a merge) reaches exactly the record's end, as many bases from the seed as the record has left, and its leaf ends with one of the accepted reasons (its `end_reasons` or a `label_end` event on it). Where the truth's flank does not reach the end, the arm's leaves are judged by their lengths alone.",
+   "inconclusive": "An arm a stated resource limit stopped short of the end (status truncated, every path ended by a resource reason before the end, the stop possible): the end cannot be shown, and the detail names the stop and the distance left; a route search that stopped at its bound before a route following the record reached the end. Also by the common rule.",
+   "fails": "No path reaches the end (the path lengths and the distance in the detail), a path of the right length through which no route follows the record, a leaf at the end with another reason than accepted, a stated stop that cannot have happened (the invariants' rule), or a seed that was not walked."
+  },
+  "walk_in_record": {
+   "generic": false,
+   "title": "the walk follows the record",
+   "spec": [
+    "SPEC-labeled-traversal-core sections 6.2 to 6.5 (arms and steps, the label-constrained walk, branching, tips, bubbles and reconvergence)",
+    "section 6.6 (edge reuse, seed re-entry)",
+    "section 6.7 (termination reasons)",
+    "section 6.10 (`complete_to_bp`)",
+    "section 7.1 (segments, paths, events)"
+   ],
+   "args": "`label_scope`: record (the record's header is the only label: the exact minimum, no route past the record's end), column (the record's taxid), derived or annotate; seed: the result's index; arms: the arms judged (the request's by default); `any_copy`: the continuation of any copy of a repeated seed counts; `expect_branching`: some arm must state a split or branch event at or before the truth's `branch_by_bp`; `prefix_only`: no minimum (a walk a bound cut); `if_walked`: a seed that was not walked is inconclusive, not a failure.",
+   "asserts": "Per requested arm some root-to-leaf route through the segments, taking any parent at a merge and only segments carrying the record's label where labels are stated, spells the record's own continuation of the seed (for a '-' truth the seed is the reverse complement of the record's window), the root segment agrees with it, and the longest such route reaches the minimum: `truth.walk[side].min_bp` where the builder computed it exactly from the record (a header walk on a whole record: the first base where the record offers a second successor on either strand, the first reused edge, the record's end, or the radius), else the least of the radius, the record's end and the truth's flank, where a shorter route may also end at a stated branch or re-entry (other records of a column, or other taxa, can branch where this record does not). With `expect_branching`, some arm states a split or branch event at or before the record's divergence. The pass states, per arm, how many routes follow the record and the longest one against the expected minimum, or the stated structural end it reached.",
+   "inconclusive": "The record followed for fewer bases than the minimum when a stated resource limit stopped the arm there (the cap in `cap_trigger`, at or past `complete_to_bp`), and the stop can have happened; a route search that stopped at its bound before it found a route following the record; a route ended by a structural reason the record and the seed compute there (a reused edge, a re-entry) or before a base of the record outside the graph's alphabet, which the truth's minimum did not count (a truth gap); with `if_walked`, a seed that was not walked (an allowed failed outcome). An arm without its tree (an MCP answer without its graphlet) is not exposed. Also by the common rule.",
+   "fails": "No route of the arm follows the record (the paths' lengths in the detail), the root segment disagreeing with the record, a route past the record's end under its header alone, the record followed for fewer bases than the minimum with no stated stop or structural end to account for it, a branch or split stated deeper than the record's divergence (or none stated on a repeated seed), a stated stop or structural end that cannot have happened, or a seed that was not walked without `if_walked`."
+  },
+  "withheld": {
+   "generic": false,
+   "title": "an all_or_count list's stated reason",
+   "spec": [
+    "SPEC-pattern-search section 7.5 (`withheld.reason`)",
+    "sections 12.1, 14.6, 19.8, 20.5 (the reasons of paths, labels, predicates and supported paths)"
+   ],
+   "args": "pattern: the entry's index (0 when absent); reason: the reason expected, or a list of those accepted (null among them for no withheld list).",
+   "asserts": "The entry's `withheld` names the expected reason: `count_above_threshold`, `threshold_crossed`, `discovery_budget`, `deadline`, `paths_later_increment`, `anchors_above_threshold`, `annotation_budget`, as the scenario's mode and threshold leave it; in chapter Q `predicate_above_threshold` (the raw count above `max_predicate_contexts`, nothing read) and `predicate_budget` (the pass stopped at `max_predicate_work`); in chapter N null (a bounded low-complexity pattern listed whole) or `count_above_threshold` where the bound exceeds the cap. Whether the reason can have happened (its count above its threshold, its stop stated) is the invariants' question, judged on the same answer.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "`withheld` null or naming another reason; `withheld` absent from the entry (a failure on a direct arm, not exposed on the MCP arm)."
   }
  }
 }

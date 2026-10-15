@@ -81,11 +81,21 @@ def _budget(args):
     return text
 
 
+_GENERIC_BREAK = "(,=_.:/\"[{"
+
+
 def _generic(name, args):
-    if not args:
-        return esc(name)
-    inner = ", ".join("%s=%s" % (esc(k), esc(_runs(v), 40)) for k, v in sorted(args.items()))
-    return "%s(%s)" % (esc(name), inner)
+    """`name(key=value, ...)` for a check kind without a formatter, escaped, with a break opportunity after each
+    ( , = _ . : / " [ { so that the text wraps inside a narrow expectation column instead of running into the next
+    one (the full document, 2026-10-15); each value is cut at 40 characters."""
+    text = name if not args else "%s(%s)" % (name, ", ".join(
+        "%s=%s" % (k, latex.cut_text(_runs(v), 40)) for k, v in sorted(args.items())))
+    out = []
+    for ch in text:
+        out.append(esc(ch))
+        if ch in _GENERIC_BREAK:
+            out.append("\\allowbreak{}")
+    return "".join(out)
 
 
 EXPECT_TEXT = {
