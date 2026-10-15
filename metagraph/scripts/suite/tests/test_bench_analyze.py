@@ -13,6 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from bench_fixtures import base_wall, fake_panel, synthetic_run, tail_keys  # noqa: E402
+from fake_mcp_bench import fake_answer  # noqa: E402
 import analyze  # noqa: E402
 import bench_lib as bl  # noqa: E402
 import suite_common as sc  # noqa: E402
@@ -205,6 +206,29 @@ class AnalyseRuns(unittest.TestCase):
         self.assertFalse(res["verdict"]["emitted"])
         self.assertIn("index_fp: fp1, fp2", " ".join(res["verdict"]["refused"]))
         self.assertEqual(res["identity"]["blocks_changed"], [3, 4])  # fp1 fp1 fp1 fp2 fp1 fp1 fp1
+
+    def test_an_accepted_cap_and_nothing_else(self):
+        # D5: a panel query kept with a stated cap succeeds only with exactly that cap
+        panel = copy.deepcopy(self.panel)
+        why = ["result 0: label evidence lower_bound"]
+        q = [x for x in panel["queries"] if x["id"] == "T-q-0000"][0]
+        q["accepted_incomplete"] = {"reason": "test", "arms": dict((arm, list(why)) for arm in bl.ARMS)}
+        panel["panel_sha256"] = bl.panel_identity(panel["queries"])
+        capped = fake_answer(q["route"], q["scenario"]["request"])
+        capped["results"][0]["outcome"] = {"label_evidence": "lower_bound"}
+        stopped = copy.deepcopy(capped)
+        stopped["results"][0]["arms"]["right"]["status"] = "truncated"
+        bodies = dict(((q["id"], arm, c), capped) for arm in bl.ARMS for c in range(7))
+        bodies[(q["id"], "mcp", 2)] = stopped
+        bodies[(q["id"], "direct-remote", 3)] = fake_answer(q["route"], q["scenario"]["request"])  # not capped
+        res, _ = analyze.analyse(synthetic_run(self.d, "capped", panel, base_wall, sizes_override=bodies), boot=0)
+        arms = res["queries"]["T-q-0000"]["arms"]
+        self.assertEqual(arms["direct-local"]["classes"], {"success": 6})
+        self.assertEqual(arms["mcp"]["classes"], {"success": 5, "incomplete": 1})
+        self.assertEqual(arms["direct-remote"]["classes"], {"success": 5, "result_changed": 1})
+        # without the exception every capped answer is incomplete
+        res, _ = analyze.analyse(synthetic_run(self.d, "capped2", self.panel, base_wall, sizes_override=bodies), boot=0)
+        self.assertEqual(res["queries"]["T-q-0000"]["arms"]["direct-local"]["classes"], {"incomplete": 6})
 
     def test_heterogeneous_change_is_inconclusive(self):
         # half the queries 30 % slower, half 20 % faster: the panel's mean barely moves, its interval spans both

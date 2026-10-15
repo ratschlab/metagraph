@@ -133,9 +133,11 @@ def answer_incomplete(route, body):
     """Why an HTTP 200 answer is not a complete, successful search ([] when it is): a per-pattern or per-result
     error (a refusal inside the answer: below the information floor, a bad alphabet), a withheld result, a stop or
     cut of any reason (a time stop depends on the host's speed; a work or row cap is budget stress, which GPT's
-    protocol runs apart from the panel), a traversal arm truncated or stopped, a resolve whose labels were
-    truncated. The panel takes only complete answers, and the analysis counts a measured execution with such an
-    answer apart from the successes."""
+    protocol runs apart from the panel), a pattern's labels, occurrences or anchors cut, a retrieval incomplete
+    outside a count, a result's labels not complete, a traversal arm truncated or stopped or its label lists capped
+    (label evidence a lower bound), a resolve whose labels were truncated. The panel takes only complete answers
+    (or one recorded as a stated exception: make_panel.py --accept-incomplete), and the analysis counts a measured
+    execution with such an answer apart from the successes."""
     if not isinstance(body, dict):
         return ["no answer body"]
     mode = mode_of(route)
@@ -153,16 +155,28 @@ def answer_incomplete(route, body):
             if p.get("withheld"):
                 why.append("pattern %s: withheld %s" % (pid, (p["withheld"] or {}).get("reason")
                                                         if isinstance(p["withheld"], dict) else p["withheld"]))
-            for key in ("stop", "cut"):
+            for key in ("stop", "cut", "labels_cut", "occurrences_cut"):
                 if p.get(key):
                     what = p[key].get("reason") if isinstance(p[key], dict) else p[key]
                     why.append("pattern %s: %s %s" % (pid, key, what))
+            if p.get("anchors_truncated"):
+                why.append("pattern %s: anchors truncated" % pid)
+            # a count retrieves nothing; any other mode that did not retrieve everything was cut
+            if p.get("retrieval_complete") is False and (p.get("mode") or body.get("mode")) != "count":
+                why.append("pattern %s: retrieval incomplete" % pid)
+            for j, res in enumerate(p.get("results") or []):
+                if isinstance(res, dict) and res.get("labels_status") not in (None, "complete"):
+                    why.append("pattern %s: result %d labels %s" % (pid, j, res.get("labels_status")))
     elif mode == "traverse":
         for i, r in enumerate(body.get("results") or []):
             if not isinstance(r, dict):
                 continue
             if r.get("error"):
                 why.append("result %d: error" % i)
+            # label lists cut at labels.max_labels_per_node: the label evidence is a lower bound
+            evidence = (r.get("outcome") or {}).get("label_evidence")
+            if evidence not in (None, "complete"):
+                why.append("result %d: label evidence %s" % (i, evidence))
             # an arm `truncated` was cut by a budget (walk_domain); `complete` with the walks `partial` reached the
             # requested scope (max_extension_bp), a requested bound and no cap
             for side, arm in sorted((r.get("arms") or {}).items()):
@@ -172,6 +186,9 @@ def answer_incomplete(route, body):
                     why.append("result %d %s: status %s" % (i, side, arm.get("status")))
                 if arm.get("stop"):
                     why.append("result %d %s: stop" % (i, side))
+                for lim in arm.get("limitations") or []:
+                    if isinstance(lim, dict) and lim.get("kind") == "label_lists":
+                        why.append("result %d %s: limitation label_lists" % (i, side))
     elif mode == "resolve":
         if body.get("stop"):
             why.append("stop %s" % ((body["stop"] or {}).get("reason") if isinstance(body["stop"], dict)
@@ -281,11 +298,12 @@ def request_key(scenario):
 
 def panel_identity(queries):
     """The sha256 of the canonical JSON of the panel's [(id, scenario sha256, weight, each arm's recorded result
-    sizes)]: two runs measure the same panel, judged against the same results, only when this agrees (the same
-    queries with other recorded sizes, e.g. rebuilt on another baseline, are another panel)."""
+    sizes[, the accepted incompleteness])]: two runs measure the same panel, judged against the same results, only
+    when this agrees (the same queries with other recorded sizes, e.g. rebuilt on another baseline, are another
+    panel)."""
     rows = [[q["id"], q["scenario_sha256"], q["weight"],
              dict((arm, (e or {}).get("sizes")) for arm, e in sorted((q.get("expected") or {}).items()))]
-            for q in queries]
+            + ([q["accepted_incomplete"]] if q.get("accepted_incomplete") else []) for q in queries]
     return hashlib.sha256(sc.canonical_json(rows)).hexdigest()
 
 

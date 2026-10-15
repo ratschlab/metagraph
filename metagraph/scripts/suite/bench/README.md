@@ -27,20 +27,30 @@ tests.test_bench_analyze tests.test_bench_run` from the suite directory.
 ## The panel (`panel_v4.json`)
 
 Built by `make_panel.py --baseline <v4 copy re-evaluated with c11db9dd> --reevaluated --manifest
-../manifest/suite_v4.json --name v4` from run `20261014T061053Z_refseq97-6f945db4`. Every query carries its frozen
-scenario (and its sha256), each arm's recorded result sizes, the recorded walls (under the Logan load: ranking and
-costing only) and its weight. `panel_sha256` binds ids, scenarios, weights and each arm's recorded result sizes
-(panel version 2); `bench_lib.read_panel` refuses a panel
-whose queries do not match it.
+../manifest/suite_v4.json --name v4 --include T-derived-0003 --accept-incomplete "T-derived-0003=<reason>"` from
+run `20261014T061053Z_refseq97-6f945db4`. Every query carries its frozen scenario (and its sha256), each arm's
+recorded result sizes, the recorded walls (under the Logan load: ranking and costing only) and its weight.
+`panel_sha256` binds ids, scenarios, weights, each arm's recorded result sizes and any accepted incompleteness
+(panel version 2); `bench_lib.read_panel` refuses a panel whose queries do not match it.
 
 **Eligible** (460 of 681 v4 scenarios): a search route (POST /resolve, /traverse, /pattern), no protocol case
 (`body_raw`, `headers`, `run_unique`), not the long class, mapped to an MCP tool; every arm recorded it, every
 execution passed (decisive: no inconclusive, by-design or failing outcome), answered HTTP 200 and was not time-limited;
 the direct arms identical, the MCP arm agreeing, each arm's repeats with one digest; the direct answer a complete
 search (`bench_lib.answer_incomplete`: no per-pattern refusal such as `information_below_floor`, no withheld
-result, no stop or cut of any reason, no truncated traversal arm, no truncated labels: capped queries are budget
+result, no stop or cut of any reason, no cut labels, occurrences or anchors, no incomplete retrieval outside a count,
+no result whose labels are not complete, no truncated or stopped traversal arm, no label lists capped at
+`labels.max_labels_per_node` (label evidence a lower bound), no truncated resolve labels: capped queries are budget
 stress, which the protocol runs apart); not a duplicate request (the D area repeats other areas' requests; the
 original is kept). Excluded counts are in the panel (`selection.excluded`, with the ids).
+
+**One stated exception: T-derived-0003.** Its label lists are cut at the default `labels.max_labels_per_node` 64
+(label evidence `lower_bound`), on every arm and every recorded repeat alike: a deterministic cap, so its work is
+the same each time. It is kept (`--accept-incomplete`, tag `capped`) because it is the panel's only large traverse
+answer (96 KB) and its most label-heavy walk (70 labels); without it the traverse mode has no large answer. The
+query records the incompleteness each arm stated (`accepted_incomplete`), the panel identity binds it, and the
+analysis accepts exactly that incompleteness: any other (a stop, a truncated arm) is `incomplete`, and an uncapped
+answer is `result_changed` (another workload).
 
 **Selection** per mode, 16 each, deterministic: the eligible queries ranked by recorded cost (the least wall of the
 direct arms: load only adds time, so the least is the best estimate on a loaded host; the server-stated elapsed time
@@ -54,7 +64,7 @@ empty results per mode).
 | mode | areas | tags |
 |---|---|---|
 | resolve 16 | R 8, N 8 | 3 label-heavy (5-14 labels), 3 long queries (970-1970 k-mers), 6 heavy (0.08-5.7 s), 1 empty |
-| traverse 16 | T 14, N 2 | 3 label-heavy (6-70 labels), 5 long-path (1-14 kbp), 1 large answer, 4 heavy (0.4-2.9 s) |
+| traverse 16 | T 14, N 2 | 3 label-heavy (6-70 labels), 5 long-path (1-14 kbp), 1 large answer (the capped exception), 4 heavy (0.4-2.9 s) |
 | pattern 16 | P 3, L 2, X 3, M 3, Q 2, N 3 | 3 label-heavy (5-18 labels), 4 long-path, 3 large answers (85-743 KB), 6 heavy (0.1-9.4 s) |
 
 27 families. Weights are equal (1/48) and fixed; the analysis never re-weights silently.
@@ -84,7 +94,7 @@ empty results per mode).
 | traverse | T-walk-0008 | long_path | 26.7 | paths 1, path_bp 1000, labels 1 |
 | traverse | T-derived-0006 | label_heavy, long_path | 41.4 | paths 2, path_bp 2000, labels 13 |
 | traverse | T-derived-0002 | label_heavy, long_path | 56.2 | paths 17, path_bp 14198, labels 6 |
-| traverse | T-derived-0003 | label_heavy, large_answer, long_path | 68.3 | paths 7, path_bp 7000, labels 70 |
+| traverse | T-derived-0003 | capped, label_heavy, large_answer, long_path | 68.3 | paths 7, path_bp 7000, labels 70 (cap 64 per node) |
 | traverse | T-exhaustive-0003 | - | 101.6 | paths 2, path_bp 200, labels 1 |
 | traverse | T-walk-0009 | - | 142.2 | paths 2, path_bp 200, labels 1 |
 | traverse | N-realrep-0006 | - | 185.4 | paths 2, path_bp 400, labels 1 |

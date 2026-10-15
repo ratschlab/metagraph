@@ -139,8 +139,13 @@ def classify(run, step, line):
     if body is None:
         return "unverified", "the answer could not be read", None
     why = bl.answer_incomplete(q.get("route"), body)
-    if why:
-        return "incomplete", "; ".join(why[:3]), None
+    accepted = ((q.get("accepted_incomplete") or {}).get("arms") or {}).get(step["arm"])
+    if why and sorted(why) != sorted(accepted or []):
+        only = " (the panel accepts only: %s)" % "; ".join(accepted) if accepted else ""
+        return "incomplete", "; ".join(why[:3]) + only, None
+    if accepted and not why:
+        # the panel recorded a capped answer (a stated exception): an uncapped one is another workload
+        return "result_changed", "not capped as the panel recorded (%s)" % "; ".join(accepted), None
     sizes = bl.result_sizes(q.get("route"), body)
     expected = ((q.get("expected") or {}).get(step["arm"]) or {}).get("sizes")
     if not expected or all(v is None for v in expected.values()):

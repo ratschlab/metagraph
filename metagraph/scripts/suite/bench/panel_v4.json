@@ -1,8 +1,8 @@
 {
  "builder": {
-  "bench_lib_sha256": "617487f37b0e5f9d4311dccfc7c154773fea92a8059f597091528d007ad4af5e",
+  "bench_lib_sha256": "4cac4a956d9596be96431b1d6fa7ae618dcc8d8dd560adf4e400810267d60423",
   "script": "bench/make_panel.py",
-  "sha256": "d8b30fce43686bc1d789ef1d56c9b8f1ded5aaa429c8efc2ec106b9f73affc7c"
+  "sha256": "a4bad1855c6c2442b391916540f54f74e2c7d99626c4bf4d0267e95bc25bfefd"
  },
  "costing": {
   "allowance_host_hours": [
@@ -29,9 +29,9 @@
   "step_gap_source": "the baseline's median gaps",
   "warmup_requests": 48
  },
- "created_utc": "2026-10-15T07:43:18.813Z",
+ "created_utc": "2026-10-15T07:47:52.134Z",
  "name": "v4",
- "panel_sha256": "39b1febd8697d1ede1654eb4e7ef9fd3476fb6e96c2e83025e61941681ac166c",
+ "panel_sha256": "84c57d4611a0d75b1a007f3a082eacb063ab68c2cb6ee9ad39e22a5a7ce0b674",
  "panel_version": 2,
  "protocol": {
   "arm_orders": [
@@ -4496,6 +4496,26 @@
    }
   },
   {
+   "accepted_incomplete": {
+    "arms": {
+     "direct-local": [
+      "result 0: label evidence lower_bound",
+      "result 0 left: limitation label_lists",
+      "result 0 right: limitation label_lists"
+     ],
+     "direct-remote": [
+      "result 0: label evidence lower_bound",
+      "result 0 left: limitation label_lists",
+      "result 0 right: limitation label_lists"
+     ],
+     "mcp": [
+      "result 0: label evidence lower_bound",
+      "result 0 left: limitation label_lists",
+      "result 0 right: limitation label_lists"
+     ]
+    },
+    "reason": "label lists cut at the default labels.max_labels_per_node 64 (label evidence lower_bound), the same on every arm and repeat: deterministic; kept as the only large traverse answer and the most label-heavy walk (70 labels)"
+   },
    "area": "T",
    "baseline_digests": {
     "direct-local": "d4b58bd1d0608e9fb9391c8b0b8379693678608090059b6bf67a990468620cfa",
@@ -4694,8 +4714,9 @@
     }
    },
    "scenario_sha256": "9962164ee9be7b3bc220d479e18de49967e94001062b7bac9e574fbc126a31bd",
-   "selected_by": "tag:label_heavy",
+   "selected_by": "include",
    "tags": [
+    "capped",
     "label_heavy",
     "large_answer",
     "long_path"
@@ -9936,12 +9957,17 @@
   }
  ],
  "selection": {
+  "accept_incomplete_not_kept": [],
+  "accepted_incomplete": {
+   "T-derived-0003": "label lists cut at the default labels.max_labels_per_node 64 (label evidence lower_bound), the same on every arm and repeat: deterministic; kept as the only large traverse answer and the most label-heavy walk (70 labels)"
+  },
   "by_mode": {
    "pattern": 16,
    "resolve": 16,
    "traverse": 16
   },
   "by_tag": {
+   "capped": 1,
    "empty_result": 1,
    "heavy": 16,
    "label_heavy": 9,
@@ -10639,7 +10665,9 @@
   },
   "families": 27,
   "heavy_fraction": 0.1,
-  "include": [],
+  "include": [
+   "T-derived-0003"
+  ],
   "include_not_eligible": [],
   "include_unknown": [],
   "max_empty_per_mode": 2,

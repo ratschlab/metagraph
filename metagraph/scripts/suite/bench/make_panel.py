@@ -6,6 +6,7 @@ three-arm suite run, with the result sizes each arm recorded, fixed weights and 
                    [--size 48] [--quota resolve=16,traverse=16,pattern=16]
                    [--min-tags label_heavy=3,long_path=4,long_query=2,large_answer=2,heavy=2] [--max-empty 2]
                    [--include IDS] [--exclude IDS] [--include-from PANEL] [--name NAME]
+                   [--accept-incomplete ID=REASON ...]
 
 RUN_DIR is a merged suite run (executions.jsonl, compare.json, run.json, the arms' raw answers; with --reevaluated
 its re-evaluated set, executions.reevaluated.jsonl and compare.reevaluated.json, judged by the checks of the
@@ -24,8 +25,11 @@ A query is ELIGIBLE (each failed rule is counted in the panel's `selection.exclu
   time       none was time-limited (the work does not depend on the host's speed);
   agreement  the direct arms identical, the MCP arm agrees, each arm's repeats with one digest;
   complete   the direct answer is a complete search (bench_lib.answer_incomplete: no per-pattern refusal, withheld
-             result, stop or cut, no truncated or stopped traversal arm, no truncated labels): capped queries are
-             budget stress, which the protocol runs apart;
+             result, stop or cut, no cut labels, occurrences or anchors, no incomplete retrieval outside a count, no
+             truncated, stopped or label-capped traversal arm, no truncated labels): capped queries are budget
+             stress, which the protocol runs apart. --accept-incomplete ID=REASON keeps one as a stated exception
+             when every arm's executions state the same incompleteness (a deterministic cap): the query records
+             it (`accepted_incomplete`, bound by the panel identity) and the analysis accepts exactly it;
   duplicate  not the same request as an eligible query before it (the D area repeats other areas' requests).
 The answers' result sizes (bench_lib.result_sizes) are recorded per arm: a measured execution counts as the same
 workload only when its sizes equal these.
@@ -229,8 +233,29 @@ def candidate(run_dir, scenario, arms):
             "recorded": recorded, "scenario": scenario}
 
 
-def candidates(manifest, baseline):
-    """(eligible candidates in manifest order, excluded {rule: count}, excluded ids {rule: [ids]})."""
+def accepted_reasons(run_dir, route, arms):
+    """{arm: the incompleteness every recorded execution of the arm states}, None when an arm's executions state
+    different ones (a cap that is not deterministic is no workload) or an answer cannot be read."""
+    out = {}
+    for arm in bl.ARMS:
+        seen = set()
+        for line in arms.get(arm) or []:
+            body = raw_body(run_dir, line)
+            if body is None:
+                return None
+            seen.add(tuple(bl.answer_incomplete(route, body)))
+        if len(seen) != 1:
+            return None
+        out[arm] = list(seen.pop())
+    return out
+
+
+def candidates(manifest, baseline, accept=None):
+    """(eligible candidates in manifest order, excluded {rule: count}, excluded ids {rule: [ids]}). `accept` {id:
+    reason}: incomplete answers kept as a stated exception when every arm's executions state the same
+    incompleteness (a deterministic cap); the candidate records it (`accepted_incomplete`) and the analysis then
+    accepts exactly that incompleteness and no other."""
+    accept = accept or {}
     excluded, excluded_ids, out, seen = {}, {}, [], {}
     # D-area scenarios repeat other areas' requests: judge them last, so the original is the one kept
     order = sorted(manifest.get("scenarios") or [], key=lambda s: (str(s.get("area")) == "D",))
@@ -241,8 +266,14 @@ def candidates(manifest, baseline):
         if not why:
             # the direct answer (repeat 0) a complete, successful search: no refusal, withheld result, stop or cap
             body = raw_body(baseline["run_dir"], arms["direct-local"][0])
-            if body is None or bl.answer_incomplete(scenario.get("route"), body):
+            accepted = None
+            if body is None:
                 why = ["complete"]
+            elif bl.answer_incomplete(scenario.get("route"), body):
+                if sid in accept:
+                    accepted = accepted_reasons(baseline["run_dir"], scenario.get("route"), arms)
+                if not accepted:
+                    why = ["complete"]
         if not why:
             key = bl.request_key(scenario)
             if key in seen:
@@ -253,7 +284,11 @@ def candidates(manifest, baseline):
             excluded[rule] = excluded.get(rule, 0) + 1
             excluded_ids.setdefault(rule, []).append(sid)
         if not why:
-            out.append(candidate(baseline["run_dir"], scenario, arms))
+            c = candidate(baseline["run_dir"], scenario, arms)
+            if accepted:
+                c["accepted_incomplete"] = {"reason": accept[sid], "arms": accepted}
+                c["tags"].append("capped")
+            out.append(c)
     position = dict((s.get("id"), i) for i, s in enumerate(manifest.get("scenarios") or []))
     out.sort(key=lambda c: position[c["id"]])
     return out, excluded, excluded_ids
@@ -431,12 +466,13 @@ def costing(chosen, baseline, cycles=bl.DEFAULT_CYCLES, warmup_arm=bl.DEFAULT_WA
 # the panel
 
 def build(manifest, baseline, size=DEFAULT_SIZE, quota=None, min_tags=None, max_empty=DEFAULT_MAX_EMPTY,
-          include=(), exclude=(), name=None, manifest_path=None, now=None):
+          include=(), exclude=(), name=None, manifest_path=None, now=None, accept_incomplete=None):
     quota = dict(quota or DEFAULT_QUOTA)
     if sum(quota.values()) != size:
         raise SystemExit("make_panel: the quota %s does not add up to --size %d" % (quota, size))
     min_tags = dict(DEFAULT_MIN_TAGS if min_tags is None else min_tags)
-    cands, excluded, excluded_ids = candidates(manifest, baseline)
+    accept_incomplete = dict(accept_incomplete or {})
+    cands, excluded, excluded_ids = candidates(manifest, baseline, accept_incomplete)
     known = set(s.get("id") for s in manifest.get("scenarios") or [])
     eligible = set(c["id"] for c in cands)
     include_missing = [i for i in include if i not in eligible]
@@ -461,6 +497,8 @@ def build(manifest, baseline, size=DEFAULT_SIZE, quota=None, min_tags=None, max_
                         "weight": weight, "cost_ms": c["cost_ms"], "expected": c["expected"], "work": c["work"],
                         "baseline_digests": c["digests"], "recorded": c["recorded"],
                         "scenario_sha256": bl.scenario_sha256(c["scenario"]), "scenario": c["scenario"]})
+        if c.get("accepted_incomplete"):
+            queries[-1]["accepted_incomplete"] = c["accepted_incomplete"]
     ident = sc.manifest_identity(manifest)
     by_mode = dict((m, sum(1 for q in queries if q["mode"] == m)) for m in bl.MODES)
     by_tag = {}
@@ -488,6 +526,10 @@ def build(manifest, baseline, size=DEFAULT_SIZE, quota=None, min_tags=None, max_
         "selection": {"rules": list(ELIGIBILITY_RULES), "size": size, "quota": quota, "min_tags": min_tags,
                       "max_empty_per_mode": max_empty, "heavy_fraction": HEAVY_FRACTION,
                       "tag_thresholds": bl.TAG_THRESHOLDS, "include": list(include), "exclude": list(exclude),
+                      "accepted_incomplete": dict((q["id"], q["accepted_incomplete"]["reason"]) for q in queries
+                                                  if q.get("accepted_incomplete")),
+                      "accept_incomplete_not_kept": sorted(set(accept_incomplete) - set(
+                          q["id"] for q in queries if q.get("accepted_incomplete"))),
                       "include_not_eligible": include_missing,
                       "include_unknown": [i for i in include if i not in known],
                       "scenarios": len(manifest.get("scenarios") or []), "eligible": len(eligible),
@@ -522,6 +564,9 @@ def main(argv=None):
     ap.add_argument("--include", default="", help="ids to include (comma-separated) when eligible")
     ap.add_argument("--include-from", default=None, help="an earlier panel whose queries to include when eligible")
     ap.add_argument("--exclude", default="", help="ids never to choose")
+    ap.add_argument("--accept-incomplete", action="append", default=[], metavar="ID=REASON",
+                    help="keep an incomplete (capped) query eligible as a stated exception when every arm's executions "
+                         "state the same incompleteness (repeatable; combine with --include to choose it)")
     ap.add_argument("--name", default=None)
     args = ap.parse_args(argv)
     manifest_path = args.manifest or os.path.join(args.baseline, "manifest.json")
@@ -538,8 +583,14 @@ def main(argv=None):
         include += [q["id"] for q in bl.read_panel(args.include_from)["queries"] if q["id"] not in include]
     quota = parse_map(args.quota) if args.quota else None
     min_tags = parse_map(args.min_tags) if args.min_tags is not None else None
+    accept = {}
+    for item in args.accept_incomplete:
+        sid, sep, reason = item.partition("=")
+        if not sep or not sid.strip() or not reason.strip():
+            raise SystemExit("make_panel: --accept-incomplete takes ID=REASON, not %r" % item)
+        accept[sid.strip()] = reason.strip()
     panel = build(manifest, baseline, args.size, quota, min_tags, args.max_empty, include, parse_ids(args.exclude),
-                  args.name, manifest_path)
+                  args.name, manifest_path, accept_incomplete=accept)
     sc.write_json_atomic(args.out, panel)
     sel = panel["selection"]
     print("panel %s: %d queries (%s) from %d eligible of %d scenarios; tags %s; families %d; %d requests, "

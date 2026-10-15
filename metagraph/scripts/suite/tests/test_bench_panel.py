@@ -149,6 +149,26 @@ class ResultSizes(unittest.TestCase):
         self.assertTrue(bl.answer_incomplete("POST /resolve", body))
         self.assertEqual(bl.answer_incomplete("POST /resolve", resolve_body()), [])
 
+    def test_caps_and_truncations_are_incomplete(self):
+        # D5: label-list caps (lower-bound label evidence) and the pattern truncation fields
+        body = traverse_body()
+        body["results"][0]["outcome"]["label_evidence"] = "lower_bound"
+        self.assertEqual(bl.answer_incomplete("POST /traverse", body), ["result 0: label evidence lower_bound"])
+        body = traverse_body()
+        body["results"][0]["arms"]["right"]["limitations"] = [{"kind": "label_lists", "limit": 64}, {"kind": "scope"}]
+        self.assertEqual(bl.answer_incomplete("POST /traverse", body), ["result 0 right: limitation label_lists"])
+        for extra, why in (({"labels_cut": {"reason": "max_labels"}}, "pattern w: labels_cut max_labels"),
+                           ({"occurrences_cut": {"reason": "max_occurrences"}},
+                            "pattern w: occurrences_cut max_occurrences"),
+                           ({"anchors_truncated": [{"strand": "+"}]}, "pattern w: anchors truncated"),
+                           ({"retrieval_complete": False, "mode": "all_or_count"}, "pattern w: retrieval incomplete"),
+                           ({"results": [{"labels_status": "truncated"}]}, "pattern w: result 0 labels truncated")):
+            self.assertEqual(bl.answer_incomplete("POST /pattern", pattern_body(extra=extra)), [why], extra)
+        # a count is no retrieval; the empty and complete fields are no cap
+        self.assertEqual(bl.answer_incomplete("POST /pattern", pattern_body(extra={
+            "retrieval_complete": False, "mode": "count", "anchors_truncated": [], "labels_cut": None,
+            "results": [{"labels_status": "complete"}]})), [])
+
     def test_tags(self):
         self.assertIn("label_heavy", bl.query_tags("POST /resolve", resolve_body(labels=5)))
         self.assertIn("long_query", bl.query_tags("POST /resolve", resolve_body(kmers=970)))
@@ -292,6 +312,26 @@ class BuildPanel(unittest.TestCase):
         self.assertIn("P-exact-0008", [x["id"] for x in pat])
         self.assertNotIn("P-exact-0009", [x["id"] for x in panel["queries"]])
         self.assertEqual([x["selected_by"] for x in pat if x["id"] == "P-exact-0008"], ["include"])
+
+    def test_a_capped_query_only_as_a_stated_exception(self):
+        # D5: a label-list cap is incomplete; --accept-incomplete keeps one query as a documented exception
+        b = build_mixed(self.root)
+        capped = traverse_body(bp=2000, labels=70)
+        capped["results"][0]["outcome"]["label_evidence"] = "lower_bound"
+        b.add(scenario("T-derived-0003", "traverse"), capped, wall=40.0)
+        panel = self.build(b)
+        self.assertIn("T-derived-0003", panel["selection"]["excluded_ids"]["complete"])
+        reason = "the default label cap (labels.max_labels_per_node 64), deterministic"
+        panel = self.build(b, include=["T-derived-0003"], accept_incomplete={"T-derived-0003": reason})
+        q = [x for x in panel["queries"] if x["id"] == "T-derived-0003"][0]
+        self.assertEqual(q["accepted_incomplete"]["reason"], reason)
+        self.assertEqual(q["accepted_incomplete"]["arms"]["mcp"], ["result 0: label evidence lower_bound"])
+        self.assertIn("capped", q["tags"])
+        self.assertEqual(panel["selection"]["accepted_incomplete"], {"T-derived-0003": reason})
+        # the identity binds the accepted incompleteness
+        before = bl.panel_identity(panel["queries"])
+        q["accepted_incomplete"]["arms"]["mcp"] = []
+        self.assertNotEqual(bl.panel_identity(panel["queries"]), before)
 
     def test_run_manifest_verifies(self):
         b = build_mixed(self.root)
