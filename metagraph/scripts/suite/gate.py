@@ -308,19 +308,40 @@ def property_results(scenario, line, is_property, generic=False):
     return out
 
 
-def _explained_property(line, name, k):
-    """Whether the line's answered / clamped case explains the k-th item of check |name| (explained_items: indices
-    into the line's checks)."""
-    items = line.get("explained_items")
-    if isinstance(items, list) and items:
-        seen = {}
-        for i, c in enumerate(line.get("checks") or []):
-            n = seen.get(c.get("check"), 0)
-            seen[c.get("check")] = n + 1
-            if c.get("check") == name and n == k:
-                return i in items
+def table_explanations(comp):
+    """{(scenario, repeat): (explained item indices, the case)} of the MCP executions an answered / clamped case
+    judged by the checks, as compare derived them from the table (mcp_agreement explained_items and by_design_notes,
+    other_repeats included). The gate reads an execution's explanation from here, never from the line's own
+    explained_items / explained_checks (a runner's E is not trusted: S5c-05)."""
+    out = {}
+    for sid, entry in ((comp or {}).get("scenarios") or {}).items():
+        ma = (entry or {}).get("mcp_agreement") or {}
+        others = ma.get("other_repeats")
+        for part in [ma] + (others if isinstance(others, list) else [others]):
+            if not isinstance(part, dict):
+                continue
+            notes = part.get("by_design_notes") or {}
+            for rep, items in (part.get("explained_items") or {}).items():
+                try:
+                    out[(sid, int(rep))] = (list(items or []), notes.get(rep))
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def _explained_property(line, name, k, explanations):
+    """Whether the table explains the k-th item of check |name| of an MCP line (table_explanations: indices into the
+    line's checks); never on a direct arm, never by the line's own claim."""
+    if line.get("arm") != "mcp":
         return False
-    return name in (line.get("explained_checks") or ())
+    items, _ = explanations.get((line.get("scenario"), line.get("repeat")), ([], None))
+    seen = {}
+    for i, c in enumerate(line.get("checks") or []):
+        n = seen.get(c.get("check"), 0)
+        seen[c.get("check")] = n + 1
+        if c.get("check") == name and n == k:
+            return i in items
+    return False
 
 
 EVIDENCE_SOURCES = ("live", "table", "unknown")
@@ -598,6 +619,7 @@ def judge(run_dir, policy, reevaluated=False):
         problems.append(_problem("identity", "the property reading refuses the checks that judged the set (%s): %s"
                                  % (judging["source"], refused)))
     is_property = _is_property_fn(judging["dir"])
+    explanations = table_explanations(comp)
     passed = judged = 0
     passed_by_arm = {}
     by_design_mcp_only = 0
@@ -628,7 +650,8 @@ def judge(run_dir, policy, reevaluated=False):
         else:
             problems.append(_problem("outcome", "outcome %r" % (sc.outcome_value(o),), sid, arm, rep))
             continue
-        if o == "pass" or r.get("explained_checks") or r.get("explained_items"):
+        if o == "pass" or r.get("explained_checks") or r.get("explained_items") or \
+                (arm == "mcp" and (sid, rep) in explanations):
             # the line's outcome is not trusted: every check the scenario expects has a result here (determinism
             # not on the first repeat), the status passed, no generic check failed or could not test, and every
             # property passed unless the policy does not require it or the named answered case explains it
@@ -652,10 +675,10 @@ def judge(run_dir, policy, reevaluated=False):
                     continue
                 if out == "pass":
                     continue
-                if out in sc.EXPLAINABLE_OUTCOMES and _explained_property(r, name, k) and \
-                        r.get("service_by_design_case") in cmp.case_ids(s):
-                    # the named answered / clamped case explains it (a failure, or a field its path removed:
-                    # suite_common.item_explained): judged with the pair below
+                if out in sc.EXPLAINABLE_OUTCOMES and _explained_property(r, name, k, explanations) and \
+                        explanations[(sid, rep)][1] in cmp.case_ids(s):
+                    # the named answered / clamped case explains it by the table (a failure, or a field its path
+                    # removed: suite_common.item_explained): judged with the pair below
                     continue
                 if prop:
                     if not not_required(policy, sid, arm, name):
@@ -669,6 +692,23 @@ def judge(run_dir, policy, reevaluated=False):
         entry = scomp.get(sid) or {}
         ma = entry.get("mcp_agreement") or {}
         if "mcp" in arms and not excluded(policy, sid, "mcp") and ma:
+            # a line whose recorded explanation is not the table's (compare's notes): the gate reads the table's,
+            # and a runner that explains otherwise is named
+            for key, what in (("explained_items_recorded", "explained items"),
+                              ("explained_checks_recorded", "explained checks")):
+                for rep, rec in sorted((ma.get(key) or {}).items(), key=lambda kv: str(kv[0])):
+                    try:
+                        rep_i = int(rep)
+                    except (TypeError, ValueError):
+                        rep_i = None
+                    table = explanations.get((sid, rep_i), ([], None))[0]
+                    if key == "explained_checks_recorded":
+                        line = recorded.get((sid, "mcp", rep_i)) or {}
+                        table = list(dict.fromkeys(str((line.get("checks") or [{}] * (i + 1))[i].get("check"))
+                                                   for i in table))
+                    problems.append(_problem("agreement", "the MCP line records the %s %s, the table's are %s (a "
+                                                          "runner's explanation is not trusted)"
+                                             % (what, json.dumps(rec), json.dumps(table)), sid, "mcp", rep_i))
             direct_ran = any((k[0] == sid and k[1] in sc.DIRECT_ARMS) for k in recorded)
             mcp_sbd = any(r.get("outcome") == "service_by_design" or r.get("explained_checks")
                           or r.get("explained_items") for (s_, a_, _), r in recorded.items() if s_ == sid and a_ == "mcp")

@@ -2383,7 +2383,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                                  str((mcp_error(x, run_dir) or {}).get("code")) for x in host))})
     # the runner's matcher, per execution
     groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
-    undecided, recorded_items = [], {}
+    undecided, recorded_items, recorded_names = [], {}, {}
     outside = [r for r in judged if not sc.outcome_known(sc.recorded_outcome(r))]
     judged = [r for r in judged if not any(r is x for x in outside)]
     for r in judged:
@@ -2410,6 +2410,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             answered[r.get("repeat")] = noted
             explained[r.get("repeat")] = line_explained_items(r, matched, recorded_items)
             explained_names[r.get("repeat")] = e
+            names = r.get("explained_checks")
+            if "explained_items" not in r and names is not None and \
+                    sorted(set(str(x) for x in (names if isinstance(names, list) else [names]))) != sorted(set(e)):
+                recorded_names[r.get("repeat")] = names   # a line naming other explained checks than the table
             plain.append(r)
         elif matched:
             key = (how, matched[0].get("id"))
@@ -2422,6 +2426,9 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     if recorded_items:
         # S5c-05: the items are the table's; a line that recorded others (another table) is noted, not trusted
         note["explained_items_recorded"] = dict((str(k), v) for k, v in sorted(recorded_items.items(), key=str))
+    if recorded_names:
+        # a line recording explained_checks only (a runner before f386a3c0) whose names are not the table's E
+        note["explained_checks_recorded"] = dict((str(k), v) for k, v in sorted(recorded_names.items(), key=str))
     if undecided:
         note["undecidable_repeats"] = [r.get("repeat") for r in undecided]
         if not groups and not plain and not outside:

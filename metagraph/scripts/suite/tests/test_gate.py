@@ -498,23 +498,32 @@ class ExplainedNotExposedTest(GateCase):
     verified pair as for any answered case (gate.judge's property loop skips an explained item, the pair is judged
     in the agreement step); without the item in E the property blocks as not_exposed."""
 
-    def run_with(self, name, explained_items):
+    @staticmethod
+    def merged_checks(field="results.1.duplicate"):
+        return [{"check": "status", "outcome": "pass", "detail": "ok"},
+                {"check": "contains_source_context", "outcome": "fail", "detail": "1 results for 2 seeds"},
+                {"check": "answer_fields", "outcome": "not_exposed", "detail": "field not in the answer: " + field}]
+
+    def run_with(self, name, explained_items, checks_by_rep=None, names_only=False, direct_change=None):
+        """The T-010 run whose MCP lines (r0, r1) record |explained_items| (and the names of those items; with
+        |names_only| the names alone) on |checks_by_rep| (default: the merged reading on both)."""
         scen = [s for s in scenarios() if s["id"] in ("T-001", "R-002")]
         scen.append(scenario("T-010", "POST /traverse", by_design=[MERGED["id"]]))
         m = manifest_of(scen, [])
-        checks = [{"check": "status", "outcome": "pass", "detail": "ok"},
-                  {"check": "contains_source_context", "outcome": "fail", "detail": "1 results for 2 seeds"},
-                  {"check": "answer_fields", "outcome": "not_exposed",
-                   "detail": "field not in the answer: results.1.duplicate"}]
-        e = [checks[i]["check"] for i in explained_items]
-        change = dict((("T-010", r), {"outcome": "service_by_design", "checks": checks,
-                                      "service_by_design_case": MERGED["id"], "explained_checks": e,
-                                      "explained_items": list(explained_items)}) for r in (0, 1))
+        change = {}
+        for r in (0, 1):
+            checks = (checks_by_rep or {}).get(r) or self.merged_checks()
+            change[("T-010", r)] = {"outcome": "service_by_design", "checks": checks,
+                                    "service_by_design_case": MERGED["id"],
+                                    "explained_checks": [checks[i]["check"] for i in explained_items]}
+            if not names_only:
+                change[("T-010", r)]["explained_items"] = list(explained_items)
         global TABLE
         saved = TABLE
         TABLE = (dict(list(saved[0].items()) + [(MERGED["id"], MERGED)]), dict(saved[1], cases=len(saved[0]) + 1))
         try:
-            d = make_run(self.run_dir(name), m, mcp_lines(m, change=change), direct=("direct-local",))
+            d = make_run(self.run_dir(name), m, mcp_lines(m, change=change), direct=("direct-local",),
+                         direct_change=direct_change)
             pol = policy_of(m, arms=("mcp", "direct-local"))
         finally:
             TABLE = saved
@@ -576,11 +585,43 @@ class ExplainedNotExposedTest(GateCase):
         ma = sc.read_json(os.path.join(d, "compare.json"))["scenarios"]["T-010"]["mcp_agreement"]
         self.assertEqual((ma["class"], ma["verified"], ma["explained_items"]),
                          ("service_by_design", True, {"0": [1, 2], "1": [1, 2]}))
-        # a line that records only the failure in E: the removed field blocks as a required property
+        # a line that records only the failure in E (a runner without the shared rule): the table explains the
+        # removed field whatever the line says, so no property problem; the line's other explanation is named
         d, pol = self.run_with("failure-only", (1,))
         v = gate.judge(d, pol)
-        self.assertEqual([(p["kind"], p["scenario"], p["detail"]) for p in v["problems"]],
-                         [("property", "T-010", "required property answer_fields not_exposed")] * 2)
+        self.assertEqual([(p["kind"], p["scenario"], p["repeat"], p["detail"]) for p in v["problems"]],
+                         [("agreement", "T-010", r, "the MCP line records the explained items [1], the table's are "
+                                                    "[1, 2] (a runner's explanation is not trusted)") for r in (0, 1)])
+
+    def test_the_gate_takes_the_explanation_from_the_table_not_the_line(self):
+        # VERIFY-G stage 2: a line's own claim never explains a reading at the gate: answer_fields not_exposed on
+        # another path, claimed explained by items or by names, or on r1 beside a legitimate r0, blocks as the
+        # property it is; a direct-arm line carrying the case's fields is no MCP explanation at all
+        other = self.merged_checks("results.0.labels")
+        missing = ("property", "T-010", "mcp", "required property answer_fields not_exposed")
+        for name, kw, want in (
+                ("claimed-items", dict(checks_by_rep={0: other, 1: other}), [(0, missing), (1, missing)]),
+                ("claimed-names", dict(checks_by_rep={0: other, 1: other}, names_only=True),
+                 [(0, missing), (1, missing)]),
+                ("r1-claimed", dict(checks_by_rep={1: other}), [(1, missing)])):
+            d, pol = self.run_with(name, (1, 2), **kw)
+            v = gate.judge(d, pol)
+            self.assertFalse(v["passed"], name)
+            got = [(p["repeat"], (p["kind"], p["scenario"], p["arm"], p["detail"])) for p in v["problems"]
+                   if p["kind"] == "property"]
+            self.assertEqual(got, want, gate.render(v))
+            # the claim that is not the table's is named
+            agreement = [p for p in v["problems"] if p["kind"] == "agreement"]
+            self.assertEqual(sorted(p["repeat"] for p in agreement), [r for r, _ in want], gate.render(v))
+            self.assertTrue(all("(a runner's explanation is not trusted)" in p["detail"] for p in agreement))
+        direct = self.merged_checks()
+        direct[1] = dict(direct[1], outcome="pass", detail="2 results")
+        d, pol = self.run_with("direct-claim", (1, 2), direct_change={("T-010", 0): {
+            "checks": direct, "service_by_design_case": MERGED["id"], "explained_checks": ["answer_fields"],
+            "explained_items": [2]}})
+        v = gate.judge(d, pol)
+        self.assertIn(("property", "direct-local", 0, "required property answer_fields not_exposed"),
+                      [(p["kind"], p["arm"], p["repeat"], p["detail"]) for p in v["problems"]])
 
 
 class PlanTest(GateCase):
