@@ -2519,3 +2519,18 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   with the strategy echo, which states the effective value the walk ran under. The legitimate clamps keep passing:
   T-edge-0012's time budget (70,000 -> 60,000) on both direct arms, an omitted work budget set to the maximum, the
   derivation's raise of a zero budget.
+- /traverse, a structural end needs its leaf's events (B2). A path that counts a structural end (branch, a quorum or
+  split-limit end, a re-entry) is judged by its leaf's `events` (the label_end event of the end, the blocked event of a
+  re-entry). The rule that a stated end has its label_end event read the list only where it was one, so an answer
+  whose leaf had no `events` (absent, null, an object) skipped it and the branch rules too: the zero-extension branch
+  answer with `events` deleted passed every check (a string crashed walk_in_record). The engine writes the list on
+  every segment of a tree or full detail (traverse.cpp arm_to_json; segment events are never truncated), so its
+  absence is an output or normaliser defect: _structural_end_problems raises Missing for such a leaf, which fails on a
+  direct arm and is not exposed on the MCP arm (evaluate's rule), never a pass. walk_in_record treats such a leaf like
+  one whose end cannot have happened (it shows none of its ends) and states the missing field only where nothing
+  failed; the invariants likewise raise it only when they found no other problem, so a failure is never hidden behind
+  it. Events are read through _seg_events (a list's objects; nothing from another type): no crash. The graphlet
+  parser gives every segment an `events` list (an MGT states every event, SPEC §7.5; it listed them only on segments
+  with an E or R record), so the MCP arm's parsed walks cannot lack it. An end that is no structural one needs no
+  events. The unit fixture `walk(..., reason="branch")` stated no events on its leaf and passed through the hole; it
+  states the label_end event as the engine writes it.

@@ -2023,10 +2023,14 @@ class TraverseChecks(unittest.TestCase):
 
     def walk(self, flanks, status="complete", trig=None, reason="max_extension_bp", split_at=None, extra=None):
         """A detail-full result: per side one path whose single segment spells |flanks[side]| (natural
-        orientation: a left flank ends at the seed)."""
+        orientation: a left flank ends at the seed); the segment states its events as the engine writes them (a
+        structural end's label_end event at the path's end)."""
         arms = {}
         for side, f in flanks.items():
-            a = {"status": status, "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": len(f), "sequence": f}],
+            ev = [{"at_bp": len(f), "type": "label_end", "label": 0, "reason": reason, "structural_successors": 2}] \
+                if reason in checks._STATED_STRUCTURAL_ENDS else []
+            a = {"status": status, "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": len(f), "sequence": f,
+                                                 "events": ev}],
                  "paths": [{"id": 0, "segments": [0], "length_bp": len(f), "path_reason": reason,
                             "end_reasons": {reason: 1}}]}
             if trig:
@@ -2559,6 +2563,60 @@ class TraverseChecks(unittest.TestCase):
             self.assertEqual(judge(*self.structural_walk(end=end, blocked=False)), ("fail", "fail"))
         # a structural reason the path counts without its label_end event at the leaf
         self.assertEqual(judge(*self.structural_walk(strategy=mlb2, events=False)), ("fail", "fail"))
+
+    def test_a_structural_end_needs_its_events(self):
+        # a structural end is shown by its leaf's events (§7.0; traverse.cpp writes the list on every segment of a
+        # tree or full detail): without the list (absent, null, another type) the end is not shown, so it never
+        # excuses the record's shorter route: fail on a direct arm, not exposed on the MCP's, never a crash
+        mlb2 = {"branching": {"max_label_branches": 2}}
+
+        def judge(sc, ans, arm="direct-local"):
+            return outcome(sc, ans, "walk_in_record", arm)[0], outcome(sc, ans, "invariants", arm)[0]
+
+        def broken(value, **kw):
+            sc, ans = self.structural_walk(strategy=mlb2, **kw)
+            leaf = ans["body"]["results"][0]["arms"]["right"]["segments"][3]
+            if value == "absent":
+                del leaf["events"]
+            else:
+                leaf["events"] = value
+            return sc, ans
+        fabricated = {"branches": 0, "kinds": ("divergence", "divergence")}   # the zero-extension stop of the review
+        for value in ("absent", None, {}, "label_end", 7):
+            for kw in (fabricated, {}):   # ... and the legitimate end, its leaf's events removed
+                sc, ans = broken(value, **kw)
+                self.assertEqual(judge(sc, ans), ("fail", "fail"), (value, kw))
+                for check in ("walk_in_record", "invariants"):
+                    d = outcome(sc, ans, check)[1]
+                    self.assertIn("field not in the answer", d)
+                    self.assertIn("segments[3].events of path 0 at 30 bp, a branch end", d)
+                    self.assertNotIn("raised", d)
+                self.assertEqual(judge(sc, ans, "mcp"), ("not_exposed", "not_exposed"), (value, kw))
+        # the missing evidence never hides a failure the answer shows (the MCP arm included)
+        sc, ans = broken("absent", **fabricated)
+        ans["body"]["results"][0]["arms"]["right"]["paths"][1]["length_bp"] = 99
+        o, d = outcome(sc, ans, "invariants", "mcp")
+        self.assertEqual(o, "fail")
+        self.assertIn("segments sum 21 != length_bp 99", d)
+        self.assertIn("field not in the answer: result 0 right: segments[3].events", d)
+        # the empty list states no event: the end is unstated (fail on both arms), as before
+        sc, ans = broken([], **fabricated)
+        self.assertEqual(judge(sc, ans, "mcp"), ("fail", "fail"))
+        # an end that is no structural one needs no events: a path to the radius without the list passes
+        sc, ans = self.structural_walk(strategy=mlb2)
+        right = ans["body"]["results"][0]["arms"]["right"]
+        for p in right["paths"]:
+            p["end_reasons"] = {"max_extension_bp": 1} if p["id"] == 0 else p["end_reasons"]
+        for sg in right["segments"]:
+            sg.pop("events")
+        self.assertEqual(outcome(sc, ans, "invariants")[0], "pass")
+        # a graphlet states every event (§7.5): every parsed segment lists its own, empty where it has none (a
+        # re-entry end here: mcp_shaped writes no split flags, which a branch end needs)
+        sc, ans = self.structural_walk(end="edge_reuse")
+        arms = checks.graphlet_arms(mcp_shaped(ans)["body"]["results"][0]["graphlet"])
+        self.assertTrue(all(isinstance(sg.get("events"), list) for sg in arms["right"]["segments"]))
+        self.assertEqual([len(sg["events"]) for sg in arms["right"]["segments"]], [0, 0, 1, 2, 1])
+        self.assertEqual(judge(sc, mcp_shaped(ans), "mcp"), ("pass", "pass"))
 
     def test_branch_taken_without_a_split_under_a_quorum(self):
         # under a quorum knob the walker raises a lineage's branches on every admissible successor before the

@@ -2739,9 +2739,12 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             parents = [] if f[1] == "*" else [int(x) for x in f[1].split(",")]
             bases = "" if f[10] in (".", "*") else f[10]
             natural = bases if cur["_side"] == "right" else bases[::-1]
+            # every segment lists its events (the E-b and R records below add them): an MGT states all of them
+            # (SPEC §7.5), so a segment without any has none, as a JSON tree's empty list says
             seg = {"id": len(cur["segments"]), "parents": parents, "from_bp": int(f[2]), "length_bp": int(f[3]),
-                   "sequence": natural, "_g": {"entry": f[4], "entry_total": f[5], "end": f[6], "partition": f[7],
-                                               "switches": [], "presence": []}}
+                   "sequence": natural, "events": [],
+                   "_g": {"entry": f[4], "entry_total": f[5], "end": f[6], "partition": f[7], "switches": [],
+                          "presence": []}}
             if f[10] == "*":
                 del seg["sequence"]
             cur["segments"].append(seg)
@@ -2851,6 +2854,13 @@ def _arm_flanks(arm_obj: dict, side: str) -> List[Tuple[dict, str]]:
     return out
 
 
+def _seg_events(seg: Any) -> List[dict]:
+    """The events of a segment that a check can read: its `events` list's objects; none where the segment states no
+    list (absent, null or another type: _structural_end_problems requires the list where an end needs it)."""
+    evs = seg.get("events") if isinstance(seg, dict) else None
+    return [x for x in evs if isinstance(x, dict)] if isinstance(evs, list) else []
+
+
 def _leaf_ends(armo: dict, p: dict, path_reason: bool = True) -> set:
     """The end reasons of path |p|'s leaf: its path_reason (unless |path_reason| is False), its end_reasons and the
     reasons of the label_end events on its leaf segment at the path's end (SPEC-labeled-traversal-core §7.1, §7.5.6:
@@ -2863,7 +2873,7 @@ def _leaf_ends(armo: dict, p: dict, path_reason: bool = True) -> set:
     segs = p.get("segments") or []
     if segs:
         leaf = next((x for x in armo.get("segments") or [] if x.get("id") == segs[-1]), None)
-        for ev in (leaf or {}).get("events") or []:
+        for ev in _seg_events(leaf):
             if ev.get("type") == "label_end" and ev.get("reason") and ev.get("at_bp") == p.get("length_bp"):
                 ends.add(ev["reason"])
     ends.discard(None)
@@ -2948,7 +2958,7 @@ def _record_routes(armo: dict, side: str, frames: Sequence[Tuple[Callable[[int],
             continue
         if not stated:
             stated = any(ev.get("type") == "blocked" and ev.get("at_bp") == event[0] and ev.get("char") == event[1]
-                         and ev.get("reason") == event[2] for ev in sg.get("events") or [])
+                         and ev.get("reason") == event[2] for ev in _seg_events(sg))
         flank = flank + sg["sequence"] if side == "right" else sg["sequence"] + flank
         n = len(flank)
         keep, past = [], False
@@ -3282,7 +3292,16 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
         return out
     L = p.get("length_bp")
     where = "path %s at %s bp" % (p.get("id"), L)
-    evs = [x for x in leaf.get("events") or [] if isinstance(x, dict) and x.get("at_bp") == L]
+    claimed = set(p.get("end_reasons") or {}) & _STATED_STRUCTURAL_ENDS
+    if claimed and not isinstance(leaf.get("events"), list):
+        # the evidence of a structural end is its leaf's events (§7.0: below complete_to_bp every decision is
+        # reported; traverse.cpp writes `events` on every segment of a tree or full detail, a graphlet states them in
+        # its E and R records, graphlet_arms lists them on every segment): without the list the end is not shown,
+        # never excused (fail on a direct arm, not exposed on the MCP's)
+        raise Missing("segments[%s].events of %s, a %s end (%s)" % (
+            chain[-1], where, "/".join(sorted(claimed)),
+            "absent" if "events" not in leaf else "%s, not a list" % type(leaf["events"]).__name__))
+    evs = [x for x in _seg_events(leaf) if x.get("at_bp") == L]
     ends = [x for x in evs if x.get("type") == "label_end"]
 
     def named(ev: dict) -> Any:
@@ -3291,7 +3310,7 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
     if isinstance(leaf.get("events"), list):
         stated = {named(x) for x in ends}
         stated |= {"branch" for x in stated if x in _QUORUM_ENDS}
-        for reason in sorted(set(p.get("end_reasons") or {}) & _STATED_STRUCTURAL_ENDS - stated):
+        for reason in sorted(claimed - stated):
             out.append("%s ends by %s without a label_end event of it on its leaf" % (where, reason))
     mlb = _strategy_knob(sc, ans, "branching", "max_label_branches", arm)
     msp = _strategy_knob(sc, ans, "branching", "max_splits_per_path", arm)
@@ -3555,6 +3574,7 @@ def check_walk_in_record(sc, ans, a, arm):
         copies += t.get("copies", [])
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     probs, notes, stopped, searched = [], [], [], []
+    unshown = []   # what the answer does not hold to judge an arm (Missing, once nothing failed)
     mismatch = _preset_mismatch(sc, ans, arm)
     branching = False
     for side in a.get("arms") or _arms_of(sc, i):
@@ -3638,11 +3658,16 @@ def check_walk_in_record(sc, ans, a, arm):
         possible = set()   # the structural ends of the longest routes' leaves that can have happened
         disproved = []     # why a stated structural end of such a leaf cannot have happened
         index = _arm_index(armo)
+        lacking = []       # a stated structural end whose evidence (the leaf's events) is not in the answer
         for p, f in following:
             if len(f) == best:
                 pe = _leaf_ends(armo, p)
                 ends |= pe
-                bad = _structural_end_problems(sc, ans, armo, p, index, arm)
+                try:
+                    bad = _structural_end_problems(sc, ans, armo, p, index, arm)
+                except Missing as m:   # an end without its evidence shows none of its ends either
+                    lacking.append(str(m))
+                    continue
                 if bad:   # a leaf with an end that cannot have happened shows none of its ends
                     disproved += bad
                 else:
@@ -3660,6 +3685,8 @@ def check_walk_in_record(sc, ans, a, arm):
             # the walk ran another strategy than the scenario's: its stop is that strategy's, named as such
             probs.append("%s: %s; the record followed for %d of %d bp to a stated %s" % (
                 side, mismatch[0], best, expected, sorted(ends & _STATED_STRUCTURAL_ENDS)[0]))
+        elif ends & _STATED_STRUCTURAL_ENDS and exact is None and lacking and not disproved:
+            unshown.append("%s: %s (the record followed for %d of %d bp)" % (side, lacking[0], best, expected))
         elif ends & _STATED_STRUCTURAL_ENDS and exact is None:
             probs.append("a stated stop that cannot have happened: %s: %s; the record followed for %d of %d bp" % (
                 side, disproved[0], best, expected))
@@ -3697,7 +3724,11 @@ def check_walk_in_record(sc, ans, a, arm):
             if m:
                 probs.append("a stated stop that cannot have happened: %s" % m)
     if probs:
-        return FAIL, "; ".join(probs[:6])
+        return FAIL, "; ".join((probs + ["field not in the answer: %s" % x for x in unshown])[:6])
+    if unshown:
+        # fail on a direct arm, not exposed on the MCP's (evaluate's Missing rule); raised only where nothing
+        # failed, so that a failure is never hidden behind it
+        raise Missing("; ".join(unshown))
     if stopped or searched:
         return INCONCLUSIVE, "; ".join(stopped + searched + notes)
     return PASS, "; ".join(notes)
@@ -3821,11 +3852,11 @@ def check_blocked_event(sc, ans, a, arm):
         segs = armo.get("segments")
         if segs is None:
             raise Missing("arms.%s.segments" % side)
-        hits = [ev for sg in segs for ev in sg.get("events") or []
+        hits = [ev for sg in segs for ev in _seg_events(sg)
                 if ev.get("type") == "blocked" and ev.get("reason") == a["reason"]
                 and isinstance(ev.get("at_bp"), int) and ev["at_bp"] <= a.get("max_at_bp", 0)]
         if not hits:
-            seen = sorted({(ev.get("reason"), ev.get("at_bp")) for sg in segs for ev in sg.get("events") or []
+            seen = sorted({(ev.get("reason"), ev.get("at_bp")) for sg in segs for ev in _seg_events(sg)
                            if ev.get("type") == "blocked"}, key=str)
             return FAIL, "%s: no blocked successor %s at or before %d bp (blocked events %s)" % (
                 side, a["reason"], a.get("max_at_bp", 0), seen[:6])
@@ -4006,7 +4037,8 @@ def _traverse_invariants(sc, ans, a, arm):
     body = _body(ans)
     res = _get(body, "results")
     seeds = sc["request"].get("seeds", [])
-    probs = []
+    probs: List[str] = []
+    unshown: List[str] = []   # the structural ends whose evidence the answer does not hold (Missing)
     if len(res) != len(seeds):
         distinct = _distinct_seeds(seeds)
         # B5b-07: a request with identical seeds states how many are distinct ("N results for M seeds (D distinct)"):
@@ -4063,10 +4095,19 @@ def _traverse_invariants(sc, ans, a, arm):
             armo = r["arms"].get(side)
             index = _arm_index(armo) if isinstance(armo, dict) else None
             for p in (armo.get("paths") or []) if isinstance(armo, dict) else []:
-                probs += ["result %d %s %s" % (i, side, m)
-                          for m in _structural_end_problems(sc, ans, armo, p, index, arm)]
+                try:
+                    probs += ["result %d %s %s" % (i, side, m)
+                              for m in _structural_end_problems(sc, ans, armo, p, index, arm)]
+                except Missing as m:
+                    unshown.append("result %d %s: %s" % (i, side, m))
     probs += _traverse_reason_problems(sc, ans)
-    return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d result(s) consistent" % len(res))
+    if probs:
+        return FAIL, "; ".join((probs + ["field not in the answer: %s" % x for x in unshown])[:6])
+    if unshown:
+        # an end without its evidence: fail on a direct arm, not exposed on the MCP's (evaluate's Missing rule),
+        # raised only where nothing else failed, so that a failure is never hidden behind it
+        raise Missing(unshown[0])
+    return PASS, "%d result(s) consistent" % len(res)
 
 
 def check_invariants(sc, ans, a, arm):
