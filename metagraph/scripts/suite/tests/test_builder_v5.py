@@ -419,5 +419,24 @@ class GateCoverage(unittest.TestCase):
             self.assertNotIn("D-" + sid, s)
 
 
+class RecordEndViaMcp(unittest.TestCase):
+    """P4-builder-truth-01: the T-end walks run under the walk preset's budget, so the MCP walks them (v4's 60,000 ms
+    made it refuse all six by design)."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_t_end(self):
+        import compare as cmp
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        s = by_id(built({"R", "T"}))
+        ends = [x for x in s.values() if x["id"].startswith("T-end")]
+        self.assertEqual(len(ends), 6)
+        for x in ends:
+            self.assertEqual(x["request"]["strategy"]["bounds"]["time_budget_ms"], 15000, x["id"])
+            self.assertEqual(ml.traverse_by_design(x["request"]), [], x["id"])
+            self.assertEqual([c for c in x["mcp"].get("by_design") or []
+                              if (cases.get(c) or {}).get("service_answer", {}).get("outcome") == "refused_at_submit"],
+                             [], x["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

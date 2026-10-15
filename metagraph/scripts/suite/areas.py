@@ -399,8 +399,10 @@ def gen_T(ctx: Ctx) -> List[dict]:
                             req, t, exp, tags=["walk", "derived-labels"]))
     nid = _ids("T-end")
     # records without terminal repeats (HSV-1's and HIV-1's ends are repeated inside them); a 31 bp seed (one k-mer,
-    # a validation of few rows) 40-100 bp from the end, under staging's time cap of 60,000 ms, so that the walk
-    # reaches the end unless a stated stop says otherwise
+    # a validation of few rows) 40-100 bp from the end, so that the walk reaches the end unless a stated stop says
+    # otherwise, under the walk preset's 15,000 ms: the MCP refuses a budget above its preset row (v4's 60,000 ms made
+    # it refuse all six by design, so the record-end stop was never walked via MCP; P4-builder-truth-01), and the
+    # direct walks took 12 ms to 8.9 s
     for i, key in enumerate(["lam", "t4", "hsam", "drem", "dmem", "scem"]):
         rec = ctx.rec(key)
         side = "right" if i % 2 == 0 else "left"
@@ -418,7 +420,7 @@ def gen_T(ctx: Ctx) -> List[dict]:
             continue
         t = ctx.flank_for(rec, t, 300)
         req = traverse_request([_tseed(t["window"], [rec.accession])],
-                               {"direction": side, "bounds": {"max_extension_bp": 200, "time_budget_ms": 60000}})
+                               {"direction": side, "bounds": {"max_extension_bp": 200}})
         exp = [OK, INV, ex("walk_end", arm=side, reasons_in=["label_lost", "dead_end"]),
                ex("walk_in_record", label_scope="record")]
         out.append(scenario(nid(), "T", "31 bp seed near the %s end of %s: the walk stops at the record's end" % (side, key),
