@@ -2881,3 +2881,81 @@ cases; the note is the lane's TABLE-DIFF.md):
   the FINDINGS line labelled exploratory). The gate on the v4 copy: 46 problems, c11db9dd's 45 and "arms/mcp
   states no observed index_fp; the policy pins 907ec986e19ecb04 (service_capabilities.host_document)". The recorded
   v4 set (not re-evaluated) is blocked as unpinned as well.
+
+## Suite integration S8i: lanes S8c, S8g and the bench merged (2026-10-15)
+Lanes S8c (checks.py), S8g (the gate's evidence, the deadline window, the gated headline, the property-level marks,
+the discovery-cap table) and the bench panel (bench/, its tests, the orchestrator tests' runner isolation)
+cherry-picked onto c11db9dd in that order, 43 commits with their messages and authorship. They share only this README
+(S8c and S8g each appended a section after S7i's: both kept, S8c first). Two items join what the S8g verification
+left (VERIFY-G round H):
+
+### A scenario-level mark needs every property check the scenario expects marked
+every_property_marked read only the property items an MCP line records: a runner that dropped an unmarked property
+check left the marked not_exposed one alone, and the execution was named "every property check is marked; this is a
+scenario-level mark" (merge_run made the recorded pass inconclusive with that reason) instead of the missing result it
+is. It now also needs every property check the scenario's `expect` names (suite_common.expected_property_checks: the
+names outside GENERIC_CHECKS) to be marked, determinism aside (suite_common.LATER_REPEATS_ONLY, the gate's list: a
+first repeat has no result of it, so the per-execution rule above stands). A dropped unmarked property is so no
+scenario-level mark: the marked reading stays set aside, the merge keeps the recorded pass, and the gate names "the
+expected check ... has no result on a passing execution" (a property problem). With every expected property marked
+and one of them dropped, the scenario-level mark stands and the gate names the dropped one's missing result beside
+it. checks_marked_aside and unmarked_checks pass their scenario through, compare.check_agreement takes the
+scenario (`scenario`), and the report's agreement depth gives it its own; with marks and no scenario only the
+recorded checks are read.
+
+### A snapshot file that is not SNAPSHOT.json's is never executed
+merge_run's stricter outcomes, the comparison (its relations and /traverse content rule) and the gate's and the
+report's property reading loaded a run snapshot's checks.py, bound to its suite_common.py, even after either changed
+against SNAPSHOT.json: the verdict blocked on "the run's snapshot changed after it was taken", but the changed code
+ran. suite_common.load_checks_bound now refuses, before executing anything, a directory holding SNAPSHOT.json whose
+checks.py or suite_common.py (EXECUTED_FILES) has another sha256 than the recorded one, or whose SNAPSHOT.json states
+no files (snapshot_refusal; SnapshotChanged). The merge then keeps the runners' outcomes and warns ("checks.
+scenario_outcome not applied, the runners' outcomes stand: ..."); the comparison uses the built-in relations and no
+content rule, and warns ("the comparison does not execute the checks that judged the set: ..."); the gate's property
+reading falls back to GENERIC_CHECKS and the gate records an identity problem ("the property reading refuses the
+checks that judged the set (snapshot): ..."), beside checks_identity's "snapshot changed" for a recorded set;
+reevaluate.py stops with the reason. A directory without SNAPSHOT.json (this tree, a re-evaluation's checks) loads as
+before; gate._snapshot_document_sha checks the snapshot's suite_common.py against SNAPSHOT.json itself.
+
+### For async: what the runner mirrors after this integration
+Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_design.json (sha256 39f87b83...), then:
+- **The deadline window** (S8g): the deadline branch of stated_bound_problem is
+  shared_rule("deadline_window_verdict")(scenario, stated, evidence, refs); its undecidable state is rule (c) with
+  UNDECIDABLE_NO_ORIGIN (in shared_rule("UNDECIDABLE")); timeout_statement carries pre_exchange_ms / acquire_ms
+  (DEADLINE_ORIGIN_KEYS) from the one error object; deadline_evidence (DEADLINE_EVIDENCE_KEYS) is recorded on the raw
+  record and the line; the phase_sources.attempts rows keep dispatched_at / settled_at.
+- **The marks** (S8g and its round H, and the expected properties above): the outcome rule judges an MCP execution
+  on shared_rule("unmarked_checks")(scenario, "mcp", checks), the manifest's scenario (never None: its `expect` is
+  read) and the whole execution's checks before an answered case's explained items are taken out, dropping no item.
+  An execution inconclusive by the checks (no rule (c), no host-state class) for which
+  shared_rule("every_property_marked")(scenario, "mcp", checks) names checks records inconclusive_reason
+  shared_rule("SCENARIO_LEVEL_MARK") and verdict_detail shared_rule("scenario_level_mark_detail")(names), after a
+  wall rule's notes, "; "-joined. Names: GENERIC_CHECKS, LATER_REPEATS_ONLY, SCENARIO_LEVEL_MARK,
+  expected_property_checks, every_property_marked, scenario_level_mark_detail, check_keys, checks_marked_aside,
+  marked_aside, unmarked_checks.
+- **The loader**: shared_rule("load_checks_bound") on {checks_dir}, the run's snapshot, raises
+  suite_common.SnapshotChanged when the snapshot's checks.py or suite_common.py is not SNAPSHOT.json's; the
+  invocation stops with that message instead of judging with a changed snapshot (SnapshotChanged, EXECUTED_FILES,
+  snapshot_refusal).
+- Nothing for S8g's identity evidence and headline (the runner records both sha256, host_document.index_fp and the
+  record's sha256 already) or for the bench (it drives both runners unchanged: run_direct.py --only, the MCP
+  runner's --ids with --repeat 0).
+
+### Validation of the integration (offline)
+- 527 tests pass (1 skipped, the record-cache builder test): 446 at c11db9dd, + 9 of S8c, + 20 of S8g, + 50 of
+  the bench (its 49 tests and the orchestrator tests' isolation test) = 525 after the cherry-picks (passing there
+  too), + 1 for each item above; the orchestrator's offline runs (run_suite.sh, run_direct.py) and the bench's
+  offline tests are among them. The expected-properties test (test_gate
+  test_a_dropped_unmarked_property_is_no_scenario_level_mark) fails before its item on the merge's outcome
+  (inconclusive, not pass); the snapshot test (test_run_snapshot
+  test_a_snapshot_file_changed_after_it_was_taken_is_never_executed) before its item, where the merge, the
+  comparison and the gate each executed a changed checks.py or suite_common.py once.
+  test_the_merge_judges_with_the_snapshot records its snapshot change in SNAPSHOT.json (it asserted that a
+  changed snapshot is executed).
+- Copies of v3 (lane-s5e/reeval-S5e) and v4 (doc/v4-c11db9dd) re-evaluated at the integrated head (`run_suite.sh
+  --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, v4 with `--gate gate/policy_v4_rt_mcp.json`): against
+  c11db9dd and against S8g's head every execution line of the 2,900 / 2,913 is equal in every field and check item
+  (detail included) but the checks' sha256; 0 changes of a direct or MCP class, a by-design verification, a relation
+  or the summary; v3 FAIL and v4 FINDINGS (exploratory, under its gate) as before. The gate on the v4 copy: 46
+  problems, problem for problem S8g's (c11db9dd's 45 and "arms/mcp states no observed index_fp; the policy pins
+  907ec986e19ecb04 (service_capabilities.host_document)"), its notes and counts equal (judged 637, passed 550).
