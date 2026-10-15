@@ -271,8 +271,32 @@ except (OSError, ValueError, KeyError, IndexError, AttributeError):
   }
   last_session() { session_value -1 "$1"; }
   first_session() { session_value 0 "$1"; }
-  restore() {  # restore NAME VALUE: log what was restored
-    RESTORED+="$1 $2, "
+  restore() {  # restore NAME [VALUE]: log what was restored
+    RESTORED+="$1${2:+ $2}, "
+  }
+  # An arm the run's first invocation skipped, skipped again by this resume, said apart: a later resume may have
+  # run it (--local / --remote), and what the run's plan holds of it stays unrecorded until a resume names that
+  # negation again.
+  skipped_arm_note() {  # skipped_arm_note ARM FLAG NEGATION
+    local counts planned missing
+    counts="$("$PY" - "$HERE" "$RUN_DIR" "$MANIFEST" "$1" <<'PYEOF' 2>/dev/null || true
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import gate, suite_common as sc
+run_dir, arm = sys.argv[2], sys.argv[4]
+keys, _, _ = gate.run_plan(run_dir, sc.read_json(sys.argv[3]) if sys.argv[3] else None)
+planned = set(k for k in keys if k[1] == arm)
+rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
+print("%d %d" % (len(planned), len(planned - set(sc.execution_key(r) for r in rows))))
+PYEOF
+)"
+    planned="${counts% *}"; missing="${counts#* }"
+    if [[ "$counts" =~ ^[0-9]+\ [0-9]+$ && $missing != 0 ]]; then
+      log "the run's first invocation gave $2, so this resume skips $1 too: the run's plan holds $planned $1" \
+        "execution(s), $missing of them not recorded, which stay so (the run reads INCOMPLETE) until a resume with $3"
+    else
+      log "the run's first invocation gave $2, so this resume skips $1 too ($3 runs it)"
+    fi
   }
   if [[ -z "$MODE" ]]; then MODE="$(last_session mode)"; [[ -z "$MODE" ]] || restore mode "$MODE"; fi
   if [[ -z "$CHECKS_MODE" ]]; then
@@ -301,10 +325,12 @@ except (OSError, ValueError, KeyError, IndexError, AttributeError):
   for opt in skip_local skip_remote allow_stub smoke; do
     if [[ "$(first_session $opt)" == 1 ]]; then
       case $opt in
-        skip_local) [[ -n "$LOCAL_SET" ]] || { SKIP_LOCAL=1; restore skip-local ""; } ;;
-        skip_remote) [[ -n "$REMOTE_SET" ]] || { SKIP_REMOTE=1; restore skip-remote ""; } ;;
-        allow_stub) [[ -n "$STUB_SET" ]] || { ALLOW_STUB=1; restore allow-stub ""; } ;;
-        smoke) [[ $SMOKE == 1 ]] || { SMOKE=1; restore smoke ""; } ;;
+        skip_local) [[ -n "$LOCAL_SET" ]] || {
+          SKIP_LOCAL=1; restore skip-local; skipped_arm_note direct-local --skip-local --local; } ;;
+        skip_remote) [[ -n "$REMOTE_SET" ]] || {
+          SKIP_REMOTE=1; restore skip-remote; skipped_arm_note direct-remote --skip-remote --remote; } ;;
+        allow_stub) [[ -n "$STUB_SET" ]] || { ALLOW_STUB=1; restore allow-stub; } ;;
+        smoke) [[ $SMOKE == 1 ]] || { SMOKE=1; restore smoke; } ;;
       esac
     fi
   done

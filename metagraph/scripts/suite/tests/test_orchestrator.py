@@ -469,6 +469,33 @@ class RunSuiteOffline(SuiteCase):
                 self.assertEqual(p.returncode, 2, p.stderr)
                 self.assertIn("exclude each other", p.stderr)
 
+    def test_a_restored_arm_flag_is_said(self):
+        # a run started with --skip-remote, resumed with --remote and cut by the request cap: the plan holds
+        # direct-remote executions; the next plain resume skips direct-remote again by the run's first flags and says
+        # so, naming what of the plan stays unrecorded and how to run it; once direct-remote is complete it says only
+        # that the arm is skipped
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--skip-remote", "--warm-every", "0", "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", run_dir, "--remote", "--max-requests", "6")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            recorded = len(sc.read_jsonl(os.path.join(run_dir, "arms", "direct-remote", "executions.jsonl"))[0])
+            self.assertLess(recorded, 8)
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("the run's first invocation gave --skip-remote, so this resume skips direct-remote too: the "
+                          "run's plan holds 8 direct-remote execution(s), %d of them not recorded, which stay so (the "
+                          "run reads INCOMPLETE) until a resume with --remote" % (8 - recorded), p.stderr)
+            self.assertIn("the run's own options: mode paired, checks stub, warm_every 0, mcp none, "
+                          "skip-remote\n", p.stderr)
+            p = self.run_suite(host, "--resume", run_dir, "--remote")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("the run's first invocation gave --skip-remote, so this resume skips direct-remote too (--remote "
+                      "runs it)", p.stderr)
+
     def test_narrowed_resume_says_so(self):
         # a resume naming a selection narrower than the run's plan says so and records it; the run stays INCOMPLETE
         make_manifest(self.mpath, basic_scenarios())

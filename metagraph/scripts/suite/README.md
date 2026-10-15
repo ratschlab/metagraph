@@ -2421,3 +2421,13 @@ one lane's verification left to another lane's file.
   table's mode line states the loop as recorded (`report.loop_text`): state (reason), the paired loop's completed of
   planned scenarios, the direct requests, the failed steps and the MCP executions not recorded; a sequential loop
   prints its own counts and no "- of -".
+
+### A resume says which arm the run's first flags skip again (VERIFY-S-RUNNER follow-up, minor)
+- A run's flags are its first invocation's (lane S7r): a run started with --skip-local and resumed once with
+  --local holds direct-local executions in its plan; if that resume is cut, the next plain resume skips direct-local
+  again and the run stays INCOMPLETE, while the log listed only "skip-local" among the run's own options.
+- A resume that restores --skip-local / --skip-remote from the first invocation now logs it on a line of its own:
+  "the run's first invocation gave --skip-remote, so this resume skips direct-remote too", with, when the run's plan
+  (gate.run_plan) holds executions of that arm the arm's records lack, "the run's plan holds N direct-remote
+  execution(s), M of them not recorded, which stay so (the run reads INCOMPLETE) until a resume with --remote", else
+  "(--remote runs it)". The options line no longer prints a stray space before the comma of a flag without a value.
