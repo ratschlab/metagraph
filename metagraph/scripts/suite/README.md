@@ -3163,12 +3163,17 @@ mcp.not_implemented, which dropped v4's MCP coverage of the service's seed merge
 MCP arm: invariants fails "1 results for 2 seeds (1 distinct)" (which traverse.duplicate_seeds already explained) and
 answer_fields reads not_exposed, "field not in the answer: results.1.duplicate" (checks.evaluate's rule for a missing
 field on the MCP arm). An explains_checks entry explained only failing items, so the table now states
-{"check": "answer_fields", "detail_matches": "field not in the answer: results\\.1\\.duplicate"} and the rule reads
-it on a not_exposed item too: compare.item_explained (a fail item an entry explains, or a not_exposed item whose
-detail a {check, detail_matches} entry matches completely; a name entry never explains a not_exposed reading), used by
-explained_outcome (E), explained_items and answered_verdict. gate.judge's property loop skips an explained
-not_exposed item as it skips an explained failure (the named case on a by-design execution), and the agreement step
-requires the pair verified, as for every answered case. Any other failure still fails. T-edge-0008 keeps mcp.by_design
+{"check": "answer_fields", "detail_matches": "field not in the answer: results\\.1\\.duplicate"}, and the rule is:
+- **a {check, detail_matches} entry can explain a not_exposed reading** (its detail matched completely: a field the
+  service's path removed from the answer);
+- **a bare check name never explains a not_exposed reading** (it explains every failing item of that check, as
+  before).
+One definition, a shared rule of suite_common: item_explained (with EXPLAINABLE_OUTCOMES, fail and not_exposed), used
+by explained_outcome (E: an execution whose only failing items E holds reads service_by_design; any other failure
+still fails) and explained_items (the line's explained_items), which compare.py names, reevaluate.py records,
+merge_run.py takes out of a line before the checks' rule (a recorded explained item of either outcome) and async's
+runner calls through shared_rule. gate.judge's property loop skips an explained item of either outcome (the named case
+on a by-design execution), and the agreement step requires the pair verified, as for every answered case. Any other failure still fails. T-edge-0008 keeps mcp.by_design
 (from its request) and carries no mark, so the MCP arm runs it again; the builder's scenario_level_marks and the
 SCENARIO_LEVEL_MARK backstop stay for marks. The table's sha256 is
 d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44 (133 cases); the v4 policy is regenerated for it
@@ -3185,12 +3190,15 @@ direct arms' steps between them ran before the loop stopped as mcp_errors. Both 
 (`loop.reason` mcp_exit_4 / mcp_exit_5), in the paired and the sequential mode (tests/fake_mcp.py: modes exit4,
 exit5).
 
-### The gate checks which checks computed a recorded set's comparison
+### The gate checks which checks computed the set's comparison
 A compare.json computed while the run's snapshot was changed (the refusal's built-in fallback, or other checks), the
-snapshot restored before the gate, passed: every other identity check reads the restored files. For a recorded set
-with a snapshot, gate.compared_with_snapshot_problems requires compare.json's judged_with to name the snapshot as its
-source and to state the checks.py and suite_common.py sha256 SNAPSHOT.json records; otherwise an identity problem asks
-to recompute the comparison. A run without a snapshot and the re-evaluated set are judged as before.
+snapshot restored before the gate, passed: every other identity check reads the restored files; so did a
+compare.reevaluated.json computed while the re-evaluation's checks were changed. gate.compared_with_checks_problems
+applies one rule to both sets: the comparison's judged_with names the checks that judged the set as its source (the
+run's snapshot for a recorded set; the re-evaluation's checks for a re-evaluated one) and states the checks.py and
+suite_common.py sha256 recorded for them (SNAPSHOT.json; reevaluated.json's checks); otherwise an identity problem asks
+to recompute the comparison. A recorded set without a snapshot is judged as before; a re-evaluated set whose checks
+directory is gone (compared with this tree's) blocks.
 
 ### A broken snapshot record or a missing executed file is refused, never a crash
 snapshot_refusal read SNAPSHOT.json with read_json, so an empty, torn or unreadable record raised (async's runner
@@ -3200,7 +3208,10 @@ suite_common.snapshot_record reads the record without raising and names the caus
 files); snapshot_refusal refuses for it and for a recorded executed file that is missing or unreadable, so
 load_checks_bound and its callers (merge, compare, the gate's property reading, reevaluate) treat both as a changed
 file. snapshot_state never raises: an unreadable record is no snapshot and changed (`SNAPSHOT.json`), and the
-orchestrator's snapshot step stops the run (exit 2) instead of taking a new snapshot over it.
+orchestrator's snapshot step stops the run (exit 2) instead of taking a new snapshot over it. The bench reads it the
+same way: bench/analyze.py's comparison refuses a run whose record is empty, torn or unreadable through
+snapshot_refusal (the record only), naming the cause per side, and bench/run_bench.py's resume says the record is
+unreadable and why ("has no snapshot" only where there is none).
 
 ### The dry v5 and its policy on the merged tree (not frozen)
 - The builder on the merged tree (lane V5's command: `SUITE_TRUTH_CACHE=<the record cache v4 was built from>
@@ -3219,11 +3230,12 @@ orchestrator's snapshot step stops the run (exit 2) instead of taking a new snap
 
 ### For async: what the runner adds for stage 2
 Re-vendor suite_common.py and service_by_design.json (d4b8636c...); checks.py is S8c's. Besides the S8i list above:
-- **Explained items** (T-edge-0008): the runner's explained_outcome mirrors compare.item_explained: a not_exposed
-  item whose detail a {check, detail_matches} entry matches completely is in E (the outcome, explained_item_indices
-  and the recorded case alike; a name entry never explains a not_exposed item). Without it the runner records E =
-  invariants alone and the gate blocks T-edge-0008's MCP executions on "required property answer_fields
-  not_exposed".
+- **Explained items** (T-edge-0008): the runner calls the shared rule, never a copy: shared_rule("explained_outcome")
+  (checks, the matched cases' entries, its outcome rule) for the outcome and E, shared_rule("explained_items") for the
+  line's explained_items (explained_item_indices), shared_rule("item_explained") (entry, item) wherever it picks the
+  recorded case (EXPLAINABLE_OUTCOMES: fail, not_exposed). A {check, detail_matches} entry can explain a not_exposed
+  reading; a bare check name never does. Without it the runner records E = invariants alone and the gate blocks
+  T-edge-0008's MCP executions on "required property answer_fields not_exposed".
 - **T-edge-0008 runs via MCP** (traverse_fetch with its two identical seeds; the service merges them).
 - **Warm-ups** (lane V5): suite_common.select_scenarios pulls a target's warm-ups (`warms`) into every selection that
   takes the target, each arm in manifest order; the resume rule (suite_common.resume_rewarms) applies only to the ids
@@ -3252,3 +3264,7 @@ Re-vendor suite_common.py and service_by_design.json (d4b8636c...); checks.py is
   evaluated with the v4 manifest: VERIFY-V5A's moves only (path_spells, blocked_event and count_relation pass;
   N-usecase-0005's MCP inconclusive -> pass; R-edge-0022 / -0023's MCP service_by_design -> fail under v4's cap of 100;
   T-attempts-0002 r1 is T-attempts-0003's 409).
+- After the follow-ups (the shared explanation rule, the re-evaluated set's comparison check, the bench's snapshot
+  record): 589 tests pass (585 + 1 + 1 + 2, each failing on its parent commit); the v3 / v4 re-evaluations equal the
+  ones above line for line (every field and check item; the comparisons' scenarios and summaries byte-equal), the v4
+  gate the same 46 problems, the v5-on-v4 moves the same.
