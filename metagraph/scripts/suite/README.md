@@ -2759,3 +2759,22 @@ and that load event read as a service failure. Both outcomes block the strict ga
   inconclusive_reason); its timeout_statement carrying pre_exchange_ms and acquire_ms; the record
   `deadline_evidence` (DEADLINE_EVIDENCE_KEYS) beside `timeout_terms` on the raw record and the line, and
   `dispatched_at` / `settled_at` kept on phase_sources.attempts rows.
+
+### The gated headline, and UNVERIFIED for what passed nothing (B8)
+A run whose MCP selection was all marks (not implemented via MCP, service-side by design) headlined PASS ("no failed
+execution ..."), and a gated report showed the ordinary verdict before the gate's: a reader skimming it took the
+absence of a failure for verification.
+- **A gated report leads with the gate.** build_report renders the deploy gate's section (GATE PASS, GATE FAIL with
+  its problems, or GATE verdict STALE) before the verdict whenever the run has a gate verdict, and the ordinary
+  verdict then reads "**Exploratory verdict (not the deploy decision, which is the gate's above): ...**".
+- **Nothing passed is never PASS.** A run with executions and no pass that no earlier rule caught (INCOMPLETE, FAIL,
+  FINDINGS, INCONCLUSIVE with inconclusive executions, untested groups, mixed releases) reads "UNVERIFIED (no
+  execution passed: 1 not implemented via MCP, 2 service-side by design; nothing was shown to hold; no failure, no
+  disagreement)"; an arm with executions and no pass reads "UNVERIFIED (no execution passed on mcp: ...; nothing
+  was shown to hold there; ...)", whatever another arm passed. Only verdicts that read PASS move; a complete
+  selective MCP-only run with passes still reads PASS, and marks-only area or route groups keep the earlier rule.
+- **The gate's nothing_passed is per policy arm** ("no execution of arm mcp passed in the policy's selection"): a
+  two-arm policy whose MCP selection is entirely excluded verified nothing via MCP and no longer passes on
+  direct-local alone (the shipped policy, 384 required MCP executions, cannot reach it).
+- v3 FAIL and v4 FINDINGS are unchanged (every arm has passes); the v4 copy gated with the shipped policy leads with
+  GATE FAIL.

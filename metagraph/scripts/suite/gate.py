@@ -48,7 +48,8 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   plus a read by every invocation, one document per run (each record's identity recomputed, a recorded sha256 its
   record does not reproduce a problem), the runner's recorded mismatches, the advanced_path premise checked live and
   well-formed request_evidence; the per-line evidence is one problem per reference path;
-- something passed.
+- something passed: on each policy arm, an execution of the selection (a gate whose MCP selection is all excluded
+  verified nothing via MCP, whatever a direct arm passed).
 """
 
 import argparse
@@ -553,6 +554,7 @@ def judge(run_dir, policy, reevaluated=False):
     # the property reading with the checks that judged the set: a recorded run's snapshot, a re-evaluation's checks
     is_property = _is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
     passed = judged = 0
+    passed_by_arm = {}
     by_design_mcp_only = 0
     for (sid, arm, rep), r in sorted(recorded.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)),
                                                                         sc.ARMS.index(kv[0][1])
@@ -564,6 +566,7 @@ def judge(run_dir, policy, reevaluated=False):
         o = r.get("outcome")
         if o == "pass":
             passed += 1
+            passed_by_arm[arm] = passed_by_arm.get(arm, 0) + 1
         elif o in OUTCOME_BLOCKS:
             why = r.get("inconclusive_reason") or r.get("service_by_design_case") or ""
             if not sc.outcome_known(sc.recorded_outcome(r)):
@@ -667,8 +670,10 @@ def judge(run_dir, policy, reevaluated=False):
                 problems.append(_problem("relation", "%s on %s: %s%s" % (
                     rid, arm, got.get("outcome") or "not evaluated",
                     (": %s" % str(got.get("detail"))[:200]) if got.get("detail") else ""), arm=arm))
-    if not passed:
-        problems.append(_problem("nothing_passed", "no execution of the policy's arms and selection passed"))
+    for arm in arms:
+        if not passed_by_arm.get(arm):
+            problems.append(_problem("nothing_passed", "no execution of arm %s passed in the policy's selection" % arm,
+                                     arm=arm))
     order = dict((k, i) for i, k in enumerate(KINDS))
     problems.sort(key=lambda p: order.get(p["kind"], len(order)))
     return {"passed": not problems, "problems": problems, "notes": notes,

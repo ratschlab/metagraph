@@ -328,13 +328,28 @@ def untested_text(groups, limit=12):
         in groups[:limit]) + ("; ..." if len(groups) > limit else "")
 
 
+# how a verdict names the outcomes of executions that passed nothing (no_pass_text)
+NO_PASS_LABELS = (("not_implemented_mcp", "not implemented via MCP"), ("service_by_design", "service-side by design"),
+                  ("inconclusive", "inconclusive"))
+
+
+def no_pass_text(outcomes):
+    """'2 not implemented via MCP, 1 service-side by design, 1 inconclusive' of an {outcome: executions} that holds
+    no pass (every other outcome by its name)."""
+    labels = dict(NO_PASS_LABELS)
+    order = [k for k, _ in NO_PASS_LABELS] + sorted(k for k in outcomes if k not in labels)
+    return ", ".join("%d %s" % (outcomes[k], labels.get(k, k)) for k in order if outcomes.get(k))
+
+
 def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
-                    cases=None):
+                    cases=None, gated=False):
     """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
     makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
     x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
-    from PASS; an MCP execution inconclusive by a limit |cases| (the table) states for its scenario is listed apart
-    (stated_mcp_limit)."""
+    from PASS; so does a run, or an arm, with executions and no pass (UNVERIFIED: its marks, not implemented via MCP
+    or service-side by design, showed nothing to hold); an MCP execution inconclusive by a limit |cases| (the table)
+    states for its scenario is listed apart (stated_mcp_limit). |gated|: the run has a deploy gate's verdict, which
+    the report leads with; this one is labelled exploratory."""
     s = comp["summary"]
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
@@ -370,6 +385,9 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     stub = "stub" in modules and not reevaluated
     untested = untested_groups(rows, manifest, cases, comp)
     scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    arm_pos = dict((a, i) for i, a in enumerate(sc.ARMS))
+    no_pass_arms = [(arm, t["outcomes"]) for arm, t in sorted(totals.items(), key=lambda kv: (
+        arm_pos.get(kv[0], 9), kv[0])) if t.get("executions") and not t["outcomes"].get("pass")]
     stated = {}
     for r in rows:
         cid = stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp)
@@ -397,6 +415,15 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
                    "disagreement)" % mixed)
     elif not executions:
         verdict = "EMPTY (no execution recorded)"
+    elif not passed:
+        # only marks (not implemented via MCP, service-side by design): nothing was shown to hold, never PASS
+        verdict = ("UNVERIFIED (no execution passed: %s; nothing was shown to hold; no failure, no disagreement)"
+                   % no_pass_text(dict((o, sum(t["outcomes"].get(o, 0) for t in totals.values()))
+                                       for o in set(o for t in totals.values() for o in t["outcomes"]))))
+    elif no_pass_arms:
+        # an arm that passed nothing verified nothing through that arm, whatever another arm passed
+        verdict = ("UNVERIFIED (no execution passed on %s; nothing was shown to hold there; no failure, no "
+                   "disagreement)" % "; ".join("%s: %s" % (arm, no_pass_text(o)) for arm, o in no_pass_arms))
     elif stub:
         # A stub run checked the HTTP status only: never PASS (review L2).
         verdict = "UNVERIFIED (stub checks: HTTP status only): no failed status, no disagreement between the arms"
@@ -404,7 +431,10 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
     if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE (no execution passed"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
-    lines.append("**%s**" % md(verdict))
+    if gated:
+        lines.append("**Exploratory verdict (not the deploy decision, which is the gate's above): %s**" % md(verdict))
+    else:
+        lines.append("**%s**" % md(verdict))
     lines.append("")
     if mixed and "more than one deployment" not in verdict:
         lines.append("- Mixed releases: the run spans more than one deployment of the host: %s." % md(mixed))
@@ -1264,9 +1294,11 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     is_property = gate_mod._is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
     depth = agreement_depth(comp, rows, is_property)
     missing = gate_mod.missing_planned(run_dir, manifest, rows)
+    # a gated run's report leads with the gate's verdict (the deploy decision); the ordinary one is exploratory
+    gate_text = gate_section(run_dir, reevaluated, max_failures)
+    parts.append(gate_text)
     parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest,
-                                 report_cases(comp, run_dir)))
-    parts.append(gate_section(run_dir, reevaluated, max_failures))
+                                 report_cases(comp, run_dir), gated=bool(gate_text)))
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures, run))
     parts.append(environment_section(run, comp, rows, samples))

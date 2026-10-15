@@ -1027,5 +1027,74 @@ class ReportPlanTest(GateCase):
         self.assertIn("missing 1", text)
 
 
+
+class GatedHeadlineTest(GateCase):
+    """The report's headline beside the gate (GPT review 2's B8, VERIFY-G's addition): a gated report leads with the
+    gate's verdict and labels the ordinary one exploratory; a run, or an arm, with executions and no pass reads
+    UNVERIFIED, never PASS; the gate's nothing_passed applies per policy arm."""
+
+    def bold(self, d):
+        with contextlib.redirect_stdout(io.StringIO()):
+            text = report.build_report(d)
+        return [x for x in text.splitlines() if x.startswith("**")], text
+
+    def gated(self, d, pol):
+        sc.write_json_atomic(os.path.join(d, "gate.json"), gate.judge(d, pol))
+        return self.bold(d)
+
+    def marks_only(self):
+        # R-003 refused by design, T-004 not implemented via MCP: a legitimate MCP-only selection with no pass
+        m = manifest_of([s for s in scenarios() if s["id"] in ("R-003", "T-004")], [])
+        return m, make_run(self.run_dir(), m, mcp_lines(m))
+
+    def test_marks_only_run_is_unverified(self):
+        m, d = self.marks_only()
+        lines, _ = self.bold(d)
+        self.assertEqual(lines[0], "**UNVERIFIED (no execution passed: 1 not implemented via MCP, 2 service-side by "
+                                   "design; nothing was shown to hold; no failure, no disagreement)**")
+        lines, text = self.gated(d, policy_of(m))
+        self.assertTrue(lines[0].startswith("**GATE FAIL**"), lines)
+        self.assertIn("nothing\\_passed 1", lines[0])
+        self.assertEqual(lines[1], "**Exploratory verdict (not the deploy decision, which is the gate's above): "
+                                   "UNVERIFIED (no execution passed: 1 not implemented via MCP, 2 service-side by "
+                                   "design; nothing was shown to hold; no failure, no disagreement)**")
+        self.assertLess(text.index("# Deploy gate"), text.index("# Verdict"))
+
+    def test_an_arm_that_passed_nothing(self):
+        # direct-local passes T-004, which the MCP cannot express: the run reads UNVERIFIED on mcp, and the two-arm
+        # gate fails nothing_passed for mcp (it passed on direct-local alone before)
+        m = manifest_of([s for s in scenarios() if s["id"] == "T-004"], [])
+        d = make_run(self.run_dir(), m, mcp_lines(m), direct=("direct-local",))
+        lines, _ = self.bold(d)
+        self.assertEqual(lines[0], "**UNVERIFIED (no execution passed on mcp: 1 not implemented via MCP; nothing was "
+                                   "shown to hold there; no failure, no disagreement)**")
+        v = gate.judge(d, policy_of(m, arms=("direct-local", "mcp")))
+        self.assertEqual([(p["kind"], p["arm"], p["detail"]) for p in v["problems"]],
+                         [("nothing_passed", "mcp", "no execution of arm mcp passed in the policy's selection")])
+        self.assertTrue(gate.judge(d, policy_of(m, arms=("direct-local",)))["passed"])
+
+    def test_mixed_and_clean_gated_runs_lead_with_the_gate(self):
+        d = make_run(self.run_dir(), self.m, mcp_lines(self.m, change={
+            ("D-007", 2): {"outcome": "inconclusive", "inconclusive_reason": "traversal_resolve_deadline"}}))
+        lines, _ = self.gated(d, policy_of(self.m))
+        self.assertTrue(lines[0].startswith("**GATE FAIL**"), lines)
+        self.assertTrue(lines[1].startswith("**Exploratory verdict (not the deploy decision, which is the gate's "
+                                            "above): PASS (no failed execution, no finding, no disagreement between "
+                                            "the arms); 1 inconclusive execution(s)"), lines)
+        d = make_run(self.run_dir("clean"), self.m, mcp_lines(self.m))
+        lines, _ = self.gated(d, policy_of(self.m))
+        self.assertTrue(lines[0].startswith("**GATE PASS**"), lines)
+        self.assertTrue(lines[1].startswith("**Exploratory verdict (not the deploy decision, which is the gate's "
+                                            "above): PASS"), lines)
+        # a stale verdict leads too, and the ordinary verdict stays exploratory
+        rows, _ = sc.read_jsonl(os.path.join(d, "executions.jsonl"))
+        os.remove(os.path.join(d, "executions.jsonl"))
+        for r in rows[1:]:
+            sc.append_jsonl(os.path.join(d, "executions.jsonl"), r)
+        lines, _ = self.bold(d)
+        self.assertTrue(lines[0].startswith("**GATE verdict STALE**"), lines)
+        self.assertTrue(lines[1].startswith("**Exploratory verdict"), lines)
+
+
 if __name__ == "__main__":
     unittest.main()
