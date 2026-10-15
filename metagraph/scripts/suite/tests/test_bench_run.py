@@ -301,6 +301,24 @@ class RunBenchOffline(BenchCase):
         steps = [r for r in sc.read_jsonl(os.path.join(run_dir, "steps.jsonl"))[0] if not r.get("probe")]
         self.assertEqual([sum(1 for r in steps if r["session"] == i) for i in (0, 1)], [10, 32])
 
+    def test_resume_names_an_unreadable_snapshot_record(self):
+        # a resume reads the run's snapshot record: a torn one is reported as unreadable with its cause, not as a run
+        # without a snapshot, and nothing runs
+        with FakeHost() as host:
+            p = self.bench(host, "--panel", self.panel_path, "--seed", "3", "--cycles", "2", "--checks", "stub",
+                           "--pause", "0", "--no-preflight", "--max-steps", "4")
+            self.assertEqual(p.returncode, 3, p.stderr)
+            run_dir = self.run_dir(p)
+            with open(os.path.join(run_dir, "scripts", "SNAPSHOT.json"), "w") as fh:
+                fh.write('{"files": {"run_direct.py": ')
+            n = len(host.log)
+            q = self.bench(host, "--resume", run_dir, "--no-preflight")
+            self.assertEqual(q.returncode, 2, q.stderr)
+            self.assertIn("the run's snapshot record is unreadable: %s is no JSON"
+                          % os.path.join(run_dir, "scripts", "SNAPSHOT.json"), q.stderr)
+            self.assertNotIn("has no snapshot", q.stderr)
+            self.assertFalse([x for x in host.log[n:] if x[0] == "POST"])
+
     def test_mcp_error_is_counted_apart(self):
         with FakeHost() as host:
             bad = "R-q-0001~c2"

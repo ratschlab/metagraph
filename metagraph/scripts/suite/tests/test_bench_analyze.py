@@ -253,6 +253,23 @@ class AnalyseRuns(unittest.TestCase):
         self.assertTrue(any("run_direct.py" in r for r in cmp_["refused"]), cmp_["refused"])
         self.assertEqual(cmp_["harness"]["differs"], ["snapshot run_direct.py"])
 
+    def test_a_torn_or_empty_snapshot_record_is_refused_with_its_cause(self):
+        # a comparison reads each run's snapshot record for the harness: an empty or torn SNAPSHOT.json refuses the
+        # comparison naming its cause (suite_common.snapshot_refusal), never a crash; a run without one reads None
+        a = synthetic_run(self.d, "a", self.panel, base_wall)
+        b = synthetic_run(self.d, "b", self.panel, base_wall, seed=2)
+        for run, text in ((a, ""), (b, '{"files": {"run_direct.py": "ab')):
+            os.makedirs(os.path.join(run, "scripts"), exist_ok=True)
+            with open(os.path.join(run, "scripts", "SNAPSHOT.json"), "w") as fh:
+                fh.write(text)
+        cmp_ = analyze.compare(b, a, boot=20, boot_seed=1)
+        self.assertEqual(cmp_["verdict"], "refused")
+        self.assertIn("candidate: the run's snapshot: %s is no JSON" % os.path.join(b, "scripts", "SNAPSHOT.json"),
+                      " | ".join(cmp_["refused"]))
+        self.assertIn("baseline: the run's snapshot: %s is empty" % os.path.join(a, "scripts", "SNAPSHOT.json"),
+                      cmp_["refused"])
+        self.assertEqual(analyze.harness(a)["snapshot run_direct.py"], None)
+
     def test_an_accepted_cap_names_its_value(self):
         # F1: the accepted cap is the same knob at the same limit with the same observed count; the same kind of cap
         # at another value (a release lowering labels.max_labels_per_node) is another workload, never a success

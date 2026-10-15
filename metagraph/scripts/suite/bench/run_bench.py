@@ -405,7 +405,9 @@ class Bench(object):
                         "--resume again" % (self.cfg.mex_dir, self.cfg.mex))
         doc, changed, live = sc.snapshot_state(self.run_dir, SUITE)
         if doc is None:
-            raise Setup("%s has no snapshot of its scripts" % self.run_dir)
+            unreadable = sc.snapshot_refusal(sc.snapshot_dir(self.run_dir), ())
+            raise Setup("%s: the run's snapshot record is unreadable: %s" % (self.run_dir, unreadable[0]) if unreadable
+                        else "%s has no snapshot of its scripts" % self.run_dir)
         if changed:
             log("warning: the run's snapshot changed after it was taken (%s)" % ", ".join(changed))
         if live:

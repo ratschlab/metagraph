@@ -2275,10 +2275,11 @@ def snapshot_refusal(directory, names=EXECUTED_FILES):
     is empty, is no JSON or states no files (snapshot_record); a file of |names| it records is missing or unreadable;
     a file of |names| it holds has another sha256 than the recorded one (changed, or added after the snapshot was
     taken). [] for a directory without SNAPSHOT.json (a tree, a re-evaluation's checks) and for one whose files are the
-    recorded ones. Never raises: a refusal names its cause."""
+    recorded ones; with no |names| only the record is read (a reader of its sha256, the bench's harness). Never raises:
+    a refusal names its cause."""
     doc, why = snapshot_record(directory)
     if doc is None:
-        return ["%s: %s not executed" % (why, ", ".join(names))] if why else []
+        return ([("%s: %s not executed" % (why, ", ".join(names))) if names else why] if why else [])
     files = doc["files"]
     out = []
     for name in names:

@@ -458,9 +458,11 @@ HARNESS_SCRIPTS = ("run_direct.py", "suite_common.py", "sampler.py")
 
 
 def harness(run_dir):
-    """The run's harness: bench.json's settings and the sha256 of the snapshot's runner, shared module and sampler."""
+    """The run's harness: bench.json's settings and the sha256 of the snapshot's runner, shared module and sampler
+    (None each where SNAPSHOT.json is missing or unreadable: suite_common.snapshot_record; compare refuses the
+    latter, naming its cause)."""
     bench = sc.read_json(os.path.join(run_dir, "bench.json")) or {}
-    snap = (sc.read_json(os.path.join(run_dir, "scripts", sc.SNAPSHOT_FILE)) or {}).get("files") or {}
+    snap = (sc.snapshot_record(sc.snapshot_dir(run_dir))[0] or {}).get("files") or {}
     out = dict((k, bench.get(k)) for k in HARNESS_KEYS)
     out.update(("snapshot %s" % name, snap.get(name)) for name in HARNESS_SCRIPTS)
     return out
@@ -490,6 +492,10 @@ def compare(cand_dir, base_dir, boot=DEFAULT_BOOT, boot_seed=None, tolerance=DEF
     if differ:
         refused.append("result sizes differ between the runs: %d query/arm cell(s): %s" % (
             len(differ), "; ".join(differ[:6])))
+    for name, d in (("candidate", cand_dir), ("baseline", base_dir)):
+        # a snapshot record that cannot be read (empty, torn, unreadable) states no harness: refused with its cause
+        refused.extend("%s: the run's snapshot: %s" % (name, why)
+                       for why in sc.snapshot_refusal(sc.snapshot_dir(d), ()))
     hc, hb = harness(cand_dir), harness(base_dir)
     hdiff = [k for k in hc if hc[k] != hb.get(k)]
     if hdiff:
