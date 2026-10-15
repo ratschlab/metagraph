@@ -29,7 +29,8 @@ tests.test_bench_analyze tests.test_bench_run` from the suite directory.
 Built by `make_panel.py --baseline <v4 copy re-evaluated with c11db9dd> --reevaluated --manifest
 ../manifest/suite_v4.json --name v4` from run `20261014T061053Z_refseq97-6f945db4`. Every query carries its frozen
 scenario (and its sha256), each arm's recorded result sizes, the recorded walls (under the Logan load: ranking and
-costing only) and its weight. `panel_sha256` binds ids, scenarios and weights; `bench_lib.read_panel` refuses a panel
+costing only) and its weight. `panel_sha256` binds ids, scenarios, weights and each arm's recorded result sizes
+(panel version 2); `bench_lib.read_panel` refuses a panel
 whose queries do not match it.
 
 **Eligible** (460 of 681 v4 scenarios): a search route (POST /resolve, /traverse, /pattern), no protocol case

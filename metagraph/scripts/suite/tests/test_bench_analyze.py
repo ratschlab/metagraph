@@ -2,6 +2,7 @@
 intervals, the verdict gate (load, identity change, changed results, missing steps) and the release comparison."""
 
 import contextlib
+import copy
 import io
 import os
 import sys
@@ -110,6 +111,39 @@ class AnalyseRuns(unittest.TestCase):
             self.assertEqual(analyze.main([slow, "--baseline", a, "--boot", "100"]), analyze.EXIT_REGRESSION)
         with open(os.path.join(slow, "comparison.md")) as fh:
             self.assertIn("regression", fh.read())
+
+    def test_the_panel_identity_binds_the_recorded_sizes(self):
+        # D2: the same queries with other recorded result sizes (a rebuild on another baseline) are another panel
+        panel_b = copy.deepcopy(self.panel)
+        for q in panel_b["queries"]:
+            if q["mode"] == "pattern":
+                for arm in bl.ARMS:
+                    q["expected"][arm]["sizes"]["contexts"] = 7
+        panel_b["panel_sha256"] = bl.panel_identity(panel_b["queries"])
+        self.assertNotEqual(panel_b["panel_sha256"], self.panel["panel_sha256"])
+        other = dict(((q["id"], arm, c), {"patterns": [{"id": "w", "counts": {"contexts": {"value": 7}}}]})
+                     for q in panel_b["queries"] if q["mode"] == "pattern" for arm in bl.ARMS for c in range(7))
+        a = synthetic_run(self.d, "a", self.panel, base_wall)
+        b = synthetic_run(self.d, "b", panel_b, base_wall, seed=2, sizes_override=other)
+        self.assertTrue(analyze.analyse(b, boot=0)[0]["verdict"]["emitted"])
+        cmp_ = analyze.compare(b, a, boot=50, boot_seed=1)
+        self.assertEqual(cmp_["verdict"], "refused")
+        self.assertIn("the runs measured different panels", cmp_["refused"])
+
+    def test_comparison_refuses_differing_successful_sizes(self):
+        # D2: both runs match the panel's recorded sizes, but the candidate's answers state another result size the
+        # panel did not record (returned 5): not the same result, no comparison
+        extra = dict(((q["id"], "direct-local", c), {"patterns": [{"id": "w", "returned": 5,
+                                                                  "counts": {"contexts": {"value": 1}}}]})
+                     for q in self.panel["queries"] if q["mode"] == "pattern" for c in range(7))
+        a = synthetic_run(self.d, "a", self.panel, base_wall)
+        b = synthetic_run(self.d, "b", self.panel, base_wall, seed=2, sizes_override=extra)
+        self.assertEqual(analyze.analyse(b, boot=0)[0]["classes"]["direct-local"], {"success": 36})
+        cmp_ = analyze.compare(b, a, boot=50, boot_seed=1)
+        self.assertEqual(cmp_["verdict"], "refused")
+        self.assertTrue(any(r.startswith("result sizes differ between the runs") for r in cmp_["refused"]),
+                        cmp_["refused"])
+        self.assertIn("P-q-0000 direct-local", " ".join(cmp_["refused"]))
 
     def test_heterogeneous_change_is_inconclusive(self):
         # half the queries 30 % slower, half 20 % faster: the panel's mean barely moves, its interval spans both

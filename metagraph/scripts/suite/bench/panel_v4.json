@@ -1,6 +1,6 @@
 {
  "builder": {
-  "bench_lib_sha256": "faf58a2c1283c9e1deb54cea66da0bf50431cea0fba505c3f89196eb8b249ca0",
+  "bench_lib_sha256": "617487f37b0e5f9d4311dccfc7c154773fea92a8059f597091528d007ad4af5e",
   "script": "bench/make_panel.py",
   "sha256": "d8b30fce43686bc1d789ef1d56c9b8f1ded5aaa429c8efc2ec106b9f73affc7c"
  },
@@ -29,10 +29,10 @@
   "step_gap_source": "the baseline's median gaps",
   "warmup_requests": 48
  },
- "created_utc": "2026-10-15T07:19:54.131Z",
+ "created_utc": "2026-10-15T07:43:18.813Z",
  "name": "v4",
- "panel_sha256": "c042d5993543d64d53ca1edc5addf926a74fbfa701af7b95cd30bd746e7d1006",
- "panel_version": 1,
+ "panel_sha256": "39b1febd8697d1ede1654eb4e7ef9fd3476fb6e96c2e83025e61941681ac166c",
+ "panel_version": 2,
  "protocol": {
   "arm_orders": [
    [

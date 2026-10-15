@@ -50,6 +50,7 @@ Stdlib only.
 """
 
 import argparse
+import json
 import math
 import os
 import random
@@ -84,13 +85,16 @@ def load_run(run_dir):
     sched = sc.read_json(os.path.join(run_dir, "schedule.json"))
     if not isinstance(bench, dict) or not isinstance(panel, dict) or not isinstance(sched, dict):
         raise SystemExit("analyze: %s is no bench run (bench.json, panel.json, schedule.json)" % run_dir)
+    panel_ok = (bl.panel_identity(panel.get("queries") or []) == panel.get("panel_sha256") ==
+                (bench.get("panel") or {}).get("panel_sha256"))
     lines = {}
     for arm in bl.ARMS:
         rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
         for r in rows:
             if r.get("arm") == arm:
                 lines[(r.get("scenario"), arm)] = r  # the last line of an execution recorded twice
-    return {"dir": os.path.abspath(run_dir), "bench": bench, "panel": panel, "steps": sched.get("steps") or [],
+    return {"dir": os.path.abspath(run_dir), "bench": bench, "panel": panel, "panel_ok": panel_ok,
+            "steps": sched.get("steps") or [],
             "seed": sched.get("seed"), "lines": lines,
             "queries": dict((q["id"], q) for q in panel.get("queries") or [])}
 
@@ -159,6 +163,8 @@ def observations(run):
         rec = {"query": step["query"], "mode": q.get("mode"), "cycle": step["cycle"], "block": step["block"],
                "arm": step["arm"], "position": step["position"], "order": step["order"], "class": cls,
                "detail": detail, "wall_ms": _num((line or {}).get("wall_ms"))}
+        if cls == "success":
+            rec["sizes"] = dict((k, v) for k, v in (sizes or {}).items() if v is not None)
         if line is not None:
             server = line.get("server") if isinstance(line.get("server"), dict) else {}
             rec["server_elapsed_ms"] = _num(server.get("elapsed_ms"))
@@ -220,8 +226,10 @@ def per_query(obs, arms):
     out = {}
     for o in obs:
         q = out.setdefault(o["query"], {"mode": o["mode"], "arms": {}})
-        a = q["arms"].setdefault(o["arm"], {"walls": {}, "classes": {}, "others": []})
+        a = q["arms"].setdefault(o["arm"], {"walls": {}, "classes": {}, "others": [], "sizes": set()})
         a["classes"][o["class"]] = a["classes"].get(o["class"], 0) + 1
+        if o["class"] == "success":
+            a["sizes"].add(json.dumps(o.get("sizes") or {}, sort_keys=True))
         if o["class"] == "success" and o["wall_ms"] is not None:
             a["walls"][o["cycle"]] = o["wall_ms"]
         elif o["class"] != "success":
@@ -248,11 +256,12 @@ def pair_stats(pairs):
 def summarise_query(q, arms):
     out = {"mode": q["mode"], "arms": {}, "pairs": {}}
     for arm in arms:
-        a = q["arms"].get(arm) or {"walls": {}, "classes": {}, "others": []}
+        a = q["arms"].get(arm) or {"walls": {}, "classes": {}, "others": [], "sizes": set()}
         walls = [a["walls"][c] for c in sorted(a["walls"])]
         out["arms"][arm] = {"n_success": len(walls), "walls_ms": [round(w, 1) for w in walls],
                             "median_ms": bl.median(walls), "min_ms": min(walls) if walls else None,
-                            "max_ms": max(walls) if walls else None, "classes": a["classes"], "others": a["others"]}
+                            "max_ms": max(walls) if walls else None, "classes": a["classes"], "others": a["others"],
+                            "sizes": [json.loads(x) for x in sorted(a.get("sizes") or ())]}
     for a, b in PAIRS:
         if a in arms and b in arms:
             out["pairs"]["%s/%s" % (a, b)] = pair_stats(pairs_of(q, a, b))
@@ -363,6 +372,8 @@ def analyse(run_dir, boot=DEFAULT_BOOT, boot_seed=None, min_success=DEFAULT_MIN_
                    for q in summaries for arm in arms if summaries[q]["arms"][arm]["n_success"] < min_success)
     absent = sorted(set(weights) - set(summaries))
     refused = []
+    if not run["panel_ok"]:
+        refused.append("the run's panel.json does not match its identity (panel_sha256, bench.json)")
     if guard["verdict"] != "clean":
         refused.append("load guard: %s (loaded blocks %s, unguarded blocks %s)" % (
             guard["verdict"], ",".join(guard["loaded"]) or "-", ",".join(guard["unguarded"]) or "-"))
@@ -413,6 +424,18 @@ def compare(cand_dir, base_dir, boot=DEFAULT_BOOT, boot_seed=None, tolerance=DEF
         refused.append("the runs measured different panels")
     if cand["cycles"] != base["cycles"] or cand["arms"] != base["arms"]:
         refused.append("the runs differ in cycles or arms")
+    # the same results: every query's successful answers state the same result sizes in both runs (the panel binds
+    # the recorded ones; a size it did not record, or a release that changed a result, shows here)
+    differ = []
+    for q in sorted(set(cand["queries"]) & set(base["queries"])):
+        for arm in [a for a in cand["arms"] if a in base["arms"]]:
+            sc_, sb = cand["queries"][q]["arms"][arm]["sizes"], base["queries"][q]["arms"][arm]["sizes"]
+            if sc_ and sb and sc_ != sb:
+                differ.append("%s %s (%s vs %s)" % (q, arm, json.dumps(sc_, sort_keys=True),
+                                                    json.dumps(sb, sort_keys=True)))
+    if differ:
+        refused.append("result sizes differ between the runs: %d query/arm cell(s): %s" % (
+            len(differ), "; ".join(differ[:6])))
     panel = sc.read_json(os.path.join(cand_dir, "panel.json")) or {}
     weights = dict((q["id"], q["weight"]) for q in panel.get("queries") or [])
     arms = [a for a in cand["arms"] if a in base["arms"]]

@@ -24,7 +24,7 @@ if SUITE not in sys.path:
     sys.path.insert(0, SUITE)
 import suite_common as sc  # noqa: E402
 
-PANEL_VERSION = 1
+PANEL_VERSION = 2  # 2: the identity binds each query's recorded result sizes
 ARMS = tuple(sc.ARMS)  # ("direct-local", "direct-remote", "mcp")
 MODES = ("resolve", "traverse", "pattern")
 ROUTE_MODE = {"POST /resolve": "resolve", "POST /traverse": "traverse", "POST /pattern": "pattern"}
@@ -280,9 +280,12 @@ def request_key(scenario):
 
 
 def panel_identity(queries):
-    """The sha256 of the canonical JSON of the panel's [(id, scenario sha256, weight)]: two runs measure the same
-    panel only when this agrees."""
-    rows = [[q["id"], q["scenario_sha256"], q["weight"]] for q in queries]
+    """The sha256 of the canonical JSON of the panel's [(id, scenario sha256, weight, each arm's recorded result
+    sizes)]: two runs measure the same panel, judged against the same results, only when this agrees (the same
+    queries with other recorded sizes, e.g. rebuilt on another baseline, are another panel)."""
+    rows = [[q["id"], q["scenario_sha256"], q["weight"],
+             dict((arm, (e or {}).get("sizes")) for arm, e in sorted((q.get("expected") or {}).items()))]
+            for q in queries]
     return hashlib.sha256(sc.canonical_json(rows)).hexdigest()
 
 
@@ -440,8 +443,10 @@ def read_panel(path):
         raise ValueError("%s is not a bench panel" % path)
     computed = panel_identity(panel["queries"])
     if panel.get("panel_sha256") != computed:
-        raise ValueError("%s: panel_sha256 %s does not match its queries (%s)" % (
-            path, panel.get("panel_sha256"), computed))
+        raise ValueError("%s: panel_sha256 %s does not match its queries (%s)%s" % (
+            path, panel.get("panel_sha256"), computed,
+            "; a panel of version %s: rebuild it with make_panel.py" % panel.get("panel_version")
+            if panel.get("panel_version") != PANEL_VERSION else ""))
     for q in panel["queries"]:
         if scenario_sha256(q.get("scenario")) != q.get("scenario_sha256"):
             raise ValueError("%s: query %s: its scenario does not match scenario_sha256" % (path, q.get("id")))
