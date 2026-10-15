@@ -537,5 +537,24 @@ class HeaderExactColumnTolerant(unittest.TestCase):
         self.assertEqual(len(seed["truth"]["seed_refusals"]), 2)
 
 
+class NothingDropsSilently(unittest.TestCase):
+    """P5-v4-content-05: every planned wrong-genetic-code scenario that is not built is listed in `skipped`."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_skipped(self):
+        m = built({"X", "M", "N"})
+        skipped = [x["scenario"] for x in m["skipped"]]
+        for table in (2, 5, 12):
+            self.assertIn("X-table1 table %d" % table, skipped)
+        self.assertIn("M-protein table 12", skipped)
+        self.assertEqual(len([x for x in skipped if x.startswith("N-usecase own table")]), 2)
+        built_tables = set(int(x["title"].split("(table ")[1].split(")")[0]) for x in m["scenarios"]
+                           if x["id"].startswith("X-table1"))
+        prots = [p for p in truth.load_proteins() if p["genome"] in dict((r.key, r) for r in
+                                                                      truth.load_records())]
+        for table in set(p["transl_table"] for p in prots) - {1, 11}:
+            self.assertTrue(table in built_tables or "X-table1 table %d" % table in skipped, table)
+
+
 if __name__ == "__main__":
     unittest.main()

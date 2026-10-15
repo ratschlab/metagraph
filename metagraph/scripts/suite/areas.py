@@ -1523,6 +1523,7 @@ def gen_X(ctx: Ctx) -> List[dict]:
     # the table-1 arm of non-standard codes: where a reassigned codon lies in the window the source is out of reach
     nid = _ids("X-table1")
     n = 0
+    built_tables: set = set()
     for prot in prots:
         if prot["transl_table"] in (1, 11):
             continue
@@ -1539,10 +1540,20 @@ def gen_X(ctx: Ctx) -> List[dict]:
             out.append(scenario(nid(), "X", "decapeptide of %s (table %d) read in table 1: the record's codons are out of reach" % (prot["genome"], prot["transl_table"]),
                                 "POST /pattern", req, t,
                                 [OK, INV, CC, ex("source_absent", strand=t["strand"])], tags=["peptide", "wrong-code", "expected-miss"]))
+            built_tables.add(prot["transl_table"])
             n += 1
             break
         if n >= 6:
             break
+    # every other code the genomes carry without a scenario is stated (P5-v4-content-05: nothing drops silently)
+    for table in sorted(set(p["transl_table"] for p in prots) - {1, 11} - built_tables):
+        reads = [w for p in prots if p["transl_table"] == table for w in p["windows"]
+                 if w["length_aa"] == 10 and st.translate(w["dna"], 1) != w["peptide"]]
+        ctx.skip("X", "X-table1 table %d" % table,
+                 ("the six scenarios are taken from the first proteins with such a window (tables %s); table %d's "
+                  "%d windows that read differently in table 1 were not reached" % (
+                      ", ".join(str(x) for x in sorted(built_tables)), table, len(reads))) if reads else
+                 "no decapeptide of table %d reads differently in table 1 (no codon the table reassigns)" % table)
     # X-stop: the last 9 residues and the stop codon
     nid = _ids("X-stop")
     n = 0
@@ -1898,6 +1909,7 @@ def _gen_M(ctx: Ctx) -> List[dict]:
             break
     # protein positives in a code other than 11 (the verification's M4), and at m = 2 under today's cap of 3
     np_ = 0
+    nc_tables: List[int] = []
     for prot in [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (4, 12)]:
         win = next((w for w in prot["windows"] if w["length_aa"] == 10 and st.translate(w["dna"], 1) != w["peptide"]), None)
         tr = _peptide_truth(ctx, prot, win) if win else None
@@ -1919,8 +1931,13 @@ def _gen_M(ctx: Ctx) -> List[dict]:
                             timing_class="slow", tags=["mismatch", "protein", "machine-dependent",
                                                        "table-%d" % prot["transl_table"]]))
         np_ += 1
+        nc_tables.append(prot["transl_table"])
         if np_ >= 2:
             break
+    if 12 not in nc_tables:
+        ctx.skip("M", "M-protein table 12", "no table-12 decapeptide whose coding DNA reads differently in table 1 "
+                 "(table 12's proteins hold no CTG in any window or shift); the scenarios built: table %s" % (
+                     ", ".join(str(x) for x in nc_tables) or "none"))
     # m = 2 only under a protein cap of at least 2 in the build's capabilities snapshot (G04: the deployed cap is 1,
     # and above it the host answers the cap slot, the next scenario); the ids are kept either way
     pcap = HOST_MISMATCH_MAX.get("protein", 3)
@@ -2747,6 +2764,10 @@ def _gen_N(ctx: Ctx) -> List[dict]:
         win = next((w for w in prot["windows"] if w["length_aa"] == 10 and st.translate(w["dna"], 1) != w["peptide"]), None)
         tr = _peptide_truth(ctx, prot, win) if win else None
         if tr is None:
+            # stated, not dropped (P5-v4-content-05); the X-table1 scenarios test the other codes' wrong-code reads
+            ctx.skip("N", "N-usecase own table / table 1 pair of %s (table %d)" % (prot["key"], prot["transl_table"]),
+                     "no decapeptide of this protein reads differently in table 1" if win is None else
+                     "its differing decapeptide is not in a fetched record")
             continue
         out.append(scenario(nid(), "N", "a %s peptide in its own table %d: found" % (prot["genome"], prot["transl_table"]), "POST /pattern",
                             pattern_request([{"id": "own", "protein": win["peptide"]}], genetic_code=prot["transl_table"]), tr,
