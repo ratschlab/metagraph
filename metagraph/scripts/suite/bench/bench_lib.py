@@ -209,15 +209,19 @@ def work_counters(route, body):
 
 
 def sizes_equal(expected, observed):
-    """(equal, differing fields): the fields both state must agree; a field only one side states is not compared."""
-    diff = []
-    for key in sorted(set(expected or {}) | set(observed or {})):
-        a, b = (expected or {}).get(key), (observed or {}).get(key)
-        if a is None or b is None:
+    """(equal, differing fields, unstated fields): every field the panel recorded (not None) must be stated by the
+    observed answer and agree; a field the answer does not state is `unstated` (an answer stating none of them, a
+    moved or wrapped body, never matches); a field only the answer states is not compared."""
+    diff, unstated = [], []
+    for key, a in sorted((expected or {}).items()):
+        if a is None:
             continue
-        if a != b:
+        b = (observed or {}).get(key)
+        if b is None:
+            unstated.append(key)
+        elif a != b:
             diff.append(key)
-    return not diff, diff
+    return not diff and not unstated, diff, unstated
 
 
 # Tag thresholds (the panel records them): label-heavy answers name at least LABEL_HEAVY labels; a long path is a

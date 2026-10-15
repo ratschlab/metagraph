@@ -121,11 +121,16 @@ class ResultSizes(unittest.TestCase):
         self.assertEqual((p["returned"], p["contexts"], p["labels"], p["by_label"]), (5, 9, 6, 6))
         self.assertEqual(bl.result_sizes("GET /capabilities", {"x": 1}), {})
 
-    def test_sizes_equal_reads_only_fields_both_state(self):
-        ok, diff = bl.sizes_equal({"paths": 2, "labels": 4}, {"paths": 2, "labels": None})
-        self.assertTrue(ok)
-        ok, diff = bl.sizes_equal({"paths": 2, "path_bp": 100}, {"paths": 3, "path_bp": 100})
-        self.assertEqual((ok, diff), (False, ["paths"]))
+    def test_sizes_equal_needs_every_recorded_field(self):
+        # a field the panel recorded must be stated by the answer: an answer stating none of them is no match (D1)
+        self.assertEqual(bl.sizes_equal({"paths": 2, "labels": 4}, {"paths": 2, "labels": None}),
+                         (False, [], ["labels"]))
+        self.assertEqual(bl.sizes_equal({"paths": 2, "path_bp": 100}, {"paths": 3, "path_bp": 100}),
+                         (False, ["paths"], []))
+        self.assertEqual(bl.sizes_equal({"patterns": 1, "contexts": 7}, bl.result_sizes("POST /pattern", {})),
+                         (False, [], ["contexts", "patterns"]))
+        # a field only the answer states is not compared; one the panel recorded as None is not required
+        self.assertEqual(bl.sizes_equal({"paths": 2, "labels": None}, {"paths": 2, "segments": 5}), (True, [], []))
 
     def test_incomplete_answers(self):
         self.assertEqual(bl.answer_incomplete("POST /pattern", pattern_body()), [])

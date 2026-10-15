@@ -75,6 +75,17 @@ class AnalyseRuns(unittest.TestCase):
         self.assertTrue(any(r.startswith("incomplete") for r in res["verdict"]["refused"]))
         self.assertEqual(res["classes"]["mcp"]["missing"], 1)
 
+    def test_an_answer_stating_no_recorded_size_is_unverified(self):
+        # D1: every MCP answer replaced by a body that states none of the panel's size fields
+        moved = synthetic_run(self.d, "moved_body", self.panel, base_wall,
+                              sizes_override=dict(((q["id"], "mcp", c), {"something": "else"})
+                                                  for q in self.panel["queries"] for c in range(1, 7)))
+        res, _ = analyze.analyse(moved, boot=0)
+        self.assertEqual(res["classes"]["mcp"], {"unverified": 36})
+        self.assertFalse(res["verdict"]["emitted"])
+        others = res["queries"]["P-q-0000"]["arms"]["mcp"]["others"]
+        self.assertIn("does not state", others[0]["detail"])
+
     def test_comparison(self):
         a = synthetic_run(self.d, "a", self.panel, base_wall)
         same = synthetic_run(self.d, "same", self.panel, base_wall, seed=2)

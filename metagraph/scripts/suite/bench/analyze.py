@@ -12,10 +12,12 @@ EVERY MEASURED EXECUTION (blocks 1..6; the warm-up is never measured) is classed
   refusal         an HTTP status other than 200 (a 4xx refusal, a 503 deadline);
   not_pass        the runner's outcome is not `pass` (fail, error, inconclusive, by design);
   time_limited    the runner or the answer states a time limitation;
+  unverified      the answer could not be read;
   incomplete      the answer is no complete search (bench_lib.answer_incomplete: a refusal inside the answer, a
                   withheld result, a stop or cap);
-  unverified      the answer could not be read, so its result sizes are unknown;
-  result_changed  its result sizes differ from those the panel recorded for this arm (another workload);
+  result_changed  a result size differs from the one the panel recorded for this arm (another workload);
+  unverified      the answer does not state every result size the panel recorded for this arm (a moved or wrapped
+                  body is no match), so it cannot be shown to be the same workload;
   success         otherwise.
 Latency statistics use successes only; every other class is counted and listed apart with its walls (refusal and
 timeout latency is never mixed into search latency).
@@ -134,12 +136,14 @@ def classify(run, step, line):
         return "incomplete", "; ".join(why[:3]), None
     sizes = bl.result_sizes(q.get("route"), body)
     expected = ((q.get("expected") or {}).get(step["arm"]) or {}).get("sizes")
-    if expected is None:
+    if not expected or all(v is None for v in expected.values()):
         return "unverified", "the panel recorded no sizes for this arm", sizes
-    ok, diff = bl.sizes_equal(expected, sizes)
-    if not ok:
+    ok, diff, unstated = bl.sizes_equal(expected, sizes)
+    if diff:
         return "result_changed", "sizes differ: %s" % ", ".join(
             "%s %s -> %s" % (k, expected.get(k), sizes.get(k)) for k in diff), sizes
+    if unstated:
+        return "unverified", "the answer does not state %s, which the panel recorded" % ", ".join(unstated), sizes
     return "success", "", sizes
 
 
