@@ -1746,8 +1746,10 @@ service_by_design.json at sha256 ab4100c9...
   from the run's recorded live document (the MCP runner's run.json `service_capabilities.document`; the host's
   /capabilities the direct arms recorded), else the table's own blocks `host_capabilities` / `service_settings`, else
   unknown (suite_common.References; the order agreed with async's runner). A path both state with different values
-  is a mismatch, judged with the live value. Each MCP line records `request_evidence` {case: {reference: live |
-  table | unknown}} (and `request_evidence_mismatches`); compare.json's `references` and a warning line in the report
+  is a mismatch, judged with the live value. An MCP line records `request_evidence` {case: {reference: live |
+  table | unknown}} for every case whose request was evaluated and names at least one {"host"|"service"} reference
+  (section "Suite integration S7i"; left out when empty), and `request_evidence_mismatches`; compare.json's
+  `references` and a warning line in the report
   name the source of each namespace and every mismatch; reevaluated.json records the same. Lane G3's gate calls
   compare.gate_configuration_problems (no live service_settings recorded, a mismatch, a line that read the table or
   found a reference unknown).
@@ -1954,10 +1956,10 @@ by lane S6c; everything below was open.
   session of orchestrator.json records `snapshot` {state created / kept, changed, live_differs, mcp_checks_dir}.
 - **What judged each arm.** run_direct records per session `checks_sha256`, `suite_common_sha256` and `checks_dir`
   (of the modules it imported; the stub's file under --checks stub), and the latest at run.json's top. async's runner
-  records `checks_dir` per invocation (run.json `invocations[]`; it keeps `checks_module` out of them). It is to
-  record, per invocation beside `checks_dir`, `checks_sha256` and `suite_common_sha256` (the sha256 of checks.py and
-  suite_common.py it imported); merge_run reads exactly these per-invocation keys (a runner without `invocations`, as
-  tests/fake_mcp.py, states its one at run.json's top) and never `checks_module`.
+  records per invocation (run.json `invocations[]`; it keeps `checks_module` out of them) `checks_dir` and, since
+  its 1dccc344, `checks_sha256` and `suite_common_sha256` (the sha256 of checks.py and suite_common.py it imported);
+  merge_run reads exactly these per-invocation keys (a runner without `invocations`, as tests/fake_mcp.py, states its
+  one at run.json's top) and never `checks_module`.
 - **merge_run.checks_identity** (recorded sets; a re-evaluated set is judged with one checks module, the
   re-evaluation's) compares them with the snapshot: a direct session whose checks or suite_common sha256 is not the
   snapshot's (the stub's for a stub arm), an MCP invocation whose recorded checks directory is not RUN_ID/scripts (a
@@ -2431,3 +2433,23 @@ one lane's verification left to another lane's file.
   (gate.run_plan) holds executions of that arm the arm's records lack, "the run's plan holds N direct-remote
   execution(s), M of them not recorded, which stay so (the run reads INCOMPLETE) until a resume with --remote", else
   "(--remote runs it)". The options line no longer prints a stray space before the comma of a flag without a value.
+
+### What the gate reads from the MCP runner, and request_evidence (agreed with async)
+- `request_evidence` (an MCP line's; TABLE-DIFF §2 as amended): {case: {reference path: live | table | unknown}} for
+  every case whose request was EVALUATED and names at least one {"host"|"service": ...} reference: a named candidate
+  whose service_answer matched, an answer-triggered candidate whose MCP side matched. Every reference that request
+  names is resolved and recorded (no short-circuit), the path without its namespace. A case whose request names no
+  reference records nothing, and a line with nothing recorded leaves the field out (reevaluate.py writes it only
+  when not empty). `request_evidence_mismatches` [{namespace, ref, live, table, case}] beside it on a mismatch.
+- The gate's inputs from the MCP runner (async's suite_mcp_runner.py), in arms/mcp/run.json at its top (the latest
+  invocation) and per invocation (`invocations[]`):
+  - `service_capabilities` {document (GET /traverse/capabilities), host_document (the host's /capabilities as the
+    service reads it: pattern, resolve.time_budget, release, index_fp, index_meta_fp where stated), sha256 (the
+    agreed suite_common.service_document_sha256, lane S7v), read_at, base, database, mismatches, error}:
+    configuration_problems (a
+    successful read per invocation, one deployment over all reads by the sha256, the live service_settings and
+    advanced_path, the runner's own mismatches) and compare.recorded_documents (an MCP-only run's host references);
+  - `checks_dir`, `checks_sha256`, `suite_common_sha256` per invocation (the runner records them since its
+    1dccc344, taking the reference code from the suite_common beside --checks-dir, the run's snapshot): merge_run's
+    checks_identity, an error for --strict-identity and the gate where the run has a snapshot;
+  - `mcp_auth` per invocation (rule 2 of the plausibility rules) and the lines' `request_evidence` above.
