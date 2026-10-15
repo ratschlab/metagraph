@@ -1,6 +1,6 @@
 {
  "builder": {
-  "bench_lib_sha256": "4cac4a956d9596be96431b1d6fa7ae618dcc8d8dd560adf4e400810267d60423",
+  "bench_lib_sha256": "7e993f33dd44ae89c45a56b8811331a72b2f1bfd1a3209e49feba1fe41da2042",
   "script": "bench/make_panel.py",
   "sha256": "4acd5aef7509d4a577e161b5fa39673da927cf73335dc531b5f30fb4a79166ce"
  },
@@ -29,9 +29,9 @@
   "step_gap_source": "the baseline's median gaps",
   "warmup_requests": 48
  },
- "created_utc": "2026-10-15T07:53:30.130Z",
+ "created_utc": "2026-10-15T08:23:51.391Z",
  "name": "v4",
- "panel_sha256": "84c57d4611a0d75b1a007f3a082eacb063ab68c2cb6ee9ad39e22a5a7ce0b674",
+ "panel_sha256": "c94f73619dcb61fe1fe5a74af9a81480c34e583f8b9a99740664b3c329e7a8ce",
  "panel_version": 2,
  "protocol": {
   "arm_orders": [
@@ -4500,18 +4500,18 @@
     "arms": {
      "direct-local": [
       "result 0: label evidence lower_bound",
-      "result 0 left: limitation label_lists",
-      "result 0 right: limitation label_lists"
+      "result 0 left: limitation label_lists labels.max_labels_per_node limit 64 observed 68",
+      "result 0 right: limitation label_lists labels.max_labels_per_node limit 64 observed 69"
      ],
      "direct-remote": [
       "result 0: label evidence lower_bound",
-      "result 0 left: limitation label_lists",
-      "result 0 right: limitation label_lists"
+      "result 0 left: limitation label_lists labels.max_labels_per_node limit 64 observed 68",
+      "result 0 right: limitation label_lists labels.max_labels_per_node limit 64 observed 69"
      ],
      "mcp": [
       "result 0: label evidence lower_bound",
-      "result 0 left: limitation label_lists",
-      "result 0 right: limitation label_lists"
+      "result 0 left: limitation label_lists labels.max_labels_per_node limit 64 observed 68",
+      "result 0 right: limitation label_lists labels.max_labels_per_node limit 64 observed 69"
      ]
     },
     "reason": "label lists cut at the default labels.max_labels_per_node 64 (label evidence lower_bound), the same on every arm and repeat: deterministic; kept as the only large traverse answer and the most label-heavy walk (70 labels)"

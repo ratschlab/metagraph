@@ -48,9 +48,11 @@ original is kept). Excluded counts are in the panel (`selection.excluded`, with 
 (label evidence `lower_bound`), on every arm and every recorded repeat alike: a deterministic cap, so its work is
 the same each time. It is kept (`--accept-incomplete`, tag `capped`) because it is the panel's only large traverse
 answer (96 KB) and its most label-heavy walk (70 labels); without it the traverse mode has no large answer. The
-query records the incompleteness each arm stated (`accepted_incomplete`), the panel identity binds it, and the
-analysis accepts exactly that incompleteness: any other (a stop, a truncated arm) is `incomplete`, and an uncapped
-answer is `result_changed` (another workload).
+query records the incompleteness each arm stated (`accepted_incomplete`), with the cap's value: the knob, its limit
+and the count observed (`labels.max_labels_per_node limit 64 observed 68` on the left, `observed 69` on the right).
+The panel identity binds it (panel_v4.json: `c94f7361`), and the analysis accepts exactly that incompleteness: any
+other, including the same kind of cap at another limit or count (a release lowering the default cap), is
+`incomplete`, and an uncapped answer is `result_changed` (another workload).
 
 **Selection** per mode, 16 each, deterministic: the eligible queries ranked by recorded cost (the least wall of the
 direct arms: load only adds time, so the least is the best estimate on a loaded host; the MCP arm's server-stated

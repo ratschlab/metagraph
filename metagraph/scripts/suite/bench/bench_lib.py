@@ -188,7 +188,10 @@ def answer_incomplete(route, body):
                     why.append("result %d %s: stop" % (i, side))
                 for lim in arm.get("limitations") or []:
                     if isinstance(lim, dict) and lim.get("kind") == "label_lists":
-                        why.append("result %d %s: limitation label_lists" % (i, side))
+                        # the knob, its limit and the count observed: an accepted cap is that value, not its kind
+                        # (a release lowering the default cap is another workload)
+                        why.append("result %d %s: limitation label_lists %s limit %s observed %s" % (
+                            i, side, lim.get("knob"), lim.get("limit"), lim.get("observed")))
     elif mode == "resolve":
         if body.get("stop"):
             why.append("stop %s" % ((body["stop"] or {}).get("reason") if isinstance(body["stop"], dict)

@@ -155,8 +155,11 @@ class ResultSizes(unittest.TestCase):
         body["results"][0]["outcome"]["label_evidence"] = "lower_bound"
         self.assertEqual(bl.answer_incomplete("POST /traverse", body), ["result 0: label evidence lower_bound"])
         body = traverse_body()
-        body["results"][0]["arms"]["right"]["limitations"] = [{"kind": "label_lists", "limit": 64}, {"kind": "scope"}]
-        self.assertEqual(bl.answer_incomplete("POST /traverse", body), ["result 0 right: limitation label_lists"])
+        body["results"][0]["arms"]["right"]["limitations"] = [
+            {"kind": "label_lists", "knob": "labels.max_labels_per_node", "limit": 64, "observed": 68},
+            {"kind": "scope"}]
+        self.assertEqual(bl.answer_incomplete("POST /traverse", body), [
+            "result 0 right: limitation label_lists labels.max_labels_per_node limit 64 observed 68"])
         for extra, why in (({"labels_cut": {"reason": "max_labels"}}, "pattern w: labels_cut max_labels"),
                            ({"occurrences_cut": {"reason": "max_occurrences"}},
                             "pattern w: occurrences_cut max_occurrences"),

@@ -253,6 +253,33 @@ class AnalyseRuns(unittest.TestCase):
         self.assertTrue(any("run_direct.py" in r for r in cmp_["refused"]), cmp_["refused"])
         self.assertEqual(cmp_["harness"]["differs"], ["snapshot run_direct.py"])
 
+    def test_an_accepted_cap_names_its_value(self):
+        # F1: the accepted cap is the same knob at the same limit with the same observed count; the same kind of cap
+        # at another value (a release lowering labels.max_labels_per_node) is another workload, never a success
+        def capped(limit, observed):
+            body = fake_answer(q["route"], q["scenario"]["request"])
+            body["results"][0]["arms"]["right"]["limitations"] = [
+                {"kind": "label_lists", "knob": "labels.max_labels_per_node", "limit": limit, "observed": observed}]
+            return body
+        panel = copy.deepcopy(self.panel)
+        q = [x for x in panel["queries"] if x["id"] == "T-q-0000"][0]
+        accepted = bl.answer_incomplete(q["route"], capped(64, 68))
+        q["accepted_incomplete"] = {"reason": "test", "arms": dict((arm, list(accepted)) for arm in bl.ARMS)}
+        panel["panel_sha256"] = bl.panel_identity(panel["queries"])
+        bodies = dict(((q["id"], arm, c), capped(64, 68)) for arm in bl.ARMS for c in range(7))
+        bodies[(q["id"], "mcp", 2)] = capped(16, 68)
+        bodies[(q["id"], "direct-local", 4)] = capped(64, 70)
+        res, _ = analyze.analyse(synthetic_run(self.d, "cap-value", panel, base_wall, sizes_override=bodies), boot=0)
+        arms = res["queries"]["T-q-0000"]["arms"]
+        self.assertEqual(arms["mcp"]["classes"], {"success": 5, "incomplete": 1})
+        self.assertEqual(arms["direct-local"]["classes"], {"success": 5, "incomplete": 1})
+        self.assertEqual(arms["direct-remote"]["classes"], {"success": 6})
+        self.assertIn("limit 16", arms["mcp"]["others"][0]["detail"])
+        # the identity binds the value too
+        before = panel["panel_sha256"]
+        q["accepted_incomplete"]["arms"]["mcp"] = bl.answer_incomplete(q["route"], capped(16, 68))
+        self.assertNotEqual(bl.panel_identity(panel["queries"]), before)
+
     def test_heterogeneous_change_is_inconclusive(self):
         # half the queries 30 % slower, half 20 % faster: the panel's mean barely moves, its interval spans both
         a = synthetic_run(self.d, "a", self.panel, base_wall)
