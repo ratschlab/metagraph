@@ -338,15 +338,21 @@ def aggregate(states, arm):
         servers.append(srv)
         if arm != "mcp" and _num(l.get("wall_ms")) is not None:
             states.append(host_cache_of(l))
+    # the members the arm never exercised (the service refused or could not express the request, no execution
+    # recorded) are said so, never counted as ok 0/0 (the owner's review, point 4)
     extras = []
-    if bd:
-        extras.append("%d \\gbd" % bd)
     if ni:
-        extras.append("%d \\gni" % ni)
+        extras.append("%d\\,\\gni{}" % ni)
+    if bd:
+        extras.append("%d\\,\\gbd{}" % bd)
     if missing:
-        extras.append("%d \\gnone" % missing)
-    denominator = n - bd - ni - missing
-    parts = (["ok %d/%d" % (ok, denominator)] if denominator else []) + extras
+        extras.append("%d\\,\\gnone{}" % missing)
+    not_exercised = bd + ni + missing
+    denominator = n - not_exercised
+    parts = ["ok %d/%d" % (ok, denominator)] if denominator else []
+    if not_exercised:
+        parts.append("not exercised: %s" % (extras[0] if len(extras) == 1 else "%d (%s)" % (
+            not_exercised, " ".join(extras))))
     if walls:
         wall_text = fmt_pair(percentile(walls, 50), max(v for v in walls if _num(v) is not None))
         mark = host_marks_text(states)
@@ -359,9 +365,67 @@ def aggregate(states, arm):
     return text, line2
 
 
+def coverage_text(states, arm):
+    """The coverage of a replicates unit on an arm, in words: `exercised 6/6, passed 6`, or `not exercised (3 ○)`
+    when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`."""
+    members = [s[arm] for s in states.values()]
+    n = len(members)
+    exercised = [m for m in members if m.present and m.glyph_key not in ("service_by_design",
+                                                                            "not_implemented_mcp")]
+    passed = sum(1 for m in exercised if m.worst == "pass")
+    rest = {}
+    for m in members:
+        if m in exercised:
+            continue
+        rest[m.glyph_key] = rest.get(m.glyph_key, 0) + 1
+    rest_text = " ".join("%d\\,%s{}" % (rest[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if rest.get(k))
+    if not exercised:
+        return "not exercised (%s)" % rest_text if rest_text else "not exercised"
+    text = "exercised %d/%d, passed %d" % (len(exercised), n, passed)
+    if rest_text:
+        text += "; not exercised %s" % rest_text
+    return text
+
+
+def property_tested(line, is_property=None):
+    """What an execution tested of its scenario's property checks: ('yes' | 'partly' | 'no' | 'n/a', passed,
+    total). A check is a property check by its recorded `property` flag, else by `is_property(name)`; a scenario
+    without one (a refusal, whose status is the claim) reads n/a with its generic checks."""
+    checks = [c for c in (line.get("checks") or []) if isinstance(c, dict)]
+    props = [c for c in checks if (c.get("property") is True or (c.get("property") is None and is_property
+                                                                   and is_property(c.get("check"))))]
+    if not props:
+        generic_passed = sum(1 for c in checks if c.get("outcome") == "pass")
+        return ("n/a", generic_passed, len(checks))
+    passed = sum(1 for c in props if c.get("outcome") == "pass")
+    if passed == len(props):
+        return ("yes", passed, len(props))
+    if passed:
+        return ("partly", passed, len(props))
+    return ("no", 0, len(props))
+
+
+# the local timing legends: what `/` and the brackets mean under each table type (the owner's review, point 6)
+TIMING_LEGEND = {
+    "series": "times: wall per execution in repeat order, a / b (mcp: the cold call / the warm call); [ ] the "
+              "host's server time; be the host call as the service timed it; c a i on a direct time: host-cold, "
+              "aged, warm after an interrupted execution",
+    "list": "times: wall per execution in repeat order, a / b (mcp: cold / warm); [ ] the host's server time; be "
+            "the host call as the service timed it; c a i: host-cold, aged, warm after an interrupted execution",
+    "pairs": "times: wall per execution in repeat order, a / b (mcp: cold / warm); [ ] the host's server time; "
+             "c a i: host-cold, aged, warm after an interrupted execution; = and ≠ on a repeated test: equal / "
+             "different answer digests",
+    "replicates": "times: a / b is the median / the maximum of the members' walls (each member's first "
+                  "host-warm execution, else its only one); [ ] the median server time",
+    "refusals": "no times in the rows: the maximum wall per arm is in the summary line",
+    "summary": "a / b in a summary line is p50 / p90",
+}
+
+
 def glyph_counts(states_list, arm):
     """`27 ● 1 ◐` for the states of several scenarios on an arm (LaTeX): each number bound to its glyph with a
-    thin non-breaking space, a wider gap between the pairs."""
+    thin non-breaking space, a wider gap between the pairs; the glyph macro closed with {} so that the space
+    after the last pair survives."""
     counts = {}
     for s in states_list:
         k = s[arm].glyph_key
@@ -369,7 +433,7 @@ def glyph_counts(states_list, arm):
     parts = []
     for k in GLYPH_ORDER:
         if counts.get(k):
-            parts.append("%d\\,%s" % (counts[k], GLYPH.get(k, "\\gnone")))
+            parts.append("%d\\,%s{}" % (counts[k], GLYPH.get(k, "\\gnone")))
     return "\\enspace ".join(parts) if parts else "–"
 
 

@@ -1,0 +1,30 @@
+{
+ "_about": "Short local reasons for the by-design and not-expressible cases of the service-by-design table, keyed by case id: one clause the tables print in a not-exercised MCP cell, under a normalised row, in a detail block's adjudication line and as 'in short' in appendix B (the long explanation stays in appendix B; the generator adds the class in words, the service's status and code and the pointer 'see B' itself). Plain text, inline markup `code` and *emphasis*. A case without an entry falls back on the manifest's not-implemented reason, the case's missing argument or its service outcome. Written for the cases chapter R names (2026-10-15); other chapters' cases are added with their prose.",
+ "short": {
+  "resolve.not_expressible.bounds_max_query_bp": "the tool always sends its own `bounds.max_query_bp` (2,000; 500 for a discovery) and has no argument for another",
+  "resolve.not_expressible.support": "the tool has no support argument",
+  "resolve.not_expressible.graph": "the tool has no graph argument",
+  "resolve.not_expressible.select": "the tool has no select argument",
+  "capabilities.not_expressible.protocol": "the tool builds the HTTP request itself, so a raw body, a header or a method cannot be chosen",
+  "resolve.sequence_too_long": "the service answers 400 `resolve_query_too_long` (a resolve takes at most 2,000 bp) at submit, so the host's own limit of 10,000 bp is never reached",
+  "resolve.sequence_too_short": "the host's 400 (Query shorter than k) comes back as 502 `backend_fault` with the host's text",
+  "resolve.unknown_label": "the host's 400 (Label not found in the annotation) comes back as 400 `resolve_rejected` with the host's text",
+  "resolve.duplicate_labels": "the service de-duplicates the labels before the request, so the host sees one label and answers 200 where the direct request is refused with Duplicate label",
+  "resolve.lowercase_whitespace_fasta": "the service upper-cases the sequence (and strips whitespace and a FASTA header) before the request; the answers agree",
+  "resolve.n_or_iupac": "the service answers 400 `resolve_sequence_invalid` (a character outside ACGT) at submit, where the host answers 200 with the k-mers holding the code absent from the graph",
+  "resolve.too_many_labels": "the service answers 400 `resolve_too_many_labels` (at most 1,000 distinct labels) at submit, where the host has no cap",
+  "resolve.empty_sequence": "the service's own validation answers `invalid_arguments` (provide a sequence) before any request; the host refuses too, with its own text",
+  "resolve.discover_with_labels": "the service's own validation answers `invalid_arguments` (either labels or discover, not both); the host refuses too, with its own text",
+  "resolve.no_labels_no_discover": "the service's own validation answers `resolve_labels_required`; the host refuses too, with its own text",
+  "resolve.time_budget_below_minimum": "the service answers 400 `resolve_time_budget_out_of_bounds` (below its minimum of 500 ms) at submit; the host refuses too, a budget not above the 250 ms reserve",
+  "resolve.time_budget_above_host_max": "the service answers 400 `resolve_time_budget_out_of_bounds` (above the host's cap) at submit, where the host lowers the budget to its cap and states it (clamped)",
+  "resolve.time_budget_above_reserve_below_minimum": "the service answers 400 `resolve_time_budget_out_of_bounds` (below its minimum of 500 ms) at submit, where the host answers (a 200, or a 503 deadline under load)",
+  "resolve.discover_limit_above_100": "the service's own validation answers `invalid_arguments` (the limit must be in 1..100); the host refuses too (out of range)",
+  "resolve.discover_limit_above_100_host_answers": "the service's own validation answers `invalid_arguments` (the limit must be in 1..100), where the host answers 200 (its own cap is far higher)",
+  "resolve.discovery_too_long": "the service answers 400 `resolve_query_too_long` (a discovery takes at most 500 bp) at submit, where the host answers",
+  "resolve.blank_label": "the service's own validation answers `invalid_arguments` (a blank label)",
+  "resolve.time_budget_unnamed": "the tool sends `bounds.time_budget_ms` 60,000 where the request names none, so a resolve needing more than about 60 s answers a stated stop via MCP and completes directly; the profile checks read the prefix",
+  "resolve.job_path": "the service runs the resolve in its queue and the tool waits inline (30 s with explicit labels, 10 s for a discovery) or hands back the job; no difference in the answer",
+  "service.resolve_repeat": "on the anonymous path each call is a new resolve job (with an API key the service may return the running or recent job instead); no difference in the answer"
+ }
+}

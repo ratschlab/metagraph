@@ -8,9 +8,9 @@
 \begin{document}
 \maketitle
 \thispagestyle{empty}
-\begin{center}\sffamily
-{{verdict_line}}
-\end{center}
+{{sample_note}}
+\coverbox{Run verdict}{{{verdict_line}}}
+\coverbox{Deploy gate}{{{gate_line}}}
 \vspace{1em}
 {{front_matter}}
 \tableofcontents

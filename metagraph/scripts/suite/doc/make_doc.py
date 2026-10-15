@@ -8,11 +8,13 @@
 Reads the run directory (manifest, the re-evaluated executions and compare.json when present, else the recorded
 ones, run.json, reevaluated.json, samples, gate.json, arms/mcp/run.json), the unit metadata (the manifest's `doc`
 blocks, else the mapping `--units`, default doc/units/suite_v<version>.json), the prose data (`--prose-dir`,
-default doc/prose/: <chapter>.json, overview.json, glossary.json, checks.json) and writes DIR/doc.tex with one included file per
-chapter, DIR/doc.sty, then builds DIR/doc.pdf with xelatex (twice; a third time when the .aux changed). Python
-stdlib only; offline; deterministic (no clock in the output).
+default doc/prose/: <chapter>.json, overview.json, glossary.json, checks.json, closing.json, cases.json) and
+writes DIR/doc.tex with one included file per chapter, the plots' data files (plot_*.csv), DIR/doc.sty, then
+builds DIR/doc.pdf with xelatex (twice; a third time when the .aux changed). Python stdlib only; offline;
+deterministic (no clock in the output; the README's commit is read from the checkout).
 
---chapters picks the chapters of Part II (the appendices and the index follow); --sample is --chapters R;
+--chapters picks the chapters of Part II (the appendices and the index follow); --sample is --chapters R with the
+cover note "Chapter R sample; whole-run summary shown for context";
 --recorded reads the recorded set instead of the re-evaluated one; --scaffold-prose writes the placeholder
 entries the prose files lack (existing text untouched) and exits.
 
@@ -53,8 +55,10 @@ def read_json(path):
 
 
 def load_prose(prose_dir, units, chapters):
-    """({chapter: prose}, overview, glossary, checks prose); a missing file or key for a built chapter raises DocError
-    naming it. overview.json, glossary.json and checks.json (the shared check catalogue) are optional."""
+    """({chapter: prose}, overview, glossary, checks prose, closing prose, cases prose); a missing file or key for a
+    built chapter raises DocError naming it. The shared files overview.json, glossary.json, checks.json (the check
+    catalogue), closing.json (the closing section's templates) and cases.json (the short reasons of the by-design
+    cases) are optional."""
     prose = {}
     missing = []
     for ch in chapters:
@@ -85,13 +89,11 @@ def load_prose(prose_dir, units, chapters):
     if missing:
         raise DocError("prose missing (%d): %s" % (len(missing), "; ".join(missing[:30])
                                                    + (" ..." if len(missing) > 30 else "")))
-    overview_path = os.path.join(prose_dir, "overview.json")
-    glossary_path = os.path.join(prose_dir, "glossary.json")
-    checks_path = os.path.join(prose_dir, "checks.json")
-    overview = read_json(overview_path) if os.path.exists(overview_path) else {}
-    glossary = read_json(glossary_path) if os.path.exists(glossary_path) else {}
-    checks_prose = read_json(checks_path) if os.path.exists(checks_path) else {}
-    return prose, overview, glossary, checks_prose
+    shared = {}
+    for name in ("overview", "glossary", "checks", "closing", "cases"):
+        path = os.path.join(prose_dir, "%s.json" % name)
+        shared[name] = read_json(path) if os.path.exists(path) else {}
+    return prose, shared["overview"], shared["glossary"], shared["checks"], shared["closing"], shared["cases"]
 
 
 def render(template, fields):
@@ -101,20 +103,25 @@ def render(template, fields):
     return out
 
 
-def build_tex(run, units, chapters, prose, overview, glossary, checks_prose=None):
-    """(main .tex text, {chapter file name: text}) for the run."""
-    ctx = sections.Context(run, units, prose, overview, glossary, chapters, checks_prose)
+def build_tex(run, units, chapters, prose, overview, glossary, checks_prose=None, closing_prose=None,
+              cases_prose=None, sample=False):
+    """(main .tex text, {file name: text}, the context) for the run: the chapter files and the plots' data files
+    are written beside the main .tex."""
+    ctx = sections.Context(run, units, prose, overview, glossary, chapters, checks_prose, closing_prose,
+                           cases_prose, sample)
     with open(os.path.join(TEMPLATES, "main.tex.in"), "r", encoding="utf-8") as fh:
         template = fh.read()
-    part_one = sections.part_one(ctx)
+    # the chapters first: Part I's annotated matrix and the decision summary refer to the footnotes they assign
     chapter_files = {}
     part_two = "\\part*{Part II\\qd Results by area}\\addcontentsline{toc}{part}{Part II\\qd Results by area}\n"
     for i, ch in enumerate(chapters):
         name = "chapter_%s.tex" % ch
         chapter_files[name] = sections.chapter(ctx, ch)
         part_two += ("\\clearpage\n" if i else "") + "\\input{%s}\n" % name[:-4]
+    part_one = sections.part_one(ctx)
     closing = sections.closing(ctx)
     appendices = sections.appendices(ctx)
+    chapter_files.update(ctx.data_files)
     started = None
     for info in (run.run.get("arms") or {}).values():
         s = (info or {}).get("started_utc")
@@ -124,6 +131,7 @@ def build_tex(run, units, chapters, prose, overview, glossary, checks_prose=None
         run.run_id()), "author": "generated by make\\_doc.py from the run directory%s" % (
         " (the re-evaluated set)" if run.reevaluated else " (the recorded set)"),
               "date": esc((started or "")[:10]) or "–", "verdict_line": sections.verdict_line(ctx),
+              "gate_line": sections.gate_line(ctx), "sample_note": sections.sample_note(ctx),
               "front_matter": sections.front_matter(ctx), "part_one": part_one, "part_two": part_two,
               "closing": closing, "appendices": appendices}
     return render(template, fields), chapter_files, ctx
@@ -250,8 +258,10 @@ def main(argv=None):
         unknown = [c for c in chapters if c not in units.chapters]
         if unknown:
             raise DocError("unknown chapter(s): %s (the run has %s)" % (", ".join(unknown), ", ".join(units.chapters)))
-        prose, overview, glossary, checks_prose = load_prose(args.prose_dir, units, chapters)
-        main_tex, chapter_files, _ = build_tex(run, units, chapters, prose, overview, glossary, checks_prose)
+        prose, overview, glossary, checks_prose, closing_prose, cases_prose = load_prose(args.prose_dir, units,
+                                                                                           chapters)
+        main_tex, chapter_files, _ = build_tex(run, units, chapters, prose, overview, glossary, checks_prose,
+                                               closing_prose, cases_prose, sample=args.sample)
     except (reader.RunError, units_mod.UnitsError, DocError) as e:
         print("make_doc: %s" % e, file=sys.stderr)
         return 2

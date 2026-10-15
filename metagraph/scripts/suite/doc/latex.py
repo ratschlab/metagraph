@@ -52,7 +52,7 @@ def esc(text, limit=None):
         if ch in _SPECIALS:
             out.append(_SPECIALS[ch])
         elif ch in _SYMBOLS:
-            out.append("{\\glyphfont %s}" % ch)
+            out.append("{\\mdseries\\upshape\\glyphfont %s}" % ch)
         else:
             out.append(ch)
     return "".join(out)
@@ -167,7 +167,7 @@ def placeholder(text):
 
 
 def col_p(width_mm, align="raggedright"):
-    return ">{\\%s\\arraybackslash}p{%.1fmm}" % (align, width_mm)
+    return ">{\\%s\\arraybackslash}p{%.2fmm}" % (align, width_mm)
 
 
 def fit(widths, extra_cols=0, extra_mm=15.0):
@@ -200,15 +200,15 @@ def _ids_row(ncols, text):
     return "\\multicolumn{%d}{@{}p{%.0fmm}@{}}{\\scriptsize %s}\\\\" % (ncols, TEXT_WIDTH_MM, text)
 
 
-def unit_header(unit_id, title, unit_type, property_tex, needspace=14):
+def unit_header(unit_id, title, unit_type, property_tex, needspace=20):
     """The line above a unit's table: id, title, layout; then the property line; then the label."""
     return ("\\Needspace{%d\\baselineskip}\n\\unithead{%s}{%s}{%s}\n\\propline{%s}\\label{unit:%s}\n" % (
         needspace, esc(unit_id), title, esc(unit_type), property_tex, label_key(unit_id)))
 
 
-def series_table(columns, rows, ids_text):
+def series_table(columns, rows, ids_text, legend=None):
     """A series matrix: arms as rows, variants as columns. `columns`: the variant labels (LaTeX); `rows`:
-    [(arm label, [cell LaTeX, ...])]; `ids_text`: the id line (LaTeX)."""
+    [(arm label, [cell LaTeX, ...])]; `ids_text`: the id line (LaTeX); `legend`: the timing legend line."""
     n = max(1, len(columns))
     label_w = 20.0
     w = (TEXT_WIDTH_MM - label_w - 2 * TABCOLSEP_MM * (n + 1)) / n
@@ -219,11 +219,36 @@ def series_table(columns, rows, ids_text):
              "\\midrule"]
     for arm, cells in rows:
         lines.append("%s & %s\\\\" % (arm, " & ".join(c or "~" for c in cells)))
-    lines += ["\\bottomrule", _ids_row(n + 1, ids_text), "\\end{tabular}", "\\endgroup", ""]
+    lines += ["\\bottomrule", _ids_row(n + 1, ids_text)]
+    if legend:
+        lines.append(_ids_row(n + 1, "\\color{black!60}" + legend))
+    lines += ["\\end{tabular}", "\\endgroup", ""]
     return "\n".join(lines)
 
 
-def _longtable(spec, header, rows, ids_text, ncols):
+def replicates_table(unit_label, rows, ids_text, legend=None):
+    """Rows: [(group label, n, cell dl, cell dr, cell mcp)]."""
+    spec = "@{}%s r %s %s %s@{}" % (col_p(26), col_p(43), col_p(43), col_p(43))
+    header = "%s & n & direct-local & direct-remote & mcp" % unit_label
+    return _longtable_lines(spec, header, _rows_with_notes([[g, str(n), a, b, c] for g, n, a, b, c in rows], 5),
+                            ids_text, 5, legend)
+
+
+def _rows_with_notes(rows, ncols):
+    """Rows as LaTeX lines; a row given as (cells, note) gets the note in a full-width line under it (the owner's
+    review, point 5: a short explanation under the row rather than a smaller font)."""
+    out = []
+    for r in rows:
+        note = None
+        if isinstance(r, tuple) and len(r) == 2 and isinstance(r[0], list):
+            r, note = r
+        out.append(" & ".join(c or "~" for c in r) + "\\\\")
+        if note:
+            out.append("\\multicolumn{%d}{@{}p{%.0fmm}@{}}{\\hspace*{4mm}%s}\\\\" % (ncols, TEXT_WIDTH_MM, note))
+    return out
+
+
+def _longtable_lines(spec, header, body_lines, ids_text, ncols, legend=None):
     lines = ["\\begingroup\\sffamily\\footnotesize\\setlength\\tabcolsep{3pt}",
              "\\setlength\\LTleft{0pt}\\setlength\\LTright{0pt}",
              "\\begin{longtable}{%s}" % spec,
@@ -232,48 +257,48 @@ def _longtable(spec, header, rows, ids_text, ncols):
              "\\bottomrule"]
     if ids_text:
         lines.append(_ids_row(ncols, ids_text))
+    if legend:
+        lines.append(_ids_row(ncols, "\\color{black!60}" + legend))
     lines.append("\\endlastfoot")
-    for r in rows:
-        lines.append(" & ".join(c or "~" for c in r) + "\\\\")
+    lines += body_lines
     lines += ["\\end{longtable}", "\\endgroup", ""]
     return "\n".join(lines)
 
 
-def replicates_table(unit_label, rows, ids_text):
-    """Rows: [(group label, n, cell dl, cell dr, cell mcp)]."""
-    spec = "@{}%s r %s %s %s@{}" % (col_p(26), col_p(43), col_p(43), col_p(43))
-    header = "%s & n & direct-local & direct-remote & mcp" % unit_label
-    return _longtable(spec, header, [(g, str(n), a, b, c) for g, n, a, b, c in rows], ids_text, 5)
+def refusals_table(rows, ids_text=None, legend=None):
+    """Rows: ([id, input, host expectation, glyph dl, glyph dr, mcp cell], note or None). The mcp column holds the
+    recorded status, the service's code and the class of the outcome in words."""
+    spec = "@{}%s %s %s %s %s %s@{}" % (col_p(22), col_p(28), col_p(56), col_p(5, "centering"),
+                                          col_p(5, "centering"), col_p(44))
+    header = "id & input & host expectation & dl & dr & mcp"
+    return _longtable_lines(spec, header, _rows_with_notes(rows, 6), ids_text, 6, legend)
 
 
-def refusals_table(rows, ids_text=None):
-    """Rows: [(id, input, expected, glyph dl, glyph dr, glyph mcp)]."""
-    spec = "@{}%s %s %s %s %s %s@{}" % (col_p(22), col_p(36), col_p(84), col_p(6, "centering"),
-                                          col_p(6, "centering"), col_p(6, "centering"))
-    header = "id & input & expected & dl & dr & mcp"
-    return _longtable(spec, header, rows, ids_text, 6)
+def list_table(rows, ids_text=None, legend=None):
+    """Rows: ([id, input, host expectation, cell dl, cell dr, cell mcp], note or None)."""
+    spec = "@{}%s %s %s %s %s %s@{}" % (col_p(21), col_p(26), col_p(40), col_p(21), col_p(21), col_p(34))
+    header = "id & input & host expectation & direct-local & direct-remote & mcp"
+    return _longtable_lines(spec, header, _rows_with_notes(rows, 6), ids_text, 6, legend)
 
 
-def list_table(rows, ids_text=None):
-    """Rows: [(id, input, expected, cell dl, cell dr, cell mcp)]."""
-    spec = "@{}%s %s %s %s %s %s@{}" % (col_p(22), col_p(28), col_p(44), col_p(22), col_p(22), col_p(22))
-    header = "id & input & expected & direct-local & direct-remote & mcp"
-    return _longtable(spec, header, rows, ids_text, 6)
-
-
-def pairs_table(rows, ids_text=None, second="test"):
+def pairs_table(rows, ids_text=None, second="test", legend=None):
     """Rows: [(id, test or source, cell dl, cell dr, cell mcp)]."""
     spec = "@{}%s %s %s %s %s@{}" % (col_p(30), col_p(48), col_p(28), col_p(28), col_p(28))
     header = "id & %s & direct-local & direct-remote & mcp" % second
-    return _longtable(spec, header, rows, ids_text, 5)
+    return _longtable_lines(spec, header, _rows_with_notes(rows, 5), ids_text, 5, legend)
 
 
-def plain_table(spec, header, rows, caption=None, small=True):
-    """A plain longtable for Part I, the closing section and the appendices (cells already LaTeX)."""
+def plain_table(spec, header, rows, caption=None, small=True, needspace=None):
+    """A plain longtable for Part I, the closing section and the appendices (cells already LaTeX); a row may be
+    (cells, note) with a full-width note line under it. `needspace` lines are asked for before a table that
+    should not start at a page's bottom (default 6 with a caption)."""
     ncols = len(header)
     lines = ["\\begingroup\\sffamily%s\\setlength\\tabcolsep{3pt}" % ("\\footnotesize" if small else "\\small")]
+    need = needspace if needspace is not None else (6 if caption else None)
+    if need:
+        lines.append("\\Needspace{%d\\baselineskip}" % need)
     if caption:
-        lines.append("\\Needspace{6\\baselineskip}\\noindent{\\itshape %s}\\par\\nopagebreak\\vspace{-4pt}" % caption)
+        lines.append("\\noindent{\\itshape %s}\\par\\nopagebreak\\vspace{-4pt}" % caption)
     lines += ["\\setlength\\LTleft{0pt}\\setlength\\LTright{0pt}",
               "\\begin{longtable}{%s}" % spec]
     lines += ["\\toprule", " & ".join(header) + "\\\\", "\\midrule", "\\endhead",
@@ -281,16 +306,36 @@ def plain_table(spec, header, rows, caption=None, small=True):
               "\\bottomrule", "\\endlastfoot"]
     if not rows:
         lines.append("\\multicolumn{%d}{l}{\\itshape none}\\\\" % ncols)
-    for r in rows:
-        lines.append(" & ".join(c if c else "~" for c in r) + "\\\\")
+    lines += _rows_with_notes(rows, ncols)
     lines += ["\\end{longtable}", "\\endgroup", ""]
     return "\n".join(lines)
 
 
-def detail_box(scenario_id, body):
-    """A breakable grey box for a test's detail block, labelled detail:<id>."""
-    return ("\\Needspace{8\\baselineskip}\\phantomsection\\label{detail:%s}\n\\begin{detailbox}\n%s\n\\end{detailbox}\n" % (
-        label_key(scenario_id), body))
+def detail_box(scenario_id, number, title, body, long=False):
+    """A test's detail block, labelled detail:<id>: a short block is one unbreakable box (moved whole to the
+    next page when it does not fit), a long block breaks across pages and repeats the test id on every
+    continuation (pagination: no orphaned continuation of a short block)."""
+    head = "\\fn{%d}\\ %s\\quad %s" % (number, breakable_id(scenario_id), title)
+    cont = "%s\\ (continued)" % breakable_id(scenario_id)
+    env = "detaillong" if long else "detailshort"
+    return ("\\phantomsection\\label{detail:%s}\n\\begin{%s}[title={%s},title after break={%s}]\n%s\n\\end{%s}\n" % (
+        label_key(scenario_id), env, head, cont, body, env))
+
+
+def block_table(header, rows):
+    """The compact execution table of a detail block: one row per arm and repeat."""
+    spec = "@{}l l l l l l@{}"
+    lines = ["\\par\\smallskip\\noindent\\begingroup\\sffamily\\footnotesize\\setlength\\tabcolsep{4pt}",
+             "\\begin{tabular}{%s}" % spec, "\\toprule", " & ".join(header) + "\\\\", "\\midrule"]
+    for r in rows:
+        lines.append(" & ".join(c or "~" for c in r) + "\\\\")
+    lines += ["\\bottomrule", "\\end{tabular}", "\\endgroup\\par\\smallskip"]
+    return "\n".join(lines)
+
+
+def finding_line(text):
+    """The evidence of a finding, set apart from an allowed 503 (an orange rule and the word FINDING)."""
+    return "\\findingline{%s}" % text
 
 
 def bline(key, text):
@@ -305,10 +350,10 @@ def bsub(key, text):
 
 def glossary_entry(term, text, see=None):
     """One glossary entry: the term in bold, the text hanging under it, the cross-references in small grey type."""
-    out = "\\par\\noindent\\hangindent=4mm\\hangafter=1\\textbf{%s}\\quad %s" % (term, text)
+    out = "\\par\\noindent\\hangindent=3mm\\hangafter=1\\textbf{%s}\\quad %s" % (term, text)
     if see:
-        out += " {\\small\\color{black!60}(see %s)}" % see
-    return out + "\\par\\smallskip\n"
+        out += " {\\color{black!60}(see %s)}" % see
+    return out + "\\par\\vspace{1.5pt}\n"
 
 
 def catline(key, text):
@@ -316,9 +361,10 @@ def catline(key, text):
     return "\\catline{%s}{%s}" % (key, text)
 
 
-def section(title, label=None, star=True, level="section", mark=None):
-    """A heading outside the numbering, in the table of contents; `mark` sets the page header."""
-    out = "\\%s%s{%s}" % (level, "*" if star else "", title)
+def section(title, label=None, star=True, level="section", mark=None, needspace=8):
+    """A heading outside the numbering, in the table of contents; `mark` sets the page header. A heading asks for
+    `needspace` lines below it, so that it is never left at a page's bottom (pagination)."""
+    out = "\\Needspace{%d\\baselineskip}\n\\%s%s{%s}" % (needspace, level, "*" if star else "", title)
     if star:
         out += "\\addcontentsline{toc}{%s}{%s}" % (level, title)
     if label:
@@ -326,3 +372,44 @@ def section(title, label=None, star=True, level="section", mark=None):
     if mark:
         out += "\\markright{%s}" % esc(mark)
     return out + "\n"
+
+
+def tlegend(text):
+    """A local legend line under a table (what / and the brackets mean there)."""
+    return "\\noindent{\\sffamily\\scriptsize\\color{black!60}%s}\\par\\smallskip\n" % text
+
+
+def paired_plot(data_file, xcol, ycol, xlabel, ylabel, label):
+    """A log-log scatter of paired walls (one point per scenario) with the diagonal y = x, from a data file the
+    generator wrote (deterministic; pgfplots reads the columns by name)."""
+    return ("\\begin{tikzpicture}\n"
+            "\\begin{axis}[width=0.48\\textwidth,height=0.42\\textwidth,xmode=log,ymode=log,"
+            "xlabel={%s},ylabel={%s},tick label style={font=\\footnotesize},label style={font=\\footnotesize},"
+            "grid=major,grid style={black!10},log ticks with fixed point]\n"
+            "\\addplot[only marks,mark=*,mark size=0.7pt,color=bdblue,opacity=0.55] table[x=%s,y=%s,col sep=comma]{%s};\n"
+            "\\addplot[domain=1:100000,samples=2,color=black!50,dashed] {x};\n"
+            "\\end{axis}\\end{tikzpicture}\\label{%s}\n" % (xlabel, ylabel, xcol, ycol, data_file, label_key(label)))
+
+
+def figure_block(body, caption):
+    """A plot (or two side by side) and its caption kept on one page (a minipage moves as a whole)."""
+    return ("\\par\\medskip\\noindent\\begin{minipage}{\\textwidth}\\centering\n%s\n"
+            "\\par\\smallskip\\begin{flushleft}{\\small\\itshape %s}\\end{flushleft}\\end{minipage}\\par\\medskip\n" % (
+                body, caption))
+
+
+def phase_boxplot(boxes, label):
+    """Box plots of the MCP phases (one box per phase: p10, p25, p50, p75, p90), log scale, from the quantiles
+    the generator computed; `boxes`: [(name, p10, p25, p50, p75, p90, n)] in ms."""
+    lines = ["\\begin{tikzpicture}",
+             "\\begin{axis}[width=0.9\\textwidth,height=0.38\\textwidth,ymode=log,boxplot/draw direction=y,"
+             "ylabel={ms},tick label style={font=\\footnotesize},label style={font=\\footnotesize},"
+             "xtick={%s},xticklabels={%s},grid=major,grid style={black!10},log ticks with fixed point,"
+             "boxplot/box extend=0.5]" % (",".join(str(i + 1) for i in range(len(boxes))),
+                                           ",".join("{%s (n %d)}" % (b[0], b[6]) for b in boxes))]
+    for b in boxes:
+        lines.append("\\addplot[boxplot prepared={lower whisker=%.4g,lower quartile=%.4g,median=%.4g,"
+                     "upper quartile=%.4g,upper whisker=%.4g},fill=bdblue!15,draw=bdblue] coordinates {};" % (
+                         b[1], b[2], b[3], b[4], b[5]))
+    lines += ["\\end{axis}\\end{tikzpicture}\\label{%s}" % label_key(label), ""]
+    return "\n".join(lines)

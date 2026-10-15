@@ -13,6 +13,9 @@
 \RequirePackage{microtype}
 \RequirePackage{fancyhdr}
 \RequirePackage[breakable,skins]{tcolorbox}
+\RequirePackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{statistics}
 \RequirePackage[hidelinks,bookmarksnumbered=false,pdfusetitle]{hyperref}
 
 \setmainfont{LibertinusSerif-Regular.otf}[BoldFont=LibertinusSerif-Bold.otf,ItalicFont=LibertinusSerif-Italic.otf,BoldItalicFont=LibertinusSerif-BoldItalic.otf]
@@ -28,15 +31,15 @@
 \definecolor{bdblue}{HTML}{1565C0}
 
 % the outcome glyphs (§3.1)
-\newcommand\gpass{\leavevmode{\glyphfont\color{okgreen}\symbol{"25CF}}}
-\newcommand\gfail{\leavevmode{\glyphfont\color{failred}\symbol{"2716}}}
-\newcommand\gfind{\leavevmode{\glyphfont\color{findorange}\symbol{"25B2}}}
-\newcommand\ginc{\leavevmode{\glyphfont\color{incgrey}\symbol{"25D0}}}
-\newcommand\gni{\leavevmode{\glyphfont\color{niglight}\symbol{"25CB}}}
-\newcommand\gbd{\leavevmode{\glyphfont\color{bdblue}\symbol{"25C6}}}
-\newcommand\gerr{\leavevmode{\glyphfont\color{failred}\symbol{"2298}}}
+\newcommand\gpass{\leavevmode{\mdseries\upshape\glyphfont\color{okgreen}\symbol{"25CF}}}
+\newcommand\gfail{\leavevmode{\mdseries\upshape\glyphfont\color{failred}\symbol{"2716}}}
+\newcommand\gfind{\leavevmode{\mdseries\upshape\glyphfont\color{findorange}\symbol{"25B2}}}
+\newcommand\ginc{\leavevmode{\mdseries\upshape\glyphfont\color{incgrey}\symbol{"25D0}}}
+\newcommand\gni{\leavevmode{\mdseries\upshape\glyphfont\color{niglight}\symbol{"25CB}}}
+\newcommand\gbd{\leavevmode{\mdseries\upshape\glyphfont\color{bdblue}\symbol{"25C6}}}
+\newcommand\gerr{\leavevmode{\mdseries\upshape\glyphfont\color{failred}\symbol{"2298}}}
 \newcommand\gnone{\leavevmode{\color{black!50}--}}
-\newcommand\gne{\leavevmode{\glyphfont\scriptsize\color{failred}\symbol{"2260}}}
+\newcommand\gne{\leavevmode{\mdseries\upshape\glyphfont\scriptsize\color{failred}\symbol{"2260}}}
 % marks: a footnote digit, a small letter after a glyph or a time
 \newcommand\fn[1]{\textsuperscript{\scriptsize\color{failred}\textbf{#1}}}
 \newcommand\tmark[1]{\textsuperscript{\scriptsize #1}}
@@ -45,17 +48,38 @@
 \newcommand\propline[1]{\noindent{\small #1}\par\nopagebreak\smallskip}
 % a family or chapter summary line
 \newcommand\sumline[1]{\par\noindent{\sffamily\footnotesize #1}\par\medskip}
-% detail blocks
-\newtcolorbox{detailbox}{breakable,enhanced,colback=black!4,colframe=black!35,boxrule=0.4pt,arc=1pt,
-  left=4pt,right=4pt,top=3pt,bottom=3pt,before skip=4pt,after skip=8pt,fontupper=\footnotesize}
+% detail blocks: a short block is one unbreakable box (moved whole to the next page when it does not fit), a
+% long block breaks and repeats the test id in its title on every continuation
+\tcbset{detailstyle/.style={enhanced,colback=black!4,colframe=black!35,boxrule=0.4pt,arc=1pt,
+  left=4pt,right=4pt,top=3pt,bottom=3pt,before skip=4pt,after skip=8pt,fontupper=\footnotesize,
+  coltitle=black,colbacktitle=black!10,fonttitle=\footnotesize\sffamily,titlerule=0pt,toptitle=1.5pt,bottomtitle=1.5pt}}
+\newtcolorbox{detailshort}[1][]{detailstyle,unbreakable,#1}
+\newtcolorbox{detaillong}[1][]{detailstyle,breakable,#1}
 \newcommand\bline[2]{\par\noindent\hangindent=22mm\hangafter=1\makebox[22mm][l]{\sffamily\bfseries #1}#2}
 \newcommand\bsub[2]{\par\noindent\hangindent=38mm\hangafter=1\hspace*{6mm}\makebox[32mm][l]{\sffamily #1}#2}
+% the evidence of a finding, set apart from an allowed 503: an orange rule in the margin and the word FINDING
+\newcommand\findingline[1]{\par\smallskip\noindent{\color{findorange}\rule[-1pt]{2pt}{9pt}}\hspace{4pt}%
+  \begin{minipage}[t]{\dimexpr\linewidth-6pt-2pt\relax}\raggedright{\sffamily\bfseries\color{findorange}\gfind\ FINDING}\quad #1\end{minipage}\par\smallskip}
+% the cover: the run verdict and the deploy gate, two boxes of equal weight
+\newcommand\coverbox[2]{\noindent\begin{tcolorbox}[enhanced,colback=black!3,colframe=black!45,boxrule=0.5pt,arc=1pt,
+  left=6pt,right=6pt,top=4pt,bottom=4pt,width=\linewidth,before skip=4pt,after skip=4pt]
+  {\sffamily\small\color{black!60}#1}\par\smallskip{\sffamily #2}\end{tcolorbox}}
+% a numbered marker on the annotated matrix of the reading guide
+\newcommand\amark[1]{\textsuperscript{\sffamily\bfseries\color{findorange}(#1)}}
+% the sample note under the title
+\newcommand\samplenote[1]{\begin{center}{\sffamily\large\color{findorange}#1}\end{center}}
 % a line of the check catalogue (appendix A): a bold key in the margin, hanging text, small type
 \newcommand\catline[2]{\par\noindent\hangindent=24mm\hangafter=1\makebox[24mm][l]{\small\sffamily\bfseries #1}{\small #2}}
 % the same with a key too wide for the margin (a route list): the key on its own line, the text indented under it
 \newcommand\catblock[2]{\par\noindent{\small\sffamily\bfseries #1}\par\nopagebreak{\leftskip=24mm\noindent\small #2\par}}
 % a small heading inside an appendix (a group of catalogue entries)
 \newcommand\grouphead[1]{\par\medskip\noindent{\sffamily\bfseries #1}\par\nopagebreak\smallskip}
+% a run-in heading of Part I, a chapter page or an appendix, kept with what follows it (never at a page's bottom)
+\newcommand\parhead[1]{\par\medskip\Needspace{5\baselineskip}\noindent{\bfseries #1}\par\nopagebreak\smallskip}
+% a continuation line of a detail block, aligned with the text column of \bline
+\newcommand\bcont[1]{\par\noindent\hangindent=22mm\hangafter=0{}#1}
+% a line of the annotated matrix's key: the marker in the margin, hanging text
+\newcommand\annline[2]{\par\noindent\hangindent=9mm\hangafter=1\makebox[9mm][l]{\amark{#1}}#2}
 
 % justified prose holds monospace identifiers and URLs: let a line stretch rather than overflow
 \tolerance=400

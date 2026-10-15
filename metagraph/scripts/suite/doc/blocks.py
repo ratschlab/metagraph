@@ -8,6 +8,7 @@ execution lines.
 
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +17,7 @@ if HERE not in sys.path:
 
 import cells  # noqa: E402
 import latex  # noqa: E402
-from latex import esc, tt  # noqa: E402
+from latex import esc, tt, inline  # noqa: E402
 
 GENERIC_LAST = ("invariants", "budget_respected", "counts_consistent", "deterministic", "content_encoding",
                 "answer_fields", "entry_fields")
@@ -65,7 +66,7 @@ def _resolve_runs(args):
 
 
 def _clamped(args):
-    return "clamped %s %s {\\glyphfont →} %s" % (tt(args.get("field", "?")), esc(args.get("requested")),
+    return "clamped %s %s {\\mdseries\\upshape\\glyphfont →} %s" % (tt(args.get("field", "?")), esc(args.get("requested")),
                                                    esc(args.get("effective")))
 
 
@@ -141,120 +142,330 @@ def refusal_expected(scenario, previous=None):
     return "–", None
 
 
+# -- the MCP arm's standing on an edge input ---------------------------------------------------------------------
+
+MCP_CLASS_WORD = {"not_expressible": "not expressible through MCP",
+                  "refused_before_host": "refused before host execution",
+                  "normalised": "answered after service normalization",
+                  "relayed": "host refusal relayed through the service",
+                  "answered": "answered by the host through the service",
+                  "refused_unexplained": "refused by the service (no by-design case explains it)",
+                  "host_state": "ended by the service's own limit (a host state)",
+                  "none": "no MCP execution recorded"}
+
+
+def host_expects_refusal(scenario):
+    """Whether the scenario's status expectation is a refusal (an HTTP status other than 2xx)."""
+    for e in scenario.get("expect") or []:
+        if isinstance(e, dict) and e.get("check") == "status":
+            http = (e.get("args") or {}).get("http")
+            codes = http if isinstance(http, list) else [http]
+            return any(isinstance(c, int) and c >= 400 for c in codes)
+    return False
+
+
+def mcp_class(lines, scenario, agreement, cases):
+    """The class of the MCP arm's outcome on one scenario, derived from the recorded evidence, never from prose
+    (the owner's review, point 5): whether the host was reached (`host_cache`), the error's source (the by-design
+    case's `service_answer.outcome`: refused_at_submit, relayed, answered, not_expressible) and the status.
+
+    Returns (class key, the evidence in a few words, LaTeX). Keys: not_expressible (no answer recorded, the manifest's
+    mark or the table's not-expressible case), refused_before_host (the service answered a refusal without
+    calling the host), relayed (the service called the host and relayed its refusal under its own code),
+    normalised (the service reshaped the request and the host answered where it would have refused the
+    original), answered (the host answered through the service), host_state (the service ended the call by its
+    own limit), refused_unexplained (a refusal that failed: no case explains it), none (no execution)."""
+    lines = [l for l in lines if isinstance(l, dict)]
+    agreement = agreement or {}
+    if not lines:
+        return "none", "no MCP execution recorded"
+    # a recorded not-implemented mark is no answer, whatever status a runner wrote beside it
+    answered = [l for l in lines if l.get("http") is not None and l.get("outcome") != "not_implemented_mcp"]
+    case_id = next((l.get("service_by_design_case") for l in lines if l.get("service_by_design_case")), None) \
+        or agreement.get("case")
+    case = (cases or {}).get(case_id) or {}
+    sa = case.get("service_answer") or {}
+    service_outcome = sa.get("outcome")
+    if not answered:
+        reason = (scenario.get("mcp") or {}).get("not_implemented") or sa.get("missing_argument")
+        return "not_expressible", ("no MCP call made: %s" % tt(reason)) if reason else "no MCP call made"
+    first = answered[0]
+    http = first.get("http")
+    code = (first.get("error") or {}).get("code") if isinstance(first.get("error"), dict) else None
+    reached = any(cells.host_cache_of(l) in ("cold", "warm", cells.WARM_AFTER_INTERRUPTED, "aged") for l in answered)
+    status_text = "http %s%s" % (esc(http), (" " + tt(code)) if code else "")
+    if first.get("inconclusive_reason") and first.get("inconclusive_reason") != "checks":
+        return "host_state", "%s; the service's limit %s" % (status_text, tt(first["inconclusive_reason"]))
+    failed = first.get("outcome") in ("fail", "error")
+    if http and http >= 400 and failed:
+        # a refusal no by-design case explains: a failure of the run, never one of the four by-design classes
+        return "refused_unexplained", "%s; no by-design case matched" % status_text
+    if not reached:
+        # the host never saw the request: the service answered at submit, in the host's place (a relayed case
+        # is the one exception: the service called the host and relays its refusal under its own code)
+        if service_outcome == "relayed":
+            return "relayed", "%s; the host was called and its refusal relayed" % status_text
+        if service_outcome == "not_expressible" or agreement.get("class") == "not_implemented_mcp":
+            return "refused_before_host", "%s at submit (the table: not expressible)" % status_text
+        return "refused_before_host", "%s at submit" % status_text
+    if http and http >= 400:
+        return "relayed", "%s; the host was called and its refusal relayed" % status_text
+    if host_expects_refusal(scenario) and (first.get("outcome") in ("service_by_design", "pass")
+                                           or service_outcome == "answered"):
+        # the host answered where the direct request is refused: the service reshaped it (de-duplicated the
+        # labels, upper-cased the sequence) before calling the host, as its table documents; a failed execution
+        # against an expected refusal is no normalisation but a disagreement, and reads answered
+        return "normalised", "%s after the service reshaped the request (the host expectation is a refusal)" % status_text
+    return "answered", status_text
+
+
 # -- detail blocks ---------------------------------------------------------------------------------------------
 
-def _error_text(line):
-    err = line.get("error") if isinstance(line.get("error"), dict) else None
-    if not err:
-        return ""
-    code = err.get("code")
-    text = err.get("text")
-    out = ""
-    if code:
-        out += " %s" % tt(code)
-    if text:
-        out += " “%s”" % esc(text, 400)
+HC_WORD = {"cold": "host-cold", "warm": "host-warm", cells.WARM_AFTER_INTERRUPTED: "warm after an interruption",
+           "aged": "aged", "not_reached": "host not reached", "unknown": "host cache unknown"}
+HC_SHORT = {"cold": "cold", "warm": "warm", cells.WARM_AFTER_INTERRUPTED: "warm, i", "aged": "aged",
+            "not_reached": "not reached", "unknown": "unknown"}
+
+
+def _err(line):
+    err = line.get("error") if isinstance(line.get("error"), dict) else {}
+    return err.get("code"), err.get("text")
+
+
+def _status_cell(line):
+    http = line.get("http")
+    code, _ = _err(line)
+    if http is None:
+        return "–"
+    return "%s%s" % (esc(http), (" " + tt(code)) if code else "")
+
+
+def _budget_text(run, sid):
+    b = run.budget_ms(sid)
+    return ("{:,} ms".format(int(b)) if isinstance(b, (int, float)) else "none")
+
+
+def _property_cell(line, is_property):
+    word, passed, total = cells.property_tested(line, is_property)
+    if word == "n/a":
+        return "n/a (status is the claim)" if total else "n/a"
+    if word == "yes":
+        return "yes (%d of %d)" % (passed, total)
+    if word == "partly":
+        return "partly (%d of %d)" % (passed, total)
+    return "no"
+
+
+def _finding_checks(line):
+    return [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "finding"]
+
+
+def _first_clause(text, limit=200):
+    """The evidence clause of a check detail: up to its first ': ' (the explanation follows), cut at `limit`."""
+    text = str(text or "")
+    head = text.split(": ", 1)[0] if ": " in text else text
+    return latex.cut_text(head, limit)
+
+
+def _overridden(line, is_mcp):
+    """The MCP runner's host-state rule: the checks stay as they read, the outcome is overridden."""
+    return bool(is_mcp and line.get("outcome") == "inconclusive" and line.get("inconclusive_reason")
+                and line.get("inconclusive_reason") != "checks")
+
+
+def adjudication(line, run, sid, is_mcp, state=None):
+    """One phrase: the final outcome of an execution and why, the classification first (the owner's review:
+    'timeout classified as a host-state outcome; the sequence property is untested')."""
+    outcome = line.get("outcome")
+    http = line.get("http")
+    code, text = _err(line)
+    wall = cells.fmt_t(line.get("wall_ms"))
+    budget = _budget_text(run, sid)
+    if outcome == "pass":
+        return "pass: every check passed"
+    if outcome == "finding":
+        fc = _finding_checks(line)
+        if http == 503 and code == "deadline":
+            return ("\\textbf{FINDING}: an allowed 503 deadline, but delivered later than max(1 s, the budget) after "
+                    "the %s budget (the evidence and the rule below); the property itself was not tested" % esc(budget))
+        return "\\textbf{FINDING}: %s (the evidence and the rule below); the property itself was not tested" % esc(
+            _first_clause(fc[0].get("detail")) if fc else "a stated bound broken")
+    if outcome == "inconclusive":
+        if _overridden(line, is_mcp):
+            return ("inconclusive: the service's %s (http %s) classified as a host-state outcome by the runner's "
+                    "rule (below), not as a failure; the property is untested on this repeat" % (
+                        tt(line["inconclusive_reason"]), esc(http)))
+        if http == 503 and code == "deadline":
+            return ("inconclusive: an allowed 503 deadline at %s against a %s budget, within max(1 s, the budget) "
+                    "of it; nothing in the body to judge, the property not tested" % (wall, esc(budget)))
+        if http is not None and http != 200:
+            return "inconclusive: http %s%s, an answer the scenario allows; the property not tested" % (
+                esc(http), (" " + tt(code)) if code else "")
+        checks = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
+        if checks:
+            return "inconclusive: %s (%s)" % (esc(checks[0].get("check")), esc(_first_clause(checks[0].get("detail"), 160)))
+        return "inconclusive: the property could not be tested"
+    if outcome == "fail":
+        failed = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
+        if failed:
+            return "\\textbf{FAIL}: %s: %s" % (esc(failed[0].get("check")), esc(failed[0].get("detail"), 200))
+        return "\\textbf{FAIL}"
+    if outcome == "error":
+        return "\\textbf{ERROR}: no HTTP answer%s" % ((": " + esc(text, 160)) if text else "")
+    if outcome == "not_implemented_mcp":
+        return "not exercised via MCP"
+    if outcome == "service_by_design":
+        return "service-side by design"
+    return esc(cells.WORD.get(outcome, str(outcome)))
+
+
+def _arm_adjudication(st, run, sid, arm):
+    """The adjudication of one arm: per repeat when the repeats differ, once when they agree."""
+    phrases = []
+    for l in st.lines:
+        phrases.append((l.get("repeat"), adjudication(l, run, sid, arm == "mcp", st)))
+    if not phrases:
+        return "no execution recorded" + (" although the run planned one" if st.missing_planned else " (none planned)")
+    if len(phrases) == 1:
+        text = phrases[0][1]
+    elif len(set(p for _, p in phrases)) == 1:
+        text = "both repeats: %s" % phrases[0][1] if len(phrases) == 2 else "every repeat: %s" % phrases[0][1]
+    else:
+        text = "; ".join("r%s %s" % (esc(r), p) for r, p in phrases)
+    if arm == "direct-remote" and st.agreement.get("class") == "timing":
+        text += " (direct class timing: the two direct arms differ by one time-limited answer)"
+    elif arm == "direct-remote" and st.agreement.get("class") in ("same_checks", "not_comparable"):
+        text += " (direct class %s)" % esc(st.agreement["class"].replace("_", " "))
+    if st.ne:
+        text += " · DISAGREES with the reference arm"
+    return text
+
+
+def _not_exercised_text(st, run, sid, short_reasons):
+    """The one line of an MCP arm the service refused or could not express: the short local reason, the
+    service's code, and the pointer to appendix B (the owner's review, point 4)."""
+    cls, evidence = mcp_class(st.lines, run.scenario(sid), st.agreement, run.cases)
+    case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
+                                             if l.get("service_by_design_case")), None)
+    reason = short_reason(run, sid, case, short_reasons)
+    glyph = "\\gni" if st.glyph_key == "not_implemented_mcp" else "\\gbd"
+    head = "not exercised via MCP" if st.glyph_key == "not_implemented_mcp" else "service-side by design"
+    text = "%s\\ %s: %s" % (glyph, head, reason)
+    if cls != "not_expressible":
+        text += " (%s: %s" % (esc(MCP_CLASS_WORD.get(cls, cls)), evidence)
+        walls = [l.get("wall_ms") for l in st.lines if cells._num(l.get("wall_ms")) is not None]
+        if walls:
+            text += ", %s" % cells.fmt_times(walls)
+        text += ")"
+    if st.glyph_key == "service_by_design" and st.agreement.get("verified") is False:
+        text += " · UNVERIFIED pair: %s" % esc(((st.agreement.get("disagreement") or {}).get("direct_detail")
+                                              or "the direct side did not match the case"), 200)
+    if case:
+        text += "; case %s, see B" % tt(case)
+    else:
+        text += "; see B"
+    return text
+
+
+def short_reason(run, sid, case, short_reasons=None):
+    """A short local reason for a not-exercised MCP arm: the prose's text for the case (doc/prose/cases.json
+    `short`), else the manifest's not-implemented reason, else the case's missing argument or service outcome."""
+    short_reasons = short_reasons or {}
+    if case and short_reasons.get(case):
+        return inline(short_reasons[case])
+    ni = (run.scenario(sid).get("mcp") or {}).get("not_implemented")
+    if ni:
+        return "the request's %s cannot be expressed through the tools" % esc(ni, 80)
+    c = (run.cases or {}).get(case) or {}
+    sa = c.get("service_answer") or {}
+    if sa.get("missing_argument"):
+        return "no MCP argument for %s" % tt(sa["missing_argument"])
+    if sa.get("outcome"):
+        return "the service's answer is %s" % esc(str(sa["outcome"]).replace("_", " "))
+    return "the service decided the call in the host's place"
+
+
+def _execution_rows(st, run, sid, arm, is_property):
+    rows = []
+    several = len(st.lines) > 1
+    for l in st.lines:
+        outcome = l.get("outcome")
+        glyph = cells.GLYPH.get(outcome, "\\gfail")
+        word = {"pass": "pass", "finding": "\\textbf{FINDING}", "inconclusive": "inconclusive", "fail": "\\textbf{FAIL}",
+                "error": "\\textbf{ERROR}"}.get(outcome, esc(cells.WORD.get(outcome, str(outcome))))
+        hc = cells.host_cache_of(l)
+        wall = cells.fmt_t(l.get("wall_ms"))
+        if arm != "mcp" or hc in ("cold", "warm", cells.WARM_AFTER_INTERRUPTED):
+            wall += " (%s)" % esc(HC_SHORT.get(hc, hc))
+        rows.append(["%s%s" % (esc(arm), (" r%s" % esc(l.get("repeat"))) if several or arm == "mcp" else ""),
+                     "%s\\ %s" % (glyph, word), _status_cell(l), wall, esc(_budget_text(run, sid)),
+                     _property_cell(l, is_property)])
+    return rows
+
+
+def _finding_lines(st, run, sid, arm):
+    out = []
+    for l in st.lines:
+        if l.get("outcome") != "finding":
+            continue
+        fc = _finding_checks(l)
+        for c in fc:
+            out.append("%s r%s, %s: %s" % (esc(arm), esc(l.get("repeat")), esc(c.get("check")), esc(c.get("detail"), 420)))
     return out
 
 
-def _phases_text(line):
-    ph = line.get("mcp_phases") if isinstance(line.get("mcp_phases"), dict) else None
-    if not ph or ph.get("backend_ms") is None:
-        return None
-    keys = [("submit_ms", "submit"), ("queue_ms", "queue"), ("backend_ms", "backend"),
-            ("backend_pattern_ms", "pattern"), ("terminal_lag_ms", "terminal lag"), ("paging_ms", "paging")]
-    parts = ["%s %s" % (label, cells.fmt_t(ph[k])) for k, label in keys if ph.get(k) is not None]
-    return "phases: " + ", ".join(parts)
-
-
-def _repeat_lines(line, run_, is_mcp):
-    """The lines of one execution that is not clean: the header line and one line per check not passed."""
-    out = []
-    outcome = line.get("outcome")
-    glyph = cells.GLYPH.get(outcome, "\\gfail")
-    head = "%s %s" % (glyph, esc(cells.WORD.get(outcome, outcome)))
-    if line.get("http") is not None:
-        head += " · http %s" % esc(line.get("http"))
-    head += _error_text(line)
-    hc = cells.host_cache_of(line)
-    hc_text = {"cold": "host-cold", "warm": "host-warm", cells.WARM_AFTER_INTERRUPTED:
-               "host-warm, after an interrupted execution", "aged": "host cache aged", "not_reached":
-               "host not reached", "unknown": "host cache unknown"}.get(hc, hc)
-    head += " · wall %s (%s)" % (cells.fmt_t(line.get("wall_ms")), esc(hc_text))
-    srv = (line.get("server") or {}).get("elapsed_ms") if isinstance(line.get("server"), dict) else None
-    head += " · server %s" % (cells.fmt_t(srv) if srv is not None else "–")
-    out.append(head)
-    checks = [c for c in (line.get("checks") or []) if isinstance(c, dict)]
-    passed = [c for c in checks if c.get("outcome") == "pass"]
-    others = [c for c in checks if c.get("outcome") != "pass"]
-    # the MCP runner's host-state rule keeps the checks as they read and overrides the execution's outcome to
-    # inconclusive: such checks are labelled, so that their fail glyphs do not read as failures of the run
-    overridden = bool(is_mcp and outcome == "inconclusive" and line.get("inconclusive_reason")
-                      and line.get("inconclusive_reason") != "checks")
-    sub = []
-    if passed:
-        sub.append(("passed", ", ".join("%s \\gpass" % esc(c.get("check")) for c in passed)))
-    prev = None
-    for c in others:
-        detail = c.get("detail") or ""
-        if detail and detail == prev:
-            shown = "as above"
+def _check_groups(line, is_mcp):
+    """The checks of an execution that did not pass, grouped by (outcome, detail) so that a reason shared by
+    several checks is said once (never 'as above', never a list of checks all untestable for one reason)."""
+    groups = []
+    for c in (line.get("checks") or []):
+        if not isinstance(c, dict) or c.get("outcome") == "pass":
+            continue
+        key = (c.get("outcome"), c.get("detail") or "")
+        for g in groups:
+            if g[0] == key:
+                g[1].append(c.get("check"))
+                break
         else:
-            shown = esc(detail, 300)
-            if overridden and c.get("outcome") == "fail":
-                shown = "fail, overridden by the host state (below): " + shown
-        prev = detail or prev
-        sub.append(("%s %s" % (esc(c.get("check")), cells.GLYPH.get(c.get("outcome"), "\\gfail")), shown))
-    if is_mcp:
-        if line.get("inconclusive_reason") and line.get("inconclusive_reason") != "checks":
-            sub.append(("reason", esc(line["inconclusive_reason"])))
-        if line.get("verdict_detail"):
-            sub.append(("host state", esc(line["verdict_detail"])))
-        if line.get("service_by_design_case"):
-            sub.append(("by-design case", tt(line["service_by_design_case"])))
-        ph = _phases_text(line)
-        if ph:
-            sub.append(("mcp", esc(ph)))
-    if line.get("time_limited"):
-        sub.append(("time-limited", esc(line["time_limited"], 160)))
-    return out, sub
+            groups.append((key, [c.get("check")]))
+    return groups
 
 
-def _clean_arm_text(st, run, sid):
-    """One line for an arm that is clean."""
-    if not st.present:
-        return "no execution (none planned)"
-    if st.glyph_key == "not_implemented_mcp":
-        case = st.agreement.get("case")
-        text = "\\gni\\ not implemented via MCP"
-        if case:
-            c = run.cases.get(case) or {}
-            text += ": table case %s" % tt(case)
-            if c.get("scenario_match"):
-                text += " (%s)" % esc(c["scenario_match"], 160)
-        elif (run.scenario(sid).get("mcp") or {}).get("not_implemented"):
-            text += ": manifest, %s" % esc((run.scenario(sid).get("mcp") or {}).get("not_implemented"), 120)
-        refused = [l for l in st.lines if l.get("service_by_design_case")]
-        if refused:
-            l = refused[0]
-            text += " · the service refused each call by design, case %s%s · %s, host not reached" % (
-                tt(l["service_by_design_case"]), _error_text(l), cells.fmt_times(st.walls))
-        return text
-    if st.glyph_key == "service_by_design":
-        case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
-                                                if l.get("service_by_design_case")), None)
-        text = "\\gbd\\ service-side by design"
-        if case:
-            text += ", case %s" % tt(case)
-        text += ", verified" if st.agreement.get("verified") else (", unverified" if st.agreement.get("verified")
-                                                                   is False else "")
-        if st.lines:
-            text += " · %s%s" % (cells.fmt_times(st.walls), _error_text(st.lines[0]))
-        return text
-    return "%s %s: every check passed" % (st.glyph_tex(), cells.fmt_times(st.walls, st.time_marks))
+def _texts_line(states):
+    """Every distinct error text of the block, once, keyed by its status and code."""
+    seen = []
+    for arm in cells.ARMS:
+        st = states[arm]
+        for l in st.lines:
+            code, text = _err(l)
+            if not text or l.get("outcome") in ("not_implemented_mcp", "service_by_design"):
+                continue
+            key = "%s%s" % (l.get("http"), (" " + code) if code else "")
+            if any(k == key and t == text for k, t in seen):
+                continue
+            seen.append((key, text))
+    return "; ".join("%s: “%s”" % (esc(k), esc(t, 300)) for k, t in seen)
+
+
+def _artifacts_line(run, states):
+    parts = []
+    numbers = []
+    for arm in cells.ARMS:
+        for l in states[arm].lines:
+            if l.get("raw"):
+                parts.append(tt(l["raw"]))
+            n = run.line_no(l)
+            if n:
+                numbers.append(str(n))
+    text = ", ".join(parts) if parts else "no raw file recorded"
+    if numbers:
+        text += "; %s line%s %s" % (tt(run.executions_file), "" if len(numbers) == 1 else "s", esc(", ".join(numbers)))
+    return text
 
 
 def _classes_text(run, sid, states):
+    """The agreement classes in one line: the direct class with its detail where the arms differ, the MCP class
+    with its depth; the by-design verification note only when the pair is unverified (else appendix B)."""
     entry = run.comp_entry(sid)
     da = entry.get("direct_agreement") or {}
     ma = entry.get("mcp_agreement") or {}
@@ -264,31 +475,24 @@ def _classes_text(run, sid, states):
         words = {"identical": "identical answers", "same_checks": "different answers, the same check outcomes",
                  "timing": "the answers differ by timing alone", "not_comparable":
                  "not comparable (no check both arms evaluated)", "disagree": "DISAGREE"}.get(cls, cls)
-        text = "direct-local vs direct-remote: %s" % esc(words)
+        text = "direct: %s" % esc(words)
         if da.get("differing_checks"):
-            text += "; differing checks: %s" % esc(", ".join(str(c) for c in da["differing_checks"]), 200)
+            text += "; differing checks: %s" % esc(", ".join(str(c) for c in da["differing_checks"]), 160)
         for t in da.get("timing_repeats") or []:
             if isinstance(t, dict) and t.get("detail"):
-                text += "; r%s: %s" % (esc(t.get("repeat")), esc(t["detail"], 200))
+                text += "; r%s: %s" % (esc(t.get("repeat")), esc(t["detail"], 160))
         for d in da.get("execution_differs") or []:
             if isinstance(d, dict):
-                items = []
-                for c in d.get("checks") or []:
-                    if isinstance(c, dict):
-                        items.append("%s local %s, remote %s" % (
-                            c.get("check"), "/".join(str(x) for x in (c.get("local") or [])),
-                            "/".join(str(x) for x in (c.get("remote") or []))))
-                text += "; the execution checks differ (r%s): %s" % (esc(d.get("repeat")), esc("; ".join(items), 200))
+                items = ["%s local %s, remote %s" % (c.get("check"), "/".join(str(x) for x in (c.get("local") or [])),
+                                                     "/".join(str(x) for x in (c.get("remote") or [])))
+                         for c in (d.get("checks") or []) if isinstance(c, dict)]
+                text += "; the checks differ (r%s): %s" % (esc(d.get("repeat")), esc("; ".join(items), 160))
         parts.append(text)
     mcls = ma.get("class")
     if mcls:
         text = "mcp: %s" % esc(mcls.replace("_", " ") if mcls != "not_implemented_mcp" else "not implemented via MCP")
         if ma.get("case"):
             text += ", case %s" % tt(ma["case"])
-        if ma.get("by"):
-            text += " by the %s" % esc(ma["by"])
-        if ma.get("side"):
-            text += " (%s side)" % esc(ma["side"])
         if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
             text += "; %s check(s) compared" % esc(ma["checks_compared"])
         depth = (run.depth or {}).get(sid)
@@ -297,17 +501,11 @@ def _classes_text(run, sid, states):
             if depth.get("not_compared"):
                 text += " (not compared: %s)" % esc(", ".join(depth["not_compared"]), 120)
         if ma.get("differing_checks"):
-            text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 200)
-        dis = ma.get("disagreement")
-        if isinstance(dis, dict) and dis.get("case") and mcls == "not_implemented_mcp":
-            # the service's refusal matched a by-design case; the direct side is checked against the same case
-            text += "; the service's refusal matched case %s (service side %s, direct side %s%s)" % (
-                tt(dis["case"]), "verified" if dis.get("mcp_verified") else "not verified",
-                "verified" if dis.get("direct_verified") else "not verified",
-                (": " + esc(dis["direct_detail"], 200)) if dis.get("direct_detail") and not dis.get("direct_verified")
-                else "")
-        elif isinstance(dis, dict) and dis.get("direct_detail"):
-            text += "; %s" % esc(dis["direct_detail"], 240)
+            text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 160)
+        if mcls == "service_by_design" and ma.get("verified") is False:
+            dis = ma.get("disagreement") if isinstance(ma.get("disagreement"), dict) else {}
+            text += "; UNVERIFIED: %s" % esc(dis.get("direct_detail") or dis.get("mcp_detail") or "one side did not "
+                                                                                                "match the case", 200)
         parts.append(text)
     missing = [arm for arm, st in states.items() if st.missing_planned]
     if missing:
@@ -326,22 +524,49 @@ def _relations_text(run, sid, units):
         if all((arms.get(a) or {}).get("outcome") in (None, "pass") for a in cells.ARMS) and arms:
             continue
         per_arm = []
+        details = []
         for arm in cells.ARMS:
             a = arms.get(arm) or {}
             if not a:
                 continue
-            per_arm.append("%s %s%s" % (esc(arm), cells.GLYPH.get(a.get("outcome"), "\\ginc"),
-                                        (" " + esc(a.get("detail"), 120)) if a.get("detail") else ""))
+            per_arm.append("%s %s{}" % (esc(cells.ARM_SHORT.get(arm, arm)), cells.GLYPH.get(a.get("outcome"), "\\ginc")))
+            if a.get("detail") and a.get("outcome") != "pass":
+                details.append((arm, a["detail"]))
         other = rel.get("b") if rel.get("a") == sid else rel.get("a")
-        out.append("%s (%s, %s): %s" % (latex.breakable_id(rel.get("id")), esc(rel.get("title"), 120),
-                                        latex.sid(other, units.unit_of(other)), " · ".join(per_arm) or "not evaluated"))
+        text = "%s (%s, with %s): %s" % (latex.breakable_id(rel.get("id")), esc(rel.get("title"), 100),
+                                         latex.sid(other, units.unit_of(other)), " ".join(per_arm) or "not evaluated")
+        if details:
+            distinct = []
+            for arm, d in details:
+                if d not in [x for _, x in distinct]:
+                    distinct.append((arm, d))
+            if len(distinct) == 1:
+                text += " — %s" % esc(distinct[0][1], 120)
+            else:
+                text += " — " + "; ".join("%s: %s" % (esc(cells.ARM_SHORT.get(a, a)), esc(d, 100)) for a, d in distinct)
+        out.append(text)
     return out
 
 
-def detail_block(run, sid, states, number, units):
-    """The LaTeX of one test's detail block (DESIGN-DOC §4.6)."""
+def estimate_lines(body_lines, chars_per_line=150):
+    """A rough height of a block in text lines, for the short / long decision of the box (pagination)."""
+    total = 0
+    for text in body_lines:
+        plain = re.sub(r"\\[A-Za-z]+\{[^}]*\}|\\[A-Za-z]+|[{}]", "", text)
+        total += max(1, int(len(plain) / float(chars_per_line)) + 1)
+    return total
+
+
+SHORT_BLOCK_LINES = 20
+
+
+def detail_block(run, sid, states, number, units, short_reasons=None):
+    """The LaTeX of one test's detail block: the adjudication first, then one row per arm and repeat (final
+    outcome, HTTP and code, wall, requested budget, property tested?), a finding's own evidence and rule set
+    apart, the texts once, the classes, the relations, the supporting artifacts (the owner's review, point 1 and
+    the first of the four further changes)."""
     sc_ = run.scenario(sid)
-    head = "\\fn{%d}\\ %s\\quad %s" % (number, latex.breakable_id(sid), esc(sc_.get("title"), 200))
+    title = esc(sc_.get("title"), 200)
     meta = [esc(sc_.get("route") or "")]
     if sc_.get("timing_class"):
         meta.append(esc(sc_["timing_class"]))
@@ -350,43 +575,82 @@ def detail_block(run, sid, states, number, units):
     rep = sc_.get("repeat")
     if rep:
         meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
-    body = [head + "\\par{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
+    body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
     body.append(latex.bline("expected", expected_text(sc_, run.is_property)))
+    adj = []
     for arm in cells.ARMS:
         st = states[arm]
-        if st.clean:
-            body.append(latex.bline(esc(arm), _clean_arm_text(st, run, sid)))
+        if st.present and st.glyph_key in ("not_implemented_mcp", "service_by_design"):
+            adj.append("\\textbf{%s}: %s" % (esc(arm), _not_exercised_text(st, run, sid, short_reasons)))
+        else:
+            adj.append("\\textbf{%s}: %s" % (esc(arm), _arm_adjudication(st, run, sid, arm)))
+    body.append(latex.bline("adjudication", adj[0]))
+    for text in adj[1:]:
+        body.append("\\bcont{%s}" % text)
+    rows = []
+    for arm in cells.ARMS:
+        st = states[arm]
+        if st.present and st.glyph_key not in ("not_implemented_mcp", "service_by_design"):
+            rows.extend(_execution_rows(st, run, sid, arm, run.is_property))
+    if rows:
+        body.append(latex.block_table(["arm / repeat", "final outcome", "http · code", "wall", "requested budget",
+                                       "property tested?"], rows))
+    findings = []
+    for arm in cells.ARMS:
+        findings.extend(_finding_lines(states[arm], run, sid, arm))
+    if findings:
+        rule = None
+        for e in sc_.get("expect") or []:
+            if isinstance(e, dict) and (e.get("args") or {}).get("rule"):
+                rule = e["args"]["rule"]
+                break
+        body.append(latex.finding_line("; ".join(findings) + ((" · rule: " + esc(rule, 400)) if rule else "")))
+    # the host-state rule and the intermediate evaluation of an overridden MCP execution; the non-passing checks
+    # of the other executions grouped by reason
+    for arm in cells.ARMS:
+        st = states[arm]
+        if not st.present or st.glyph_key in ("not_implemented_mcp", "service_by_design"):
             continue
-        if not st.present:
-            body.append(latex.bline(esc(arm), "\\gnone\\ no execution recorded although the run planned one"))
-            continue
-        if st.glyph_key in ("not_implemented_mcp", "service_by_design"):
-            body.append(latex.bline(esc(arm), _clean_arm_text(st, run, sid)))
-            continue
-        several = len(st.lines) > 1
-        for line in st.lines:
-            if line.get("outcome") == "pass" and several:
-                body.append(latex.bsub("r%s" % esc(line.get("repeat")), "%s pass %s: every check passed" % (
-                    "\\gpass", cells.fmt_t(line.get("wall_ms")))))
+        for l in st.lines:
+            if l.get("outcome") == "pass":
                 continue
-            heads, sub = _repeat_lines(line, run, arm == "mcp")
-            key = esc(arm) if not several else "%s r%s" % (esc(arm), esc(line.get("repeat")))
-            body.append(latex.bline(key, heads[0]))
-            for k, v in sub:
-                body.append(latex.bsub(k, v))
-        if st.arm == "direct-remote" and st.agreement.get("class") in ("timing", "same_checks", "not_comparable",
-                                                                       "disagree"):
-            pass  # said under classes
+            label = "%s r%s" % (esc(cells.ARM_SHORT.get(arm, arm)), esc(l.get("repeat")))
+            if _overridden(l, arm == "mcp"):
+                if l.get("verdict_detail"):
+                    body.append(latex.bsub("host state (%s)" % label, esc(l["verdict_detail"])))
+                groups = _check_groups(l, True)
+                if groups:
+                    body.append(latex.bsub("intermediate (%s)" % label, "the evaluation before the host-state rule, kept as recorded: " + "; ".join(
+                        "%s %s{} — %s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(k[0], "\\gfail"),
+                                        esc(_first_clause(k[1], 160))) for k, names in groups)))
+                continue
+            groups = [g for g in _check_groups(l, arm == "mcp") if g[0][0] != "finding"]
+            if groups and (l.get("outcome") == "fail" or (l.get("outcome") == "inconclusive" and l.get("http") == 200)):
+                body.append(latex.bsub("checks (%s)" % label, "; ".join(
+                    "%s %s{}%s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(k[0], "\\gfail"),
+                                 (" — " + esc(k[1], 240)) if k[1] else "") for k, names in groups)))
+            ph = _phases_text(l) if arm == "mcp" else None
+            if ph:
+                body.append(latex.bsub("mcp phases (%s)" % label, esc(ph)))
+    texts = _texts_line(states)
+    if texts:
+        body.append(latex.bline("texts", texts))
     classes = _classes_text(run, sid, states)
     if classes:
         body.append(latex.bline("classes", " · ".join(classes)))
     rels = _relations_text(run, sid, units)
     if rels:
         body.append(latex.bline("relations", "; ".join(rels)))
-    if any(c.get("outcome") == "finding" for st in states.values() for l in st.lines
-           for c in (l.get("checks") or []) if isinstance(c, dict)):
-        for e in sc_.get("expect") or []:
-            if isinstance(e, dict) and (e.get("args") or {}).get("rule"):
-                body.append(latex.bline("rule", esc(e["args"]["rule"], 400)))
-                break
-    return latex.detail_box(sid, "\n".join(body))
+    body.append(latex.bline("artifacts", _artifacts_line(run, states)))
+    long = estimate_lines(body) > SHORT_BLOCK_LINES
+    return latex.detail_box(sid, number, title, "\n".join(body), long)
+
+
+def _phases_text(line):
+    ph = line.get("mcp_phases") if isinstance(line.get("mcp_phases"), dict) else None
+    if not ph or ph.get("backend_ms") is None:
+        return None
+    keys = [("submit_ms", "submit"), ("queue_ms", "queue"), ("backend_ms", "backend"),
+            ("backend_pattern_ms", "pattern"), ("terminal_lag_ms", "terminal lag"), ("paging_ms", "paging")]
+    parts = ["%s %s" % (label, cells.fmt_t(ph[k])) for k, label in keys if ph.get(k) is not None]
+    return ", ".join(parts)

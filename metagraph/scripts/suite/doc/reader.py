@@ -6,7 +6,9 @@ by-design table, the owner-declared file and the checks module whose docstrings 
 Everything is read from the run directory and the suite directory; nothing is written into the run.
 """
 
+import json
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +31,39 @@ class RunError(Exception):
 def _repeat_key(line):
     r = line.get("repeat")
     return r if isinstance(r, int) else -1
+
+
+def _index_lines(path):
+    """{(scenario, arm, repeat): 1-based physical line number} of a JSON-lines file; the last line of a key wins,
+    as the merge's reading does. A missing or torn line is skipped, never raised."""
+    out = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for i, raw in enumerate(fh, 1):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    row = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(row, dict):
+                    out[(row.get("scenario"), row.get("arm"), row.get("repeat"))] = i
+    except OSError:
+        pass
+    return out
+
+
+def git_commit_of(path, cwd):
+    """The short commit that last touched `path` in the checkout at `cwd` (the version pin of a README
+    reference), or None when git or the checkout is unavailable. Deterministic for one checkout; no network."""
+    try:
+        proc = subprocess.run(["git", "log", "-1", "--format=%h", "--", path], cwd=cwd, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = proc.stdout.decode("utf-8", "replace").strip() if proc.returncode == 0 else ""
+    return text or None
 
 
 class Run(object):
@@ -93,6 +128,9 @@ class Run(object):
             self.lines.setdefault((r.get("scenario"), r.get("arm")), []).append(r)
         for key in self.lines:
             self.lines[key].sort(key=_repeat_key)
+        # the physical line of every execution in the executions file, for the detail blocks' artifact lines
+        self.executions_file = sc.reevaluated_name("executions.jsonl", reevaluated)
+        self.line_numbers = _index_lines(os.path.join(self.dir, self.executions_file))
         verdict, facts = report.verdict_text(self.run, self.comp, self.rows, reevaluated, (self.missing,
                                                                                             self.plan_source),
                                              self.manifest, self.cases)
@@ -189,6 +227,27 @@ class Run(object):
 
     def run_id(self):
         return self.run.get("run_id") or self.comp.get("run_id") or os.path.basename(self.dir)
+
+    def line_no(self, line):
+        """The physical line of an execution in the executions file (1-based), or None."""
+        return self.line_numbers.get((line.get("scenario"), line.get("arm"), line.get("repeat")))
+
+    def records(self):
+        """The manifest's ground-truth records (key, label, accession, taxid, kingdom, ...), in manifest order."""
+        gt = self.manifest.get("ground_truth") or {}
+        return [r for r in (gt.get("records") or []) if isinstance(r, dict) and r.get("key")]
+
+    def budget_ms(self, sid):
+        """The time budget a scenario's request names (bounds.time_budget_ms, else a top-level time_budget_ms),
+        or None."""
+        req = self.scenario(sid).get("request") or {}
+        if not isinstance(req, dict):
+            return None
+        bounds = req.get("bounds") if isinstance(req.get("bounds"), dict) else {}
+        for v in (bounds.get("time_budget_ms"), req.get("time_budget_ms"), req.get("budget_ms")):
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return v
+        return None
 
     def check_doc(self, name):
         """The docstring of a check kind from the judging checks module, or None."""
