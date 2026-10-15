@@ -206,7 +206,8 @@ class Generic(unittest.TestCase):
         self.assertEqual(checks.evaluate(sc_m, dl, "direct-local", client={"wall_ms": 60012.9})[2]["outcome"],
                          "inconclusive")
         # G22 (VERIFY-2 item 3): a /resolve 503 deadline in place of its 200 is SPEC-core §4.5's answer too, before
-        # the budget less the finalisation reserve (250 ms) it fails
+        # the budget it fails (the host answers it once the elapsed time reaches the budget; the finalisation reserve
+        # ends the work, not the answer)
         rsc = {"route": "POST /resolve", "request": {"query": "A" * 60, "bounds": {"time_budget_ms": 20000}},
                "truth": {}, "expect": [{"check": "status", "args": {"http": 200}},
                                        {"check": "invariants", "args": {}}, {"check": "budget_respected", "args": {}}]}
@@ -215,10 +216,12 @@ class Generic(unittest.TestCase):
         self.assertEqual([r["outcome"] for r in res], ["inconclusive", "inconclusive", "inconclusive"])
         self.assertIn("SPEC-labeled-traversal-core §4.5", res[0]["detail"])
         self.assertEqual(checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 19800.0})[2]["outcome"],
+                         "fail")
+        self.assertEqual(checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 20000.0})[2]["outcome"],
                          "inconclusive")
         res = checks.evaluate(rsc, rdl, "direct-local", client={"wall_ms": 800.0})
         self.assertEqual(res[2]["outcome"], "fail")
-        self.assertIn("finalisation reserve", res[2]["detail"])
+        self.assertIn("before the 20000 ms budget", res[2]["detail"])
         # another code, another route, or a scenario expecting a refusal: as stated
         res = checks.evaluate(sc, checks.normalise_direct(503, b'{"error": "d", "code": "loading"}'), "direct-local")
         self.assertEqual([r["outcome"] for r in res], ["fail", "fail"])
@@ -662,6 +665,58 @@ class MoreChecks(unittest.TestCase):
         thr = self.entry(notes=["low_complexity_pattern"], stop={"phase": "discovery", "reason": "max_contexts"}, counts={})
         self.assertEqual(outcome(sc, thr, "low_complexity_note", expected=True)[0], "pass")    # a threshold stop
 
+    def test_low_complexity_note_beside_a_later_phase(self):
+        # SPEC-pattern-search §7.8: the note is the engine's, decided after its search; a stop of a later phase (the
+        # labels' reads, the selection, the output) leaves it as it is, an engine phase's budget stop leaves it out
+        sc = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "A" * 31}]})
+        for st in ({"phase": "output", "reason": "time"}, {"phase": "output", "reason": "max_memory"},
+                   {"phase": "label_discovery", "reason": "max_annotation_work"},
+                   {"phase": "placement", "reason": "max_memory"},
+                   {"phase": "selection", "reason": "max_predicate_work"}):
+            noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
+            plain = self.entry(notes=[], stop=st, counts={})
+            self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "pass", st)
+            o, d = outcome(sc, plain, "low_complexity_note", expected=True)
+            self.assertEqual(o, "fail", st)
+            self.assertIn("beside a later phase's stop", d)
+            self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=False)[0], "fail", st)
+            self.assertEqual(outcome(sc, plain, "low_complexity_note", expected=False)[0], "pass", st)
+        for st in ({"phase": "discovery", "reason": "time"}, {"phase": "extension", "reason": "max_memory"},
+                   {"phase": "extension", "reason": "max_annotation_work"}, {"reason": "max_steps"}):
+            noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
+            self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "fail", st)
+            self.assertEqual(outcome(sc, self.entry(notes=[], stop=st, counts={}), "low_complexity_note",
+                                     expected=True)[0], "inconclusive", st)
+        # a supported-path search's selection stop can be its own refusal of a held walk, inside the search
+        sup = self.sc({"long_search": "supported_paths", "predicate": {"any": ["1"]}, "predicate_strands": "either",
+                       "patterns": [{"dna": "A" * 40}]})
+        st = {"phase": "selection", "reason": "max_memory"}
+        noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
+        plain = self.entry(notes=[], stop=st, counts={})
+        self.assertEqual(outcome(sup, noted, "low_complexity_note", expected=True)[0], "pass")
+        self.assertEqual(outcome(sup, plain, "low_complexity_note", expected=True)[0], "inconclusive")
+        self.assertEqual(outcome(sup, noted, "low_complexity_note", expected=False)[0], "fail")
+        self.assertEqual(outcome(sup, plain, "low_complexity_note", expected=False)[0], "pass")
+        # the invariants: a stored answer with an output stop keeps a note; a supported-path search's own budget
+        # stop does not
+        req, ans = fixture("labels_all_output_budget")
+        fsc = {"route": "POST /pattern", "request": req, "truth": {}}
+        ans = copy.deepcopy(ans)
+        ans["patterns"][0]["notes"].append("low_complexity_pattern")
+        self.assertEqual(outcome(fsc, ok_answer(ans), "invariants")[0], "pass")
+        ans["patterns"][0]["stop"]["reason"] = "time"
+        ans["patterns"][0]["determinism"] = "time_limited"
+        o, d = outcome(fsc, ok_answer(ans), "invariants")
+        self.assertNotIn("low_complexity_pattern", d)
+        req, ans = fixture("supported_paths_work_budget")
+        fsc = {"route": "POST /pattern", "request": req, "truth": {}}
+        self.assertEqual(outcome(fsc, ok_answer(ans), "invariants")[0], "pass")
+        ans = copy.deepcopy(ans)
+        ans["patterns"][0]["notes"].append("low_complexity_pattern")
+        o, d = outcome(fsc, ok_answer(ans), "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("low_complexity_pattern beside a budget stop extension/max_annotation_work", d)
+
     def test_stops_stated_and_levels(self):
         sc = self.sc({"patterns": [{"dna": "A" * 20}, {"dna": "C" * 20}]})
         ok = ok_answer({"patterns": [{"stop": None, "counts": {"contexts": {"value": 3, "relation": "exact"}}},
@@ -693,6 +748,76 @@ class MoreChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, self.entry(stop=None, counts={"contexts": {"value": 900, "relation": "exact"}}),
                                  "count_relation", relation="exact", min=1000)[0], "fail")
         self.assertEqual(outcome(sc, stopped, "count_relation", relation=["exact", "at_least"], min=800)[0], "pass")
+
+    def test_count_relation_after_any_stop_that_leaves_it_inexact(self):
+        # SPEC-pattern-search §7.4: at_least means a stop interrupted the count; every budget of §7.6, §14.4, §19.8
+        # and §20.5 and every stop_at_threshold stop can be that stop (inconclusive below a minimum), no stop cannot
+        def C(rel, v, **kw):
+            return dict({"relation": rel, "value": v}, **kw)
+        sup = self.sc({"long_search": "supported_paths", "mode": "count", "patterns": [{"dna": "ACGT" * 10}]})
+        for reason in ("max_annotation_work", "max_memory"):
+            e = self.entry(stop={"phase": "extension", "reason": reason},
+                           counts={"anchors": C("exact", 2), "supported_paths": C("at_least", 0)})
+            o, d = outcome(sup, e, "count_relation", count="supported_paths", min=1)
+            self.assertEqual(o, "inconclusive", d)
+            self.assertIn("after the stop extension/%s" % reason, d)
+        none = self.entry(stop=None, counts={"anchors": C("exact", 2), "supported_paths": C("at_least", 0)})
+        o, d = outcome(sup, none, "count_relation", count="supported_paths", min=1)
+        self.assertEqual(o, "fail")
+        self.assertIn("with no stop that leaves the count inexact", d)
+        # a predicate's pruning states supported_paths at_least without a stop (§20.4, §20.9), any branch pruned
+        # before L the paths
+        pred = self.sc({"long_search": "supported_paths", "mode": "count", "predicate": {"any": ["1"]},
+                        "patterns": [{"dna": "ACGT" * 10}]})
+        pruned = self.entry(stop=None, counts={"anchors": C("exact", 2), "paths": C("at_least", 0),
+                                               "supported_paths": C("at_least", 0, branches_pruned=2,
+                                                                    branches_pruned_by_predicate=1)})
+        self.assertEqual(outcome(pred, pruned, "count_relation", count="supported_paths", min=1)[0], "inconclusive")
+        self.assertEqual(outcome(pred, pruned, "count_relation", count="paths", min=1)[0], "inconclusive")
+        paths = self.sc({"long_search": "paths", "mode": "count", "patterns": [{"dna": "ACGT" * 10}]})
+        mem = self.entry(stop={"phase": "extension", "reason": "max_memory"},
+                         counts={"anchors": C("exact", 2), "paths": C("at_least", 3)})
+        o, d = outcome(paths, mem, "count_relation", count="paths", relation="exact")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertEqual(outcome(paths, self.entry(stop=None, counts={"anchors": C("exact", 2), "paths": C(
+            "at_least", 3)}), "count_relation", count="paths", relation="exact")[0], "fail")
+        heavy = self.sc({"mode": "count", "patterns": [{"dna": "GCTACACACACC"}]})
+        o, d = outcome(heavy, self.entry(stop=None, counts={"contexts": C("at_least", 3)}), "count_relation", min=20,
+                       relation=["exact", "at_least"])
+        self.assertEqual(o, "fail")
+        steps = self.entry(stop={"phase": "discovery", "reason": "max_steps"}, counts={"contexts": C("at_least", 3)})
+        self.assertEqual(outcome(heavy, steps, "count_relation", min=20)[0], "inconclusive")
+        # a stop_at_threshold stop leaves the count at_least too (§7.4)
+        thr = self.sc({"mode": "count", "stop_at_threshold": True, "max_contexts": 10,
+                       "patterns": [{"dna": "GCTACACACACC"}]})
+        crossed = self.entry(stop={"phase": "discovery", "reason": "max_contexts"},
+                             counts={"contexts": C("at_least", 11)})
+        self.assertEqual(outcome(thr, crossed, "count_relation", min=20)[0], "inconclusive")
+        self.assertEqual(outcome(thr, crossed, "count_relation", min=11)[0], "pass")
+        # bounds decide only where they do not straddle the minimum; a value the bounds exclude fails, also after a
+        # stop
+        scan = self.entry(stop={"phase": "mask_scan", "reason": "max_steps"},
+                          counts={"contexts": C("bounds", 5, lower=5, upper=30)})
+        self.assertEqual(outcome(heavy, scan, "count_relation", min=20)[0], "inconclusive")
+        self.assertEqual(outcome(heavy, scan, "count_relation", min=5)[0], "pass")
+        self.assertEqual(outcome(heavy, scan, "count_relation", min=31)[0], "fail")
+        self.assertEqual(outcome(heavy, scan, "count_relation", value=40)[0], "fail")
+        self.assertEqual(outcome(heavy, scan, "count_relation", value=20)[0], "inconclusive")
+        self.assertEqual(outcome(heavy, steps, "count_relation", value=2)[0], "fail")       # at_least 3 > 2
+        self.assertEqual(outcome(heavy, steps, "count_relation", value=7)[0], "inconclusive")
+        # a stop of the labels' reads or the output leaves the graph count as the search made it (§7.5): no excuse
+        # for a graph count, an excuse for the labels' own counts
+        labels = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "GCTACACACACC"}]})
+        out = self.entry(stop={"phase": "output", "reason": "max_memory"}, counts={"contexts": C("at_least", 3),
+                                                                                 "labels": C("at_least", 2)})
+        self.assertEqual(outcome(labels, out, "count_relation", min=20)[0], "fail")
+        self.assertEqual(outcome(labels, out, "count_relation", relation="exact")[0], "fail")
+        self.assertEqual(outcome(labels, out, "count_relation", count="labels", relation="exact")[0], "inconclusive")
+        # a count of relation rules of its own: at_least below a minimum is inconclusive without a stop, an
+        # unexpected relation still fails
+        plain = self.entry(stop=None, counts={"contexts": C("exact", 30), "labels": C("at_least", 2)})
+        self.assertEqual(outcome(labels, plain, "count_relation", count="labels", min=5)[0], "inconclusive")
+        self.assertEqual(outcome(labels, plain, "count_relation", count="labels", relation="exact")[0], "fail")
 
     def test_mirror_needs_a_mirror(self):
         req, ans = fixture("predicate_selection_strands")
@@ -900,11 +1025,18 @@ class BudgetChecks(unittest.TestCase):
         # without the cap (a manifest built before A2-03) the requested budget, as before: a false fail
         self.assertEqual(checks.evaluate(sc(70000, None), dl, "direct-local",
                                          client={"wall_ms": 60100.0})[2]["outcome"], "fail")
-        # before the capped budget less the reserve: fail; long past it: a finding; a cap above the request: the
-        # request's budget
+        # before the capped budget: fail; long past it: a finding; a cap above the request: the request's budget
         res = checks.evaluate(sc(70000, 60000), dl, "direct-local", client={"wall_ms": 59000.0})
         self.assertEqual(res[2]["outcome"], "fail")
-        self.assertIn("less its 250 ms finalisation reserve", res[2]["detail"])
+        self.assertIn("before the 60000 ms budget (the requested 70000 ms lowered", res[2]["detail"])
+        # the host answers /resolve's 503 only once the elapsed time reaches the budget (Deadline::respond_expired):
+        # its finalisation reserve ends the work earlier, not the answer, so a 503 within it is premature too
+        for wall, want in ((59900.0, "fail"), (59998.0, "fail"), (59999.0, "inconclusive"), (60000.0, "inconclusive")):
+            self.assertEqual(checks.evaluate(sc(70000, 60000), dl, "direct-local",
+                                             client={"wall_ms": wall})[2]["outcome"], want, wall)
+        for wall, want in ((900.0, "fail"), (999.0, "inconclusive"), (1000.0, "inconclusive"), (600.0, "fail")):
+            self.assertEqual(checks.evaluate(sc(1000, None), dl, "direct-local",
+                                             client={"wall_ms": wall})[2]["outcome"], want, wall)
         self.assertEqual(checks.evaluate(sc(70000, 60000), dl, "direct-local",
                                          client={"wall_ms": 125000.0})[2]["outcome"], "finding")
         self.assertEqual(checks.evaluate(sc(20000, 60000), dl, "direct-local",
@@ -1701,13 +1833,156 @@ class ResolveChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, empty, "resolve_absent")[0], "pass")
         self.assertEqual(outcome(sc, self.body([[0, 70]]), "resolve_absent")[0], "fail")
 
+    def test_runs_on_a_stopped_answer_without_a_prefix_argument(self):
+        # a stop answers the resolve of a prefix (SPEC-labeled-traversal-core §4.5); an expectation about the whole
+        # query (no prefix_if_stopped / unless_stopped) is decided only where the prefix decides it
+        sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "labels": ["562", "9606"],
+                                                    "bounds": {"time_budget_ms": 20000}}, "truth": {}}
+        late = {"limits": {"time_budget_ms": 20000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": 19900.0}}
+
+        def stopped(x, runs):
+            stop = {"phase": "rows", "reason": "time", "resolved_kmers": x, "query_kmers": 70,
+                    "resolved_bp": x + 30 if x else 0, "query_bp": 100, "remainder_from_bp": x}
+            a = self.body(runs, num=x, graph=[[0, x]] if x else [], stop=stop)
+            a["body"].update(late)
+            return a
+        prefix = stopped(40, [[0, 40]])
+        self.assertEqual(outcome(sc, prefix, "invariants")[0], "pass")
+        o, d = outcome(sc, prefix, "resolve_runs", label="562", full=True)
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("full support of the query untested", d)
+        self.assertEqual(outcome(sc, stopped(40, [[0, 20], [25, 40]]), "resolve_runs", label="562", full=True)[0],
+                         "fail")
+        self.assertEqual(outcome(sc, stopped(0, []), "resolve_runs", label="562", full=True)[0], "inconclusive")
+        holed = stopped(40, [[0, 20], [25, 40]])
+        for args, want in (({"covers": [0, 20]}, "pass"), ({"covers": [10, 30]}, "fail"),
+                           ({"covers": [30, 60]}, "inconclusive"), ({"covers": [10, 60]}, "fail"),
+                           ({"covers": [45, 60]}, "inconclusive"),
+                           ({"run_end_in": [15, 25]}, "pass"), ({"run_end_in": [30, 35]}, "fail"),
+                           ({"run_start_in": [20, 30]}, "inconclusive"), ({"run_start_in": [0, 10]}, "fail"),
+                           ({"runs": [[0, 20], [25, 70]]}, "inconclusive"), ({"runs": [[0, 20], [30, 70]]}, "fail"),
+                           ({"kmers": 60}, "inconclusive"), ({"kmers": 30}, "fail"), ({"kmers": 70}, "fail"),
+                           ({"max_kmers": 30}, "fail"), ({"max_kmers": 50}, "inconclusive"),
+                           ({"min_kmers": 30}, "pass"), ({"min_kmers": 66}, "fail"),
+                           ({"min_kmers": 50}, "inconclusive"),
+                           ({"covers": [0, 20], "kmers": 60}, "inconclusive")):
+            self.assertEqual(outcome(sc, holed, "resolve_runs", label="562", **args)[0], want, args)
+        self.assertEqual(outcome(sc, prefix, "resolve_runs", label="562", run_end_in=[30, 50])[0], "inconclusive")
+        self.assertEqual(outcome(sc, prefix, "resolve_runs", label="562", run_end_in=[10, 30])[0], "fail")
+
     def test_discover(self):
         sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "discover": {}}, "truth": {}}
         a = self.body([[0, 70]])
         self.assertEqual(outcome(sc, a, "resolve_discover_contains", label="562")[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_discover_contains", label="1")[0], "fail")
-        a["body"]["labels_truncated"] = {"kept": 2, "total": 9}
-        self.assertEqual(outcome(sc, a, "resolve_discover_contains", label="1")[0], "pass")
+        # SPEC-labeled-traversal-core §4.2: a truncated list keeps the top max_labels by supported k-mers; the
+        # source supports every in-graph k-mer, so it may be dropped only in a tie at that support (the recorded
+        # R-discover-0001: 713600 kept, the source 107806 one of 7 dropped at full length)
+        disc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "discover": {"kind": "column",
+                                                                                          "max_labels": 1}},
+                "truth": {}}
+
+        def listed(label, n, trunc):
+            return ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels_truncated": trunc,
+                              "labels": [{"label": label, "kind": "column", "kmers_supported": n, "runs": [[0, n]]}]})
+        tie = listed("713600", 70, {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 70,
+                                    "dropped_full_length": 7})
+        o, d = outcome(disc, tie, "resolve_discover_contains", label="107806")
+        self.assertEqual(o, "pass")
+        self.assertIn("ties the kept labels at all 70 in-graph k-mers", d)
+        self.assertNotIn("index order", d)
+        self.assertEqual(outcome(disc, tie, "invariants")[0], "pass")
+        self.assertEqual(outcome(disc, tie, "resolve_discover_contains", label="713600")[0], "pass")
+        # an index-order host: a label with 3 of 70 k-mers kept, one with 70 dropped
+        index_order = listed("670", 3, {"kept": 1, "total": 9, "min_kept_kmers": 3, "max_dropped_kmers": 70,
+                                        "dropped_full_length": 1})
+        self.assertEqual(outcome(disc, index_order, "resolve_discover_contains", label="107806")[0], "fail")
+        self.assertEqual(outcome(disc, index_order, "invariants")[0], "fail")
+        # the kept label below full support, or no dropped label at full support: the source would be kept
+        below = listed("670", 60, {"kept": 1, "total": 9, "min_kept_kmers": 60, "max_dropped_kmers": 60,
+                                   "dropped_full_length": 0})
+        o, d = outcome(disc, below, "resolve_discover_contains", label="107806")
+        self.assertEqual(o, "fail")
+        self.assertIn("supports all 70 in-graph k-mers and a kept label only 60", d)
+        self.assertEqual(outcome(disc, below, "invariants")[0], "pass")
+        none_full = listed("713600", 70, {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 69,
+                                          "dropped_full_length": 0})
+        self.assertEqual(outcome(disc, none_full, "resolve_discover_contains", label="107806")[0], "fail")
+        self.assertEqual(outcome(disc, none_full, "invariants")[0], "pass")
+        # labels_truncated without its fields: not exposed on the MCP arm, a failure on a direct one
+        bare = listed("713600", 70, {"kept": 1, "total": 9})
+        self.assertEqual(outcome(disc, bare, "resolve_discover_contains", label="107806")[0], "fail")
+        self.assertEqual(outcome(disc, bare, "resolve_discover_contains", label="107806", _arm="mcp")[0],
+                         "not_exposed")
+        # the invariants: kept is the list's length, below total; the last kept label states min_kept_kmers; a
+        # full-length drop has every in-graph k-mer; the list is ranked by supported k-mers, at most max_labels
+        for trunc in ({"kept": 2, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 7},
+                      {"kept": 1, "total": 1, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 0},
+                      {"kept": 1, "total": 9, "min_kept_kmers": 69, "max_dropped_kmers": 69, "dropped_full_length": 0},
+                      {"kept": 1, "total": 9, "min_kept_kmers": 70, "max_dropped_kmers": 60, "dropped_full_length": 2},
+                      {"kept": 1, "total": 3, "min_kept_kmers": 70, "max_dropped_kmers": 70, "dropped_full_length": 3}):
+            self.assertEqual(outcome(disc, listed("713600", 70, trunc), "invariants")[0], "fail", trunc)
+        # only more than max_labels labels are truncated, to exactly max_labels (§4.2; default 1000): a list cut to
+        # another size is no tie, whatever its counts say (R-discover-0003's shape, where a correct host lists all 18)
+        def cut(max_labels, kept, total):
+            sc_ = dict(disc, request=dict(disc["request"], discover={"kind": "column", "max_labels": max_labels}))
+            if max_labels is None:
+                sc_["request"]["discover"] = {"kind": "column"}
+            ans = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels": [
+                {"label": str(1000 + j), "kind": "column", "kmers_supported": 70, "runs": [[0, 70]]}
+                for j in range(kept)], "labels_truncated": {"kept": kept, "total": total, "min_kept_kmers": 70,
+                                                            "max_dropped_kmers": 70, "dropped_full_length": total - kept}})
+            return sc_, ans
+        for max_labels, kept, total in ((100, 1, 18), (20, 5, 18), (None, 1, 9), (20, 20, 20)):
+            sc_, ans = cut(max_labels, kept, total)
+            o, d = outcome(sc_, ans, "resolve_discover_contains", label="272634")
+            self.assertEqual(o, "fail", (max_labels, kept, total))
+            self.assertIn("only more than max_labels labels are truncated", d)
+            o, d = outcome(sc_, ans, "invariants")
+            self.assertEqual(o, "fail", (max_labels, kept, total))
+            self.assertIn("truncates only more than max_labels labels", d)
+        for max_labels, kept, total in ((20, 20, 25), (None, 1000, 1200)):
+            sc_, ans = cut(max_labels, kept, total)
+            self.assertEqual(outcome(sc_, ans, "resolve_discover_contains", label="272634")[0], "pass")
+            self.assertEqual(outcome(sc_, ans, "invariants")[0], "pass")
+        two = ok_answer({"k": 31, "num_kmers": 70, "graph_runs": [[0, 70]], "labels_truncated": None, "labels": [
+            {"label": "a", "kind": "column", "kmers_supported": 10, "runs": [[0, 10]]},
+            {"label": "b", "kind": "column", "kmers_supported": 70, "runs": [[0, 70]]}]})
+        many = dict(disc, request=dict(disc["request"], discover={"kind": "column", "max_labels": 5}))
+        o, d = outcome(many, two, "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("not ranked by supported k-mers", d)
+        self.assertEqual(outcome(disc, two, "invariants")[0], "fail")          # 2 labels, max_labels 1
+        two["body"]["labels"].reverse()
+        self.assertEqual(outcome(many, two, "invariants")[0], "pass")
+        trace = dict(many, request=dict(many["request"], support="trace"))
+        two["body"]["labels"].reverse()
+        self.assertEqual(outcome(trace, two, "invariants")[0], "pass")         # trace states trace runs, not the rank
+
+
+    def test_discover_stopped_before_an_in_graph_kmer(self):
+        disc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "discover": {"kind": "column",
+                                                                                          "max_labels": 1}},
+                "truth": {}}
+        # a discovery stopped before it read an in-graph k-mer has no profile to rank (§4.5); one that read some
+        # k-mers and lists no source fails as a complete list does
+        budgeted = dict(disc, request=dict(disc["request"], bounds={"time_budget_ms": 3000}))
+        for resolved, graph in ((0, []), (5, [])):
+            stopped = ok_answer({"k": 31, "num_kmers": resolved, "graph_runs": graph, "labels": [],
+                                 "labels_truncated": None, "limits": {"time_budget_ms": 3000, "finalize_reserve_ms": 250},
+                                 "timing": {"elapsed_ms": 2800.0},
+                                 "stop": {"phase": "rows", "reason": "time", "resolved_kmers": resolved,
+                                          "remainder_from_bp": resolved, "resolved_bp": resolved + 30 if resolved else 0,
+                                          "query_kmers": 70, "query_bp": 100}})
+            o, d = outcome(budgeted, stopped, "resolve_discover_contains", label="107806")
+            self.assertEqual(o, "inconclusive", resolved)
+            self.assertIn("no profile to rank", d)
+        some = ok_answer({"k": 31, "num_kmers": 40, "graph_runs": [[0, 40]], "labels_truncated": None, "labels": [
+            {"label": "713600", "kind": "column", "kmers_supported": 40, "runs": [[0, 40]]}],
+            "limits": {"time_budget_ms": 3000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": 2800.0},
+            "stop": {"phase": "rows", "reason": "time", "resolved_kmers": 40, "remainder_from_bp": 40,
+                     "resolved_bp": 70, "query_kmers": 70, "query_bp": 100}})
+        self.assertEqual(outcome(budgeted, some, "resolve_discover_contains", label="107806")[0], "fail")
 
 
 class TraverseChecks(unittest.TestCase):
@@ -2589,6 +2864,29 @@ class TraverseChecks(unittest.TestCase):
         unset = res("failed", rs={"resource": "memory", "requested": 2}, lims=["bounds.max_memory_mb"], arms=False)
         self.assertEqual(outcome(sc, unset, "traverse_stop", knob="bounds.max_memory_mb", resource="memory",
                                  walks=["partial", "failed"])[0], "fail")
+        # direction both: an arm whose walks all ended before the cap stays complete (SPEC-labeled-traversal-core
+        # §6.7), for a per-arm cap and a per-seed stop alike; some arm must show the cap
+        both = dict(sc, request={"seeds": [{"sequence": "A" * 40}], "strategy": {"direction": "both", "bounds": {
+            "max_output_bp": 50, "max_steps": 5}}})
+
+        def arm(status, trig, knob):
+            return {"status": status, "complete_to_bp": 5, "cap_trigger": {"reason": trig} if trig else None,
+                    "limitations": [{"kind": "walk_domain", "knob": knob}] if trig else []}
+
+        def two(left, right):
+            return ok_answer({"results": [{"outcome": {"walks": "partial"}, "limitations": [], "resource_stop": None,
+                                           "arms": {"left": left, "right": right}}]})
+        for cap, knob in (("max_output_bp", "bounds.max_output_bp"), ("max_steps", "bounds.max_steps")):
+            args = dict(knob=knob, cap_reason=cap)
+            self.assertEqual(outcome(both, two(arm("complete", None, knob), arm("truncated", cap, knob)),
+                                     "traverse_stop", **args)[0], "pass", cap)
+            self.assertEqual(outcome(both, two(arm("truncated", cap, knob), arm("truncated", cap, knob)),
+                                     "traverse_stop", **args)[0], "pass", cap)
+            o, d = outcome(both, two(arm("complete", None, knob), arm("complete", None, knob)), "traverse_stop", **args)
+            self.assertEqual(o, "fail", cap)
+            self.assertIn("no requested arm truncated by %s" % cap, d)
+            self.assertEqual(outcome(both, two(arm("truncated", "max_paths", knob), arm("truncated", cap, knob)),
+                                     "traverse_stop", **args)[0], "fail", cap)
 
 
     def test_walk_end_and_outcome(self):
@@ -2608,6 +2906,26 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(outcome(dict(sc, truth=longer), ok_answer(full), "walk_end", arm="right")[0], "fail")
         self.assertEqual(outcome(sc, ok_answer(full), "traverse_seed_outcome", walks="complete")[0], "pass")
         self.assertEqual(outcome(sc, ok_answer(full), "traverse_seed_outcome", walks="failed")[0], "fail")
+
+    def test_walk_end_resource_end_below_the_frontier(self):
+        # a resource end of a path shorter than its arm's complete_to_bp cannot have happened (a cap ends walks at or
+        # past it, SPEC-labeled-traversal-core §6.10): the record's end not reached is no stated stop then
+        import random
+        rnd = random.Random(5)
+        record = "".join(rnd.choice("ACGT") for _ in range(400))
+        start, L = 100, 40
+        t = {"record": "x", "taxid": "1", "seq_id": 0, "record_length": 400, "start": start, "length": L,
+             "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0}
+        sc = {"route": "POST /traverse", "truth": t, "request": {"seeds": [{"sequence": t["window"]}], "strategy": {
+            "direction": "right", "bounds": {"max_extension_bp": 1000, "time_budget_ms": 15000}}}}
+        right = record[start + L:start + L + 30]
+        capped = dict(status="truncated", trig="time_budget", reason="time_budget")
+        o, d = outcome(sc, self.walk({"right": right}, **capped), "walk_end", arm="right")
+        self.assertEqual(o, "inconclusive")
+        self.assertIn("stopped by time_budget", d)
+        o, d = outcome(sc, self.walk({"right": right}, extra={"complete_to_bp": 60}, **capped), "walk_end", arm="right")
+        self.assertEqual(o, "fail")
+        self.assertIn("below the arm's complete_to_bp 60", d)
 
     def test_blocked_event(self):
         # N-hard-0022: a tandem-repeat seed re-enters itself at 0 bp on each arm (SPEC §6.6)

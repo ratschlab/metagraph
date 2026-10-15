@@ -50,6 +50,11 @@ _NCBIEAA = {   # the tables the suite's peptides use (seqtools.NCBIEAA holds all
 _CODONS = [a + b + c for a in "TCAG" for b in "TCAG" for c in "TCAG"]
 _AMBIG = {"B": "DN", "Z": "EQ", "J": "IL"}
 _BUDGET_STOP_REASONS = {"max_steps", "time"}
+# the stop reasons that can leave a count inexact (SPEC-pattern-search §7.4: at_least "a stop interrupted
+# discovery"; bounds after a stop in a deferred scan): the budgets of every phase (§7.6, §14.4, §19.8, §20.5) and the
+# stop_at_threshold stops (§7.6, §12.1, §19.8, §20.9)
+_INEXACT_STOP_REASONS = {"max_steps", "time", "max_annotation_work", "max_memory", "max_predicate_work",
+                         "max_contexts", "max_anchors", "max_paths", "max_predicate_contexts"}
 _ORIENT_RANK = {"+": 0, "forward": 0, "-": 1, "reverse": 1, "=": 2, "palindromic": 2}
 
 PASS, FAIL, NOT_EXPOSED = "pass", "fail", "not_exposed"
@@ -1094,10 +1099,42 @@ def check_pattern_slot_error(sc, ans, a, arm):
     return PASS, "slot %s" % a["code"]
 
 
+# the graph counts (SPEC-pattern-search §7.4, §7.7, §12.1, §20.4): at_least only after a stop of the graph search; a
+# stop of the labels' reads or of the output leaves them as the search made them (§7.5: "the graph count is then still
+# the discovery's")
+_GRAPH_COUNTS = ("contexts", "anchors", "paths", "supported_paths")
+_LABEL_PHASES = {"label_discovery", "placement", "output"}
+
+
+def _stopless_inexact(body: dict, e: dict, req: dict, name: str, rel: str) -> Optional[str]:
+    """Why graph count |name| of entry |e| may have the inexact relation |rel| with no stop that leaves it so, by the
+    SPEC, or None: bounds on a graph without its mask (SPEC-pattern-search §7.4); on a supported-path search,
+    supported_paths and paths at_least after a predicate's pruning and paths at_least after any branch pruned before
+    the pattern's end (§20.4, §20.9). Otherwise a graph count is at_least or bounds only after a stop (§7.4, §12.1)."""
+    counts = e.get("counts") or {}
+    if rel == "bounds" and ((body.get("index") or {}).get("counting") == "upper_bound"):
+        return "a graph without its mask (index.counting upper_bound, SPEC-pattern-search §7.4)"
+    if name in ("supported_paths", "paths") and req.get("long_search") == "supported_paths" and rel == "at_least":
+        sp = counts.get("supported_paths") if isinstance(counts.get("supported_paths"), dict) else {}
+        by_predicate = _number(sp.get("branches_pruned_by_predicate")) or 0
+        pruned = _number(sp.get("branches_pruned")) or 0
+        if by_predicate > 0:
+            return "the predicate pruned %d branch(es) of the search (SPEC-pattern-search §20.4, §20.9)" % by_predicate
+        if name == "paths" and pruned > 0:
+            return "%d branch(es) pruned before the pattern's end (SPEC-pattern-search §20.4)" % pruned
+    return None
+
+
 def check_count_relation(sc, ans, a, arm):
-    """A count's relation and value (`relation`, `value`, `min`, `max`; `level` for by_mismatches). A count a
-    budget stop left inexact (relation at_least or unknown under a time or max_steps stop) cannot show an exact
-    expectation: inconclusive, not fail, unless the scenario expects the stop."""
+    """A count's relation and value (`relation`, `value`, `min`, `max`; `level` for by_mismatches). A count a stop
+    left inexact (at_least, unknown or bounds beside a stated stop of a reason that can leave it so,
+    _INEXACT_STOP_REASONS; for a graph count not a stop of the labels' reads or the output, which leave it as the
+    search made it), or a graph count the SPEC states inexact without such a stop (_stopless_inexact), cannot show an
+    exact expectation: inconclusive, unless the scenario expects that relation or the bound it states decides
+    (at_least v >= min passes, at_least v > max fails, a value outside the bounds fails). A graph count at_least
+    below a minimum with nothing that can leave it so contradicts the SPEC (§7.4: at_least means a stop interrupted
+    it) and fails; another count (labels, occurrences, tested, selected) has relation rules of its own (§12.1,
+    §14.6, §19.7): at_least below a minimum is inconclusive there."""
     e = _entry(ans, a.get("pattern", 0))
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
@@ -1107,34 +1144,60 @@ def check_count_relation(sc, ans, a, arm):
         c = _get(c, "by_mismatches.%d" % a["level"])
     value, rel = _count(c)
     stop = e.get("stop") or {}
-    stopped = stop.get("reason") in _BUDGET_STOP_REASONS and rel in ("at_least", "unknown")
+    graph = name in _GRAPH_COUNTS
+    inexact = rel in ("at_least", "unknown", "bounds")
+    stopped = inexact and stop.get("reason") in _INEXACT_STOP_REASONS and not (
+        graph and stop.get("phase") in _LABEL_PHASES)
     if stopped:
         bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
         if bad:
             return FAIL, "%s %s %s after a %s/%s stop that cannot have happened: %s" % (
                 name, rel, value, stop.get("phase"), stop.get("reason"), bad[0])
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    body = _body(ans)
+    cause = ("the stop %s/%s" % (stop.get("phase"), stop.get("reason"))) if stopped else \
+        (_stopless_inexact(body if isinstance(body, dict) else {}, e, req, name, rel) if inexact and graph else None)
     if "relation" in a:
         rels = a["relation"] if isinstance(a["relation"], list) else [a["relation"]]
         if rel not in rels:
-            if stopped:
-                return INCONCLUSIVE, "%s %s %s after a %s/%s stop: not the exact count expected" % (
-                    name, rel, value, stop.get("phase"), stop.get("reason"))
+            if cause:
+                return INCONCLUSIVE, "%s %s %s after %s: not the relation expected (%s)" % (
+                    name, rel, value, cause, rels)
             return FAIL, "%s relation %s (value %s), expected %s" % (name, rel, value, rels)
     lower = c.get("lower", value) if rel == "bounds" else value
-    if "value" in a and (rel != "exact" or value != a["value"]):
-        return FAIL, "%s = %s %s, expected exact %s" % (name, rel, value, a["value"])
+    upper = c.get("upper") if rel == "bounds" else value if rel == "exact" else None
+    if "value" in a:
+        if rel == "exact" and value != a["value"]:
+            return FAIL, "%s = exact %s, expected exact %s" % (name, value, a["value"])
+        if rel != "exact":
+            if (lower is not None and lower > a["value"]) or (upper is not None and upper < a["value"]):
+                return FAIL, "%s = %s %s%s, which excludes the exact %s expected" % (
+                    name, rel, value, " [%s, %s]" % (lower, upper) if rel == "bounds" else "", a["value"])
+            if cause:
+                return INCONCLUSIVE, "%s %s %s after %s: the exact %s expected not shown" % (
+                    name, rel, value, cause, a["value"])
+            return FAIL, "%s = %s %s, expected exact %s" % (name, rel, value, a["value"])
     if "min" in a:
         if rel == "unknown":
-            if stopped:
-                return INCONCLUSIVE, "%s unknown after a %s/%s stop" % (name, stop.get("phase"), stop.get("reason"))
+            if cause:
+                return INCONCLUSIVE, "%s unknown after %s" % (name, cause)
             return FAIL, "%s unknown, expected at least %d" % (name, a["min"])
-        if rel == "at_least" and value is not None and value < a["min"] and stopped:
-            return INCONCLUSIVE, "%s at least %d after a %s/%s stop, %d expected" % (
-                name, value, stop.get("phase"), stop.get("reason"), a["min"])
+        if rel == "at_least" and value is not None and value < a["min"]:
+            if cause:
+                return INCONCLUSIVE, "%s at least %d after %s, %d expected" % (name, value, cause, a["min"])
+            if not graph:
+                return INCONCLUSIVE, "%s at least %d, %d expected: a count of relation rules of its own " \
+                                     "(SPEC-pattern-search §12.1, §14.6, §19.7)" % (name, value, a["min"])
+            return FAIL, "%s at least %d below the minimum %d, with no stop that leaves the count inexact " \
+                         "(SPEC-pattern-search §7.4: at_least means a stop interrupted it)" % (name, value, a["min"])
         if rel == "exact" and value < a["min"]:
             return FAIL, "%s exact %d below %d" % (name, value, a["min"])
-        if rel == "bounds" and c.get("upper", 0) < a["min"]:
-            return FAIL, "%s bounds upper %s below %d" % (name, c.get("upper"), a["min"])
+        if rel == "bounds":
+            if c.get("upper", 0) < a["min"]:
+                return FAIL, "%s bounds upper %s below %d" % (name, c.get("upper"), a["min"])
+            if lower is not None and lower < a["min"]:
+                return INCONCLUSIVE, "%s bounds [%s, %s] straddle the minimum %d%s" % (
+                    name, lower, c.get("upper"), a["min"], " (after %s)" % cause if cause else "")
     if "max" in a and rel in ("exact", "at_least", "bounds") and lower is not None and lower > a["max"]:
         return FAIL, "%s %s %s above %d" % (name, rel, lower, a["max"])
     return PASS, "%s %s %s" % (name, rel, value)
@@ -1210,14 +1273,37 @@ def check_notes(sc, ans, a, arm):
 
 
 _SEARCH_BUDGET_STOPS = {"max_steps", "time", "max_annotation_work", "max_memory"}
+# the engine's phases (SPEC-pattern-search §7.6: the range search, the deferred scans, the release and its delivery,
+# a path search's extension), whose stop the engine's low-complexity diagnostic follows; the labels' reads, a
+# predicate's selection and the output come after it (§7.8)
+_ENGINE_PHASES = {"discovery", "mask_scan", "extraction", "extension"}
+
+
+def _note_stop(sc: dict, e: dict) -> str:
+    """How entry |e|'s stop bears on the low_complexity_pattern note (SPEC-pattern-search §7.8, §8.10, §20.5): "budget"
+    for a budget stop of the search (max_steps, time, the supported-path search's max_annotation_work and max_memory)
+    in an engine phase, a stop without a phase counted as the engine's, which leaves the note out; "selection" for a
+    selection-phase stop of a supported-path search, whose selection runs in the search (a held walk the account
+    refused) or after it, so that the note may be either; "" for none, a stop_at_threshold stop or a later phase's
+    stop (labels, selection, output), which leave the note as it is."""
+    stop = e.get("stop") if isinstance(e.get("stop"), dict) else {}
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    phase = stop.get("phase")
+    if stop.get("reason") in _SEARCH_BUDGET_STOPS and (phase is None or phase in _ENGINE_PHASES):
+        return "budget"
+    if phase == "selection" and req.get("long_search") == "supported_paths":
+        return "selection"
+    return ""
 
 
 def check_low_complexity_note(sc, ans, a, arm):
     """The `low_complexity_pattern` note as SPEC-pattern-search §7.8 states it: on an exact pattern that sdust flags
     (args.expected, computed by the builder with seqtools.sdust, the host's T = 20, W = 64), when the answer states
-    no budget stop of the search; never beside such a stop. A pattern of more than 191 bases whose diagnostic the
-    work time cut (determinism time_limited) may lack it: inconclusive then, as is an expected note a budget stop
-    left out."""
+    no budget stop of the search (_note_stop: an engine phase's); never beside such a stop. A stop of a later phase
+    (the labels' reads, a predicate's selection, the output) leaves the note as the engine decided it, so the note
+    follows sdust there; a supported-path search's selection stop allows either, a present note only where sdust
+    flags the pattern. A pattern of more than 191 bases whose diagnostic the work time cut (determinism
+    time_limited) may lack it: inconclusive then, as is an expected note a budget stop left out."""
     e = _entry(ans, a.get("pattern", 0))
     if "error" in e:
         return FAIL, "entry refused (%s)" % e["error"].get("code")
@@ -1226,26 +1312,33 @@ def check_low_complexity_note(sc, ans, a, arm):
         raise Missing("notes")
     has = "low_complexity_pattern" in notes
     stop = e.get("stop") or {}
+    kind = _note_stop(sc, e)
     if stop.get("reason") in _SEARCH_BUDGET_STOPS or e.get("determinism") == "time_limited":
         bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
         if bad and not has:
             return FAIL, "no note after a stop or time limitation that cannot have happened: %s" % bad[0]
-    if stop.get("reason") in _SEARCH_BUDGET_STOPS:
+    if kind == "budget":
         if has:
             return FAIL, "low_complexity_pattern beside a budget stop %s/%s" % (stop.get("phase"), stop.get("reason"))
         if a["expected"]:
             return INCONCLUSIVE, "a budget stop %s/%s leaves the note out" % (stop.get("phase"), stop.get("reason"))
         return PASS, "no note (a budget stop, and sdust does not flag the pattern)"
+    if kind == "selection" and not has and a["expected"]:
+        return INCONCLUSIVE, "a supported-path search's selection stop %s/%s, which can come from the search's own " \
+                             "refusal of a held walk: the note may be left out" % (
+                                 stop.get("phase"), stop.get("reason"))
+    later = " beside a later phase's stop %s/%s" % (stop.get("phase"), stop.get("reason")) if \
+        stop.get("phase") is not None and stop.get("phase") not in _ENGINE_PHASES else ""
     if has == bool(a["expected"]):
-        return PASS, "note %s, as sdust says" % ("present" if has else "absent")
+        return PASS, "note %s, as sdust says%s" % ("present" if has else "absent", later)
     try:
         L = _pattern_length(*_request_pattern(sc, a.get("pattern", 0)))
     except Missing:
         L = 0
     if not has and L > 191 and e.get("determinism") == "time_limited":
         return INCONCLUSIVE, "the diagnostic of a %d-base pattern was cut by the work time" % L
-    return FAIL, "low_complexity_pattern %s, sdust %s the pattern" % (
-        "present" if has else "absent", "flags" if a["expected"] else "does not flag")
+    return FAIL, "low_complexity_pattern %s, sdust %s the pattern%s" % (
+        "present" if has else "absent", "flags" if a["expected"] else "does not flag", later)
 
 
 def check_stops_stated(sc, ans, a, arm):
@@ -1673,9 +1766,6 @@ _TAIL_PIECES = 2
 # SPEC-labeled-traversal-core §4.5); the client's wall time also holds the network, the front and any wait for a
 # request-pool thread, so a 503 is judged "long past" its budget only beyond max(1 s, the budget again).
 _LATE_503_MIN_MS = 1000.0
-# /resolve's finalisation reserve (SPEC-labeled-traversal-core §4.5, capabilities resolve.finalize_reserve_ms: fixed
-# 250 ms in this build): its work deadline is the budget less the reserve, so a 503 deadline before that is premature
-_RESOLVE_FINALIZE_RESERVE_MS = 250.0
 
 
 def _budget_503(sc, ans, client, a=None):
@@ -1683,11 +1773,12 @@ def _budget_503(sc, ans, client, a=None):
     `client`) against the EFFECTIVE budget, min(the requested budget, the route's cap the builder states in the
     check's args, cap_ms: /resolve resolve.time_budget.max_time_ms, /pattern caps.time_budget_ms of the capabilities
     snapshot; a host lowers a larger budget to its cap, SPEC-labeled-traversal-core §4.5, SPEC-pattern-search §4.5;
-    A2-03 of the review of lane S5b). FAIL when it came before that budget (/resolve: before it less its
-    finalisation reserve): the SPECs answer it only when the answer cannot be written by the budget, and the deadline
-    starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core
-    §4.5); FINDING when it came long past it (an unpolled piece of that length, which the SPECs' deadline rule
-    answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
+    A2-03 of the review of lane S5b). FAIL when it came before that budget, on both routes: the SPECs answer it
+    only when the answer cannot be written by the budget (the host throws it once the elapsed time reaches the
+    budget, Deadline::respond_expired; /resolve's finalisation reserve ends the work earlier, not the answer), and
+    the deadline starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6,
+    SPEC-labeled-traversal-core §4.5); FINDING when it came long past it (an unpolled piece of that length, which the
+    SPECs' deadline rule answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
     route = sc.get("route", "")
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     asked = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
@@ -1702,12 +1793,9 @@ def _budget_503(sc, ans, client, a=None):
     named = "%.0f ms budget" % budget if budget == asked else \
         "%.0f ms budget (the requested %.0f ms lowered to the host's cap)" % (budget, asked)
     late = wall - budget
-    floor = budget - (_RESOLVE_FINALIZE_RESERVE_MS if route == "POST /resolve" else 0.0)
-    if wall < floor - 1.0:
-        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %s%s: the answer is a 503 only when "
-                      "it cannot be written by the budget, and the client's interval holds the host's" % (
-                          wall, named, " less its %.0f ms finalisation reserve" % _RESOLVE_FINALIZE_RESERVE_MS
-                          if route == "POST /resolve" else ""))
+    if wall < budget - 1.0:
+        return FAIL, ("503 deadline at a client wall time of %.0f ms, before the %s: the answer is a 503 only when it "
+                      "cannot be written by the budget, and the client's interval holds the host's" % (wall, named))
     if late > max(_LATE_503_MIN_MS, budget):
         return FINDING, ("503 deadline delivered %.0f ms after the %s (client wall %.0f ms): the deadline is read "
                          "where the work and the delivery poll it, so an unpolled piece of about that length ran (the "
@@ -2028,8 +2116,11 @@ def _pattern_entry_problems(sc: dict, i: int, e: dict, limits: dict, sticky: Opt
         if not c or c.get("relation") != "exact" or c.get("value") != len(res):
             probs.append("p%d: retrieval_complete with %s %r and %d results" % (i, name, c and (c.get("relation"), c.get("value")), len(res)))
     stop = e.get("stop")
-    if stop and stop.get("reason") in _BUDGET_STOP_REASONS and "low_complexity_pattern" in (e.get("notes") or []):
-        probs.append("p%d: low_complexity_pattern beside a budget stop" % i)
+    if _note_stop(sc, e) == "budget" and "low_complexity_pattern" in (e.get("notes") or []):
+        # the engine diagnoses the note only after a search that completed or stopped at a threshold
+        # (SPEC-pattern-search §7.8); a later phase's stop leaves it as it is
+        probs.append("p%d: low_complexity_pattern beside a budget stop %s/%s of the search" % (
+            i, stop.get("phase"), stop.get("reason")))
     # SPEC-pattern-search §7.5: a stop of the graph search shortens a list only with a cut (partial) or a withheld
     # list (all_or_count)
     if isinstance(stop, dict) and stop.get("phase") in ("discovery", "mask_scan", "extraction", "extension", "selection") and \
@@ -2151,12 +2242,103 @@ def check_resolve_runs(sc, ans, a, arm):
                 x, a["label"], ks, runs[:4], (body.get("graph_runs") or [])[:4], x)
         return PASS, "stopped after %s of %s k-mers: the prefix fully supported by %s" % (
             x, stop.get("query_kmers"), a["label"])
+    if stop:
+        # the answer is the resolve of a prefix (SPEC-labeled-traversal-core §4.5), not of the query the expectation
+        # is about: each argument is decided only where the prefix decides it
+        return _resolve_prefix_profile(a, lab, runs, stop)
     outcome, detail = _resolve_profile(a, lab, runs, num, ks)
     if a.get("prefix_if_stopped") and not stop and outcome != FAIL:
         # the scenario's property is the stated stop (SPEC §4.5: a stop answers the resolve of a prefix): a complete
         # answer holds the profile but never exercised it
         return INCONCLUSIVE, "no stop happened: the prefix property was not tested (%s)" % detail
     return outcome, detail
+
+
+def _resolve_prefix_profile(a: dict, lab: dict, runs: list, stop: dict) -> Tuple[str, str]:
+    """resolve_runs' assertions about the whole query on a stopped answer, which resolves the prefix of the first
+    resolved_kmers = x k-mers (SPEC-labeled-traversal-core §4.5: the profile of the prefix, a run that reaches the
+    prefix's end cut there). An argument fails where the prefix contradicts it (a hole in a full support, a run end
+    before the range, more support than allowed, too little left to reach a count), passes where the prefix alone
+    proves it (a covered interval inside the prefix, a run end inside it, a minimum already reached) and is
+    inconclusive otherwise; a stop before the first k-mer shows nothing."""
+    label = a["label"]
+    x = _number(stop.get("resolved_kmers"))
+    if not x:
+        return INCONCLUSIVE, "stopped before the first k-mer (resolved_kmers %r): nothing of label %s to check" % (
+            stop.get("resolved_kmers"), label)
+    x = int(x)
+    qk = _number(stop.get("query_kmers"))
+    rest = int(qk) - x if qk is not None and qk >= x else None
+    ks = _number(lab.get("kmers_supported"))
+    clean = [r for r in runs if isinstance(r, list) and len(r) == 2]
+    head = "stopped at %d of %s k-mers: label %s" % (x, stop.get("query_kmers"), label)
+    results: List[Tuple[str, str]] = []
+    if a.get("full"):
+        if ks != x or clean != [[0, x]]:
+            results.append((FAIL, "%s supports %s, runs %s: the full support expected is broken in the prefix" % (
+                head, lab.get("kmers_supported"), clean[:4])))
+        else:
+            results.append((INCONCLUSIVE, "%s supports the whole prefix; full support of the query untested" % head))
+    if "covers" in a:
+        lo, hi = a["covers"]
+        if hi <= x:
+            ok = any(r[0] <= lo and hi <= r[1] for r in clean)
+            results.append((PASS if ok else FAIL, "%s: [%d, %d) %scovered in the prefix (runs %s)" % (
+                head, lo, hi, "" if ok else "not ", clean[:6])))
+        elif lo < x and not any(r[0] <= lo and r[1] == x for r in clean):
+            results.append((FAIL, "%s: no run covers [%d, %d) of the prefix, so none covers [%d, %d) (runs %s)" % (
+                head, lo, x, lo, hi, clean[:6])))
+        else:
+            results.append((INCONCLUSIVE, "%s: [%d, %d) reaches past the prefix" % (head, lo, hi)))
+    if "run_end_in" in a:
+        lo, hi = a["run_end_in"]
+        first = next((r for r in clean if r[0] == 0), None)
+        if first is None:
+            results.append((FAIL, "%s: no run starts at the first k-mer (runs %s)" % (head, clean[:6])))
+        elif first[1] < x:
+            ok = lo <= first[1] <= hi
+            results.append((PASS if ok else FAIL, "%s: the run [0, %d) ends inside the prefix, %s [%d, %d]" % (
+                head, first[1], "in" if ok else "not in", lo, hi)))
+        elif x > hi:
+            results.append((FAIL, "%s: the run from 0 reaches the prefix's end %d, past [%d, %d]" % (head, x, lo, hi)))
+        else:
+            results.append((INCONCLUSIVE, "%s: the run from 0 reaches the prefix's end %d, before [%d, %d] ends" % (
+                head, x, lo, hi)))
+    if "run_start_in" in a:
+        lo, hi = a["run_start_in"]
+        if x > hi and not any(r[1] == x and lo <= r[0] <= hi for r in clean):
+            results.append((FAIL, "%s: no run [b, %d) with b in [%d, %d], so none reaches the query's end from "
+                                  "there (runs %s)" % (head, x, lo, hi, clean[:6])))
+        else:
+            results.append((INCONCLUSIVE, "%s: a run to the query's end is past the prefix" % head))
+    if "runs" in a:
+        want = [[r[0], min(r[1], x)] for r in a["runs"] if r[0] < x]
+        if clean != want:
+            results.append((FAIL, "%s: runs %s, the expected %s cut at the prefix are %s" % (
+                head, clean[:6], a["runs"][:6], want[:6])))
+        else:
+            results.append((INCONCLUSIVE, "%s: runs %s as expected in the prefix" % (head, clean[:6])))
+    for arg, bad, good in (("kmers", lambda v: ks > v or (rest is not None and ks + rest < v), None),
+                           ("max_kmers", lambda v: ks > v, None),
+                           ("min_kmers", lambda v: rest is not None and ks + rest < v, lambda v: ks >= v)):
+        if arg not in a or ks is None:
+            continue
+        if bad(a[arg]):
+            results.append((FAIL, "%s supports %s k-mers of the prefix, %s k-mers left: %s %s cannot hold" % (
+                head, lab.get("kmers_supported"), rest, arg, a[arg])))
+        elif good is not None and good(a[arg]):
+            results.append((PASS, "%s supports %s k-mers of the prefix, %s %s reached" % (
+                head, lab.get("kmers_supported"), arg, a[arg])))
+        else:
+            results.append((INCONCLUSIVE, "%s supports %s k-mers of the prefix; %s %s untested" % (
+                head, lab.get("kmers_supported"), arg, a[arg])))
+    for want in (FAIL, INCONCLUSIVE):
+        hit = [d for o, d in results if o == want]
+        if hit:
+            return want, "; ".join(hit[:3])
+    if results:
+        return PASS, "; ".join(d for _, d in results[:3])
+    return INCONCLUSIVE, "%s: nothing of the query's profile asked" % head
 
 
 def _resolve_profile(a: dict, lab: dict, runs: list, num: Any, ks: Any) -> Tuple[str, str]:
@@ -2214,16 +2396,129 @@ def check_resolve_graph_runs(sc, ans, a, arm):
     return PASS, "graph_runs %s" % gr
 
 
+# a discovery's max_labels where the request states none (traverse.cpp parses discover.max_labels with default 1000
+# and no server cap; SPEC-labeled-traversal-core §4.1's example states the same)
+_DISCOVER_MAX_LABELS = 1000
+
+
+def _discover_max_labels(req: dict) -> Optional[float]:
+    """The max_labels a discovery request runs with: the one it states, else the default."""
+    d = req.get("discover") if isinstance(req, dict) else None
+    if not isinstance(d, dict):
+        return None
+    return _number(d["max_labels"]) if "max_labels" in d else float(_DISCOVER_MAX_LABELS)
+
+
+def _in_graph_kmers(body: dict) -> int:
+    """The query's k-mers in the graph (the resolved prefix's under a stop): the lengths of graph_runs summed."""
+    return sum(r[1] - r[0] for r in body.get("graph_runs") or [] if isinstance(r, list) and len(r) == 2)
+
+
 def check_resolve_discover_contains(sc, ans, a, arm):
+    """The discovery lists the scenario's source label (SPEC-labeled-traversal-core §4.2: the labels of the query's
+    in-graph k-mers; more than max_labels of them keep the top max_labels by supported k-mers, ties by column id, then
+    seq_id, and state labels_truncated). The source record's own label supports every in-graph k-mer of a query taken
+    from it (the graph_runs summed; under a stop, the resolved prefix's), so a truncated list may leave it out only
+    in a tie at that support: min_kept_kmers and max_dropped_kmers equal to it and dropped_full_length at least 1.
+    Such an answer passes, the ranking being all an answer can show (the tie's column ids are not in it); a list that
+    keeps a label with fewer k-mers, ranks a dropped label above a kept one or drops none at full support fails, as
+    does a complete list without the label. Only more than max_labels labels are truncated, to exactly max_labels
+    (the request's, else the default): a list cut to another size fails, tie or not. A discovery stopped before it
+    read the row of an in-graph k-mer (SPEC-labeled-traversal-core §4.5: the resolve of a prefix without one) has no
+    profile to rank: inconclusive."""
     body = _body(ans)
     names = [l.get("label") for l in _get(body, "labels")]
     trunc = body.get("labels_truncated")
     if a["label"] in names:
         return PASS, "%s discovered (%d labels%s)" % (a["label"], len(names), ", truncated" if trunc else "")
-    if trunc:
-        return PASS, "%s not listed, the list is truncated (kept %s of %s; index order, not best-supported)" % (
-            a["label"], trunc.get("kept"), trunc.get("total"))
-    return FAIL, "%s not discovered in a complete list of %d labels" % (a["label"], len(names))
+    if body.get("stop") and not trunc and not names and _in_graph_kmers(body) == 0:
+        return INCONCLUSIVE, "%s not listed: the discovery stopped before it read an in-graph k-mer (resolved_kmers " \
+                             "%r), so it has no profile to rank" % (
+                                 a["label"], (body["stop"] or {}).get("resolved_kmers"))
+    if not trunc:
+        return FAIL, "%s not discovered in a complete list of %d labels" % (a["label"], len(names))
+    if not isinstance(trunc, dict):
+        return FAIL, "labels_truncated %r, not the SPEC's object" % (trunc,)
+    vals = {}
+    for f in ("kept", "total", "min_kept_kmers", "max_dropped_kmers", "dropped_full_length"):
+        if f not in trunc:
+            raise Missing("labels_truncated." + f)
+        vals[f] = _number(trunc[f])
+    full = _in_graph_kmers(body)
+    stated = "kept %s of %s, min_kept_kmers %s, max_dropped_kmers %s, dropped_full_length %s" % (
+        trunc["kept"], trunc["total"], trunc["min_kept_kmers"], trunc["max_dropped_kmers"],
+        trunc["dropped_full_length"])
+    if None in vals.values():
+        return FAIL, "%s not listed, labels_truncated not numeric (%s)" % (a["label"], stated)
+    want = _discover_max_labels(sc.get("request") if isinstance(sc.get("request"), dict) else {})
+    if want is not None and (vals["kept"] != want or vals["total"] <= want):
+        return FAIL, "%s not listed, and the list is truncated to %s of %s labels for max_labels %d: only more than " \
+                     "max_labels labels are truncated, to exactly max_labels (SPEC-labeled-traversal-core §4.2)" % (
+                         a["label"], trunc["kept"], trunc["total"], want)
+    if vals["max_dropped_kmers"] > vals["min_kept_kmers"]:
+        return FAIL, "%s not listed, and the truncation is not by support: a dropped label has more supported " \
+                     "k-mers than a kept one (%s; SPEC-labeled-traversal-core §4.2)" % (a["label"], stated)
+    if vals["min_kept_kmers"] < full:
+        return FAIL, "%s not listed, but it supports all %d in-graph k-mers and a kept label only %s (%s): the " \
+                     "top max_labels by supported k-mers hold it (SPEC-labeled-traversal-core §4.2)" % (
+                         a["label"], full, trunc["min_kept_kmers"], stated)
+    if vals["dropped_full_length"] < 1 or vals["max_dropped_kmers"] < full:
+        return FAIL, "%s not listed, but no dropped label supports all %d in-graph k-mers as it does (%s)" % (
+            a["label"], full, stated)
+    return PASS, "%s not listed: it ties the kept labels at all %d in-graph k-mers (%s), a tie decided by column " \
+                 "id, then seq_id (SPEC-labeled-traversal-core §4.2), which the answer does not state" % (
+                     a["label"], full, stated)
+
+
+def _discovery_problems(req: dict, body: dict) -> List[str]:
+    """A discovery's list and labels_truncated as SPEC-labeled-traversal-core §4.2 ranks them: the labels by
+    supported k-mers, most first (each label's kmers_supported is that count unless support is trace, whose count
+    is of trace runs), at most max_labels (the request's, else the default); a truncated list states kept (its length,
+    exactly max_labels) of total (more), the least support kept at least the most dropped, and full-length drops
+    only where a dropped label has every in-graph k-mer, none of which is more than the query has."""
+    probs: List[str] = []
+    labels = body.get("labels") or []
+    trunc = body.get("labels_truncated")
+    want = _discover_max_labels(req)
+    full = _in_graph_kmers(body)
+    ranked = req.get("support") != "trace"
+    ks = [_number(l.get("kmers_supported")) for l in labels]
+    if want is not None and len(labels) > want:
+        probs.append("%d labels discovered, max_labels %d" % (len(labels), want))
+    if ranked and None not in ks and any(x < y for x, y in zip(ks, ks[1:])):
+        probs.append("discovered labels not ranked by supported k-mers: %s" % ks[:8])
+    if any(x is not None and x > full for x in ks):
+        probs.append("a discovered label supports more k-mers than the %d in the graph" % full)
+    if trunc is None:
+        return probs
+    if not isinstance(trunc, dict):
+        return probs + ["labels_truncated %r, not the SPEC's object" % (trunc,)]
+    v = {f: _number(trunc.get(f)) for f in ("kept", "total", "min_kept_kmers", "max_dropped_kmers",
+                                            "dropped_full_length")}
+    if None in v.values():
+        return probs + ["labels_truncated %s, a field missing or not numeric" % json.dumps(trunc, sort_keys=True)]
+    if v["kept"] != len(labels) or v["total"] <= v["kept"]:
+        probs.append("labels_truncated kept %s of total %s for %d labels listed" % (
+            trunc["kept"], trunc["total"], len(labels)))
+    if want is not None and (v["kept"] != want or v["total"] <= want):
+        probs.append("labels_truncated kept %s of total %s with max_labels %d: a discovery truncates only more than "
+                     "max_labels labels, to exactly max_labels (SPEC-labeled-traversal-core §4.2)" % (
+                         trunc["kept"], trunc["total"], want))
+    if v["max_dropped_kmers"] > v["min_kept_kmers"]:
+        probs.append("labels_truncated max_dropped_kmers %s above min_kept_kmers %s: not truncated by support" % (
+            trunc["max_dropped_kmers"], trunc["min_kept_kmers"]))
+    if v["min_kept_kmers"] > full:
+        probs.append("labels_truncated min_kept_kmers %s above the %d in-graph k-mers" % (
+            trunc["min_kept_kmers"], full))
+    if not 0 <= v["dropped_full_length"] <= v["total"] - v["kept"] or (
+            v["dropped_full_length"] > 0 and v["max_dropped_kmers"] != full):
+        probs.append("labels_truncated dropped_full_length %s with max_dropped_kmers %s, %d in-graph k-mers, %s "
+                     "dropped" % (trunc["dropped_full_length"], trunc["max_dropped_kmers"], full,
+                                  v["total"] - v["kept"]))
+    if ranked and labels and None not in ks and ks[-1] != v["min_kept_kmers"]:
+        probs.append("labels_truncated min_kept_kmers %s, the last kept label supports %s" % (
+            trunc["min_kept_kmers"], ks[-1]))
+    return probs
 
 
 def _resolve_invariants(sc, ans, a, arm):
@@ -2268,6 +2563,8 @@ def _resolve_invariants(sc, ans, a, arm):
                 if not any(g[0] <= r[0] and r[1] <= g[1] for g in gr):
                     probs.append("label %s: run %s outside the graph runs" % (lab.get("label"), r))
                     break
+    if isinstance(req, dict) and isinstance(req.get("discover"), dict):
+        probs += _discovery_problems(req, body)
     if isinstance(req, dict) and req.get("labels") and not probs:
         names = [l.get("label") for l in body.get("labels") or []]
         missing = [l for l in req["labels"] if l not in names]
@@ -3450,8 +3747,11 @@ def check_walk_end(sc, ans, a, arm):
                 len(f) < want and (p.get("path_reason") in _RESOURCE_ENDS or set(p.get("end_reasons") or {}) & _RESOURCE_ENDS)
                 for p, f in fl):
             trig = armo.get("cap_trigger") or {}
+            # a cap ends walks at or past complete_to_bp (SPEC-labeled-traversal-core §6.10), as walk_in_record
+            # judges a resource end
             bad = next((m for m in (_resource_end_problem(r, armo, side, {p.get("path_reason")} | set(
-                p.get("end_reasons") or {})) for p, _ in fl) if m), None) or _arm_stop_problem(sc, ans, r, i, side)
+                p.get("end_reasons") or {})) or _resource_end_below_frontier(armo, side, p) for p, _ in fl) if m),
+                       None) or _arm_stop_problem(sc, ans, r, i, side)
             if bad:
                 return FAIL, "not reached: a stated stop that cannot have happened: %s" % bad
             return INCONCLUSIVE, "not reached: the %s arm stopped by %s at %s bp (a stated stop), the record ends %d bp out" % (
@@ -3486,8 +3786,10 @@ def _limitations_naming(r: dict, knob: str) -> List[dict]:
 def check_traverse_stop(sc, ans, a, arm):
     """A stated stop of the knob that was set (SPEC-labeled-traversal-core §7.0): outcome.walks among args.walks;
     with args.resource (time, memory, work: a request budget) a resource_stop of that resource whose `requested` is
-    the request's knob value; with args.cap_reason, every requested arm of a walked seed truncated with that
-    cap_trigger reason; and a limitation naming args.knob (a walk_domain on the arm, or on a failed seed)."""
+    the request's knob value; with args.cap_reason, on a walked seed some requested arm truncated (or pruned) with
+    that cap_trigger reason and every other one either so or complete (§6.7: an arm whose walks all ended for a
+    semantic reason before the cap stays complete, for a per-arm cap and a per-seed stop alike); and a limitation
+    naming args.knob (a walk_domain on the arm, or on a failed seed)."""
     i = a.get("seed", 0)
     r = _result(ans, i)
     walks = (r.get("outcome") or {}).get("walks")
@@ -3506,12 +3808,19 @@ def check_traverse_stop(sc, ans, a, arm):
         if want is not None and _number(rs.get("requested")) != want:
             return FAIL, "resource_stop.requested %r, the request's %s is %r" % (rs.get("requested"), knob, want)
     if a.get("cap_reason") and "arms" in r:
+        capped, ended = [], []
         for side in _arms_of(sc, i):
             armo = r["arms"].get(side) or {}
             trig = (armo.get("cap_trigger") or {}).get("reason")
-            if armo.get("status") == "complete" or trig != a["cap_reason"]:
-                return FAIL, "%s arm status %r, cap_trigger %r, expected truncated by %s" % (
+            if armo.get("status") == "complete":
+                ended.append(side)
+            elif trig == a["cap_reason"] and armo.get("status") in ("truncated", "pruned"):
+                capped.append(side)
+            else:
+                return FAIL, "%s arm status %r, cap_trigger %r, expected truncated by %s or complete" % (
                     side, armo.get("status"), trig, a["cap_reason"])
+        if not capped:
+            return FAIL, "no requested arm truncated by %s (%s complete)" % (a["cap_reason"], "/".join(ended))
     lims = _limitations_naming(r, knob)
     if not lims:
         return FAIL, "no limitation names %s" % knob

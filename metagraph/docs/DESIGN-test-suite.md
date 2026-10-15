@@ -112,8 +112,12 @@ Counts are estimates for the first manifest (about 800 scenarios, ~1,100 executi
 - R-multi: explicit labels = taxid + unrelated taxids: unrelated ones 0 or partial runs; order and dedup.
 - R-junction: a query spanning two records of different taxa (concatenation): two runs, the split at the
   junction (+/- k-1).
-- R-discover: discover with limit 1/20/100, kind column/header: the source taxid present when not truncated
-  (the documented caveat: index order, not best-supported; checked as presence, not rank).
+- R-discover: discover with limit 1/20/100, kind column/header: the source label (the taxid, or the record's
+  accession for kind header) listed. SPEC-labeled-traversal-core §4.2 ranks by supported k-mers (ties by column id,
+  then seq_id) and truncates only more than max_labels labels, to exactly max_labels, stating `labels_truncated`;
+  the source supports every in-graph k-mer, so a truncated list may leave it out only in a tie at that full support,
+  which the check verifies from min_kept_kmers, max_dropped_kmers and dropped_full_length (the suite's README, lane
+  S7c).
 - R-budget: time_budget_ms small: stated stop with `resolved_kmers`, the answer equals the resolve of that prefix
   (re-resolve the prefix and compare); continuation from `remainder_from_bp` completes it.
 - R-edge: exactly k bases; k-1 bases (refused); 2,001 bp (refused, `max_query_bp`); N or IUPAC (refused, exact

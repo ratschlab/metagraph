@@ -777,9 +777,9 @@ From the triage of the full run's first part (triage-1/TRIAGE.md, groups G01-G25
   scenario's status expectation asks for a 200 and does not itself name the deadline (an http 503, the code
   `deadline` or a text naming it), such a 503 makes `status` inconclusive and joins evaluate's allowed list, so the
   body's checks read inconclusive and `budget_respected` judges it by the client's wall time (`_budget_503`, against
-  min(the requested budget, the route's cap the builder states as cap_ms): before it, /resolve less its 250 ms
-  reserve, a fail; long past it a finding). A scenario that expects a refusal (no 200), names the deadline itself,
-  or another route or code is judged as it states.
+  min(the requested budget, the route's cap the builder states as cap_ms): before it a fail (lane S7c: on /resolve
+  too, not before it less the 250 ms reserve); long past it a finding). A scenario that expects a refusal (no 200),
+  names the deadline itself, or another route or code is judged as it states.
 
 ### Comparator and re-evaluation
 - The table: async's 789fb5f0 (130 cases, sha256 2fdea36b...), byte-identical, with the triage's corrections (G09,
@@ -889,8 +889,8 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
 ### Checks
 - A premature deadline (A-01). A 503 `deadline` arrives only when the answer cannot be written by the budget, and the
   deadline starts at the parsed body, inside the client's interval: `_budget_503` (budget_respected on an allowed
-  503) fails one whose client wall time is below the budget less 1 ms (/resolve: below the budget less its fixed
-  finalisation reserve of 250 ms, SPEC-labeled-traversal-core §4.5). A /pattern scenario where the deadline can be
+  503) fails one whose client wall time is below the budget less 1 ms, on /resolve too (lane S7c: the reserve ends
+  the work, not the answer; SPEC-labeled-traversal-core §4.5). A /pattern scenario where the deadline can be
   allowed carries budget_respected (v3: 426), as do the 85 budgeted /resolve scenarios that ask for a 200.
 - The /resolve deadline (G22 as VERIFY-2 item 3 has it). `checks.deadline_allowed` (formerly
   `pattern_deadline_allowed`, kept as an alias) allows a POST /resolve 503 `deadline` as it allows the /pattern one
@@ -2223,3 +2223,129 @@ resolve_time_budget} (the host's block as received, not backends.<db>.resolve.ti
 - Agreed, no change: request_evidence_mismatches as the field name; the legacy no-budget term.
 - Recorded runs: v3 and v4 record no service_capabilities, so nothing they read moves; their comparison and report
   name the table's new sha256.
+
+## Lane S7c: checks that the two-day review found too lenient or too strict (2026-10-14)
+
+The suite findings of the review of 2026-10-14 (ultracode REPORT §3, P1-checks-01..07 and P5-v4-content-01) on
+checks.py, judged against 14552938. The deploy gate is strict, so a false FAIL or a false inconclusive blocks as a
+false pass misleads: each stricter rule below is measured on every recorded answer of v3 and v4 (all arms) and on the
+engine's stored pattern fixtures. The runner vendors checks.py: it takes these rules by re-vendoring.
+
+- /traverse, walk_end (the finding that any resource cap excuses a record route that ended far below it is closed in
+  walk_in_record by lane S6g1): a path that states a resource end below its arm's complete_to_bp cannot have had it
+  (SPEC-labeled-traversal-core §6.10), so walk_end fails "not reached: a stated stop that cannot have happened" where
+  it read inconclusive (the invariants already failed that execution).
+- /pattern, count_relation (SPEC-pattern-search §7.4: at_least means a stop interrupted the count): a count that is
+  at_least, unknown or bounds beside a stop of any reason that can leave it so (every budget of §7.6, §14.4, §19.8,
+  §20.5: max_steps, time, max_annotation_work, max_memory, max_predicate_work; every stop_at_threshold stop) cannot
+  show an exact expectation or a minimum it lies below: inconclusive (the stop's own reason rules first, as before).
+  A graph count (contexts, anchors, paths, supported_paths) is not excused by a stop of the labels' reads or the
+  output (label_discovery, placement, output: §7.5, "the graph count is then still the discovery's"). Before, only
+  max_steps and time counted, in any phase, so a supported-path search stopped by max_annotation_work or max_memory
+  with supported_paths at_least 0 passed min 1, and paths at_least 3 after {extension, max_memory} failed relation
+  exact. Without such a stop, a graph count at_least below the minimum fails: nothing can have left it inexact (it
+  passed). The inexactness the SPEC states without a stop stays inconclusive: supported_paths after a predicate's
+  pruning and the paths of a supported-path search after any branch pruned before L (§20.4, §20.9), bounds on a
+  graph without its mask (§7.4); the counts with relation rules of their own (labels, occurrences, tested, selected:
+  §12.1, §14.6, §19.7) read inconclusive at_least below a minimum (they passed) and keep their other rules. Bounds
+  that straddle a minimum are inconclusive (they passed); an expected exact value an inexact count excludes (at_least
+  above it, bounds around other values) fails also after a stop, one it does not exclude is inconclusive after a
+  stop (it failed). Measured: every inexact count of v3 and v4 without a stop is a supported-path search's after a
+  predicate's pruning (the L-supported scenarios, at_least 1 >= their min 1) or a selection's (bounds, pass
+  stopped), or a label count; every inexact count of v3, v4 and the stored fixtures judged against min = its value
+  + 1 and relation exact fails nowhere the checks of 14552938 did not (stress_count: 0 new failures; of 1,154
+  such hypothetical expectations that move, 676 earlier failures and 478 passes read inconclusive). No recorded
+  count_relation outcome moves; two inconclusive details (M-planted-0016 / -0017 MCP) name the relation expected.
+- /resolve, resolve_discover_contains and the invariants test the discovery's ranking (SPEC-labeled-traversal-core
+  §4.2: the top max_labels by supported k-mers, ties by column id, then seq_id; `labels_truncated` {kept, total,
+  min_kept_kmers, max_dropped_kmers, dropped_full_length}). A truncated list without the source label passed as
+  "index order, not best-supported", a misreading of the SPEC: R-discover-0001 / -0004 (limit 1, always truncated)
+  could never fail. The source record's label supports every in-graph k-mer of a query taken from it (graph_runs
+  summed; under a stop, the prefix's), so a truncated list may leave it out only in a tie at that support:
+  min_kept_kmers and max_dropped_kmers equal to it and dropped_full_length >= 1. That answer passes (the tie's column
+  ids are not in the answer; inconclusive would block the strict gate on a correct host every run, since limit 1
+  with a seven-way tie always hides the source): the recorded R-discover-0001 (713600 kept, 70 of 70, 7 dropped at
+  full length) passes with a detail that names the tie. A kept label below full support, a dropped label above a
+  kept one or no full-length drop fails (the index-order host of the finding: 670 kept with 3 of 70, max_dropped
+  70). labels_truncated without its fields is not_exposed on the MCP arm and fails on a direct one. The invariants of
+  a discovery: at most max_labels labels, ranked by kmers_supported (not under support trace, whose count is of trace
+  runs), none above the in-graph k-mers; a truncation states kept = the list's length < total, max_dropped_kmers <=
+  min_kept_kmers = the last kept label's count, min_kept_kmers within the in-graph k-mers, and full-length drops
+  (at most total - kept) only with max_dropped_kmers = the in-graph k-mers. Measured on every recorded discovery of
+  v3 and v4 (R-discover, N-usecase-0010 / -0012, R-edge-0023 with 150 kept of 2,753, N-negative): none violates a
+  rule; R-discover-0001's eight passes keep their outcome with the new detail. DESIGN-test-suite.md's R-discover
+  line is corrected.
+- /resolve, the truncation's size (the lane's verification): only more than max_labels labels are truncated, to
+  exactly max_labels (SPEC-labeled-traversal-core §4.2; the request's max_labels, else the host's default 1000, with
+  no server cap). A list cut to another size (max_labels 100, kept 1 of 18 at 70 of 70: R-discover-0003's shape,
+  where a correct host lists all 18) passed resolve_discover_contains and the invariants as a tie; both now fail it
+  (kept != max_labels, or total <= max_labels). The tie pass rests on the builder's premise that the source supports
+  every in-graph k-mer: the answer cannot show the dropped source's own support. A discovery stopped before it read
+  an in-graph k-mer (§4.5: the resolve of a prefix without one) has no profile to rank: resolve_discover_contains
+  reads it inconclusive (it failed "not discovered in a complete list of 0 labels"; latent, no discovery scenario
+  has a budget). Every recorded discovery of v3 and v4 states max_labels and keeps exactly that many when
+  truncated: no outcome or detail moves.
+- /pattern, low_complexity_note and the invariants read the stop's phase (SPEC-pattern-search §7.8, §8.10, §20.5):
+  the note is the engine's, diagnosed after a search that completed or stopped at a threshold
+  (pattern_search.cpp decides it on engine.stop()), so only a budget stop of the search in an engine phase
+  (discovery, mask_scan, extraction, extension; max_steps, time, max_annotation_work, max_memory; a stop without a
+  phase counts as the engine's) leaves it out. A stop of a later phase (label_discovery, placement, output, a
+  predicate's selection) leaves the note as the engine decided it: the note follows sdust there (present and
+  expected passes, absent and expected fails). There low_complexity_note failed a present note beside {output,
+  time}, {output, max_memory}, {label_discovery, max_annotation_work} or {placement, max_memory} and read a missing
+  one inconclusive; the invariants, whose vocabulary was max_steps and time, failed it beside {output, time}. A
+  supported-path search's selection stop can be its own refusal of a held walk inside the search
+  (§20.9) or come after it: a present note passes only where sdust flags the pattern, a missing one is inconclusive.
+  The invariants fail a note beside every engine-phase budget stop (before: max_steps and time only; now also the
+  supported-path search's {extension, max_annotation_work | max_memory} and the path extension's {extension,
+  max_memory}, which the engine counts as budget stops). Measured: no recorded answer of v3 or v4 and no stored
+  fixture states the note beside any stop, and no exact pattern sdust flags meets a later-phase stop there (14
+  fixture and 11 recorded later-phase stops, none of a flagged pattern); no recorded outcome or detail moves.
+- /resolve, resolve_runs on a stopped answer without prefix_if_stopped / unless_stopped: a stop answers the resolve
+  of a prefix of resolved_kmers k-mers (SPEC-labeled-traversal-core §4.5), so an expectation about the whole query
+  was judged on the prefix and passed ("3 of 3 k-mers" for `full`), against the suite's rule that a stop before the
+  property is never a pass. Each argument is now decided only where the prefix decides it: it fails where the
+  prefix contradicts it (`full`: a hole in the prefix; `covers`: an uncovered part inside the prefix; `run_end_in`:
+  the run from 0 ending inside the prefix outside the range, or reaching the prefix's end past it; `run_start_in`:
+  no run to the prefix's end starting in the range when the range lies inside the prefix; `runs`: the prefix's runs
+  other than the expected ones cut at the prefix; `kmers` / `max_kmers` / `min_kmers`: more support than allowed,
+  or too few k-mers left to reach the count), passes where the prefix proves it (a covered interval or a run end
+  inside the prefix, a minimum already reached), and is inconclusive otherwise (a stop before the first k-mer
+  shows nothing). 68 `full` expectations of v4 and 31 others are at risk only beyond 19.75 s of work on at most
+  2,000 bp: no recorded /resolve answer of v3 or v4 states a stop, so no outcome moves.
+- /resolve and /pattern, budget_respected on an allowed 503 `deadline` (`_budget_503`): the premature floor is the
+  budget itself on both routes (1 ms slack). It was the budget less /resolve's 250 ms finalisation reserve, so a 503
+  up to 250 ms before the budget read inconclusive; the host throws ResolveDeadline only once the elapsed time
+  reaches the budget (Deadline::respond_expired, elapsed >= budget; the reserve ends the work earlier, not the
+  answer), its clock starting inside the client's interval, so a correct host cannot answer one there. Budget
+  1,000 ms: wall 900 (any wall below 999 ms) fails, where it read inconclusive; 999 and 1,000 are inconclusive (the
+  1 ms slack); 600 fails as before. Every recorded 503 deadline of v3 and v4 (R-budget, R-twin, R-pos-0027, the
+  /pattern ones) came at or after its budget (the smallest /resolve margin: R-twin-0004's 20,776 ms for 20,000, v3
+  direct-local): no outcome moves. README lines of lanes S5 and S5b corrected.
+- /traverse, traverse_stop with cap_reason: some requested arm of the walked seed must be truncated (or pruned) by
+  that cap and every other one either so or `complete`; it required every arm truncated by the cap, a false FAIL
+  under direction both, where an arm whose walks all ended for a semantic reason before the cap stays complete
+  (SPEC-labeled-traversal-core §6.7), for a per-arm cap (max_output_bp, max_paths, max_live_paths) and a per-seed
+  stop (max_steps, time_budget, resource_limit) alike. Both arms complete fails ("no requested arm truncated by
+  ..."), an arm truncated by another cap fails as before. Recorded: every traverse_stop answer of v3 and v4
+  (T-budget-0001..0004, T-caps-0001) has each requested arm truncated by the cap; no outcome moves.
+
+### Validation (offline)
+- The findings' failing inputs with their controls (lane-s-checks/scratch/probes/findings.py, 37 probes): at
+  14552938 15 read as they must, here all 37. The tests that state these rules (five new, four extended or
+  corrected, among them test_error_answer_skips_other_checks, which asserted the 250 ms floor) fail at 14552938
+  (9 of 77 in test_checks) and pass here; the verification's amendments (the truncation's size, a discovery stopped
+  before an in-graph k-mer) fail at the lane's first head f07a2fd3 too.
+- Every recorded answer of v3 and v4 (5,716 answers, all arms) judged by the checks of 14552938 and these, check by
+  check: no outcome moves. Every inexact count of v3, v4 and the stored pattern fixtures judged against a minimum
+  one above it and relation exact (stress_count.py): no failure the checks of 14552938 did not give.
+- Re-evaluation of the recorded runs (v3: lane S5e's reeval-S5e copy; v4: the complete run copy; `run_suite.sh
+  --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, against the same copies re-evaluated at 14552938): 0
+  outcome changes and 0 check outcome changes of 2,900 (v3) and 2,913 (v4) executions, 0 relation changes (66 per
+  run), compare.reevaluated.json identical (summary and every scenario entry), the report identical but its
+  timestamps and the checks' provenance; the v4 deploy gate (gate/policy_v4_rt_mcp.json on the re-evaluated set)
+  states the same 45 problems. Detail changes only: R-discover-0001's resolve_discover_contains (direct-local and
+  direct-remote r0, MCP r0 and r1, both runs) names the tie, and count_relation's inconclusive on M-planted-0017
+  (v3 MCP r0) and M-planted-0016 (v4 MCP r0) names the relation expected. The verification's amendments move
+  nothing more (re-evaluated again at their head: the same five detail changes per run, the same 45 gate problems).
+- 350 tests pass (1 skipped).
