@@ -9,6 +9,10 @@
    "title": "walks",
    "prose": "(family prose: to be written)"
   },
+  "T-longwalk": {
+   "title": "long walks",
+   "prose": "(family prose: to be written)"
+  },
   "T-derived": {
    "title": "derived labels",
    "prose": "(family prose: to be written)"
@@ -68,6 +72,7 @@
  },
  "units": {
   "T-walk": "A walk from a seed of the record, constrained to the record's label, spells a substring of the record at the expected position, or stops at a stated branch whose arms both carry the label.",
+  "T-longwalk": "The gate's walk of a seed (300 to 5,000 bp under 60,000 ms, constrained to the record's column label) and its long twin, the same seed walked 10,000 bp under the same budget (budget_stress, outside the gate): each follows the record or stops at a stated branch, and a stop by the budget is stated within it. (unit property: to be written; this is the mapping's draft)",
   "T-derived": "A seed without explicit labels (permit per_hit) walks under the carrier set the host derives; a path follows the record.",
   "T-end": "A 31 bp seed near a record end: the walk stops at the record's end with the stated end reason.",
   "T-repeat": "A seed inside a multi-copy repeat: a branch is stated where the record's copies diverge, and a path of each copy is in the record.",

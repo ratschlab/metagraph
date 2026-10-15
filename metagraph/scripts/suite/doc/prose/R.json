@@ -108,6 +108,10 @@
    "title": "twins",
    "prose": "The upper-case twin of the lower-case resolve R-edge-0007: the same 100 bp of E. coli in upper case, expected full under the column, and the relation `same_answer`, which requires the two bodies to be equal apart from timing, on every arm (via MCP the service upper-cases the lower-case request before the host sees it[[rel[REL-same_answer-0003][mcp] = pass ?, so the two answers are the same there too | ; in this run the relation reads {rel[REL-same_answer-0003][mcp]} there]]). The other twins made for relations, the full and the continued 10 kb resolves, are printed with R-budget, whose relations they serve.",
    "claim": "the upper-case twin answers byte for byte like the lower-case resolve"
+  },
+  "R-warm": {
+   "title": "warm-ups",
+   "prose": "(family prose: to be written for the v5 prose round; the family exists in manifest v5 only: eight warm-ups, each a window of a traverse or negative target's record resolved under the record's own label right before the target, see the unit's property line)"
   }
  },
  "units": {
@@ -130,7 +134,8 @@
   "R-edge-accepted": "An edge input the host accepts is answered with the right profile: exactly k bases; an N or IUPAC code (its 31 k-mers absent, the rest supported); lower case; 1,001 labels; an absent random sequence; a budget above the cap lowered and stated; and the two values the service refuses but the host answers.",
   "R-rc": "The reverse complement of a window unique on both strands: on this basic, forward-strand graph the record's header supports none of its k-mers (`kmers_supported` 0).",
   "R-order": "The same labels in another order are each answered as if named alone.",
-  "R-twin-case": "The lower-case resolve (R-edge-0007) and its upper-case twin answer byte for byte alike, timing aside (relation `same_answer`)."
+  "R-twin-case": "The lower-case resolve (R-edge-0007) and its upper-case twin answer byte for byte alike, timing aside (relation `same_answer`).",
+  "R-warm": "A warm-up: a window of the target's record resolved under the record's own label right before the target (the manifest's `warms`: T-repeat, T-walk, T-labels and N-hard scenarios), so that the target meets rows the host has just read; every k-mer supported, one run. (unit property: to be written for the v5 prose round; this is the mapping's draft)"
  },
  "mcp_notes": {
   "units": {

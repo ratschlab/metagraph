@@ -3924,6 +3924,32 @@ re-evaluation records, one the comparison stating no executions sha256), the I.4
 glossary entry and the README pin, and, without `--by-design`, the by-design table (the replayed d1e040aa table is
 no longer in the tree: the live d4b8636c one prints with the WARNING, appendix B two cases longer).
 
+### The v5 unit mapping (`doc/units/suite_v5.json`, 2026-10-15)
+
+The frozen v5 manifest (content 72181c4a…, 700 scenarios) has no per-scenario `doc` blocks and cannot get them, so
+its mapping is a file keyed to the manifest's content sha, as v4's is, built by `units_v5_build.py` (the lane's
+notes directory) on the v4 builder's rules: a v4 id whose title did not change keeps its committed v4 label (645
+of 681), a changed title gets its label from the new one (R-budget's stops at 480 / 420 ms after their complete
+twins at 60 s, the continuation from base 2,500 / 5,000, R-discover's limits 9 and 3, R-rc's eco, R-edge-0023,
+T-walk's groups by the new extensions, N-negative-0018's 12 residues, the T-labels / T-strand label cuts). The 107
+v4 units are kept with their members and variants; two units are v5's: `R-warm` (family R-warm, replicates: the
+eight warm-ups of T-repeat, T-walk, T-labels and N-hard targets) under chapter R, whose 14 units of the owner's
+grouping stay as they are, and `T-longwalk` (family T-longwalk, pairs: the four gate walks T-walk-0006 / 0012 /
+0018 / 0036 each followed by its 10 kb budget_stress twin T-longwalk-0001..0004), the only move of v4 ids between
+units. R-edge-0025 joins `R-edge-accepted`, T-attempts-0003 `T-attempts`, T-caps-0002..0004 `T-caps`,
+T-quorum-0002 `T-quorum`, T-seeds-0002 `T-seeds`; the 22 relations are placed as in v4. 109 units in 78 families:
+37 replicates (339 scenarios), 23 series (97), 22 list (78), 20 pairs (125), 7 refusals (61); every series at most
+8 variants. The maintenance tests run over both mappings (complete, valid, keyed to the manifest's sha, the moves and
+the v5-only placements named) and over both for the prose rule; the prose files carry the mapping's drafts for the
+v5-only family and units (`R.json` R-warm, named in `ROUND2_PENDING` until the v5 prose round; `T.json`
+T-longwalk among T's pending prose). `tests/fake_doc_v5.py` builds a FAKE v5-shaped run from the frozen manifest
+(every scenario on the three arms with synthetic passing answers, the MCP marks read not_exposed, one warm-up run
+again for a resume; nothing of it is evidence about a host), and `V5ScaffoldTest` builds the full document from it
+without a PDF: every v5 id once in the index, the ten chapters, the two v5 units, the marked checks set aside, the
+re-run as timing evidence. The prose round for v5 must cover, besides the two new units: R.json's `summary`,
+`coverage_gap`, the R-budget family prose and unit line and `mcp_notes.units.R-budget`, which assume v4's figures
+(10 kb under 3,000 / 8,000 ms, the full twins at 20 s, the continuation from base 5,000).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

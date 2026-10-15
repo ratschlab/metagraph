@@ -35,6 +35,8 @@ import units as units_mod  # noqa: E402
 
 V4_MANIFEST = os.path.join(SUITE, "manifest", "suite_v4.json")
 V4_MAPPING = os.path.join(DOC, "units", "suite_v4.json")
+V5_MANIFEST = os.path.join(SUITE, "manifest", "suite_v5.json")
+V5_MAPPING = os.path.join(DOC, "units", "suite_v5.json")
 PROSE_DIR = os.path.join(DOC, "prose")
 # the chapters whose prose is written: their files, the overview, the glossary and their check kinds' catalogue
 # entries may hold no placeholder ("to be written"); add a chapter here when its prose lands
@@ -42,7 +44,9 @@ WRITTEN_CHAPTERS = ("R",)
 PLACEHOLDER = "to be written"
 # Keys whose prose is still pending may carry a placeholder (the generator ships one); empty since the prose of
 # the owner's review (round 2, 2026-10-15) landed. Name a file or "<chapter>.json: <key>" here while prose is awaited.
-ROUND2_PENDING = ()
+# The v5 prose round: the family R-warm and its unit exist in manifest v5 only (the warm-ups); their entries are the
+# mapping's drafts until the prose writers cover them.
+ROUND2_PENDING = ("R.json: families.R-warm", "R.json: units.R-warm")
 
 
 # The causal or attributive timing wordings no prose file and no line of the generator may carry (the owner's
@@ -59,6 +63,12 @@ BANNED_TIMING_WORDINGS = ("upper bound", "as much as the window", "record matter
 def v4():
     manifest = sc.read_json(V4_MANIFEST)
     mapping = units_mod.load_mapping(V4_MAPPING)
+    return manifest, mapping, units_mod.resolve(manifest, mapping)
+
+
+def v5():
+    manifest = sc.read_json(V5_MANIFEST)
+    mapping = units_mod.load_mapping(V5_MAPPING)
     return manifest, mapping, units_mod.resolve(manifest, mapping)
 
 
@@ -88,6 +98,44 @@ class MappingTest(unittest.TestCase):
         self.assertEqual(len(units.units), 107)
         self.assertEqual(len([u for f in units.chapter_families("R") for u in units.families[f]["units"]]), 14)
 
+    def test_mapping_complete_v5(self):
+        """The v5 mapping over the frozen v5 manifest (700 scenarios): the v4 units kept, chapter R's 14 units
+        plus the warm-ups' unit, the long walks paired with the gate's walks, every v5-only scenario placed once,
+        every v4 id in the unit it had (the four gate walks moved beside their long twins apart)."""
+        manifest, mapping, units = v5()
+        self.check_complete(manifest, mapping, units, 5)
+        self.assertEqual(len(units.chapter_scenarios("R")), 90)
+        self.assertEqual(len(units.units), 109)
+        r_units = [u for f in units.chapter_families("R") for u in units.families[f]["units"]]
+        self.assertEqual(len(r_units), 15)
+        self.assertIn("R-warm", r_units)
+        self.assertEqual(sorted(set(r_units) - set(u for f in v4()[2].chapter_families("R")
+                                                  for u in v4()[2].families[f]["units"])), ["R-warm"])
+        self.assertEqual(units.units["R-warm"]["members"], ["R-warm-%04d" % i for i in (7, 1, 2, 8, 3, 4, 5, 6)])
+        self.assertEqual(units.units["T-longwalk"]["members"],
+                         ["T-walk-0006", "T-longwalk-0001", "T-walk-0012", "T-longwalk-0002", "T-walk-0018",
+                          "T-longwalk-0003", "T-walk-0036", "T-longwalk-0004"])
+        self.assertEqual(units.units["T-longwalk"]["unit_type"], "pairs")
+        self.assertEqual(units.families["T-longwalk"]["chapter"], "T")
+        for sid, uid in (("R-edge-0025", "R-edge-accepted"), ("T-attempts-0003", "T-attempts"),
+                         ("T-caps-0002", "T-caps"), ("T-caps-0004", "T-caps"), ("T-quorum-0002", "T-quorum"),
+                         ("T-seeds-0002", "T-seeds")):
+            self.assertEqual(units.unit_of(sid), uid, sid)
+        v4_manifest, v4_mapping, v4_units = v4()
+        v4_ids = set(s["id"] for s in v4_manifest["scenarios"])
+        moved = set(sid for sid in v4_ids if v4_units.unit_of(sid) != units.unit_of(sid))
+        self.assertEqual(moved, {"T-walk-0006", "T-walk-0012", "T-walk-0018", "T-walk-0036"})
+        self.assertEqual(sorted(set(units.by_scenario) - v4_ids),
+                         ["R-edge-0025"] + ["R-warm-%04d" % i for i in range(1, 9)] + ["T-attempts-0003"]
+                         + ["T-caps-%04d" % i for i in (2, 3, 4)] + ["T-longwalk-%04d" % i for i in range(1, 5)]
+                         + ["T-quorum-0002", "T-seeds-0002"])
+        # a v4 id whose title did not change keeps its v4 label; a changed title gets a label from the new one
+        for sid in ("R-pos-0001", "R-edge-0004", "T-walk-0001"):
+            self.assertEqual(units.by_scenario[sid]["variant"], v4_units.by_scenario[sid]["variant"], sid)
+        self.assertEqual(units.by_scenario["R-budget-0001"]["variant"], "eco, 480 ms stop")
+        self.assertEqual(units.by_scenario["R-twin-0002"]["variant"], "eco, complete, 60 s (warm-up)")
+        self.assertEqual(units.by_scenario["T-walk-0004"]["group"], "right, 300 bp")
+
     def test_validate_names_problems(self):
         manifest, mapping, units = v4()
         broken = json.loads(json.dumps(mapping))
@@ -113,8 +161,10 @@ class MappingTest(unittest.TestCase):
 class ProseTest(unittest.TestCase):
     def test_prose_complete(self):
         """The owner's rule: a suite test fails if a family or unit lacks prose (every chapter an intro, every family a
-        title and prose, every unit a property line); the message names the missing keys."""
-        self.check_prose_complete(v4())
+        title and prose, every unit a property line); the message names the missing keys. Over the v4 and the v5
+        mapping (the v5-only family and units have at least the mapping's draft)."""
+        for version in (v4, v5):
+            self.check_prose_complete(version())
 
     def check_prose_complete(self, loaded):
         manifest, mapping, units = loaded
@@ -2420,6 +2470,59 @@ class RebasedFieldsTest(unittest.TestCase):
         self.assertEqual(units_mod.default_mapping_path(other), V4_MAPPING)
         unknown = {"manifest_version": 7, "content_sha256": "0" * 64}
         self.assertEqual(os.path.basename(units_mod.default_mapping_path(unknown)), "suite_v7.json")
+
+
+class V5ScaffoldTest(unittest.TestCase):
+    """The generator on a FAKE v5-shaped run (tests/fake_doc_v5.py: every scenario of the frozen v5 manifest,
+    synthetic answers): the mapping is picked by the manifest's content sha, every v5 id is in the index once, the
+    v5-only units print, the manifest's property-level marks and the warm-up's re-run are read."""
+
+    @classmethod
+    def setUpClass(cls):
+        from fake_doc_v5 import build_v5_run
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        cls.manifest = build_v5_run(cls.run_dir)
+        cls.out = os.path.join(cls.tmp, "doc")
+        cls.rc = make_doc.main([cls.run_dir, "--out", cls.out, "--no-pdf"])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def read(self, name):
+        with open(os.path.join(self.out, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_scaffold(self):
+        self.assertEqual(self.rc, 0)
+        run = reader.Run(self.run_dir)
+        self.assertEqual(run.manifest["content_sha256"], sc.read_json(V5_MANIFEST)["content_sha256"])
+        units = units_mod.resolve(run.manifest, units_mod.load_mapping(units_mod.default_mapping_path(run.manifest)))
+        self.assertEqual(units.source, "mapping")
+        self.assertEqual(len(units.units), 109)
+        main = self.read("doc.tex")
+        for ch in ("R", "T", "P", "L", "X", "M", "Q", "C", "N", "D"):
+            self.assertIn("\\input{chapter_%s}" % ch, main)
+        index = main.split("Index of test ids", 1)[1].split("\\end{multicols}", 1)[0]
+        for sid in run.order:
+            self.assertEqual(index.count(latex.tt(sid)), 1, sid)
+        self.assertEqual(len(run.order), 700)
+        chapter_r, chapter_t = self.read("chapter_R.tex"), self.read("chapter_T.tex")
+        self.assertIn("\\label{unit:R-warm}", chapter_r)
+        self.assertIn("\\label{unit:T-longwalk}", chapter_t)
+        self.assertLess(chapter_t.index("T-\\allowbreak{}walk-\\allowbreak{}0006"),
+                        chapter_t.index("T-\\allowbreak{}longwalk-\\allowbreak{}0001"))
+        # the marked checks of the T-labels pairs read as set aside (compare: checks_marked), never as untested
+        self.assertEqual(run.summary()["mcp_agreement"].get("checks_marked"), 8)
+        self.assertEqual(run.marked_aside("T-labels-0003", run.arm_lines("T-labels-0003", "mcp")[0]),
+                         {("label_dict_contains", 0): {"mark": "not_implemented",
+                                                      "reason": "the MCP traverse answers carry no label dictionary"}})
+        self.assertNotIn("label\\_dict\\_contains", main.split("Properties still untested", 1)[1].split("\\parhead", 1)[0])
+        # the warm-up's re-run is timing evidence in the provenance and appendix F, not an execution
+        self.assertEqual(len(run.reruns), 1)
+        self.assertIn("Warm-ups run again for a resume", main)
+        self.assertEqual(index.count(latex.tt("R-warm-0001")), 1)
 
 
 if __name__ == "__main__":
