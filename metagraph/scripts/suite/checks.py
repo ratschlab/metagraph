@@ -417,12 +417,13 @@ def _time_limited(ans: dict) -> str:
     return ""
 
 
-def check_deterministic(sc, ans, a, arm, previous=None):
+def check_deterministic(sc, ans, a, arm, previous=None, client=None):
     """The answer's digest equals the earlier repeats' (`previous`: their digests, or {"digest", "time_limited"}
     objects; a bare digest counts as not time-limited). Only earlier repeats no time budget limited are compared (a
     time-limited answer, a 503 deadline included, need not repeat: SPEC-pattern-search §7.9,
     SPEC-labeled-traversal-core §6.8): with none left the check is inconclusive, and an answer that is itself
-    time-limited is inconclusive unless its stated time limitation cannot have happened (fail)."""
+    time-limited is inconclusive unless its stated time limitation cannot have happened (fail;
+    _time_limitation_problem, a /resolve stop judged against the client's wall, |client|)."""
     d = answer_digest(ans, sc.get("route"))
     if not previous:
         return INCONCLUSIVE, "first repeat: nothing to compare yet (digest %s)" % d[:16]
@@ -433,7 +434,7 @@ def check_deterministic(sc, ans, a, arm, previous=None):
     diff = [p for p in clean if p["digest"] != d]
     if own:
         if diff:
-            bad = _time_limitation_problem(sc, ans, arm)
+            bad = _time_limitation_problem(sc, ans, arm, client)
             if bad:
                 return FAIL, "digest %s differs from %d earlier repeat(s); its time limitation cannot have happened: " \
                              "%s" % (d[:16], len(diff), bad)
@@ -858,10 +859,15 @@ def _hiding(sc: dict, ans: dict, i: int, e: dict) -> Tuple[str, List[str]]:
     return hidden, _pattern_reason_problems(sc, body, i, e)
 
 
-def _resolve_stop_problem(sc: dict, body: dict) -> Optional[str]:
+def _resolve_stop_problem(sc: dict, body: dict, client: Optional[dict] = None) -> Optional[str]:
     """Why a /resolve answer's stated stop cannot have happened, or None (SPEC-labeled-traversal-core §4.5: the
-    work stops at the budget less the reserve, the only stop reason being time; timing.elapsed_ms is set after the
-    work)."""
+    work stops at the budget less the reserve, the only stop reason being time). The deadline starts once the body
+    is parsed, timing.elapsed_ms's clock later (traverse.cpp process_resolve_request: after the request's fields
+    and the LabelOracle), so elapsed_ms is no measure of the deadline's time: a valid stop can state far less than
+    the budget less the reserve when that gap is long (a stall). Only a clock whose interval holds the deadline's
+    can show a stop before the work deadline: the client's wall (|client| wall_ms: a direct runner's send to last
+    byte, the MCP arm's service-measured backend exchange, mcp_phases.backend_ms). Without one the time is not
+    judged. /traverse and /pattern read their stop and their elapsed time on one clock, so their rules keep it."""
     stop = body.get("stop") if isinstance(body, dict) else None
     if not isinstance(stop, dict):
         return None
@@ -876,9 +882,10 @@ def _resolve_stop_problem(sc: dict, body: dict) -> Optional[str]:
         return "a resolve time stop without a time budget"
     reserve = _number(lim.get("finalize_reserve_ms"))
     reserve = 250.0 if reserve is None else reserve
-    el = _number((body.get("timing") or {}).get("elapsed_ms"))
-    if el is not None and el < budget - reserve - 1.0:
-        return "a resolve time stop after %.0f ms, before the budget %.0f ms less the reserve %.0f ms" % (el, budget, reserve)
+    wall = _number((client or {}).get("wall_ms"))
+    if wall is not None and wall < budget - reserve - 1.0:
+        return "a resolve time stop within a client wall of %.0f ms, before the budget %.0f ms less the reserve " \
+               "%.0f ms (the client's interval holds the deadline's)" % (wall, budget, reserve)
     return None
 
 
@@ -1047,9 +1054,11 @@ def time_limited(ans: dict) -> str:
     return _time_limited(ans)
 
 
-def _time_limitation_problem(sc: dict, ans: dict, arm: Optional[str] = None) -> Optional[str]:
+def _time_limitation_problem(sc: dict, ans: dict, arm: Optional[str] = None,
+                             client: Optional[dict] = None) -> Optional[str]:
     """Why an answer's stated time limitation cannot have happened, or None: a /pattern time stop or limitation
-    before its work time, a /resolve stop before its budget less the reserve, a /traverse time stop before its
+    before its work time, a /resolve stop before its budget less the reserve by the client's wall (|client|,
+    _resolve_stop_problem), a /traverse time stop before its
     budget, an attempt-bound stop before its bound (_attempt_stops; AttemptAtBound in a 200 seed result only on the
     MCP arm, which relays the host's 503 so)."""
     body = ans.get("body")
@@ -1062,7 +1071,7 @@ def _time_limitation_problem(sc: dict, ans: dict, arm: Optional[str] = None) -> 
                 return _pattern_time_problem(sc, body, "p%d: a time limitation" % i)
         return None
     if route == "POST /resolve":
-        return _resolve_stop_problem(sc, body)
+        return _resolve_stop_problem(sc, body, client)
     if route == "POST /traverse":
         probs = [m for m in _traverse_reason_problems(sc, ans) if "time_budget" in m]
         probs += [p for _, p in _attempt_stops(sc, ans, "mcp").values() if p]
@@ -2215,7 +2224,7 @@ def _resolve_label(body: dict, name: str) -> dict:
     return labs[0]
 
 
-def check_resolve_runs(sc, ans, a, arm):
+def check_resolve_runs(sc, ans, a, arm, client=None):
     body = _body(ans)
     lab = _resolve_label(body, a["label"])
     n = len([l for l in body["labels"] if l.get("label") == a["label"]])
@@ -2228,7 +2237,7 @@ def check_resolve_runs(sc, ans, a, arm):
     ks = lab.get("kmers_supported")
     stop = body.get("stop")
     if stop:
-        bad = _resolve_stop_problem(sc, body)
+        bad = _resolve_stop_problem(sc, body, client)
         if bad:
             return FAIL, "label %s: %s" % (a["label"], bad)
     if (a.get("prefix_if_stopped") or a.get("unless_stopped")) and stop:
@@ -2521,7 +2530,7 @@ def _discovery_problems(req: dict, body: dict) -> List[str]:
     return probs
 
 
-def _resolve_invariants(sc, ans, a, arm):
+def _resolve_invariants(sc, ans, a, arm, client=None):
     if ans.get("http") != 200:
         return PASS, "no answer to check (http %s)" % ans.get("http")
     body = _body(ans)
@@ -2532,7 +2541,7 @@ def _resolve_invariants(sc, ans, a, arm):
     qk = max(0, len(seq) - K + 1)
     num = body.get("num_kmers")
     if stop:
-        bad = _resolve_stop_problem(sc, body)
+        bad = _resolve_stop_problem(sc, body, client)
         if bad:
             probs.append(bad)
         x = stop.get("resolved_kmers")
@@ -4116,12 +4125,12 @@ def _traverse_invariants(sc, ans, a, arm):
     return PASS, "%d result(s) consistent" % len(res)
 
 
-def check_invariants(sc, ans, a, arm):
+def check_invariants(sc, ans, a, arm, client=None):
     route = sc.get("route", "")
     if route == "POST /pattern":
         return _pattern_invariants(sc, ans, a, arm)
     if route == "POST /resolve":
-        return _resolve_invariants(sc, ans, a, arm)
+        return _resolve_invariants(sc, ans, a, arm, client)
     if route == "POST /traverse":
         return _traverse_invariants(sc, ans, a, arm)
     return PASS, "no invariants for %s" % route
@@ -4572,6 +4581,11 @@ def _with_stopped_seeds_failed(answer: dict, stops: Dict[int, Tuple[str, Optiona
     return dict(answer, body=body)
 
 
+# the checks that read the runner's `client` ({"wall_ms"}) beside the answer: budget_respected (an allowed 503
+# deadline, _budget_503) and the /resolve stop's time (_resolve_stop_problem); deterministic reads it too
+_CLIENT_CHECKS = {"budget_respected", "invariants", "resolve_runs"}
+
+
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[Any]] = None,
              client: Optional[dict] = None) -> List[dict]:
     """Every expectation of |scenario| against |answer| (DESIGN §8.2), each result {check, outcome, detail,
@@ -4579,7 +4593,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
     arm; an unknown check name or a check that raises is a fail stating why (never a silent pass). `deterministic` is
     left out of the first repeat (nothing to compare). `previous`: the earlier repeats' digests or {digest,
     time_limited}; `client` (optional, from a runner): {"wall_ms"} of this execution, which budget_respected reads
-    on an allowed 503 `deadline` (_budget_503)."""
+    on an allowed 503 `deadline` (_budget_503), and the checks that judge a /resolve stop's time against it
+    (_resolve_stop_problem: invariants, resolve_runs, deterministic)."""
     out = []
     http = answer.get("http")
     allowed = [200]
@@ -4635,8 +4650,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
                 judged = stopped_view
         try:
             if name == "deterministic":
-                outcome, detail = fn(scenario, answer, args, arm, previous=previous)
-            elif name == "budget_respected":
+                outcome, detail = fn(scenario, answer, args, arm, previous=previous, client=client)
+            elif name in _CLIENT_CHECKS:
                 outcome, detail = fn(scenario, judged, args, arm, client=client)
             else:
                 outcome, detail = fn(scenario, judged, args, arm)

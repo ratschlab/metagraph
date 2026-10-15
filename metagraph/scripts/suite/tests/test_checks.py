@@ -29,10 +29,10 @@ def ok_answer(body):
     return checks.normalise_direct(200, body)
 
 
-def outcome(sc, ans, check, _arm="direct-local", previous=None, **args):
+def outcome(sc, ans, check, _arm="direct-local", previous=None, _client=None, **args):
     sc = dict(sc)
     sc["expect"] = [{"check": "status", "args": {"http": ans["http"]}}, {"check": check, "args": args}]
-    res = checks.evaluate(sc, ans, _arm, previous=previous)
+    res = checks.evaluate(sc, ans, _arm, previous=previous, client=_client)
     return res[1]["outcome"], res[1]["detail"]
 
 
@@ -1792,13 +1792,42 @@ class ResolveChecks(unittest.TestCase):
                 "query_bp": 100, "remainder_from_bp": 40}
         a = self.body([[0, 40]], num=40, graph=[[0, 40]], stop=stop)
         a["body"].update(limits={"time_budget_ms": 3000, "finalize_reserve_ms": 250}, timing={"elapsed_ms": 2800.0})
-        # a stop before the budget less the reserve cannot have happened (SPEC §4.5): fail, not a prefix
+        # a stop before the budget less the reserve cannot have happened (SPEC §4.5): fail, not a prefix. The
+        # deadline starts at the parsed body, timing.elapsed_ms's clock after the request's fields and the
+        # LabelOracle (traverse.cpp process_resolve_request), so only a client wall, whose interval holds the
+        # deadline's, can show it: a stop within 2,050 ms or 2,748 ms of wall (under 3,000 - 250 - 1) is premature
         early = copy.deepcopy(a)
         early["body"]["timing"]["elapsed_ms"] = 2000.0
-        o, d = outcome(sc, early, "resolve_runs", label="562", full=True, prefix_if_stopped=True)
-        self.assertEqual(o, "fail")
-        self.assertIn("before the budget 3000 ms less the reserve 250 ms", d)
-        self.assertEqual(outcome(sc, early, "invariants")[0], "fail")
+        for arm in ("direct-local", "direct-remote", "mcp"):
+            for wall in (2050.0, 2748.0):
+                o, d = outcome(sc, early, "resolve_runs", arm, _client={"wall_ms": wall}, label="562", full=True,
+                               prefix_if_stopped=True)
+                self.assertEqual(o, "fail", (arm, wall))
+                self.assertIn("before the budget 3000 ms less the reserve 250 ms", d)
+                self.assertEqual(outcome(sc, early, "invariants", arm, _client={"wall_ms": wall})[0], "fail")
+        # GPT's pre-timer case: 2,250 ms pass before the timer starts (a stall), the work stops at the deadline's
+        # 2,750 ms, the answer is written by 2,805 ms: elapsed_ms 555 is valid. With no client wall the stop's time
+        # is not judged; the prefix arithmetic still is
+        pre = copy.deepcopy(a)
+        pre["body"]["timing"]["elapsed_ms"] = 555.0
+        for arm in ("direct-local", "mcp"):
+            for client in ({"wall_ms": 2805.0}, {"wall_ms": 2749.0}, None):
+                self.assertEqual(outcome(sc, pre, "invariants", arm, _client=client)[0], "pass", (arm, client))
+                self.assertEqual(outcome(sc, pre, "resolve_runs", arm, _client=client, label="562", full=True,
+                                         prefix_if_stopped=True)[0], "pass", (arm, client))
+        holed_pre = copy.deepcopy(pre)   # the record's own k-mers in the prefix claimed unsupported
+        holed_pre["body"]["labels"][0]["runs"] = [[0, 30]]
+        holed_pre["body"]["labels"][0]["kmers_supported"] = 30
+        self.assertEqual(outcome(sc, holed_pre, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0],
+                         "fail")
+        # a time-limited repeat whose digest differs from a clean earlier one: inconclusive where its stop can have
+        # happened (a valid wall, or no wall), fail where the wall shows it premature
+        for client, want in (({"wall_ms": 2805.0}, "inconclusive"), (None, "inconclusive"),
+                             ({"wall_ms": 600.0}, "fail")):
+            o, d = outcome(sc, pre, "deterministic", "direct-local", previous=["0" * 64], _client=client)
+            self.assertEqual(o, want, client)
+        self.assertIn("its time limitation cannot have happened: a resolve time stop within a client wall of 600 ms",
+                      outcome(sc, pre, "deterministic", previous=["0" * 64], _client={"wall_ms": 600.0})[1])
         self.assertEqual(outcome(sc, a, "invariants")[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_runs", label="562", full=True, unless_stopped=True)[0], "pass")
         self.assertEqual(outcome(sc, a, "resolve_runs", label="562", full=True, prefix_if_stopped=True)[0], "pass")

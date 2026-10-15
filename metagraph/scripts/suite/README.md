@@ -2541,3 +2541,18 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   only where nothing failed; expect_branching does not call a split missing from an arm it cannot see. Measured on
   v4: of the 123 recorded MCP answers with a graphlet, with the graphlets removed, walk_in_record read fail on 100
   that passed; now no check turns to fail.
+- /resolve, a stop's time is judged on a clock that holds the deadline's (B3). The engine starts a budgeted
+  resolve's deadline once the body is parsed and its timing.elapsed_ms clock later, after the request's fields and
+  the LabelOracle (traverse.cpp process_resolve_request), so elapsed_ms is no lower bound of the deadline's time: a
+  valid stop at the work deadline (budget less the reserve) states less than that whenever the gap is long (a stall:
+  microseconds of work, so only an OS pause makes it long; the verification found no recorded resolve stop). Three
+  sites judged a stop premature by elapsed_ms (the invariants, resolve_runs on any stop, and deterministic's "time
+  limitation that cannot have happened"). They now judge it only against the client's wall, whose interval holds the
+  deadline's: a direct runner's send to last byte, the MCP arm's service-measured backend exchange
+  (mcp_phases.backend_ms, the service's monotonic interval around the backend call); a wall below the budget less the
+  reserve less 1 ms fails, no wall leaves the time unjudged (the prefix arithmetic still holds). evaluate passes its
+  `client` to these three checks (_CLIENT_CHECKS); its signature is unchanged, and both runners and reevaluate.py
+  already supply it. /traverse and /pattern read their stops and their elapsed times on one clock and keep their
+  rules; the upper bound of budget_respected on a /resolve 200 stays on elapsed_ms (lenient by the gap, never a false
+  fail). A same-origin engine field (the deadline's elapsed time) would let the rule judge without the transport in
+  the wall; that is an engine change, proposed by the verification, not made here.
