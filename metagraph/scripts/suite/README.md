@@ -3543,3 +3543,50 @@ Still judged weakly or not at all:
     indices". So a run covers the nodes entered by steps `from_bp + 1 … to_bp`; 7.4's `label_sets` say the
     same in words. The keep walker gives switch-entered claims the same `from_bp`. The check now starts at
     `max(from_bp + 1, route start)` (below).
+
+#### Round 2 of the verification (2026-10-15, against 81c620ef)
+The verifier (the lane directory's `verify/VERIFY-ORACLE.md`, "Round 2") confirmed all four disagreements as
+oracle errors, and confirmed that the nine fixes close H1-H5 and M1-M5. It ruled the exact form of both fixes.
+- **(a) Merged arms** (`traverse_compare._merge_invariants`), as SPEC 6.5 and 7.1 state them:
+  - *Displays.* A displayed walk that is not a keep walk must be a real graph walk: every node a k-mer of
+    the index, and no edge twice. It must equal a keep walk from its own latest merge on, at the same
+    node there. A walk with no merge before its end must be a keep walk.
+  - *Merge parents.* Every merge's parents end at one node.
+  - *`labels_via_parent`.* It partitions the merged labels, each under a parent whose `labels_at_end`
+    holds it.
+  - *The majority parent.* `parents[0]` brings the most labels, unless a memory budget applies. Ties keep
+    the arrival order, which the answer does not show, so they are not judged.
+  - *Own routes.* Each leaf label's own route is a keep walk the label holds. A lineage switched twice
+    before a merge is marked unjudged; none occurred.
+
+  Tests: the three real answers pass. The display through the minority parent fails, and a label said to
+  enter through a parent that never carried it fails.
+- **(b) Displayed support** starts at `max(from_bp + 1, route start)`. Test: `T-canonical_k10-0076`.
+- **Merged arms before their first merge** are held to the keep walker exactly: walks, label ends and their
+  events, switches, blocked and hairpin events. After it, the united history stays invariant-only. Three
+  merge-structure corruptions joined the mutation set: `merge_minority_first`, `merge_via_wrong_parent` and
+  `merge_early_reason`.
+- **`loss_budget` at random.** Transition-chain requests use random seeds, values, budgets, `switch_on` and
+  branching, with two switches ahead.
+- **Low items:**
+  - the provenance test builds its own git tree, and with it found that `build_src_uncommitted` was always 0
+    (a pathspec bug, now fixed; the eng-int tree is clean);
+  - the "graph walk" correction above;
+  - the bounded CANONICAL row is now stated.
+
+Validation: six runs on the code of `6ec3d280` against the same 81c620ef build. Seed 1 ran at the default
+sizes and seeds 2-6 at twice the size (`runs/v4final_*`), over every route and all twelve configurations.
+- 16,406 requests: 7,128 `/pattern`, 1,484 `/resolve`, 7,794 `/traverse`.
+- 44,291 answers: 40,799 equal the oracle and 3,492 are inconclusive with every invariant passing.
+  **0 disagree.**
+- The four answers of the first final runs were re-requested. Apart from timing they are identical, and they
+  now pass.
+- 440,277 corruptions of the stated mutation set, 125,027 of them of `/traverse` answers, every one caught.
+  55 of them are merged-arm structure corruptions.
+- Per seed:
+  - 23-37 `loss_budget` label ends with their `needed_budget` (3 before);
+  - 3-5 merged arms, 24 in all, every one passing the exact rules;
+  - 103-229 merge arms that merged nothing, held strictly;
+  - 14-15 trace queries telling trace from presence;
+  - 13-23 PRIMARY twins.
+- **No candidate engine defect.**
