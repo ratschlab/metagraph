@@ -4,15 +4,18 @@ the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M [-
 execution line per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
 scenario so) to DIR/executions.jsonl and its job to DIR/jobs.jsonl, skips what is recorded (resumable), and
 logs each call to DIR/calls.log with whether the environment variable SUITE_TEST_SECRET reached it (the value
-itself is never written). No request is made.
+itself is never written). No request is made. The resume rule as async's runner applies it to the ids of one call: a
+listed warm-up whose execution of --repeat is recorded while its listed target's is not runs again right before the
+target (a line with rerun_for_resume true and rerun_target, the earlier one untouched).
 
 FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails its checks (exit 1);
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
 `canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal); `crash` writes a traceback
 to stderr and no line for any id (exit 1, a runner defect), only for a call that names FAKE_MCP_CRASH_ID when that
 is set; `unknown` records the outcome `skipped_by_runner`, outside the shared vocabulary (exit 0); `sigint` waits
-up to 30 s on each call and, interrupted (Ctrl-C), prints a last line on stdout as async's runner does and notes in
-calls.log whether that print worked (exit 130) or met a closed pipe (exit 1).
+up to 30 s on each call (only on a call that names FAKE_MCP_SIGINT_ID when that is set) and, interrupted (Ctrl-C),
+prints a last line on stdout as async's runner does and notes in calls.log whether that print worked (exit 130) or met
+a closed pipe (exit 1).
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
 identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
@@ -75,7 +78,7 @@ def main(argv=None):
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])
     with open(os.path.join(args.out, "calls.log"), "a") as fh:
         fh.write("%s %d env=%s\n" % (args.ids, args.repeat, "yes" if os.environ.get("SUITE_TEST_SECRET") else "no"))
-    if mode == "sigint":
+    if mode == "sigint" and os.environ.get("FAKE_MCP_SIGINT_ID", args.ids) in args.ids.split(","):
         try:
             time.sleep(30)
         except KeyboardInterrupt:
@@ -88,9 +91,17 @@ def main(argv=None):
                 fh.write(note + "\n")
             return rc
     bad = 0
-    for sid in [i for i in args.ids.split(",") if i]:
+    listed = [i for i in args.ids.split(",") if i]
+    steps = []
+    for sid in listed:
+        target = (scen.get(sid) or {}).get("warms")
         if (sid, "mcp", args.repeat) in done:
+            if (target in listed and (target, "mcp", args.repeat) not in done
+                    and not ((scen.get(sid) or {}).get("mcp") or {}).get("not_implemented")):
+                steps.append((sid, target))
             continue
+        steps.append((sid, None))
+    for sid, rerun_target in steps:
         nim = ((scen.get(sid) or {}).get("mcp") or {}).get("not_implemented")
         t0 = time.time()
         time.sleep(0.02)
@@ -104,6 +115,9 @@ def main(argv=None):
                 "mcp_phases": None if nim else {"submit_ms": 1.0, "queue_ms": 2.0, "backend_ms": 3.0,
                                                 "terminal_lag_ms": 1.0, "paging_ms": 1.0},
                 "job": None if nim else {"search_id": "s-%s-%d" % (sid, args.repeat), "job_id": None}}
+        if rerun_target:
+            line.update(rerun_for_resume=True, rerun_target=rerun_target)
+            line["job"]["search_id"] += "-rerun"
         if nim:
             pass
         elif mode == "fail":

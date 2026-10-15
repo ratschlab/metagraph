@@ -30,7 +30,11 @@ closing GET /capabilities. Either way run.json's `planned` / `state` cover the w
 planned execution is recorded, else `partial`.
 
 Resumable: a second invocation with the same --out skips the executions already recorded (same manifest
-required). SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
+required). A warm-up whose executions in the invocation's scope are all recorded while its target there has one left
+(an interruption between the two) runs again, its repeat 0, right before the target's first execution left
+(suite_common.resume_rewarms): a line with the warm-up's id and repeat, `rerun_for_resume` true and `rerun_target`,
+its own raw file with both fields; the earlier execution stays the one judged. A paired step names the warm-up with
+its target (--only W,T) when run_suite.sh's plan wants it. SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
 state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run), also when the reader of
 stdout is gone by then (a paired step whose ssh client a Ctrl-C ended: `say`). --max-requests counts
 every request of the invocation, the closing GET /capabilities included. Stdlib only: runs with python3.12 on
@@ -563,7 +567,7 @@ class Runner(object):
         ident = sc.identity_from_capabilities(docs)
         return docs, statuses, ident
 
-    def execute(self, index, scenario, repeat, cache, after_resume, previous):
+    def execute(self, index, scenario, repeat, cache, after_resume, previous, rerun_target=None):
         sid = scenario.get("id")
         method, path, body, headers, recorded = build_request(scenario, self.run["run_id"], self.args.arm)
         timeout = timeout_for(scenario, self.args.arm, self.timeouts)
@@ -592,12 +596,14 @@ class Runner(object):
             outcome = "error"
         if not res["http"] or (res["error"] and res["error"][0] == "decode"):
             outcome = "error"
-        raw_rel = sc.raw_name(sid, self.args.arm, repeat)
-        sc.write_gz_json(os.path.join(self.out, raw_rel), {
+        rerun = {"rerun_for_resume": True, "rerun_target": rerun_target} if rerun_target else {}
+        raw_rel = sc.rerun_raw_name(sid, self.args.arm, repeat, started) if rerun else \
+            sc.raw_name(sid, self.args.arm, repeat)
+        sc.write_gz_json(os.path.join(self.out, raw_rel), dict({
             "scenario": sid, "arm": self.args.arm, "repeat": repeat, "started_utc": sc.iso_utc(started),
             "request": recorded, "response": {"http": res["http"], "headers": res["headers"],
                                               "bytes_wire": res["bytes_wire"], "bytes_body": len(res["raw"])},
-            "answer": answer})
+            "answer": answer}, **rerun))
         line = {
             "run_id": self.run["run_id"], "scenario": sid, "area": scenario.get("area"), "route": route,
             "timing_class": scenario.get("timing_class"), "arm": self.args.arm, "repeat": repeat, "cache": cache,
@@ -614,6 +620,7 @@ class Runner(object):
         }
         if after_resume:
             line["after_resume"] = True
+        line.update(rerun)
         sc.append_jsonl(self.exec_path, line)
         self.executed += 1
         return line
@@ -656,7 +663,7 @@ class Runner(object):
     # -- the run ----------------------------------------------------------------------------------------------
     def recorded_keys(self):
         rows, _ = sc.read_jsonl(self.exec_path)
-        return set(sc.execution_key(r) for r in rows if r.get("arm") == self.args.arm)
+        return set(sc.execution_key(r) for r in sc.judged_lines(rows) if r.get("arm") == self.args.arm)
 
     def final_state(self, planned):
         """done when every planned execution of the selection is recorded, else partial."""
@@ -678,6 +685,7 @@ class Runner(object):
                                     if self.checks_error else ""))
         self.open_run(len(planned), skipped)
         rows, bad = sc.read_jsonl(self.exec_path)
+        rows = sc.judged_lines(rows)
         done = set(sc.execution_key(r) for r in rows)
         # The earlier repeats of each scenario so far, in repeat order, as {digest, time_limited}: checks.evaluate's
         # `previous` (lane S1's determinism check compares a repeat with the earlier ones, and a time-limited earlier
@@ -700,6 +708,16 @@ class Runner(object):
         todo = [p for p in scope if (p[1].get("id"), self.args.arm, p[2]) not in done]
         ndone = sum(1 for p in planned if (p[1].get("id"), self.args.arm, p[2]) in done)
         self.session["skipped_done"] = len(scope) - len(todo)
+        # the resume rule: a recorded warm-up runs again right before its target's first execution left
+        rewarms = sc.resume_rewarms(scope, set((k[0], k[2]) for k in done if k[1] == self.args.arm))
+        steps = []
+        for p in todo:
+            for index, warm_up in rewarms.pop(p[1].get("id"), []):
+                steps.append((index, warm_up, 0, "cold", p[1].get("id")))
+            steps.append(p + (None,))
+        again = [{"scenario": s_[1].get("id"), "target": s_[4]} for s_ in steps if s_[4]]
+        if again:
+            self.session["reruns_for_resume"] = again
         self.save_run()
         self.write_state("running", len(planned), ndone)
         if self.args.sample_docker:
@@ -718,11 +736,20 @@ class Runner(object):
                     self.run.update(ident)
                 self.save_run()
             ran_in_session = set()
-            for index, scenario, repeat, cache in todo:
+            for index, scenario, repeat, cache, rerun_target in steps:
                 if not self.may_request():
                     break
                 sid = scenario.get("id")
                 self.write_state("running", len(planned), ndone, sid)
+                if rerun_target:
+                    # timing evidence for the target, never an execution of its key: no `previous`, no digest
+                    line = self.execute(index, scenario, repeat, cache, False, [], rerun_target=rerun_target)
+                    if not self.args.quiet:
+                        say("[%s] %s r%d again before %s (resume) %s http=%s %.0f ms\n" % (
+                            self.args.arm, sid, repeat, rerun_target, line["outcome"], line["http"],
+                            line["wall_ms"] or 0.0))
+                    self.pause()
+                    continue
                 after_resume = repeat > 0 and (sid, repeat - 1) not in ran_in_session
                 line = self.execute(index, scenario, repeat, cache, after_resume, list(digests.get(sid, [])))
                 if sc.feeds_previous(line):

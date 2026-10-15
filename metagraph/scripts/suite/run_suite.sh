@@ -46,7 +46,13 @@
 # and repeat with {ids} (comma-separated scenario ids), {repeat} (the repeat index to run: 0 cold, >= 1 warm),
 # {repeats} ({repeat} + 1), {out} (RUN_DIR/arms/mcp), {manifest} (the run's manifest) and {checks_dir} (the run's
 # snapshot RUN_DIR/scripts, below) replaced by
-# shell-quoted values; run with `bash -c` and this environment unchanged. Only the template is recorded,
+# shell-quoted values; run with `bash -c` and this environment unchanged. The resume rule (suite_common.paired_plan
+# rewarm): when a warm-up's executions on an arm are all recorded and its target's are not (an interruption between
+# the two), the target's step names the warm-up first ({ids} W,T; run_direct.py --only W,T), and the runner runs
+# the warm-up again right before the target (a line with the warm-up's id and repeat, rerun_for_resume true,
+# rerun_target T; the earlier execution stays the judged one). The MCP runner applies that rule only to the ids one
+# invocation lists, as run_direct.py applies it only within --only: a step that lists the target alone never runs
+# its warm-up again. Only the template is recorded,
 # never the expanded command or any environment value. A full run (not --smoke) uses the default template
 # DEFAULT_MCP_CMD below (SUITE_MCP_CMD replaces it, '' for none) unless --mcp-cmd, --no-mcp or --mcp-run is
 # given; --mcp-cmd default asks for it in a smoke run; --resume keeps the run's template. The default runner
@@ -959,7 +965,7 @@ loop_summary() {
 # --- paired mode ----------------------------------------------------------------------------------------------
 run_paired() {
   local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 since_pull=0 runner_live=0 stop=0
-  local step_failed nmissing
+  local step_failed nmissing wl wr wm mids
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -979,18 +985,24 @@ run_paired() {
   loop_record running
   log "paired: $N_PLAN scenario(s); arms ${arms%,}"
   for entry in ${plan[@]+"${plan[@]}"}; do
-    read -r sid l r mc mw <<< "$entry"
+    read -r sid l r mc mw wl wr wm <<< "$entry"
     heartbeat
     step_failed=0
     nmissing=${#MCP_MISSING[@]}
+    # The resume rule (suite_common.paired_plan rewarm): a warm-up whose executions on an arm are all recorded
+    # while its target has some left there is named with the target in that arm's step, and the runner runs it
+    # again right before the target (on the MCP arm in the target's first step left).
+    mids="$sid"; [[ "${wm:--}" == "-" ]] || mids="$wm,$sid"
     if [[ $mc == 1 ]]; then
-      rc=0; mcp_step "$sid" 0 || rc=$?
+      [[ "$mids" == "$sid" ]] || log "mcp: $wm again before $sid (resume)"
+      rc=0; mcp_step "$mids" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
-      mcp_after "$sid" 0 "$rc" || { LOOP_STATE=failed; break; }
+      mcp_after "$mids" 0 "$rc" || { LOOP_STATE=failed; break; }
+      mids="$sid"
     fi
     if [[ $l == 1 ]]; then
-      log "direct-local: $sid"
-      rc=0; direct_call local --only "$sid" || rc=$?
+      log "direct-local: $sid$( [[ "${wl:--}" == "-" ]] || printf ' (%s again before it: resume)' "$wl")"
+      rc=0; direct_call local --only "$( [[ "${wl:--}" == "-" ]] || printf '%s,' "$wl")$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
       if [[ $rc != 0 ]]; then
         fails_local=$((fails_local + 1)); step_failed=1; FAILED_STEPS+=("direct-local:$sid:$rc")
@@ -1013,8 +1025,8 @@ run_paired() {
       fi
     fi
     if [[ $r == 1 ]]; then
-      log "direct-remote: $sid"
-      rc=0; direct_call remote --only "$sid" || rc=$?
+      log "direct-remote: $sid$( [[ "${wr:--}" == "-" ]] || printf ' (%s again before it: resume)' "$wr")"
+      rc=0; direct_call remote --only "$( [[ "${wr:--}" == "-" ]] || printf '%s,' "$wr")$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
       if [[ $rc != 0 ]]; then
         fails_remote=$((fails_remote + 1)); step_failed=1; FAILED_STEPS+=("direct-remote:$sid:$rc")
@@ -1025,9 +1037,11 @@ run_paired() {
     fi
     if [[ "$mw" != "-" ]]; then
       for rep in ${mw//,/ }; do
-        rc=0; mcp_step "$sid" "$rep" || rc=$?
+        [[ "$mids" == "$sid" ]] || log "mcp: $wm again before $sid (resume)"
+        rc=0; mcp_step "$mids" "$rep" || rc=$?
         [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
-        mcp_after "$sid" "$rep" "$rc" || { stop=1; break; }
+        mcp_after "$mids" "$rep" "$rc" || { stop=1; break; }
+        mids="$sid"
       done
       if [[ $stop == 1 ]]; then LOOP_STATE=failed; break; fi
     fi
@@ -1150,14 +1164,17 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     # The MCP arm last: repeat 0 of every scenario, then one pass per warm repeat index (1, then 2 for the
     # scenarios the paired plan gives three MCP repeats: suite_common.mcp_repeats), so a sequential run records the
     # same MCP executions as a paired one.
-    local arms="mcp" entry sid l r mc mw rep cold="" maxrep=0 pass
+    local arms="mcp" entry sid l r mc mw wl wr wm rep cold="" maxrep=0 pass again
     local warm=()
     while IFS= read -r entry; do
-      read -r sid l r mc mw <<< "$entry"
-      [[ $mc != 1 ]] || cold+="$sid,"
+      read -r sid l r mc mw wl wr wm <<< "$entry"
+      # the resume rule as in the paired loop: a warm-up to run again goes into the target's first pass, before it
+      again=""; [[ "${wm:--}" == "-" ]] || again="$wm,"
+      if [[ $mc == 1 ]]; then cold+="$again$sid,"; again=""; fi
       if [[ "$mw" != "-" ]]; then
         for rep in ${mw//,/ }; do
-          warm[$rep]="${warm[$rep]:-}$sid,"
+          warm[$rep]="${warm[$rep]:-}$again$sid,"
+          again=""
           (( rep <= maxrep )) || maxrep=$rep
         done
       fi

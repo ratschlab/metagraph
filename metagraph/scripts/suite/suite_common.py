@@ -222,6 +222,56 @@ def execution_key(line):
     return (line.get("scenario"), line.get("arm"), line.get("repeat"))
 
 
+# A warm-up run again for a resume (the resume rule below): a line with the warm-up's own scenario id and repeat,
+# `rerun_for_resume` true and `rerun_target` the target it ran before; the earlier execution of the same key stays.
+RERUN_FIELDS = ("rerun_for_resume", "rerun_target")
+
+
+def is_rerun(line):
+    """Whether an execution line is a warm-up's re-run for a resume: timing evidence next to its target, never a
+    judged execution of its key (merge_run, reevaluate, compare, report and the gate judge the original)."""
+    return isinstance(line, dict) and line.get("rerun_for_resume") is True
+
+
+def judged_lines(rows):
+    """The execution lines that are executions of their key: every line but a warm-up's re-run for a resume."""
+    return [r for r in rows if not is_rerun(r)]
+
+
+def rerun_raw_name(scenario_id, arm, repeat, started):
+    """The raw file of a warm-up's re-run: its own, beside the original execution's (raw_name), one per re-run."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(scenario_id))
+    return "raw/%s.%s.%d.rerun-%d.json.gz" % (safe, arm, repeat, int(round(started * 1000)))
+
+
+def resume_rewarms(scope, done):
+    """The resume rule of a runner's invocation: a warm-up (a scenario whose `warms` names its target) in the
+    invocation's scope with every execution there recorded, whose target in the scope has an execution left, runs
+    again right before the target's first execution left, so that execution meets the rows its warm-up read even
+    after an interruption between the two. scope: [(index, scenario, repeat, cache)] (plan_executions), done: the
+    recorded (scenario, arm, repeat) keys as (scenario, repeat) pairs. Returns {target id: [(index, warm-up)]} in
+    scope order; a warm-up with an execution left runs as planned (it is right before its target) and is not
+    listed."""
+    by_sid, order = {}, []
+    for index, scenario, repeat, _ in scope:
+        sid = scenario.get("id")
+        if sid not in by_sid:
+            by_sid[sid] = (index, scenario, [])
+            order.append(sid)
+        by_sid[sid][2].append(repeat)
+    out = {}
+    for sid in order:
+        index, scenario, repeats = by_sid[sid]
+        target = scenario.get("warms")
+        if not target or target not in by_sid:
+            continue
+        if any((sid, r) not in done for r in repeats):
+            continue
+        if any((target, r) not in done for r in by_sid[target][2]):
+            out.setdefault(target, []).append((index, scenario))
+    return out
+
+
 def feeds_previous(line):
     """Whether a recorded execution is one of the earlier repeats that checks.evaluate's `previous` holds: the host
     answered it (an HTTP status) and its runner did not end it in `error`. An execution without a status (a transport
@@ -258,17 +308,27 @@ def mcp_repeats(index, scenario, warm_every=10):
 def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=("direct-local", "direct-remote"),
                 ids=None):
     """The paired loop's work per scenario of the selection (select_scenarios: areas, limit, ids), in manifest order:
-    [{scenario, direct-local, direct-remote, mcp_cold, mcp_warm}] where a direct arm's value is True (executions
-    left), False (all recorded) or None (the arm does not run it), mcp_cold likewise, and mcp_warm the warm repeat
-    indices left. Recorded executions are read from RUN_DIR/arms/<arm>/executions.jsonl."""
+    [{scenario, direct-local, direct-remote, mcp_cold, mcp_warm, rewarm}] where a direct arm's value is True
+    (executions left), False (all recorded) or None (the arm does not run it), mcp_cold likewise, and mcp_warm the
+    warm repeat indices left. Recorded executions are read from RUN_DIR/arms/<arm>/executions.jsonl.
+
+    rewarm {arm: [warm-up id]}: the resume rule (resume_rewarms) per arm, decided before anything of this invocation
+    runs. A target with executions left on an arm whose warm-up has all of its executions there recorded (an
+    interruption between the two) gets its warm-up again right before it on that arm: the paired loop names the
+    warm-up with the target in the arm's step (run_direct.py --only W,T; the MCP runner --ids W,T), and the runner,
+    whose scope then holds both, runs the warm-up again first (run_direct.py: repeat 0; the MCP runner: the step's
+    repeat). On the MCP arm that is the target's first step left (cold, else its first warm repeat). A warm-up the
+    manifest marks not implemented via MCP sends nothing there and is never run again on that arm."""
     recorded = {}
     for arm in ARMS:
         rows, _ = read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
-        recorded[arm] = set(execution_key(r) for r in rows if r.get("arm") == arm)
+        recorded[arm] = set(execution_key(r) for r in judged_lines(rows) if r.get("arm") == arm)
     out = []
+    by_sid = {}
     for index, scenario in select_scenarios(manifest, areas, limit, ids):
         sid = scenario.get("id")
-        item = {"scenario": sid, "mcp_cold": None, "mcp_warm": []}
+        item = {"scenario": sid, "mcp_cold": None, "mcp_warm": [], "rewarm": {}}
+        by_sid[sid] = (item, scenario)
         for arm in DIRECT_ARMS:
             if arm not in arms:
                 item[arm] = None
@@ -281,6 +341,19 @@ def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=(
                 item["mcp_cold"] = (sid, "mcp", 0) not in recorded["mcp"]
                 item["mcp_warm"] = [r for r in reps[1:] if (sid, "mcp", r) not in recorded["mcp"]]
         out.append(item)
+    for item in out:
+        target = by_sid[item["scenario"]][1].get("warms")
+        if not target or target not in by_sid:
+            continue
+        titem = by_sid[target][0]
+        warm_up = by_sid[item["scenario"]][1]
+        for arm in DIRECT_ARMS:
+            if titem.get(arm) is True and item.get(arm) is False:
+                titem["rewarm"].setdefault(arm, []).append(item["scenario"])
+        mcp_left = item["mcp_cold"] is True or item["mcp_warm"]
+        if (item["mcp_cold"] is False and not mcp_left and not (warm_up.get("mcp") or {}).get("not_implemented")
+                and (titem["mcp_cold"] is True or titem["mcp_warm"])):
+            titem["rewarm"].setdefault("mcp", []).append(item["scenario"])
     return out
 
 
@@ -2302,8 +2375,10 @@ def _main(argv):
     beyond-status MANIFEST AREAS LIMIT [IDS]
                                  print the expected checks the stub cannot evaluate ('' for none)
     paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS [IDS]
-                                 print the paired loop's work: 'SID L R MC MW' per scenario (L, R, MC: 1 to
-                                 do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -)
+                                 print the paired loop's work: 'SID L R MC MW WL WR WM' per scenario (L, R, MC: 1
+                                 to do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -; WL,
+                                 WR, WM: the warm-ups to run again right before SID on direct-local, direct-remote
+                                 and the MCP arm, comma-separated, or -: paired_plan's rewarm)
     lock-check LOCK_JSON HOST_ID
                                  print 'stale|live|foreign REASON' for another invocation's lock
     host-id                      print this machine's stable id for the lock (host_id())
@@ -2347,9 +2422,11 @@ def _main(argv):
         ids = [i for i in (argv[7] if len(argv) > 7 else "").split(",") if i] or None
         flag = lambda v: "-" if v is None else ("1" if v else "0")  # noqa: E731
         for item in paired_plan(read_json(argv[1]), argv[2], areas, limit, int(argv[5]), arms, ids):
-            print("%s %s %s %s %s" % (item["scenario"], flag(item["direct-local"]), flag(item["direct-remote"]),
-                                      flag(item["mcp_cold"]),
-                                      ",".join(str(r) for r in item["mcp_warm"]) or "-"))
+            rw = item.get("rewarm") or {}
+            print("%s %s %s %s %s %s %s %s" % (
+                item["scenario"], flag(item["direct-local"]), flag(item["direct-remote"]), flag(item["mcp_cold"]),
+                ",".join(str(r) for r in item["mcp_warm"]) or "-", ",".join(rw.get("direct-local") or []) or "-",
+                ",".join(rw.get("direct-remote") or []) or "-", ",".join(rw.get("mcp") or []) or "-"))
         return 0
     if len(argv) >= 3 and argv[0] == "lock-check":
         try:
