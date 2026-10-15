@@ -7,10 +7,11 @@ For every arm under RUN_DIR/arms/ and every execution line of its executions.jso
 arm and repeat, as merge_run keeps it), the raw answer the runner recorded (raw/...json.gz: both runners keep the
 NORMALISED answer under `answer`, the MCP runner the shape of its normaliser, so no normaliser runs again) is
 judged again with checks.evaluate of DIR/checks.py (default: this directory), with what the runner passed:
-`previous` = the earlier repeats of the scenario on the arm, in repeat order, as {digest, time_limited} computed
-from their raw answers with the same checks (the recorded digest and time_limited where a raw answer is missing),
-and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), the MCP arm's service-measured
-backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
+`previous` = the earlier repeats of the scenario on the arm the host answered and the runner did not end in error
+(suite_common.feeds_previous of the recorded line, as both runners apply it), in repeat order, as {digest,
+time_limited} computed from their raw answers with the same checks (the recorded digest and time_limited where a raw
+answer is missing), and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), the MCP arm's
+service-measured backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
 checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: an
 outcome outside the vocabulary (suite_common.outcome_known; a warning, read as a failure downstream), `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
@@ -448,8 +449,11 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
                 out_rows.append(row)
                 continue
             route = scenario.get("route")
-            previous = [entries[sc.execution_key(o)] for o in sorted(repeats.get(sid, []), key=lambda o: o.get("repeat") or 0)
-                        if (o.get("repeat") or 0) < rep and sc.execution_key(o) in entries]
+            # an earlier repeat without the host's answer (no HTTP status) or ended in error by its runner holds a
+            # stand-in's digest: no earlier repeat (sc.feeds_previous, as run_direct.py and async's runner)
+            previous = [entries[sc.execution_key(o)]
+                        for o in sorted(repeats.get(sid, []), key=lambda o: o.get("repeat") or 0)
+                        if (o.get("repeat") or 0) < rep and sc.execution_key(o) in entries and sc.feeds_previous(o)]
             kwargs = {}
             if takes_prev:
                 kwargs["previous"] = previous

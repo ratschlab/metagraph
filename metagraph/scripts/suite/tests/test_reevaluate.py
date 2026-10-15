@@ -244,8 +244,8 @@ class Reevaluate(unittest.TestCase):
         with open(os.path.join(self.run_dir, "report.md")) as fh:
             self.assertNotIn("# Re-evaluation", fh.read())
 
-    def test_checks_of_another_directory(self):
-        # a checks.py of its own directory: it is passed what the runners pass, and the relations use it too
+    def probe_checks(self):
+        """A checks.py of its own directory whose one check states what it was passed (previous, client)."""
         d = os.path.join(self.tmp.name, "other")
         os.makedirs(d)
         with open(os.path.join(d, "checks.py"), "w") as fh:
@@ -261,6 +261,11 @@ class Reevaluate(unittest.TestCase):
                 def time_limited(answer):
                     return "TL" if "determinism" in json.dumps(answer.get("body")) else ""
             '''))
+        return d
+
+    def test_checks_of_another_directory(self):
+        # a checks.py of its own directory: it is passed what the runners pass, and the relations use it too
+        d = self.probe_checks()
         mark = reevaluate.reevaluate(self.run_dir, d)
         self.assertEqual(mark["checks"]["dir"], d)
         self.assertIsNone(mark["checks"]["commit"])
@@ -275,6 +280,38 @@ class Reevaluate(unittest.TestCase):
         merge_run.merge(self.run_dir, reevaluated=True)
         comp = cmp.compare(self.run_dir, cmp.load_by_design(""), reevaluated=True)
         self.assertEqual(comp["summary"]["relations"]["implementation"], "compare.py built-in")
+
+    def test_unanswered_repeat_feeds_no_previous(self):
+        # an earlier repeat the host never answered (no HTTP status) or its runner ended in error is no earlier repeat
+        # in `previous` (suite_common.feeds_previous, as run_direct.py applies it): its digest is a stand-in's, and
+        # the next repeat's deterministic would fail although the host answered nothing
+        ok = {"http": 200, "body": COMPLETE, "error": None}
+        added = {("direct-local", 0): ("error", {"http": 0, "body": None,
+                                                 "error": {"code": "transport", "text": "timed out"}}),
+                 ("direct-local", 1): ("pass", ok), ("direct-remote", 0): ("inconclusive", DEADLINE),
+                 ("direct-remote", 1): ("pass", ok)}
+        for (arm, rep), (outcome, answer) in sorted(added.items()):
+            raw = sc.raw_name("D-0001", arm, rep)
+            sc.append_jsonl(os.path.join(self.run_dir, "arms", arm, "executions.jsonl"), {
+                "run_id": "R", "scenario": "D-0001", "area": "D", "arm": arm, "repeat": rep, "route": "POST /pattern",
+                "started_utc": sc.iso_utc(T0 + 100 + rep), "ended_utc": sc.iso_utc(T0 + 101 + rep), "wall_ms": 50.0,
+                "http": answer["http"], "outcome": outcome, "checks": [], "answer_digest": "stand-in", "raw": raw,
+                "error": answer["error"]})
+            sc.write_gz_json(os.path.join(self.run_dir, "arms", arm, raw),
+                             {"scenario": "D-0001", "arm": arm, "repeat": rep, "answer": answer})
+        # the MCP arm's r0: answered (http 200), ended in error by its runner
+        path = os.path.join(self.run_dir, "arms", "mcp", "executions.jsonl")
+        rows, _ = sc.read_jsonl(path)
+        with open(path, "w") as fh:
+            for r in rows:
+                if (r["scenario"], r["repeat"]) == ("D-0001", 0):
+                    r["outcome"] = "error"
+                fh.write(json.dumps(r) + "\n")
+        reevaluate.reevaluate(self.run_dir, self.probe_checks())
+        previous = dict((arm, json.loads(self.lines(arm)[("D-0001", 1)]["checks"][0]["detail"])["previous"])
+                        for arm in ("direct-local", "direct-remote", "mcp"))
+        self.assertEqual(previous, {"direct-local": [], "mcp": [],
+                                    "direct-remote": [{"digest": "D503", "time_limited": ""}]})
 
     def test_run_suite_reevaluate_is_offline(self):
         env = dict(os.environ)

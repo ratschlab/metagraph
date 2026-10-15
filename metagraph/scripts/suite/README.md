@@ -1996,8 +1996,8 @@ by lane S6c; everything below was open.
   gate/policy_v4_rt_mcp.json reads the same 45 problems (GATE FAIL) before and after. The recorded v4 merge (not
   re-evaluated) gives the same 2913 outcomes and host-cache labels; its checks identity has no snapshot and states
   the sessions without a sha256 as unverified, which is no warning and no error for a run older than the snapshot.
-  The re-evaluation does not run run_direct: the `previous` rule changes nothing there until reevaluate.py applies
-  suite_common.feeds_previous too.
+  The re-evaluation does not run run_direct: reevaluate.py applies suite_common.feeds_previous since the
+  integration (section "Suite integration S7i").
 - 371 tests pass (1 skipped; 345 at 14552938), the follow-up of the lane's verification included (first-session
   flags and their negations, `tee -i`, the per-invocation sha256 keys); its re-evaluations of v3 / v4 and the gated
   v4 again move nothing.
@@ -2372,3 +2372,11 @@ one lane's verification left to another lane's file.
   error as well (the counts partition the executions). The report's Failures section lists it as "outcome '...'
   outside the vocabulary (read as error)"; the gate's outcome problem names it ("error (outcome '...' outside the
   vocabulary)"). The paired loop counts it as an error (`unknown` from mcp_step_result, lane S7r). FAIL either way.
+
+### The re-evaluation's earlier repeats (P3-run-measure-report-01 in reevaluate.py)
+- run_direct.py (lane S7r) and async's runner pass in `previous` only the earlier repeats the host answered (an HTTP
+  status) and the runner did not end in error (`suite_common.feeds_previous`): such a repeat's digest is its
+  stand-in's, and the next repeat's `deterministic` would fail although the host answered nothing. reevaluate.py
+  still passed every earlier repeat with an answer, so a run recorded with an errored repeat and then re-evaluated
+  got back the false determinism failure the recording avoided. It applies feeds_previous to the recorded line, as
+  the runners do (test_reevaluate's test_unanswered_repeat_feeds_no_previous).
