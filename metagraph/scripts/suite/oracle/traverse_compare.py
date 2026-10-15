@@ -368,12 +368,36 @@ def _before_first_merge(checks, prefix, res, view, m0):
                f'every blocked and hairpin step before the first merge at {m0}', _diff(want, got))
 
 
-def _end_reasons_after_merge(checks, prefix, view, w, seed, arm, m0):
+def _switch_costs(checks, prefix, view, arm_json, strategy):
+    """Every switch of a merged arm at the cost model's price (verification round 4): none under
+    forbid; under a constant cost every switch event's cost and every switched-in run's cost is
+    the value. Table and hll costs are not modelled."""
+    st = T.Strategy(strategy)
+    events = [(sid, e) for sid, s in view.segs.items() for e in s.get('events') or []
+              if e.get('type') == 'switch']
+    entered = [r for r in arm_json.get('runs') or [] if r.get('entered_by') == 'switch']
+    bad = []
+    if st.model == 'forbid':
+        bad = [('a switch under forbid', sid, e) for sid, e in events] + \
+              [('a switched-in run under forbid', r) for r in entered]
+    elif st.model == 'constant':
+        bad = [('a switch off the constant cost', sid, e) for sid, e in events
+               if abs(float(e.get('cost', -1)) - st.cost_value) > 1e-9] + \
+              [('a switched-in run off the constant cost', r) for r in entered
+               if abs(float(r.get('cost', -1)) - st.cost_value) > 1e-9]
+    checks.add(f'{prefix}.switch_costs', not bad, 'every switch at the cost model\'s price',
+               bad[:10])
+
+
+def _end_reasons_after_merge(checks, prefix, view, arm_json, w, seed, arm, m0):
     """After the first merge the label states are not modelled, but two end reasons are structural
     (SPEC 6.7, verification round 3): a label ends dead_end only at a graph tip (no successor at
     all), and label_lost only where every successor holding the label (k-mer support; trace is
-    refused with merge) has it re-entered by a switch on that step -- its own lineage there beaten
-    by a cheaper one. The keep oracle's own claims obey both on every v4final request."""
+    refused with merge) has it re-entered by a switch on that step, the re-entering run strictly
+    cheaper than the lost one -- SPEC 6.3 takes min(stay, switch) and the stay wins a tie, and a
+    run's loss is constant along it (round 4). The keep oracle's own claims obey both on every
+    v4final request."""
+    runs = arm_json.get('runs') or []
     bad = []
     for sid, s in view.segs.items():
         if sid not in view.walk:
@@ -395,6 +419,21 @@ def _end_reasons_after_merge(checks, prefix, view, w, seed, arm, m0):
                                                for k in view.switches)]
             if lone:
                 bad.append(('label_lost with a successor holding the label', walk, name, lone))
+                continue
+            if not held:
+                continue
+            lost = next((r for r in runs if r.get('label') == e.get('label')
+                         and r.get('segment') == sid and r.get('to_bp') == e['at_bp']), None)
+            for c in held:
+                back = [r for r in runs if r.get('label') == e.get('label')
+                        and r.get('entered_by') == 'switch' and r.get('from_bp') == e['at_bp']
+                        and r.get('segment') in view.walk
+                        and view.walk[r['segment']].startswith(walk + c)]
+                if lost is None or not back or min(float(r.get('loss', 0.0)) for r in back) >= \
+                        float(lost.get('loss', 0.0)) - 1e-9:
+                    bad.append(('a re-entry not strictly cheaper than the stay', walk, name, c,
+                                None if lost is None else lost.get('loss'),
+                                [r.get('loss') for r in back]))
     checks.add(f'{prefix}.end_reasons_after_merge', not bad,
                'dead_end only at a graph tip, label_lost only where no successor keeps the label',
                bad[:10])
@@ -623,7 +662,8 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
     if merged_segs:
         m0 = min(s.get('from_bp', 0) for s in merged_segs)
         _before_first_merge(checks, prefix, res, view, m0)
-        _end_reasons_after_merge(checks, prefix, view, w, seed, arm, m0)
+        _end_reasons_after_merge(checks, prefix, view, arm_json, w, seed, arm, m0)
+        _switch_costs(checks, prefix, view, arm_json, strategy or {})
     leaf_route = {}
     for p in arm_json.get('paths') or []:
         for e in p.get('end_labels') or []:

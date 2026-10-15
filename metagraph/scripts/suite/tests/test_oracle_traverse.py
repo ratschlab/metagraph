@@ -743,3 +743,73 @@ class EndReasonsAfterMerge(unittest.TestCase):
                  if e['type'] == 'label_end' and e['reason'] == 'max_extension_bp')
         e.update({'reason': 'label_lost', 'at_bp': 35})
         self.assertIn('traverse.right.end_reasons_after_merge', self.failed(a))
+
+
+def _reenter(aj, run_i, lost_seg, at, child_seg, src, cost, new_loss, leaf_path):
+    """The verifier's round-4 construction (verify/r4/widen_probe.py): run |run_i|'s label ends
+    label_lost at |at| on |lost_seg| and is re-entered there by a switch from |src| into
+    |child_seg|, the new run carrying the leaf's end label."""
+    r = aj['runs'][run_i]
+    lab = r['label']
+    r.update({'segment': lost_seg, 'to_bp': at, 'end_reason': 'label_lost'})
+    for s in aj['segments']:
+        if s['id'] == lost_seg:
+            s['events'] = sorted((s.get('events') or []) + [
+                {'at_bp': at, 'label': lab, 'reason': 'label_lost', 'structural_successors': 1,
+                 'type': 'label_end'}], key=lambda e: e['at_bp'])
+        if s['id'] == child_seg:
+            s['events'] = sorted((s.get('events') or []) + [
+                {'at_bp': at, 'cost': cost, 'from': src, 'to': lab, 'type': 'switch'}],
+                key=lambda e: e['at_bp'])
+    aj['runs'].append({'branches': 0, 'cost': cost, 'end_reason': 'max_extension_bp',
+                       'entered_by': 'switch', 'from': src, 'from_bp': at, 'label': lab,
+                       'loss': new_loss, 'route_bp': 0, 'segment': child_seg, 'to_bp': 40})
+    for p in aj['paths']:
+        if p['id'] == leaf_path:
+            for e in p['end_labels']:
+                if e['label'] == lab:
+                    e['run'] = len(aj['runs']) - 1
+                    e['loss'] = new_loss
+
+
+class ReEntryAfterMerge(unittest.TestCase):
+    """Verification round 4 (R4.2): a label_lost end where a successor still holds the label is
+    legal only if a strictly cheaper switch re-entered it there (SPEC 6.3: min(stay, switch), the
+    stay first on a tie), and every switch is at the cost model's price (none under forbid)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(MERGE_DATA) as f:
+            cls.items = {x['id']: x for x in json.load(f)['answers']}
+
+    def failed(self, rid, answer):
+        item = self.items[rid]
+        out = TC.compare_traverse(config_walker(item['config']), item['request'], 200, answer)
+        return {x['check'] for _, c in out for x in c.failed()}
+
+    def test_w2_a_re_entry_dearer_than_the_stay_fails(self):
+        """0076 (constant 1, budget 2, switch_on any): c_alpha ends label_lost at 30 holding the
+        next node and is re-entered from c_eps at loss 1 against its stay's 0."""
+        a = copy.deepcopy(self.items['T-canonical_k10-0076']['answer'])
+        aj = a['results'][0]['arms']['right']
+        names = {x['name']: i for i, x in enumerate(a['results'][0]['label_dict'])}
+        _reenter(aj, 0, 3, 30, 3, names['c_eps'], 1.0, 1.0, 0)
+        self.assertIn('traverse.right.end_reasons_after_merge',
+                      self.failed('T-canonical_k10-0076', a))
+
+    def test_w1_a_switch_under_forbid_after_a_merge_fails(self):
+        """0051 (forbid): c_alpha ends label_lost at 39 and is re-entered from c_eps at cost 0."""
+        a = copy.deepcopy(self.items['T-canonical_k10-0051']['answer'])
+        aj = a['results'][0]['arms']['left']
+        names = {x['name']: i for i, x in enumerate(a['results'][0]['label_dict'])}
+        _reenter(aj, 0, 4, 39, 6, names['c_eps'], 0.0, 0.0, 1)
+        failed = self.failed('T-canonical_k10-0051', a)
+        self.assertIn('traverse.left.switch_costs', failed)
+        self.assertIn('traverse.left.end_reasons_after_merge', failed)
+
+    def test_a_switch_off_the_constant_cost_fails(self):
+        a = copy.deepcopy(self.items['T-canonical_k10-0076']['answer'])
+        aj = a['results'][0]['arms']['right']
+        e = next(e for s in aj['segments'] for e in s['events'] if e['type'] == 'switch')
+        e['cost'] = 2.0
+        self.assertIn('traverse.right.switch_costs', self.failed('T-canonical_k10-0076', a))
