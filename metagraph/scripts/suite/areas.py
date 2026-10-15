@@ -191,16 +191,31 @@ def gen_R(ctx: Ctx) -> List[dict]:
                             "exactly, from the records; the columns' within the junction)" % (
                                 ra.key, rb.key, a_end, b_start),
                             "POST /resolve", req, truth, exp, tags=["positive", "junction", "index-empirical"]))
+    # SPEC-labeled-traversal-core §4.2 ranks a discovery by supported k-mers (ties by column id, then seq_id) and
+    # truncates only above max_labels, so the source, which supports every in-graph k-mer, is left out of a truncated
+    # list only in a tie at full support (resolve_discover_contains reads that from labels_truncated, lane S7c). At
+    # limit 1 the v4 windows of buc (column) and ser (header) were left out in such ties (8 and 2 labels at full
+    # support), which tested the tie and never the listing: their limit is the v4 tie plus one, so the source must be
+    # listed. Every discovery names max_labels and kind, at most 100: the MCP sends its limit and kind as they are and
+    # refuses above 100, the host's own default is 1,000 (the async session's constraint for v5).
+    full_support_tie_v4 = {"buc": {"total": 9, "full_support": 8}, "ser": {"total": 7, "full_support": 2}}
     nid = _ids("R-discover")
     for i, key in enumerate(["buc", "mge", "mpn", "ser", "mja", "sso"]):
         rec = ctx.rec(key)
         t = ctx.window(rng, rec, 100)
         kind = "column" if i % 2 == 0 else "header"
         limit = [1, 20, 100][i % 3]
+        tie = full_support_tie_v4.get(key)
+        if tie:
+            limit = tie["full_support"] + 1
+            t = dict(t, discover_v4=dict(tie, max_labels=1))
         req = resolve_request(t["window"], discover={"max_labels": limit, "kind": kind})
         lab = rec.column if kind == "column" else rec.accession
         exp = [OK, INV, ex("resolve_discover_contains", label=lab)]
-        out.append(scenario(nid(), "R", "discover %s labels (limit %d) on a %s window: the source present unless truncated" % (kind, limit, key),
+        out.append(scenario(nid(), "R", "discover %s labels (limit %d%s) on a %s window: the source listed (ranked by "
+                            "supported k-mers; a truncated list leaves it out only in a tie at full support)" % (
+                                kind, limit, ", above v4's full-support tie of %d" % tie["full_support"] if tie else "",
+                                key),
                             "POST /resolve", req, t, exp, timing_class="slow",
                             tags=["discover"] + (["smoke"] if i == 0 else [])))
     nid = _ids("R-trace")

@@ -319,6 +319,19 @@ def validate(scenarios) -> list:
             problems.append("%s: no status expectation" % s["id"])
         for e in s["expect"]:
             problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
+        disc = s["request"].get("discover") if s["route"] == "POST /resolve" and isinstance(s["request"], dict) else None
+        if isinstance(disc, dict) and _status_ok(s):
+            # one question on both arms: the MCP sends its limit and kind as they are (20 when none, refused above 100),
+            # the host's default is 1,000 (the async session's constraint for v5)
+            ml = disc.get("max_labels")
+            by = (s.get("mcp") or {}).get("by_design") or []
+            if "max_labels" not in disc or "kind" not in disc:
+                problems.append("%s: a discovery that does not name max_labels and kind" % s["id"])
+            elif isinstance(ml, int) and ml > 100 and "resolve.discover_limit_above_100_host_answers" not in by:
+                problems.append("%s: discover.max_labels %d above the MCP's 100 outside its by-design case" % (s["id"], ml))
+            elif "tool" in s["mcp"] and (s["mcp"]["arguments"].get("limit") != ml
+                                         or s["mcp"]["arguments"].get("kind") != disc.get("kind")):
+                problems.append("%s: the MCP arguments do not state the discovery's limit and kind" % s["id"])
         cb = (s.get("truth") or {}).get("chance_bound") if isinstance(s.get("truth"), dict) else None
         if cb and cb.get("p", 0) > areas.CHANCE_BOUND_MAX:
             problems.append("%s: a negative control whose chance bound %g exceeds %g" % (
@@ -329,6 +342,13 @@ def validate(scenarios) -> list:
                 if f not in req:
                     problems.append("%s: /pattern request without %s" % (s["id"], f))
     return problems
+
+
+def _status_ok(s: dict) -> bool:
+    """Whether the scenario's status expectation admits a 200 (a request answered, not a refusal)."""
+    st = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
+    w = st.get("http", 200)
+    return 200 in (w if isinstance(w, list) else [w])
 
 
 def smoke_of(manifest: dict) -> dict:

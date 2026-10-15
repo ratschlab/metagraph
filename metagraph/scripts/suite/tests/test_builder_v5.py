@@ -556,5 +556,32 @@ class NothingDropsSilently(unittest.TestCase):
             self.assertTrue(table in built_tables or "X-table1 table %d" % table in skipped, table)
 
 
+class Discoveries(unittest.TestCase):
+    """Item 8 (lane S-checks' hand-off) and the async session's constraint: R-discover-0001/-0004 ask above v4's
+    full-support tie, so the source is listed; every discovery names max_labels (at most 100 but for the by-design
+    case) and kind, on both arms."""
+
+    def test_validation(self):
+        import build_manifest as bm
+        mk = lambda d: ml.scenario("R-x-0001", "R", "t", "POST /resolve", ml.resolve_request("A" * 100, discover=d),  # noqa
+                                   {}, [{"check": "status", "args": {"http": 200}}])
+        self.assertTrue(any("max_labels and kind" in p for p in bm.validate([mk({"kind": "column"})])))
+        self.assertTrue(any("max_labels and kind" in p for p in bm.validate([mk({"max_labels": 5})])))
+        self.assertEqual([p for p in bm.validate([mk({"max_labels": 5, "kind": "column"})]) if "discover" in p], [])
+        self.assertEqual([p for p in bm.validate([mk({"max_labels": 150, "kind": "column"})]) if "discover" in p], [])
+        bad = mk({"max_labels": 150, "kind": "column"})
+        bad["mcp"]["by_design"] = ["resolve.job_path"]
+        self.assertTrue(any("above the MCP's 100" in p for p in bm.validate([bad])))
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_limits(self):
+        s = by_id(built({"R"}))
+        for sid in ("R-discover-0001", "R-discover-0004"):
+            d = s[sid]["request"]["discover"]
+            self.assertEqual(d["max_labels"], s[sid]["truth"]["discover_v4"]["full_support"] + 1, sid)
+            self.assertLessEqual(d["max_labels"], 100)
+            self.assertNotIn("unless truncated", s[sid]["title"])
+
+
 if __name__ == "__main__":
     unittest.main()
