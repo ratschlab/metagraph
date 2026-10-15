@@ -329,7 +329,16 @@ def mutations_for_traverse(request, answer, position, walker=None):
         segs = aj.get('segments') or []
         children = {s['id']: [c['id'] for c in segs if s['id'] in (c.get('parents') or [])]
                     for s in segs}
-        if aj.get('completeness_scope') == 'united_history':
+        merged = any(len(s.get('parents') or []) > 1 for s in segs)
+        if merged:
+            for si, s in enumerate(segs):
+                if any(e.get('type') == 'reconverge' for e in s.get('events') or []):
+                    a, r = mutant()
+                    r['arms'][arm]['segments'][si]['events'] = [
+                        e for e in s['events'] if e.get('type') != 'reconverge']
+                    yield f'{arm}:drop_reconverge', (f'{p}.reconverge_events',), a
+                    break
+        if aj.get('completeness_scope') == 'united_history' and merged:
             # merge: only the invariants are asserted (traverse_compare._merge_invariants)
             withseq = [i for i, s in enumerate(segs) if s.get('sequence')]
             if withseq:

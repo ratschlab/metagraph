@@ -429,3 +429,54 @@ class ConstantCostReasons(unittest.TestCase):
         anyst = T.Strategy({'labels': {'change_cost': {'model': 'constant', 'value': 0.5},
                                        'loss_budget': 2, 'switch_on': 'any'}})
         self.assertEqual('sw2', T.derive_entry(w, anyst, by_name, sigma, lab['sw3'], v3, 5).pred)
+
+
+class MergeArms(unittest.TestCase):
+    """Verification H5: a merge arm that merged nothing is held strictly to the keep walker; one
+    that merged keeps its invariants and states a reconverge event at each merge."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(DATA) as f:
+            cls.answers = json.load(f)['answers']
+
+    def arms(self, merged):
+        for item in self.answers:
+            for res in item['answer']['results']:
+                for arm, aj in (res.get('arms') or {}).items():
+                    if aj.get('completeness_scope') != 'united_history':
+                        continue
+                    did = any(len(s.get('parents') or []) > 1 for s in aj['segments'])
+                    if did == merged and aj.get('status') == 'complete':
+                        yield item, arm
+
+    def test_g8_a_wrong_reason_in_a_merge_arm_that_merged_nothing_fails(self):
+        n = 0
+        for item, arm in self.arms(merged=False):
+            a = copy.deepcopy(item['answer'])
+            runs = [r for res in a['results'] for r in res['arms'][arm]['runs']
+                    if r['end_reason'] in ('label_lost', 'branch', 'max_extension_bp')]
+            if not runs:
+                continue
+            runs[0]['end_reason'] = 'dead_end'
+            w = config_walker(item['config'])
+            out = TC.compare_traverse(w, item['request'], 200, a)
+            self.assertTrue(any(c.outcome() == C.FAIL for _, c in out), item['id'])
+            n += 1
+        self.assertGreater(n, 0)
+
+    def test_a_merge_without_its_reconverge_event_fails(self):
+        n = 0
+        for item, arm in self.arms(merged=True):
+            w = config_walker(item['config'])
+            self.assertFalse(any(c.outcome() == C.FAIL for _, c in
+                                 TC.compare_traverse(w, item['request'], 200, item['answer'])))
+            a = copy.deepcopy(item['answer'])
+            for res in a['results']:
+                for s in res['arms'][arm]['segments']:
+                    s['events'] = [e for e in s['events'] if e['type'] != 'reconverge']
+            out = TC.compare_traverse(w, item['request'], 200, a)
+            self.assertIn(f'traverse.{arm}.reconverge_events',
+                          {x['check'] for _, c in out for x in c.failed()})
+            n += 1
+        self.assertGreater(n, 0)

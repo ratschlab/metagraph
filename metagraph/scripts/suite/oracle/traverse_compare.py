@@ -214,7 +214,12 @@ def compare_arm(checks, w, seed, arm, arm_json, names, strategy, labels, extra, 
         _compare_annotate(checks, prefix, trie, view, complete, ctb)
     else:
         res = T.constrain_walk(w, seed, arm, labels, st, extra)
-        if keep:
+        merged = any(len(s.get('parents') or []) > 1 for s in arm_json.get('segments') or [])
+        if keep or not merged:
+            if not keep:
+                # merge with no merge done: the united history is each path's own (SPEC 6.5,
+                # 6.10), so the arm is held to the keep walker strictly (verification H5)
+                _scope_limitation(checks, prefix, arm_json, 0)
             _compare_constrain(checks, prefix, res, view, complete, ctb)
         else:
             _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm,
@@ -328,6 +333,13 @@ def served_claims(claims):
     return {(c[0], c[1], T.served(c[2])) + tuple(c[3:]) for c in claims}
 
 
+def _scope_limitation(checks, prefix, arm_json, merges):
+    limits = {l.get('kind'): l for l in arm_json.get('limitations') or []}
+    checks.add(f'{prefix}.scope_limitation', 'scope' in limits
+               and limits['scope'].get('observed') == merges,
+               f'a scope limitation observing {merges} merges', limits.get('scope'))
+
+
 def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name):
     """on_reconverge merge: the united history is not modelled (SPEC 6.10); its invariants are.
     Under merge the displayed walk follows first parents (SPEC 7.1), so a run's walk is the
@@ -338,11 +350,16 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
     got_walks = view.all_walks()
     checks.add(f'{prefix}.sound', got_walks <= res.walks, 'every walk an oracle walk',
                _diff(set(), got_walks - res.walks))
-    limits = {l.get('kind'): l for l in arm_json.get('limitations') or []}
-    merges = sum(1 for s in arm_json.get('segments') or [] if len(s.get('parents') or []) > 1)
-    checks.add(f'{prefix}.scope_limitation', 'scope' in limits
-               and limits['scope'].get('observed') == merges,
-               f'a scope limitation observing {merges} merges', limits.get('scope'))
+    segs = arm_json.get('segments') or []
+    merged_segs = [s for s in segs if len(s.get('parents') or []) > 1]
+    _scope_limitation(checks, prefix, arm_json, len(merged_segs))
+    # SPEC 6.5: a reconverge event {at_bp, segments} on each merged segment, at its start, naming
+    # its parents; and no reconverge event elsewhere
+    want = {(s['id'], s.get('from_bp'), tuple(s.get('parents'))) for s in merged_segs}
+    got = {(s['id'], e.get('at_bp'), tuple(e.get('segments') or ())) for s in segs
+           for e in s.get('events') or [] if e.get('type') == 'reconverge'}
+    checks.add(f'{prefix}.reconverge_events', got == want,
+               'a reconverge event at each merge, naming its parents', _diff(want, got))
     leaf_route = {}
     for p in arm_json.get('paths') or []:
         for e in p.get('end_labels') or []:
