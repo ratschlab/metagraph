@@ -3030,6 +3030,18 @@ default, the gate policy). What changed, by finding:
   -0004 before R-budget. Ids are fixed per target (`areas.WARM_IDS`). This assumes each arm runs scenarios in manifest
   order (the paired loop and the async runner do). The builder refuses a run-unique scenario expecting its 200 on the
   paired plan's warm-repeat index (`warm_repeat_problems`: T-attempts-0002 would meet its own 409).
+- **The resume rule of a warm-up**: after an interruption between a warm-up and its target, a resume runs the warm-up
+  again right before the target on every arm that runs the target (`suite_common.paired_plan` `rewarm`, decided
+  before anything of the invocation runs; `suite_common.resume_rewarms` inside a runner's scope). The paired loop
+  names the warm-up with the target in that arm's step (`run_direct.py --only W,T`; the MCP runner `--ids W,T`, on
+  the target's first MCP step left), the sequential mode puts it into the target's first pass; a runner applies the
+  rule only within its scope (`--only`, the ids of one MCP call), so a step of the target alone never re-runs its
+  warm-up. The re-run is a line with the warm-up's id and repeat (run_direct.py: repeat 0; the MCP runner: the step's
+  repeat), `rerun_for_resume` true and `rerun_target`, on the line and in its raw record (run_direct.py: a raw file of
+  its own); the earlier execution stays. `merge_run.py` never lets it replace its key: it goes under the target's
+  `warm_up_reruns` (the first execution of the target on that arm after it, with `before_s`) and into run.json
+  `reruns_for_resume`; `reevaluate.py` carries it unjudged, compare, the report (a table beside the timing) and the
+  gate judge the original, so it is never a second outcome, a duplicate, a missing or an extra execution.
 - **T-budget-0003** (G18): T-attempts-0002's eco seed, whose seed phase took 148,723 work units in v4
   (usage.per_seed[0].work_seed), under 300,000: partial walks only. **T-labels-0004** (V02): 4,096 MB for its 6,181
   derived headers (counts hard-coded from the v4 answers, `derived_labels_v4`); T-labels-0006 drops the override and
