@@ -754,6 +754,8 @@ class WarmRepeatGuard(unittest.TestCase):
         self.assertEqual(bm.warm_repeat_problems(scs), [])
         scs[20]["run_unique"] = ["attempt_id"]
         self.assertEqual(len(bm.warm_repeat_problems(scs)), 1)
+        scs[20]["expect"] = [{"check": "status", "args": {"http": 409}}]     # the duplicate meets its 409 again
+        self.assertEqual(bm.warm_repeat_problems(scs), [])
         self.assertEqual(sc_.repeat_count(20, {"repeat": 1}, bm.WARM_EVERY), 2)   # the rule the guard mirrors
 
     @unittest.skipUnless(have_cache(), "no record cache")

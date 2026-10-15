@@ -376,12 +376,17 @@ WARM_EVERY = 10
 
 
 def warm_repeat_problems(scenarios, warm_every: int = WARM_EVERY) -> list:
-    """A run-unique scenario (run_unique: its id is the run's and the arm's) must not get the warm repeat: the repeat
-    would resend the id and meet the retained attempt's 409 (T-attempts-0002 expects the 200; VERIFY-V5A). Checked on
-    every build, the frozen one included."""
+    """A run-unique scenario (run_unique: its id is the run's and the arm's) that expects the attempt's 200 must not get
+    the warm repeat: the repeat would resend the id and meet the retained attempt's 409 (T-attempts-0002; VERIFY-V5A).
+    One that expects the 409 (T-attempts-0003) meets it again. Checked on every build, the frozen one included."""
+    def wants_200(s):
+        st = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
+        w = st.get("http", 200)
+        return 200 in (w if isinstance(w, list) else [w])
     return ["%s: run-unique at manifest index %d, which the warm repeat (every %dth scenario) would repeat" % (
                 s["id"], i, warm_every)
-            for i, s in enumerate(scenarios) if s.get("run_unique") and warm_every and i % warm_every == 0]
+            for i, s in enumerate(scenarios)
+            if s.get("run_unique") and wants_200(s) and warm_every and i % warm_every == 0]
 
 
 def _table_cases() -> set:
