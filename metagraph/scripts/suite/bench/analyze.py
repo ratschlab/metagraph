@@ -32,10 +32,12 @@ resampling the queries within each mode, then each resampled query's cycles (blo
 Six repeats support median comparisons: no tail percentile (p90, p99) is computed for any query or arm. The arm
 order's effect is shown as each arm's median wall relative to its query median by position in the triple.
 
-THE PERFORMANCE VERDICT is emitted only when the load guard finds every block clean (load_guard.py), every scheduled
-step is recorded, the host's release and server instance and the MCP service's capabilities did not change during
-the run, and every query has at least --min-success (5 of 6) successes on every arm. Otherwise it is refused with
-the reasons, and the numbers are descriptive of an uncontrolled run.
+THE PERFORMANCE VERDICT is emitted only when the load guard finds every block clean (load_guard.py) with the
+thresholds the run recorded (an override may only tighten them: --sra-max / --load1-max above the run's, or
+--allow-missing-sra where the run did not allow it, refuse the verdict), every scheduled step is recorded, the
+host's release and server instance and the MCP service's capabilities did not change during the run, and every
+query has at least --min-success (5 of 6) successes on every arm. Otherwise it is refused with the reasons, and the
+numbers are descriptive of an uncontrolled run.
 
 WITH --baseline (release A vs B): both runs must emit a verdict, measure the same panel (panel_sha256), cycles and
 arms; per arm and query the ratio of the medians (candidate / baseline), aggregated with the panel's weights, with a
@@ -374,6 +376,8 @@ def analyse(run_dir, boot=DEFAULT_BOOT, boot_seed=None, min_success=DEFAULT_MIN_
     refused = []
     if not run["panel_ok"]:
         refused.append("the run's panel.json does not match its identity (panel_sha256, bench.json)")
+    if guard["loosened"]:
+        refused.append("thresholds loosened after the run: %s" % "; ".join(guard["loosened"]))
     if guard["verdict"] != "clean":
         refused.append("load guard: %s (loaded blocks %s, unguarded blocks %s)" % (
             guard["verdict"], ",".join(guard["loaded"]) or "-", ",".join(guard["unguarded"]) or "-"))
@@ -493,6 +497,10 @@ def compare(cand_dir, base_dir, boot=DEFAULT_BOOT, boot_seed=None, tolerance=DEF
         overall = "pass"
     return {"candidate": cand["run_id"], "baseline": base["run_id"], "candidate_dir": cand["run_dir"],
             "baseline_dir": base["run_dir"], "tolerance": tolerance, "boot": boot, "boot_seed": boot_seed,
+            "guard": {"overrides": dict((k, v) for k, v in (guard_overrides or {}).items() if v is not None),
+                      "candidate": cand["load_guard"]["limits"], "baseline": base["load_guard"]["limits"],
+                      "candidate_loosened": cand["load_guard"]["loosened"],
+                      "baseline_loosened": base["load_guard"]["loosened"]},
             "verdict": overall, "refused": refused, "arms": per_arm,
             "note": "per arm the ratio of the per-query medians (candidate / baseline), aggregated with the panel's "
                     "weights; the interval resamples queries within modes and each run's cycles independently"}
@@ -527,7 +535,11 @@ def report_md(res):
             "Thresholds: sra_all CPU <= %s %%, load1 <= %s, coverage gaps <= %s s, windows padded %s s%s." % (
                 g["limits"]["sra_all_cpu_pct_max"], g["limits"]["host_load1_max"], g["limits"]["max_gap_s"],
                 g["limits"]["pad_s"], ", a missing sra_all reading counts 0 %" if g["limits"]["allow_missing_sra"]
-                else ""), "", "| block | verdict | samples | sra_all max % | load1 max | reason |",
+                else ""),
+            "Overrides: %s%s." % (json.dumps(g.get("overrides") or {}, sort_keys=True),
+                                  "; loosened after the run (no verdict): %s" % "; ".join(g["loosened"])
+                                  if g.get("loosened") else ""),
+            "", "| block | verdict | samples | sra_all max % | load1 max | reason |",
             "|---|---|---|---|---|---|"]
     for b, x in g["blocks"].items():
         out.append("| %s | %s | %d | %s | %s | %s |" % (
@@ -591,7 +603,8 @@ def report_md(res):
 
 def comparison_md(cmp_):
     out = ["# Bench comparison: %s vs %s" % (cmp_["candidate"], cmp_["baseline"]), "",
-           "**Verdict: %s** (tolerance %s; candidate / baseline per arm)." % (cmp_["verdict"], cmp_["tolerance"])]
+           "**Verdict: %s** (tolerance %s; candidate / baseline per arm)." % (cmp_["verdict"], cmp_["tolerance"]),
+           "", "Load-guard overrides: %s." % json.dumps(cmp_["guard"]["overrides"], sort_keys=True), ""]
     for r in cmp_["refused"]:
         out.append("- %s" % r)
     out += ["", "| arm | queries | geometric mean ratio | 95 % interval | verdict |", "|---|---|---|---|---|"]

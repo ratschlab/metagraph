@@ -145,6 +145,30 @@ class AnalyseRuns(unittest.TestCase):
                         cmp_["refused"])
         self.assertIn("P-q-0000 direct-local", " ".join(cmp_["refused"]))
 
+    def test_thresholds_may_only_tighten_after_the_run(self):
+        # D3: a loaded run stays without a verdict whatever limit is passed afterwards; a tighter one may refuse more
+        loaded = synthetic_run(self.d, "loaded", self.panel, base_wall, sra=7700.0)
+        res, _ = analyze.analyse(loaded, boot=0, guard_overrides={"sra_all_cpu_pct_max": 10000.0})
+        self.assertFalse(res["verdict"]["emitted"])
+        self.assertTrue(any(r.startswith("thresholds loosened after the run") for r in res["verdict"]["refused"]),
+                        res["verdict"]["refused"])
+        for loosen in ({"host_load1_max": 99.0}, {"max_gap_s": 60.0}, {"pad_s": 0.0}, {"allow_missing_sra": True}):
+            clean = synthetic_run(self.d, "clean-%s" % sorted(loosen)[0], self.panel, base_wall)
+            res, _ = analyze.analyse(clean, boot=0, guard_overrides=loosen)
+            self.assertFalse(res["verdict"]["emitted"], loosen)
+        clean = synthetic_run(self.d, "tight", self.panel, base_wall)
+        res, _ = analyze.analyse(clean, boot=0, guard_overrides={"host_load1_max": 5.0, "sra_all_cpu_pct_max": 50.0})
+        self.assertTrue(res["verdict"]["emitted"], res["verdict"]["refused"])
+        res, _ = analyze.analyse(clean, boot=0, guard_overrides={"host_load1_max": 0.5})
+        self.assertEqual(res["load_guard"]["verdict"], "loaded")
+        # the comparison records the overrides and refuses a loosened one
+        a = synthetic_run(self.d, "a", self.panel, base_wall)
+        cmp_ = analyze.compare(loaded, a, boot=50, boot_seed=1, guard_overrides={"sra_all_cpu_pct_max": 10000.0})
+        self.assertEqual(cmp_["verdict"], "refused")
+        self.assertEqual(cmp_["guard"]["overrides"], {"sra_all_cpu_pct_max": 10000.0})
+        self.assertEqual(cmp_["guard"]["candidate"]["sra_all_cpu_pct_max"], 10000.0)
+        self.assertTrue(cmp_["guard"]["candidate_loosened"])
+
     def test_heterogeneous_change_is_inconclusive(self):
         # half the queries 30 % slower, half 20 % faster: the panel's mean barely moves, its interval spans both
         a = synthetic_run(self.d, "a", self.panel, base_wall)

@@ -21,7 +21,8 @@ executions themselves). A block a resume finished later has two windows. Executi
 (direct-local) are stamped with mex's clock, the others with the orchestrator's; samples carry mex's clock: the run's
 recorded clock offset (bench.json) puts all on the orchestrator's. The run's verdict is clean only when every block
 is clean; analyze.py emits a performance verdict only then. Thresholds default to the run's own (bench.json `guard`),
-and what was used is part of every verdict. Stdlib only.
+and what was used is part of every verdict; an override may only tighten the run's own (a loosened one is
+listed under `loosened`, and analyze.py then emits no verdict). Stdlib only.
 """
 
 import argparse
@@ -218,13 +219,37 @@ def run_blocks(run_dir, offset_s):
     return blocks
 
 
+def loosened(recorded, overrides):
+    """The overrides that loosen the run's recorded thresholds (a limit raised, the coverage gap widened, the padding
+    narrowed, a missing Logan reading newly allowed), as sentences. Only a tightening may follow a run: a verdict
+    must rest on the thresholds the run declared before it saw its own samples."""
+    out = []
+    for key, v in sorted((overrides or {}).items()):
+        if v is None or key not in DEFAULTS:
+            continue
+        r = recorded[key]
+        if key == "pad_s":
+            worse = v < r
+        elif key == "allow_missing_sra":
+            worse = bool(v) and not r
+        else:
+            worse = v > r
+        if worse:
+            out.append("%s %s (the run's %s)" % (key, v, r))
+    return out
+
+
 def judge_run(run_dir, overrides=None):
-    """The load guard's verdict on a bench run directory."""
+    """The load guard's verdict on a bench run directory: with the run's recorded thresholds (bench.json `guard`),
+    and any override applied; `loosened` lists the overrides that loosen them (analyze.py then emits no verdict)."""
     bench = sc.read_json(os.path.join(run_dir, "bench.json")) or {}
+    recorded = thresholds(None, bench.get("guard"))
     limits = thresholds(overrides, bench.get("guard"))
     offset = clock_offset(bench)
     out = judge_blocks(run_blocks(run_dir, offset), read_samples(run_dir), limits, offset)
     out["overrides"] = dict((k, v) for k, v in (overrides or {}).items() if v is not None)
+    out["recorded_limits"] = recorded
+    out["loosened"] = loosened(recorded, overrides)
     return out
 
 
@@ -249,7 +274,9 @@ def main(argv=None):
             print("block %s: %s (%s; %d samples, sra_all max %s %%, load1 max %s)" % (
                 b, v["verdict"], v["reason"], v["samples"], v["sra_all_cpu_pct_max"], v["host_load1_max"]))
         print("run: %s" % res["verdict"])
-    return 0 if res["verdict"] == "clean" else 1
+        if res["loosened"]:
+            print("thresholds loosened after the run: %s: no verdict may rest on this" % "; ".join(res["loosened"]))
+    return 0 if res["verdict"] == "clean" and not res["loosened"] else 1
 
 
 if __name__ == "__main__":
