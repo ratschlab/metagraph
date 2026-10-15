@@ -2262,7 +2262,7 @@ def _split_by_keys(checks, keys):
     return picked, rest
 
 
-def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
+def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, marks=None):
     """The per-check agreement of MCP executions with the reference direct arm (DESIGN §1.3; ref: {repeat: line},
     each MCP repeat against the reference's same repeat, else its first): `explained` {repeat: item indices} the
     check ITEMS an answered / clamped case explains on that repeat (E of explained_outcome, B5b-06), compared apart
@@ -2273,8 +2273,13 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
     reference outcome is then that of the lines the comparison used (a reference execution every compared item of
     which fell back is left out, the other arm's executions that gave an item are in). The class: disagree (a
     differing check outside E, or one side alone errored), service_by_design (only items of E differ),
-    not_comparable (no check compared), agree."""
+    not_comparable (no check compared), agree. |marks| (suite_common.mcp_check_marks of the scenario): an MCP item a
+    property-level mark sets aside (suite_common.marked_aside: the marked check read not_exposed) is compared with
+    nothing, neither skipped as not exposed nor unmatched, and is listed as `marked_checks` {repeat, check, mark}
+    (`checks_marked` their number) when there is one."""
     explained = explained or {}
+    marks = marks or {}
+    marked = []
     ref0 = ref[min(ref)]
     alt0 = alt[min(alt)] if alt else None
     differing, by_design, unmatched = [], [], set()
@@ -2306,6 +2311,13 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
             for x in d_e:
                 x["repeat"] = r.get("repeat")
             by_design.extend(d_e)
+        aside = set((c.get("check"), k) for c, k in _with_occurrence(mine)
+                    if sc.marked_aside(None, "mcp", c, marks) is not None)
+        if aside:
+            _, mine = _split_by_keys(mine, aside)
+            _, theirs = _split_by_keys(theirs, aside)
+            marked.extend({"repeat": r.get("repeat"), "check": name, "mark": marks[name]["mark"]}
+                          for name, _ in sorted(aside, key=lambda x: (str(x[0]), x[1])))
         d, u, n, ne, ni = compare_checks(mine, theirs)
         compared += n
         not_exposed += ne
@@ -2340,6 +2352,8 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
         out["explained_differences"] = by_design
     if fallbacks:
         out.update(reference_alternative=alt_arm, reference_fallbacks=fallbacks)
+    if marked:
+        out.update(checks_marked=len(marked), marked_checks=marked)
     return out
 
 
@@ -2498,7 +2512,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                 rest = {"class": "no_direct_reference",
                         "mcp_outcome": aggregate_outcome([r.get("outcome") for r in compared_lines])}
             elif compared_lines:
-                rest = check_agreement(compared_lines, k_ref, k_arm, explained, o_ref, o_arm)
+                rest = check_agreement(compared_lines, k_ref, k_arm, explained, o_ref, o_arm,
+                                       sc.mcp_check_marks(scenario))
     if rest is not None:
         if answered:
             rest["by_design_notes"] = dict((str(k), v) for k, v in sorted(answered.items()))
@@ -3094,6 +3109,9 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             mcp_summary["checks_compared"] += ma.get("checks_compared") or 0
             mcp_summary["checks_not_exposed"] += ma.get("checks_not_exposed") or 0
             mcp_summary["checks_inconclusive"] += ma.get("checks_inconclusive") or 0
+            if ma.get("checks_marked"):
+                # set aside by a property-level mark (v5 manifests); absent for a run without one
+                mcp_summary["checks_marked"] = mcp_summary.get("checks_marked", 0) + ma["checks_marked"]
             if ma["class"] == "service_by_design" and "verified" in ma:
                 mcp_summary["by_design_verified" if ma["verified"] else "by_design_unverified"] += 1
             elif ma["class"] == "service_by_design":

@@ -2778,3 +2778,34 @@ absence of a failure for verification.
   direct-local alone (the shipped policy, 384 required MCP executions, cannot reach it).
 - v3 FAIL and v4 FINDINGS are unchanged (every arm has passes); the v4 copy gated with the shipped policy leads with
   GATE FAIL.
+
+### Property-level marks of what the MCP cannot show (manifest v5; owner decision 2026-10-15)
+From v5 the manifest marks what the MCP cannot show by its true class: `mcp.not_implemented` (the whole scenario, as
+before), `mcp.not_implemented_checks` [{check, reason}] (a missing MCP feature at property level, e.g. the label
+dictionary of T-labels-0003 / -0005 / -0006; the rest of the scenario stays tested via MCP) and
+`mcp.by_design_checks` [{check, case}] (a deliberate service behaviour at property level, e.g. T-edge-0008's
+answer_fields under traverse.duplicate_seeds). Lane V5 adds the fields and gate_policy's derivation; the names are
+read in one place, suite_common.MCP_CHECK_MARKS.
+- **What a mark sets aside** (suite_common.marked_aside / unmarked_checks): on the MCP arm, a marked check that
+  reads not_exposed, the reading the mark declares. A marked check that reads anything else (pass, fail, finding,
+  inconclusive) is judged as any check: a mark hides no result.
+- **Outcome.** reevaluate.py's outcome rule (and an answered case's verdict) and merge_run.stricter_outcomes judge an
+  MCP execution on its checks less the set-aside items, so a marked check never makes it inconclusive ("every
+  property not exposed") and so never untested in the report.
+- **Gate.** A marked check the MCP read not_exposed, or did not read, is no required-property problem, and with
+  require_agreement no property "not compared with the reference" (gate.uncompared_properties leaves it out).
+- **Comparison.** compare.check_agreement compares a set-aside item with nothing (removed from both sides by check
+  and occurrence): it is neither counted as skipped (checks_not_exposed) nor unmatched, and the scenario's
+  mcp_agreement lists it as `marked_checks` [{repeat, check, mark}] with `checks_marked`, summed in the summary;
+  report.agreement_depth neither compares nor skips it (a reference failure of it is still named as hidden).
+- **Report.** The Agreement section lists the marks per scenario under "Not implemented yet via MCP (property)" and
+  "Service-side by design (property)" (reason or case, the MCP executions it was set aside on, any other reading
+  "judged as usual"), the agreement paragraph counts the set-aside items, and the verdict section has one line
+  counting the marked checks by class.
+- A manifest without the fields (v1-v4) is judged exactly as before: none of these keys or lines appears, and a
+  not_exposed check that is not marked keeps its handling (skipped, partial depth, the gate's property problem
+  unless the policy lists it as not required).
+- **async's runner mirrors** the outcome part: its outcome rule judges an MCP execution on
+  shared_rule("unmarked_checks")(scenario, "mcp", checks); until then a recorded line it made inconclusive by a
+  marked check stays so in the recorded set (merge_run only makes outcomes stricter) and is corrected by a
+  re-evaluation.

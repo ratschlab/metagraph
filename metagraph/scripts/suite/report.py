@@ -333,6 +333,10 @@ NO_PASS_LABELS = (("not_implemented_mcp", "not implemented via MCP"), ("service_
                   ("inconclusive", "inconclusive"))
 
 
+# how the verdict names the property-level marks (suite_common.MCP_CHECK_MARKS)
+MARK_WORDS = {"not_implemented": "not implemented yet via MCP", "by_design": "service-side by design"}
+
+
 def no_pass_text(outcomes):
     """'2 not implemented via MCP, 1 service-side by design, 1 inconclusive' of an {outcome: executions} that holds
     no pass (every other outcome by its name)."""
@@ -451,6 +455,18 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         if o.get(cmp.OTHER_OUTCOME):
             lines[-1] = lines[-1][:-1] + "; %d with an outcome outside the vocabulary (read as failures)." % (
                 o[cmp.OTHER_OUTCOME])
+    ran_mcp = set(r.get("scenario") for r in rows if r.get("arm") == "mcp")
+    marked = {}
+    for sid in sorted(ran_mcp, key=str):
+        for name, m in sc.mcp_check_marks(scen.get(sid)).items():
+            marked.setdefault(m.get("mark"), []).append((sid, name))
+    if marked:
+        # what the MCP cannot show at property level: set aside by the manifest's marks, listed under Agreement
+        lines.append("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed; listed "
+                     "under Agreement): %s." % "; ".join(
+                         "%d check(s) of %d scenario(s) %s" % (len(marked[mark]), len(set(x[0] for x in marked[mark])),
+                                                               MARK_WORDS.get(mark, mark))
+                         for mark, _ in sc.MCP_CHECK_MARK_LABELS if marked.get(mark)))
     outside = s.get("outcomes_outside_vocabulary") or []
     if outside:
         lines.append("- Outcomes outside the vocabulary (%s), read as failures: %s%s." % (
@@ -771,14 +787,16 @@ DEPTH_CLASSES = (
 JUDGED = ("pass", "fail", "finding")
 
 
-def agreement_depth(comp, rows, is_property):
+def agreement_depth(comp, rows, is_property, manifest=None):
     """How much an MCP `agree` establishes, per scenario (VERIFY-B): compare's agree means the checks both arms
     evaluated agree, not that the answers are equal or right. Each agreeing scenario's property checks
     (checks.is_property; the generic ones, e.g. budget_respected which the MCP never sees, do not count) on each MCP
     repeat against the reference arm's same repeat (else its first; an item compare took from the other direct arm,
     reference_fallbacks, from that arm's: compare.reference_checks): {scenario: {class (DEPTH_CLASSES), not_compared
     (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
-    where the MCP does not expose them)}}."""
+    where the MCP does not expose them)}}. An MCP item a property-level mark of |manifest|'s scenario sets aside
+    (suite_common.marked_aside) is neither compared nor skipped: the mark states it, and the report lists it."""
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     by = {}
     for r in rows:
         by.setdefault(r.get("scenario"), {}).setdefault(r.get("arm"), {})[r.get("repeat")] = r
@@ -796,6 +814,7 @@ def agreement_depth(comp, rows, is_property):
         alt = ((by.get(sid) or {}).get(ma.get("reference_alternative")) or {}) if ma.get("reference_fallbacks") else {}
         alt0 = alt[min(alt)] if alt else None
         has_prop, compared, skipped, hidden = False, set(), set(), set()
+        marks = sc.mcp_check_marks(scen.get(sid))
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
             mine = mcp[rep].get("checks") or []
             theirs, _ = cmp.reference_checks(mine, (ref.get(rep) or ref0).get("checks") or [],
@@ -812,6 +831,9 @@ def agreement_depth(comp, rows, is_property):
                 for oa, ob in zip(ca[name], cb[name]):
                     if oa in JUDGED and ob in JUDGED:
                         compared.add(name)
+                    elif sc.marked_aside(None, "mcp", {"check": name, "outcome": oa}, marks) is not None:
+                        if ob in ("fail", "finding"):
+                            hidden.add(name)   # the reference's failure stays named: a mark hides no result
                     else:
                         skipped.add(name)
                         if oa == "not_exposed" and ob in ("fail", "finding"):
@@ -847,7 +869,39 @@ def outcomes_text(value):
     return "none" if value is None else str(value)
 
 
-def agreement_section(comp, depth=None, mcp_planned_missing=0):
+def marked_checks_lines(comp, manifest, rows):
+    """The report's lines of the property-level marks (suite_common.mcp_check_marks) of the scenarios the run has, per
+    mark (MCP_CHECK_MARK_LABELS) and scenario: each marked check with its reason or case, the MCP executions it read
+    not_exposed on (set aside) and any other reading (judged as usual: the mark may be stale); [] for a manifest
+    without marks."""
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    reads = {}
+    for r in rows or []:
+        if r.get("arm") == "mcp":
+            for c in r.get("checks") or []:
+                reads.setdefault((r.get("scenario"), c.get("check")), []).append((r.get("repeat"), c.get("outcome")))
+    out = []
+    for mark, label in sc.MCP_CHECK_MARK_LABELS:
+        items = []
+        for sid in (comp or {}).get("order") or []:
+            for name, m in sorted(sc.mcp_check_marks(scen.get(sid)).items()):
+                if m.get("mark") != mark:
+                    continue
+                seen = sorted(reads.get((sid, name)) or [], key=lambda x: (str(x[0]), str(x[1])))
+                aside = ["r%s" % rep for rep, o in seen if o == "not_exposed"]
+                other = ["r%s %s" % (rep, o) for rep, o in seen if o != "not_exposed"]
+                why = m.get("reason") if mark == "not_implemented" else "case %s" % m.get("case")
+                items.append("%s %s (%s; set aside on %s%s)" % (
+                    md(sid), md(name), md(why or "-", 200), ", ".join(aside) or "no MCP execution",
+                    ("; judged as usual: %s" % ", ".join(other)) if other else ""))
+        if items:
+            out.append("%s: %s.\n" % (label, "; ".join(items)))
+    return out
+
+
+def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, lines=None):
+    """The agreement between the arms; |manifest| and |lines| (the executions) for the property-level marks the MCP
+    part lists (marked_checks_lines)."""
     s = comp["summary"]
     da = s["direct_agreement"]
     out = ["# Agreement between the arms", "", "## direct-local vs direct-remote", ""]
@@ -902,13 +956,15 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0):
     out.append("%d scenario(s): %s." % (ma["compared"], ", ".join("%d %s" % (ma[k], md(k)) for k in classes)))
     out.append("")
     out.append("Agreement is decided on the checks both arms evaluated: %d check result(s) compared, %d skipped "
-               "as not exposed via MCP, %d as inconclusive on either side. `agree` needs at least one compared "
+               "as not exposed via MCP, %d as inconclusive on either side%s. `agree` needs at least one compared "
                "check; a scenario with none is "
                "`not comparable`. Service-side by design: %d pair(s) verified (each side the table case has was "
                "checked and held), %d unverified (a side stated nothing to compare, or the MCP runner's own "
                "mark).\n" % (ma.get("checks_compared", 0), ma.get("checks_not_exposed", 0),
-                              ma.get("checks_inconclusive", 0), ma.get("by_design_verified", 0),
-                              ma.get("by_design_unverified", 0)))
+                              ma.get("checks_inconclusive", 0),
+                              (", %d set aside by a property-level mark of the manifest (listed below)"
+                               % ma["checks_marked"]) if ma.get("checks_marked") else "",
+                              ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0)))
     if depth:
         counts = depth_counts(depth)
         out.append("What an `agree` establishes: agreement of the checks both arms evaluated, not equal or right "
@@ -957,6 +1013,7 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0):
            if (comp["scenarios"][sid].get("mcp_agreement") or {}).get("class") == "not_implemented_mcp"]
     if nim:
         out.append("Not implemented yet via MCP: %s.\n" % ", ".join(md(x) for x in nim[:200]))
+    out.extend(marked_checks_lines(comp, manifest, lines))
     return "\n".join(out)
 
 
@@ -1292,7 +1349,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
                  ((manifest or {}).get("index") or {}).get("database") or "refseq33m-experimental"),
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
     is_property = gate_mod._is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
-    depth = agreement_depth(comp, rows, is_property)
+    depth = agreement_depth(comp, rows, is_property, manifest)
     missing = gate_mod.missing_planned(run_dir, manifest, rows)
     # a gated run's report leads with the gate's verdict (the deploy decision); the ordinary one is exploratory
     gate_text = gate_section(run_dir, reevaluated, max_failures)
@@ -1305,7 +1362,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))
     parts.append(findings_section(rows, manifest, max_failures))
-    parts.append(agreement_section(comp, depth, sum(1 for k in missing[0] if k[1] == "mcp")))
+    parts.append(agreement_section(comp, depth, sum(1 for k in missing[0] if k[1] == "mcp"), manifest, rows))
     parts.append(relations_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))

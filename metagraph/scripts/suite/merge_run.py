@@ -167,6 +167,10 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
             checks = [c for i, c in enumerate(checks) if not (i in items and c.get("outcome") == "fail")]
         elif explained:
             checks = [c for c in checks if not (c.get("check") in explained and c.get("outcome") == "fail")]
+        # the MCP checks a property-level mark of the manifest sets aside (suite_common.unmarked_checks) decide nothing
+        checks = sc.unmarked_checks((scenarios or {}).get(row.get("scenario")), row.get("arm"), checks)
+        if not checks:
+            continue
         try:
             new = outcome_fn(checks)
         except Exception:

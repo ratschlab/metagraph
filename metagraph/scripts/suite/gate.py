@@ -38,8 +38,10 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   service_by_design for a case the scenario does not name in the manifest, or a by-design pair not verified (the
   pair verified when a direct arm ran the scenario, the MCP side verified when none did);
 - property: on a passing execution every property check the scenario expects (checks.is_property) passed, unless the
-  policy lists it as not required for that scenario and arm; with require_agreement every required property was
-  compared with the direct reference;
+  policy lists it as not required for that scenario and arm, or (the MCP arm) the manifest marks it not shown via MCP
+  (suite_common.mcp_check_marks: mcp.not_implemented_checks / by_design_checks) and it read not_exposed or nothing;
+  with require_agreement every required property was compared with the direct reference (a marked one read
+  not_exposed is neither compared nor missing);
 - disagreement: no MCP disagreement (MCP a policy arm) and no direct disagreement (both direct arms policy arms) in the
   selection; with require_agreement the MCP class is agree or a verified by-design pair;
 - relation: every relation the policy requires passed on each of its arms;
@@ -587,9 +589,12 @@ def judge(run_dir, policy, reevaluated=False):
             # the line's outcome is not trusted: every check the scenario expects has a result here (determinism
             # not on the first repeat), the status passed, no generic check failed or could not test, and every
             # property passed unless the policy does not require it or the named answered case explains it
+            marks = sc.mcp_check_marks(s) if arm == "mcp" else {}
             for name, k, out in property_results(s, r, is_property, generic=True):
                 prop = is_property(name)
                 label = "%s%s" % (name, (" #%d" % (k + 1)) if k else "")
+                if name in marks and out in (None, "not_exposed"):
+                    continue   # the manifest marks it not shown via MCP (not implemented / by design): no claim
                 if out is None:
                     if name in LATER_REPEATS_ONLY and rep == 0:
                         continue
@@ -689,7 +694,8 @@ def uncompared_properties(sid, recorded, ref_arm, scenario, is_property):
     """The property checks of an agreeing scenario not compared with the reference arm: on some MCP repeat one side
     evaluated it and the other did not (not exposed, inconclusive, no result), or no repeat compared it at all (each
     MCP repeat against the reference's same repeat, else its first; a check of later repeats only, determinism, is
-    compared where both have it)."""
+    compared where both have it). A check the scenario's property-level marks state (suite_common.mcp_check_marks)
+    that the MCP read not_exposed, or did not read, is left out: the mark states why it was not compared."""
     if not ref_arm:
         return []
     ref = dict((k[2], r) for k, r in recorded.items() if k[0] == sid and k[1] == ref_arm)
@@ -697,12 +703,16 @@ def uncompared_properties(sid, recorded, ref_arm, scenario, is_property):
         return []
     ref0 = ref[min(ref)]
     judged = ("pass", "fail", "finding")
+    marks = sc.mcp_check_marks(scenario)
     compared, skipped, order = set(), set(), []
     for k, r in sorted(recorded.items(), key=lambda kv: kv[0][2]):
         if k[0] != sid or k[1] != "mcp":
             continue
         theirs = dict(((n, i), o) for n, i, o in property_results(scenario, ref.get(k[2], ref0), is_property))
         for name, i, o in property_results(scenario, r, is_property):
+            if sc.marked_aside(None, "mcp", {"check": name, "outcome": o}, marks) is not None or (
+                    name in marks and o is None):
+                continue   # a property-level mark of the manifest states it: neither compared nor skipped
             if (name, i) not in order:
                 order.append((name, i))
             t = theirs.get((name, i))

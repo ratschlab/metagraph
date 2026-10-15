@@ -285,7 +285,9 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
                 info["inconclusive_reason"] = sc.undecidable_class(why)
                 return "inconclusive", "the table's %s case %s: %s (rule (c))" % (how, cid, why)
             if compare.judged_by_checks(matched[0]):
-                outcome, explained, noted = compare.answered_verdict(matched, new_checks, rule)
+                # the checks a property-level mark sets aside (suite_common.unmarked_checks) decide nothing
+                outcome, explained, noted = compare.answered_verdict(
+                    matched, sc.unmarked_checks(scenario, arm, new_checks), rule)
                 info.update(service_by_design_case=noted, explained_checks=explained,
                             explained_items=compare.explained_items(new_checks, compare.union_of(matched)))
                 info["note"] = "the table's %s case %s: judged by the checks%s" % (
@@ -324,7 +326,9 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         info["verdict_detail"] = "; ".join(notes)
     if raised:
         return ("fail" if arm == "mcp" else "error"), None
-    return rule(new_checks), None
+    # an MCP check the manifest marks as not shown via MCP (mcp.not_implemented_checks / by_design_checks) that reads
+    # not_exposed is set aside: it makes the execution neither inconclusive nor untested, the rest decides
+    return rule(sc.unmarked_checks(scenario, arm, new_checks)), None
 
 
 def changed_checks(old, new):

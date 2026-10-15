@@ -1789,6 +1789,53 @@ def identity_from_capabilities(docs):
     return ident
 
 
+# What the MCP cannot show of a scenario at PROPERTY level, by its true class (manifest v5; the owner's decision of
+# 2026-10-15, lane V5 adds the fields): mcp.not_implemented_checks [{check, reason}] a missing MCP feature,
+# mcp.by_design_checks [{check, case}] a deliberate service behaviour; the rest of the scenario stays tested via MCP.
+# (manifest key, mark, the entry's detail key)
+MCP_CHECK_MARKS = (("not_implemented_checks", "not_implemented", "reason"), ("by_design_checks", "by_design", "case"))
+# how the report lists each mark
+MCP_CHECK_MARK_LABELS = (("not_implemented", "Not implemented yet via MCP (property)"),
+                         ("by_design", "Service-side by design (property)"))
+
+
+def mcp_check_marks(scenario):
+    """{check name: {"mark": "not_implemented" | "by_design", "reason" | "case": its detail}} of a scenario's
+    property-level marks (MCP_CHECK_MARKS; the first entry of a name wins); {} for a manifest without them (v1-v4)."""
+    mcp = (scenario or {}).get("mcp")
+    out = {}
+    for key, mark, detail in MCP_CHECK_MARKS:
+        entries = mcp.get(key) if isinstance(mcp, dict) else None
+        for e in entries if isinstance(entries, list) else []:
+            name = e.get("check") if isinstance(e, dict) else None
+            if isinstance(name, str) and name and name not in out:
+                out[name] = {"mark": mark, detail: e.get(detail)}
+    return out
+
+
+def marked_aside(scenario, arm, item, marks=None):
+    """The mark (mcp_check_marks' entry) that sets a check result aside: on the MCP arm, a check the scenario marks
+    that reads not_exposed, what the mark declares; None otherwise. A marked check that reads anything else (pass,
+    fail, finding, inconclusive) is judged as any check: a mark hides no result. |marks|: mcp_check_marks(scenario)
+    when the caller has it."""
+    if arm != "mcp" or not isinstance(item, dict) or item.get("outcome") != "not_exposed":
+        return None
+    marks = mcp_check_marks(scenario) if marks is None else marks
+    return marks.get(item.get("check"))
+
+
+def unmarked_checks(scenario, arm, checks):
+    """|checks| without the items marked_aside sets aside: what the outcome rule (outcome_from_checks,
+    checks.scenario_outcome), the comparison and the gate judge an MCP execution on, so a marked check never makes
+    it inconclusive (not exposed) or untested; |checks| itself when nothing is set aside (every arm but MCP, every
+    scenario without marks)."""
+    marks = mcp_check_marks(scenario) if arm == "mcp" else {}
+    if not marks or not isinstance(checks, list):
+        return checks
+    kept = [c for c in checks if marked_aside(scenario, arm, c, marks) is None]
+    return checks if len(kept) == len(checks) else kept
+
+
 def outcome_from_checks(checks):
     """An execution's outcome from its checks, the rule the MCP runner applies too: fail when a check failed (or
     reported an outcome outside CHECK_OUTCOMES); finding when a check is a finding and none failed; inconclusive
