@@ -260,13 +260,19 @@ def main(argv=None):
             raise DocError("unknown chapter(s): %s (the run has %s)" % (", ".join(unknown), ", ".join(units.chapters)))
         prose, overview, glossary, checks_prose, closing_prose, cases_prose = load_prose(args.prose_dir, units,
                                                                                            chapters)
-        main_tex, chapter_files, _ = build_tex(run, units, chapters, prose, overview, glossary, checks_prose,
-                                               closing_prose, cases_prose, sample=args.sample)
+        main_tex, chapter_files, ctx = build_tex(run, units, chapters, prose, overview, glossary, checks_prose,
+                                                 closing_prose, cases_prose, sample=args.sample)
     except (reader.RunError, units_mod.UnitsError, DocError) as e:
         print("make_doc: %s" % e, file=sys.stderr)
         return 2
     main_path = write_outputs(args.out, main_tex, chapter_files, args.name)
     print("wrote %s (%d chapter file(s))" % (main_path, len(chapter_files)))
+    unresolved = sorted(set(ctx.unresolved))
+    if unresolved:
+        # a placeholder or condition the run's values lack stays visible in the document; say so here too
+        print("make_doc: WARNING: %d prose placeholder(s) or condition(s) the run's values lack (printed as "
+              "written): %s" % (len(unresolved), ", ".join(unresolved[:40]) + (" ..." if len(unresolved) > 40 else "")),
+              file=sys.stderr)
     if args.no_pdf:
         return 0
     xelatex = find_xelatex(args.xelatex)

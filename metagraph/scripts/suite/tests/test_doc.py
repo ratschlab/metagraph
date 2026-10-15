@@ -984,8 +984,12 @@ class ReviewRoundTwoTest(unittest.TestCase):
         ctx = sections.Context(self.runobj, self.units, {}, {}, glossary, ["P"])
         text = sections.glossary(ctx)
         self.assertIn("as of commit", text)
-        self.assertIn("\\parhead{Record key}", text)
+        self.assertIn("\\parhead{Record key}\\phantomsection\\label{rk:D}", text)
         self.assertIn(latex.inline(glossary["records_key"]["lead"]), text)
+        # N-1: the record key before the glossary's entries
+        self.assertLess(text.find("\\parhead{Record key}"), text.find("\\parhead{Glossary}"))
+        self.assertIn("\\Needspace{56\\baselineskip}\n\\parhead{Glossary}", text)  # the glossary stays one page
+        self.assertLess(text.find("\\parhead{Glossary}"), text.find("\\begin{multicols}"))
         self.assertNotIn("{readme_commit}", text)
         self.assertIn("\\texttt{metagraph/\\allowbreak{}scripts/\\allowbreak{}suite/\\allowbreak{}README.\\allowbreak{}md}", main)
         self.assertNotIn("\\samplenote", main)  # every chapter built: no note
@@ -1048,7 +1052,7 @@ class VerifyRoundTwoTest(unittest.TestCase):
         # the fake run has no gate: I.4's row and I.1's clause say so, never "every one blocks the gate"
         ctx = self.ctx()
         text = sections.limitations_table(ctx)
-        self.assertIn("1; the gate was not judged; each footnoted in Part II", text)
+        self.assertIn("1; the gate was not judged; each footnoted in its chapter's tables", text)
         self.assertNotIn("every one blocks the gate", text)
         values = ctx.placeholders()
         self.assertEqual(values["n_gate_outcome_problems"], 0)
@@ -1120,8 +1124,12 @@ class VerifyRoundTwoTest(unittest.TestCase):
             self.assertEqual(n + n_zero, len(pop[key]))
             self.assertTrue(p10 > 0)
         self.assertEqual(v["phase_paging_zero_n"], str(sum(1 for x in pop["paging_ms"] if x == 0)) if pop["paging_ms"] else None)
-        self.assertIn("zeros left out", latex.phase_boxplot([("paging", 1, 2, 3, 4, 5, 10, 3)], "fig:x"))
-        self.assertNotIn("zeros left out", latex.phase_boxplot([("submit", 1, 2, 3, 4, 5, 10, 0)], "fig:x"))
+        # N-2: a two-line tick label (the phase, then its n; `n 10 of 13` where zeros are left out), centred
+        plot = latex.phase_boxplot([("paging", 1, 2, 3, 4, 5, 10, 3), ("submit", 1, 2, 3, 4, 5, 10, 0)], "fig:x")
+        self.assertIn("{paging\\\\(n 10 of 13)}", plot)
+        self.assertIn("{submit\\\\(n 10)}", plot)
+        self.assertIn("xticklabel style={align=center", plot)
+        self.assertNotIn("zeros left out", plot)
 
     def test_first_clause_balanced(self):
         """L2: the evidence clause splits at the first ': ' outside a parenthesis, and a cut never leaves a
@@ -1273,6 +1281,330 @@ class VerifyRoundTwoTest(unittest.TestCase):
         self.assertEqual(heads, ["The three arms.", "Execution order.", "Ground truth.", "Times and load."])
         self.assertEqual(len(overview["appendix_F"]["rules"]), 2)
         self.assertNotIn("*Coverage.*", json.dumps(overview["sections"]["provenance"]))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the re-verification of round 3 (VERIFY-R2 "Re-verification"): the record key in I.3, before the glossary and
+# linked from the legends (N-1), the box plot's labels (N-2, above), the prose filled from the run (N-3), the
+# closing populations' wording (L-b), the uncut B note (L-d)
+
+V4_LITERALS = ("76 of the 81", "78 on direct-remote", "79 identical", "27 of 28", "51 pairs", "14 by-design",
+               "16 tests", "74 ms", "n 29", "11 s at p90", "18 s", "6.1 s", "7.5 s", "9.5 s", "25.5 s", "24 s", "8.2 s",
+               "completed in 0.4 s", "four times", "five tests", "four tests", "three of the four", "kept 1 of 9",
+               "7 of the 8", "70, 70, 71 and 76", "98, 99, 100 and 100", "between 1 and 25 s", "seven edge inputs",
+               "six of them")
+PROSE_FILES = ("R.json", "overview.json", "glossary.json", "closing.json", "cases.json", "checks.json")
+PROSE_SKIP_KEYS = ("_about", "placeholders", "_assumes", "_placeholders")
+# what is not a figure of a run: placeholders, code spans, ids, dates, SPEC and section references, p50 / r0
+# names, ordinals, appendix letters (the conditionals' heads go first, through strip_conditional_heads)
+_NOT_A_FIGURE = [r"\{[^{}]*\}", r"`[^`]*`", r"\b[A-Z]+-[a-z_]+-\d{4}\b", r"(?<=-)\d{4}\b",
+                 r"\d{4}-\d{2}-\d{2}", r"\bSPEC(?:-[A-Za-z-]+)?(?:\.md)?\s*(?:§\s*)?(?:\d+(?:\.\d+)?)?",
+                 r"\bsections?\s+\d+(?:\.\d+)?(?:(?:,\s*|\s+and\s+|\s+to\s+)\d+(?:\.\d+)?)*", r"§\s*\d+(?:\.\d+)?",
+                 r"\b[A-Z]\.\d\b", r"\b[pr]\d+\b", r"\b\d+(?:st|nd|rd|th)\b", r"\bappendi(?:x|ces)\s+[A-G]\b"]
+
+
+def prose_strings(obj, path=""):
+    """(path, text) of every prose string of a prose file (its documentation keys left out)."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in PROSE_SKIP_KEYS:
+                continue
+            for x in prose_strings(v, path + "." + k):
+                yield x
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            for x in prose_strings(v, "%s[%d]" % (path, i)):
+                yield x
+    elif isinstance(obj, str):
+        yield path, obj
+
+
+_COND = re.compile(r"\[\[((?:(?!\[\[|\]\]).)*)\]\]", re.S)
+
+
+def strip_conditional_heads(text):
+    """(the text with every conditional's head dropped and its branches kept, the heads): innermost first, as
+    facts.fill reads them; a bracketed run list such as `[[0, 1]]` is prose and stays."""
+    heads = []
+    pos = 0
+    while True:
+        m = _COND.search(text, pos)
+        if not m:
+            return text, heads
+        head, sep, rest = m.group(1).partition("?")
+        if not sep:
+            pos = m.end()
+            continue
+        heads.append(head.strip())
+        text = text[:m.start()] + " " + rest.replace("|", " ") + " " + text[m.end():]
+        pos = 0
+
+
+def literal_numbers(text):
+    """The numbers a prose string carries as text (not as a placeholder, a flag, an id or a reference)."""
+    text, _ = strip_conditional_heads(text)
+    for pat in _NOT_A_FIGURE:
+        text = re.sub(pat, " ", text)
+    return [n.rstrip(",.") for n in re.findall(r"(?<![A-Za-z_\d])\d[\d,]*(?:\.\d+)?(?:\.\.\d+)?", text)]
+
+
+class VerifyRoundThreeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        build_run(cls.run_dir)
+        merge_run.merge(cls.run_dir)
+        sc.write_json_atomic(os.path.join(cls.run_dir, "compare.json"), cmp.compare(cls.run_dir, (CASES, {"cases": 5})))
+        cls.runobj = reader.Run(cls.run_dir)
+        cls.units = units_mod.resolve(cls.runobj.manifest, FAKE_MAPPING)
+        cls.R = sc.read_json(os.path.join(PROSE_DIR, "R.json"))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def ctx(self, prose=None, **kw):
+        import sections
+        ctx = sections.Context(self.runobj, self.units, prose or {}, {}, {}, list(self.units.chapters), **kw)
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        return ctx
+
+    def test_fill_conditionals_and_specs(self):
+        """facts.fill: conditionals (negated, nested, compared), the plural and word specs, the index syntax, the
+        spacing around a chosen or empty branch, a literal run list left alone, the unresolved recorded."""
+        import facts
+        v = {"a": True, "z": 0, "n": 4, "m": 1, "x": {"R-1": {"dl": {"wall": "8.2 s", "class": "relayed"}}}}
+        u = []
+        self.assertEqual(facts.fill("agree[[a ?, all | ({n} of)]]; x", v, u), "agree, all; x")
+        self.assertEqual(facts.fill("agree[[!a ?, all | ({n} of)]]; x", v, u), "agree (4 of); x")
+        self.assertEqual(facts.fill("table[[z ? (u)]]; x [[z ? y]]; z", v, u), "table; x; z")
+        self.assertEqual(facts.fill("host[[a ? under load]] they", v, u), "host under load they")
+        self.assertEqual(facts.fill("{n} test{n:s} follow{n:v}; {m} test{m:s} follow{m:v}; {n:word} {n:Word}", v, u),
+                         "4 tests follow; 1 test follows; four Four")
+        self.assertEqual(facts.fill("[[x[R-1][dl][class] = relayed ? yes | no]]/[[x[R-1][dl][class] = other ? yes | no]] {x[R-1][dl][wall]}", v, u),
+                         "yes/no 8.2 s")
+        self.assertEqual(facts.fill("[[a ? [[z ? inner | outer]] | c]].", v, u), "outer.")
+        self.assertEqual(facts.fill("runs [[0, 1]] and [[0, 20], [51, 70]] [[a ? y]]", v, u), "runs [[0, 1]] and [[0, 20], [51, 70]] y")
+        self.assertEqual(u, [])
+        out = facts.fill("{missing} and [[nope ? a | b]] {x[R-9][dl][wall]}", v, u)
+        self.assertEqual(out, "{missing} and (UNRESOLVED CONDITION nope) {x[R-9][dl][wall]}")
+        self.assertEqual(sorted(u), ["[[nope]]", "missing", "x[R-9][dl][wall]"])
+        self.assertEqual(facts.number_word(0), "zero")
+        self.assertEqual(facts.number_word(13), "13")
+
+    def test_no_v4_literal_survives(self):
+        """N-3: chapter R's prose rendered on the fake run (another run entirely) prints none of the v4 sample's
+        figures: every figure comes from the run, every run-dependent sentence from a computed fact."""
+        import sections
+        prose = {"R": dict(self.R)}
+        # the fake run's one R family carries, in turn, each v4 family's prose
+        texts = []
+        for fid, entry in self.R["families"].items():
+            prose["R"]["families"] = {"R-one": dict(entry)}
+            ctx = self.ctx(prose)
+            # the family's prose paragraph (the tables and blocks after it hold the fake run's own times)
+            texts.append((fid, sections.family_section(ctx, "R", "R-one").split("\\unithead", 1)[0]))
+        prose["R"]["families"] = {"R-one": dict(self.R["families"]["R-budget"])}
+        ctx = self.ctx(prose)
+        whole = sections.chapter(ctx, "R")
+        conclusion = whole.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
+        gap = whole.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        texts.append(("chapter", conclusion + gap))
+        for where, text in texts:
+            for lit in V4_LITERALS:
+                self.assertNotIn(lit, text, "%s: the v4 literal %r survives" % (where, lit))
+            # a condition on a v4 scenario the fake run lacks stays visible; every other flag resolves
+            for name in re.findall(r"\(UNRESOLVED CONDITION ([^)]*)\)", text):
+                self.assertTrue(name.startswith(("x[", "fam[")), "%s: unresolved %s" % (where, name))
+        # the fake run's own facts are printed in their place
+        chapter = whole
+        self.assertIn("0 of the 1 tests pass on direct-local and 1 on direct-remote", chapter.replace("\\", ""))
+        self.assertIn("1 pair agrees", chapter)
+        self.assertIn("every test was exercised through the tools", chapter)
+        self.assertNotIn("Of the zero relations", whole)
+        self.assertIn("the deploy gate was not judged", chapter.lower())
+        # the unresolved placeholders are the v4 scenarios the fake run lacks and the family the chapter prose names
+        unresolved = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
+        self.assertEqual(unresolved, {"fam", "x"}, sorted(set(ctx.unresolved)))
+
+    def test_prose_placeholders_resolvable_on_v4(self):
+        """Every placeholder and flag of R.json names a value the generator computes: a chapter or family key, a
+        family of the v4 mapping under `fam`, a v4 scenario of chapter R under `x` with an arm and an arm key."""
+        import facts
+        manifest, mapping, units = v4()
+        ctx = self.ctx({"R": self.R})
+        chapter_keys = set(facts.chapter_facts(ctx, "R"))
+        family_keys = set(facts.family_facts(ctx, "R-one"))
+        arm_keys = set(facts.arm_facts(ctx, "R-001", "mcp"))
+        scenario_keys = set(facts.scenario_facts(ctx, "R-001"))
+        r_sids = set(units.chapter_scenarios("R"))
+        r_fams = set(units.chapter_families("R"))
+        problems = []
+
+        def check(name, scope):
+            root = name.split("[", 1)[0].split(":", 1)[0]
+            idx = re.findall(r"\[([^\]]+)\]", name.split(":", 1)[0])
+            if root == "fam":
+                if scope != "chapter" or not idx or idx[0] not in r_fams:
+                    problems.append("%s: fam[...] needs a v4 family of R in the chapter prose" % name)
+                elif len(idx) >= 2 and idx[1] != "x" and idx[1] not in family_keys:
+                    problems.append("%s: no family value %s" % (name, idx[1]))
+                elif len(idx) >= 2 and idx[1] == "x" and (len(idx) < 3 or idx[2] not in r_sids):
+                    problems.append("%s: no v4 scenario of R" % name)
+            elif root == "x":
+                if not idx or idx[0] not in r_sids:
+                    problems.append("%s: no v4 scenario of R" % name)
+                elif len(idx) == 2 and idx[1] not in scenario_keys:
+                    problems.append("%s: no scenario value %s" % (name, idx[1]))
+                elif len(idx) >= 3 and (idx[1] not in ("dl", "dr", "mcp") or idx[2] not in arm_keys):
+                    problems.append("%s: no arm value %s" % (name, idx[1:3]))
+            else:
+                keys = chapter_keys if scope == "chapter" else family_keys
+                if root not in keys and root not in ctx.placeholders():
+                    problems.append("%s: no %s value %s" % (name, scope, root))
+
+        for path, text in prose_strings(self.R):
+            scope = "chapter" if path.startswith((".summary", ".coverage_gap", ".intro", ".units", ".mcp_notes")) else "family"
+            for name in re.findall(r"\{([^{}]+)\}", text):
+                check(name, scope)
+            for head in strip_conditional_heads(text)[1]:
+                check(head.lstrip("!").split("=", 1)[0].strip(), scope)
+        self.assertEqual(problems, [], "; ".join(problems))
+        self.assertEqual(self.R.get("coverage_gap_families"), ["R-budget"])
+        for fid in r_fams:
+            self.assertTrue(self.R["families"][fid].get("claim"), "%s: no claim" % fid)
+            for sid in self.R["families"][fid].get("claim_members") or []:
+                self.assertIn(sid, r_sids)
+
+    def test_prose_numbers_filled_or_assumed(self):
+        """A number a prose string carries as text is a constant the file's `_assumes` lists with its source (the
+        SPEC's, the manifest's, the service's); a run's figure is a placeholder, never text."""
+        problems = []
+        for name in PROSE_FILES:
+            data = sc.read_json(os.path.join(PROSE_DIR, name)) or {}
+            assumes = data.get("_assumes") or {}
+            self.assertTrue(assumes.get("_note"), "%s: _assumes without its note" % name)
+            for path, text in prose_strings(data):
+                for n in literal_numbers(text):
+                    if n not in assumes:
+                        problems.append("%s%s: %s" % (name, path, n))
+        self.assertEqual(problems, [], "numbers the generator did not fill: " + "; ".join(sorted(set(problems))))
+        # the scan sees what it should: a figure, not an id, a reference or a placeholder
+        self.assertEqual(literal_numbers("R-pos-0027 and REL-prefix_equals-0004, -0002, I.4, p90, r0, SPEC 4.2, section 4.5, "
+                                         "sections 7.4 to 7.6, `max_labels 1`, {n_tests} {x[R-pos-0001][dl][wall]} "
+                                         "[[fam[R-budget][n_late503] ? a | b]] appendix D 2026-10-15 90th"), [])
+        self.assertEqual(literal_numbers("76 of the 81 tests, 2,000 bp, 6.1 s, 1..100, 0.2 s"), ["76", "81", "2,000", "6.1", "1..100", "0.2"])
+
+    def test_family_and_chapter_facts(self):
+        """The facts on the fake run: the standing counts, the footnoted members' phrases, the findings, the MCP
+        classes and variants, the claims sorted by what the direct arms showed, the gate flag."""
+        import facts
+        ctx = self.ctx({"P": {"families": {"P-pos": {"title": "t", "prose": "p", "claim": "a window resolves"},
+                                           "P-edge": {"title": "e", "prose": "p", "claim": "an edge is refused"}}}})
+        fv = facts.family_facts(ctx, "P-pos")
+        self.assertEqual(fv["n_tests"], 4)
+        self.assertEqual(fv["n_mcp_normalised"], 1)
+        self.assertEqual(fv["mcp_normalised_ids"], "P-003")
+        self.assertEqual(fv["mcp_normalised_variants"], "20 bp")
+        self.assertIn("P-001", fv["x"])
+        self.assertEqual(fv["x"]["P-001"]["dl"]["standing"], "pass")
+        self.assertEqual(fv["x"]["P-001"]["dl"]["phrase"], "a pass in 9 ms / 6 ms (r0 / r1)")
+        self.assertEqual(fv["x"]["P-001"]["dr"]["phrase"], "both repeats a pass in 0.1 s")
+        self.assertEqual(fv["x"]["P-003"]["dl"]["phrase"], "the expected refusal (http 400) in 4 ms")
+        self.assertEqual(fv["n_pass_dl"], 4)
+        self.assertEqual(fv["n_relations"], 0)
+        self.assertEqual(fv["n_declared_relations"], 0)
+        self.assertFalse(fv["stop_observed"])
+        cv = facts.chapter_facts(ctx, "P")
+        self.assertEqual(cv["n_tests"], 5)
+        self.assertIn("a window resolves (P-pos)", cv["claims_held"])
+        self.assertIn("an edge is refused (P-edge)", cv["claims_held"])
+        self.assertEqual(cv["claims_unsupported"], "")
+        self.assertFalse(cv["gate_judged"])
+        self.assertEqual(cv["fam"]["P-pos"]["n_tests"], 4)
+        self.assertIn("direct-local", cv["direct_agreement_text"] + "direct-local")
+        rv = facts.chapter_facts(self.ctx({"R": {"families": {"R-one": {"claim": "the one", "prose": "p", "title": "t"}}}}), "R")
+        self.assertEqual(rv["n_direct_failed_tests"], 1)
+        self.assertFalse(rv["direct_clean"])
+        self.assertIn("with a failure or a disagreement", rv["claims_unsupported"])
+        self.assertEqual(rv["n_footnoted"], 1)
+        self.assertTrue(rv["x"]["R-001"]["dl"]["phrase"].startswith("FAIL ("), rv["x"]["R-001"]["dl"]["phrase"])
+        self.assertEqual(rv["claims_held"], "")
+
+    def test_record_key_on_the_chapter_page_and_in_legends(self):
+        """N-1: the chapter page carries the compact record key before its first family (one paragraph, labelled
+        rk:<chapter>), every unit table whose variants name a record links to it and to appendix D's full key in
+        its legend, and appendix D's key is labelled rk:D before the glossary."""
+        import sections
+
+        class R(object):
+            def records(self):
+                return [{"key": "eco", "label": "Escherichia coli K-12 MG1655", "accession": "NC_000913.3", "taxid": "511145"},
+                        {"key": "pfa", "label": "Plasmodium falciparum 3D7 chr 5", "accession": "NC_004326.2", "taxid": "36329"}]
+
+        class C(object):
+            run = R()
+        text = sections.record_key_paragraph(C())
+        self.assertIn("\\label{rk:compact}", text)
+        self.assertIn("\\label{rk:P}", sections.record_key_paragraph(C(), "P"))
+        self.assertIn("\\texttt{eco} Escherichia coli K-12 MG1655 · \\texttt{pfa} Plasmodium falciparum 3D7 chr 5", text)
+        self.assertIn("\\hyperref[rk:D]{appendix D}", text)
+        ctx = self.ctx()
+        # the fake run's ground truth has no records: no key, no link
+        self.assertEqual(sections.record_key_paragraph(ctx), "")
+        self.assertEqual(sections.record_key_link(ctx, ["P-001"]), "")
+        ctx.run.manifest["ground_truth"] = {"records": [{"key": "bp", "label": "x", "accession": "a", "taxid": "1"}]}
+        try:
+            self.assertIn("record keys: \\hyperref[rk:P]{p.\\,\\pageref{rk:P}}", sections.record_key_link(ctx, ["P-001"], "P"))  # variant "10 bp"
+            self.assertEqual(sections.record_key_link(ctx, ["R-001"], "R"), "")  # variant "the one"
+            self.assertNotIn("Record key", sections.reading_guide(ctx))  # Part I stays four pages
+            chapter = sections.chapter(ctx, "P")
+            self.assertLess(chapter.find("\\parhead{Background}"), chapter.find("\\label{rk:P}"))
+            self.assertLess(chapter.find("\\label{rk:P}"), chapter.find("\\unithead"))
+            unit = sections.unit_section(ctx, "P", "P-pos-series")
+            self.assertIn("in full \\hyperref[rk:D]{appendix D}", unit)
+        finally:
+            ctx.run.manifest["ground_truth"] = {}
+
+    def test_closing_untimed_cold_and_uncut_note(self):
+        """L-b: the cold MCP calls C.4 counts and C.3 leaves out are a value of their own; L-d: appendix B's note
+        under a row is never cut."""
+        import sections
+        ctx = self.ctx()
+        v = sections.closing_values(ctx)
+        self.assertIn("cold_mcp_untimed_n", v)
+        s = ctx.run.summary()
+        n_all = ((((s.get("front_overhead") or {}).get("cold") or {}).get("mcp") or {}).get("wall_ms") or {}).get("n")
+        n_timed = (s.get("mcp_cold_wall_ms") or {}).get("n")
+        if n_all is not None and n_timed is not None:
+            self.assertEqual(v["cold_mcp_untimed_n"], str(n_all - n_timed))
+        closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
+        self.assertIn("{cold_mcp_untimed_n}", json.dumps(closing["sections"]))
+        self.assertIn("cold_mcp_untimed_n", closing["placeholders"])
+        self.assertNotIn("the warm execution of each paired scenario", json.dumps(closing))
+        with open(os.path.join(DOC, "sections.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        body = src.split("def by_design_table(ctx):", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn("unverified_detail), 600", body)
+        self.assertIn('"; ".join(unverified_detail)))', body)
+        # L-a: the limitations row no longer claims every inconclusive execution is footnoted in Part II
+        self.assertIn("each footnoted in its chapter's tables", sections.limitations_table(ctx))
+        glossary = sc.read_json(os.path.join(PROSE_DIR, "glossary.json"))
+        inc = [e for e in glossary["entries"] if e["term"] == "inconclusive"][0]
+        self.assertIn("in the policy's selection and not declared exempt", inc["definition"])
+        # L-e: the by-design row of F says the table was found by its sha
+        ctx.run.table_meta = {"path": "/w/service_by_design.json", "version": 1, "cases": 5, "service_commit": "abc",
+                              "sha256": "d" * 64, "replayed": True, "warnings": []}
+        ctx.run.reeval = {"by_design": {"path": "/main/service_by_design.json", "sha256": "d" * 64}}
+        try:
+            text = sections.environment_table(ctx)
+        finally:
+            ctx.run.table_meta = {}
+            ctx.run.reeval = {}
+        self.assertIn("found by its sha256 at this path (the re-evaluation recorded", text)
 
 
 if __name__ == "__main__":

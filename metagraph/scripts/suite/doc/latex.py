@@ -400,14 +400,16 @@ def figure_block(body, caption):
 
 def phase_boxplot(boxes, label):
     """Box plots of the MCP phases (one box per phase: p10, p25, p50, p75, p90), log scale, from the quantiles
-    the generator computed; `boxes`: [(name, p10, p25, p50, p75, p90, n[, n_zero])] in ms; a phase with zeros
-    left out of the log scale says so in its label."""
+    the generator computed; `boxes`: [(name, p10, p25, p50, p75, p90, n[, n_zero])] in ms. A tick label is two
+    lines, the phase and its n (`n 425 of 547` for a phase whose zeros the log scale leaves out: the caption says
+    why), centred under its box, so that neighbouring labels never overlap (re-verification N-2)."""
     def _label(b):
         zeros = b[7] if len(b) > 7 else 0
-        return "{%s (n %d%s)}" % (b[0], b[6], ("; %d zeros left out" % zeros) if zeros else "")
+        return "{%s\\\\(n %d%s)}" % (b[0], b[6], (" of %d" % (b[6] + zeros)) if zeros else "")
     lines = ["\\begin{tikzpicture}",
-             "\\begin{axis}[width=0.9\\textwidth,height=0.38\\textwidth,ymode=log,boxplot/draw direction=y,"
+             "\\begin{axis}[width=0.95\\textwidth,height=0.38\\textwidth,ymode=log,boxplot/draw direction=y,"
              "ylabel={ms},tick label style={font=\\footnotesize},label style={font=\\footnotesize},"
+             "xticklabel style={align=center,font=\\footnotesize},"
              "xtick={%s},xticklabels={%s},grid=major,grid style={black!10},log ticks with fixed point,"
              "boxplot/box extend=0.5]" % (",".join(str(i + 1) for i in range(len(boxes))),
                                            ",".join(_label(b) for b in boxes))]

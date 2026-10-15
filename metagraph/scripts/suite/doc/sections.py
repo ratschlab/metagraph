@@ -16,6 +16,7 @@ if HERE not in sys.path:
 import blocks  # noqa: E402
 import cells  # noqa: E402
 import compare as cmp  # noqa: E402
+import facts  # noqa: E402
 import gate as gate_mod  # noqa: E402
 import latex  # noqa: E402
 import reader  # noqa: E402
@@ -32,7 +33,7 @@ PART_ONE = [("decision", "Decision summary", "I.1"), ("methods", "Methods", "I.2
             ("reading", "Reading guide", "I.3"), ("provenance", "Provenance and coverage", "I.4")]
 # the appendices: letter, title, label
 APPENDICES = [("A", "The check catalogue"), ("B", "The by-design table"), ("C", "The relations"),
-              ("D", "Glossary and record key"), ("E", "Index of test ids"),
+              ("D", "Record key and glossary"), ("E", "Index of test ids"),
               ("F", "Environment, vocabulary and the gate in full"),
               ("G", "Known MCP limits and owner-declared exemptions")]
 README_PATH = "metagraph/scripts/suite/README.md"
@@ -61,8 +62,10 @@ class Context(object):
         self.footnotes = {}  # chapter -> Footnotes
         self.blocks_by_chapter = {}
         self.data_files = {}  # file name -> text (the plots' data, written beside the .tex)
+        self.unresolved = []  # the prose placeholders and conditions the values lacked (facts.fill)
         self._closing_values = None
         self._untested = None
+        self._facts = {}  # chapter -> facts.chapter_facts, "fam:" + family -> facts.family_facts
 
     def state(self, sid):
         if sid not in self.states:
@@ -148,22 +151,17 @@ class Context(object):
                 "by_design_sha_short": (table.get("sha256") or "–")[:12],
                 "by_design_table_line": by_design_table_text(run),
                 "n_chapters": len(self.units.chapters), "built_chapters": ", ".join(self.chapters),
-                "readme_path": README_PATH, "readme_commit": self.readme_commit() or "not determined"}
+                "readme_path": README_PATH, "readme_commit": self.readme_commit() or "not determined",
+                "logan_caveat": facts.logan_caveat(run), "gate_judged": bool(gate)}
 
     def fill(self, text, extra=None):
-        """Prose placeholders `{release}` etc. filled from the run (and `extra`, a chapter's own values)."""
+        """Prose placeholders `{release}` etc. filled from the run (and `extra`, a chapter's, a family's or the
+        closing section's own values), the conditionals `[[flag ? a | b]]` resolved (facts.fill); what the values
+        lack stays visible and is recorded in `unresolved`."""
         values = self.placeholders()
         if extra:
             values.update(extra)
-
-        class _Safe(dict):
-            def __missing__(self, key):
-                return "{%s}" % key
-
-        try:
-            return str(text).format_map(_Safe(values))
-        except (ValueError, IndexError):
-            return str(text)
+        return facts.fill(text, values, self.unresolved)
 
     def readme_commit(self):
         ref = self.glossary.get("readme") if isinstance(self.glossary.get("readme"), dict) else {}
@@ -205,12 +203,11 @@ class Context(object):
         return self.prose.get(ch) or {}
 
     def chapter_values(self, ch):
-        fams = self.units.chapter_families(ch)
-        sids = self.units.chapter_scenarios(ch)
-        fn = self.footnotes.get(ch)
-        return {"chapter": ch, "n_tests": len(sids), "n_families": len(fams),
-                "n_units": sum(len(self.units.families[f]["units"]) for f in fams),
-                "n_detail": len(fn.order) if fn else 0}
+        """The chapter's prose values (facts.chapter_facts), computed once per chapter after its families are
+        built (the footnotes are assigned then)."""
+        if ch not in self._facts:
+            self._facts[ch] = facts.chapter_facts(self, ch)
+        return self._facts[ch]
 
     def untested(self):
         if self._untested is None:
@@ -218,23 +215,17 @@ class Context(object):
         return self._untested
 
     def family_values(self, fid):
-        """A family's own placeholders for its prose: {n_tests, n_units} and the MCP arm's outcome classes over
-        its members as the tables derive them (blocks.mcp_class; the owner's review, point 5), so that the prose's
-        counts cannot drift from the cells (VERIFY-R2 M1): `n_mcp_<class>` per class (not_expressible,
-        refused_before_host, relayed, normalised, answered, host_state, refused_unexplained, none) and
-        `mcp_<class>_ids` (the member ids of that class, comma-separated)."""
-        f = self.units.families.get(fid) or {}
-        members = [sid for uid in f.get("units") or [] for sid in self.units.units[uid]["members"]]
-        by_class = {}
-        for sid in members:
-            st = self.state(sid)["mcp"]
-            cls, _ = blocks.mcp_class(st.lines, self.run.scenario(sid), st.agreement, self.run.cases)
-            by_class.setdefault(cls, []).append(sid)
-        values = {"n_tests": len(members), "n_units": len(f.get("units") or [])}
-        for cls in blocks.MCP_CLASS_WORD:
-            values["n_mcp_%s" % cls] = len(by_class.get(cls) or [])
-            values["mcp_%s_ids" % cls] = ", ".join(by_class.get(cls) or []) or "none"
-        return values
+        """A family's own placeholders for its prose (facts.family_facts): {n_tests, n_units}, the MCP arm's
+        outcome classes over its members as the tables derive them (blocks.mcp_class; the owner's review, point
+        5), so that the prose's counts cannot drift from the cells (VERIFY-R2 M1): `n_mcp_<class>` per class
+        (not_expressible, refused_before_host, relayed, normalised, answered, host_state, refused_unexplained,
+        none), `mcp_<class>_ids` and `mcp_<class>_variants`; and the run facts of round 4 (the standing counts,
+        the footnoted members' phrases, the findings, the late 503s, the relations, the declared exemptions, the
+        members' facts under `x`)."""
+        key = "fam:" + fid
+        if key not in self._facts:
+            self._facts[key] = facts.family_facts(self, fid)
+        return self._facts[key]
 
 
 # -- small helpers --------------------------------------------------------------------------------------------
@@ -1045,7 +1036,8 @@ def record_key(ctx, full=False):
                          esc(r.get("kingdom")), "{:,}".format(int(r["length"])) if isinstance(r.get("length"), (int, float))
                          else "–", esc(r.get("records_in_column", "–")), esc(r.get("transl_table", "–")),
                          esc("yes" if r.get("last_in_column") else "no")])
-        return latex.plain_table(latex.spec_p([10, 40, 24, 14, 16], extra_cols=4, extra_spec="r r r l"),
+        # the organism column wide enough for every record label on one line: the key stays within a page
+        return latex.plain_table(latex.spec_p([9, 58, 26, 12, 15], extra_cols=4, extra_spec="r r r l"),
                                  ["key", "organism (record label)", "accession", "taxid", "kingdom", "length bp",
                                   "records in column", "code", "last in column"], rows,
                                  "the %d records of the ground truth, as the manifest states them" % len(recs))
@@ -1066,10 +1058,49 @@ def record_key(ctx, full=False):
                              needspace=min(19, len(rows) + 3))
 
 
+def record_key_label(chapter=None):
+    """The label of the compact record key: one per chapter (a full build prints the key on every chapter page)."""
+    return "rk:%s" % chapter if chapter else "rk:compact"
+
+
+def record_key_paragraph(ctx, chapter=None):
+    """The compact record key, one paragraph (abbreviation and organism, in the manifest's order), printed on the
+    chapter page before its first family, where the matrices need it, and labelled rk:<chapter> so that every
+    matrix's legend links to it (the owner's review, point 3: the abbreviations are needed in the matrices and
+    deserve easier access than the implementation terms; re-verification N-1; in I.3 it cost Part I a fifth page,
+    against point 2). The full key (accession, taxid, kingdom, length) is appendix D's."""
+    recs = ctx.run.records()
+    if not recs:
+        return ""
+    items = " · ".join("%s %s" % (tt(r.get("key")), esc(r.get("label"))) for r in recs)
+    return ("\\par\\smallskip\\noindent\\phantomsection\\label{%s}{\\sffamily\\footnotesize\\textbf{Record key}\\ "
+            "(the abbreviations of the matrices' columns and ids; accession, taxid, kingdom and length in "
+            "\\hyperref[rk:D]{appendix D}, p.\\,\\pageref{rk:D}): %s.}\\par\\smallskip\n" % (
+                latex.label_key(record_key_label(chapter)), items))
+
+
+def record_key_link(ctx, members, chapter=None):
+    """The legend's pointer to the record key (the chapter's compact key and appendix D's full one) when a unit's
+    variants or groups name a record abbreviation, else an empty string."""
+    keys = set(str(r.get("key")) for r in ctx.run.records() if r.get("key"))
+    if not keys:
+        return ""
+    words = set()
+    for sid in members:
+        meta = ctx.units.by_scenario.get(sid) or {}
+        for field in ("variant", "group"):
+            words.update(re.findall(r"[A-Za-z0-9]+", str(meta.get(field) or "")))
+    if not (words & keys):
+        return ""
+    label = latex.label_key(record_key_label(chapter))
+    return "record keys: \\hyperref[%s]{p.\\,\\pageref{%s}}, in full \\hyperref[rk:D]{appendix D}" % (label, label)
+
+
 def reading_guide(ctx):
     """I.3: the prose, the annotated matrix with its marker texts, then the legend, the marks and the two grammar
-    rules (longtables that break across a page without an orphaned heading). The record key is appendix D's (the
-    owner's review, point 3 puts it with the glossary; point 2 holds Part I to about four pages: VERIFY-R2 M3)."""
+    rules (longtables that break across a page without an orphaned heading). The compact record key is on each
+    chapter page (record_key_paragraph), the full key appendix D's (the owner's review, point 3; point 2 holds
+    Part I to about four pages: VERIFY-R2 M3, re-verification N-1)."""
     out = ctx.prose_paragraphs("reading")
     out += annotated_matrix(ctx)
     out += legend_table(ctx)
@@ -1167,7 +1198,7 @@ def limitations_table(ctx):
         blocking = "%d block the gate (a gated arm, in the policy's selection, not declared exempt)" % gp["inconclusive"]
     else:
         blocking = "the gate was not judged"
-    rows.append(["inconclusive executions", "%d; %s; each footnoted in Part II" % (n_inc, esc(blocking)),
+    rows.append(["inconclusive executions", "%d; %s; each footnoted in its chapter's tables" % (n_inc, esc(blocking)),
                  "\\hyperref[sec:I1]{I.1}"])
     return latex.plain_table(latex.spec_p([62, 94, 10]), ["limitation", "count", "in full"], rows,
                              needspace=len(rows) + 3)
@@ -1462,6 +1493,9 @@ def unit_section(ctx, chapter, uid):
     fns = dict((sid, _footnotes_for(ctx, chapter, sid)) for sid in members)
     meta = units.by_scenario
     legend = cells.TIMING_LEGEND.get(layout)
+    rk = record_key_link(ctx, members, chapter)
+    if rk:
+        legend = (legend + "; " + rk) if legend else rk
     if layout == "series":
         columns = [esc(meta[sid].get("variant") or sid) for sid in members]
         rows = []
@@ -1516,7 +1550,7 @@ def unit_section(ctx, chapter, uid):
             mcp_cell, note = _mcp_edge_cell(ctx, sid, st["mcp"], fns[sid], with_times=False)
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
                           esc_wrap(meta[sid].get("variant") or ""), expected] + cs + [mcp_cell], note))
-        out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND)
+        out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + (("; " + rk) if rk else ""))
         states = [ctx.state(sid) for sid in members]
         out += "\\sumline{%s: %d test%s · %s · %s}\n" % (tt(uid), len(members), "" if len(members) == 1 else "s", " · ".join(
             "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS), cells.max_wall_text(run, members))
@@ -1529,7 +1563,8 @@ def unit_section(ctx, chapter, uid):
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
                           esc_wrap(meta[sid].get("variant") or ""),
                           blocks.expected_text(run.scenario(sid), run.is_property)] + cs + [mcp_cell], note))
-        out += latex.list_table(rows, units_ids(ctx, members), legend + "; " + EDGE_LEGEND)
+        out += latex.list_table(rows, units_ids(ctx, members), cells.TIMING_LEGEND["list"] + "; " + EDGE_LEGEND
+                                + (("; " + rk) if rk else ""))
     else:  # pairs
         rows = []
         for sid in members:
@@ -1619,6 +1654,8 @@ def chapter(ctx, ch):
     out += "\\parhead{Background}\n"
     out += paragraphs([ctx.fill(p, values) for p in (prose.get("intro") or [])]) if prose.get("intro") else \
         latex.placeholder("(chapter prose: to be written)") + "\n\n"
+    # the compact record key right before the first family's tables (re-verification N-1)
+    out += record_key_paragraph(ctx, ch)
     return out + body
 
 
@@ -1792,6 +1829,9 @@ def closing_values(ctx):
     # every host-cold MCP execution (C.4's host-cold table), against the cold calls of the paired scenarios
     # (summary.mcp_cold_wall_ms, C.3); the two populations differ and the prose says so (VERIFY-R2 M4)
     stats("cold_mcp_all", ((fo_.get("cold") or {}).get("mcp") or {}).get("wall_ms"))
+    n_all = cells._num((((fo_.get("cold") or {}).get("mcp") or {}).get("wall_ms") or {}).get("n"))
+    n_timed = cells._num((s.get("mcp_cold_wall_ms") or {}).get("n")) if isinstance(s.get("mcp_cold_wall_ms"), dict) else None
+    v["cold_mcp_untimed_n"] = str(int(n_all) - int(n_timed)) if n_all is not None and n_timed is not None else None
     # the phases' population: the warm execution of each paired scenario (summary.mcp_phases); paging is 0 ms
     # where the results came with the terminal status, and the log-scale box leaves those out
     phase_pop = phase_population(ctx)
@@ -2185,7 +2225,7 @@ def by_design_table(ctx):
         rows.append(first + [matches, "; ".join(service) or "–", "; ".join(direct) or "–", "; ".join(named) or "–"])
         if unverified_detail:
             rows[-1] = (rows[-1], "{\\footnotesize not verified on the direct side: %s}" % esc_wrap(
-                "; ".join(unverified_detail), 600))
+                "; ".join(unverified_detail)))
     out = ("One row per case of the service-by-design table that a scenario of the built chapters names, that an "
            "MCP answer matched, or that belongs to their areas: the case and its agreement class, what it matches "
            "(and the short reason the tables use), the service's answer, the direct expectation, and the scenarios "
@@ -2239,21 +2279,30 @@ def _sort_key(term):
 
 
 def glossary(ctx):
-    """Appendix D: the short glossary of glossary.json ({term, definition | text, see}) in alphabetical order (a
-    leading article ignored), two columns; the version-pinned README reference for the long form; then the full
-    record key."""
+    """Appendix D: the full record key first (labelled rk:D, linked from every matrix's legend and from the
+    compact key of I.3: re-verification N-1), then the short glossary of glossary.json ({term, definition | text,
+    see}) in alphabetical order (a leading article ignored), two columns, with the version-pinned README reference
+    for the long form."""
     entries = [e for e in ((ctx.glossary or {}).get("entries") or []) if isinstance(e, dict) and e.get("term")]
     ref = ctx.glossary.get("readme") if isinstance(ctx.glossary.get("readme"), dict) else {}
     commit = ctx.readme_commit()
+    out = "\\parhead{Record key}\\phantomsection\\label{rk:D}\n"
+    rk = ctx.glossary.get("records_key") if isinstance(ctx.glossary.get("records_key"), dict) else {}
+    if rk.get("lead"):
+        out += paragraphs([ctx.fill(rk["lead"])])
+    out += record_key(ctx, full=True)
+    # the glossary stays one page (the owner's review, point 3): it asks for a page's space and so starts on a
+    # fresh page when the record key's table ends mid-page
+    out += "\\Needspace{56\\baselineskip}\n\\parhead{Glossary}\n"
     lead = ctx.glossary.get("lead")
     if lead:
-        out = paragraphs([ctx.fill(lead)])
+        out += paragraphs([ctx.fill(lead)])
     else:
-        out = ("The short form: the terms needed to read the evidence. The long form of every term, with the rules "
-               "behind the classes, is the suite README's section ‘%s’ (%s), pinned to commit %s%s.\n\n" % (
-                   esc(ref.get("section") or README_SECTION), tt(ref.get("path") or README_PATH),
-                   tt(commit) if commit else "(not determined: no git checkout at build time)",
-                   " of this repository" if commit else ""))
+        out += ("The short form: the terms needed to read the evidence. The long form of every term, with the rules "
+                "behind the classes, is the suite README's section ‘%s’ (%s), pinned to commit %s%s.\n\n" % (
+                    esc(ref.get("section") or README_SECTION), tt(ref.get("path") or README_PATH),
+                    tt(commit) if commit else "(not determined: no git checkout at build time)",
+                    " of this repository" if commit else ""))
     if not entries:
         out += latex.placeholder("(glossary: to be written)") + "\n\n"
     else:
@@ -2266,11 +2315,6 @@ def glossary(ctx):
             see_text = inline(", ".join(str(x) for x in see)) if isinstance(see, list) and see else None
             out += latex.glossary_entry(esc(e["term"]), text, see_text)
         out += "\\end{multicols}\n\n"
-    out += "\\parhead{Record key}\n"
-    rk = ctx.glossary.get("records_key") if isinstance(ctx.glossary.get("records_key"), dict) else {}
-    if rk.get("lead"):
-        out += paragraphs([ctx.fill(rk["lead"])])
-    out += record_key(ctx, full=True)
     return out
 
 
@@ -2345,7 +2389,10 @@ def environment_table(ctx):
             esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)),
             _date(table.get("generated_utc")), tt(table.get("sha256") or "–"), tt(table.get("path")))
         if table.get("replayed"):
-            text += "; the table the re-evaluation replayed (reevaluated.json by\\_design)"
+            recorded = ((run.reeval or {}).get("by_design") or {}).get("path")
+            text += "; the table the re-evaluation replayed (reevaluated.json by\\_design), found by its sha256%s" % (
+                (" at this path (the re-evaluation recorded %s)" % tt(recorded))
+                if recorded and recorded != table.get("path") else " at the recorded path")
         elif table.get("replayed_sha256"):
             text += "; \\textbf{WARNING}: not the table the re-evaluation replayed (sha256 %s, %s cases): %s" % (
                 tt(table["replayed_sha256"]), esc(table.get("replayed_cases", "–")),

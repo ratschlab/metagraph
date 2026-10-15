@@ -3740,7 +3740,28 @@ table and states the zero paging times it leaves out; C.3's cold-wall population
 family's prose may count the MCP classes of its members through placeholders the generator fills from the same
 classifier as the cells (`Context.family_values`: `{n_mcp_refused_before_host}` ...), so that prose and tables cannot
 drift. Part I is four pages: the methods hold the arms, the order, the ground truth and the timing definitions (the
-owner's list) and the rules of judging, the verdict and the gate moved to appendix F; the record key is appendix D's.
+owner's list) and the rules of judging, the verdict and the gate moved to appendix F.
+
+After the re-verification of round 3 (round 4, 2026-10-15) every figure of the run that a chapter's prose states is a
+placeholder the generator fills from the record, and every sentence whose truth depends on the run is a conditional,
+so that a later run's document never prints the sample's numbers (`doc/facts.py`): the chapter prose reads
+`facts.chapter_facts` (the counts by standing and by agreement, the summary's timing figures, the findings with their
+overruns, the claims each family states in its `claim` sorted into what the direct arms showed, the footnoted tests
+with one phrase per arm, the gate's outcome problems among them; `fam[<family>][...]` a family's values, `x[<scenario>]
+[dl|dr|mcp][wall|phrase|detail|class|...]` a scenario's), a family's prose `facts.family_facts` (its standing counts, the
+MCP classes with their ids and variants, the members' phrases, the findings, the 503 deadlines past their budgets, the
+stated stops, the relations, the owner's declared exemptions, the expected runs); `[[flag ? when true | when false]]`,
+`[[!flag ? ...]]` and `[[x[R-edge-0003][mcp][class] = refused_before_host ? ...]]` choose a text, nested innermost first;
+`{n:s}` is the plural s, `{n:v}` the verb's s, `{n:word}` the number in words. A placeholder or flag the run's values
+lack stays visible and `make_doc.py` warns. The literal numbers a prose file still carries are the constants of the SPEC,
+of the manifest (lengths, budgets, expected runs) and of the service, each listed under the file's `_assumes` with its
+source; `tests/test_doc.py` fails on any other number, on a placeholder or flag the generator does not compute, and
+when chapter R's prose rendered on the fake run prints one of the v4 sample's figures. The compact record key
+(abbreviation and organism, one paragraph) sits on each chapter page before its first family, where the matrices
+need it (in I.3 it cost Part I a fifth page), every unit table whose variants name a record links to it and to
+appendix D's full key from its legend, and appendix D prints the key before the glossary. The phase box plot's tick
+labels are two lines (the phase, its n). The closing section says which population each n is (per scenario the
+host-warm MCP execution with a backend timing; the cold calls without a backend timing counted apart).
 
 - Reads the run directory as report.py does (manifest.json, the re-evaluated executions and compare.json when the
   run has them, else the recorded ones, run.json, reevaluated.json, samples.jsonl, gate.json, arms/mcp/run.json),
@@ -3779,12 +3800,16 @@ owner's list) and the rules of judging, the verdict and the gate moved to append
   key's lead). Inline markup: `code` and *emphasis*. `--scaffold-prose` writes the placeholder entries a chapter
   file lacks (existing text untouched). Chapter R, Part I, the glossary, the closing section, the case reasons
   and R's check kinds are written (2026-10-15, round 2); the other chapters hold placeholders marked "(to be
-  written)". `tests/test_doc.py` fails when a family, a unit or a check kind has no entry at all, when a written
+  written)". A chapter's prose names the run's figures as placeholders and its run-dependent sentences as
+  conditionals (round 4; `doc/facts.py` computes the values, each file's `_assumes` lists the constants it may
+  carry as text). `tests/test_doc.py` fails when a family, a unit or a check kind has no entry at all, when a written
   chapter (`WRITTEN_CHAPTERS`) still carries a placeholder (its summary, coverage gap, intro, families, units and
   unit notes, the overview's sections and appendix lead-ins, the glossary, the closing section's every key, the
-  case reasons), when a catalogue entry's generic flag disagrees with `checks.is_property`, or when the prose uses
-  a placeholder the generator does not fill (or declares one it does not). A key whose prose is awaited can be
-  named in the test's `ROUND2_PENDING` and tolerates a placeholder until it lands (empty since round 2 landed).
+  case reasons), when a catalogue entry's generic flag disagrees with `checks.is_property`, when the prose uses
+  a placeholder the generator does not fill (or declares one it does not), when a prose string carries a number
+  that is neither a placeholder nor an `_assumes` constant, or when chapter R's prose on the fake run prints a
+  v4 figure. A key whose prose is awaited can be named in the test's `ROUND2_PENDING` and tolerates a placeholder
+  until it lands (empty since round 2 landed).
 - The cell grammar (`doc/cells.py`): glyph (pass, fail, error, finding, inconclusive, not implemented via MCP,
   service-side by design) + marks (footnote digit, disagreement, timing / same checks / not comparable, cold /
   aged, mixed repeats, unverified) + wall times in repeat order with the unit once, the server time in brackets,
@@ -3804,13 +3829,18 @@ owner's list) and the rules of judging, the verdict and the gate moved to append
   outcome counts and clause, the replayed by-design table found by its sha (and the warning when another is read),
   the closing figures' populations, the evidence clause's parenthesis balance, the finding line's single mechanism,
   the rows' qualifiers and the one-phrase MCP arm, the family values from the classifier, the repeats in appendix F
-  and the rules in appendix F.
+  and the rules in appendix F; and, for round 4, the prose filling (conditionals, specs, the index syntax, the
+  spacing, the unresolved recorded), no v4 literal on the fake run, every placeholder of R.json resolvable on v4,
+  every literal number assumed, the facts on the fake run, the record key in I.3 and the legends, appendix D's
+  order, the box plot's labels, the untimed cold count and the uncut B note.
 - The sample of 2026-10-15 (Part I, chapter R, the closing section, the appendices chapter R needs, the index)
   was built from the v4 run re-evaluated with c11db9dd: `doc/make_doc.py RUN_DIR --out DIR --sample`; its notes
   for the owner's review are `~/.cache/metagraph-traverse-plans/2026-10-15/doc/sample/SAMPLE-NOTES.md` (round 1)
   and `.../doc/sample-r2/SAMPLE-NOTES.md` (round 2, after the owner's review, point by point; round 3, after the
-  verification of round 2, rebuilt in the same directory). The template is frozen after round 3 (the 14-unit
-  grouping of R stays; pagination may evolve).
+  verification of round 2, rebuilt in the same directory) and `.../doc/sample-r3/SAMPLE-NOTES.md` (round 4, after
+  the re-verification of round 3). The template is frozen after round 3 (the 14-unit grouping of R stays;
+  pagination may evolve); round 4 changed no table cell, only the prose's sources, the record key's places and
+  the plot's labels.
 
 ## Glossary
 

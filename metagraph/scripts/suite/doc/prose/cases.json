@@ -1,5 +1,22 @@
 {
  "_about": "Short local reasons for the by-design and not-expressible cases of the service-by-design table, keyed by case id: one clause the tables print in a not-exercised MCP cell, under a normalised row, in a detail block's adjudication line and as 'in short' in appendix B (the long explanation stays in appendix B; the generator adds the class in words, the service's status and code and the pointer 'see B' itself). Plain text, inline markup `code` and *emphasis*. A case without an entry falls back on the manifest's not-implemented reason, the case's missing argument or its service outcome. Written for the cases chapter R names (2026-10-15); other chapters' cases are added with their prose.",
+ "_assumes": {
+  "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest v4 (lengths, budgets, expected runs), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
+  "10": "the tool's inline wait for a discovery, 10 s (service_by_design.json)",
+  "30": "the tool's inline wait with explicit labels, 30 s (service_by_design.json)",
+  "60": "about 60 s, the service's default budget as seconds (service_by_design.json)",
+  "200": "http 200 (SPEC)",
+  "250": "the finalisation reserve in ms (SPEC section 4.5)",
+  "400": "http 400 (SPEC; the service's refusals)",
+  "500": "a discovery's 500 bp and the service's minimum budget of 500 ms (service_by_design.json)",
+  "502": "http 502 backend_fault (service_by_design.json)",
+  "503": "http 503 deadline (SPEC section 4.5)",
+  "1,000": "the service's cap of 1,000 distinct labels (service_by_design.json)",
+  "2,000": "the service's `bounds.max_query_bp` (service_by_design.json)",
+  "1..100": "the service's discovery limit range (service_by_design.json)",
+  "10,000": "the server's max_query_bp (host_capabilities)",
+  "60,000": "the service's default `bounds.time_budget_ms` (service_by_design.json)"
+ },
  "short": {
   "resolve.not_expressible.bounds_max_query_bp": "the tool always sends its own `bounds.max_query_bp` (2,000; 500 for a discovery) and has no argument for another",
   "resolve.not_expressible.support": "the tool has no support argument",

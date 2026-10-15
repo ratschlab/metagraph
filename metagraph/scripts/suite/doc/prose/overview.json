@@ -1,5 +1,24 @@
 {
  "_about": "Part I of the suite results document in the four sections of the owner's review (2026-10-15), in `order`: decision (I.1 Decision summary), methods (I.2 Methods), reading (I.3 Reading guide), provenance (I.4 Provenance and coverage); each entry has its id, title and `paragraphs` (the lead-in). A section may hold further slots the generator prints between its computed parts: I.1 `verdict` (after the two verdict lines), `findings` (under 'Principal findings', before the computed lists), `untested` (under 'Properties still untested', before the computed list) and `closing` (the last paragraph); I.4 `coverage` (before the per-arm outcome table) and `exemptions` (before the limitation counts). The reading section also holds the wording of the glyph legend (`legend`), of the small marks (`marks`) and the texts of the numbered markers on the annotated matrix (`annotations`, keyed column / glyph / repeats / server / backend / footnote / mark / ids / summary); the generator supplies the symbols from its own macros so that the legend and the tables cannot drift apart. `appendix_F` and `appendix_G` are the lead-ins of those appendices; `appendix_F.rules` (with `rules_title`) holds the judging, verdict and gate rules printed in F after the environment (round 3: moved out of I.2 so that Part I is four pages, as the owner's Methods list has the arms, the order, the ground truth and the timing definitions only). Placeholders in braces are filled from the run (sections.Context.placeholders); every placeholder used is declared under `placeholders` with its source, and the text holds no other braces. Inline markup: `code` and *emphasis*. The cover's lines and every table and computed list are the generator's. Audience: MetaGraph developers who know the engine but not the suite. Every rule stated follows checks.py, compare.py, report.py and gate.py as of c11db9dd and SPEC-labeled-traversal-core section 4.",
+ "_assumes": {
+  "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest v4 (lengths, budgets, expected runs), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
+  "0": "repeat 0 (the harness)",
+  "1": "repeat 1 (the harness); the genetic codes 1 to 6, 11 and 12 (the ground truth)",
+  "2": "DUST below 2 (areas.py); the sampler's 2 s interval (sampler.py)",
+  "6": "the genetic codes 1 to 6 (the ground truth)",
+  "10": "the rounding rule: one decimal below 10 s (cells.fmt_t)",
+  "11": "genetic code 11 (the ground truth)",
+  "12": "genetic code 12 (the ground truth)",
+  "50": "a window lies 50 bp from any other (areas.py)",
+  "0.2": "the rounding example 150 to 249 ms print as 0.2 s (cells.fmt_t)",
+  "100": "the rounding rule: whole milliseconds below 100 ms (cells.fmt_t)",
+  "120": "the fast class's client time-out and the front's cut, 120 s (run_direct.py, the front)",
+  "150": "the rounding example (cells.fmt_t)",
+  "249": "the rounding example (cells.fmt_t)",
+  "503": "http 503 (SPEC)",
+  "600": "the slow class's client time-out, 600 s (run_direct.py)",
+  "1,800": "the long class's client time-out, 1,800 s (run_direct.py)"
+ },
  "order": [
   "decision",
   "methods",
@@ -61,7 +80,9 @@
   "untested_scope": "'in this run' for a full build, 'in the built chapter R' for a partial one (the properties-untested list covers the built chapters only)",
   "by_design_cases": "the number of cases of the by-design table the document prints: the table the re-evaluation replayed (reevaluated.json by_design, found by its sha256), else the comparator's choice with a warning (131 in v4)",
   "by_design_sha_short": "that table's sha256, first 12 hex digits",
-  "by_design_table_line": "that table in one line: version, cases, service commit, sha256, and whether it is the replayed one (else the warning)"
+  "by_design_table_line": "that table in one line: version, cases, service commit, sha256, and whether it is the replayed one (else the warning)",
+  "logan_caveat": "whether the Logan caveat applies (report.LOAD_CAVEAT_SRA_CPU_PCT / LOAD_CAVEAT_LOAD1 against the sampler's means): a flag for the prose's conditionals `[[logan_caveat ? ...]]`",
+  "gate_judged": "whether a deploy gate verdict exists (gate.json, or judged offline by gate.py for the document): a flag for the prose's conditionals"
  },
  "sections": {
   "decision": {
@@ -80,7 +101,7 @@
     "{n_inconclusive} executions were inconclusive ({inconclusive_by_reason}): the test could not test its property on that answer, which is neither a pass nor a failure; {gate_inconclusive_clause}. The properties no arm showed {untested_scope} are listed below per unit, with the reason per arm, and the run-wide count follows. The MCP arm's not-exercised and by-design executions are counted in I.4 ({n_not_implemented_mcp} and {n_service_by_design}, a known limit and the service's documented answers, not failures)."
    ],
    "closing": [
-    "*Where to look.* Part II has one chapter per area, each led by what held and which claim remains unsupported, then the tests in units, one table each; a test that is not clean carries a footnote to its detail block right after its table. The closing section reads the timing across chapters. Appendix E finds any test id; the glossary (appendix D) keys the records' abbreviations."
+    "*Where to look.* Part II has one chapter per area, each led by what held and which claim remains unsupported, then the tests in units, one table each; a test that is not clean carries a footnote to its detail block right after its table. The closing section reads the timing across chapters. Appendix E finds any test id; the record key on each chapter page (in full in appendix D, before the glossary) reads the records' abbreviations."
    ]
   },
   "methods": {

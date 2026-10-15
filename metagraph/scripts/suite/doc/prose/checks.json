@@ -1,5 +1,15 @@
 {
  "_about": "Appendix A of the suite results document, the check catalogue (round 2, after OWNER-REVIEW-SAMPLE-1.md): one entry per check kind, keyed on the check's name in checks.CHECKS. Written from checks.py's code and docstrings as of c11db9dd, as prose a developer who knows the engine but not the suite can read: `asserts` what the check claims of an answer, `inconclusive` when it cannot test that claim, `fails` when it fails, `args` what its arguments mean, `spec` the SPEC sections it rests on, `generic` whether it is one of checks.GENERIC_CHECKS (status, invariants, counts_consistent, budget_respected: they hold on any answer of the route; every other check is a property check, the scenario's own claim). `routes` splits an entry whose rule differs per route. This round holds the ten kinds chapter R (and chapter D's R copies) use; the other 36 follow with their chapters. Where a function has a docstring too, this prose is the catalogue's text and the docstring the source. The `common` paragraphs state the rules checks.evaluate applies to every check before the check itself runs, and the MCP runner's host-state adjudication that follows the checks; the catalogue prints them once, at the top of the appendix. The words pass and ok are reserved for a property actually tested: a check that could not test its claim reads inconclusive, never pass.",
+ "_assumes": {
+  "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest v4 (lengths, budgets, expected runs), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
+  "0": "runs 0-based, a stop before the first k-mer, zero k-mers (SPEC section 4)",
+  "1": "L - k + 1, k - 1 (SPEC section 4.1); max(1 s, the budget) (checks.py)",
+  "200": "http 200 (SPEC)",
+  "503": "http 503 deadline (SPEC)",
+  "1,000": "the default `max_labels` of a discovery (SPEC section 4.2)",
+  "60,000": "the server's cap on staging (host_capabilities)",
+  "70,000": "R-edge-0021's budget (manifest)"
+ },
  "common": [
   "Every check reads the normalised answer: the HTTP status, the body, the error (code and text) and, on a direct arm, the headers. The MCP arm's normaliser maps the tool results into the same shape for the fields the service exposes.",
   "Before a check runs, checks.evaluate applies three rules. A check other than status on an answer whose status is not 200 does not run: it is inconclusive (not testable) when the scenario allows that status, which is the case for an expected refusal and for an allowed 503 deadline (see status), and a failure (no answer to check) otherwise; `budget_respected` on an allowed 503 is the one exception, it judges the 503's timing. A field the check needs that the answer lacks is not exposed on the MCP arm and a failure on a direct arm, where the field is part of the contract. An unknown check name, or a check that raises, is a failure stating why, never a silent pass.",
