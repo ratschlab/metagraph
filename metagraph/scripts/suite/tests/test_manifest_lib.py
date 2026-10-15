@@ -15,7 +15,9 @@ import manifest_lib as ml  # noqa: E402
 class Builders(unittest.TestCase):
     def test_pattern_request_names_the_defaults(self):
         r = ml.pattern_request([{"dna": "ACGT" * 6}])
-        self.assertEqual((r["mode"], r["max_contexts"], r["time_budget_ms"]), ("all_or_count", 10000, 60000))
+        # the budget is 120,000 ms since v6 (the owner, 2026-10-15; 60,000 before)
+        self.assertEqual((r["mode"], r["max_contexts"], r["time_budget_ms"]), ("all_or_count", 10000, 120000))
+        self.assertEqual(ml.PATTERN_TIME_BUDGET_MS, 120000)
         r = ml.pattern_request([{"dna": "A" * 25}], mode="partial", output={"labels": "all"})
         self.assertEqual(r["max_labels"], 1000)
         r = ml.pattern_request([{"dna": "A" * 25}], predicate={"any": ["562"]})
@@ -494,7 +496,7 @@ class FrozenManifests(unittest.TestCase):
         found = 0
         for name in ("suite_v1.json", "suite_smoke_v1.json", "suite_v2.json", "suite_smoke_v2.json", "suite_v3.json",
                      "suite_smoke_v3.json", "suite_v4.json", "suite_smoke_v4.json", "suite_v5.json",
-                     "suite_smoke_v5.json"):
+                     "suite_smoke_v5.json", "suite_v6.json", "suite_smoke_v6.json"):
             path = os.path.join(SUITE, "manifest", name)
             if not os.path.exists(path):
                 continue

@@ -20,8 +20,14 @@ from truth import K, TRUTH_DIR, Record
 
 DB = "refseq33m-experimental"
 
-# Every pattern request names these (async finding 1: the MCP defaults differ: mode count, max_contexts 1,000)
-PATTERN_TIME_BUDGET_MS = 60000
+# Every pattern request names these (async finding 1: the MCP defaults differ: mode count, max_contexts 1,000).
+# The budget is 120,000 ms since v6 (the owner, 2026-10-15): under v5's 60,000 ms the loaded staging host answered
+# the heavy scenarios (P-heavy-0001, M-protein-0001 / -0003, the M-planted ones, ...) with a 503 deadline at ~60.2 s
+# or a time-limited 200, every one inconclusive, so the run's baseline could not decide them. The host's /pattern cap
+# is 600,000 ms (caps.time_budget_ms, the snapshot); /resolve and /traverse keep 60,000 ms, their host maximum
+# (RESOLVE_TIME_BUDGET_MS). A scenario that tests a budget names its own (P-caps-0004's 300 ms, M-protein-0010's
+# 30,000 ms, the refusal / minimum / above-cap scenarios).
+PATTERN_TIME_BUDGET_MS = 120000
 PATTERN_MAX_CONTEXTS = 10000
 PATTERN_MAX_PREDICATE_CONTEXTS = 10000   # the MCP's default and the staging host's cap
 # The host's defaults (the capabilities: default_scope any_offset, default_strands both, default_projection none,

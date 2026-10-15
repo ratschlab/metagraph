@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Build the suite's frozen scenario manifests (DESIGN §8.1): the full catalogue and the smoke selection.
 
-    build_manifest.py --out manifest/suite_v5.json --smoke-out manifest/suite_smoke_v5.json [--seed N] [--no-fetch]
+    build_manifest.py --out manifest/suite_v6.json --smoke-out manifest/suite_smoke_v6.json [--seed N] [--no-fetch]
                       [--capabilities DIR]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
 same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
 `relations_sha256` (of `relations`, the comparisons across scenarios); `created_utc` is outside them.
 
-The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v5` in the full manifest): few enough for a
-paired three-arm smoke run within 60 host requests, the MCP arm's included. The `smoke` tag keeps marking the
-scenarios a smoke validation exercised (the earlier selections).
+The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v5` in the full manifest: the tag names the
+smoke SELECTION, v5's, which v6 keeps, so that the scenarios of v6 the deploy gate selects stay byte-identical to
+v5's): few enough for a paired three-arm smoke run within 60 host requests, the MCP arm's included. The `smoke` tag
+keeps marking the scenarios a smoke validation exercised (the earlier selections).
+
+v6 (the owner, 2026-10-15) is v5 with one change: every /pattern request that named the default budget of 60,000 ms
+names 120,000 ms (manifest_lib.PATTERN_TIME_BUDGET_MS), on both arms; nothing else of any scenario, and no relation,
+changed (the gate's 237 resolve / traverse / capabilities scenarios are byte-identical, so the v5 acceptance carries
+over). The MCP exposure baseline it reads is v4's with its request digests rebased (--exposure-rebase, below).
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -45,14 +51,17 @@ import truth  # noqa: E402
 from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
-MANIFEST_VERSION = 5
+MANIFEST_VERSION = 6
+# The smoke selection's version (SMOKE_TAG): v5's selection, kept by v6 (the tag is part of every scenario's tags, and
+# the gate's scenarios must stay byte-identical to v5's)
+SMOKE_SELECTION_VERSION = 5
 DEFAULT_CAPABILITIES = os.path.join(truth.TRUTH_DIR, "staging_capabilities")
 # The v3 smoke selection (lane S3): the checks lane S3 changed, live, within 60 host requests in a paired three-arm
 # run (each scenario MCP cold, direct-local, direct-remote, MCP warm; plus 9 capabilities GETs): the 503 past a
 # budget (R-budget-0001), exact junction runs, a walk to a record's end, a 1 ms walk budget (a stop at depth 1),
 # the telomeric seed's re-entry, an all_or_count hard region never withheld, a peptide, a count in suffix scope
 # (properties the MCP may not expose), a 31-mer of a real repeat, and the max_mismatches 0 relation pair.
-SMOKE_TAG = "smoke-v%d" % MANIFEST_VERSION
+SMOKE_TAG = "smoke-v%d" % SMOKE_SELECTION_VERSION
 # v5 adds a forced cap via MCP (T-caps-0002); the warm-ups of the smoke scenarios that have one (R-twin-0002 before
 # R-budget-0001, R-warm-0006 before N-hard-0022) travel with them (tag_scenarios: `warms`), so that a smoke run meets
 # them as the full run does: 14 scenarios, 28 direct requests of a paired smoke run with the closing GETs
@@ -84,12 +93,15 @@ CONVENTIONS = {
 CAPABILITY_DOCUMENTS = ("capabilities", "pattern_capabilities", "traverse_capabilities")
 # The checks a baseline run shows the MCP surface exposes, per scenario (mcp.exposes; compare.exposure_drops reads a
 # listed check that reads not_exposed as a disagreement): written by --exposure-from from a recorded run
-DEFAULT_EXPOSURE = os.path.join(truth.TRUTH_DIR, "mcp_exposure", "v4-20261014T061053Z.json")
+# v6: the v4 baseline with its request digests rebased to the budget-free rule of mcp_request_sha256 (--exposure-rebase:
+# the exposes lists are v4-20261014T061053Z.json's, byte for byte), so that the /pattern requests of v6, which differ
+# from v4's in their time_budget_ms alone, keep their lists
+DEFAULT_EXPOSURE = os.path.join(truth.TRUTH_DIR, "mcp_exposure", "v4-20261014T061053Z-budget-free.json")
 EXPOSURE_RULE = ("the checks decided (pass, fail or finding) on EVERY recorded MCP execution of the scenario whose "
                  "status check passed (an execution with another status decides nothing, so a scenario with one has "
                  "no list); written into a scenario's mcp.exposes only where its MCP request is the baseline's "
-                 "(traverse_resolve's time_budget_ms aside: a budget shapes no field of the answer), restricted to "
-                 "the checks the scenario expects")
+                 "(a time_budget_ms aside, traverse_resolve's and pattern_search's: a budget shapes no field of the "
+                 "answer), restricted to the checks the scenario expects")
 
 
 def load_capabilities(directory: str) -> dict:
@@ -186,15 +198,47 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     return manifest
 
 
+# the tools whose time_budget_ms the request digest leaves out (EXPOSURE_RULE): traverse_resolve's since v5,
+# pattern_search's since v6 (the budget 60,000 -> 120,000 ms would otherwise drop every /pattern scenario's list)
+BUDGET_FREE_DIGEST_TOOLS = ("traverse_resolve", "pattern_search")
+
+
 def mcp_request_sha256(mcp: dict) -> Optional[str]:
-    """The digest of a scenario's MCP request (tool and arguments; traverse_resolve's time_budget_ms left out), None
-    for a scenario the MCP does not run."""
+    """The digest of a scenario's MCP request (tool and arguments; the time_budget_ms of BUDGET_FREE_DIGEST_TOOLS left
+    out), None for a scenario the MCP does not run."""
     if not isinstance(mcp, dict) or not mcp.get("tool"):
         return None
     args = dict(mcp.get("arguments") or {})
-    if mcp["tool"] == "traverse_resolve":
+    if mcp["tool"] in BUDGET_FREE_DIGEST_TOOLS:
         args.pop("time_budget_ms", None)
     return sha256_json({"tool": mcp["tool"], "arguments": args})
+
+
+def rebase_exposure(baseline: dict, source_manifest: dict, baseline_file: str) -> dict:
+    """|baseline| with every scenario's mcp_request_sha256 recomputed by the current mcp_request_sha256 from the MCP
+    request of |source_manifest|, the manifest the baseline was recorded against (its source.manifest_content_sha256
+    must be that manifest's content_sha256, and every scenario of the baseline must be in it); the exposes lists
+    and the source stay, the rule is the current one, and source.rebased_from names the file rebased (its sha256).
+    A ValueError names what does not fit."""
+    want = (baseline.get("source") or {}).get("manifest_content_sha256")
+    if want != source_manifest.get("content_sha256"):
+        raise ValueError("the baseline was recorded against the manifest content %s, not the given one (%s)" % (
+            want, source_manifest.get("content_sha256")))
+    scen = dict((s.get("id"), s) for s in source_manifest.get("scenarios") or [])
+    missing = sorted(sid for sid in (baseline.get("scenarios") or {}) if sid not in scen)
+    if missing:
+        raise ValueError("baseline scenarios not in the manifest: %s" % ", ".join(missing[:10]))
+    out = {}
+    for sid, entry in sorted((baseline.get("scenarios") or {}).items()):
+        out[sid] = {"exposes": list(entry.get("exposes") or []),
+                    "mcp_request_sha256": mcp_request_sha256(scen[sid].get("mcp"))}
+    with open(baseline_file, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    source = dict(baseline.get("source") or {})
+    source["rebased_from"] = {"file": os.path.relpath(os.path.abspath(baseline_file), HERE), "sha256": digest,
+                              "rule": baseline.get("rule"),
+                              "digest_left_out": "time_budget_ms of %s" % ", ".join(BUDGET_FREE_DIGEST_TOOLS)}
+    return {"source": source, "rule": EXPOSURE_RULE, "scenarios": out}
 
 
 def exposure_baseline(rows: list, manifest: dict, source: dict) -> dict:
@@ -645,8 +689,31 @@ def main(argv=None) -> int:
     ap.add_argument("--exposure-from", metavar="RUN_DIR",
                     help="write the exposure baseline of a recorded run (its executions.reevaluated.jsonl, else "
                          "executions.jsonl, and manifest.json) to --exposure-out, then exit")
-    ap.add_argument("--exposure-out", help="where --exposure-from writes")
+    ap.add_argument("--exposure-out", help="where --exposure-from / --exposure-rebase writes")
+    ap.add_argument("--exposure-rebase", metavar="BASELINE",
+                    help="write BASELINE with its request digests recomputed by the current rule from the manifest it "
+                         "was recorded against (--exposure-source-manifest) to --exposure-out, then exit")
+    ap.add_argument("--exposure-source-manifest", metavar="MANIFEST",
+                    help="the manifest --exposure-rebase's baseline was recorded against (manifest/suite_v4.json)")
     args = ap.parse_args(argv)
+    if args.exposure_rebase:
+        if not args.exposure_out or not args.exposure_source_manifest:
+            raise SystemExit("--exposure-rebase needs --exposure-source-manifest and --exposure-out")
+        with open(args.exposure_rebase) as f:
+            baseline = json.load(f)
+        with open(args.exposure_source_manifest) as f:
+            source_manifest = json.load(f)
+        try:
+            doc = rebase_exposure(baseline, source_manifest, args.exposure_rebase)
+        except ValueError as e:
+            raise SystemExit("--exposure-rebase: %s" % e)
+        os.makedirs(os.path.dirname(os.path.abspath(args.exposure_out)), exist_ok=True)
+        with open(args.exposure_out, "w") as f:
+            json.dump(doc, f, indent=1, sort_keys=True)
+            f.write("\n")
+        print("%d scenarios, %d with exposed checks, digests rebased" % (
+            len(doc["scenarios"]), sum(1 for v in doc["scenarios"].values() if v["exposes"])))
+        return 0
     if args.exposure_from:
         if not args.exposure_out:
             raise SystemExit("--exposure-from needs --exposure-out")
