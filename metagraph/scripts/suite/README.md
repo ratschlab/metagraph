@@ -2959,3 +2959,119 @@ Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_desig
   or the summary; v3 FAIL and v4 FINDINGS (exploratory, under its gate) as before. The gate on the v4 copy: 46
   problems, problem for problem S8g's (c11db9dd's 45 and "arms/mcp states no observed index_fp; the policy pins
   907ec986e19ecb04 (service_capabilities.host_document)"), its notes and counts equal (judged 637, passed 550).
+
+## Lane V5: the v5 builder, decisive under load (Phase A: a dry v5, not frozen, not the default) (2026-10-15)
+
+`build_manifest.py` builds manifest version 5 (`suite_v5.json` / `suite_smoke_v5.json`, smoke tag `smoke-v5`); the
+frozen v1-v4 stay (1387455f rebuilds v4 byte for byte from the record cache it was built from). Phase A builds v5
+dry (lane V5's scratch, content_sha256 409987cc..., relations_sha256 39660cfa...); run_suite.sh keeps v4 as its
+default until the freeze (Phase B: freeze, smoke, default, the gate policy from gate/declared_v5_rt.json). What
+changed, by finding:
+
+### Ground truth and the builder
+- **Reverse negatives k-mer by k-mer** (the outside review's finding 8, VERIFY-D; P4-builder-truth-02).
+  `Ctx.rc_negative_window` draws until no k-mer of the reverse query is in the whole record
+  (`manifest_lib.reverse_kmers_in_record`, which refuses a fetched region); whole-window uniqueness let about 1 % of
+  accepted windows keep one. R-rc's second window is E. coli's (its reverse k-mers are in the graph through its many
+  records, so the header check discriminates; v4's mja window was absent from the graph). T-strand and the
+  mutated-seed refusals (N-nearmiss-0035/-0038/-0041) accept either seed refusal (`seed '<32>': `): both follow
+  from the record alone; which one appears is the index's.
+- **Chance bounds** (VERIFY-D). Every global negative control (truth random, shuffled_from or random_peptide)
+  states `truth.chance_bound` (the union bound over the graph's k-mers; a shuffled query also its
+  composition-matched worst case; `areas.chance_bound` states the model per route), and the builder refuses one
+  above 1e-4. N-negative-0018's random peptide has 12 residues with paths (6.8e-8; 10 residues met 5.6e-4).
+- **index-empirical**: claims the records cannot certify (X-junction's graph-wide absence, R-junction's columns,
+  which seed refusal T-strand gets, the telomere warm-up's human column, a region record's mutated seed) carry
+  `truth.index_empirical` {index_fp, claim}: a failure on another index asks to re-validate the expectation.
+- **Flanks end at a base outside ACGT** (triage-v4 V03): truth_at / flank_for cut the flank there and state it
+  (`flank_cut` {at, base}); `walk_expectations` stops a header walk's minimum where the next step would take such a
+  base (`first: non_acgt`) and counts no k-mer holding one as a successor. Only T-walk-0018 changes (its IUPAC S).
+- **Exact runs on headers, a tolerance on columns** (P5-v4-content-03): R-junction asks the records' headers for
+  their exact runs (`areas._record_runs`: the k-mers each whole record holds) and the taxid columns for one run that
+  reaches into the junction, never past it (`run_end_in` / `run_start_in`, at most 100 k-mers); the single-substitution
+  resolves ask the header's exact runs and the column's cover of both sides only (pae's column holds 1,762 records).
+- **Titles tested** (finding 6A, P5-v4-content-04): L-long-0006 asks path_spells on '+', L-long-0005 on '-';
+  N-usecase-0005 counts both primers forward. **The re-entry** (P5-v4-content-02): N-realrep-0003/-0006 expect
+  `blocked_event rejoined_seed` at 0 bp (a period of at most 40 - k bases inside the 40 bp seed).
+- **Nothing drops silently** (P5-v4-content-05): the X-table1 codes not reached (2, 5) or without a reassigned
+  codon (12), the N area's own-table pair and M-protein's table-12 slot are `skipped` entries.
+- **gen_D's pool** (P4-builder-truth-03) leaves out run-unique and retention-dependent scenarios, those that repeat
+  already, those whose status admits more than a 200, warm-ups and gate-coverage scenarios (the picks stay v4's).
+
+### Decisive under load (items 1 and 5; DECISIVE-v5.md in the lane directory lists the 32 v4 problems)
+- **/resolve**: explicit-label resolves name the host's cap, 60,000 ms (`RESOLVE_TIME_BUDGET_MS`; the service's own
+  default), not 20,000 (cold first calls of 21-37 s under the load); the builder refuses a snapshot with a lower cap;
+  `resolve.time_budget_above_host_max` names only a budget above the snapshot's cap.
+- **The stated stop** (V05 with VERIFY-V4's amendment): R-budget-0001 resolves eco's 5 kb second half (eco's
+  10 kb never completed here) under 700 ms, R-budget-0002 pae's 10 kb under 420 ms: the work deadline (budget -
+  250 ms) inside the warm work, after each one's complete twin (R-twin-0002 / -0004 at 60,000 ms, the warm-up). A
+  stop still depends on batch times: tagged `budget_stress` (truth.budget_stress), repeat 2, and excluded from the
+  deploy gate by the declared file; a complete answer reads inconclusive (lane G1's rule).
+- **Walks** (V06, G24): the 1 kb header T-walks walk 300 bp (the MCP's walk preset caps the budget at 15 s; cold
+  rates 36-58 bp/s); T-walk-0006 / -0012 / -0018 / -0036 ask the host's 60,000 ms (refused by the MCP above its
+  preset, by design) and walk 2,500 / 1,000 / 10,000 / 2,500 bp, what the slowest cold direct rate observed covers in
+  30 s; T-repeat 400 bp, eco's derived-label pair 50 bp, T-coords 250 bp. Every window is drawn as in v4 (the
+  class's margin), so nothing else moves.
+- **Warm-ups** (`warm-up`, truth.warm_up_for; `build_manifest.place_warm_ups` puts each right before its target): a
+  resolve of the rows the target reads (the record region under its header: tuples; under its column: rows), itself a
+  positive check (R-warm-0001..0004 before T-repeat-0001..0004, R-warm-0005 before T-labels-0003, R-warm-0006, the
+  telomere repeat under the human column, before N-hard-0022; R-twin-0002 / -0004 before R-budget). This assumes each
+  arm runs scenarios in manifest order (the paired loop does).
+- **T-budget-0003** (G18): T-attempts-0002's eco seed, whose seed phase took 148,723 work units in v4
+  (usage.per_seed[0].work_seed), under 300,000: partial walks only. **T-labels-0004** (V02): 4,096 MB for its 6,181
+  derived headers (counts hard-coded from the v4 answers, `derived_labels_v4`); T-labels-0006 drops the override and
+  walks via MCP. **T-end** (P4-builder-truth-01): the preset's 15,000 ms, so the MCP walks the record-end stop.
+  **T-attempts** (V04): the 200 (T-attempts-0002) and the retained 409 (T-attempts-0003) are two scenarios.
+
+### The gate's coverage (item 4, P5-v4-content-06)
+- Added (MCP-expressible, on the resolve / traverse routes; tag `gate-coverage`): T-caps-0002 / -0003, the trie's
+  `max_live_paths` 2 and `max_paths` 1 forced on a 3-copy M. genitalium 31-mer whose header-constrained trie holds 3
+  heads by 23 / 28 bp (`manifest_lib.trie_heads`, from the record); T-caps-0004, `max_live_paths` 1,001 above the
+  service's maximum (the host walks it, the MCP refuses it: traverse.bounds_knob_above_service_maximum); T-quorum-0002,
+  the permit side of `min_live_labels` (header and taxid of the record at 2); T-seeds-0002, a seed of two labels of
+  which the host drops one (`seed_unsupported`, labels_supporting_total 1) with a client `seed_id` (echoed,
+  `seed_id_mismatch`). The stop of a running job (traverse_stop) is the async session's area S.
+- Every discovery names `max_labels` (at most 100 but the by-design case R-edge-0023) and `kind`, on both arms (the
+  MCP sends 20 when none is given, the host 1,000; the builder refuses another); R-discover-0001 / -0004 ask v4's
+  full-support tie plus one (9, 3), so the source must be listed.
+- **SPEC request paths not exercised, by decision** (each one stays out of the manifest for its stated reason):
+  - /resolve `select` (policies, `merge_overlapping`, `max_labels_per_seed`), `run_format rle`, `min_block_kmers` /
+    `min_block_bp`: not expressible via MCP (traverse_resolve has no such argument; VERIFY-D); a direct-arm gap,
+    covered by the engine's ResolveTest fixtures; candidates for the full suite's next increment, outside the
+    MCP gate.
+  - /traverse label switching (`labels.extra`, `change_cost`, `loss_budget`, `switch_on`, `max_switch_sources`),
+    the quorum knobs `min_successor_labels` / `min_successor_fraction`, `max_splits_per_path`, `hairpins`, the
+    frontier (`order`, `on_overflow`, beam), `branching.max_label_branches` 0 / 1, `output.detail` summary / tree,
+    `output.sequences`, profile bins, continuation: the MCP's advanced strategy path is off on staging
+    (preset_unavailable) and `output.*` is not overridable; the engine's synthetic fixtures (SPEC §11.3 T15, T27,
+    T35) cover them.
+  - `bubble_window_bp` / `tip_window_bp`: not served features (only 0 is accepted); T-edge-0015 tests tip's refusal.
+  - The attempt routes (GET /traverse/attempt, POST /traverse/cancel, `expect_server_instance`): not expressible via
+    MCP beyond traverse_stop (area S); T-attempts-0001..0003 cover the attempt fields on the direct arms.
+  - /pattern `max_labels_per_anchor`, `max_occurrences_per_label`, `occurrences: false`, a `max_labels` cut,
+    `allow_unbudgeted_annotation`, `stop_at_threshold` beyond P-modes-0005, Q's motif `tested_contexts`,
+    `predicate.vacuous`, `predicate_too_large`: the /pattern route is not in the resolve / traverse gate; several
+    are not expressible via MCP (PATTERN_NOT_EXPRESSIBLE); left to the full suite's next increment.
+
+### mcp.exposes and the declared gate entries (items 9 and 6b)
+- `build_manifest.py --exposure-from RUN --exposure-out FILE` writes a run's exposure baseline
+  (truth/mcp_exposure/v4-20261014T061053Z.json: the v4 run's MCP lines re-evaluated at 1387455f); the build fills
+  `mcp.exposes` with the checks decided (pass, fail, finding) on EVERY recorded MCP execution of the scenario whose
+  status passed, only where its MCP request is the baseline's (traverse_resolve's time budget aside) and restricted to
+  its checks; the manifest states the baseline (`mcp_exposure_baseline`). 504 v5 scenarios carry a list.
+- gate/declared_v5_rt.json carries the owner's v4 §1 entries (C-caps-0001 on MCP; label_dict_contains on
+  T-labels-0003 / -0005 and answer_fields on T-edge-0008 not required on MCP) and adds R-budget-0001 / -0002 on
+  direct-local (budget_stress, for the owner); every v4 suite error of §2 is fixed and dropped.
+
+### Validation (offline, Phase A)
+- The dry v5 against v4 (scenario by scenario): 693 scenarios (12 added: R-warm-0001..0006, T-attempts-0003,
+  T-caps-0002..0004, T-quorum-0002, T-seeds-0002; none dropped); 182 changed beyond mcp.exposes and the smoke tag, each
+  to one finding above; 107 unchanged; 392 only gained mcp.exposes or the smoke tag.
+- Every truth re-checked against the cached records (627 windows, 615 flanks, all ACGT, 15 copies; 46 walk minima,
+  12 header runs, 2 trie head counts, 34 chance bounds, 3 reverse negatives recomputed; 8 warm-ups placed and
+  matching; 13 discoveries explicit): 0 problems.
+- The v4 answers judged by v5's expectations where the request is v4's (545 scenarios): every new check passes on
+  every arm and repeat; N-usecase-0005's MCP executions turn inconclusive -> pass (a property the MCP exposes);
+  v4's T-attempts-0002 repeat-1 409 is T-attempts-0003's answer in v5 (pass there).
+- The v5 gate policy derives from the dry build with the declared file: 234 selected, MCP 202 scenarios / 410
+  executions, direct-local 232 / 266; REL-same_answer-0003 and REL-prefix_equals-0002 / -0004 required.
