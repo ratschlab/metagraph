@@ -1800,6 +1800,9 @@ MCP_CHECK_MARK_LABELS = (("not_implemented", "Not implemented yet via MCP (prope
 # The checks that hold on any answer of the route (checks.GENERIC_CHECKS, for a check result that does not state its
 # own `property`): every other check is a PROPERTY check, the claim the scenario was built to test
 GENERIC_CHECKS = frozenset({"status", "invariants", "counts_consistent", "budget_respected"})
+# The checks a repeat evaluates only when an earlier one exists (checks.evaluate: determinism has nothing to compare
+# on the first repeat, so it has no result there)
+LATER_REPEATS_ONLY = ("deterministic",)
 # An MCP execution whose every property check a property-level mark covers tests nothing of its scenario's claim via
 # MCP: that is a scenario-level mark (mcp.not_implemented / mcp.by_design), and the execution is inconclusive with
 # this inconclusive_reason, never a pass on its generic checks alone (every_property_marked)
@@ -1849,16 +1852,34 @@ def _property_item(item):
     return flag if isinstance(flag, bool) else item.get("check") not in GENERIC_CHECKS
 
 
+def expected_property_checks(scenario):
+    """The names of the property checks |scenario| expects (its `expect` entries outside GENERIC_CHECKS), each once,
+    in order."""
+    expect = scenario.get("expect") if isinstance(scenario, dict) else None
+    out = []
+    for e in expect if isinstance(expect, list) else []:
+        name = e.get("check") if isinstance(e, dict) else None
+        if isinstance(name, str) and name and name not in GENERIC_CHECKS and name not in out:
+            out.append(name)
+    return out
+
+
 def every_property_marked(scenario, arm, checks, marks=None):
     """The sorted names of an MCP execution's property checks when the scenario's property-level marks cover every one
-    of them (at least one, each recorded reading not_exposed: marked_aside), else []. Such an execution tests nothing
-    of the scenario's claim via MCP (SCENARIO_LEVEL_MARK): checks_marked_aside sets nothing aside for it and
-    unmarked_checks reads its marked items inconclusive. |marks|: mcp_check_marks(scenario) when the caller has it."""
+    of them (at least one, each recorded reading not_exposed: marked_aside) and every property check the scenario
+    expects (expected_property_checks; LATER_REPEATS_ONLY aside, which a first repeat has no result of), else [].
+    Such an execution tests nothing of the scenario's claim via MCP (SCENARIO_LEVEL_MARK): checks_marked_aside sets
+    nothing aside for it and unmarked_checks reads its marked items inconclusive. An unmarked property check the
+    scenario expects and the execution has no result of (a runner that dropped it) is no scenario-level mark: it
+    stays the missing result it is. |marks|: mcp_check_marks(scenario) when the caller has it; with |scenario| None
+    only the recorded checks are read."""
     if arm != "mcp" or not isinstance(checks, list):
         return []
     marks = mcp_check_marks(scenario) if marks is None else marks
     props = [c for c in checks if isinstance(c, dict) and _property_item(c)]
     if not marks or not props or any(marked_aside(None, arm, c, marks) is None for c in props):
+        return []
+    if any(name not in marks and name not in LATER_REPEATS_ONLY for name in expected_property_checks(scenario)):
         return []
     return sorted(set(str(c.get("check")) for c in props))
 
@@ -1879,7 +1900,7 @@ def checks_marked_aside(scenario, arm, checks, marks=None):
     property-level one. {} on every arm but MCP and for a scenario without marks. |marks|: mcp_check_marks(scenario)
     when the caller has it."""
     marks = (mcp_check_marks(scenario) if marks is None else marks) if arm == "mcp" else {}
-    if not marks or not isinstance(checks, list) or every_property_marked(None, arm, checks, marks):
+    if not marks or not isinstance(checks, list) or every_property_marked(scenario, arm, checks, marks):
         return {}
     out = {}
     for c, key in zip(checks, check_keys(checks)):
@@ -1897,12 +1918,12 @@ def unmarked_checks(scenario, arm, checks):
     inconclusive with scenario_level_mark_detail: either rule then gives inconclusive (fail or finding where another
     check says so), never a pass on the generic checks alone."""
     marks = mcp_check_marks(scenario) if arm == "mcp" else {}
-    names = every_property_marked(None, arm, checks, marks)
+    names = every_property_marked(scenario, arm, checks, marks)
     if names:
         detail = scenario_level_mark_detail(names)
         return [dict(c, outcome="inconclusive", detail=detail) if marked_aside(None, arm, c, marks) is not None
                 else c for c in checks]
-    aside = checks_marked_aside(None, arm, checks, marks)
+    aside = checks_marked_aside(scenario, arm, checks, marks)
     if not aside:
         return checks
     return [c for c, key in zip(checks, check_keys(checks)) if key not in aside]

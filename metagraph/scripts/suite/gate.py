@@ -281,7 +281,7 @@ def _is_property_fn(checks_dir=None):
 
 # The checks a repeat evaluates only when an earlier one exists (checks.evaluate: determinism has nothing to compare
 # on the first repeat, so it has no result there).
-LATER_REPEATS_ONLY = ("deterministic",)
+LATER_REPEATS_ONLY = sc.LATER_REPEATS_ONLY
 
 
 def property_results(scenario, line, is_property, generic=False):

@@ -1304,6 +1304,51 @@ class PropertyMarksTest(GateCase):
         self.assertEqual(sc.checks_marked_aside(m["scenarios"][1], "mcp", rows[("R-002", "mcp", 0)]["checks"]),
                          {("answer_fields", 0): {"mark": "by_design", "case": self.BD["case"]}})
 
+    def test_a_dropped_unmarked_property_is_no_scenario_level_mark(self):
+        # T-001 marks answer_fields only; a runner that dropped the unmarked contains_source_context leaves the
+        # marked answer_fields, read not_exposed, its only property item. The marks do not cover the property checks
+        # the scenario expects: no scenario-level mark (the merge keeps the recorded pass, the comparison's fallback
+        # names the checks), the marked reading stays set aside, and the gate names the unmarked check's missing
+        # result
+        m = self.manifest()
+        s = m["scenarios"][0]
+        dropped = dict((("T-001", r), {"checks": [c for c in checks_for("T-001", r, prop="not_exposed")
+                                                  if c["check"] != "contains_source_context"], "outcome": "pass"})
+                       for r in (0, 1))
+        checks = dropped[("T-001", 0)]["checks"]
+        self.assertEqual(sc.expected_property_checks(s), ["contains_source_context", "answer_fields"])
+        self.assertEqual(sc.every_property_marked(s, "mcp", checks), [])
+        self.assertEqual(sc.checks_marked_aside(s, "mcp", checks),
+                         {("answer_fields", 0): {"mark": "not_implemented", "reason": self.NI["reason"]}})
+        self.assertEqual(sc.unmarked_checks(s, "mcp", checks), checks[:1])
+        d = self.marked_run(m, "dropped-unmarked", direct=False, change=dropped)
+        rows = self.rows(d)
+        for r in (0, 1):
+            self.assertEqual(rows[("T-001", "mcp", r)]["outcome"], "pass")
+            self.assertNotIn("inconclusive_reason", rows[("T-001", "mcp", r)])
+        self.assertEqual(cmp.inconclusive_reason(dict(rows[("T-001", "mcp", 0)], outcome="inconclusive"), s, d),
+                         "checks")
+        v = gate.judge(d, policy_of(m))
+        self.assertFalse(v["passed"])
+        self.assertFalse([p for p in v["problems"] if sc.SCENARIO_LEVEL_MARK in p["detail"]], gate.render(v))
+        self.assertEqual([(p["kind"], p["scenario"], p["repeat"], p["detail"]) for p in v["problems"]],
+                         [("property", "T-001", r, "the expected check contains_source_context has no result on a "
+                                                   "passing execution") for r in (0, 1)])
+        self.assertIn("T-001 answer\\_fields (the MCP's records carry no such field; set aside on r0, r1)",
+                      self.report(d))
+        # the marks covering every property check the scenario expects stay a scenario-level mark: with a marked
+        # check dropped (its missing result named beside it), and on a first repeat, where determinism has no result
+        both = self.manifest(both=True)["scenarios"][0]
+        self.assertEqual(sc.every_property_marked(both, "mcp", checks), ["answer_fields"])
+        d7 = dict(scenarios()[6], mcp=dict(scenarios()[6]["mcp"], not_implemented_checks=[
+            dict(self.NI), {"check": "contains_source_context", "reason": "x"}]))
+        self.assertIn("deterministic", sc.expected_property_checks(d7))
+        first = [dict(c, outcome="not_exposed") if c["check"] != "status" else c for c in checks_for("D-007", 0)]
+        later = [dict(c, outcome="not_exposed") if c["check"] not in ("status", "deterministic") else c
+                 for c in checks_for("D-007", 1)]
+        self.assertEqual(sc.every_property_marked(d7, "mcp", first), ["answer_fields", "contains_source_context"])
+        self.assertEqual(sc.every_property_marked(d7, "mcp", later), [])
+
     def test_compare_and_report_set_it_aside_and_list_it(self):
         texts = {}
         for marked in (False, True):

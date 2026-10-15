@@ -817,7 +817,7 @@ def agreement_depth(comp, rows, is_property, manifest=None):
         marks = sc.mcp_check_marks(scen.get(sid))
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
             mine = mcp[rep].get("checks") or []
-            aside = sc.checks_marked_aside(None, "mcp", mine, marks)
+            aside = sc.checks_marked_aside(scen.get(sid), "mcp", mine, marks)
             theirs, _ = cmp.reference_checks(mine, (ref.get(rep) or ref0).get("checks") or [],
                                              (alt.get(rep) or alt0 or {}).get("checks") if alt else None)
             has_prop = has_prop or any(is_property(c.get("check")) for c in mine + theirs)

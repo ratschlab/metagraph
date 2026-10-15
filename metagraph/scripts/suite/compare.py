@@ -2262,7 +2262,7 @@ def _split_by_keys(checks, keys):
     return picked, rest
 
 
-def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, marks=None):
+def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, marks=None, scenario=None):
     """The per-check agreement of MCP executions with the reference direct arm (DESIGN §1.3; ref: {repeat: line},
     each MCP repeat against the reference's same repeat, else its first): `explained` {repeat: item indices} the
     check ITEMS an answered / clamped case explains on that repeat (E of explained_outcome, B5b-06), compared apart
@@ -2275,8 +2275,9 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, 
     differing check outside E, or one side alone errored), service_by_design (only items of E differ),
     not_comparable (no check compared), agree. |marks| (suite_common.mcp_check_marks of the scenario): an MCP item a
     property-level mark sets aside (suite_common.checks_marked_aside of the execution's checks: the marked check read
-    not_exposed) is compared with nothing, neither skipped as not exposed nor unmatched, and is listed as
-    `marked_checks` {repeat, check, mark} (`checks_marked` their number) when there is one."""
+    not_exposed; |scenario| gives it the property checks the scenario expects) is compared with nothing, neither
+    skipped as not exposed nor unmatched, and is listed as `marked_checks` {repeat, check, mark} (`checks_marked`
+    their number) when there is one."""
     explained = explained or {}
     marks = marks or {}
     marked = []
@@ -2313,7 +2314,7 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, 
             by_design.extend(d_e)
         # the rule reads the whole execution; its items are found among those left after E by identity
         full = r.get("checks") or []
-        aside_keys = sc.checks_marked_aside(None, "mcp", full, marks)
+        aside_keys = sc.checks_marked_aside(scenario, "mcp", full, marks)
         aside_ids = set(id(c) for c, key in zip(full, sc.check_keys(full)) if key in aside_keys)
         aside = set((c.get("check"), k) for c, k in _with_occurrence(mine) if id(c) in aside_ids)
         if aside:
@@ -2516,7 +2517,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                         "mcp_outcome": aggregate_outcome([r.get("outcome") for r in compared_lines])}
             elif compared_lines:
                 rest = check_agreement(compared_lines, k_ref, k_arm, explained, o_ref, o_arm,
-                                       sc.mcp_check_marks(scenario))
+                                       sc.mcp_check_marks(scenario), scenario)
     if rest is not None:
         if answered:
             rest["by_design_notes"] = dict((str(k), v) for k, v in sorted(answered.items()))
