@@ -1,8 +1,10 @@
 """The resume rule of a warm-up and its target (lane V5): after an interruption between a warm-up and its target, the
 warm-up runs again right before the target on every arm that runs the target (suite_common.paired_plan's rewarm,
 suite_common.resume_rewarms in run_direct.py, the MCP runner on the ids of one call), as a line with the warm-up's id
-and repeat, rerun_for_resume true and rerun_target; the earlier execution stays the one judged. Offline: the fake
-host."""
+and repeat, rerun_for_resume true and rerun_target; the earlier execution stays the one judged. merge_run puts the
+re-run next to its target as timing evidence (warm_up_reruns, run.json reruns_for_resume); reevaluate, compare, the
+report and the gate judge the original execution and never count the re-run as a second outcome, a duplicate, a
+missing or an extra execution. Offline: the fake host, tests/fake_mcp.py and the mex side in a local directory."""
 
 import gzip
 import json
@@ -11,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,9 +21,11 @@ SUITE = os.path.dirname(HERE)
 sys.path.insert(0, SUITE)
 sys.path.insert(0, HERE)
 
+import gate_policy  # noqa: E402
 import run_direct  # noqa: E402
 import suite_common as sc  # noqa: E402
 from fake_host import FakeHost  # noqa: E402
+from test_orchestrator import SuiteCase  # noqa: E402
 from test_runner import make_manifest, scenario  # noqa: E402
 
 RESOLVE = {"sequence": "ACGT" * 10, "labels": ["562"]}
@@ -169,6 +174,138 @@ class DirectRunner(unittest.TestCase):
             self.assertEqual(self.run_direct(host.base, out, "--only", "R-t"), 0)
             self.assertEqual([p for _, p in host.log[n:]], ["/resolve"])
         self.assertFalse([r for r in sc.read_jsonl(os.path.join(out, "executions.jsonl"))[0] if sc.is_rerun(r)])
+
+
+class Orchestrated(SuiteCase):
+    """run_suite.sh interrupted (Ctrl-C) while the MCP arm waits on the target's cold step, after the warm-up ran on
+    every arm, then resumed: the warm-up runs again before the target on direct-local, direct-remote and the MCP arm;
+    the merge, the comparison, the report, the re-evaluation and the gate judge the warm-up's first execution."""
+
+    def policy(self):
+        pol = gate_policy.build_policy(sc.read_json(self.mpath), routes=["POST /resolve"],
+                                       arms=["direct-local", "mcp"], table_path="", warm_every=0)
+        path = os.path.join(self.d, "policy.json")
+        sc.write_json_atomic(path, pol)
+        return path
+
+    def calls(self, run_dir):
+        with open(os.path.join(run_dir, "arms", "mcp", "calls.log")) as fh:
+            return [x.split()[:2] for x in fh if x.split() and x.split()[0][:2] == "R-"]
+
+    def check_merged(self, run_dir, suffix=""):
+        rows, bad = sc.read_jsonl(os.path.join(run_dir, "executions%s.jsonl" % suffix))
+        self.assertEqual(bad, 0)
+        keys = [sc.execution_key(r) for r in rows]
+        self.assertEqual(len(keys), len(set(keys)))                  # one line per key, no re-run among them
+        self.assertFalse([r for r in rows if sc.is_rerun(r)])
+        self.assertEqual(len(rows), 2 * 3 + 3 * 2)                  # direct 1 per scenario, MCP 2
+        key = dict((sc.execution_key(r), r) for r in rows)
+        t_mcp0 = sc.parse_utc(key[("R-t", "mcp", 0)]["started_utc"])
+        for arm in sc.ARMS:
+            # the warm-up's judged execution is its first, of the interrupted invocation
+            self.assertLess(sc.parse_utc(key[("R-w", arm, 0)]["started_utc"]), t_mcp0 - 0.5, arm)
+        run = sc.read_json(os.path.join(run_dir, "run%s.json" % suffix))
+        again = run["reruns_for_resume"]
+        self.assertEqual(sorted((r["arm"], r["scenario"], r["repeat"], r["rerun_target"], tuple(r["target_execution"]))
+                                for r in again),
+                         [("direct-local", "R-w", 0, "R-t", ("R-t", "direct-local", 0)),
+                          ("direct-remote", "R-w", 0, "R-t", ("R-t", "direct-remote", 0)),
+                          ("mcp", "R-w", 0, "R-t", ("R-t", "mcp", 0))])
+        self.assertEqual(run["counts"]["reruns_for_resume"], 3)
+        self.assertEqual(run["counts"]["executions"], 12)
+        for arm in sc.ARMS:
+            near = key[("R-t", arm, 0)]["warm_up_reruns"]
+            self.assertEqual([(w["scenario"], w["repeat"]) for w in near], [("R-w", 0)], arm)
+            self.assertGreaterEqual(near[0]["before_s"], 0.0)
+            self.assertEqual(run["arms"][arm]["executions_recorded"], 3 if arm != "mcp" else 6)
+            self.assertEqual(run["arms"][arm]["reruns_for_resume"], 1)
+        self.assertNotIn("warm_up_reruns", key[("R-t", "mcp", 1)])
+        return run
+
+    def test_ctrl_c_between_warm_up_and_target_then_resume(self):
+        make_manifest(self.mpath, scenarios())
+        pol = self.policy()
+        with FakeHost() as host:
+            cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                   "--mcp-cmd", self.mcp_cmd(), "--warm-every", "0", "--gate", pol, "--by-design", ""]
+            proc = subprocess.Popen(cmd, env=self.env(host, FAKE_MCP_MODE="sigint", FAKE_MCP_SIGINT_ID="R-t"),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+                                    start_new_session=True, stdin=subprocess.DEVNULL)
+            deadline = time.time() + 120
+            run_dir = None
+            while time.time() < deadline:
+                runs = os.listdir(self.runs) if os.path.isdir(self.runs) else []
+                if runs:
+                    run_dir = os.path.join(self.runs, runs[0])
+                    if os.path.exists(os.path.join(run_dir, "arms", "mcp", "calls.log")) and \
+                            ["R-t", "0"] in self.calls(run_dir):
+                        break
+                time.sleep(0.05)
+            time.sleep(0.3)
+            os.killpg(proc.pid, signal.SIGINT)
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 130, err)
+            for arm in sc.ARMS:
+                rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
+                self.assertIn(("R-w", arm, 0), set(sc.execution_key(r) for r in rows), arm)
+                self.assertNotIn("R-t", set(r["scenario"] for r in rows), arm)
+            p = self.run_suite(host, "--resume", run_dir, "--by-design", "")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("GATE PASS", p.stderr)
+            self.assertIn("mcp: R-w again before R-t (resume)", p.stderr)
+            self.assertIn("direct-local: R-t (R-w again before it: resume)", p.stderr)
+            self.assertIn("direct-remote: R-t (R-w again before it: resume)", p.stderr)
+        # the MCP runner got the warm-up with the target in the target's cold step, the target alone after it
+        self.assertEqual(self.calls(run_dir)[-2:], [["R-w,R-t", "0"], ["R-t", "1"]])
+        for arm in sc.ARMS:
+            rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
+            seq = [(r["scenario"], r.get("rerun_target")) for r in rows if r["repeat"] == 0]
+            self.assertEqual(seq[-2:], [("R-w", "R-t"), ("R-t", None)], arm)
+        self.check_merged(run_dir)
+        g = sc.read_json(os.path.join(run_dir, "gate.json"))
+        self.assertTrue(g["passed"], g.get("problems"))
+        self.assertFalse([x for x in g.get("problems") or [] if x.get("kind") == "missing"])
+        comp = sc.read_json(os.path.join(run_dir, "compare.json"))
+        self.assertEqual(comp["summary"]["totals"]["direct-local"]["executions"], 3)
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            report = fh.read()
+        self.assertIn("## Warm-ups run again for a resume", report)
+        self.assertIn("| R-w | mcp | 0 |", report)
+        self.assertNotIn("INCOMPLETE", report.split("# Environment")[0])
+        # the offline path: the re-evaluated set carries the re-runs, its merge and gate judge the originals
+        p = self.run_suite(host, "--reevaluate", run_dir, "--gate", pol, "--by-design", "")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        for arm in sc.ARMS:
+            rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", arm, "executions.reevaluated.jsonl"))
+            self.assertEqual(len([r for r in rows if sc.is_rerun(r)]), 1, arm)
+        self.check_merged(run_dir, ".reevaluated")
+        self.assertTrue(sc.read_json(os.path.join(run_dir, "gate.reevaluated.json"))["passed"])
+
+    def test_sequential_resume_after_the_warm_up(self):
+        # a run of the warm-up alone (R-w's selection does not take its target), then a resume that selects the
+        # target: the sequential mode's arms each run the warm-up again before it (run_direct.py over its whole
+        # selection, the MCP arm's cold pass naming both)
+        make_manifest(self.mpath, scenarios())
+        ids = os.path.join(self.d, "w.txt")
+        with open(ids, "w") as fh:
+            fh.write("R-w\n")
+        tid = os.path.join(self.d, "t.txt")
+        with open(tid, "w") as fh:
+            fh.write("R-t\n")
+        with FakeHost() as host:
+            p = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(),
+                               "--warm-every", "0", "--ids", ids, "--checks", "stub")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", run_dir, "--ids", tid)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.calls(run_dir), [["R-w", "0"], ["R-w", "1"], ["R-w,R-t", "0"], ["R-t", "1"]])
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(sorted(sc.execution_key(r) for r in rows),
+                         sorted([(s_, a, 0) for s_ in ("R-w", "R-t") for a in sc.ARMS] +
+                                [("R-w", "mcp", 1), ("R-t", "mcp", 1)]))
+        run = sc.read_json(os.path.join(run_dir, "run.json"))
+        self.assertEqual(sorted(r["arm"] for r in run["reruns_for_resume"] if r["target_execution"]), list(sc.ARMS))
 
 
 if __name__ == "__main__":

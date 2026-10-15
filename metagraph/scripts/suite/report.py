@@ -1098,6 +1098,28 @@ def timing_section(comp):
     return "\n".join(out)
 
 
+def reruns_section(run):
+    """The warm-ups run again for a resume (merge_run's run.json `reruns_for_resume`): timing evidence beside the
+    target each one ran right before, never an outcome of its own (the warm-up's judged execution is its first)."""
+    again = run.get("reruns_for_resume") or []
+    if not again:
+        return ""
+    out = ["## Warm-ups run again for a resume", "",
+           "A resume after an interruption between a warm-up and its target ran the warm-up again right before the "
+           "target, on every arm that ran the target (suite_common.resume_rewarms). These re-runs are timing "
+           "evidence only: the warm-up's outcome is its first execution's.", ""]
+    rows = []
+    for r in again:
+        t = r.get("target_execution")
+        rows.append([md(r.get("scenario")), md(r.get("arm")), md(r.get("repeat")), fmt_ms(r.get("wall_ms")),
+                     md(r.get("http")), md(r.get("rerun_target")),
+                     md("repeat %s" % t[2]) if t else "did not run after it",
+                     fmt_num(r.get("before_s"), 3) if t else "-"])
+    out.append(table(["warm-up", "arm", "repeat", "wall", "http", "target", "target execution",
+                      "s before the target"], rows))
+    return "\n".join(out)
+
+
 def overhead_section(comp):
     s = comp["summary"]
     fo = s["front_overhead"]
@@ -1374,6 +1396,9 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(agreement_section(comp, depth, sum(1 for k in missing[0] if k[1] == "mcp"), manifest, rows))
     parts.append(relations_section(comp))
     parts.append(timing_section(comp))
+    again = reruns_section(run)
+    if again:
+        parts.append(again)
     parts.append(overhead_section(comp))
     parts.append(resources_section(comp, load_figures(samples)))
     if compare_dir:

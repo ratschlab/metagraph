@@ -729,7 +729,7 @@ def gate_configuration_problems(run_dir, cases=None, reevaluated=False):
     if not rows:
         rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", "mcp", sc.reevaluated_name("executions.jsonl",
                                                                                            reevaluated)))
-    for r in rows:
+    for r in sc.judged_lines(rows):
         ev = r.get("request_evidence") if r.get("arm", "mcp") == "mcp" else None
         for case, paths in sorted((ev or {}).items()) if isinstance(ev, dict) else []:
             weak = sorted("%s: %s" % (p, v) for p, v in (paths or {}).items() if v in ("table", "unknown"))

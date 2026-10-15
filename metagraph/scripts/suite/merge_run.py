@@ -8,7 +8,9 @@ jobs.jsonl); the orchestrator's samplers on mex write RUN_DIR/samples/*.jsonl. T
 RUN_DIR/executions.jsonl (raw paths rewritten relative to RUN_DIR; one line per scenario x arm x repeat, the
 last recorded one when a resume repeated it; each line with `host_cache`, `since_prev_s` and
 `host_cache_after` from the order in which the run's executions reached the host, see
-suite_common.assign_host_cache), samples.jsonl (sorted by time, deduplicated, each sample's `phase` the arm or
+suite_common.assign_host_cache; a warm-up's re-run for a resume, suite_common.is_rerun, is never a line of its own
+and never replaces its key's execution: it is timing evidence under `warm_up_reruns` of the target's execution it
+ran right before, suite_common.attach_reruns, and listed in run.json `reruns_for_resume`), samples.jsonl (sorted by time, deduplicated, each sample's `phase` the arm or
 loop it was taken during), jobs.jsonl, manifest.json and run.json (the identity of the run from the direct
 arms, every arm's own run.json under `arms`). Re-running it rewrites the same files.
 
@@ -515,6 +517,8 @@ def merge(run_dir, reevaluated=False):
     jobs = []
     arm_runs = {}
     arm_counts = {}
+    arm_reruns = {}
+    reruns = []
     manifest_copy = None
     for name, path in arm_dirs(run_dir):
         run = sc.read_json(os.path.join(path, "run.json"), {}) or {}
@@ -536,11 +540,15 @@ def merge(run_dir, reevaluated=False):
             raw = row.get("raw")
             if isinstance(raw, str) and raw and not os.path.isabs(raw) and not raw.startswith("arms/"):
                 row["raw"] = "arms/%s/%s" % (name, raw)
+            if sc.is_rerun(row):
+                reruns.append(row)
+                arm_reruns[name] = arm_reruns.get(name, 0) + 1
+                continue
             key = sc.execution_key(row)
             if key not in executions:
                 order.append(key)
             executions[key] = row
-        arm_counts[name] = len(rows) - dropped
+        arm_counts[name] = len(rows) - dropped - arm_reruns.get(name, 0)
         if dropped:
             warnings.append("arms/%s: %d line(s) of another arm dropped" % (name, dropped))
         srows, sbad = sc.read_jsonl(os.path.join(path, "samples.jsonl"))
@@ -567,6 +575,7 @@ def merge(run_dir, reevaluated=False):
     orchestrator = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
     offsets = clock_offsets(orchestrator)
     merged_rows = sc.assign_host_cache([executions[k] for k in order], offsets)
+    rerun_list = sc.attach_reruns(merged_rows, reruns, offsets)
     checks_dir = None
     if mark is not None:
         checks_dir = (mark.get("checks") or {}).get("dir")
@@ -651,6 +660,8 @@ def merge(run_dir, reevaluated=False):
     for name, run in arm_runs.items():
         slim = dict((k, v) for k, v in run.items() if k != "capabilities")
         slim["executions_recorded"] = arm_counts.get(name, 0)
+        if arm_reruns.get(name):
+            slim["reruns_for_resume"] = arm_reruns[name]
         arms_summary[name] = slim
     merged = {
         "run_id": reference.get("run_id") or os.path.basename(os.path.abspath(run_dir)),
@@ -664,7 +675,9 @@ def merge(run_dir, reevaluated=False):
         "arms": arms_summary,
         "orchestrator": orchestrator,
         "host_cache": {"warm_window_s": sc.HOST_CACHE_WARM_S, "clock_offsets_s": offsets},
-        "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
+        "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs),
+                   "reruns_for_resume": len(rerun_list)},
+        "reruns_for_resume": rerun_list,
         "outcomes_rederived": rederived,
         "outcomes_unknown": unknown,
         "manifest_identity": identity,

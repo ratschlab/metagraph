@@ -520,6 +520,42 @@ def line_times(line, offset_s=0.0):
     return start, end
 
 
+def attach_reruns(rows, reruns, clock_offsets=None):
+    """Puts each warm-up's re-run for a resume (is_rerun) next to its target, as timing evidence: the target's first
+    execution on the same arm that started after the re-run ended gets it under `warm_up_reruns` (a list: scenario,
+    repeat, started_utc, ended_utc, wall_ms, http, outcome, raw, and before_s, from the re-run's end to the target's
+    start). Returns the re-runs in time order with `target_execution` [scenario, arm, repeat], or None when the target
+    did not run after it on that arm (an interruption right after the re-run). |rows| (the judged lines, in place)
+    never gain a line: a re-run is no execution of its key."""
+    offsets = clock_offsets or {}
+    for r in rows:
+        r.pop("warm_up_reruns", None)
+    out = []
+    for rr in sorted(reruns, key=lambda r: parse_utc(r.get("started_utc")) or 0.0):
+        arm = rr.get("arm")
+        off = offsets.get(arm, 0.0) or 0.0
+        _, end = line_times(rr, off)
+        best = None
+        for r in rows:
+            if r.get("arm") != arm or r.get("scenario") != rr.get("rerun_target"):
+                continue
+            start, _ = line_times(r, off)
+            # the stamps have milliseconds: a start in the re-run's last millisecond is after it
+            if start is None or end is None or start < end - 0.001:
+                continue
+            if best is None or start < best[0]:
+                best = (start, r)
+        entry = dict((k, rr.get(k)) for k in ("scenario", "repeat", "started_utc", "ended_utc", "wall_ms", "http",
+                                              "outcome", "raw"))
+        summary = dict(entry, arm=arm, rerun_target=rr.get("rerun_target"), target_execution=None)
+        if best is not None:
+            best[1].setdefault("warm_up_reruns", []).append(dict(entry, before_s=round(max(0.0, best[0] - end), 3)))
+            summary["target_execution"] = list(execution_key(best[1]))
+            summary["before_s"] = round(max(0.0, best[0] - end), 3)
+        out.append(summary)
+    return out
+
+
 def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
     """Adds `host_cache`, `since_prev_s` and `host_cache_after` to every execution line (in place), from the
     order in which the run's executions of each scenario reached the host, over all arms:

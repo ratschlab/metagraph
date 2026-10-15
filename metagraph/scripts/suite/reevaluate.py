@@ -133,15 +133,24 @@ def checks_identity(directory):
 
 
 def arm_lines(path):
-    """The arm's execution lines, the last one per scenario, arm and repeat, in first-seen order; (lines, bad)."""
+    """The arm's execution lines, the last one per scenario, arm and repeat, in first-seen order; (lines, bad). A
+    warm-up's re-run for a resume (suite_common.is_rerun) is no execution of its key: left out here (reruns() keeps
+    it), so the original execution is the one judged."""
     rows, bad = sc.read_jsonl(path)
     keyed, order = {}, []
-    for row in rows:
+    for row in sc.judged_lines(rows):
         key = sc.execution_key(row)
         if key not in keyed:
             order.append(key)
         keyed[key] = row
     return [keyed[k] for k in order], bad
+
+
+def reruns(path):
+    """The arm's warm-up re-runs for a resume, as recorded: the re-evaluated set carries them unchanged (timing
+    evidence, never judged), so merge_run.py --reevaluated puts them next to their targets as the recorded merge does."""
+    rows, _ = sc.read_jsonl(path)
+    return [r for r in rows if sc.is_rerun(r)]
 
 
 def raw_doc(arm_dir, line):
@@ -532,6 +541,15 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
                 mark["changes"].append({"scenario": sid, "arm": name, "repeat": rep, "area": line.get("area"),
                                         "before": line.get("outcome"), "after": outcome, "kept": kept,
                                         "checks": diff})
+            out_rows.append(row)
+        again = reruns(os.path.join(arm_dir, "executions.jsonl"))
+        if again:
+            counts["reruns_for_resume"] = len(again)
+        for line in again:
+            row = dict(line)
+            row["reevaluation"] = {"checks_sha256": short, "outcome_recorded": line.get("outcome"),
+                                   "checks_changed": [],
+                                   "kept": "a warm-up's re-run for a resume: timing evidence, not judged"}
             out_rows.append(row)
         merge_run.write_jsonl(os.path.join(arm_dir, sc.reevaluated_name("executions.jsonl")), out_rows)
         mark["arms"][name] = counts
