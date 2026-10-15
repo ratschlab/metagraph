@@ -245,7 +245,9 @@ def gen_R(ctx: Ctx) -> List[dict]:
         tie = full_support_tie_v4.get(key)
         if tie:
             limit = tie["full_support"] + 1
-            t = dict(t, discover_v4=dict(tie, max_labels=1))
+            t = empirical(dict(t, discover_v4=dict(tie, max_labels=1)),
+                          "the labels carrying the window at full support number %d (index 907ec986's answers in v3 "
+                          "and v4): the limit lies above them" % tie["full_support"])
         req = resolve_request(t["window"], discover={"max_labels": limit, "kind": kind})
         lab = rec.column if kind == "column" else rec.accession
         exp = [OK, INV, ex("resolve_discover_contains", label=lab)]
@@ -254,7 +256,7 @@ def gen_R(ctx: Ctx) -> List[dict]:
                                 kind, limit, ", above v4's full-support tie of %d" % tie["full_support"] if tie else "",
                                 key),
                             "POST /resolve", req, t, exp, timing_class="slow",
-                            tags=["discover"] + (["smoke"] if i == 0 else [])))
+                            tags=["discover"] + (["smoke"] if i == 0 else []) + (["index-empirical"] if tie else [])))
     nid = _ids("R-trace")
     for i, key in enumerate(["eco", "sau", "lam"]):
         rec = ctx.rec(key)

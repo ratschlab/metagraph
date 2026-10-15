@@ -148,7 +148,8 @@ class IndexEmpirical(unittest.TestCase):
         with open(os.path.join(SUITE, "truth", "staging_capabilities", "traverse_capabilities.json")) as f:
             fp = json.load(f)["index_fp"]
         tagged = [s for s in m["scenarios"] if "index-empirical" in s["tags"]]
-        self.assertEqual(sorted(set(s["id"].rsplit("-", 1)[0] for s in tagged)), ["R-junction", "T-strand", "X-junction"])
+        self.assertEqual(sorted(set(s["id"].rsplit("-", 1)[0] for s in tagged)),
+                         ["R-discover", "R-junction", "T-strand", "X-junction"])    # areas R, T, X built
         for s in tagged:
             self.assertEqual(s["truth"]["index_empirical"]["index_fp"], fp, s["id"])
             self.assertTrue(s["truth"]["index_empirical"]["claim"], s["id"])
@@ -625,6 +626,8 @@ class Discoveries(unittest.TestCase):
             self.assertEqual(d["max_labels"], s[sid]["truth"]["discover_v4"]["full_support"] + 1, sid)
             self.assertLessEqual(d["max_labels"], 100)
             self.assertNotIn("unless truncated", s[sid]["title"])
+            self.assertIn("index-empirical", s[sid]["tags"])                  # the tie is the index's (VERIFY-V5A)
+            self.assertTrue(s[sid]["truth"]["index_empirical"]["claim"])
 
 
 class McpExposure(unittest.TestCase):
