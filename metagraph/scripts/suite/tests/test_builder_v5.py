@@ -290,10 +290,11 @@ class ResolveDecisive(unittest.TestCase):
             self.assertEqual(s[twin]["request"]["sequence"], s[sid]["request"]["sequence"])
             self.assertEqual(s[twin]["request"]["bounds"]["time_budget_ms"], 60000)
             b = s[sid]
-            self.assertIn("budget_stress", b["tags"])
             budget = b["request"]["bounds"]["time_budget_ms"]
-            self.assertLess(budget - 250, b["truth"]["budget_stress"]["warm_work_ms"])  # the work deadline in the warm work
-            self.assertEqual(b["repeat"], 2)
+            self.assertLess(budget - 250, b["truth"]["stop_design"]["warm_work_ms"])   # the work deadline in the warm work
+            # in the gate, required on direct-local (the owner, 2026-10-15): one repeat, no budget_stress
+            self.assertEqual(b["repeat"], 1)
+            self.assertNotIn("budget_stress", b["tags"])
         self.assertEqual(len(s["R-budget-0001"]["request"]["sequence"]), 5000)          # eco's second half
         for x in m["scenarios"]:
             if x["route"] == "POST /resolve" and isinstance(x["request"], dict) and x["request"].get("labels") \

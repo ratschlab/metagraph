@@ -235,8 +235,9 @@ def gen_R(ctx: Ctx) -> List[dict]:
     # 170 ms falls in the 4,096-row batch, which ends at about 276 ms at that rate); eco's 10 kb never completed on
     # this host (v3 and v4: 21-45 s), its second half took 1.37 s warm (R-twin-0003), so the query is that half under
     # 700 ms (the deadline at 450 ms falls in the 1,024-row batch, which ends at about 546 ms). Whether a stop happens
-    # still depends on the batch times, i.e. on the load and on what is warm: the property is time-dependent
-    # (budget_stress, left out of the deploy gate); a complete answer reads inconclusive (no stop, nothing tested).
+    # still depends on the batch times, i.e. on the load and on what is warm; a complete answer reads inconclusive (no
+    # stop, nothing tested). The scenarios stay in the deploy gate, required on direct-local (the owner, 2026-10-15),
+    # one repeat each: a repeat decides on its own, so a second would double what must stop.
     nid = _ids("R-budget")
     for i, (key, budget, half, warm_ms) in enumerate((("eco", 700, True, 1370), ("pae", 420, False, 343))):
         rec = ctx.rec(key)
@@ -245,15 +246,14 @@ def gen_R(ctx: Ctx) -> List[dict]:
             t = ctx.truth_at(rec, t["start"] - rec.offset + 5000, 5000)
         L = t["length"]
         req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=budget)
-        t2 = dict(t, flank="", budget_stress={
-            "reason": "a stated stop needs the batch in flight at the work deadline to end before the budget: it "
-                      "depends on the batch times (the load, what is warm), so no budget makes it certain",
+        t2 = dict(t, flank="", stop_design={
+            "rule": "the work deadline (budget - 250 ms) falls inside the warm work, in a row batch that ends before "
+                    "the budget at the warm rate measured",
             "warm_work_ms": warm_ms, "work_deadline_ms": budget - 250})
         exp = [OK, INV, ex("resolve_runs", label=rec.column, full=True, prefix_if_stopped=True)]
         out.append(scenario(nid(), "R", "%s bp of %s under a %d ms budget after its complete twin: a stated stop answers "
                             "the prefix, the record's own label supporting every k-mer of it" % (format(L, ","), key, budget),
-                            "POST /resolve", req, t2, exp, timing_class="slow",
-                            tags=["budget", "machine-dependent", "budget_stress"], repeat=2))
+                            "POST /resolve", req, t2, exp, timing_class="slow", tags=["budget", "machine-dependent"]))
     # R-edge
     nid = _ids("R-edge")
     eco = ctx.rec("eco")
@@ -3018,7 +3018,7 @@ def gen_REL(ctx: Ctx, scenarios: List[dict], caps: Dict[str, dict]) -> List[dict
         rb = _by_id(scenarios, sid)
         seq = rb["request"]["sequence"]
         lab = rb["request"]["labels"][0]
-        base = {k: v for k, v in rb["truth"].items() if k != "budget_stress"}
+        base = {k: v for k, v in rb["truth"].items() if k != "stop_design"}
         full = _twin(rb, "R-twin-%04d" % (2 + 2 * i), "the same %s bp under the %s ms budget, run first (it warms the "
                      "rows): the profile the stop must be a prefix of" % (format(len(seq), ","),
                                                                           format(RESOLVE_TIME_BUDGET_MS, ",")),

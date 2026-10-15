@@ -1,9 +1,9 @@
 {
  "declared_version": 1,
- "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): what the MCP surface cannot show (carried over from declared_v4_rt.json section 1, approved by the owner on 2026-10-14; the scenario ids are v5's, which keep v4's), and the scenarios whose property is inherently time-dependent (budget_stress, lane V5: new, for the owner's review before the freeze). The v4 suite errors of declared_v4_rt.json (T-labels-0004, T-budget-0003, T-attempts-0002 r1, REL-prefix_equals-0001/0002/0003) are fixed by v5 and not carried. Decided by the owner, never inferred from an answer a run received; each entry names its evidence.",
+ "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): what the MCP surface cannot show, carried over from declared_v4_rt.json section 1 (approved by the owner on 2026-10-14; the scenario ids are v5's, which keep v4's). Nothing else: the v4 suite errors of declared_v4_rt.json (T-labels-0004, T-budget-0003, T-attempts-0002 r1, REL-prefix_equals-0001/0002/0003) are fixed by v5, R-budget-0001/0002 stay required on direct-local (the owner, 2026-10-15), and the long walks' budget_stress exclusions derive from their tag in gate_policy.py (owner-approved 2026-10-15: T-longwalk-0001..0004). Decided by the owner, never inferred from an answer a run received; each entry names its evidence.",
  "manifest": {
   "file": "manifest/suite_v5.json",
-  "content_sha256": "409987ccfaf81641d95f5948f5ea7493a22ca44ce63c509dbe166ecbb20d5e7f"
+  "content_sha256": "9d97365a4c21ccdc25213be3efa27d9a02eeaa83dc4135dc530303d39b2dd29e"
  },
  "exclusions": [
   {
@@ -12,20 +12,6 @@
     "mcp"
    ],
    "reason": "the MCP's traverse_capabilities answers the service's view (gate, backends, service_maxima, presets), not the host's document (table case capabilities.traverse_capabilities_document: 'the raw document and its gate-block projection are not exposed'), so its one property check, capabilities_doc, is not exposed ('field not in the answer: release') and every MCP execution is inconclusive; nothing else is tested there. Tested on direct-local."
-  },
-  {
-   "scenario": "R-budget-0001",
-   "arms": [
-    "direct-local"
-   ],
-   "reason": "budget_stress (lane V5, item 5; triage-v4 V05): the property, a stated /resolve stop answering the resolve of the query's prefix, needs the row batch in flight at the work deadline (budget - 250 ms) to end before the budget, which depends on the batch times, i.e. on the host's load and on what is warm; no budget makes a stop certain (v3 and v4: no stop in any answer), so the scenario cannot be decisive under load. It follows its complete twin (R-twin-0002, the warm-up, required) and runs in the full suite; its relation REL-prefix_equals-0001 leaves the gate with it. Excluded on MCP already (a query above the MCP's 2,000 bp)."
-  },
-  {
-   "scenario": "R-budget-0002",
-   "arms": [
-    "direct-local"
-   ],
-   "reason": "budget_stress (lane V5, item 5; triage-v4 V05): the property, a stated /resolve stop answering the resolve of the query's prefix, needs the row batch in flight at the work deadline (budget - 250 ms) to end before the budget, which depends on the batch times, i.e. on the host's load and on what is warm; no budget makes a stop certain (v3 and v4: no stop in any answer), so the scenario cannot be decisive under load. It follows its complete twin (R-twin-0004, the warm-up, required) and runs in the full suite; its relation REL-prefix_equals-0003 leaves the gate with it. Excluded on MCP already (a query above the MCP's 2,000 bp)."
   }
  ],
  "not_required": [
