@@ -48,9 +48,22 @@ class MergeUnknownOutcomeTest(unittest.TestCase):
             self.assertIn("arms/mcp: 6 line(s) with an outcome outside the shared vocabulary (None 1, "
                           "skipped_by_runner 5) read as error (outcome_runner keeps the recorded one)",
                           merged["warnings"])
-            cmp.compare(d, ({}, None))
+            comp = cmp.compare(d, ({}, None))
+            sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
             text = report.build_report(d)
         self.assertIn("**FAIL (", text)
+        # the comparison and the report state the recorded outcome as outside the vocabulary (one mechanism: the
+        # merge's error, read back through outcome_runner), counted once
+        totals = comp["summary"]["totals"]["mcp"]["outcomes"]
+        self.assertEqual((totals["other"], totals["error"]), (6, 0))
+        outside = comp["summary"]["outcomes_outside_vocabulary"]
+        self.assertIn({"scenario": "P-0", "arm": "mcp", "repeat": 0, "outcome": "skipped_by_runner",
+                       "read_as": "error"}, outside)
+        self.assertIn({"scenario": "P-5", "arm": "mcp", "repeat": 0, "outcome": None, "read_as": "error"}, outside)
+        self.assertEqual(comp["scenarios"]["P-0"]["mcp_agreement"]["by"], "outcome")
+        self.assertIn("6 with an outcome outside the vocabulary", text)
+        self.assertIn("'skipped_by_runner' (the merge read it as error)", text.replace("\\_", "_"))
+        self.assertIn("outcome 'skipped_by_runner' outside the vocabulary (read as error)", text.replace("\\_", "_"))
         # every known outcome stays as recorded
         rows = [{"arm": "mcp", "outcome": o} for o in sc.OUTCOMES]
         self.assertEqual(merge_run.unknown_outcomes(rows), {})

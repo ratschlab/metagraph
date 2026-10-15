@@ -1985,9 +1985,8 @@ by lane S6c; everything below was open.
   shared test (defined identically to lane S7v's, gr/suite-s-verdict 9a12a6c9). merge_run reads such a line (or one
   without an outcome) as `error`, `outcome_runner` keeping the recorded one, with a warning per arm and run.json
   `outcomes_unknown` {arm: {recorded outcome: lines}}; mcp_step_result reports it as `unknown`, which mcp_after
-  counts like `error` towards the stop after three in a row and logs. (Lane S7v's comparator counts an unknown
-  outcome apart and reads it as a failure; after this merge a merged set holds none, the warning and outcome_runner
-  name them.)
+  counts like `error` towards the stop after three in a row and logs. (The comparator, the report and the gate read
+  the recorded outcome back from outcome_runner: section "Suite integration S7i".)
 
 ### Validation (offline)
 - Copies of v3 (the S5e input set) and v4 re-evaluated (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth
@@ -2115,8 +2114,8 @@ failing on 14552938.
   disagreement of its own (side mcp, by outcome; never compared check by check), a direct pair with one disagrees,
   and aggregate_outcome ranks it worst. reevaluate keeps such an outcome (the checks never replace it) with a
   warning. report: any `other` makes the verdict FAIL ("N with an outcome outside the vocabulary"), the arm's line
-  and a list name them. gate.py already failed such a line ("outcome '...'"). merge_run (lane S-runner) and the
-  paired loop's mcp_after (run_suite.sh) still read the value as recorded; their side is lane S-runner's.
+  and a list name them. gate.py already failed such a line ("outcome '...'"). merge_run and the paired loop's
+  mcp_after read it as error (lane S7r); the comparison states the recorded one (section "Suite integration S7i").
 - Recorded runs: every outcome is in the vocabulary; the totals gain `other: 0` and the summary an empty list.
 
 ### The load caveat without a measurement
@@ -2354,3 +2353,22 @@ engine's stored pattern fixtures. The runner vendors checks.py: it takes these r
   (v3 MCP r0) and M-planted-0016 (v4 MCP r0) names the relation expected. The verification's amendments move
   nothing more (re-evaluated again at their head: the same five detail changes per run, the same 45 gate problems).
 - 350 tests pass (1 skipped).
+
+## Suite integration S7i: lanes S7r, S7v and S7c merged, and the rules that span them (2026-10-15)
+Lanes S7r (runner), S7v (verdict) and S7c (checks) merged onto 81c620ef in that order; the rules below join what
+one lane's verification left to another lane's file.
+
+### One reading of an outcome outside the vocabulary
+- Two mechanisms met at the merge: merge_run (S7r) read an outcome outside the vocabulary as `error` before the
+  comparison ran, so the comparator's `other` bucket, its by-outcome MCP disagreement and the report's "outside the
+  vocabulary" sentence (S7v) never fired on a merged set; the run read FAIL as N errored executions, the recorded
+  outcome visible only in a merge warning.
+- One test, `suite_common.outcome_known`, and one place that rewrites the line, merge_run (`error`, the recorded
+  outcome kept under `outcome_runner`). `suite_common.recorded_outcome` reads it back: for a line whose outcome is
+  error and whose outcome_runner is present and outside the vocabulary, that recorded outcome, else the line's
+  outcome. compare's totals, per-area counts, arm views, the direct pair's and the MCP arm's by-outcome
+  disagreement and `outcomes_outside_vocabulary` (with `read_as: error` where the merge rewrote it) read
+  recorded_outcome, so a merged and an unmerged set read alike; such a line counts under `other` and not under
+  error as well (the counts partition the executions). The report's Failures section lists it as "outcome '...'
+  outside the vocabulary (read as error)"; the gate's outcome problem names it ("error (outcome '...' outside the
+  vocabulary)"). The paired loop counts it as an error (`unknown` from mcp_step_result, lane S7r). FAIL either way.

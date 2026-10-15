@@ -54,7 +54,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_run  # noqa: E402
 import suite_common as sc  # noqa: E402
 
-# the counted outcomes; `other` counts an outcome outside the vocabulary (sc.outcome_known), read as a failure
+# the counted outcomes; `other` counts an outcome outside the vocabulary (sc.outcome_known of sc.recorded_outcome:
+# also one merge_run read as error), read as a failure
 OTHER_OUTCOME = "other"
 OUTCOME_KEYS = ("pass", "fail", "error", "finding", "inconclusive", "not_implemented_mcp", "service_by_design",
                 "mixed", OTHER_OUTCOME)
@@ -1303,8 +1304,9 @@ def arm_view(lines):
     reps = [lines[k] for k in sorted(lines)]
     digests = [r.get("answer_digest") for r in reps]
     return {
-        "outcome": aggregate_outcome([r.get("outcome") for r in reps]),
-        "outcomes": [r.get("outcome") for r in reps],
+        # an outcome outside the vocabulary as recorded, also where merge_run read it as error (sc.recorded_outcome)
+        "outcome": aggregate_outcome([sc.recorded_outcome(r) for r in reps]),
+        "outcomes": [sc.recorded_outcome(r) for r in reps],
         "http": [r.get("http") for r in reps],
         "digests_equal": (len(set(digests)) == 1) if len(digests) > 1 else None,
         "wall_ms": [r.get("wall_ms") for r in reps],
@@ -1652,11 +1654,11 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
         compared += n
         for x in d:
             x["repeat"] = r
-        outside = [x for x in (local[r], remote[r]) if not sc.outcome_known(x.get("outcome"))]
+        outside = [x for x in (local[r], remote[r]) if not sc.outcome_known(sc.recorded_outcome(x))]
         if outside:
             differing.extend(d)
             untimed.append({"repeat": r, "detail": "; ".join("%s: outcome %r outside the vocabulary" % (
-                x.get("arm"), x.get("outcome")) for x in outside)})
+                x.get("arm"), sc.recorded_outcome(x)) for x in outside)})
             continue
         own = execution_only_difference(local[r], remote[r])
         if own is not None:
@@ -2006,7 +2008,7 @@ def outside_vocabulary_part(lines):
     reps = [r.get("repeat") for r in lines]
     return {"class": "disagree", "side": "mcp", "by": "outcome", "repeats": reps, "mcp_verified": False,
             "mcp_detail": "repeat(s) %s: outcome %s outside the vocabulary (%s)" % (
-                reps, sorted(set(repr(r.get("outcome")) for r in lines)), ", ".join(sc.OUTCOMES))}
+                reps, sorted(set(repr(sc.recorded_outcome(r)) for r in lines)), ", ".join(sc.OUTCOMES))}
 
 
 def mcp_mapped(scenario):
@@ -2367,7 +2369,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     # the runner's matcher, per execution
     groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
     undecided, recorded_items = [], {}
-    outside = [r for r in judged if not sc.outcome_known(r.get("outcome"))]
+    outside = [r for r in judged if not sc.outcome_known(sc.recorded_outcome(r))]
     judged = [r for r in judged if not any(r is x for x in outside)]
     for r in judged:
         if not cases and runner_rule_c_by_design(r):
@@ -3064,13 +3066,21 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         if why is not None:
             arm_counts = by_reason.setdefault(r.get("arm"), {})
             arm_counts[why] = arm_counts.get(why, 0) + 1
-    outside = [{"scenario": r.get("scenario"), "arm": r.get("arm"), "repeat": r.get("repeat"),
-                "outcome": r.get("outcome")} for r in rows if not sc.outcome_known(r.get("outcome"))]
+    # an outcome outside the vocabulary counts as `other` by the outcome recorded, also on a line merge_run read as
+    # error (sc.recorded_outcome; `read_as` says so), never under error as well: the counts partition the executions
+    outside = []
+    for r in rows:
+        recorded = sc.recorded_outcome(r)
+        if not sc.outcome_known(recorded):
+            x = {"scenario": r.get("scenario"), "arm": r.get("arm"), "repeat": r.get("repeat"), "outcome": recorded}
+            if r.get("outcome") != recorded:
+                x["read_as"] = r.get("outcome")
+            outside.append(x)
     totals = {}
     for arm in arms_present:
         arm_lines = [r for r in rows if r.get("arm") == arm]
-        outcomes = dict((k, sum(1 for r in arm_lines if r.get("outcome") == k)) for k in OUTCOME_KEYS)
-        outcomes[OTHER_OUTCOME] = sum(1 for r in arm_lines if not sc.outcome_known(r.get("outcome")))
+        outcomes = dict((k, sum(1 for r in arm_lines if sc.recorded_outcome(r) == k)) for k in OUTCOME_KEYS)
+        outcomes[OTHER_OUTCOME] = sum(1 for r in arm_lines if not sc.outcome_known(sc.recorded_outcome(r)))
         totals[arm] = {"executions": len(arm_lines),
                        "outcomes": outcomes,
                        "host_cache": dict((k, sum(1 for r in arm_lines if host_cache(r) == k))

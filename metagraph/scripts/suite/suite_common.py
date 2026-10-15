@@ -50,6 +50,18 @@ def outcome_known(outcome):
     return isinstance(outcome, str) and outcome in OUTCOMES
 
 
+def recorded_outcome(line):
+    """The outcome an execution line recorded, as the comparator, the report and the gate state it: merge_run reads
+    an outcome outside the vocabulary as `error` and keeps the recorded one under `outcome_runner`
+    (merge_run.unknown_outcomes), so for such a line (outcome error, outcome_runner present and not outcome_known)
+    the recorded one, else the line's outcome. `not outcome_known(recorded_outcome(line))` is the one test of an
+    outcome outside the vocabulary, whether or not the set went through merge_run."""
+    outcome = line.get("outcome")
+    if outcome == "error" and "outcome_runner" in line and not outcome_known(line.get("outcome_runner")):
+        return line.get("outcome_runner")
+    return outcome
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # time
 

@@ -539,6 +539,13 @@ class JudgeTest(GateCase):
         self.assertEqual([p["detail"] for p in self.problems(v, "outcome")],
                          ["inconclusive (traversal_resolve_deadline)"])
 
+    def test_outcome_outside_the_vocabulary_is_named(self):
+        # the merge reads it as error; the gate's problem names the outcome the runner recorded
+        v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change={
+            ("D-007", 2): {"outcome": "skipped_by_runner"}})))
+        self.assertEqual([p["detail"] for p in self.problems(v, "outcome")],
+                         ["error (outcome 'skipped_by_runner' outside the vocabulary)"])
+
     def test_not_implemented_on_a_selected_scenario_fails(self):
         # a flipped configuration refusing a basic request: not an exclusion of the policy, so it blocks
         v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change={

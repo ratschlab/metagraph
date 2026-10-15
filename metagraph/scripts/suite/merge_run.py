@@ -26,7 +26,8 @@ from the generic ones (an execution whose property checks are all not exposed is
 
 An outcome outside the vocabulary every arm shares (suite_common.outcome_known: a runner's mark not agreed first, or
 none) is read as `error`, never as a pass: the line's outcome becomes error, `outcome_runner` keeps the recorded
-one, a warning counts them per arm (run.json `outcomes_unknown`).
+one, a warning counts them per arm (run.json `outcomes_unknown`). The comparator, the report and the gate state the
+recorded one (suite_common.recorded_outcome).
 
 --reevaluated (lane S4): merges the re-evaluated set of reevaluate.py instead, each arm's
 executions.reevaluated.jsonl into RUN_DIR/executions.reevaluated.jsonl and run.reevaluated.json (with the set's

@@ -525,6 +525,9 @@ def judge(run_dir, policy, reevaluated=False):
             passed += 1
         elif o in OUTCOME_BLOCKS:
             why = r.get("inconclusive_reason") or r.get("service_by_design_case") or ""
+            if not sc.outcome_known(sc.recorded_outcome(r)):
+                # the merge read an outcome outside the vocabulary as error: the problem names the recorded one
+                why = "outcome %r outside the vocabulary" % (sc.recorded_outcome(r),)
             problems.append(_problem("outcome", o + (" (%s)" % why if why else ""), sid, arm, rep))
             continue
         elif o == "service_by_design":

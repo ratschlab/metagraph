@@ -332,8 +332,9 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     outside = s.get("outcomes_outside_vocabulary") or []
     if outside:
         lines.append("- Outcomes outside the vocabulary (%s), read as failures: %s%s." % (
-            md(", ".join(sc.OUTCOMES)), md("; ".join("%s %s r%s %r" % (x.get("arm"), x.get("scenario"), x.get("repeat"),
-                                                                      x.get("outcome")) for x in outside[:20])),
+            md(", ".join(sc.OUTCOMES)), md("; ".join("%s %s r%s %r%s" % (
+                x.get("arm"), x.get("scenario"), x.get("repeat"), x.get("outcome"),
+                (" (the merge read it as %s)" % x["read_as"]) if x.get("read_as") else "") for x in outside[:20])),
             " ..." if len(outside) > 20 else ""))
     if untested and not verdict.startswith("INCONCLUSIVE (no execution passed in"):
         lines.append("- No execution passed in %d area / route x arm group(s) (only inconclusive ones, beside marks): "
@@ -599,7 +600,8 @@ def findings_section(rows, manifest, max_items):
 
 def failures_section(rows, manifest, max_failures):
     scen = dict((s.get("id"), s) for s in (manifest or {}).get("scenarios", [])) if manifest else {}
-    bad = [r for r in rows if r.get("outcome") in ("fail", "error")]
+    # an outcome outside the vocabulary is a failure too, named as recorded (sc.recorded_outcome)
+    bad = [r for r in rows if r.get("outcome") in ("fail", "error") or not sc.outcome_known(sc.recorded_outcome(r))]
     out = ["# Failures", ""]
     if not bad:
         out.append("No execution failed or errored.\n")
@@ -610,8 +612,12 @@ def failures_section(rows, manifest, max_failures):
     out.append("")
     for r in bad[:max_failures]:
         s = scen.get(r.get("scenario")) or {}
+        recorded = sc.recorded_outcome(r)
         out.append("## %s (%s, repeat %s): %s" % (md(r.get("scenario")), md(r.get("arm")), md(r.get("repeat")),
-                                                 md(r.get("outcome"))))
+                                                 md(r.get("outcome")) if sc.outcome_known(recorded) else
+                                                 "outcome %s outside the vocabulary (read as %s)" % (
+                                                     md(repr(recorded)),
+                                                     "error" if r.get("outcome") == "error" else "a failure")))
         out.append("")
         if s.get("title"):
             out.append("- title: %s" % md(s.get("title"), 300))
