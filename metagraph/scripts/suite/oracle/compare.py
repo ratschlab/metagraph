@@ -198,6 +198,9 @@ def compare_entry(index, config, request, position, entry, previous_stop=None,
     _shape(checks, config, exp, entry)
     stop = entry.get('stop')
     _notes(checks, config, exp, entry, stop)
+    # no request of the suite meets the work time: every answer is deterministic (SPEC 7.9)
+    checks.add('shape.determinism', entry.get('determinism') == 'full', 'full',
+               entry.get('determinism'))
 
     if previous_stop is not None and not pat.no_instance:
         checks.add('stop.sticky', stop == previous_stop, previous_stop, stop)
@@ -361,19 +364,26 @@ def _counts(checks, index, config, exp, entry, stopped, released):
     c = counts['contexts']
     truth = exp.counts
     up = exp.with_upper(index) if not config.masked else None
+    # Which levels' dummies a bounds count still holds (it is only consulted for a bounds
+    # count): without substitutions all of them -- a partition is bounds exactly when its
+    # candidates went unchecked, also the orientation a stop left complete beside an at_least
+    # total (SPEC 7.4, 7.9); with substitutions those of the levels the answer leaves in bounds
+    # (21.6); after a stop with substitutions U is not modelled (lower <= truth <= upper only).
     if exp.m:
         in_bounds = [t for t, v in (c.get('by_mismatches') or {}).items()
                      if isinstance(v, dict) and v.get('relation') == 'bounds']
+        if stopped:
+            up = None
     else:
-        in_bounds = ['0'] if c.get('relation') == 'bounds' else []
+        in_bounds = ['0']
 
-    def u(path, key=None, levels=None):
+    def u(path, key=None):
         """U of a partition: the truth plus the dummies of the levels in bounds."""
         if up is None:
             return None
         base = truth[path] if key is None else truth[path][key]
         extra = 0
-        for t in (in_bounds if levels is None else levels):
+        for t in in_bounds:
             if t in up:
                 extra += up[t][path] if key is None else up[t][path][key]
         return base + extra
@@ -591,6 +601,15 @@ def _labels(checks, index, config, exp, entry, results, released, stopped):
                            'contexts_suffix': (b.get('contexts_suffix') or {}).get('value'),
                            'occurrences': occ.get('value')})
     checks.add('labels.by_label', got_by == want_by, want_by, got_by)
+    if released is not None and not stopped:
+        # ample budgets: nothing refused, truncated or cut (SPEC 14.2-14.5)
+        fields = {f: entry.get(f) for f in ('rows_refused', 'anchors_truncated', 'labels_cut',
+                                            'occurrences_cut')}
+        checks.add('labels.nothing_refused', fields == {'rows_refused': [],
+                                                        'anchors_truncated': [],
+                                                        'labels_cut': None,
+                                                        'occurrences_cut': None},
+                   'nothing refused, truncated or cut', fields)
     if complete:
         judge_count(checks, 'labels.counts.labels', counts.get('labels'), view['labels'], True,
                     unit='labels')
@@ -614,6 +633,21 @@ def _labels(checks, index, config, exp, entry, results, released, stopped):
 
 
 # -- the whole /pattern answer --------------------------------------------------------------
+
+def _index_block(checks, config, block):
+    """The answer's index (SPEC 8.2): k, graph mode, alphabet, strands stated on BASIC, and
+    counting/dummy_fraction exactly on a graph without its mask."""
+    block = block if isinstance(block, dict) else {}
+    want = {'k': config.k, 'graph_mode': config.mode, 'alphabet': '$ACGT',
+            'strand_stated': config.mode == 'basic'}
+    got = {f: block.get(f) for f in want}
+    unmasked = {'counting': block.get('counting'),
+                'dummy_fraction': 'dummy_fraction' in block}
+    ok = got == want and (unmasked == {'counting': 'upper_bound', 'dummy_fraction': True}
+                          if not config.masked else
+                          unmasked == {'counting': None, 'dummy_fraction': False})
+    checks.add('answer.index', ok, dict(want, masked=config.masked), dict(got, **unmasked))
+
 
 def sticky_stop(stop, request):
     """The stop every later pattern of the request carries after |stop| (SPEC section 7.6: a
@@ -640,6 +674,8 @@ def compare_pattern(index, config, request, answer, max_contexts=None):
     steps = 0
     for i, entry in enumerate(patterns):
         checks, exp = compare_entry(index, config, request, i, entry, sticky, max_contexts)
+        if i == 0:
+            _index_block(checks, config, answer.get('index'))
         stop = entry.get('stop') if isinstance(entry, dict) else None
         if sticky is None:
             sticky = sticky_stop(stop, request)

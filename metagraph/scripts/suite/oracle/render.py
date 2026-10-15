@@ -174,8 +174,15 @@ def render_answer(index, config, request, max_contexts=10 ** 9, stop_at=None):
             if 'counts' in e and 'no_stop_codon' not in e.get('notes', []):
                 _unknown(e, request)
             entries.append(e)
+    block = {'k': index.k, 'graph_mode': index.mode, 'alphabet': '$ACGT',
+             'strand_stated': index.mode == 'basic', 'index_ns': None, 'index_fp': None,
+             'release': ''}
+    if not config.masked:
+        block.update({'counting': 'upper_bound',
+                      'dummy_fraction': {'value': 0.99, 'interval': [0.98, 1.0],
+                                         'samples': 10000, 'source': 'sampled'}})
     return {'pattern_contract_version': 1, 'mode': request.get('mode', 'all_or_count'),
-            'patterns': entries}
+            'index': block, 'patterns': entries}
 
 
 def _unknown(entry, request):

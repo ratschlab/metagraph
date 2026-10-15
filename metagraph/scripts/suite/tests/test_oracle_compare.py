@@ -209,6 +209,26 @@ class Probes(unittest.TestCase):
         res = C.compare_pattern(self.index, self.config, req, answer, 100000)
         self.assertEqual(C.FAIL, outcome(res))
 
+    def test_a_stop_leaves_the_complete_orientation_bounds_at_u(self):
+        # breadth run seed 4 (B-basic_k11_unchecked-0140): a max_steps stop leaves the total
+        # at_least and the orientation searched first complete; without the mask that one is
+        # bounds, its upper U = its truth plus its own source dummies (SPEC 7.4, 7.9)
+        config = C.Config('unmasked', 'basic', 11, masked=False)
+        pat = O.Pattern('iupac', 'ACGKAC')
+        req = {'mode': 'count', 'max_steps': 57, 'patterns': [{'iupac': 'ACGKAC'}]}
+        answer = R.render_answer(self.index, config, req, 100000, (0, 3))
+        c = answer['patterns'][0]['counts']['contexts']
+        truth = len([x for x in O.contexts(self.index, pat, 'any_offset', 'forward')])
+        dummies = len(O.dummy_contexts(self.index, pat, 'any_offset', 'forward'))
+        self.assertGreater(dummies, 0)
+        c['by_strand']['+'] = {'value': 2, 'relation': 'bounds', 'unit': 'graph_contexts',
+                               'lower': 2, 'upper': truth + dummies, 'estimate': truth}
+        res = C.compare_pattern(self.index, config, req, answer, 100000)
+        self.assertEqual(C.INCONCLUSIVE, outcome(res), res[0][1].failed())
+        c['by_strand']['+']['upper'] = truth
+        res = C.compare_pattern(self.index, config, req, answer, 100000)
+        self.assertIn('counts.by_strand[+]', [x['check'] for x in res[0][1].failed()])
+
     def test_partial_cut_lists_the_first_contexts_in_answer_order(self):
         req = {'mode': 'partial', 'max_contexts': 5, 'patterns': [{'iupac': 'GNNNA'}]}
         answer = R.render_answer(self.index, self.config, req, 5)
