@@ -2493,3 +2493,29 @@ one lane's verification left to another lane's file.
   policy): 45 problems, the same set as at 81c620ef with the policy of its table. The verification's three
   follow-ups (the snapshot's suite_common bound, list / dict outcomes, run-relative paths) move nothing on v3 / v4
   either (re-evaluated again: identical to the integration's head, the gate the same 45 problems).
+
+## Lane S8c: checks that GPT's second review found too lenient or too strict (2026-10-15)
+
+The checks.py findings of GPT's second review of the suite at c11db9dd (B1, B2, B3, then B5, B6) as their Opus
+verification corrected them, and its side note on an MCP walk without its graphlet. The gate is strict: each stricter
+rule is measured on every recorded answer of v3 and v4 (all arms), each looser one keeps the failing neighbour it
+exists for. The runner vendors checks.py: it takes these rules by re-vendoring (none needs runner logic).
+
+- /traverse, a clamp stands only for what the engine clamps (B1). The engine states a `strategy.clamped` entry for
+  four fields only (traverse.cpp, the clamps of a request): bounds.time_budget_ms above the server's max_time_ms (or
+  a budget <= 0 raised to it where a seed derives its labels: that budget also bounds the derivation),
+  labels.max_seed_labels above its cap, bounds.max_memory_mb and bounds.max_work_units above the server's maxima (or
+  omitted and set to them, `requested` "unlimited"). A structural knob out of range is refused, never clamped. The
+  checks held a walk to any clamp's effective value and exempted a clamped knob from the MCP preset comparison, so a
+  zero-extension branch answer with a fabricated `branching.max_label_branches` clamp to 0 (with or without the echo
+  following it, with or without `requested`) passed every check on both arms. A clamp now stands for its knob only
+  where it is one the engine can state (_clamped_knob), and the /traverse invariants fail every other entry
+  (_clamp_problems): a field outside the four, no `requested`, an effective value that is no positive cap, "unlimited"
+  on a field that is not a budget, an entry that is no lowering (beyond the two engine raises above), a field stated
+  twice, a `strategy.clamped` that is not a list. Where it is known the entry also agrees with the request (on a direct
+  arm, whose request is what the runner sent: the declared value, "unlimited" for an omitted budget; the MCP arm's
+  request is the service's, so its `requested` is not compared), with the cap (the scenario's own `clamped`
+  expectation of the field, from the build's capabilities snapshot; the checker sees no capabilities document) and
+  with the strategy echo, which states the effective value the walk ran under. The legitimate clamps keep passing:
+  T-edge-0012's time budget (70,000 -> 60,000) on both direct arms, an omitted work budget set to the maximum, the
+  derivation's raise of a zero budget.

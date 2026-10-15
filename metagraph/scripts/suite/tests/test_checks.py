@@ -2457,11 +2457,77 @@ class TraverseChecks(unittest.TestCase):
         sc, ans = self.structural_walk(branches=0, kinds=("divergence", "divergence"),
                                        echo={"branching": {"max_label_branches": 0}})
         self.assertEqual(judge(sc, ans), ("pass", "pass"))     # no request value: the echo's 0, nothing to spend
-        sc, ans = self.structural_walk(strategy=mlb2, echo={"branching": {"max_label_branches": 0},
-                                                            "clamped": [{"field": "branching.max_label_branches",
-                                                                         "requested": 2, "effective": 0}]},
-                                       branches=0, kinds=("divergence", "divergence"))
-        self.assertEqual(judge(sc, ans), ("pass", "pass"))     # a stated clamp is the allowance
+        # a clamp of a structural knob is no engine statement (traverse.cpp clamps the time budget, the seed-label
+        # cap and the two budgets only; a structural knob out of range is refused): it never stands for the request's
+        # allowance, on either arm, with the echo following it or not, with or without `requested`
+        for echo in ({"branching": {"max_label_branches": 0}, "clamped": [
+                         {"field": "branching.max_label_branches", "requested": 2, "effective": 0}]},
+                     {"branching": {"max_label_branches": 2}, "clamped": [
+                         {"field": "branching.max_label_branches", "requested": 2, "effective": 0}]},
+                     {"clamped": [{"field": "branching.max_label_branches", "effective": 0}]}):
+            sc, ans = self.structural_walk(strategy=mlb2, echo=echo, branches=0, kinds=("divergence", "divergence"))
+            self.assertEqual(judge(sc, ans), ("fail", "fail"), echo)
+            self.assertIn("a field the engine never clamps", outcome(sc, ans, "invariants")[1])
+            self.assertEqual((outcome(sc, ans, "walk_in_record", "mcp")[0], outcome(sc, ans, "invariants", "mcp")[0]),
+                             ("fail", "fail"), echo)
+        # the engine's own clamps (the time budget above the server's cap, an omitted work budget set to the
+        # server's maximum) leave the walk's structural knobs as declared: the legitimate end passes on both arms
+        timed = {"branching": {"max_label_branches": 2}, "bounds": {"time_budget_ms": 70000}}
+        engine = {"bounds": {"max_extension_bp": 100, "time_budget_ms": 60000.0, "max_work_units": 100000000},
+                  "clamped": [{"field": "bounds.time_budget_ms", "requested": 70000.0, "effective": 60000.0},
+                              {"field": "bounds.max_work_units", "requested": "unlimited", "effective": 100000000}]}
+        sc, ans = self.structural_walk(strategy=timed, echo=engine)
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))
+        self.assertEqual(outcome(sc, ans, "invariants", "mcp")[0], "pass")
+        # ... and the zero budget raised to the cap where the seed derives its labels (traverse.cpp: the derivation
+        # needs a bound), which a seed naming its labels never sees
+        zero = {"branching": {"max_label_branches": 2}, "bounds": {"time_budget_ms": 0}}
+        raised = {"bounds": {"max_extension_bp": 100, "time_budget_ms": 60000.0},
+                  "clamped": [{"field": "bounds.time_budget_ms", "requested": 0, "effective": 60000.0}]}
+        sc, ans = self.structural_walk(strategy=zero, echo=raised)
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))
+        sc["request"]["seeds"][0]["labels"] = ["x"]
+        self.assertEqual(judge(sc, ans), ("pass", "fail"))
+        self.assertIn("raised only where a seed derives its labels", outcome(sc, ans, "invariants")[1])
+
+        def clamp(entries, strategy=timed, echo_bounds=None):
+            return self.structural_walk(strategy=strategy, echo={
+                "bounds": dict({"max_extension_bp": 100}, **(echo_bounds or {})), "clamped": entries})
+        tb = {"field": "bounds.time_budget_ms", "requested": 70000.0, "effective": 60000.0}
+        for entries, why in (
+                ([{"field": "labels.max_seed_labels", "requested": 100, "effective": 1000}], "no lowering"),
+                ([dict(tb, requested=80000.0)], "the request sent 70000"),
+                ([dict(tb, requested="unlimited")], "only an omitted budget states"),
+                ([{"field": "bounds.max_work_units", "requested": 5000, "effective": 1000}], "the request omitted"),
+                ([dict(tb, effective=0)], "no server cap"),
+                ([{k: v for k, v in tb.items() if k != "requested"}], "states no requested value"),
+                ([tb, tb], "twice"),
+                (["bounds.time_budget_ms"], "not an object")):
+            sc, ans = clamp(entries)
+            o, d = outcome(sc, ans, "invariants")
+            self.assertEqual(o, "fail", entries)
+            self.assertIn(why, d)
+        sc, ans = clamp(tb)
+        self.assertIn("is not a list", outcome(sc, ans, "invariants")[1])
+        # the echo states what the walk ran under: a clamp the echo contradicts is none
+        sc, ans = clamp([tb], echo_bounds={"time_budget_ms": 30000.0})
+        self.assertIn("the strategy echo ran under 30000", outcome(sc, ans, "invariants")[1])
+        # the MCP arm's request is the service's: a requested value it chose is not compared with the scenario's
+        sc, ans = clamp([dict(tb, requested=80000.0)])
+        self.assertEqual(outcome(sc, ans, "invariants", "mcp")[0], "pass")
+        # the cap the scenario's own clamp expectation states (the build's capabilities snapshot)
+        sc, ans = clamp([dict(tb, effective=50000.0)])
+        sc["expect"] = [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                        {"check": "clamped", "args": {"where": "strategy", "field": "bounds.time_budget_ms",
+                                                      "requested": 70000, "effective": 60000}}]
+        res = checks.evaluate(sc, ans, "mcp")
+        self.assertEqual([r["outcome"] for r in res], ["pass", "fail", "fail"])
+        self.assertIn("the server's cap is 60000", res[1]["detail"])
+        sc, ans = clamp([tb])
+        sc["expect"] = [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                        {"check": "clamped", "args": {"where": "strategy", "field": "bounds.time_budget_ms",
+                                                      "requested": 70000, "effective": 60000}}]
+        self.assertEqual([r["outcome"] for r in checks.evaluate(sc, ans, "direct-local")], ["pass", "pass", "pass"])
         self.assertEqual(judge(*self.structural_walk(strategy={"branching": {"max_label_branches": "unlimited"}})),
                          ("fail", "fail"))
         self.assertEqual(judge(*self.structural_walk(strategy={"exhaustive": True})), ("fail", "fail"))

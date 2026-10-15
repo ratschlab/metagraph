@@ -3034,23 +3034,143 @@ def _declared_knob(sc: dict, group: str, name: str, arm: Optional[str]) -> Tuple
     return None, None
 
 
-def _clamped_knob(ans: dict, group: str, name: str) -> Tuple[bool, Any]:
+# The strategy.clamped fields the engine states, each with the knob of the strategy it lowers (src/cli/traverse.cpp,
+# the clamps of a /traverse request): bounds.time_budget_ms above the server's max_time_ms (or a budget <= 0 raised
+# to it where a seed derives its labels: that budget also bounds the derivation), labels.max_seed_labels above its
+# cap, bounds.max_memory_mb and bounds.max_work_units above the server's maxima (or omitted and set to them, stated
+# with `requested` "unlimited"). A structural knob is never clamped: out of range it is refused (limit_or_unlimited,
+# Strict ranges), so a clamp of one is no engine statement and never stands for the knob.
+_CLAMPABLE = {"bounds.time_budget_ms": ("bounds", "time_budget_ms"),
+              "labels.max_seed_labels": ("labels", "max_seed_labels"),
+              "bounds.max_memory_mb": ("bounds", "max_memory_mb"),
+              "bounds.max_work_units": ("bounds", "max_work_units")}
+_CLAMPED_FROM_UNLIMITED = {"bounds.max_memory_mb", "bounds.max_work_units"}
+
+
+def _is_num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _seeds_derive(sc: dict, arm: Optional[str]) -> bool:
+    """Whether a seed of the arm's request derives its labels (none named: SPEC-labeled-traversal-core §5), True
+    where the seeds are not known (the MCP arm's arguments, else the scenario's request)."""
+    seeds = None
+    if arm == "mcp":
+        args = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
+        seeds = args.get("seeds") if isinstance(args, dict) else None
+    if not isinstance(seeds, list):
+        seeds = (sc.get("request") or {}).get("seeds") if isinstance(sc.get("request"), dict) else None
+    if not isinstance(seeds, list) or not seeds:
+        return True
+    return any(not (s.get("labels") if isinstance(s, dict) else None) for s in seeds)
+
+
+def _scenario_clamp_cap(sc: dict, field: str) -> Optional[float]:
+    """The cap of a clampable field the scenario knows: the effective value its own `clamped` expectation of that
+    strategy field states (the builder's, from the host's capabilities snapshot), else None."""
+    for exp in sc.get("expect") or []:
+        args = exp.get("args") if isinstance(exp, dict) else None
+        if exp.get("check") == "clamped" and isinstance(args, dict) and args.get("where") == "strategy" and \
+                args.get("field") == field and _is_num(args.get("effective")):
+            return float(args["effective"])
+    return None
+
+
+def _clamp_problem(sc: dict, ans: dict, c: Any, arm: Optional[str]) -> Optional[str]:
+    """Why one strategy.clamped entry cannot be the engine's, or None. The engine states a clamp only of the four
+    _CLAMPABLE fields, with `requested` (the request's value, "unlimited" for an omitted budget) and `effective`
+    (the server's positive cap), and only as a lowering (the two exceptions: a time budget <= 0 raised to the cap
+    where a seed derives its labels, a budget from "unlimited"). Where it is known the entry also agrees with the
+    request (a direct arm's request is what the runner sent; the MCP arm's is the service's, so not compared), the
+    cap (the scenario's own `clamped` expectation of the field) and the strategy echo, which states the effective
+    value the walk ran under."""
+    if not isinstance(c, dict):
+        return "strategy.clamped entry %r is not an object" % (c,)
+    f = c.get("field")
+    if f not in _CLAMPABLE:
+        return "strategy.clamped names %r, a field the engine never clamps (only %s): no clamp stands for the " \
+               "request's value" % (f, ", ".join(sorted(_CLAMPABLE)))
+    if "requested" not in c:
+        return "strategy.clamped %s states no requested value" % f
+    req, eff = c["requested"], c.get("effective")
+    if not _is_num(eff) or eff <= 0:
+        return "strategy.clamped %s: effective %r is no server cap (a positive number)" % (f, eff)
+    if req == "unlimited":
+        if f not in _CLAMPED_FROM_UNLIMITED:
+            return "strategy.clamped %s: requested \"unlimited\", which only an omitted budget states" % f
+    elif not _is_num(req):
+        return "strategy.clamped %s: requested %r is not a number" % (f, req)
+    elif not (eff < req or (f == "bounds.time_budget_ms" and req <= 0 and _seeds_derive(sc, arm))):
+        return "strategy.clamped %s: %r -> %r is no lowering to the server's cap%s" % (
+            f, req, eff, " (a budget <= 0 is raised only where a seed derives its labels)"
+            if f == "bounds.time_budget_ms" and req <= 0 else "")
+    group, name = _CLAMPABLE[f]
+    if arm != "mcp":
+        st = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
+        g = st.get(group) if isinstance(st, dict) else None
+        if isinstance(g, dict) and name in g:
+            if g[name] != req:
+                return "strategy.clamped %s: requested %r, the request sent %r" % (f, req, g[name])
+        elif f in _CLAMPED_FROM_UNLIMITED and req != "unlimited":
+            return "strategy.clamped %s: requested %r, the request omitted the budget (\"unlimited\")" % (f, req)
+    cap = _scenario_clamp_cap(sc, f)
+    if cap is not None and eff != cap:
+        return "strategy.clamped %s: effective %r, the server's cap is %r" % (f, eff, cap)
     body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
     echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
-    for c in echo.get("clamped") or []:
-        if isinstance(c, dict) and c.get("field") == "%s.%s" % (group, name) and "effective" in c:
-            return True, c["effective"]
-    return False, None
+    eg = echo.get(group)
+    if isinstance(eg, dict) and _is_num(eg.get(name)) and eg[name] != eff:
+        return "strategy.clamped %s: effective %r, the strategy echo ran under %r" % (f, eff, eg[name])
+    return None
+
+
+def _clamp_problems(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
+    """Why the answer's strategy.clamped cannot be the engine's (_clamp_problem per entry; a list, one entry per
+    field)."""
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    lst = echo.get("clamped")
+    if lst is None:
+        return []
+    if not isinstance(lst, list):
+        return ["strategy.clamped %r is not a list" % (lst,)]
+    out, seen = [], set()
+    for c in lst:
+        bad = _clamp_problem(sc, ans, c, arm)
+        if bad:
+            out.append(bad)
+            continue
+        if c["field"] in seen:
+            out.append("strategy.clamped states %s twice" % c["field"])
+        seen.add(c["field"])
+    return out
+
+
+def _clamped_knob(sc: dict, ans: dict, group: str, name: str, arm: Optional[str] = None) -> Tuple[bool, Any]:
+    """(True, the effective value) where the answer's single strategy.clamped entry of strategy.<group>.<name> is
+    one the engine can state (_clamp_problem: a _CLAMPABLE field, lowered to its cap); else (False, None): a clamp
+    of another knob, or one that cannot have happened, never stands for the request's value."""
+    field = "%s.%s" % (group, name)
+    if field not in _CLAMPABLE:
+        return False, None
+    body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
+    echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
+    lst = echo.get("clamped")
+    mine = [c for c in lst if isinstance(c, dict) and c.get("field") == field] if isinstance(lst, list) else []
+    if len(mine) != 1 or _clamp_problem(sc, ans, mine[0], arm):
+        return False, None
+    return True, mine[0]["effective"]
 
 
 def _strategy_knob(sc: dict, ans: dict, group: str, name: str, arm: Optional[str] = None) -> Any:
     """The value of strategy.<group>.<name> the walk is held to (SPEC-labeled-traversal-core §5): a clamp's
-    effective value (strategy.clamped), else what the arm's requests declare (_declared_knob: on the MCP arm its
-    overrides, then the scenario's direct request, whose walk the preset mirrors), else the answer's echo, else the
-    default (the echo's preset or mode, else §5's). The declaration comes before the echo: a knob a service dropped
-    or rewrote without a clamp, a preset's included, is held to what the scenario asked, never excused by its own
-    echo (_preset_mismatch names such a difference)."""
-    clamped, value = _clamped_knob(ans, group, name)
+    effective value (strategy.clamped, only a clamp the engine can state: _clamped_knob, so never one of a
+    structural knob), else what the arm's requests declare (_declared_knob: on the MCP arm its overrides, then the
+    scenario's direct request, whose walk the preset mirrors), else the answer's echo, else the default (the echo's
+    preset or mode, else §5's). The declaration comes before the echo: a knob a service dropped or rewrote, a
+    preset's included, is held to what the scenario asked, never excused by its own echo or a clamp it states
+    (_preset_mismatch names such a difference, _clamp_problems such a clamp)."""
+    clamped, value = _clamped_knob(sc, ans, group, name, arm)
     if clamped:
         return value
     whose, value = _declared_knob(sc, group, name, arm)
@@ -3078,7 +3198,7 @@ def _preset_mismatch(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
     out = []
     for group, name in _STRUCTURAL_KNOBS:
         g = echo.get(group)
-        if not isinstance(g, dict) or name not in g or _clamped_knob(ans, group, name)[0]:
+        if not isinstance(g, dict) or name not in g or _clamped_knob(sc, ans, group, name, arm)[0]:
             continue
         whose, declared = _declared_knob(sc, group, name, arm)
         if whose == "overrides" and g[name] != declared:
@@ -3896,6 +4016,8 @@ def _traverse_invariants(sc, ans, a, arm):
                                                     if distinct < len(seeds) else ""))
     # the MCP walk ran the strategy the scenario declares (§5): a changed or dropped preset knob is named
     probs += _preset_mismatch(sc, ans, arm)
+    # a clamp states only what the engine can lower (_clamp_problem): never a request's knob it rewrote
+    probs += _clamp_problems(sc, ans, arm)
     maxbp = ((sc["request"].get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     echoed = ((body.get("strategy") or {}).get("bounds") or {}).get("max_extension_bp")
     radius = echoed if isinstance(echoed, int) else maxbp
