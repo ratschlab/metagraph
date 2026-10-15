@@ -351,5 +351,28 @@ class WalksDecisive(unittest.TestCase):
             self.assertFalse(x["id"].startswith("D-R-warm"), x["id"])
 
 
+class TitlesTested(unittest.TestCase):
+    """Finding 6A (VERIFY-C) and P5-v4-content-04: the record's own path on '+' for the IUPAC long pattern, the '-' path
+    for the reverse one, and both primers of the forward-only pair counted."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_checks(self):
+        s = by_id(built({"L", "N"}))
+        ex6 = [e for e in s["L-long-0006"]["expect"] if e["check"] == "path_spells"]
+        self.assertEqual(ex6, [{"check": "path_spells", "args": {"strand": "+"}}])
+        self.assertIn({"check": "path_spells", "args": {"strand": "-"}}, s["L-long-0005"]["expect"])
+        t = s["L-long-0006"]["truth"]
+        entry = {"id": "w", "results": [{"sequence": "A" * 60, "strand": "-", "offset": 0}], "retrieval_complete": True,
+                 "counts": {"paths": {"relation": "exact", "value": 1}}}
+        ans = checks.normalise_direct(200, {"patterns": [entry]})
+        self.assertEqual(checks.CHECKS["path_spells"](s["L-long-0006"], ans, {"strand": "+"}, "direct-local")[0], "fail")
+        entry["results"].append({"sequence": t["window"], "strand": "+", "offset": 0})
+        ans = checks.normalise_direct(200, {"patterns": [entry]})
+        self.assertEqual(checks.CHECKS["path_spells"](s["L-long-0006"], ans, {"strand": "+"}, "direct-local")[0], "pass")
+        pair = s["N-usecase-0005"]
+        got = sorted((e["check"], e["args"].get("pattern")) for e in pair["expect"] if e["args"].get("pattern") is not None)
+        self.assertEqual(got, [("count_relation", 0), ("count_relation", 1), ("entry_fields", 0), ("entry_fields", 1)])
+
+
 if __name__ == "__main__":
     unittest.main()

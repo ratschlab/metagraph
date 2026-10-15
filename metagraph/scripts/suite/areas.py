@@ -1251,10 +1251,13 @@ def gen_L(ctx: Ctx) -> List[dict]:
     rec = ctx.rec("mpn")
     t = ctx.window(rl, rec, 100)
     t["strand"] = "-"
+    # the record's path listed as '-' (P5-v4-content-04: the invariants already pin an exact pattern's '-' paths to the
+    # record's bases, VERIFY-C; the title's claim is now a check of its own)
     out.append(scenario(nid(), "L", "100 bp of mpn as its reverse complement, strands reverse: the record's path as '-'",
                         "POST /pattern", pattern_request([_p(st.revcomp(t["window"]))], long_search="paths",
                                                          strands="reverse"), t,
-                        [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1)],
+                        [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1),
+                         ex("path_spells", strand="-")],
                         tags=["paths", "strands"]))
     rec = ctx.rec("sso")
     t = ctx.window(rl, rec, 60)
@@ -1262,9 +1265,12 @@ def gen_L(ctx: Ctx) -> List[dict]:
     for p in (10, 30, 50):
         w[p] = st.iupac_code_holding(w[p], 2, rl)
     t["iupac_positions"] = [10, 30, 50]
+    # the record's own path, on '+' (finding 6A of the outside review, VERIFY-C: a count of 1 or more passed with the
+    # planted '+' path dropped and only the '-' instance listed)
     out.append(scenario(nid(), "L", "a 60 bp IUPAC pattern (3 two-base codes) with paths: the record's path among them",
                         "POST /pattern", pattern_request([_p("".join(w), kind="iupac")], long_search="paths"), t,
-                        [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1)],
+                        [OK, INV, CC, ex("count_relation", count="paths", relation="exact", min=1),
+                         ex("path_spells", strand="+")],
                         tags=["paths", "iupac"]))
     # an exact anchor window is one k-mer per orientation: A^60's anchors are A^31 (+) and T^31 (-), two, above
     # max_anchors 1
@@ -2537,8 +2543,14 @@ def _gen_N(ctx: Ctx) -> List[dict]:
                             tags=["use-case", "primer"] + (["smoke"] if name == "515F" else [])))
     req = pattern_request([_p(PRIMERS["515F"], "515F", kind="iupac"), _p(PRIMERS["806R"], "806R", kind="iupac")],
                           mode="count", strands="forward")
+    # both entries searched forward only and both counted (P5-v4-content-04: the second primer was not asserted, so its
+    # slot refused would have passed); 806R's forward count is the records that hold the 16S gene on the reverse
+    # strand (v4: 6,900 exact, 515F 7,737)
     out.append(scenario(nid(), "N", "a primer pair on the forward strand only (one primer is reverse): both counted", "POST /pattern",
-                        req, None, [OK, INV, ex("entry_fields", pattern=0, equals={"strands": ["+"]})], tags=["use-case", "primer", "wrong-strand"]))
+                        req, None, [OK, INV] + [e for j in (0, 1) for e in (
+                            ex("entry_fields", pattern=j, equals={"strands": ["+"]}),
+                            ex("count_relation", pattern=j, relation="exact", min=1))],
+                        tags=["use-case", "primer", "wrong-strand"]))
     t = ctx.window(rng, eco, 25)
     req = pattern_request([_p(st.revcomp(t["window"]), "rc")], strands="forward")
     out.append(scenario(nid(), "N", "the wrong strand: the reverse complement of a window searched forward only: the record's k-mers not found",
