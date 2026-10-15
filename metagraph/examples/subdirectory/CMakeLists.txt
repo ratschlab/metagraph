@@ -18,6 +18,10 @@ target_link_libraries(basic_query PRIVATE
     metagraph-core
 )
 
+# Coordinate context example (requires DNA, coordinates, and a .seqs mapping).
+add_executable(context_cursor ../src/context_cursor.cpp)
+target_link_libraries(context_cursor PRIVATE metagraph-cli metagraph-core)
+
 # Set alphabet (DNA or Protein)
 if(NOT DEFINED CMAKE_DBG_ALPHABET)
     set(CMAKE_DBG_ALPHABET "DNA" CACHE STRING "Alphabet for MetaGraph (DNA or Protein)")
