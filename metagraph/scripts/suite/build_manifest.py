@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 import sys
+from typing import Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -75,6 +76,14 @@ CONVENTIONS = {
 
 
 CAPABILITY_DOCUMENTS = ("capabilities", "pattern_capabilities", "traverse_capabilities")
+# The checks a baseline run shows the MCP surface exposes, per scenario (mcp.exposes; compare.exposure_drops reads a
+# listed check that reads not_exposed as a disagreement): written by --exposure-from from a recorded run
+DEFAULT_EXPOSURE = os.path.join(truth.TRUTH_DIR, "mcp_exposure", "v4-20261014T061053Z.json")
+EXPOSURE_RULE = ("the checks decided (pass, fail or finding) on EVERY recorded MCP execution of the scenario whose "
+                 "status check passed (an execution with another status decides nothing, so a scenario with one has "
+                 "no list); written into a scenario's mcp.exposes only where its MCP request is the baseline's "
+                 "(traverse_resolve's time_budget_ms aside: a budget shapes no field of the answer), restricted to "
+                 "the checks the scenario expects")
 
 
 def load_capabilities(directory: str) -> dict:
@@ -96,7 +105,8 @@ def snapshot_digests(directory: str) -> dict:
     return out
 
 
-def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES) -> dict:
+def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES,
+          exposure_file: Optional[str] = DEFAULT_EXPOSURE) -> dict:
     recs = truth.load_with_sequences(fetch=fetch)
     missing = [r.key for r in recs if r.fetch_error]
     ctx = Ctx(recs, seed)
@@ -123,6 +133,11 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         scenarios += areas.gen_D(ctx, scenarios)
     areas.state_chance_bounds(scenarios)
     scenarios = place_warm_ups(scenarios)
+    exposure = None
+    if exposure_file:
+        with open(exposure_file) as f:
+            exposure = json.load(f)
+        apply_exposure(scenarios, exposure)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios)
@@ -149,6 +164,10 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
             "records_not_fetched": missing,
         },
         "conventions": CONVENTIONS,
+        "mcp_exposure_baseline": None if exposure is None else {
+            "file": os.path.relpath(os.path.abspath(exposure_file), HERE), "source": exposure.get("source"),
+            "rule": exposure.get("rule"), "sha256": sha256_json(exposure),
+            "scenarios_with_exposes": sum(1 for sc in scenarios if (sc.get("mcp") or {}).get("exposes"))},
         "skipped": ctx.skipped,
         "not_applicable": not_applicable(caps),
         "counts": counts(scenarios, relations),
@@ -157,6 +176,53 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         "scenarios": scenarios,
     }
     return manifest
+
+
+def mcp_request_sha256(mcp: dict) -> Optional[str]:
+    """The digest of a scenario's MCP request (tool and arguments; traverse_resolve's time_budget_ms left out), None
+    for a scenario the MCP does not run."""
+    if not isinstance(mcp, dict) or not mcp.get("tool"):
+        return None
+    args = dict(mcp.get("arguments") or {})
+    if mcp["tool"] == "traverse_resolve":
+        args.pop("time_budget_ms", None)
+    return sha256_json({"tool": mcp["tool"], "arguments": args})
+
+
+def exposure_baseline(rows: list, manifest: dict, source: dict) -> dict:
+    """The exposure baseline of a recorded run (EXPOSURE_RULE): {source, rule, scenarios: {id: {exposes,
+    mcp_request_sha256}}} from the run's execution lines |rows| (the MCP arm's) and its manifest."""
+    scen = dict((sc.get("id"), sc) for sc in manifest.get("scenarios") or [])
+    per: dict = {}
+    for r in rows:
+        if r.get("arm") != "mcp" or r.get("scenario") not in scen:
+            continue
+        checks_ = r.get("checks") or []
+        status_ok = any(c.get("check") == "status" and c.get("outcome") == "pass" for c in checks_)
+        decided = set(c.get("check") for c in checks_ if c.get("outcome") in ("pass", "fail", "finding")) \
+            if status_ok else set()
+        per.setdefault(r["scenario"], []).append(decided)
+    out = {}
+    for sid, sets in sorted(per.items()):
+        common = set.intersection(*sets) if sets else set()
+        out[sid] = {"exposes": sorted(common), "mcp_request_sha256": mcp_request_sha256(scen[sid].get("mcp"))}
+    return {"source": source, "rule": EXPOSURE_RULE, "scenarios": out}
+
+
+def apply_exposure(scenarios: list, baseline: Optional[dict]) -> int:
+    """Fill mcp.exposes from |baseline| (EXPOSURE_RULE); returns how many scenarios got a list."""
+    n = 0
+    for sc in scenarios:
+        b = ((baseline or {}).get("scenarios") or {}).get(sc["id"])
+        sha = mcp_request_sha256(sc.get("mcp"))
+        if not b or sha is None or sha != b.get("mcp_request_sha256"):
+            continue
+        expected = set(e["check"] for e in sc["expect"])
+        exposes = [c for c in b.get("exposes") or [] if c in expected]
+        if exposes:
+            sc["mcp"]["exposes"] = exposes
+            n += 1
+    return n
 
 
 def _snapshot_name(directory: str) -> str:
@@ -435,7 +501,37 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--no-fetch", action="store_true", help="use the record cache only")
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
+    ap.add_argument("--exposure", default=DEFAULT_EXPOSURE,
+                    help="the MCP exposure baseline (default truth/mcp_exposure/v4-20261014T061053Z.json; '' for none)")
+    ap.add_argument("--exposure-from", metavar="RUN_DIR",
+                    help="write the exposure baseline of a recorded run (its executions.reevaluated.jsonl, else "
+                         "executions.jsonl, and manifest.json) to --exposure-out, then exit")
+    ap.add_argument("--exposure-out", help="where --exposure-from writes")
     args = ap.parse_args(argv)
+    if args.exposure_from:
+        if not args.exposure_out:
+            raise SystemExit("--exposure-from needs --exposure-out")
+        run = args.exposure_from
+        lines = os.path.join(run, "executions.reevaluated.jsonl")
+        if not os.path.exists(lines):
+            lines = os.path.join(run, "executions.jsonl")
+        with open(lines) as f:
+            rows = [json.loads(x) for x in f if x.strip()]
+        with open(os.path.join(run, "manifest.json")) as f:
+            man = json.load(f)
+        checks_sha = sorted(set((r.get("reevaluation") or {}).get("checks_sha256") for r in rows
+                                if r.get("arm") == "mcp") - {None})
+        run_ids = sorted(set(r.get("run_id") for r in rows if r.get("arm") == "mcp") - {None})
+        source = {"run": run_ids or [os.path.basename(os.path.normpath(run))], "lines": os.path.basename(lines),
+                  "manifest_content_sha256": man.get("content_sha256"), "checks_sha256": checks_sha}
+        doc = exposure_baseline(rows, man, source)
+        os.makedirs(os.path.dirname(os.path.abspath(args.exposure_out)), exist_ok=True)
+        with open(args.exposure_out, "w") as f:
+            json.dump(doc, f, indent=1, sort_keys=True)
+            f.write("\n")
+        print("%d scenarios, %d with exposed checks" % (len(doc["scenarios"]),
+                                                       sum(1 for v in doc["scenarios"].values() if v["exposes"])))
+        return 0
     only = set(args.areas.split(",")) if args.areas else None
     if only and (manifest_path(args.out) or manifest_path(args.smoke_out)):
         raise SystemExit("--areas builds a partial manifest: give --out and --smoke-out outside manifest/ (not a "
@@ -444,7 +540,8 @@ def main(argv=None) -> int:
         why = frozen_target(path)
         if why:
             raise SystemExit(why)
-    m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities)
+    m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities,
+              exposure_file=args.exposure or None)
     if only:
         m["partial_build"] = True
     write(args.out, m)

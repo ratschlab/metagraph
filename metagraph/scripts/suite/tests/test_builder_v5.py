@@ -583,5 +583,46 @@ class Discoveries(unittest.TestCase):
             self.assertNotIn("unless truncated", s[sid]["title"])
 
 
+class McpExposure(unittest.TestCase):
+    """Lane S-verdict's hand-off (item 9): mcp.exposes from the v4 baseline holds only the checks decided on EVERY
+    recorded MCP execution of the scenario, and only where the MCP request is the baseline's."""
+
+    def test_baseline_and_apply(self):
+        import build_manifest as bm
+        mcp = {"tool": "traverse_resolve", "arguments": {"labels": ["1"], "time_budget_ms": 20000}}
+        man = {"scenarios": [{"id": "A", "mcp": mcp}, {"id": "B", "mcp": mcp}, {"id": "C", "mcp": mcp}]}
+        line = lambda sid, rep, **o: {"arm": "mcp", "scenario": sid, "repeat": rep, "checks": [  # noqa: E731
+            {"check": c, "outcome": v} for c, v in o.items()]}
+        rows = [line("A", 0, status="pass", invariants="pass", resolve_runs="pass"),
+                line("A", 1, status="pass", invariants="pass", resolve_runs="inconclusive", deterministic="pass"),
+                line("B", 0, status="fail", resolve_runs="fail"),            # a relayed 503: nothing decided
+                line("B", 1, status="pass", resolve_runs="pass"),
+                line("C", 0, status="pass", resolve_runs="not_exposed", invariants="fail"),
+                dict(line("A", 0, status="pass"), arm="direct-local")]
+        b = bm.exposure_baseline(rows, man, {})
+        got = dict((k, v["exposes"]) for k, v in b["scenarios"].items())
+        self.assertEqual(got, {"A": ["invariants", "status"], "B": [], "C": ["invariants", "status"]})
+        exp = [{"check": "status", "args": {}}, {"check": "invariants", "args": {}}]
+        same = {"id": "A", "expect": exp, "mcp": {"tool": "traverse_resolve",
+                                                  "arguments": {"labels": ["1"], "time_budget_ms": 60000}}}
+        other = {"id": "C", "expect": exp[:1], "mcp": {"tool": "traverse_resolve", "arguments": {"labels": ["2"]}}}
+        self.assertEqual(bm.apply_exposure([same, other], b), 1)
+        self.assertEqual(same["mcp"]["exposes"], ["invariants", "status"])   # a resolve's budget aside
+        self.assertNotIn("exposes", other["mcp"])                            # another request: not the baseline's
+        walk = {"tool": "traverse_fetch", "arguments": {"overrides": {"bounds": {"time_budget_ms": 15000}}}}
+        self.assertNotEqual(bm.mcp_request_sha256(walk), bm.mcp_request_sha256(
+            {"tool": "traverse_fetch", "arguments": {"overrides": {"bounds": {"time_budget_ms": 60000}}}}))
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_built(self):
+        m = built()
+        s = by_id(m)
+        self.assertIn("resolve_runs", s["R-pos-0001"]["mcp"]["exposes"])
+        self.assertNotIn("exposes", s["T-walk-0006"]["mcp"])          # its request changed
+        self.assertNotIn("exposes", s["T-end-0001"]["mcp"])           # v4's MCP refused it: nothing decided
+        self.assertNotIn("walk_in_record", s["T-walk-0004"]["mcp"].get("exposes", []))   # inconclusive on r0
+        self.assertEqual(m["mcp_exposure_baseline"]["source"]["run"], ["20261014T061053Z_refseq97-6f945db4"])
+
+
 if __name__ == "__main__":
     unittest.main()
