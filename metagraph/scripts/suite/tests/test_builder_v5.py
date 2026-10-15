@@ -374,5 +374,50 @@ class TitlesTested(unittest.TestCase):
         self.assertEqual(got, [("count_relation", 0), ("count_relation", 1), ("entry_fields", 0), ("entry_fields", 1)])
 
 
+class GateCoverage(unittest.TestCase):
+    """VERIFY-D's gaps of the resolve / traverse gate the MCP can express, and P5-v4-content-06's: forced per-arm caps,
+    a cap above the service's maximum, the permit side of min_live_labels, a dropped seed label with a client seed_id."""
+
+    def test_trie_heads(self):
+        rng = random.Random(9)
+        rnd = lambda n: "".join(rng.choice("ACGT") for _ in range(n))  # noqa: E731
+        w = rnd(31)
+        # three copies of w, each followed by 20 shared bases, then a base that differs per copy
+        tail = rnd(20)
+        seq = rnd(50) + w + tail + "A" + rnd(60) + w + tail + "C" + rnd(60) + w + tail + "G" + rnd(50)
+        heads = ml.trie_heads(seq, 50, 31, "right", 40)
+        self.assertEqual(heads[:20], [1] * 20)
+        self.assertEqual(heads[20], 3)                         # the copies' continuations part at the 21st base
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_scenarios(self):
+        import compare as cmp
+        import gate_policy
+        m = built()
+        s = by_id(m)
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        recs = dict((r.key, r) for r in truth.load_with_sequences(fetch=False))
+        for sid, knob in (("T-caps-0002", "max_live_paths"), ("T-caps-0003", "max_paths")):
+            sc = s[sid]
+            stop = [e["args"] for e in sc["expect"] if e["check"] == "traverse_stop"][0]
+            self.assertEqual((stop["knob"], stop["cap_reason"], stop["walks"]), ("bounds." + knob, knob, ["partial"]))
+            t = sc["truth"]
+            rec = recs[t["genome"]]
+            first = [x for x in (t["trie"]["left"]["first_depth_with_3_heads"],
+                                 t["trie"]["right"]["first_depth_with_3_heads"]) if x is not None]
+            self.assertTrue(first and min(first) < sc["request"]["strategy"]["bounds"]["max_extension_bp"])
+            self.assertEqual(ml.trie_heads(rec.seq, t["start"], 31, "left", min(first))[-1] >= 3 or
+                             ml.trie_heads(rec.seq, t["start"], 31, "right", min(first))[-1] >= 3, True)
+            self.assertIsNone(gate_policy.mcp_exclusion(sc, cases), sid)          # the MCP can send it
+        self.assertEqual(s["T-caps-0004"]["mcp"]["by_design"], ["traverse.bounds_knob_above_service_maximum"])
+        self.assertEqual(s["T-seeds-0002"]["mcp"]["arguments"]["seeds"][0]["seed_id"], "suite-v5-client-seed-id")
+        q = s["T-quorum-0002"]
+        self.assertEqual(q["request"]["seeds"][0]["labels"], [q["truth"]["record"], q["truth"]["taxid"]])
+        self.assertIn("walk", q["truth"])                                          # the exact minimum, from the record
+        for sid in ("T-caps-0002", "T-caps-0003", "T-caps-0004", "T-quorum-0002", "T-seeds-0002"):
+            self.assertIn("gate-coverage", s[sid]["tags"])
+            self.assertNotIn("D-" + sid, s)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import seqtools as st
 from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, Ctx, DB, K,
-                          PATTERN_MAX_CONTEXTS, RESOLVE_MAX_QUERY_BP, acgt_flank,
+                          PATTERN_MAX_CONTEXTS, RESOLVE_MAX_QUERY_BP, acgt_flank, trie_heads, trie_index,
                           PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS, WALK_PRESET, pattern_request, relation,
                           _pattern_kinds, resolve_request, scenario, source_contexts, traverse_request,
                           walk_expectations)
@@ -663,6 +663,7 @@ def gen_T(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "T", "no seed: refused", "POST /traverse", req, None,
                         [err400("request.seeds: expected a non-empty array")], tags=["edge", "refusal"]))
     out += _t_coverage(ctx)
+    out += _t_gate_coverage(ctx, out)
     _annotate_walks(ctx, out)
     # the warm-ups, after the area's own scenarios (their ids and draws unchanged); the build places each right
     # before the walk it warms
@@ -734,6 +735,100 @@ def _t_coverage(ctx: Ctx) -> List[dict]:
                         "POST /traverse", traverse_request([_tseed(q, [rec.accession])], {"bounds": {"max_extension_bp": 100}}),
                         t, [err400(prefix="seed '%s': " % q[:32])],
                         tags=["edge", "negative", "reverse-complement", "refusal", "index-empirical"]))
+    return out
+
+
+def _branching_seed(ctx: Ctx, key: str, radius: int, tries: int = 4000) -> dict:
+    """A 31-mer of |key|'s whole record with 3-8 copies on its forward strand and none reverse-complemented, whose
+    header-constrained trie (manifest_lib.trie_heads: the record's own forward k-mers) holds 3 or more heads within
+    radius / 2 bp on some arm: the arm a max_live_paths of 2, or a max_paths of 1, must cut before the radius. One k-mer:
+    a seed phase of one row, cheap cold. Own random stream; the truth states the copies (with their flanks, for
+    walk_in_record any_copy) and, per arm, the first depth with 3 heads."""
+    rec = ctx.rec(key)
+    seq = rec.seq
+    if rec.region:
+        raise ValueError("%s: a branching seed needs the whole record" % key)
+    index = {side: trie_index(seq, side) for side in ("left", "right")}
+    r = ctx.rng("T", "caps", key)
+    for _ in range(tries):
+        s = r.randrange(radius + 100, len(seq) - radius - 100)
+        w = seq[s:s + K]
+        if not st.is_acgt(w) or st.revcomp(w) in seq:
+            continue
+        copies = st.find_all(seq, w)
+        if not 3 <= len(copies) <= 8:
+            continue
+        heads = dict((side, trie_heads(seq, s, K, side, radius, index=index[side])) for side in ("left", "right"))
+        first = dict((side, next((d + 1 for d, h in enumerate(hs) if h >= 3), None)) for side, hs in heads.items())
+        if not any(f is not None and f <= radius // 2 for f in first.values()):
+            continue
+        t = ctx.flank_for(rec, ctx.truth_at(rec, s, K), radius + 50)
+        t["copies"] = [dict((f, ctx.flank_for(rec, ctx.truth_at(rec, c, K), radius + 50)[f])
+                            for f in ("start", "flank", "flank_start")) for c in copies if c != s]
+        t["trie"] = dict((side, {"first_depth_with_3_heads": first[side], "heads_by_depth": heads[side][:40]})
+                         for side in ("left", "right"))
+        return t
+    raise ValueError("no branching 31-mer found in %s" % key)
+
+
+def _t_gate_coverage(ctx: Ctx, built: List[dict]) -> List[dict]:
+    """The traverse requests the MCP can send that no v4 scenario forced (VERIFY-D of the outside review, the gaps
+    of the resolve / traverse deploy gate; P5-v4-content-06): the trie preset's per-arm caps max_live_paths and
+    max_paths forced, a cap above the service's maximum (the by-design refusal of the table's
+    traverse.bounds_knob_above_service_maximum against the host's answer), the permit side of min_live_labels, a
+    seed of two labels one of which the host drops (seed_unsupported) with a client seed_id. Own ids (no area's
+    numbering moves), own random stream or the truths of built scenarios (copied); tagged gate-coverage (gen_D leaves
+    them out, so the determinism twins stay as built). The stop of a running job (traverse_stop) is the async
+    session's area S."""
+    out: List[dict] = []
+    mge = ctx.rec("mge")
+    R = 300
+    t = _branching_seed(ctx, "mge", R)
+    for n, (knob, val) in ((2, ("max_live_paths", 2)), (3, ("max_paths", 1))):
+        req = traverse_request([_tseed(t["window"], [mge.accession])], {"bounds": {"max_extension_bp": R, knob: val}},
+                               preset="trie")
+        out.append(scenario("T-caps-%04d" % n, "T", "trie of a %d-copy mge 31-mer under bounds.%s %d: an arm cut by "
+                            "the cap before the radius (3 heads by %s bp), its walk so far in the record" % (
+                                len(t["copies"]) + 1, knob, val,
+                                "/".join(str(t["trie"][x]["first_depth_with_3_heads"]) for x in ("left", "right"))),
+                            "POST /traverse", req, dict(t),
+                            [OK, INV, ex("traverse_stop", knob="bounds." + knob, cap_reason=knob, walks=["partial"]),
+                             ex("walk_in_record", label_scope="record", any_copy=True, prefix_only=True)],
+                            tags=["exhaustive", "caps", "gate-coverage"]))
+    ex1 = _by_id(built, "T-exhaustive-0001")
+    tb = {k: v for k, v in ex1["truth"].items() if k != "walk"}
+    req = traverse_request([_tseed(tb["window"], [tb["record"]])], {"bounds": {"max_extension_bp": 100,
+                                                                              "max_live_paths": 1001}}, preset="trie")
+    out.append(scenario("T-caps-0004", "T", "trie with bounds.max_live_paths 1,001, above the service's maximum of "
+                        "1,000: the host walks it (its own limit is none), the MCP refuses it by design",
+                        "POST /traverse", req, tb, [OK, INV, ex("walk_in_record", label_scope="record")],
+                        tags=["exhaustive", "caps", "gate-coverage"]))
+    q1 = _by_id(built, "T-quorum-0001")
+    mpn = ctx.rec(q1["truth"]["genome"])
+    tq = dict(q1["truth"])
+    req = traverse_request([_tseed(tq["window"], [mpn.accession, mpn.column])],
+                           {"bounds": {"max_extension_bp": 200, "min_live_labels": 2}})
+    out.append(scenario("T-quorum-0002", "T", "bounds.min_live_labels 2 on a seed of its header and its taxid, both "
+                        "carrying every record k-mer: the walk follows the record (the permit side of T-quorum-0001)",
+                        "POST /traverse", req, tq,
+                        [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
+                         ex("walk_in_record", label_scope="record")],
+                        tags=["labels", "quorum", "gate-coverage"]))
+    other = _distant(ctx, mpn, 0)
+    seed_id = "suite-v5-client-seed-id"
+    ts = dict(q1["truth"], dropped_label={"label": other.column, "assumes": "an unrelated taxon (another kingdom) "
+                                          "lacks one of the window's k-mers, as R-multi's label_not_full does"})
+    req = traverse_request([{"seed_id": seed_id, "sequence": ts["window"], "labels": [mpn.accession, other.column]}],
+                           {"bounds": {"max_extension_bp": 200}})
+    out.append(scenario("T-seeds-0002", "T", "a seed of two labels, %s's header and the unrelated %s (dropped: "
+                        "seed_unsupported), with a client seed_id: one label left, the id echoed with its mismatch "
+                        "stated, the walk in the record" % (mpn.key, other.key),
+                        "POST /traverse", req, ts,
+                        [OK, INV, ex("answer_fields", equals={"results.0.seed.labels_supporting_total": 1,
+                                                              "results.0.seed.seed_id": seed_id,
+                                                              "results.0.seed.seed_id_mismatch": True}),
+                         ex("walk_in_record", label_scope="record")],
+                        tags=["walk", "seeds", "multi-label", "gate-coverage"]))
     return out
 
 
@@ -2193,6 +2288,7 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
         cands = [s for s in pool if s["area"] == area and s["timing_class"] == "fast" and "refusal" not in s["tags"]
                  and "machine-dependent" not in s["tags"] and "needs-unique-id" not in s["tags"]
                  and "relation" not in s["tags"] and "split-case" not in s["tags"] and "warm-up" not in s["tags"]
+                 and "gate-coverage" not in s["tags"]
                  and not s.get("body_raw") and not s.get("headers")]
         step = max(1, len(cands) // n)
         picks += cands[::step][:n]

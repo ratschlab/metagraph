@@ -364,6 +364,46 @@ def walk_expectations(seq: str, plans: List[Tuple[int, int, List[str], int]], k:
     return out
 
 
+def trie_index(seq: str, side: str, k: int = K) -> Dict[str, set]:
+    """(k-1)-mer -> the bases that extend it on |side| over the record's forward k-mers (trie_heads)."""
+    succ: Dict[str, set] = {}
+    for i in range(len(seq) - k + 1):
+        km = seq[i:i + k]
+        if side == "right":
+            succ.setdefault(km[:-1], set()).add(km[-1])
+        else:
+            succ.setdefault(km[1:], set()).add(km[0])
+    return succ
+
+
+def trie_heads(seq: str, s0: int, L: int, side: str, E: int, stop_above: int = 64, k: int = K,
+               index: Optional[Dict[str, set]] = None) -> List[int]:
+    """The heads of a header-constrained exhaustive walk (the trie) from the seed seq[s0:s0+L] on |side|, per depth
+    1..E: the distinct k-mers at that depth over every walk of the record's forward strand (the header label holds
+    exactly the record's forward k-mers on this basic graph), a step into a seed k-mer left out (rejoined_seed),
+    k-mers holding a base outside ACGT left out; walks that meet again are one head (merging). A walk that keeps its
+    paths apart has at least as many heads, so a depth with n heads here trips max_live_paths below n on either rule.
+    Stops after E, when no head is left or above |stop_above| heads. |index|: trie_index(seq, side), when reused."""
+    succ = index if index is not None else trie_index(seq, side, k)
+    seed = seq[s0:s0 + L]
+    seed_kmers = set(seed[x:x + k] for x in range(L - k + 1))
+    front = {seed[-k:]} if side == "right" else {seed[:k]}
+    out: List[int] = []
+    for _ in range(E):
+        nxt = set()
+        for km in front:
+            ctx = km[1:] if side == "right" else km[:-1]
+            for b in succ.get(ctx, ()):
+                n = ctx + b if side == "right" else b + ctx
+                if n not in seed_kmers and b in "ACGT":
+                    nxt.add(n)
+        out.append(len(nxt))
+        front = nxt
+        if not front or len(front) > stop_above:
+            break
+    return out
+
+
 # ---------------------------------------------------------------------------------------------- requests
 def pattern_request(patterns: List[dict], mode: str = "all_or_count", max_contexts: int = PATTERN_MAX_CONTEXTS,
                     time_budget_ms: int = PATTERN_TIME_BUDGET_MS, **fields: Any) -> dict:
