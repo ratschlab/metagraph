@@ -344,8 +344,8 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
     """on_reconverge merge: the united history is not modelled (SPEC 6.10); its invariants are.
     Under merge the displayed walk follows first parents (SPEC 7.1), so a run's walk is the
     label's own route only after its merges: the label must hold every node of the run's
-    displayed support -- the whole run when route_bp is 0, else from the latest merge its leaf
-    states (end_labels' route_bp) -- and its end node in any case."""
+    displayed support -- the nodes its steps entered (from from_bp + 1) when route_bp is 0, else
+    from the latest merge its leaf states (end_labels' route_bp) -- and its end node in any case."""
     checks.mark('completeness', INCONCLUSIVE, note='merge: completeness is the united history\'s')
     got_walks = view.all_walks()
     checks.add(f'{prefix}.sound', got_walks <= res.walks, 'every walk an oracle walk',
@@ -371,9 +371,12 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
         if label is None:
             bad.append(('unknown label', claim))
             continue
-        start = r.get('from_bp', 0)
-        rb = r.get('route_bp', 0)
-        if rb:
+        # SPEC 6.2: a run [from_bp, to_bp) covers the nodes entered by steps from_bp + 1 ... to_bp
+        # (7.4 says so of label_sets); the node at from_bp is a switched-in run's source's node. A
+        # merge start stays inclusive: it is the merge node, the same k-mer on every parent, and the
+        # label holds it on its own route (VERIFY-ORACLE.md R2.1 (b))
+        start = r.get('from_bp', 0) + 1
+        if r.get('route_bp', 0):
             start = max(start, leaf_route.get(i, len(walk)))
         nodes = range(max(start, 0), len(walk) + 1) if start < len(walk) else [len(walk)]
         missing = [j for j in nodes if not w.holds(label, w.walk_node(seed, arm, walk, j))]

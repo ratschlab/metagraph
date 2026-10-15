@@ -480,3 +480,42 @@ class MergeArms(unittest.TestCase):
                           {x['check'] for _, c in out for x in c.failed()})
             n += 1
         self.assertGreater(n, 0)
+
+
+MERGE_DATA = os.path.join(SUITE, 'tests', 'data', 'oracle_merge_answers.json')
+
+
+class MergedArmAnswers(unittest.TestCase):
+    """The four merged-arm answers of the verification round's final runs that the oracle failed;
+    all four oracle errors (VERIFY-ORACLE.md Round 2, R2.1; their build: the data file's engine)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(MERGE_DATA) as f:
+            cls.items = {x['id']: x for x in json.load(f)['answers']}
+
+    def failed(self, item, answer=None):
+        w = config_walker(item['config'])
+        out = TC.compare_traverse(w, item['request'], item['status'],
+                                  item['answer'] if answer is None else answer)
+        return {x['check'] for _, c in out for x in c.failed()}
+
+    def test_r2b_a_switched_in_run_is_supported_from_its_first_step(self):
+        """T-canonical_k10-0076 right: runs [22, 23) switched in at 22 and closed by the merge at
+        23 hold their label on node 23 only; node 22 is the source's (SPEC 6.2)."""
+        item = self.items['T-canonical_k10-0076']
+        self.assertNotIn('traverse.right.displayed_support', self.failed(item))
+        # the check keeps its teeth: the run handed to a label that lacks the node it entered fails
+        w = config_walker(item['config'])
+        res = item['answer']['results'][0]
+        view = TC.ArmView(res['arms']['right'], 'right',
+                          {j: d['name'] for j, d in enumerate(res['label_dict'])})
+        i, (claim, sw) = next((i, x) for i, x in enumerate(view.runs)
+                              if x[1]['entered_by'] == 'switch')
+        seed = item['request']['seeds'][0]['sequence']
+        node = w.walk_node(seed, 'right', claim[0], sw['to_bp'])
+        other = next(j for j, d in enumerate(res['label_dict'])
+                     if not w.holds(w.label(d['name']), node))
+        a = copy.deepcopy(item['answer'])
+        a['results'][0]['arms']['right']['runs'][i]['label'] = other
+        self.assertIn('traverse.right.displayed_support', self.failed(item, a))
