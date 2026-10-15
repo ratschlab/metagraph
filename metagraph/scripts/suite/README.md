@@ -2067,8 +2067,10 @@ failing on 14552938.
   `warm_pairs_left_out_after_interrupted` (scenarios whose warm pair it would have been) apart from the unpaired, and
   the report's Overheads section states the count (VERIFY-S-VERDICT (4)).
 - Moves (timing only; no outcome, check, class or verdict): v4 39 MCP lines not_reached -> cold (27) / warm (12), the
-  27 direct-local r0 after them cold -> warm with since_prev_s; 70 lines gain host_cache_after_interrupted; warm
-  pairs 527 -> 537 (32 after an interrupted execution). v3: 10 MCP lines, 8 direct-local r0 cold -> warm.
+  27 direct-local r0 after them cold -> warm with since_prev_s; 70 lines gain host_cache_after_interrupted; 32
+  scenarios are left out of the front overhead's warm pairs after a cut (wall pairs 552 -> 546, server-time pairs
+  527 -> 527). v3: 10 MCP lines, 8 direct-local r0 cold -> warm; 18 scenarios left out after a cut (wall pairs
+  562 -> 551, server-time pairs 530 -> 530).
 
 ### The text_contains grammar of an answer_match side (for async: the runner's load validation)
 - A list-valued text_contains on an answer_match side raised TypeError in compare and reevaluate, and the load
@@ -2172,14 +2174,17 @@ failing on 14552938.
   of outcome, checks, case, explained checks / items, verdict_detail, inconclusive_reason, time_limited or
   outcome_runner over 2,900 and 2,913 lines; the line changes are the host-cache labels (v3 18 / v4 66 host_cache,
   8 / 27 since_prev_s and host_cache_after, 54 / 70 lines gaining host_cache_after_interrupted).
-- Class moves, each the point of its rule: v4 R-budget-0002, R-twin-0002 direct identical -> disagree; v4
-  N-usecase-0008, R-pos-0027 and v3 M-planted-0017 MCP not_comparable -> agree; v4 T-repeat-0004 and v3
-  T-walk-0004 one more item compared; six v3 scenarios already disagreeing by an MCP runner_error list their
-  differing items. Summary: v4 MCP 534 agree / 4 not comparable -> 536 / 2, direct disagree 0 -> 2; v3 MCP 542 / 5
+- Class moves, each the point of its rule: v4 N-usecase-0008, R-pos-0027 and v3 M-planted-0017 MCP not_comparable
+  -> agree; v4 T-repeat-0004 and v3 T-walk-0004 one more item compared; six v3 scenarios already disagreeing by an
+  MCP runner_error list their differing items. No direct class moves: v4 R-budget-0002 and R-twin-0002 stay
+  identical and record execution_differs (budget_respected inconclusive on direct-local, a finding on
+  direct-remote). Summary: v4 MCP 534 agree / 4 not comparable -> 536 / 2, no direct disagreement; v3 MCP 542 / 5
   -> 543 / 4. No relation moves.
-- Verdicts: v4 FINDINGS -> FAIL (the 2 direct disagreements above); v3 FAIL unchanged. Both gain the line naming area
-  C and the two capabilities routes on mcp where nothing passed. The deploy gate on the v4 copy
-  (`--gate gate/policy_v4_rt_mcp.json`, two arms mcp + direct-local): 45 problems before and after, the same list.
+- Verdicts: v4 FINDINGS (4) and v3 FAIL, both unchanged. Neither gains an untested group: both state C-caps-0001 and
+  C-caps-0003 on mcp as limits the by-design table states (capabilities.traverse_capabilities_document,
+  capabilities.server_capabilities_document). The deploy gate on the v4 copy (`--gate gate/policy_v4_rt_mcp.json`,
+  two arms mcp + direct-local, the policy regenerated for the table's sha256): 45 problems before and after, the
+  same list.
 
 ### The host's references in an MCP-only run, a service document's identity, the wall rule's name (agreed with async)
 Agreed with the async session on 2026-10-14 (the coordinator's item). The runner records, in run.json
