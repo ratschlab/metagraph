@@ -497,5 +497,45 @@ class RepeatReentry(unittest.TestCase):
                                                             "direct-local")[0], "pass")
 
 
+class HeaderExactColumnTolerant(unittest.TestCase):
+    """P5-v4-content-03: exact runs on the records' headers (computed from the whole records), a tolerance on the
+    taxid columns (their other records may carry the junction's or the variant's bases); and the mutated seed's
+    traverse refusal as T-strand's: either seed refusal, both following from the record."""
+
+    def test_record_runs(self):
+        rec = types.SimpleNamespace(seq="C" * 10 + "ACGT" * 20 + "G" * 10)
+        q = ("ACGT" * 20)[:40] + "T" * 31
+        self.assertEqual(areas._record_runs(rec, q), [[0, 10]])
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_junction(self):
+        s = by_id(built({"R", "N"}))
+        sc = s["R-junction-0001"]
+        t = sc["truth"]
+        args = dict((e["args"]["label"], e["args"]) for e in sc["expect"] if e["check"] == "resolve_runs")
+        a_h, b_h, a_c, b_c = t["a"]["record"], t["b"]["record"], t["a"]["taxid"], t["b"]["taxid"]
+        self.assertEqual(args[a_h]["runs"], [[0, t["a_run_end"]]])
+        self.assertEqual(args[b_h]["runs"], [[t["b_run_start"], 170]])
+
+        def answer(col_a_end):
+            labs = [{"label": a_h, "runs": [[0, t["a_run_end"]]], "kmers_supported": t["a_run_end"]},
+                    {"label": b_h, "runs": [[t["b_run_start"], 170]], "kmers_supported": 170 - t["b_run_start"]},
+                    {"label": a_c, "runs": [[0, col_a_end]], "kmers_supported": col_a_end},
+                    {"label": b_c, "runs": [[t["b_run_start"], 170]], "kmers_supported": 170 - t["b_run_start"]}]
+            return checks.normalise_direct(200, {"num_kmers": 170, "graph_runs": [[0, 170]], "labels": labs})
+        rr = checks.CHECKS["resolve_runs"]
+        # another record of A's column carrying the junction's bases: the column's run reaches into the junction
+        self.assertEqual(rr(sc, answer(85), args[a_c], "direct-local")[0], "pass")
+        # ... but never past it into B's k-mers
+        self.assertEqual(rr(sc, answer(120), args[a_c], "direct-local")[0], "fail")
+        mut = s["N-nearmiss-0034"]
+        self.assertEqual(sorted(mut["request"]["labels"]), sorted([mut["truth"]["taxid"], mut["truth"]["record"]]))
+        self.assertFalse([e for e in mut["expect"] if e["args"].get("label") == mut["truth"]["taxid"]
+                          and "max_kmers" in e["args"]])
+        seed = s["N-nearmiss-0035"]
+        self.assertEqual(seed["truth"]["variant_kmers_in_record"], 0)
+        self.assertEqual(len(seed["truth"]["seed_refusals"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

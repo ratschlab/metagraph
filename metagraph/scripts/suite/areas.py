@@ -71,6 +71,19 @@ def _ids(prefix: str):
     return nxt
 
 
+def _record_runs(rec, q: str) -> List[List[int]]:
+    """The runs ([start, end) of k-mer indices) of the query k-mers |rec|'s fetched sequence holds on its forward strand:
+    on a whole record, exactly what its header label supports on this basic graph."""
+    out: List[List[int]] = []
+    for i in range(len(q) - K + 1):
+        if q[i:i + K] in rec.seq:
+            if out and out[-1][1] == i:
+                out[-1][1] = i + 1
+            else:
+                out.append([i, i + 1])
+    return out
+
+
 def _distant(ctx: Ctx, rec, i: int):
     others = [r for r in ctx.positives if r.kingdom != rec.kingdom]
     return others[i % len(others)]
@@ -160,13 +173,22 @@ def gen_R(ctx: Ctx) -> List[dict]:
         cs = next((x for x in range(min(len(b_prev), 100)) if ta["window"][-1 - x] != b_prev[-1 - x]),
                   min(len(b_prev), 100))
         a_end, b_start = 70 + min(cp, K - 1), 100 - min(cs, K - 1)
-        # exactly one run per label: A's label covering B's k-mers too (or B's A's) is a wrong answer
-        exp = [OK, INV, ex("resolve_runs", label=ra.column, runs=[[0, a_end]]),
-               ex("resolve_runs", label=rb.column, runs=[[b_start, len(q) - K + 1]])]
+        n = len(q) - K + 1
+        # The runs are exact for the records' headers (the k-mers each whole record holds, which is all a header
+        # supports on this basic graph); a taxid column holds the column's other records too, which may carry the
+        # junction's bases (a variant of the column, P5-v4-content-03: pae's column holds 1,762 records), so a
+        # column's one run from the query's end reaches into the junction within it, never past it: the k-mers of
+        # the other genome are in no record of the column (another kingdom's; empirical, the index's answers).
+        req = resolve_request(q, labels=[ra.column, rb.column, ra.accession, rb.accession])
+        exp = [OK, INV, ex("resolve_runs", label=ra.accession, runs=_record_runs(ra, q)),
+               ex("resolve_runs", label=rb.accession, runs=_record_runs(rb, q)),
+               ex("resolve_runs", label=ra.column, run_end_in=[a_end, 100], max_kmers=100),
+               ex("resolve_runs", label=rb.column, run_start_in=[70, b_start], max_kmers=n - 70)]
         truth = empirical({"a": ta, "b": tb, "junction_bp": 100, "a_run_end": a_end, "b_run_start": b_start},
-                          "the taxid columns' runs: the other records of each column hold no junction k-mer and no k-mer "
-                          "of the other genome (the runs are computed from the two records alone)")
-        out.append(scenario(nid(), "R", "junction of %s and %s: A's run ends at %d, B's starts at %d (from the records)" % (
+                          "the taxid columns hold no k-mer of the other genome (their other records, another "
+                          "kingdom's); the headers' runs are computed from the whole records")
+        out.append(scenario(nid(), "R", "junction of %s and %s: A's run ends at %d, B's starts at %d (the headers' "
+                            "exactly, from the records; the columns' within the junction)" % (
                                 ra.key, rb.key, a_end, b_start),
                             "POST /resolve", req, truth, exp, tags=["positive", "junction", "index-empirical"]))
     nid = _ids("R-discover")
@@ -2547,15 +2569,35 @@ def _gen_N(ctx: Ctx) -> List[dict]:
                             "POST /resolve", resolve_request(q, labels=[rec.column]), t,
                             [OK, INV, ex("resolve_runs", label=rec.column, max_kmers=0)], tags=["near-miss", "mutated-seed"]))
         q2 = t["window"][:100] + ("A" if t["window"][100] != "A" else "C") + t["window"][101:]
+        # the 31 k-mers holding the substitution: on a whole record its header supports exactly the k-mers the record
+        # holds (exact runs), while the taxid column may hold the variant in another record (pae's column holds 1,762:
+        # P5-v4-content-03), so the column is asked to cover both sides only
+        labels = [rec.column] + ([] if rec.region else [rec.accession])
+        exp = [OK, INV, ex("resolve_runs", label=rec.column, covers=[0, 70]),
+               ex("resolve_runs", label=rec.column, covers=[101, 170])]
+        if not rec.region:
+            exp.append(ex("resolve_runs", label=rec.accession, runs=_record_runs(rec, q2)))
         out.append(scenario(nid(), "N", "200 bp with one substitution at 100: the runs break there, both sides supported",
-                            "POST /resolve", resolve_request(q2, labels=[rec.column]), t,
-                            [OK, INV, ex("resolve_runs", label=rec.column, covers=[0, 70]),
-                             ex("resolve_runs", label=rec.column, covers=[101, 170]),
-                             ex("resolve_runs", label=rec.column, max_kmers=139)], tags=["near-miss", "mutated-seed"]))
-        out.append(scenario(nid(), "N", "a traverse seed with a substitution in its middle: refused (not in the graph)",
-                            "POST /traverse", traverse_request([_tseed(q2, [rec.accession])], {"bounds": {"max_extension_bp": 100}}), t,
-                            [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q2[:32])],
-                            tags=["near-miss", "mutated-seed", "refusal"]))
+                            "POST /resolve", resolve_request(q2, labels=labels), t, exp, tags=["near-miss", "mutated-seed"]))
+        # the seed under the record's header: a seed refusal, either one (as T-strand): "not fully present" when a
+        # variant k-mer is in no record of the graph, "no seed label supports every k-mer" when another record holds
+        # them all; the header supports none of them where the whole record holds none (checked here)
+        held = [i for i in range(70, 101) if q2[i:i + K] in rec.seq]
+        tt = dict(t, variant_kmers_in_record=len(held),
+                  seed_refusals=["seed '%s': Seed is not fully present in the graph; graph runs: " % q2[:32],
+                                 "seed '%s': No seed label supports every k-mer of the seed" % q2[:32]])
+        tags = ["near-miss", "mutated-seed", "refusal"]
+        if rec.region:
+            tt = empirical(tt, "the record holds none of the variant k-mers outside its fetched region")
+            tags.append("index-empirical")
+        if held:
+            ctx.skip("N", "a traverse seed with a substitution in %s" % rec.key,
+                     "the record holds %d of the variant's k-mers elsewhere: its header would support the seed" % len(held))
+        else:
+            out.append(scenario(nid(), "N", "a traverse seed with a substitution in its middle, under the record's "
+                                "header: a seed refusal",
+                                "POST /traverse", traverse_request([_tseed(q2, [rec.accession])], {"bounds": {"max_extension_bp": 100}}),
+                                tt, [err400(prefix="seed '%s': " % q2[:32])], tags=tags))
     # hard regions: homopolymers, dinucleotide and short tandem repeats, microsatellites, multi-copy, telomeres.
     # Contexts are graph k-mers, not occurrences: a pattern of L <= k has at most 2 (k - L + 1) 4^(k - L) of them
     # (A^31: 2), so the counts are exact and bounded, the patterns occur in refseq33m, and the low_complexity_pattern
