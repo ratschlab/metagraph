@@ -667,12 +667,19 @@ class MoreChecks(unittest.TestCase):
 
     def test_low_complexity_note_beside_a_later_phase(self):
         # SPEC-pattern-search §7.8: the note is the engine's, decided after its search; a stop of a later phase (the
-        # labels' reads, the selection, the output) leaves it as it is, an engine phase's budget stop leaves it out
-        sc = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "A" * 31}]})
+        # labels' reads, the selection, the output) leaves it as it is, an engine phase's budget stop leaves it out.
+        # Each stop stands on a request that runs its phase (SPEC-pattern-search §8.7): a selection stop on one with a
+        # predicate, an extension stop on a path search
+        base = self.sc({"mode": "partial", "output": {"labels": "all"}, "patterns": [{"dna": "A" * 31}]})
+        pred = self.sc({"mode": "partial", "output": {"labels": "all"}, "predicate": {"any": ["1"]},
+                        "patterns": [{"dna": "A" * 31}]})
+        paths = self.sc({"mode": "partial", "output": {"labels": "all"}, "long_search": "supported_paths",
+                         "patterns": [{"dna": "A" * 40}]})
         for st in ({"phase": "output", "reason": "time"}, {"phase": "output", "reason": "max_memory"},
                    {"phase": "label_discovery", "reason": "max_annotation_work"},
                    {"phase": "placement", "reason": "max_memory"},
                    {"phase": "selection", "reason": "max_predicate_work"}):
+            sc = pred if st["phase"] == "selection" else base
             noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
             plain = self.entry(notes=[], stop=st, counts={})
             self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "pass", st)
@@ -683,6 +690,7 @@ class MoreChecks(unittest.TestCase):
             self.assertEqual(outcome(sc, plain, "low_complexity_note", expected=False)[0], "pass", st)
         for st in ({"phase": "discovery", "reason": "time"}, {"phase": "extension", "reason": "max_memory"},
                    {"phase": "extension", "reason": "max_annotation_work"}, {"reason": "max_steps"}):
+            sc = paths if st.get("phase") == "extension" else base
             noted = self.entry(notes=["low_complexity_pattern"], stop=st, counts={})
             self.assertEqual(outcome(sc, noted, "low_complexity_note", expected=True)[0], "fail", st)
             self.assertEqual(outcome(sc, self.entry(notes=[], stop=st, counts={}), "low_complexity_note",
@@ -1221,6 +1229,70 @@ class StatedReasons(unittest.TestCase):
         # the work not shown: not judged
         self.ok(raw, cut="max_predicate_work", stop=("discovery", "max_predicate_contexts"),
                 limits=dict(thr, max_predicate_work=100000), req=pred)
+
+    def test_a_stop_phase_states_its_reason(self):
+        # SPEC-pattern-search §8.7: a stop's phase states only its own reasons and is one the request runs
+        thr = {"stop_at_threshold": True}
+        ctx = {"contexts": self.c("at_least", 101)}
+        self.ok(ctx, withheld="threshold_crossed", stop=("discovery", "max_contexts"), limits=thr)
+        for ph in ("placement", "label_discovery", "output", "extraction", "mask_scan", "extension"):
+            self.bad("the phase %s" % ph, ctx, withheld="threshold_crossed", stop=(ph, "max_contexts"), limits=thr)
+        self.bad("without a predicate", ctx, withheld="threshold_crossed", stop=("selection", "max_contexts"),
+                 limits=thr)
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        ex = {"contexts": self.c("exact", 19)}
+        self.ok(ex, withheld="annotation_budget", stop=("label_discovery", "max_annotation_work"), req=labels)
+        self.ok(ex, withheld="annotation_budget", stop=("placement", "max_annotation_work"), req=labels)
+        self.bad("the phase discovery", ex, withheld="annotation_budget", stop=("discovery", "max_annotation_work"),
+                 req=labels)
+        timed = {"det": "time_limited", "elapsed": 60000.0}
+        self.bad("reads no labels", ex, withheld="deadline", stop=("label_discovery", "time"), **timed)
+        self.bad("builds no output", ex, withheld="deadline", stop=("output", "time"), **timed)
+        self.ok(ex, withheld="deadline", stop=("extraction", "time"), **timed)
+        self.bad("mode count", ex, stop=("extraction", "time"), mode="count", **timed)
+        self.bad("without a path search", {"contexts": self.c("at_least", 9)}, cut="max_steps",
+                 stop=("extension", "max_steps"))
+        self.bad("does not list", {"contexts": self.c("at_least", 9)}, cut="max_steps", stop=("nowhere", "max_steps"))
+
+    def test_a_stop_phase_on_the_stored_answers(self):
+        # every stored answer's stop moved to its nearest impossible phase fails the invariants; the legitimate
+        # neighbours and the stored answers themselves pass (the stop_at_threshold fixture's discovery stop moved to
+        # each other phase is P-modes-0005's shape)
+        def judged(name, i=None, phase=None, reason=None):
+            req, body = fixture(name)
+            body = copy.deepcopy(body)
+            if i is not None:
+                body["patterns"][i]["stop"] = {"phase": phase, "reason": reason}
+            return outcome({"route": "POST /pattern", "request": req, "truth": {}}, ok_answer(body), "invariants")
+        impossible = [("stop_at_threshold", 0, ph, "max_contexts") for ph in (
+            "placement", "label_discovery", "output", "selection", "extension", "extraction", "mask_scan")] + [
+            ("labels_all_work_budget", 0, "discovery", "max_annotation_work"),
+            ("labels_all_work_budget", 0, "output", "max_annotation_work"),
+            ("max_steps", 0, "extraction", "max_steps"),
+            ("max_steps_bounds", 0, "mask_scan", "max_contexts"),
+            ("paths_stop_at_max_paths", 0, "discovery", "max_paths"),
+            ("paths_max_steps", 0, "selection", "max_steps"),
+            ("supported_paths_work_budget", 0, "label_discovery", "max_annotation_work"),
+            ("predicate_budget", 0, "discovery", "max_predicate_work"),
+            ("predicate_stop_at_threshold", 0, "discovery", "max_contexts"),
+            ("predicate_stop_at_raw", 0, "selection", "max_predicate_contexts"),
+            ("labels_all_output_budget", 0, "extraction", "max_memory"),
+            ("paths_memory", 2, "selection", "max_memory"),
+            ("motif_tested_contexts", 0, "output", "max_predicate_work"),
+            ("deadline", 0, "output", "time"),
+            ("deadline", 0, "label_discovery", "time"),
+            ("max_steps_bounds", 0, "extraction", "time"),
+            ("deadline", 0, "nowhere", "time")]
+        for case in impossible:
+            self.assertEqual(judged(*case)[0], "fail", case)
+        legitimate = [("labels_all_work_budget", 0, "placement", "max_annotation_work"),
+                      ("max_steps", 0, "mask_scan", "max_steps"),
+                      ("labels_all_output_budget", 0, "placement", "max_memory"),
+                      ("deadline", 0, "extraction", "time")]
+        for case in legitimate:
+            self.assertEqual(judged(*case)[0], "pass", case)
+        for name in sorted(set(c[0] for c in impossible + legitimate)):
+            self.assertEqual(judged(name)[0], "pass", name)
 
     def test_withheld_reasons(self):
         ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731

@@ -2578,3 +2578,24 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   partial and withheld predicate_budget in all_or_count. Both are accepted until §19.8 or the route states one.
   Measured: the 3,751 answered pattern entries of the 175 stored fixtures and v3 / v4 (all arms) give the same
   problems as before (none); the verification's legitimate compositions pass, its impossible neighbours fail.
+- /pattern, a stop's phase states its reason and is one the request runs (B6). The checks read a stop's reason
+  against the request but never its phase, so the recorded P-modes-0005 answer (a label-free threshold stop in
+  discovery) passed its whole frozen scenario with the phase moved to placement, label_discovery, output, selection,
+  extension, extraction or mask_scan, and a labels-all annotation-work stop passed in discovery; the phase also gates
+  other rules (_threshold_value_problem judges only discovery), so a wrong phase silently turned them off. Each stop
+  is now checked last in _pattern_reason_problems against SPEC-pattern-search §8.7's table (the engine's StopPhase,
+  every set_stop of the route): discovery max_steps, time, max_contexts, max_anchors, max_predicate_contexts;
+  mask_scan max_steps, time; extraction time; extension max_steps, time, max_paths, max_memory, max_annotation_work,
+  max_predicate_contexts; label_discovery and placement max_annotation_work, max_memory, time; output max_memory,
+  time; selection max_predicate_work, max_memory, time, max_contexts, max_annotation_work. And against the request:
+  extraction needs a release (a retrieval mode or a predicate), extension a path search of a pattern longer than k,
+  label_discovery and placement a retrieval mode reading labels (all, predicate_only), output a retrieval mode that
+  builds more than the engine's release (labels, a predicate, a path search) or a motif's evaluation, selection a
+  predicate; max_contexts in discovery not beside a predicate's pass (put_selection renames it
+  max_predicate_contexts), in selection only on L <= k; max_predicate_contexts in discovery only on L <= k, in
+  extension only for supported paths; max_annotation_work in extension and selection only for supported paths. A stop
+  without a phase stays the schema's. Measured: the 26 impossible phase edits of the verification's cases fail (23
+  passed), the legitimate neighbours (placement/max_annotation_work, mask_scan/max_steps, placement/max_memory,
+  extraction/time) and every stored and recorded stop pass. The unit test of the low-complexity note beside a later
+  phase stated a selection stop without a predicate and an extension stop without a path search; it states them on
+  requests that run those phases.

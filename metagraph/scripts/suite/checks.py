@@ -827,6 +827,12 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
                          "pass stops once the units reached it)" % (where, sum(punits), int(pmax)))
     elif sr not in (None, "time", "max_memory"):
         probs.append("%s: stop reason %r, one SPEC-pattern-search §7.6 does not list" % (where, sr))
+    # where the stop came, by its reason and the request: SPEC-pattern-search §8.7's phases and reasons
+    m = _stop_phase_problem(stop.get("phase"), sr, mode=mode, labels=labels, predicate=predicate,
+                            motif=req.get("predicate_scope") == "motif", long_=long_, ls=ls,
+                            selection_pass=(e.get("selection") or {}).get("pass")) if stop else None
+    if m:
+        probs.append("%s: %s" % (where, m))
     if time_limited:
         m = _pattern_time_problem(sc, body, "%s: %s" % (where, "a time stop" if sr == "time" else "a time limitation"))
         if m:
@@ -836,6 +842,75 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
 
 # the stops of stop_at_threshold (SPEC-pattern-search §7.6, §12.1, §19.8, §20.5, §20.9)
 _THRESHOLD_STOPS = ("max_contexts", "max_anchors", "max_paths", "max_predicate_contexts")
+
+# the phases of a stop and the reasons each states (SPEC-pattern-search §7.6, §8.7 `stop`, §12.1, §14.4, §19.8,
+# §20.5, §20.9, §25.5; the engine's StopPhase in graph/alignment/pattern_search.hpp, the route's set_stop calls in
+# src/cli/pattern*.cpp)
+_STOP_PHASE_REASONS = {
+    "discovery": {"max_steps", "time", "max_contexts", "max_anchors", "max_predicate_contexts"},
+    "mask_scan": {"max_steps", "time"},
+    "extraction": {"time"},
+    "extension": {"max_steps", "time", "max_paths", "max_memory", "max_annotation_work", "max_predicate_contexts"},
+    "label_discovery": {"max_annotation_work", "max_memory", "time"},
+    "placement": {"max_annotation_work", "max_memory", "time"},
+    "output": {"max_memory", "time"},
+    "selection": {"max_predicate_work", "max_memory", "time", "max_contexts", "max_annotation_work"},
+}
+
+
+def _stop_phase_problem(phase: Any, reason: Any, mode: str, labels: Any, predicate: bool, motif: bool, long_: bool,
+                        ls: Any, selection_pass: Any) -> Optional[str]:
+    """Why a stop {phase, reason} cannot have come in this request, or None: the phase must be one §8.7 lists, state
+    that reason, and be a phase the request runs. extraction: a release (a retrieval mode, or a predicate's raw
+    release, which count runs too: §19.6); extension: a path search of a pattern longer than k (§12.1, §20.5);
+    label_discovery and placement: a projection's reads in a retrieval mode (labels all, predicate_only: §14.1,
+    §19.2); output: the results a retrieval mode builds beyond the engine's release (labels, a predicate's selected
+    contexts, a path search's list), or a motif's evaluation (§25.5); selection: a predicate (§19.8). By reason:
+    max_contexts in discovery only for a pattern of L <= k without a predicate pass (a constant normal form runs the
+    engine's threshold; a pass, stated by selection.pass, renames it max_predicate_contexts: pattern.cpp
+    put_selection), in selection only for a predicate on L <= k; max_predicate_contexts in discovery only on L <= k,
+    in extension only for supported paths (§20.9); max_annotation_work in extension and selection only for supported
+    paths (§20.5, §20.9). A stop without a phase is left to the schema."""
+    if phase is None:
+        return None
+    allowed = _STOP_PHASE_REASONS.get(phase)
+    if allowed is None:
+        return "stop phase %r, one SPEC-pattern-search §8.7 does not list" % (phase,)
+    if reason is not None and reason not in allowed:
+        return "a %s stop in the phase %s, which states only %s (SPEC-pattern-search §8.7)" % (
+            reason, phase, "/".join(sorted(allowed)))
+    retrieval = mode != "count"
+    path_search = long_ and ls in ("paths", "supported_paths")
+    if phase == "extraction" and not (retrieval or predicate):
+        return "an extraction stop of mode count without a predicate (nothing released: §7.6)"
+    if phase == "extension" and not path_search:
+        return "an extension stop without a path search (%s, long_search %r: §12.1)" % (
+            "a pattern longer than k" if long_ else "a pattern of L <= k", ls)
+    if phase in ("label_discovery", "placement") and not (retrieval and labels in ("all", "predicate_only")):
+        return "a %s stop of a request that reads no labels (labels %r in mode %s: §14.1, §19.2)" % (phase, labels, mode)
+    if phase == "output" and not ((retrieval and (labels in ("all", "predicate_only") or predicate or path_search))
+                                  or (predicate and motif)):
+        return "an output stop of a request that builds no output beyond the engine's release (labels %r in mode " \
+               "%s, no predicate, no path search: §7.6)" % (labels, mode)
+    if phase == "selection" and not predicate:
+        return "a selection stop without a predicate (§19.8)"
+    if reason == "max_contexts":
+        if phase == "selection" and (long_ or not predicate):
+            return "a selection stop at max_contexts without a predicate on a pattern of L <= k (§19.6)"
+        if phase == "discovery" and predicate and not long_ and \
+                selection_pass in ("completed", "stopped", "not_admitted", "not_started"):
+            return "a discovery stop at max_contexts with a predicate's pass (its raw threshold is " \
+                   "max_predicate_contexts: §19.6)"
+    if reason == "max_predicate_contexts":
+        if phase == "discovery" and long_:
+            return "a discovery stop at max_predicate_contexts of a pattern longer than k (§20.9: the held walks, " \
+                   "phase extension)"
+        if phase == "extension" and ls != "supported_paths":
+            return "an extension stop at max_predicate_contexts without a supported-path search (§20.9)"
+    if reason == "max_annotation_work" and phase in ("extension", "selection") and \
+            not (long_ and ls == "supported_paths"):
+        return "a %s stop at max_annotation_work without a supported-path search (§20.5, §20.9)" % phase
+    return None
 
 
 def _threshold_stop_count(reason: str, phase: Any, cnt: Callable[[str], Optional[dict]], main: Optional[dict],
