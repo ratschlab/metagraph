@@ -1,8 +1,8 @@
 {
  "builder": {
-  "bench_lib_sha256": "67ac77df237036a4059876c40679bcd781eaca0f979de48cf780fc90593278df",
+  "bench_lib_sha256": "faf58a2c1283c9e1deb54cea66da0bf50431cea0fba505c3f89196eb8b249ca0",
   "script": "bench/make_panel.py",
-  "sha256": "2d1082b9b1f1e8630b0ee642e3367cc1ff14911fa9f37de1ffd811d8b436f9cf"
+  "sha256": "d8b30fce43686bc1d789ef1d56c9b8f1ded5aaa429c8efc2ec106b9f73affc7c"
  },
  "costing": {
   "allowance_host_hours": [
@@ -29,7 +29,7 @@
   "step_gap_source": "the baseline's median gaps",
   "warmup_requests": 48
  },
- "created_utc": "2026-10-15T06:55:52.670Z",
+ "created_utc": "2026-10-15T07:19:54.131Z",
  "name": "v4",
  "panel_sha256": "c042d5993543d64d53ca1edc5addf926a74fbfa701af7b95cd30bd746e7d1006",
  "panel_version": 1,
