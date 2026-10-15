@@ -2599,3 +2599,20 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   extraction/time) and every stored and recorded stop pass. The unit test of the low-complexity note beside a later
   phase stated a selection stop without a predicate and an extension stop without a path search; it states them on
   requests that run those phases.
+
+### Validation (offline)
+- 451 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd). Each item's new or revised test fails on
+  c11db9dd's checks.py: the structural-clamp rejection, the missing-events and missing-tree tests, the resolve stop's
+  pre-timer and premature-wall cases, the compound cut and the phase tests (the low-complexity-note test is a
+  correction and passes on both).
+- Copies of v3 (lane-s5e/reeval-S5e) and v4 (doc/v4-c11db9dd) re-evaluated after each item and at the head against
+  c11db9dd (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, v4 with `--gate
+  gate/policy_v4_rt_mcp.json`): 0 changes of outcome, outcome_runner, check outcome or check detail over 2,900 /
+  2,913 executions (every arm and the merged set); compare.reevaluated.json identical but for the table's path and
+  the re-evaluation mark; v3 FAIL and v4 FINDINGS as before; the v4 gate 45 problems (configuration 13, outcome 31,
+  relation 1), the same set.
+- The 3,751 answered /pattern entries of the 175 stored fixtures and v3 / v4 (all arms): _pattern_reason_problems
+  unchanged (none on either side); the 175 fixtures' invariants and counts_consistent on both arms: unchanged. The
+  verification's 50 B5 / B6 cases (legitimate compositions, single-stop controls, impossible neighbours, the full
+  P-modes-0005 scenario with each phase edit): all as intended. Of v4's 123 MCP traverse answers with a graphlet,
+  stripped of it, no check turns to fail (walk_in_record failed 100).
