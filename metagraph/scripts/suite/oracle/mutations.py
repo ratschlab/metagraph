@@ -298,3 +298,166 @@ def caught(checks, families):
     """Whether a failing check belongs to one of |families| (name prefixes)."""
     return any(c['outcome'] == 'fail' and any(c['check'].startswith(f) for f in families)
                for c in checks.items)
+
+
+# -- /traverse ----------------------------------------------------------------------------
+
+_OTHER_REASON = {'dead_end': 'label_lost', 'label_lost': 'dead_end', 'max_extension_bp': 'dead_end',
+                 'branch': 'label_lost', 'edge_reuse': 'rejoined_seed',
+                 'rejoined_seed': 'edge_reuse', 'loss_budget': 'label_lost',
+                 'trace_break': 'label_lost', 'edge_reuse_rc': 'edge_reuse'}
+
+
+def mutations_for_traverse(request, answer, position, walker=None):
+    """One-property corruptions of seed |position|'s result: per arm a dropped leaf, a changed
+    base, a run's reason, end, branches or loss changed, a run dropped, a label end event's
+    reason changed, an event dropped, a leaf's end label dropped; in annotate mode a label added
+    to or dropped from a node's set and a leaf's path reason changed; the seed's dropped labels.
+    A truncated arm gets the incomplete member's corruptions: claiming completeness, and a walk
+    the index does not hold."""
+    res = answer['results'][position]
+    if 'arms' not in res:
+        return
+    strategy = request.get('strategy') or {}
+    radius = (strategy.get('bounds') or {}).get('max_extension_bp', 5000)
+
+    def mutant():
+        a = copy.deepcopy(answer)
+        return a, a['results'][position]
+    for arm, aj in res['arms'].items():
+        p = f'traverse.{arm}'
+        segs = aj.get('segments') or []
+        children = {s['id']: [c['id'] for c in segs if s['id'] in (c.get('parents') or [])]
+                    for s in segs}
+        if aj.get('completeness_scope') == 'united_history':
+            # merge: only the invariants are asserted (traverse_compare._merge_invariants)
+            withseq = [i for i, s in enumerate(segs) if s.get('sequence')]
+            if withseq:
+                a, r = mutant()
+                s = r['arms'][arm]['segments'][withseq[-1]]
+                b = s['sequence'][-1]
+                s['sequence'] = s['sequence'][:-1] + ('A' if b != 'A' else 'C')
+                yield f'{arm}:merge_segment_base', (f'{p}.sound', f'{p}.displayed_support'), a
+            # a run handed to a label that does not hold its end node (a label holding it too
+            # would be an equivalent mutant: merge answers do not judge which co-carrier
+            # carries a run)
+            runs = aj.get('runs') or []
+            if runs and walker is not None:
+                x0 = runs[0]
+                seed = request['seeds'][position]['sequence'].upper()
+                walks = {}
+                for s in segs:
+                    seq = s.get('sequence') or ''
+                    out = seq if arm == 'right' else seq[::-1]
+                    par = (s.get('parents') or [None])[0]
+                    walks[s['id']] = walks.get(par, '') + out
+                walk = walks.get(x0.get('segment'), '')[:x0.get('to_bp', 0)]
+                node = walker.walk_node(seed, arm, walk, len(walk))
+                for i, d in enumerate(res.get('label_dict') or []):
+                    lab = walker.label(d.get('name'))
+                    if i != x0.get('label') and lab is not None and not walker.holds(lab, node):
+                        a, r = mutant()
+                        r['arms'][arm]['runs'][0]['label'] = i
+                        yield f'{arm}:merge_run_label', (f'{p}.displayed_support',), a
+                        break
+            continue
+        if aj.get('status') != 'complete':
+            a, r = mutant()
+            r['arms'][arm].update({'status': 'complete', 'complete_to_bp': radius})
+            yield f'{arm}:claim_complete', (p,), a
+            a, r = mutant()
+            root = r['arms'][arm]['segments'][0]
+            nid = max(s['id'] for s in segs) + 1
+            r['arms'][arm]['segments'].append({
+                'id': nid, 'parents': [root['id']],
+                'from_bp': root.get('from_bp', 0) + root.get('length_bp', 0), 'length_bp': 1,
+                'sequence': 'N', 'events': [], 'labels': [], 'labels_at_end': []})
+            yield f'{arm}:foreign_walk', (p,), a
+            continue
+        leaves = [x for x in aj.get('paths') or [] if x.get('segments')]
+        if leaves:
+            leaf = leaves[-1]
+            last = leaf['segments'][-1]
+            if not children.get(last) and len(leaf['segments']) > 1:
+                a, r = mutant()
+                ra = r['arms'][arm]
+                ra['paths'] = [x for x in ra['paths'] if x is not None and x.get('id') != leaf['id']]
+                ra['segments'] = [s for s in ra['segments'] if s['id'] != last]
+                ra['runs'] = [x for x in ra.get('runs') or [] if x.get('segment') != last]
+                yield f'{arm}:drop_leaf', (p,), a
+        withseq = [i for i, s in enumerate(segs) if s.get('sequence')]
+        if withseq:
+            a, r = mutant()
+            s = r['arms'][arm]['segments'][withseq[-1]]
+            b = s['sequence'][-1]
+            s['sequence'] = s['sequence'][:-1] + ('A' if b != 'A' else 'C')
+            yield f'{arm}:segment_base', (p,), a
+        runs = aj.get('runs') or []
+        if runs:
+            i = len(runs) // 2
+            a, r = mutant()
+            x = r['arms'][arm]['runs'][i]
+            x['end_reason'] = _OTHER_REASON.get(x['end_reason'], 'dead_end')
+            yield f'{arm}:run_reason', (f'{p}.claims', f'{p}.claims_'), a
+            if runs[i].get('to_bp', 0) > 0:
+                a, r = mutant()
+                r['arms'][arm]['runs'][i]['to_bp'] -= 1
+                yield f'{arm}:run_end', (f'{p}.claims', f'{p}.shape'), a
+            a, r = mutant()
+            r['arms'][arm]['runs'][i]['branches'] += 1
+            yield f'{arm}:run_branches', (f'{p}.claims',), a
+            a, r = mutant()
+            r['arms'][arm]['runs'][i]['loss'] = float(r['arms'][arm]['runs'][i]['loss']) + 0.5
+            yield f'{arm}:run_loss', (f'{p}.claims',), a
+            a, r = mutant()
+            del r['arms'][arm]['runs'][i]
+            yield f'{arm}:drop_run', (f'{p}.claims',), a
+        for si, s in enumerate(segs):
+            for ei, e in enumerate(s.get('events') or []):
+                if e.get('type') == 'label_end':
+                    a, r = mutant()
+                    ev = r['arms'][arm]['segments'][si]['events'][ei]
+                    ev['reason'] = _OTHER_REASON.get(ev['reason'], 'dead_end')
+                    yield f'{arm}:label_end_reason', (f'{p}.label_end_events',), a
+                    break
+            else:
+                continue
+            break
+        for si, s in enumerate(segs):
+            idx = [ei for ei, e in enumerate(s.get('events') or [])
+                   if e.get('type') in ('blocked', 'hairpin')]
+            if idx:
+                a, r = mutant()
+                del r['arms'][arm]['segments'][si]['events'][idx[0]]
+                yield f'{arm}:drop_event', (f'{p}.events',), a
+                break
+        with_end = [i for i, x in enumerate(aj.get('paths') or []) if x.get('end_labels')]
+        if with_end:
+            a, r = mutant()
+            r['arms'][arm]['paths'][with_end[0]]['end_labels'].pop()
+            yield f'{arm}:drop_end_label', (f'{p}.end_labels',), a
+        for si, s in enumerate(segs):
+            sets = s.get('label_sets') or []
+            if sets:
+                a, r = mutant()
+                ls = r['arms'][arm]['segments'][si]['label_sets'][0]
+                if ls.get('labels'):
+                    ls['labels'] = ls['labels'][:-1]
+                    yield f'{arm}:node_label_drop', (f'{p}.node_labels',), a
+                a, r = mutant()
+                ls = r['arms'][arm]['segments'][si]['label_sets'][0]
+                ls['labels'] = sorted(set(ls.get('labels') or []) | {len(res.get('label_dict')
+                                                                         or [])})
+                yield f'{arm}:node_label_add', (f'{p}.node_labels',), a
+                break
+        reasons = [i for i, x in enumerate(aj.get('paths') or []) if x.get('path_reason')]
+        if reasons and (strategy.get('labels') or {}).get('mode') == 'annotate':
+            a, r = mutant()
+            x = r['arms'][arm]['paths'][reasons[0]]
+            x['path_reason'] = _OTHER_REASON.get(x['path_reason'], 'dead_end')
+            yield f'{arm}:path_reason', (f'{p}.leaves',), a
+    dropped = (res.get('seed') or {}).get('dropped_labels') or []
+    if dropped:
+        a, r = mutant()
+        r['seed']['dropped_labels'] = dropped[1:]
+        yield 'seed:dropped', ('traverse.seed.dropped',), a
