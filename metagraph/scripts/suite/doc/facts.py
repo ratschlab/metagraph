@@ -440,13 +440,13 @@ def arm_facts(ctx, sid, arm):
     else:
         text = "; ".join("r%s %s" % (l.get("repeat"), p) for l, p in zip(lines, phrases))
     if st.ne:
-        text += " (DISAGREES with the reference arm)"
+        text += " (DISAGREES with the reference access path)"
     elif "t" in st.glyph_marks:
-        text += " (the arms differ by timing alone)"
+        text += " (the two direct access paths differ by timing alone)"
     elif "s" in st.glyph_marks:
         text += " (another answer, the same check outcomes)"
     elif "n" in st.glyph_marks:
-        text += " (not comparable with the reference arm)"
+        text += " (not comparable with the reference access path)"
     f["phrase"] = text
     return f
 

@@ -157,7 +157,8 @@ def inline(text):
     for p in parts:
         if len(p) >= 2 and p.startswith("`") and p.endswith("`"):
             code = p[1:-1]
-            out.append(tt(code) if (len(code) > 24 or "/" in code) else "\\texttt{%s}" % esc(code))
+            # a long code, a path or a dotted field is breakable after its punctuation (narrow columns; READ-015)
+            out.append(tt(code) if (len(code) > 24 or "/" in code or "." in code) else "\\texttt{%s}" % esc(code))
         elif len(p) >= 2 and p.startswith("*") and p.endswith("*"):
             out.append("\\emph{%s}" % join_units(esc(p[1:-1])))
         else:
@@ -211,10 +212,12 @@ def _ids_row(ncols, text):
     return "\\multicolumn{%d}{@{}p{%.0fmm}@{}}{\\scriptsize %s}\\\\" % (ncols, TEXT_WIDTH_MM, text)
 
 
-def unit_header(unit_id, title, unit_type, property_tex, needspace=20):
-    """The line above a unit's table: id, title, layout; then the property line; then the label."""
+def unit_header(unit_id, title, unit_type, property_tex, needspace=20, key=None):
+    """The line above a unit's table: id, title, and at the right the layout with its timing key (`key`, the
+    reader-facing meaning of a time cell's two numbers; READ-105), else the layout alone; then the property line;
+    then the label."""
     return ("\\Needspace{%d\\baselineskip}\n\\unithead{%s}{%s}{%s}\n\\propline{%s}\\label{unit:%s}\n" % (
-        needspace, esc(unit_id), title, esc(unit_type), property_tex, label_key(unit_id)))
+        needspace, esc(unit_id), title, esc(key or unit_type), property_tex, label_key(unit_id)))
 
 
 def series_table(columns, rows, ids_text, legend=None):
@@ -238,9 +241,9 @@ def series_table(columns, rows, ids_text, legend=None):
 
 
 def replicates_table(unit_label, rows, ids_text, legend=None):
-    """Rows: [(group label, n, cell dl, cell dr, cell mcp)]."""
+    """Rows: [(group label, n, cell dl, cell dr, cell mcp)]; n counts the group's tests (READ-105)."""
     spec = "@{}%s r %s %s %s@{}" % (col_p(26), col_p(43), col_p(43), col_p(43))
-    header = "%s & n & direct-local & direct-remote & mcp" % unit_label
+    header = "%s & n (tests) & direct-local & direct-remote & mcp" % unit_label
     return _longtable_lines(spec, header, _rows_with_notes([[g, str(n), a, b, c] for g, n, a, b, c in rows], 5),
                             ids_text, 5, legend)
 

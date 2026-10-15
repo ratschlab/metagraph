@@ -445,7 +445,7 @@ def _arm_adjudication(st, run, sid, arm):
     else:
         text = "; ".join("r%s %s" % (esc(r), p) for r, p in phrases)
     if st.ne:
-        text = (text + " · " if text else "") + "DISAGREES with the reference arm"
+        text = (text + " · " if text else "") + "DISAGREES with the reference access path"
     return text
 
 
@@ -740,19 +740,38 @@ def _texts_line(states):
     return "; ".join("%s: “%s”" % (esc(k), esc(t, 300)) for k, t in seen)
 
 
+_RAW_RE = re.compile(r"^(arms/)([^/]+)(/raw/)(.+?)\.([^.]+)\.(\d+)\.json\.gz$")
+
+
 def _artifacts_line(run, states):
-    parts = []
+    """The supporting artifacts, keyed once (READ-114): where every raw answer follows the one pattern
+    arms/<path>/raw/<id>.<path>.<repeat>.json.gz the pattern is printed once with the (access path, repeat) keys it
+    holds, else each path in full; then the executions file's physical lines."""
+    raws = []
+    extras = []
     numbers = []
     for arm in cells.ARMS:
         for l in states[arm].lines:
             if l.get("raw"):
-                parts.append(tt(l["raw"]))
+                raws.append((arm, l.get("repeat"), str(l["raw"])))
             for rr in l.get("warm_up_reruns") or []:
                 if isinstance(rr, dict) and rr.get("raw"):
-                    parts.append("%s (the warm-up's re-run)" % tt(rr["raw"]))
+                    extras.append("%s (the warm-up's re-run)" % tt(rr["raw"]))
             n = run.line_no(l)
             if n:
                 numbers.append(str(n))
+    parts = []
+    patterned = [(_RAW_RE.match(raw), arm, rep) for arm, rep, raw in raws]
+    sid = states[cells.ARMS[0]].lines[0].get("scenario") if states[cells.ARMS[0]].lines else None
+    sid = sid or next((l.get("scenario") for a in cells.ARMS for l in states[a].lines), None)
+    if raws and all(m and m.group(2) == arm and m.group(5) == arm and m.group(6) == str(rep) and m.group(4) == sid
+                    for m, arm, rep in patterned):
+        keys = ", ".join("%s r%s" % (cells.ARM_SHORT.get(arm, arm), esc(rep)) for arm, rep, _ in raws)
+        parts.append("the raw answers %s for %s" % (
+            tt("arms/<access path>/raw/%s.<access path>.<repeat>.json.gz" % sid), esc(keys)))
+    else:
+        parts.extend(tt(raw) for _, _, raw in raws)
+    parts.extend(extras)
     text = ", ".join(parts) if parts else "no raw file recorded"
     if numbers:
         text += "; %s line%s %s" % (tt(run.executions_file), "" if len(numbers) == 1 else "s", esc(", ".join(numbers)))
@@ -804,7 +823,7 @@ def _classes_text(run, sid, states):
     if cls:
         words = {"identical": "identical answers", "same_checks": "different answers, the same check outcomes",
                  "timing": "the answers differ by timing alone", "not_comparable":
-                 "not comparable (no check both arms evaluated)", "disagree": "DISAGREE"}.get(cls, cls)
+                 "not comparable (no check both access paths evaluated)", "disagree": "DISAGREE"}.get(cls, cls)
         text = "direct: %s" % esc(words)
         if da.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in da["differing_checks"]), 160)
@@ -895,15 +914,72 @@ def estimate_lines(body_lines, chars_per_line=150):
 SHORT_BLOCK_LINES = 28
 
 
-def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=False):
+def interpretation(run, sid, states, property_text=None):
+    """The first lines of a detail block in the reader's terms (READ-114): what was requested (the unit's
+    property line, else the scenario's title), what each access path did (facts.exec_phrase, one phrase per
+    path) and what remains unverified (the property checks no execution of the test passed, or the statement that
+    every one was shown somewhere); plain LaTeX."""
+    import facts  # the facts module imports this one: a lazy import
+    sc_ = run.scenario(sid)
+    requested = inline(property_text) if property_text else esc(sc_.get("title"), 200)
+    observed = []
+    for arm in cells.ARMS:
+        st = states[arm]
+        if not st.present:
+            if st.missing_planned:
+                observed.append("%s: a planned execution not recorded" % esc(arm))
+            continue
+        if st.glyph_key in ("not_implemented_mcp", "service_by_design"):
+            word = "not exercised via MCP" if st.glyph_key == "not_implemented_mcp" else "service-side by design"
+            observed.append("%s: %s%s" % (esc(arm), word, " (pair unverified)" if "u" in st.glyph_marks else ""))
+            continue
+        phrases = []
+        for l in st.lines:
+            ph = facts.exec_phrase(run, sid, l, arm)
+            if ph not in phrases:
+                phrases.append(ph)
+        text = phrases[0] if len(phrases) == 1 else "; ".join(
+            "r%s %s" % (esc(l.get("repeat")), facts.exec_phrase(run, sid, l, arm)) for l in st.lines)
+        if st.ne:
+            text += " (DISAGREES with the reference access path)"
+        observed.append("%s: %s" % (esc(arm), latex.join_units(esc(text))))
+    props = []
+    for e in sc_.get("expect") or []:
+        name = e.get("check") if isinstance(e, dict) else None
+        if name and run.is_property(name) and name not in props:
+            props.append(name)
+    unshown = [name for name in props if not any(
+        c.get("check") == name and c.get("outcome") == "pass" for arm in cells.ARMS for l in states[arm].lines
+        for c in (l.get("checks") or []) if isinstance(c, dict))]
+    if not props:
+        unverified = "none: the status, code and text are the claim, judged by the rows below"
+    elif unshown:
+        shown_on = []
+        for arm in cells.ARMS:
+            if any(c.get("check") in props and c.get("outcome") == "pass" for l in states[arm].lines
+                   for c in (l.get("checks") or []) if isinstance(c, dict)):
+                shown_on.append(arm)
+        unverified = "%s on every access path and repeat%s" % (
+            ", ".join(tt(n) for n in unshown),
+            ("; the other property check%s passed on %s" % ("" if len(props) - len(unshown) == 1 else "s",
+                                                             esc(", ".join(shown_on)))) if shown_on else "")
+    else:
+        unverified = "none of the property checks: each passed on some access path or repeat (the block explains the exception)"
+    return (latex.bline("requested", requested), latex.bline("observed", "; ".join(observed) or "no execution"),
+            latex.bline("unverified", unverified))
+
+
+def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=False, property_text=None):
     """The LaTeX of one test's detail block (the owner's review, point 1 and the first of the four further
-    changes): the expected line; the adjudication where the rows do not carry it (a failure, an error, a
+    changes; the readability review, READ-114): the interpretation first (requested, observed, unverified), then
+    the technical part: the expected line; the adjudication where the rows do not carry it (a failure, an error, a
     host-state override, a disagreement, a planned execution not recorded, the one phrase of an MCP arm the
     service decided); one row per arm and repeat (final outcome with its qualifier, HTTP and code, wall, requested
     budget, property tested?); a finding's evidence per execution with the mechanism and the rule once; the
     host-state rule and the intermediate evaluation of an overridden execution; the non-passing checks grouped by
-    reason; the texts once; the classes; the relations; the supporting artifacts. `unit_note`: the unit's table
-    carries the MCP reason, so the block only points at it."""
+    reason; the texts once; the classes; the relations; the supporting artifacts, keyed once. `unit_note`: the
+    unit's table carries the MCP reason, so the block only points at it; `property_text`: the unit's property line
+    (prose), the requested behaviour in the reader's words."""
     sc_ = run.scenario(sid)
     title = esc(sc_.get("title"), 200)
     meta = [esc(sc_.get("route") or "")]
@@ -915,6 +991,9 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     if rep:
         meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
     body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
+    body.extend(interpretation(run, sid, states, property_text))
+    body.append("{\\color{black!60}\\small\\itshape the technical record (the wire-level expectation, the rows, the "
+                "checks and the artifacts):}")
     body.append(latex.bline("expected", expected_text(sc_, run.is_property)))
     adj = []
     for arm in cells.ARMS:
@@ -935,7 +1014,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
         if st.present:
             rows.extend(_execution_rows(st, run, sid, arm, run.is_property))
     if rows:
-        body.append(latex.block_table(["arm / repeat", "final outcome", "http · code", "wall", "requested budget",
+        body.append(latex.block_table(["path / repeat", "final outcome", "http · code", "wall", "requested budget",
                                        "property tested?"], rows))
     items = []
     for arm in cells.ARMS:

@@ -462,18 +462,29 @@ def property_tested(line, is_property=None, aside=None):
 
 # the local timing legends: what `/` and the brackets mean under each table type (the owner's review, point 6)
 TIMING_LEGEND = {
-    "series": "times: wall per execution in repeat order, a / b (mcp: the cold call / the warm call); [ ] the "
-              "host's server time; be the host call as the service timed it; c a i on a direct time: host-cold, "
-              "aged, warm after an interrupted execution",
-    "list": "times: wall per execution in repeat order, a / b (mcp: cold / warm); [ ] the host's server time; be "
-            "the host call as the service timed it; c a i: host-cold, aged, warm after an interrupted execution",
-    "pairs": "times: wall per execution in repeat order, a / b (mcp: cold / warm); [ ] the host's server time; "
-             "c a i: host-cold, aged, warm after an interrupted execution; = and ≠ on a repeated test: equal / "
-             "different answer digests",
-    "replicates": "times: a / b is the median / the maximum of the members' walls (each member's first "
-                  "host-warm execution, else its only one); [ ] the median server time",
-    "refusals": "no times in the rows: the maximum wall per arm is in the summary line",
-    "summary": "a / b in a summary line is p50 / p90",
+    "series": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP the cold "
+              "call / the warm call); [ ] the host's own server time; be the host call as the service timed it; c a i "
+              "on a direct time: host-cold, aged, warm after an interrupted execution",
+    "list": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
+            "warm); [ ] the host's own server time; be the host call as the service timed it; c a i: host-cold, "
+            "aged, warm after an interrupted execution",
+    "pairs": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
+             "warm); [ ] the host's own server time; c a i: host-cold, aged, warm after an interrupted execution; = "
+             "and ≠ on a repeated test: equal / different answer digests",
+    "replicates": "times: a / b = the median / the maximum of the group's walls, one wall per test (each test's "
+                  "first host-warm execution, else its only one), never cold / warm; n counts the group's tests; "
+                  "[ ] the median server time",
+    "refusals": "no times in the rows: the maximum wall per access path is in the summary line",
+    "summary": "a / b in a summary line is p50 / p90: the median and the 90th percentile over every execution "
+               "with a wall time, whatever its outcome",
+}
+# the reader-facing key beside a unit's heading (READ-105): what the two numbers of a time cell mean in this layout
+LAYOUT_KEY = {
+    "series": "series · times: wall per repeat, r0 / r1 (mcp: cold / warm)",
+    "list": "list · times: wall per repeat, r0 / r1 (mcp: cold / warm)",
+    "pairs": "pairs · times: wall per repeat, r0 / r1 (mcp: cold / warm)",
+    "replicates": "grouped · times: wall median / maximum over the group's tests; n = tests",
+    "refusals": "refusals · no times in the rows",
 }
 
 

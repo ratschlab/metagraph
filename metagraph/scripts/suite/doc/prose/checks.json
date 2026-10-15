@@ -1,9 +1,9 @@
 {
- "_about": "Appendix A of the suite results document, the check catalogue (round 2, after OWNER-REVIEW-SAMPLE-1.md): one entry per check kind, keyed on the check's name in checks.CHECKS. Written from checks.py's code and docstrings as of c11db9dd, as prose a developer who knows the engine but not the suite can read: `asserts` what the check claims of an answer, `inconclusive` when it cannot test that claim, `fails` when it fails, `args` what its arguments mean, `spec` the SPEC sections it rests on, `generic` whether it is one of checks.GENERIC_CHECKS (status, invariants, counts_consistent, budget_respected: they hold on any answer of the route; every other check is a property check, the scenario's own claim). `routes` splits an entry whose rule differs per route. It holds every check kind the manifests v4 and v5 expect (the chapters' prose writers added theirs to chapter R's ten; an entry a check used in two chapters has one text naming both uses). Where a function has a docstring too, this prose is the catalogue's text and the docstring the source. The `common` paragraphs state the rules checks.evaluate applies to every check before the check itself runs, and the MCP runner's host-state adjudication that follows the checks; the catalogue prints them once, at the top of the appendix. The words pass and ok are reserved for a property actually tested: a check that could not test its claim reads inconclusive, never pass.",
+ "_about": "Appendix A of the suite results document, the check catalogue (round 2, after OWNER-REVIEW-SAMPLE-1.md): one entry per check kind, keyed on the check's name in checks.CHECKS. Written from checks.py's code and docstrings as of c11db9dd, as prose a developer who knows the engine but not the suite can read: `asserts` what the check claims of an answer, `inconclusive` when it cannot test that claim, `fails` when it fails, `args` what its arguments mean, `spec` the SPEC sections it rests on, `generic` whether it is one of checks.GENERIC_CHECKS (status, invariants, counts_consistent, budget_respected: they hold on any answer of the route; every other check is a property check, the scenario's own claim). `routes` splits an entry whose rule differs per route. It holds every check kind the manifests v4 and v5 expect (the chapters' prose writers added theirs to chapter R's ten; an entry a check used in two chapters has one text naming both uses). Where a function has a docstring too, this prose is the catalogue's text and the docstring the source. The `common` paragraphs state the rules checks.evaluate applies to every check before the check itself runs, and the MCP runner's host-state adjudication that follows the checks; the catalogue prints them once, at the top of the appendix. The words pass and ok are reserved for a property actually tested: a check that could not test its claim reads inconclusive, never pass. The readability review (READ-014, READ-016, READ-022, 2026-10-15): `budget_respected` carries a `decision_table` ({caption, columns, rows}) the generator prints after its arguments, the cases of the ruling with the clock each uses, apart from the server's contract; `retrieval_complete` says what an absence may be read from; the common rules name the layers of an outcome (a check item, the execution).",
  "_assumes": {
   "_note": "The literal numbers this file's prose may carry, each with its source: constants of the SPEC, of the manifest v4 (lengths, budgets, expected runs), of the service's table or of the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder; add a constant here with its source, never a run's figure.",
   "0": "runs 0-based, a stop before the first k-mer, zero k-mers (SPEC section 4); `from_bp` 0, the seed boundary; 0-based positions (SPEC section 7.1); `nodes_truncated` above 0 (SPEC section 7.0); a result index of 0 (checks.py); exact 0, offset 0, level 0, returned 0 (SPEC sections 7.2, 7.5, 9, 12.1, 21.4); exact 0, level 0, offset 0, a depth of 0 bp (SPEC; checks.py)",
-  "1": "L - k + 1, k - 1 (SPEC section 4.1); max(1 s, the budget) (checks.py); `min_live_labels` 2 with one live label, at most 1 bp (manifest T-quorum-0001); the second result (`results.1`, manifest T-edge-0008); L - k + 1 (SPEC section 12.1; checks.source_contexts); at least 1 (checks.py results_levels, min_returned's default); 1-based coordinates (SPEC section 14.3); contract version 1 (SPEC-pattern-search); L - k + 1 nodes of a path (SPEC-pattern-search section 12.1); 1-based coordinates (section 14.3); at least 1 mirror context (checks.py check_predicate_either_mirror's default)",
+  "1": "L - k + 1, k - 1 (SPEC section 4.1); max(1 s, the budget) (checks.py); `min_live_labels` 2 with one live label, at most 1 bp (manifest T-quorum-0001); the second result (`results.1`, manifest T-edge-0008); L - k + 1 (SPEC section 12.1; checks.source_contexts); at least 1 (checks.py results_levels, min_returned's default); 1-based coordinates (SPEC section 14.3); contract version 1 (SPEC-pattern-search); L - k + 1 nodes of a path (SPEC-pattern-search section 12.1); 1-based coordinates (section 14.3); at least 1 mirror context (checks.py check_predicate_either_mirror's default); max(1 s, the budget) on the client's clock (checks.py budget_respected)",
   "200": "http 200 (SPEC)",
   "503": "http 503 deadline (SPEC); http 503 deadline (SPEC section 7.6)",
   "1,000": "the default `max_labels` of a discovery (SPEC section 4.2)",
@@ -18,11 +18,12 @@
   "20": "the host's sdust T 20 (SPEC-pattern-search section 7.8; seqtools.sdust_flags)",
   "64": "the host's sdust window W 64 (SPEC-pattern-search section 7.8; seqtools.sdust_flags); the 64 k-mers of a derivation window (SPEC-labeled-traversal-core section 6.1)",
   "191": "the longest pattern sdust always diagnoses, 191 bases (SPEC-pattern-search section 7.8)",
-  "32": "the 32 KiB bound on the /traverse/capabilities document (manifest C-caps-0001; SPEC-labeled-traversal-core section 10.3)"
+  "32": "the 32 KiB bound on the /traverse/capabilities document (manifest C-caps-0001; SPEC-labeled-traversal-core section 10.3)",
+  "250": "the finalisation reserve of a /resolve, 250 ms (SPEC-labeled-traversal-core section 4.5)"
  },
  "common": [
   "Every check reads the normalised answer: the HTTP status, the body, the error (code and text) and, on a direct arm, the headers. The MCP arm's normaliser maps the tool results into the same shape for the fields the service exposes.",
-  "Before a check runs, checks.evaluate applies three rules. A check other than status on an answer whose status is not 200 does not run: it is inconclusive (not testable) when the scenario allows that status, which is the case for an expected refusal and for an allowed 503 deadline (see status), and a failure (no answer to check) otherwise; `budget_respected` on an allowed 503 is the one exception, it judges the 503's timing. A field the check needs that the answer lacks is not exposed on the MCP arm and a failure on a direct arm, where the field is part of the contract. An unknown check name, or a check that raises, is a failure stating why, never a silent pass.",
+  "Before a check runs, checks.evaluate applies three rules. A check other than status on an answer whose status is not 200 does not run: it is inconclusive (not testable) when the scenario allows that status, which is the case for an expected refusal and for an allowed 503 deadline (see status), and a failure (no answer to check) otherwise; `budget_respected` on an allowed 503 is the one exception, it judges the 503's timing. A field the check needs that the answer lacks is not exposed on the MCP arm and a failure on a direct arm, where the field is part of the contract. An unknown check name, or a check that raises, is a failure stating why, never a silent pass. These are the check items' outcomes (pass, fail, inconclusive, finding, not exposed); the execution's outcome is read from them below, and where checks.evaluate itself raised the direct runners and the re-evaluation record the execution as an error on a direct arm and as a failure via MCP (the shared vocabulary, appendix F).",
   "The execution's outcome follows from its checks by precedence fail, finding, inconclusive, pass; an execution whose property checks all could not test anything is inconclusive even when its generic checks passed; a scenario without a property check (a refusal: its status, code and text are the claim) is judged by its generic checks (I.3).",
   "A check that cannot test its property because the answer states a hiding (a withheld list, a cut), a stop or a time limitation accepts the statement only once the answer shows it can have happened: for a /resolve stop, a reason of time and a `timing.elapsed_ms` at or after the budget less the reserve. A stated reason that cannot have happened fails the check that met it, and the route's invariants with it; it never makes a check inconclusive.",
   "On the MCP arm one rule follows the checks: an execution the service ended by one of its own limits before the host answered (a `resolve_timeout` at the service's deadline for the host call, a relayed `traversal_resolve_deadline`, a relayed /pattern deadline) is adjudicated a host state, inconclusive, when the service's own timing shows the limit was reachable, and a status failure otherwise (the MCP runner's rule, replayed by the re-evaluation). The checks as they read on the raw answer stay in the record as the intermediate evaluation; a detail block states the adjudication first and labels those lines so."
@@ -30,19 +31,72 @@
  "checks": {
   "budget_respected": {
    "generic": true,
-   "title": "the server's time against the request's time budget",
+   "title": "the host's time against the request's budget: the suite's ruling on a 200 and on a 503",
    "spec": [
     "SPEC-labeled-traversal-core section 4.5 (/resolve)",
     "SPEC-pattern-search sections 6 and 7.6 (/pattern)",
     "SPEC-labeled-traversal-core section 6.8 (/traverse)"
    ],
    "args": "rule: the SPEC rule in one sentence, printed in the detail block of a finding; `cap_ms`: the route's cap on the budget where the request asks more than it (the effective budget is then the cap).",
-   "asserts": "The host kept the request's effective time budget as its SPEC states it, read from the answer's own deadline record and, for a 503, from the client's wall time; no fixed allowance is granted anywhere, since the capabilities state no bound on one uninterruptible piece. The builder adds this check to every scenario that names a time budget and allows a 200. Its breach is a finding, never a failure: the request was answered.",
+   "asserts": "The host kept the request's effective time budget as its SPEC states it, read from the answer's own deadline record for a 200 and, for a 503, from the client's wall time; no fixed allowance is granted anywhere, since the capabilities state no bound on one uninterruptible piece. The builder adds this check to every scenario that names a time budget and allows a 200. Its breach is a finding, not a failure: the request was answered, with results (a 200 past its budget) or without (a late 503 deadline); the HTTP status does not decide the suite's category. Two things are kept apart: the server's contract (past the budget the answer is a 503, never a partial answer; the work stops at the budget less the reserve) and the suite's tolerance for the 503's lateness, max(1 s, the budget) on the client's clock, which is the suite's judgement of how late a deadline answer may arrive, not a proof that the delay was the server's computation (the client's wall also holds the network and any wait for a request thread).",
    "inconclusive": "On an allowed 503 deadline whose client wall time is within max(1 s, the budget) after the budget: nothing in the body to judge. Without a client wall time, or without a budget to judge against. On /traverse, an answer with no walked seed (the seed phase alone, which the budget does not govern).",
-   "fails": "An allowed 503 deadline that came before the budget (the answer is a 503 only when it cannot be written by the budget, and the client's interval holds the host's). This is the one failure the check can give; every late answer is a finding.",
+   "fails": "An allowed 503 deadline that came before the budget on the client's clock (the answer is a 503 only when it cannot be written by the budget, and the client's interval holds the host's). This is the one failure the check can give; a late 503 is a finding beyond the tolerance and inconclusive within it (the table below).",
    "routes": {
     "POST /pattern and POST /resolve": "A 200 whose `timing.elapsed_ms` exceeds `limits.time_budget_ms` (the effective budget: the request's, lowered to the cap) is a finding: past the budget the routes answer 503, never a partial answer (/resolve sets its elapsed time before its last deadline check). An allowed 503 deadline is judged by the client's wall time against the effective budget, min(the requested budget, the cap the builder states as `cap_ms`): a 503 delivered more than max(1 s, the budget) after the budget is a finding (the deadline is read where the work and the delivery poll it, so an unpolled piece of about that length ran; the wall also holds the network and any wait for a request thread, hence the margin); within that margin it is inconclusive; before the budget it fails.",
     "POST /traverse": "Per walked seed, with the deadline the budget on the seed's clock, never read at depth 0 and the depth-0 reads unpaced (walker.cpp): a time stop before the budget is a finding (the walker stops only once the budget has passed); a budget that passed in the seed phase stops the walk at the first depth-1 checkpoint, so a path longer than 1 bp is a finding; a time stop at a checked depth must come within one read and one head piece after max(budget, seed phase), a stop at depth 1 within the depth-0 level's pieces of each requested arm (six per arm), each piece at most the seed's longest piece and at most the time since the seed phase; a walk with no time stop may run past max(budget, seed phase) only by the pieces that may follow the deadline before a reading that would stop a head below the radius, plus the radius level and the finalisation. A stop late within its pieces, or a seed phase longer than the budget, is a performance fact stated in the detail, not a finding."
+   },
+   "decision_table": {
+    "caption": "the ruling, case by case: the answer, the clock the check reads, the threshold and the outcome",
+    "columns": [
+     "the answer",
+     "the clock read",
+     "the threshold",
+     "the outcome"
+    ],
+    "rows": [
+     [
+      "a 200 (results returned), /resolve or /pattern",
+      "the host's own `timing.elapsed_ms`",
+      "the effective budget (the request's, lowered to the cap)",
+      "pass when within it; finding when past it (past the budget the route should have answered 503)"
+     ],
+     [
+      "a 503 deadline (no results) before the budget",
+      "the client's wall time",
+      "the budget",
+      "fail: the one failure of this check (a 503 is allowed only when the answer could not be written by the budget)"
+     ],
+     [
+      "a 503 deadline within max(1 s, the budget) after the budget",
+      "the client's wall time",
+      "max(1 s, the budget) after the budget: the suite's tolerance",
+      "inconclusive (allowed: nothing in the body to judge, the property not tested)"
+     ],
+     [
+      "a 503 deadline more than max(1 s, the budget) after the budget",
+      "the client's wall time",
+      "the same tolerance",
+      "finding: a late deadline answer; where the time went (an unpolled piece, the network, a wait for a thread) is not isolated"
+     ],
+     [
+      "a /traverse answer with a walked seed",
+      "the seed's own clock, read from depth 1",
+      "the budget, with the stated pieces after max(budget, seed phase) (the route rule below)",
+      "pass when the stop and the overrun fit the rule; finding otherwise; a seed phase longer than the budget is a performance fact, not a finding"
+     ],
+     [
+      "a /traverse answer with no walked seed",
+      "–",
+      "–",
+      "inconclusive: the seed phase alone, which the budget does not govern"
+     ],
+     [
+      "no client wall time, or no budget to judge against",
+      "–",
+      "–",
+      "inconclusive"
+     ]
+    ]
    }
   },
   "counts_consistent": {
@@ -442,14 +496,14 @@
   },
   "retrieval_complete": {
    "generic": false,
-   "title": "the one flag that licenses an absence",
+   "title": "whether an absence may be read from the returned list",
    "spec": [
     "SPEC-pattern-search section 7.5 (`retrieval_complete` per mode)",
     "section 9 (what it licenses)",
     "section 14.6 (with labels)"
    ],
    "args": "pattern: the entry's index (0 when absent); value: true or false.",
-   "asserts": "The entry's `retrieval_complete` is the value expected: true when every context (or path) was returned, an exact count equal to the list; false in mode `count` (a count returns nothing) and after any stop of the graph search.",
+   "asserts": "The entry's `retrieval_complete` is the value expected: true when every context (or path) of the pattern in its scope and strands was returned, so that an item missing from the list is absent from that result domain; false in mode `count` (a count returns no list, and false there says nothing against the search) and after any stop of the graph search. It is one of two routes to an absence, the other being an exact count of 0 in the searched scope (`count_relation`): an empty or shortened list that is not complete (withheld, cut, stopped) licenses no absence at all, and a complete list excludes an item only within its result domain (the graph's retained k-mers, the query's scope and strands, the labels searched; SPEC-pattern-search section 9). As a small example: a `partial` list cut at `max_contexts` after a completed discovery keeps its exact count but is not complete, so an item missing from it is not absent; a `partial` mode answer can also return a complete empty list, which is an absence; a `count` answer with `retrieval_complete` false and an exact 0 is an absence of contexts too, by the count.",
    "inconclusive": "Only by the common rule.",
    "fails": "The flag has the other value; the flag absent from the entry (not exposed on the MCP arm)."
   },
