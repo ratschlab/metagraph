@@ -72,7 +72,7 @@ class Gen:
 
     def dna(self, L=None, rc=None):
         rng = self.rng
-        L = L or rng.randint(3, self.k)
+        L = L or (rng.choice([1, 2]) if rng.random() < 0.05 else rng.randint(3, self.k))
         roll = rng.random()
         if roll < 0.08:
             return ''.join(rng.choice(O.BASES) for _ in range(L))
@@ -108,7 +108,9 @@ class Gen:
                 p[i] = rng.choice([c for c in IUPAC_CODES if O.IUPAC[p[i]] <= O.IUPAC[c]])
             else:
                 p[i] = rng.choice(IUPAC_CODES)
-        if roll < 0.25:
+        if roll < 0.35:
+            # an N run: leading (skipped by the search, and under a source dummy's '$' on a graph
+            # without its mask), inner or trailing (the reverse orientation's leading run)
             run = rng.randint(1, max(1, L // 3))
             where = rng.choice(['lead', 'inner', 'trail'])
             if where == 'lead':
