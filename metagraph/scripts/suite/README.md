@@ -3680,3 +3680,98 @@ Validation: 702 tests pass (593 + the oracle's 109); the oracle's 109 pass insid
 outside any git tree (the provenance tests build a git tree of their own); the frozen v5 manifests and both v5 gate
 files are byte-equal to a76e13b1's; the v3 / v4 re-evaluations equal the previous head's line for line, the v4 gate
 the same 46 problems. No server was contacted; the oracle's evidence runs against 81c620ef are in its lane directory.
+
+## Manifest v6: the /pattern budgets at 120,000 ms (2026-10-15)
+
+The owner's decisions (2026-10-15), after the accepted baseline run of the frozen v5 (20261015T161813Z_refseq97-81c620ef,
+the deploy gate's baseline under gate/policy_v5_rt_mcp.json): every inconclusive execution of that run was a /pattern
+scenario at its 60 s budget (P-heavy-0001, M-protein-0001 / -0003, the M-planted ones, ...: a 503 deadline at ~60.2 s
+or a time-limited 200). (1) The /pattern budgets go from 60,000 to 120,000 ms, /pattern only (the host's /pattern cap
+is 600,000 ms; /resolve and /traverse stay at 60,000, their host maximum), as manifest v6 = v5 with exactly that
+change; the gate's scenarios stay byte-identical, so the v5 acceptance carries over and deploy 1 is not delayed.
+(2) The report marks every printed execution time above 10 s yellow and above 55 s red.
+
+### The manifests
+- manifest_lib.PATTERN_TIME_BUDGET_MS is 120,000 (the default of pattern_request, named on both arms). Of the 457
+  /pattern scenarios, 449 named the default and get it in their request and, where the MCP runs them (429), in their
+  MCP arguments; the deliberate budgets stay (P-caps-0004's 300 ms, M-protein-0010's 30,000 ms; P-edge-0012 and the
+  C-protocol scenarios send no JSON object). Nothing else of any scenario and no relation changed: build_manifest.py's
+  SMOKE_TAG stays `smoke-v5` (SMOKE_SELECTION_VERSION: the tag names the smoke selection, which v6 keeps), and the
+  MCP exposure baseline it reads is truth/mcp_exposure/v4-20261014T061053Z-budget-free.json, the v4 baseline with
+  its request digests rebased from manifest/suite_v4.json to the budget-free rule (`build_manifest.py
+  --exposure-rebase truth/mcp_exposure/v4-20261014T061053Z.json --exposure-source-manifest manifest/suite_v4.json
+  --exposure-out ...`; mcp_request_sha256 leaves pattern_search's time_budget_ms out as it does traverse_resolve's:
+  a budget shapes no field of the answer; the exposes lists are v4's byte for byte, and every scenario of v6 has v5's
+  list, 512 with one). Regenerating the baseline from the v4 run with --exposure-from is no longer byte-identical to
+  the committed file (the run's lines were re-evaluated after it: Q-strands-0001's list), which is why the digests
+  are rebased rather than the baseline regenerated.
+- `manifest/suite_v6.json` and `manifest/suite_smoke_v6.json`, built on this tree with `SUITE_TRUTH_CACHE=<the record
+  cache v4 was built from> build_manifest.py --no-fetch` (deterministic: two builds, one content): manifest_version 6,
+  700 scenarios, 742 executions per arm, the same counts as v5, content_sha256
+  e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e, relations
+  39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86 (v5's); smoke 14 scenarios, content_sha256
+  183295a285c6da48aa44e3a47b580d574ab8678376a5242ff36eff7be085587e. The field-by-field diff v5 -> v6 over the 700
+  scenarios: `request.time_budget_ms` 60000 -> 120000 on 449 scenarios and `mcp.arguments.time_budget_ms` 60000 ->
+  120000 on 429, all POST /pattern, and nothing else; 251 scenarios byte-identical, the 22 relations identical.
+- `gate/policy_v6_rt_mcp.json`, generated with `gate_policy.py manifest/suite_v6.json --name v6-rt-mcp --arms
+  mcp,direct-local --declared gate/declared_v6_rt.json --out gate/policy_v6_rt_mcp.json` (gate/declared_v6_rt.json
+  names v6's content and declares nothing, as v5's): it differs from policy_v5_rt_mcp.json in the pins alone (the
+  manifest's file, content and version, the name, the declared file and its sha256, generated_utc) and equals it with
+  them masked: 241 selected / 36 excluded, required on MCP 205 scenarios / 416 executions, on direct-local 237 / 273,
+  the 5 relations, no property exemption, the by-design table d4b8636c..., no /pattern scenario. The 237 scenarios it
+  selects are byte-identical to v5's (their checks included), and so are the 5 relations: the v5 acceptance carries
+  over (test_builder_v6, test_gate).
+- run_suite.sh keeps v5 as its default (`--smoke`: suite_smoke_v5.json) until the owner approves the v6 freeze; the
+  switch is the one line of its two defaults (`MANIFEST="$HERE/manifest/suite_smoke_v5.json"` / `suite_v5.json` ->
+  `_v6`), or `--manifest manifest/suite_v6.json` per run.
+
+### The client timeouts a /pattern execution meets
+A 120 s budget answers its 503 deadline at ~120.25 s at the latest, so every client timeout must exceed it with
+margin, or an inconclusive turns into an error:
+- the direct runner's timeout per timing class was fast 120 s (slow 600 s, long 1800 s), exactly the budget:
+  suite_common.client_timeout_s gives a request the larger of its class's timeout and its stated time budget +
+  CLIENT_BUDGET_MARGIN_S (30 s), and run_direct.timeout_for uses it (the 397 fast /pattern scenarios get 150 s on
+  direct-local, the 52 slow ones keep 600 s; every 60 s /resolve and /traverse budget keeps its class); direct-remote
+  stays capped at REMOTE_TIMEOUT_CAP_S (125 s), where the front proxy answers first (below);
+- the orchestrator's wait for the mex runner after Ctrl-C is SUITE_WAIT_RUNNER_S (150 s) instead of a fixed 120 s;
+  the waits after a cancelled MCP job (suite_common.request_bound_s) and the host-cache window (end to start, 60 s)
+  follow the budget as before;
+- the MCP runner (the async session's suite_mcp_runner.py, not in this tree) needs no change: its deadlines are
+  300 s (fast) / 900 s (slow), each get_status long-poll 60 s with a 30 s HTTP margin, the submit 120 s (the
+  pattern_search submit returns at once); the service accepts a budget up to min(1,170,000 ms, the host's cap) and
+  its host-call timeout is META_CALL_TIMEOUT_SECS (1,200 s). The run's snapshot of suite_common.py is the one it
+  executes, so the new rule reaches it; a re-vendoring is due only for the shared rules, which did not change.
+- **Open: the front proxy (the owner decides).** The public URL's ingress (nginx at https://metagraph.ethz.ch:8080)
+  cuts a request at ~120 s (the long class is not run on direct-remote for it; the by-design table's note on
+  pattern.time_budget_above_host_cap: it cuts "every arm through it"). A /pattern scenario that runs to its 120 s
+  deadline answers its 503 at ~120.25 s, after the cut: on direct-remote the proxy's 504 arrives instead, a status
+  fail in place of the allowed inconclusive. The MCP arm is behind the same ingress as far as the service's code
+  shows: its settings model that ingress with a cut of 110 s (TRAVERSAL_INGRESS_CUT_S_BY_HOST, "measured only for the
+  dev ingress, nginx in front of refseq33m-experimental": the measured ~120 s less a margin) and fit traversal
+  batches to it (app/traversal/planner.py ingress_batch_cap), while the pattern path sends the request's budget as
+  it is, so a 120 s pattern search through it would end in the ingress's 504 or a cut connection (which the service
+  may retry), not in the relayed pattern_deadline the table names: an error on the MCP arm too, where v5 had an
+  inconclusive. The deploy gate (mcp and direct-local, no /pattern scenario) is untouched; direct-local, on mex
+  against the container's port, meets no proxy. A /pattern budget of at most ~110,000 ms (the service's own figure
+  for that ingress; PATTERN_TIME_BUDGET_MS is the one line, then the manifests, the policy and their pins are rebuilt
+  as above) or a longer ingress read timeout would remove the race. Not verified live (no host was contacted).
+
+### The report's colour marks
+report.py marks every printed execution time (client wall, server elapsed, MCP phases; the tables and the lines of
+the findings, failures, timing, warm-up re-runs, overheads and the change against an earlier run) above
+TIME_MARK_YELLOW_MS (10 s) yellow and above TIME_MARK_RED_MS (55 s) red (fmt_time); differences between arms and
+connection set-ups stay plain. The mark is a span with a class (`t-yellow` / `t-red`) and the tint inline
+(`background-color:#ffe866` / `#ff8a80`): a Markdown viewer that renders HTML shows the colour, a terminal the plain
+number, and on the md -> pdf path pandoc reads the span natively and report_colour.lua (`--lua-filter`, passed by
+to_pdf) turns the class into a `\colorbox` of the tint, the colours defined in header-includes (xcolor, loaded by
+pandoc's template). The text stays black and legible on both tints. One legend sentence follows the front matter.
+table() sizes and aligns columns by a cell's visible text.
+
+### Validation (offline; no host was contacted)
+- 720 tests pass, none skipped (with SUITE_TRUTH_CACHE, the record cache v4 was built from): 702 at 07dfa4875 + 18
+  (test_builder_v6 8: the versions and digests, the diff is the budgets alone, the gate's scenarios and relations
+  are v5's, the smoke selection, the rebased exposure baseline, the request digest, every request's client timeout
+  against its budget, the frozen v6 is what the builder makes; test_report_colour 7; the client-timeout rule in
+  test_common and test_runner; the v6 policy in test_gate). The v6 build is deterministic (two builds, one content);
+  the field-by-field diff v5 -> v6 and the identity proof are in the lane's notes (V6-DIFF.md, v6_diff.py). The
+  frozen v5 manifests and both v5 gate files are untouched (their shas as above), run_suite.sh's default is v5.
