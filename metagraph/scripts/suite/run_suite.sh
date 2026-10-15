@@ -867,8 +867,9 @@ PYEOF
 
 MCP_ERRORS=0    # MCP executions in a row that ended in error (or that the runner never recorded)
 MCP_MISSING=()  # the MCP executions a runner step did not record, as SCENARIO:rREPEAT
-# After an MCP step of the paired loop (async's rules): stop on the runner's exit 2 / 3 (a start refusal: key
-# file, the queue wait ran out) or 130 (interrupted), or on three executions in a row that ended `error` (a
+# After an MCP step of the paired loop (async's rules): stop at once on the runner's exit 2 / 3 (a start refusal:
+# key file, the queue wait ran out), 4 (it refused the by-design table), 5 (it refused the run's snapshot: a checks
+# file that is not SNAPSHOT.json's) or 130 (interrupted), or on three executions in a row that ended `error` (a
 # runner-level failure: transport, poll deadline, busy past the retries), were not recorded, or recorded an outcome
 # outside the shared vocabulary (suite_common.outcome_known: `unknown`, never a success); never on `fail`
 # (exit 1 also means a failing scenario, which is a result). An execution that ended `error` with its job
@@ -878,6 +879,8 @@ mcp_after() {  # mcp_after IDS REPEAT RC
   local rc="$3" res outcomes wait_s o said=0 i=0 ids
   case "$rc" in
     2|3) LOOP_REASON="mcp_exit_$rc"; log "error: the MCP runner refused to run (exit $rc): stopping the loop"; return 1 ;;
+    4) LOOP_REASON=mcp_exit_4; log "error: the MCP runner refused its by-design table (exit 4): stopping the loop"; return 1 ;;
+    5) LOOP_REASON=mcp_exit_5; log "error: the MCP runner refused the run's snapshot (exit 5): stopping the loop"; return 1 ;;
     130) LOOP_REASON=mcp_interrupted; log "the MCP runner was interrupted (exit 130): stopping the loop"; return 1 ;;
   esac
   while true; do

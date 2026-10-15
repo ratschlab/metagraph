@@ -10,7 +10,8 @@ target (a line with rerun_for_resume true and rerun_target, the earlier one unto
 
 FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails its checks (exit 1);
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
-`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal); `crash` writes a traceback
+`canceled`; no backend phase; exit 1); `exit3`, `exit4`, `exit5` write nothing and exit 3 (a start refusal), 4 (the
+by-design table refused) or 5 (the run's snapshot refused: a checks file not SNAPSHOT.json's); `crash` writes a traceback
 to stderr and no line for any id (exit 1, a runner defect), only for a call that names FAKE_MCP_CRASH_ID when that
 is set; `unknown` records the outcome `skipped_by_runner`, outside the shared vocabulary (exit 0); `sigint` waits
 up to 30 s on each call (only on a call that names FAKE_MCP_SIGINT_ID when that is set) and, interrupted (Ctrl-C),
@@ -42,8 +43,8 @@ def main(argv=None):
     ap.add_argument("--checks-dir", default=None)
     args = ap.parse_args(argv)
     mode = os.environ.get("FAKE_MCP_MODE", "")
-    if mode == "exit3":
-        return 3
+    if mode in ("exit3", "exit4", "exit5"):
+        return int(mode[-1])
     if mode == "crash" and os.environ.get("FAKE_MCP_CRASH_ID", args.ids) in args.ids.split(","):
         sys.stderr.write("Traceback (most recent call last):\n  File \"suite_mcp_runner.py\", line 1, in verdict\n"
                          "KeyError: 'fake crash'\n")

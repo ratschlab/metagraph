@@ -268,6 +268,26 @@ class RunSuiteOffline(SuiteCase):
         sess = sc.read_json(os.path.join(p.stdout.strip().splitlines()[-1], "orchestrator.json"))["sessions"][-1]
         self.assertEqual((sess["loop"]["reason"], sess["loop"]["completed"]), ("mcp_exit_3", 0))
 
+    def test_mcp_table_and_snapshot_refusals_stop_the_loop_at_once(self):
+        # the runner's exit 4 (it refused the by-design table) and 5 (it refused the run's snapshot) are start
+        # refusals like 2 / 3: the loop stops after the first MCP step, before any direct step sends a scenario, with
+        # its own reason, never after three "missing" steps
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            for code, said in ((4, "refused its by-design table (exit 4)"), (5, "refused the run's snapshot (exit 5)")):
+                n = len(host.log)
+                p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub",
+                                   FAKE_MCP_MODE="exit%d" % code)
+                self.assertEqual(p.returncode, 1, p.stderr)
+                self.assertIn(said, p.stderr)
+                self.assertNotIn("in a row ended in error", p.stderr)
+                self.assertFalse([x for x in host.log[n:] if x[0] == "POST"])   # no scenario went to the host
+                run_dir = p.stdout.strip().splitlines()[-1]
+                loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+                self.assertEqual((loop["state"], loop["reason"], loop["completed"]),
+                                 ("failed", "mcp_exit_%d" % code, 0))
+                time.sleep(1.1)
+
     def test_mcp_runner_crash_is_recorded(self):
         # a runner that crashes writes no line: its traceback is in arms/mcp/runner.log, the lost executions are named
         # in the loop record, and a scenario whose MCP execution is lost is not completed; three in a row stop the
