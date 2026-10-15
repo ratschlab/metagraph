@@ -456,6 +456,62 @@ def mutations_for_traverse(request, answer, position, walker=None):
             x = r['arms'][arm]['paths'][reasons[0]]
             x['path_reason'] = _OTHER_REASON.get(x['path_reason'], 'dead_end')
             yield f'{arm}:path_reason', (f'{p}.leaves',), a
+    # multiplicity and order (verification H1): a listing twice, a successor enumerated twice
+    for arm, aj in res['arms'].items():
+        p = f'traverse.{arm}'
+        segs = aj.get('segments') or []
+        if aj.get('runs'):
+            a, r = mutant()
+            r['arms'][arm]['runs'].append(copy.deepcopy(aj['runs'][-1]))
+            yield f'{arm}:duplicate_run', (f'{p}.unique', f'{p}.claims'), a
+        paths = [x for x in aj.get('paths') or [] if len(x.get('segments') or []) >= 2]
+        if paths:
+            pth = paths[-1]
+            last = next(s for s in segs if s['id'] == pth['segments'][-1])
+            a, r = mutant()
+            ra = r['arms'][arm]
+            nid = max(s['id'] for s in segs) + 1
+            clone = copy.deepcopy(last)
+            clone['id'] = nid
+            ra['segments'].append(clone)
+            runs = ra.get('runs') or []
+            remap = {}
+            for i, x in enumerate(list(runs)):
+                if x.get('segment') == last['id']:
+                    y = copy.deepcopy(x)
+                    y['segment'] = nid
+                    remap[i] = len(runs)
+                    runs.append(y)
+            pc = copy.deepcopy(pth)
+            pc['id'] = max(x['id'] for x in ra['paths']) + 1
+            pc['segments'] = pth['segments'][:-1] + [nid]
+            for e in pc.get('end_labels') or []:
+                if e.get('run') in remap:
+                    e['run'] = remap[e['run']]
+            ra['paths'].append(pc)
+            yield f'{arm}:duplicate_subtree', (f'{p}.unique',), a
+        for si, s in enumerate(segs):
+            if s.get('events'):
+                a, r = mutant()
+                ev = r['arms'][arm]['segments'][si]['events']
+                ev.append(copy.deepcopy(ev[0]))
+                ev.sort(key=lambda e: e.get('at_bp', 0))
+                yield f'{arm}:duplicate_event', (f'{p}.unique',), a
+                break
+        for si, s in enumerate(segs):
+            evs = s.get('events') or []
+            pos = [e.get('at_bp', 0) for e in evs]
+            if len(set(pos)) >= 2:
+                a, r = mutant()
+                r['arms'][arm]['segments'][si]['events'].reverse()
+                yield f'{arm}:event_order', (f'{p}.order',), a
+                break
+        for xi, sp in enumerate(aj.get('splits') or []):
+            if len(sp.get('branches') or []) >= 2:
+                a, r = mutant()
+                r['arms'][arm]['splits'][xi]['branches'].reverse()
+                yield f'{arm}:split_order', (f'{p}.order',), a
+                break
     dropped = (res.get('seed') or {}).get('dropped_labels') or []
     if dropped:
         a, r = mutant()

@@ -8,6 +8,9 @@ the blocked / hairpin events. A complete arm must equal the oracle as complete s
 truncated is judged on its invariants up to complete_to_bp (SPEC 6.10).
 """
 
+import collections
+import json
+
 from .compare import Checks, INCONCLUSIVE, EXPLORATORY, PASS, FAIL  # noqa: F401
 from . import traverse_oracle as T
 
@@ -30,12 +33,34 @@ class ArmView:
         names = _Names(names)
         self.names = names
         self.problems = []
-        segs = {s['id']: s for s in arm_json.get('segments') or []}
+        seg_list = arm_json.get('segments') or []
+        segs = {s['id']: s for s in seg_list}
         self.segs = segs
+        # multiplicities (verification H1): sets alone would hide a listing twice
+        self.duplicates = []
+        if len(segs) != len(seg_list):
+            self.duplicates.append(('segment id twice', len(seg_list) - len(segs)))
         self.walk = {}
         for sid in sorted(segs):
             self._walk_of(sid)
         self.leaves = {}
+        children = {}
+        for s in seg_list:
+            for par in (s.get('parents') or [])[:1]:
+                children.setdefault(par, []).append(s)
+        merged = any(len(s.get('parents') or []) > 1 for s in seg_list)
+        self.order_problems = []
+        for par, kids in children.items():
+            firsts = [self._first_base(k) for k in kids]
+            if len(set(firsts)) != len(firsts):
+                self.duplicates.append(('siblings with one first base', par, firsts))
+        if not merged:
+            seen = {}
+            for sid, w in self.walk.items():
+                if w in seen and self.segs[sid].get('length_bp', 0) > 0:
+                    self.duplicates.append(('two segments end at one walk', seen[w], sid, w))
+                seen.setdefault(w, sid)
+        leaf_seen = {}
         for p in arm_json.get('paths') or []:
             chain = p.get('segments') or []
             if not chain or chain[-1] not in self.walk:
@@ -44,15 +69,36 @@ class ArmView:
             w = self.walk[chain[-1]]
             if len(w) != p.get('length_bp'):
                 self.problems.append(('path length', p.get('id'), len(w), p.get('length_bp')))
+            if w in self.leaves:
+                self.duplicates.append(('a leaf walk twice', w))
+            if chain[-1] in leaf_seen:
+                self.duplicates.append(('a leaf segment in two paths', chain[-1]))
+            leaf_seen[chain[-1]] = p.get('id')
             self.leaves[w] = p
         self.claims = set()
         self.runs = []
         self.label_ends = set()
+        counted = collections.Counter()
         for sid, s in segs.items():
-            for e in s.get('events') or []:
-                if e.get('type') == 'label_end' and sid in self.walk:
+            evs = s.get('events') or []
+            # SPEC 7.1: events at one at_bp are unordered, the list is sorted by position
+            if [e.get('at_bp', 0) for e in evs] != sorted(e.get('at_bp', 0) for e in evs):
+                self.order_problems.append(('events not sorted by at_bp', sid))
+            for e in evs:
+                if sid not in self.walk:
+                    continue
+                key = (self.walk[sid][:e.get('at_bp', 0)], e.get('type'), e.get('label'),
+                       e.get('reason'), e.get('char'), e.get('from'), e.get('to'))
+                counted[key] += 1
+                if e.get('type') == 'label_end':
                     self.label_ends.add((self.walk[sid][:e['at_bp']], names.get(e.get('label')),
                                          e.get('reason')))
+        self.duplicates += [('an event twice', k) for k, n in counted.items() if n > 1]
+        for sp in arm_json.get('splits') or []:
+            chars = [b.get('char') for b in sp.get('branches') or []]
+            # SPEC 6.2: successors are processed in ascending character order
+            if chars != sorted(chars):
+                self.order_problems.append(('split branches not in character order', chars))
         for r in arm_json.get('runs') or []:
             w = self.walk.get(r.get('segment'))
             if w is None or r.get('to_bp', 0) > len(w):
@@ -61,8 +107,12 @@ class ArmView:
             name = names.get(r.get('label'))
             claim = (w[:r['to_bp']], name, r.get('end_reason'), r.get('branches'),
                      round(float(r.get('loss', 0.0)), 9), r.get('from_bp'), r.get('entered_by'))
+            if claim in self.claims and not merged:
+                self.duplicates.append(('a run twice', claim))
             self.claims.add(claim)
             self.runs.append((claim, r))
+        raw = collections.Counter(json.dumps(r, sort_keys=True) for r in arm_json.get('runs') or [])
+        self.duplicates += [('a run record twice', k) for k, n in raw.items() if n > 1]
         self.node_labels = {}
         self.events = set()
         for sid, s in segs.items():
@@ -82,6 +132,12 @@ class ArmView:
                     self.events.add((base[:e['at_bp']], e.get('char'), 'hairpin',
                                      'followed' if e.get('followed') else 'hairpin'))
             del start
+
+    def _first_base(self, seg):
+        seq = seg.get('sequence') or ''
+        if not seq:
+            return None
+        return seq[0] if self.arm == 'right' else seq[-1]
 
     def _walk_of(self, sid):
         if sid in self.walk:
@@ -119,6 +175,12 @@ def compare_arm(checks, w, seed, arm, arm_json, names, strategy, labels, extra, 
     prefix = f'traverse.{arm}'
     checks.add(f'{prefix}.shape', not view.problems, 'segments, paths and runs consistent',
                view.problems[:10])
+    checks.add(f'{prefix}.unique', not view.duplicates,
+               'no segment, leaf, run or event listed twice; siblings part on their first base',
+               view.duplicates[:10])
+    checks.add(f'{prefix}.order', not view.order_problems,
+               'events sorted by at_bp, split branches in character order',
+               view.order_problems[:10])
     st = T.Strategy(strategy)
     R = st.radius
     status = arm_json.get('status')

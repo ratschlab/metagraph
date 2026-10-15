@@ -4,6 +4,7 @@ are the SPEC's own statements); the two independent computations of section 6.9'
 other; and the mutation triplets on recorded engine answers, offline (their build:
 tests/data/oracle_traverse_answers.json, field engine)."""
 
+import copy
 import json
 import os
 import random
@@ -263,3 +264,103 @@ class RecordedTriplets(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class VerifierInjections(unittest.TestCase):
+    """The verification's injected engine bugs (verify/scratch/inject.py of 2026-10-15), applied to
+    the recorded answers: each must be flagged. Before the fixes they named, each was missed."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(DATA) as f:
+            cls.answers = json.load(f)['answers']
+
+    def flagged(self, inject, min_applicable=3):
+        applicable = 0
+        for item in self.answers:
+            w = walker(item['config'].split('_')[1])
+            base = TC.compare_traverse(w, item['request'], 200, item['answer'])
+            if any(c.outcome() == C.FAIL for _, c in base):
+                continue
+            mutated = inject(item)
+            if mutated is None:
+                continue
+            applicable += 1
+            out = TC.compare_traverse(w, item['request'], 200, mutated)
+            self.assertTrue(any(c.outcome() == C.FAIL for _, c in out), item['id'])
+        self.assertGreaterEqual(applicable, min_applicable)
+
+    @staticmethod
+    def complete_keep_arms(answer):
+        for res in answer['results']:
+            for aj in (res.get('arms') or {}).values():
+                if aj.get('status') == 'complete' and aj.get('completeness_scope') == 'per_path':
+                    yield aj
+
+    def test_g11_a_run_listed_twice(self):
+        def inject(item):
+            if (item['request']['strategy'].get('labels') or {}).get('mode') == 'annotate':
+                return None
+            a = copy.deepcopy(item['answer'])
+            for aj in self.complete_keep_arms(a):
+                if aj.get('runs'):
+                    aj['runs'].append(copy.deepcopy(aj['runs'][-1]))
+                    return a
+            return None
+        self.flagged(inject)
+
+    def test_g12_a_leaf_walk_listed_twice(self):
+        def inject(item):
+            a = copy.deepcopy(item['answer'])
+            for aj in self.complete_keep_arms(a):
+                segs, paths = aj['segments'], aj['paths']
+                cand = [p for p in paths if len(p['segments']) >= 2]
+                if not cand:
+                    continue
+                p = cand[-1]
+                last = next(s for s in segs if s['id'] == p['segments'][-1])
+                clone = copy.deepcopy(last)
+                clone['id'] = max(s['id'] for s in segs) + 1
+                clone['events'] = [e for e in clone['events'] if e['type'] != 'label_end']
+                segs.append(clone)
+                pc = copy.deepcopy(p)
+                pc['id'] = max(x['id'] for x in paths) + 1
+                pc['segments'] = p['segments'][:-1] + [clone['id']]
+                pc['end_labels'], pc['end_reasons'] = [], {}
+                paths.append(pc)
+                return a
+            return None
+        self.flagged(inject)
+
+    def test_g12b_a_successor_enumerated_twice(self):
+        """A dummy edge beside the real one with the same label: the leaf segment cloned whole,
+        with its runs, events and path."""
+        def inject(item):
+            a = copy.deepcopy(item['answer'])
+            for aj in self.complete_keep_arms(a):
+                segs, paths, runs = aj['segments'], aj['paths'], aj.get('runs') or []
+                cand = [p for p in paths if len(p['segments']) >= 2]
+                if not cand:
+                    continue
+                p = cand[-1]
+                last = next(s for s in segs if s['id'] == p['segments'][-1])
+                clone = copy.deepcopy(last)
+                clone['id'] = max(s['id'] for s in segs) + 1
+                segs.append(clone)
+                remap = {}
+                for i, r in enumerate(list(runs)):
+                    if r.get('segment') == last['id']:
+                        rc = copy.deepcopy(r)
+                        rc['segment'] = clone['id']
+                        remap[i] = len(runs)
+                        runs.append(rc)
+                pc = copy.deepcopy(p)
+                pc['id'] = max(x['id'] for x in paths) + 1
+                pc['segments'] = p['segments'][:-1] + [clone['id']]
+                for e in pc.get('end_labels') or []:
+                    if e.get('run') in remap:
+                        e['run'] = remap[e['run']]
+                paths.append(pc)
+                return a
+            return None
+        self.flagged(inject)
