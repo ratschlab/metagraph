@@ -2711,3 +2711,51 @@ and a recorded hash it never recomputed:
 - On the v4 copy re-evaluated (the shipped policy): 46 problems, the 45 of c11db9dd plus one identity problem, "mcp:
   arms/mcp states no observed index_fp; the policy pins 907ec986e19ecb04 (service_capabilities.host_document)" (v4's
   MCP runner recorded no service_capabilities). The recorded v4 set gains the unpinned problem as well.
+
+### A shortened deadline window is placed, not failed (B7)
+suite_common.stated_bound_problem failed every deadline-phase resolve_timeout whose window was below the read floor
+t - 1 s. The service takes the exchange's absolute deadline (now + B, B = exchange_budget_s: t plus the connect,
+write and pool caps, each at most t; 55.25 s for t = 30.25 s) before it acquires the host's token (at most A =
+service_settings.resolve.acquire_timeout_ms, 2 s) and claims the attempt, and states the window that is left when
+the exchange starts: a slow claim (a database pool wait, a stalled worker) legitimately leaves less than the floor,
+and that load event read as a service failure. Both outcomes block the strict gate; the diagnosis was wrong.
+- **One definition: suite_common.deadline_window_verdict(scenario, stated, evidence, refs)** -> (state, detail),
+  which async's runner takes through shared_rule with its own evidence record. In order:
+  1. a recorded exchange_budget_s other than B (beyond 1 ms): not_plausible, "the attempt's exchange budget X s is
+     not t + the phase caps B s";
+  2. bound_s above B: not_plausible, "service deadline window b s above its exchange budget B s";
+  3. the statement's `pre_exchange_ms` (from the deadline's start, before the acquire and the claim, to the
+     exchange's start) and `acquire_ms` (the acquire's own time), which the service states on every resolve_timeout
+     from the async session's next round (each rounded to 1 ms, absent when unknown), are preferred: acquire_ms
+     above pre_exchange_ms is not_plausible ("the stated acquire a ms exceeds the p ms before the exchange it is
+     part of"); bound_s x 1000 + pre_exchange_ms must be B x 1000 within 2 ms (DEADLINE_TERMS_TOLERANCE_MS), else
+     not_plausible ("service deadline window b s ended earlier than its terms allow: exchange budget B s - p ms
+     before the exchange = w s", or "... is longer than its terms allow: ..."), at any bound;
+  4. at or above the read floor t - 1 s: no objection, as before;
+  5. below it the failing attempt's span (from its grant, the attempt's dispatched_at, to its settling; the service
+     grants at most max(A, acquire_ms) after the deadline's start and settles after the deadline) places the
+     origin: a span below B - max(A, acquire_ms) - 1 s is not_plausible ("the deadline began before the acquire:
+     attempt span X ms (attempt) < exchange budget B s - acquire A s - 1 s = Y ms"); otherwise no objection (load);
+     no span: no objection when step 3 placed the origin, else undecidable with rule (c)'s class
+     UNDECIDABLE_NO_ORIGIN ("no attempt span places the deadline's origin: plausibility undecidable; deadline window
+     b s below its floor f s"), which merge_run and compare read as an undecidable inconclusive.
+  No objection leaves rule 4's wall rule (the stated bound - 1 s): inconclusive as a host state.
+- **The evidence: suite_common.deadline_evidence(line, doc)** reads the runner's record `deadline_evidence`
+  {exchange_budget_s, timeout_s, acquire_timeout_s, granted_at, settled_at, span_ms, span_source "attempt" | "job" |
+  null} (the raw record's, else the line's), cross-checked with deadline_evidence_from_record (a different span_ms
+  or exchange_budget_s is a warning; the recorded one is read); without one it is built from the raw record: the
+  last settled attempt of the runner's GET /admin/traversal/jobs/{id} read (reserved.bound_ms / 1000, reserved
+  .timeout_s, dispatched_at, settled_at), else phase_sources (the attempts' last span_ms; the job's finished_at -
+  started_at, "job", longer with retries, so never a false fail) and the job plan (traverse_results overview.plan
+  max_bound_s, timeout_s); acquire_timeout_s is the service's. Never mcp_phases.backend_ms (the exchange alone).
+- timeout_statement carries pre_exchange_ms / acquire_ms from the one error object it reads (non-negative numbers,
+  absent otherwise); timeout_terms takes them from the record's error when a runner's recorded statement lacks them
+  and agrees otherwise. TERMS gains connect_timeout_s, pool_timeout_s and acquire_timeout_ms (the live
+  service_settings.resolve, else the table's: 10 s, 5 s, 2000 ms).
+- No recorded resolve timeout of v3 or v4 states a phase (all legacy records): 0 recorded verdict changes.
+- **What async's runner mirrors in the same round**: stated_bound_problem's deadline branch replaced by
+  shared_rule("deadline_window_verdict")(scenario, stated, evidence, refs) (its write branch unchanged; the
+  undecidable state answers as rule (c) with shared_rule("UNDECIDABLE")'s UNDECIDABLE_NO_ORIGIN as
+  inconclusive_reason); its timeout_statement carrying pre_exchange_ms and acquire_ms; the record
+  `deadline_evidence` (DEADLINE_EVIDENCE_KEYS) beside `timeout_terms` on the raw record and the line, and
+  `dispatched_at` / `settled_at` kept on phase_sources.attempts rows.

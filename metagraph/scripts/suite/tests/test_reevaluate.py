@@ -933,10 +933,12 @@ class Reevaluate(unittest.TestCase):
         # the write phase: min(the write timeout, t) = 10 s on a budgeted call, then bound_s - 1 s
         self.assertIsNone(sc.read_bound_below_floor(res(20000), to["error"], stated("write", 10.0)))
         self.assertEqual(judge(20000, stated("write", 10.0), 9000.0)[::2], ("inconclusive", "resolve_timeout"))
-        # the deadline window: the exchange deadline (t plus each phase's cap) less what preceded the exchange
-        # (acquire, claim) reaches the read floor t - 1 s; a shorter window is no bound the service applied
+        # the deadline window: the exchange budget (t plus each phase's cap) less what preceded the exchange
+        # (acquire, claim); below the read floor t - 1 s the attempt's span places its origin, and without one
+        # nothing does (undecidable: test_resolve_timeout_deadline_window)
         self.assertEqual(judge(20000, stated("deadline", 15.0), 45000.0),
-                         ("fail", "service deadline window 15 s below its own floor 29.25 s", None))
+                         ("inconclusive", sc.UNDECIDABLE_NO_ORIGIN + "; deadline window 15 s below its floor 29.25 s",
+                          sc.UNDECIDABLE_NO_ORIGIN))
         self.assertEqual(judge(20000, stated("deadline", 30.0), 29000.0)[::2], ("inconclusive", "resolve_timeout"))
         self.assertEqual(judge(20000, stated("deadline", 30.0), 28000.0)[0], "fail")
         # a legacy record (no stated phase) keeps min(10 s, ...) - 1 s
@@ -952,6 +954,123 @@ class Reevaluate(unittest.TestCase):
             row = {"arm": "mcp", "outcome": "inconclusive", "mcp_phases": {"backend_ms": 45000.0},
                    "error": dict(to["error"], timeout_phase="read", bound_s=bound)}
             self.assertIs(merge_run.host_state_inconclusive(row, res(20000)), host, bound)
+
+    def test_resolve_timeout_deadline_window(self):
+        # GPT review 2's B7 (VERIFY-G): the service takes the exchange's deadline (now + B, B = t + the connect,
+        # write and pool caps = 55.25 s for t = 30.25 s) before it acquires the host's token (at most A = 2 s) and
+        # claims the attempt, so a slow acquire or claim legitimately leaves a deadline window below the read floor
+        # t - 1 s = 29.25 s. Below the floor the failing attempt's span (from its grant to its settling) places the
+        # deadline's origin: shorter than B - A - 1 s = 52.25 s, the deadline began before the acquire (fail);
+        # otherwise load (inconclusive); no span: undecidable. The service's stated pre_exchange_ms / acquire_ms
+        # (agreed 2026-10-15) are preferred where present: bound_s + pre_exchange_ms = B within 2 ms
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        fail = [{"check": "status", "outcome": "fail", "detail": "http 504"}]
+        res = scenario("R-pos-0001", "POST /resolve", STATUS, mcp={"tool": "traverse_resolve",
+                                                                   "arguments": {"time_budget_ms": 20000}})
+        to = {"http": 504, "body": None, "error": {"code": "resolve_timeout", "text": "the backend's answer did not "
+                                                   "complete within the exchange window (deadline)"}}
+        self.assertEqual((sc.resolve_client_timeout_s(res), sc.exchange_budget_s(res)), (30.25, 55.25))
+
+        def te(bound, **extra):
+            return dict({"code": "resolve_timeout", "timeout_phase": "deadline", "bound_s": bound,
+                         "elapsed_ms": bound * 1000.0}, **extra)
+
+        def doc(span_ms=None, job_ms=None, admin=None, evidence=None):
+            d = {"phase_sources": {"path": "job", "attempts": [{"attempt_id": "x:1", "sent": False, "span_ms": span_ms,
+                                                                 "elapsed_ms": None, "http_status": None}]}}
+            if job_ms is not None:
+                d["phase_sources"].update(started_at="2026-10-15T00:00:00+00:00",
+                                          finished_at=sc.iso_utc(sc.parse_utc("2026-10-15T00:00:00Z") + job_ms / 1e3))
+            if admin is not None:
+                d["calls"] = [{"tool": "GET /admin/traversal/jobs/j", "payload": {"attempts": admin}}]
+            if evidence is not None:
+                d["deadline_evidence"] = evidence
+            return d
+
+        def judge(tool_error, raw=None, wall_ms=None):
+            info = {}
+            line = {"outcome": "fail", "mcp_phases": {"backend_ms": wall_ms}}
+            out = reevaluate.outcome_of(None, "mcp", res, to, line, fail, False, cases, tool_error, info, raw)[0]
+            return out, info.get("verdict_detail"), info.get("inconclusive_reason")
+        # the full window: the floor holds, the stated bound - 1 s decides (unchanged)
+        self.assertEqual(judge(te(55.14), doc(55290.0))[::2], ("inconclusive", "resolve_timeout"))
+        # legitimate: a claim 27.5 s after the grant, an acquire of 2 s and a claim of 26 s (span from the attempt),
+        # a one-attempt job's span only: load
+        for raw in (doc(54800.0), doc(53300.0), doc(None, job_ms=54800.0)):
+            self.assertEqual(judge(te(27.25), raw)[::2], ("inconclusive", "resolve_timeout"), raw)
+        self.assertEqual(sc.deadline_window_verdict(res, te(27.25), {"span_ms": 54800.0, "span_source": "attempt"}), (
+            None, "deadline window 27.25 s below its floor 29.25 s, shortened before the exchange: attempt span 54800 "
+                  "ms (attempt) >= exchange budget 55.25 s - acquire 2 s - 1 s = 52250 ms (load)"))
+        # no span: undecidable, inconclusive by rule (c)'s class
+        self.assertEqual(judge(te(27.25), doc(None)), (
+            "inconclusive", sc.UNDECIDABLE_NO_ORIGIN + "; deadline window 27.25 s below its floor 29.25 s",
+            sc.UNDECIDABLE_NO_ORIGIN))
+        row = {"arm": "mcp", "outcome": "inconclusive", "inconclusive_reason": sc.UNDECIDABLE_NO_ORIGIN}
+        self.assertTrue(merge_run.host_state_inconclusive(row, res))
+        # defects: the origin at the job's creation 28 s before the grant, an exchange budget of 20 s, a tiny window
+        began = "the deadline began before the acquire: attempt span %d ms (attempt) < exchange budget 55.25 s - " \
+                "acquire 2 s - 1 s = 52250 ms"
+        for bound, span in ((27.14, 27290), (19.89, 20040), (0.001, 150)):
+            self.assertEqual(judge(te(bound), doc(float(span)), wall_ms=bound * 1000.0 + 5.0),
+                             ("fail", began % span, None), bound)
+        # the attempt's exchange budget the record states (its reserved.bound_ms) is checked, never believed
+        admin = [{"attempt_id": "x:1", "dispatched_at": "2026-10-15T00:00:00.000+00:00",
+                  "settled_at": "2026-10-15T00:00:54.800+00:00", "reserved": {"bound_ms": 55250, "timeout_s": 30.25}}]
+        self.assertEqual(judge(te(27.25), doc(None, admin=admin), 27300.0)[::2], ("inconclusive", "resolve_timeout"))
+        self.assertEqual(sc.deadline_evidence_from_record(doc(None, admin=admin)), {
+            "exchange_budget_s": 55.25, "timeout_s": 30.25, "acquire_timeout_s": 2.0,
+            "granted_at": "2026-10-15T00:00:00.000+00:00", "settled_at": "2026-10-15T00:00:54.800+00:00",
+            "span_ms": 54800.0, "span_source": "attempt"})
+        admin[0]["reserved"]["bound_ms"] = 50000
+        self.assertEqual(judge(te(27.25), doc(None, admin=admin)), (
+            "fail", "the attempt's exchange budget 50 s is not t + the phase caps 55.25 s", None))
+        # a window above the exchange budget is none the service applied
+        self.assertEqual(judge(te(56.0), doc(56100.0))[:2],
+                         ("fail", "service deadline window 56 s above its exchange budget 55.25 s"))
+        # the runner's deadline_evidence is read (cross-checked with the record: a different span is a warning)
+        ev = {"exchange_budget_s": 55.25, "timeout_s": 30.25, "acquire_timeout_s": 2.0, "granted_at": "g",
+              "settled_at": "s", "span_ms": 20000.0, "span_source": "attempt"}
+        self.assertEqual(judge(te(27.25), doc(None, evidence=ev))[0], "fail")
+        self.assertEqual(judge(te(27.25), doc(None, evidence=dict(ev, span_ms=54800.0)))[0], "inconclusive")
+        warnings = []
+        self.assertEqual(sc.deadline_evidence({}, doc(54800.0, evidence=ev), None, warnings)["span_ms"], 20000.0)
+        self.assertEqual(warnings, ["the raw record's deadline_evidence states span_ms 20000.0, the record gives "
+                                    "54800.0: the recorded one is read"])
+        self.assertEqual(sc.deadline_evidence({"deadline_evidence": dict(ev, span_ms=54800.0)}, None)["span_ms"],
+                         54800.0)
+        # the stated origin (pre_exchange_ms, acquire_ms) is preferred: consistent, load without any span
+        self.assertEqual(judge(te(27.25, pre_exchange_ms=28000, acquire_ms=1500), doc(None), 27300.0)[::2],
+                         ("inconclusive", "resolve_timeout"))
+        self.assertEqual(sc.deadline_window_verdict(res, te(27.25, pre_exchange_ms=28000)), (
+            None, "deadline window 27.25 s = exchange budget 55.25 s - 28000 ms before the exchange = 27.25 s: "
+                  "shortened before the exchange (load)"))
+        self.assertEqual(judge(te(27.251, pre_exchange_ms=27999), doc(None), 27300.0)[0], "inconclusive")  # rounding
+        # ... and it catches what the floor does not: a window that ended earlier than its terms allow, above the
+        # floor too (the origin 5 s early), one longer than they allow, an acquire longer than the time before
+        self.assertEqual(judge(te(27.25, pre_exchange_ms=20000), doc(54800.0), 27300.0), (
+            "fail", "service deadline window 27.25 s ended earlier than its terms allow: exchange budget 55.25 s - "
+                    "20000 ms before the exchange = 35.25 s", None))
+        self.assertEqual(judge(te(50.14, pre_exchange_ms=110), doc(50290.0), 50200.0)[0], "fail")
+        self.assertEqual(judge(te(55.14, pre_exchange_ms=110), doc(55290.0), 55200.0)[::2],
+                         ("inconclusive", "resolve_timeout"))
+        self.assertEqual(judge(te(27.25, pre_exchange_ms=30000), doc(None), 27300.0)[1],
+                         "service deadline window 27.25 s is longer than its terms allow: exchange budget 55.25 s - "
+                         "30000 ms before the exchange = 25.25 s")
+        self.assertEqual(judge(te(27.25, pre_exchange_ms=28000, acquire_ms=28500), doc(None), 27300.0)[1],
+                         "the stated acquire 28500 ms exceeds the 28000 ms before the exchange it is part of")
+        # a self-consistent statement whose origin precedes the acquire: the span still places it; a measured acquire
+        # longer than the acquire timeout widens what the span may lack
+        self.assertEqual(judge(te(27.14, pre_exchange_ms=28110), doc(27290.0), 27200.0)[1], began % 27290)
+        self.assertEqual(judge(te(27.25, pre_exchange_ms=28000, acquire_ms=3500), doc(51800.0), 27300.0)[::2],
+                         ("inconclusive", "resolve_timeout"))
+        self.assertEqual(judge(te(27.25, pre_exchange_ms=28000), doc(51800.0), 27300.0)[0], "fail")
+        # a runner's recorded timeout_terms without the origin terms: they are read from the record's error
+        rec = {"timeout_phase": "deadline", "bound_s": 27.25, "elapsed_ms": 27250.0, "source": "tool error"}
+        warnings = []
+        got = sc.timeout_terms({"timeout_terms": rec}, None, to["error"], te(27.25, pre_exchange_ms=20000), warnings)
+        self.assertEqual((got, warnings), (dict(rec, pre_exchange_ms=20000.0), []))
+        self.assertEqual(sc.timeout_terms({"timeout_terms": rec}, None, to["error"], te(27.25)), rec)
+        self.assertEqual(sc.timeout_statement(None, to["error"], te(27.25, pre_exchange_ms=-1, acquire_ms="5")), rec)
 
     def test_explained_items_as_the_runner(self):
         # async's f386a3c0: the line (and raw record) records explained_items beside explained_checks, the indices

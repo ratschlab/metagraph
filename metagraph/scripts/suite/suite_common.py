@@ -505,8 +505,11 @@ def _number_or_none(v):
 # was told, reevaluate.py --mcp-auth).
 # Rule 4 (f94b079d): a resolve_timeout is judged against the bound it states (timeout_statement), else the legacy
 # bound; f52846fb: a stated READ bound below the service's own floor for a known budget (budget + reserve + 10 s -
-# 1 s) is no host state whatever the wall (read_bound_below_floor). Where the runner recorded what it judged with
-# (raw `client_wall`, line `client_wall_ms`; raw / line `timeout_terms`), the recorded value is read and the
+# 1 s) is no host state whatever the wall (read_bound_below_floor). A stated DEADLINE window is what the exchange
+# budget leaves after the token's acquire and the claim: deadline_window_verdict (one definition for the runner too)
+# places its origin with the service's stated pre_exchange_ms, else the failing attempt's span (deadline_evidence),
+# else it is undecidable below the read floor. Where the runner recorded what it judged with (raw `client_wall`,
+# line `client_wall_ms`; raw / line `timeout_terms`, `deadline_evidence`), the recorded value is read and the
 # recomputed one cross-checked (a mismatch is a warning).
 # Every bound a rule compares with comes from the request (the scenario's MCP arguments), the host's capabilities and
 # the service's settings (References: the run's recorded live documents, else the by-design table's own
@@ -528,6 +531,21 @@ STATED_TIMEOUT_SLACK_MS = 1000.0
 RESOLVE_WRITE_TIMEOUT_MS = 10000.0
 # the phases a resolve_timeout states (app/traversal/resolve.py timeout_terms: timeout_phase, bound_s, elapsed_ms)
 RESOLVE_TIMEOUT_PHASES = ("read", "write", "deadline")
+# the /resolve client's connect and pool phase caps (app/traversal/backend.py _timeout, TRAVERSAL_HTTP_CONNECT_TIMEOUT_S
+# and TRAVERSAL_HTTP_POOL_TIMEOUT_S; with the write cap and the read timeout t they make the exchange budget,
+# exchange_budget_s) and the host token's acquire timeout (app/traversal/resolve.py ACQUIRE_TIMEOUT_MS)
+RESOLVE_CONNECT_TIMEOUT_MS = 10000.0
+RESOLVE_POOL_TIMEOUT_MS = 5000.0
+RESOLVE_ACQUIRE_TIMEOUT_MS = 2000.0
+# what a deadline-phase resolve_timeout states of where its deadline began (agreed with the async session,
+# 2026-10-15; each rounded to 1 ms, absent when unknown): pre_exchange_ms, from the absolute deadline's start (before
+# the token's acquire, on the job path before the claim) to the exchange's start; acquire_ms, the acquire's own time
+DEADLINE_ORIGIN_KEYS = ("pre_exchange_ms", "acquire_ms")
+# bound_s and pre_exchange_ms, each rounded to 1 ms, add up to the exchange budget within this
+DEADLINE_TERMS_TOLERANCE_MS = 2.0
+# the runner's record of a deadline-phase resolve_timeout's failing attempt (beside timeout_terms; null when unknown)
+DEADLINE_EVIDENCE_KEYS = ("exchange_budget_s", "timeout_s", "acquire_timeout_s", "granted_at", "settled_at",
+                          "span_ms", "span_source")
 # rule 2: the slack the client's wall gets as the upper bound of the service-side wall
 CLIENT_WALL_SLACK_MS = 1000.0
 # rule 2: the tools whose execution has a client wall (the routes rules R1 and R3 judge)
@@ -557,7 +575,9 @@ WALL_NONE = "no service-side timing"
 # rule (c): the verdict_detail of an execution whose plausibility cannot be decided
 UNDECIDABLE_NO_WALL = "no service-side timing: plausibility undecidable"
 UNDECIDABLE_NO_THRESHOLD = "no threshold known: plausibility undecidable"
-UNDECIDABLE = (UNDECIDABLE_NO_WALL, UNDECIDABLE_NO_THRESHOLD)
+# a deadline window below the read floor with no span of its attempt and no stated origin (deadline_window_verdict)
+UNDECIDABLE_NO_ORIGIN = "no attempt span places the deadline's origin: plausibility undecidable"
+UNDECIDABLE = (UNDECIDABLE_NO_WALL, UNDECIDABLE_NO_THRESHOLD, UNDECIDABLE_NO_ORIGIN)
 WALL_RULE_VALUES = ("budget_minus_reserve",)
 # a stated resolve bound is rounded to 1 ms by the service (app/traversal/resolve.py timeout_terms)
 STATED_BOUND_ROUNDING_S = 0.001
@@ -778,6 +798,10 @@ TERMS = {
     "default_time_budget_ms": ("service", "service_settings.resolve.default_time_budget_ms", 60000.0),
     "budget_ceiling_ms": ("service", "service_settings.resolve.budget_ceiling_ms", 240000.0),
     "write_timeout_s": ("service", "service_settings.resolve.http_timeouts_s.write", RESOLVE_WRITE_TIMEOUT_MS / 1000.0),
+    "connect_timeout_s": ("service", "service_settings.resolve.http_timeouts_s.connect",
+                          RESOLVE_CONNECT_TIMEOUT_MS / 1000.0),
+    "pool_timeout_s": ("service", "service_settings.resolve.http_timeouts_s.pool", RESOLVE_POOL_TIMEOUT_MS / 1000.0),
+    "acquire_timeout_ms": ("service", "service_settings.resolve.acquire_timeout_ms", RESOLVE_ACQUIRE_TIMEOUT_MS),
 }
 
 
@@ -1094,15 +1118,21 @@ def timeout_statement(doc, error, tool_error):
     """What a resolve_timeout states fired (rule 4; the runner's timeout_statement, f94b079d): {timeout_phase,
     bound_s, elapsed_ms, source} from the FIRST of the tool error (tool_error_of: the inline tool error or a job's
     resolve_error.detail), the answer's error object (|error|), the job's stored error (job_error) that states a
-    timeout_phase in RESOLVE_TIMEOUT_PHASES and a positive numeric bound_s, both in that one object; None when none
-    does (a legacy record)."""
+    timeout_phase in RESOLVE_TIMEOUT_PHASES and a positive numeric bound_s, both in that one object, with the
+    deadline's origin terms of that object where it states them (DEADLINE_ORIGIN_KEYS: pre_exchange_ms, acquire_ms,
+    non-negative numbers; absent otherwise); None when none does (a legacy record)."""
     for source, err in (("tool error", tool_error), ("answer error", error), ("job error", job_error(doc))):
         if not isinstance(err, dict):
             continue
         phase, bound = err.get("timeout_phase"), _number_or_none(err.get("bound_s"))
         if phase in RESOLVE_TIMEOUT_PHASES and bound is not None and bound > 0:
-            return {"timeout_phase": phase, "bound_s": bound, "elapsed_ms": _number_or_none(err.get("elapsed_ms")),
-                    "source": source}
+            out = {"timeout_phase": phase, "bound_s": bound, "elapsed_ms": _number_or_none(err.get("elapsed_ms")),
+                   "source": source}
+            for key in DEADLINE_ORIGIN_KEYS:
+                value = _number_or_none(err.get(key))
+                if value is not None and value >= 0:
+                    out[key] = value
+            return out
     return None
 
 
@@ -1115,7 +1145,8 @@ def timeout_terms(line, doc, error, tool_error, warnings=None):
     """The statement rule 4 reads: what the runner recorded (f94b079d: the raw record's `timeout_terms`, else the
     line's; null = a legacy record), else timeout_statement of the record; a recorded statement the recomputation
     does not reproduce is kept and |warnings| (a list, optional) says so; a malformed one is replaced by the
-    recomputation, with a warning."""
+    recomputation, with a warning. The deadline's origin terms (DEADLINE_ORIGIN_KEYS) a recorded statement lacks are
+    taken from the recomputation when the rest agrees (a runner that records the statement without them)."""
     computed = timeout_statement(doc, error, tool_error)
     if isinstance(doc, dict) and "timeout_terms" in doc:
         rec, where = doc.get("timeout_terms"), "the raw record's timeout_terms"
@@ -1127,10 +1158,15 @@ def timeout_terms(line, doc, error, tool_error, warnings=None):
         _warn(warnings, "%s %s states no valid phase and bound: recomputed (%s)" % (
             where, json.dumps(rec, sort_keys=True), json.dumps(computed, sort_keys=True)))
         return computed
-    if json.dumps(rec, sort_keys=True) != json.dumps(computed, sort_keys=True):
+    # the deadline's origin terms a recorded statement does not state (a runner of before them) are read from the
+    # record's error object; the rest is compared
+    extra = dict((k, v) for k, v in (computed or {}).items() if k in DEADLINE_ORIGIN_KEYS and k not in (rec or {}))
+    same = dict((k, v) for k, v in computed.items() if k not in extra) if computed is not None else None
+    if json.dumps(rec, sort_keys=True) != json.dumps(same, sort_keys=True):
         _warn(warnings, "%s %s differs from the record's statement %s: the recorded one is read" % (
             where, json.dumps(rec, sort_keys=True), json.dumps(computed, sort_keys=True)))
-    return rec
+        return rec
+    return dict(rec, **extra) if extra else rec
 
 
 def read_bound_below_floor(scenario, error, tool_error, doc=None, line=None, warnings=None, refs=None):
@@ -1158,9 +1194,9 @@ def stated_bound_problem(scenario, error, tool_error, doc=None, line=None, warni
     applies (app/traversal/backend.py _timeout_phase, exchange_budget_s): the write bound is min(the write timeout
     service_settings.resolve.http_timeouts_s.write, t) (t: resolve_client_timeout_s), within the 1 ms the statement
     is rounded to, else "service write bound <b> s is not its write cap <c> s"; the deadline window is the exchange
-    deadline (t plus each phase's cap up to t) less what preceded the exchange (the token's acquire, the claim), at
-    least the read floor t - 1 s, else "service deadline window <b> s below its own floor <f> s" (%g seconds). None
-    for another phase, no statement, or a bound the service can have applied."""
+    budget less what preceded the exchange (the token's acquire, the claim), judged by deadline_window_verdict (its
+    not_plausible detail; its undecidable state host_state_verdict reads through deadline_window_state). None for
+    another phase, no statement, or a bound the service can have applied."""
     te = tool_error if isinstance(tool_error, dict) else {}
     stated = timeout_terms(line, doc, error, te, warnings)
     if stated is None or stated.get("timeout_phase") not in ("write", "deadline"):
@@ -1172,10 +1208,193 @@ def stated_bound_problem(scenario, error, tool_error, doc=None, line=None, warni
         if abs(bound_s - cap_s) <= STATED_BOUND_ROUNDING_S + 1e-9:
             return None
         return "service write bound %g s is not its write cap %g s" % (bound_s, cap_s)
+    state, detail = deadline_window_state(scenario, error, te, doc, line, warnings, refs)
+    return detail if state == "not_plausible" else None
+
+
+def exchange_budget_s(scenario, refs=None):
+    """The absolute budget B of one /resolve exchange (app/traversal/backend.py exchange_budget_s): the client timeout
+    t (resolve_client_timeout_s) plus the connect, write and pool phase caps, each at most t
+    (service_settings.resolve.http_timeouts_s.connect / write / pool). The service takes the exchange's deadline
+    (now + B) before it acquires the host's token (exchange_deadline)."""
+    t_s = resolve_client_timeout_s(scenario, refs)
+    return t_s + sum(min(term(refs, name), t_s) for name in ("connect_timeout_s", "write_timeout_s", "pool_timeout_s"))
+
+
+def _admin_attempts(doc):
+    """The attempts of the last GET /admin/traversal/jobs/{id} the raw record's calls hold (the runner's admin read),
+    [] when there is none."""
+    for call in reversed((doc or {}).get("calls") or []):
+        tool = str(call.get("tool") or "") if isinstance(call, dict) else ""
+        if tool.startswith("GET /admin/traversal/jobs/"):
+            payload = call.get("payload")
+            rows = payload.get("attempts") if isinstance(payload, dict) else None
+            return [a for a in rows if isinstance(a, dict)] if isinstance(rows, list) else []
+    return []
+
+
+def _plan_of(doc):
+    """overview.plan of the last traverse_results call (the job's plan: timeout_s, max_bound_s), else {}."""
+    for call in reversed((doc or {}).get("calls") or []):
+        payload = call.get("payload") if isinstance(call, dict) and call.get("tool") == "traverse_results" else None
+        plan = ((payload or {}).get("overview") or {}).get("plan") if isinstance(payload, dict) else None
+        if isinstance(plan, dict):
+            return plan
+    return {}
+
+
+def _evidence_number(record, key):
+    return _number_or_none((record or {}).get(key)) if isinstance(record, dict) else None
+
+
+def deadline_evidence_from_record(doc, refs=None):
+    """deadline_evidence as the raw record of a traversal job gives it, None when it gives no figure of it: the
+    failing attempt (the last settled one of the runner's GET /admin/traversal/jobs/{id} read) states
+    exchange_budget_s (reserved.bound_ms / 1000, else the attempt's bound_ms), timeout_s (reserved.timeout_s),
+    granted_at (its dispatched_at: the service claims the attempt at the grant of the host's token), settled_at and
+    span_ms = settled_at - granted_at (span_source "attempt"); without the admin read the runner's phase_sources
+    (its attempts' last span_ms, "attempt"; else the job's finished_at - started_at, "job": a one-attempt job's span,
+    longer with retries) and the job plan (traverse_results overview.plan: max_bound_s, timeout_s);
+    acquire_timeout_s is the service's (service_settings.resolve.acquire_timeout_ms / 1000)."""
+    out = dict((k, None) for k in DEADLINE_EVIDENCE_KEYS)
+    settled = [a for a in _admin_attempts(doc) if a.get("settled_at")]
+    sources = (doc or {}).get("phase_sources") if isinstance((doc or {}).get("phase_sources"), dict) else {}
+    plan = _plan_of(doc)
+    if settled:
+        a = settled[-1]
+        reserved = a.get("reserved") if isinstance(a.get("reserved"), dict) else {}
+        bound_ms = _evidence_number(reserved, "bound_ms")
+        bound_ms = bound_ms if bound_ms is not None else _evidence_number(a, "bound_ms")
+        out.update(exchange_budget_s=None if bound_ms is None else bound_ms / 1000.0,
+                   timeout_s=_evidence_number(reserved, "timeout_s"),
+                   granted_at=a.get("dispatched_at"), settled_at=a.get("settled_at"),
+                   span_ms=_ms_between(runner_epoch(a.get("dispatched_at")), runner_epoch(a.get("settled_at"))))
+        out["span_source"] = "attempt" if out["span_ms"] is not None else None
+    if out["span_ms"] is None:
+        span = settled_attempt_ms(sources)
+        if span is not None:
+            out.update(span_ms=span, span_source="attempt")
+        else:
+            job = _ms_between(runner_epoch(sources.get("started_at")), runner_epoch(sources.get("finished_at")))
+            if job is not None:
+                out.update(granted_at=sources.get("started_at"), settled_at=sources.get("finished_at"), span_ms=job,
+                           span_source="job")
+    if out["exchange_budget_s"] is None:
+        out["exchange_budget_s"] = _evidence_number(plan, "max_bound_s")
+    if out["timeout_s"] is None:
+        out["timeout_s"] = _evidence_number(plan, "timeout_s")
+    if all(out[k] is None for k in DEADLINE_EVIDENCE_KEYS):
+        return None
+    out["acquire_timeout_s"] = term(refs, "acquire_timeout_ms") / 1000.0
+    return out
+
+
+def deadline_evidence(line, doc, refs=None, warnings=None):
+    """The record deadline_window_verdict reads: the runner's `deadline_evidence` (the raw record's, else the
+    line's; DEADLINE_EVIDENCE_KEYS) when it records one, its figures cross-checked with deadline_evidence_from_record
+    (a different span_ms or exchange_budget_s is a warning in |warnings|; the recorded one is read), else
+    deadline_evidence_from_record; None when neither states anything."""
+    computed = deadline_evidence_from_record(doc, refs)
+    if isinstance(doc, dict) and "deadline_evidence" in doc:
+        rec, where = doc.get("deadline_evidence"), "the raw record's deadline_evidence"
+    elif isinstance(line, dict) and "deadline_evidence" in line:
+        rec, where = line.get("deadline_evidence"), "the line's deadline_evidence"
+    else:
+        return computed
+    if rec is None:
+        return computed
+    if not isinstance(rec, dict):
+        _warn(warnings, "%s %s is no object: read from the record (%s)" % (
+            where, json.dumps(rec, sort_keys=True)[:200], json.dumps(computed, sort_keys=True)))
+        return computed
+    for key in ("span_ms", "exchange_budget_s"):
+        mine, theirs = _evidence_number(computed, key), _evidence_number(rec, key)
+        if computed is not None and mine is not None and (theirs is None or abs(mine - theirs) > 0.05):
+            _warn(warnings, "%s states %s %s, the record gives %s: the recorded one is read" % (
+                where, key, json.dumps(rec.get(key)), mine))
+    return dict((k, rec.get(k)) for k in DEADLINE_EVIDENCE_KEYS)
+
+
+def deadline_window_verdict(scenario, stated, evidence=None, refs=None):
+    """(state, detail) of a resolve_timeout stating timeout_phase "deadline": whether the service can have applied the
+    window bound_s it states (app/traversal/resolve_exec.py takes the exchange's absolute deadline, now + B
+    (exchange_budget_s), before it acquires the host's token (at most A, service_settings.resolve.acquire_timeout_ms)
+    and claims the attempt; the window is what is left of B when the exchange starts, so a slow acquire or claim
+    legitimately shortens it below the read floor t - 1 s). The one definition async's runner takes
+    (shared_rule("deadline_window_verdict")) with its own |evidence|. |stated|: the statement (timeout_terms:
+    timeout_phase, bound_s, and where the service states them pre_exchange_ms, from the deadline's start to the
+    exchange's, and acquire_ms, the token acquire's own time); |evidence|: deadline_evidence's record
+    (exchange_budget_s, span_ms of the failing attempt from its grant to its settling, span_source). In order:
+    1. a recorded exchange_budget_s other than B (beyond the 1 ms it is rounded to): not_plausible, "the attempt's
+       exchange budget X s is not t + the phase caps B s";
+    2. bound_s above B: not_plausible, "service deadline window b s above its exchange budget B s";
+    3. pre_exchange_ms stated (preferred: the service places the deadline's start): acquire_ms above it is
+       not_plausible ("the stated acquire a ms exceeds the p ms before the exchange it is part of"); bound_s x 1000 +
+       pre_exchange_ms must be B x 1000 within DEADLINE_TERMS_TOLERANCE_MS (each rounded to 1 ms), else
+       not_plausible: shorter, "service deadline window b s ended earlier than its terms allow: exchange budget B s
+       - p ms before the exchange = w s"; longer, "service deadline window b s is longer than its terms allow: ...";
+    4. bound_s at or above the read floor t - 1 s: no objection;
+    5. below it, the span places the deadline's start: the attempt was granted at most max(A, acquire_ms) after it
+       and settled after the deadline, so a span below B - max(A, acquire_ms) - 1 s is not_plausible ("the deadline
+       began before the acquire: attempt span X ms (span_source) < exchange budget B s - acquire A s - 1 s = Y
+       ms"); a span at or above it is no objection (load before the exchange); no span: no objection when step 3
+       placed the start, else undecidable ("<UNDECIDABLE_NO_ORIGIN>; deadline window b s below its floor f s").
+    No objection is (None, why): rule 4's wall rule follows (the stated bound - 1 s). Another phase or no
+    statement: (None, None)."""
+    if not isinstance(stated, dict) or stated.get("timeout_phase") != "deadline":
+        return None, None
+    bound_s = _number_or_none(stated.get("bound_s"))
+    if bound_s is None:
+        return None, None
+    t_s = resolve_client_timeout_s(scenario, refs)
+    budget_s = exchange_budget_s(scenario, refs)
+    acquire_s = term(refs, "acquire_timeout_ms") / 1000.0
+    recorded = _evidence_number(evidence, "exchange_budget_s")
+    if recorded is not None and abs(recorded - budget_s) > STATED_BOUND_ROUNDING_S + 1e-9:
+        return "not_plausible", "the attempt's exchange budget %g s is not t + the phase caps %g s" % (recorded,
+                                                                                                    budget_s)
+    if bound_s > budget_s + STATED_BOUND_ROUNDING_S + 1e-9:
+        return "not_plausible", "service deadline window %g s above its exchange budget %g s" % (bound_s, budget_s)
+    pre = _number_or_none(stated.get("pre_exchange_ms"))
+    acq = _number_or_none(stated.get("acquire_ms"))
+    if pre is not None:
+        if acq is not None and acq > pre + DEADLINE_TERMS_TOLERANCE_MS:
+            return "not_plausible", "the stated acquire %g ms exceeds the %g ms before the exchange it is part of" % (
+                acq, pre)
+        allowed_ms = budget_s * 1000.0 - pre
+        terms = "exchange budget %g s - %g ms before the exchange = %g s" % (budget_s, pre, allowed_ms / 1000.0)
+        if bound_s * 1000.0 < allowed_ms - DEADLINE_TERMS_TOLERANCE_MS:
+            return "not_plausible", "service deadline window %g s ended earlier than its terms allow: %s" % (bound_s,
+                                                                                                         terms)
+        if bound_s * 1000.0 > allowed_ms + DEADLINE_TERMS_TOLERANCE_MS:
+            return "not_plausible", "service deadline window %g s is longer than its terms allow: %s" % (bound_s, terms)
     floor_ms = t_s * 1000.0 - STATED_TIMEOUT_SLACK_MS
     if bound_s * 1000.0 >= floor_ms:
-        return None
-    return "service deadline window %g s below its own floor %g s" % (bound_s, floor_ms / 1000.0)
+        return None, "deadline window %g s at or above its floor %g s" % (bound_s, floor_ms / 1000.0)
+    span = _evidence_number(evidence, "span_ms")
+    if span is None:
+        if pre is not None:
+            return None, "deadline window %g s = %s: shortened before the exchange (load)" % (bound_s, terms)
+        return "undecidable", "%s; deadline window %g s below its floor %g s" % (UNDECIDABLE_NO_ORIGIN, bound_s,
+                                                                                floor_ms / 1000.0)
+    granted_s = max(acquire_s, acq / 1000.0) if acq is not None else acquire_s
+    least_ms = (budget_s - granted_s) * 1000.0 - STATED_TIMEOUT_SLACK_MS
+    source = (evidence or {}).get("span_source") or "span"
+    if span < least_ms:
+        return "not_plausible", "the deadline began before the acquire: attempt span %.0f ms (%s) < exchange budget " \
+                                "%g s - acquire %g s - 1 s = %.0f ms" % (span, source, budget_s, granted_s, least_ms)
+    return None, "deadline window %g s below its floor %g s, shortened before the exchange: attempt span %.0f ms " \
+                 "(%s) >= exchange budget %g s - acquire %g s - 1 s = %.0f ms (load)" % (
+                     bound_s, floor_ms / 1000.0, span, source, budget_s, granted_s, least_ms)
+
+
+def deadline_window_state(scenario, error, tool_error, doc=None, line=None, warnings=None, refs=None):
+    """deadline_window_verdict of a record: its statement (timeout_terms) and its deadline_evidence."""
+    te = tool_error if isinstance(tool_error, dict) else {}
+    stated = timeout_terms(line, doc, error, te, warnings)
+    if stated is None or stated.get("timeout_phase") != "deadline":
+        return None, None
+    return deadline_window_verdict(scenario, stated, deadline_evidence(line, doc, refs, warnings), refs)
 
 
 def tool_error_problem(scenario, tool_error, refs=None):
@@ -1288,13 +1507,15 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, wa
     does not expect (the runner's host_state_plausible, its reason the detail): state "host_state" (inconclusive by
     the runner's host-state rule), "undecidable" (rule (c): no threshold, UNDECIDABLE_NO_THRESHOLD, or no
     service-side wall and rule 2 decided nothing, undecidable_timing: UNDECIDABLE_NO_WALL, + RULE2_SKIPPED_API_KEY
-    with an API key; inconclusive) or "not_plausible" (the checks judge: a known wall below the threshold; rule 2,
-    an anonymous client wall + 1 s below it; rule 1, a relayed /resolve deadline on a discovery that sent no
-    budget; a tool error stating a reserve or budget the service cannot have applied, tool_error_problem; rule 4's
-    read floor, read_bound_below_floor, and the write and deadline bounds, stated_bound_problem, whatever the wall);
-    (None, None, None) for any other answer. traversal_resolve_deadline: discovery_without_budget, tool_error_problem,
-    then resolve_deadline_least; resolve_timeout: tool_error_problem, read_bound_below_floor, stated_bound_problem,
-    then resolve_timeout_least; the wall: service_wall, else rule 2 (client_wall_premature);
+    with an API key; a deadline window below the read floor whose origin nothing places, UNDECIDABLE_NO_ORIGIN;
+    inconclusive) or "not_plausible" (the checks judge: a known wall below the threshold; rule 2, an anonymous client
+    wall + 1 s below it; rule 1, a relayed /resolve deadline on a discovery that sent no budget; a tool error stating
+    a reserve or budget the service cannot have applied, tool_error_problem; rule 4's read floor,
+    read_bound_below_floor, and the write and deadline bounds, stated_bound_problem / deadline_window_verdict,
+    whatever the wall); (None, None, None) for any other answer. traversal_resolve_deadline: discovery_without_budget,
+    tool_error_problem, then resolve_deadline_least; resolve_timeout: tool_error_problem, read_bound_below_floor,
+    stated_bound_problem, deadline_window_state's undecidable state, then resolve_timeout_least; the wall:
+    service_wall, else rule 2 (client_wall_premature);
     uninterruptible_overrun_exceeds_allowance (the R20 lockout answers at once): no wall rule. |refs| (References;
     default_references()) the host's and the service's terms. |warnings| (a list, optional): a recorded client wall
     or statement the record does not reproduce."""
@@ -1322,6 +1543,9 @@ def host_state_verdict(scenario, line, doc=None, error=None, tool_error=None, wa
             below = rule4(scenario, err, tool_error, doc, line, warnings, refs)
             if below is not None:   # the service's own bound was too short (or not its own), whatever the wall
                 return code, "not_plausible", below
+        window, why = deadline_window_state(scenario, err, tool_error, doc, line, warnings, refs)
+        if window == "undecidable":   # a window below the read floor whose origin nothing places
+            return code, "undecidable", why
         least, rule = resolve_timeout_least(scenario, err, tool_error, doc, line, warnings, refs)
     wall, which = service_wall(scenario, line, doc)
     if least is None:
