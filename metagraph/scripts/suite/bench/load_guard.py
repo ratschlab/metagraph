@@ -16,7 +16,8 @@ of the run's schedule (block 0 the warm-up pass, blocks 1..6 the measured cycles
              which counts a sample whose staging container was read as 0 % for sra_all).
 
 A block's window is the union of its executions' [start, end] intervals, each widened by --pad-s (30 s), so the load
-between a block's requests counts too; a block a resume finished later has two windows. Executions on mex
+between a block's requests and just around them counts too; the samples must cover the window less that padding (the
+executions themselves). A block a resume finished later has two windows. Executions on mex
 (direct-local) are stamped with mex's clock, the others with the orchestrator's; samples carry mex's clock: the run's
 recorded clock offset (bench.json) puts all on the orchestrator's. The run's verdict is clean only when every block
 is clean; analyze.py emits a performance verdict only then. Thresholds default to the run's own (bench.json `guard`),
@@ -116,10 +117,12 @@ def merge_windows(intervals, pad_s):
     return out
 
 
-def coverage_gaps(times, windows, max_gap_s):
-    """The gaps (s) longer than max_gap_s between a window's start, its samples' times and its end."""
+def coverage_gaps(times, windows, max_gap_s, pad_s=0.0):
+    """The gaps (s) longer than max_gap_s between a window's start, its samples' times and its end, the window less
+    its padding (the samples must cover the executions, not the margin around them)."""
     gaps = []
     for w0, w1 in windows:
+        w0, w1 = w0 + pad_s, w1 - pad_s
         inside = sorted(t for t in times if w0 <= t <= w1)
         marks = [w0] + inside + [w1]
         for a, b in zip(marks, marks[1:]):
@@ -137,7 +140,7 @@ def judge_block(samples, intervals, limits, offset_s=0.0):
     inside = [s for t, s in timed if t is not None and any(w0 <= t <= w1 for w0, w1 in windows)]
     out = judge_samples(inside, limits)
     out["windows"] = [[sc.iso_utc(a), sc.iso_utc(b)] for a, b in windows]
-    out["gaps"] = coverage_gaps([t for t, _ in timed if t is not None], windows, limits["max_gap_s"])
+    out["gaps"] = coverage_gaps([t for t, _ in timed if t is not None], windows, limits["max_gap_s"], limits["pad_s"])
     if not windows:
         out.update(verdict="unguarded", reason="no execution in the block")
     elif out["verdict"] == "clean" and out["gaps"]:

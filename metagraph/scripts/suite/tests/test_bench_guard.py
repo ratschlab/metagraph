@@ -84,6 +84,13 @@ class JudgeBlocks(unittest.TestCase):
         res = lg.judge_blocks({1: [[T0 + 250, T0 + 400]]}, s, None)
         self.assertEqual(res["verdict"], "unguarded")
 
+    def test_coverage_reads_the_executions_not_the_padding(self):
+        # the sampler stops a few seconds after the run's last request: the padding after it needs no samples
+        s = samples(T0 - 20, T0 + 104)
+        self.assertEqual(lg.judge_blocks({6: [[T0, T0 + 100]]}, s, None)["verdict"], "clean")
+        s = samples(T0 - 20, T0 + 80)
+        self.assertEqual(lg.judge_blocks({6: [[T0, T0 + 100]]}, s, None)["verdict"], "unguarded")
+
     def test_resumed_block_has_two_windows(self):
         w = lg.merge_windows([[T0, T0 + 10], [T0 + 20, T0 + 30], [T0 + 1000, T0 + 1010]], 30.0)
         self.assertEqual(len(w), 2)
