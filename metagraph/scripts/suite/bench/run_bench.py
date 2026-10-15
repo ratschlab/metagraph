@@ -511,7 +511,8 @@ class Bench(object):
             self.sampler_pid = None
 
     def recent_samples(self, seconds):
-        """The sampler's samples of the last |seconds| on mex's clock (read from its file on mex)."""
+        """The sampler's samples of the last |seconds| on mex's clock (read from its file on mex); none when its newest
+        is older than that."""
         if not self.sampler_rel:
             return []
         _, out = self.mex.run("tail -n %d %s/%s 2>/dev/null" % (int(seconds) + 10, self.cfg.mex_dir, self.sampler_rel))
@@ -523,6 +524,9 @@ class Bench(object):
                 pass
         times = [sc.parse_utc(r.get("t_utc")) for r in rows]
         newest = max([t for t in times if t is not None] or [0])
+        # samples older than that are no reading of the host now (a sampler that stopped): none
+        if newest < time.time() + (self.session.get("clock_offset_start_s") or 0.0) - seconds:
+            return []
         return [r for r, t in zip(rows, times) if t is not None and t >= newest - seconds]
 
     def judge_now(self, bench, seconds):

@@ -264,6 +264,20 @@ class RunBenchOffline(BenchCase):
         self.assertEqual(res["queries"]["R-q-0001"]["arms"]["mcp"]["n_success"], 1)
         self.assertEqual(res["queries"]["R-q-0001"]["pairs"]["mcp/direct-local"]["n"], 1)
 
+    def test_the_suites_fake_mcp_runner_too(self):
+        # tests/fake_mcp.py (run_suite.sh's tests' stand-in) writes no raw answer: its executions run and are
+        # recorded, and the analysis cannot verify their result sizes (`unverified`, never a success)
+        tmpl = "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest} --checks-dir {checks_dir}" % (
+            shlex.quote(sys.executable), shlex.quote(os.path.join(HERE, "fake_mcp.py")))
+        with FakeHost() as host:
+            p = self.bench(host, "--panel", self.panel_path, "--seed", "2", "--cycles", "1", "--checks", "stub",
+                           "--pause", "0", "--no-preflight", SUITE_MCP_CMD=tmpl)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        res = sc.read_json(os.path.join(self.run_dir(p), "analysis.json"))
+        self.assertEqual(res["classes"]["mcp"], {"unverified": 6})
+        self.assertEqual(res["classes"]["direct-local"], {"success": 6})
+        self.assertIsNone(res["aggregates"]["all"]["pairs"]["mcp/direct-local"]["geo_mean_ratio"])
+
     def test_lock_held_refuses(self):
         os.makedirs(os.path.join(self.mex, "suite-dev"))
         with open(os.path.join(self.mex, "suite-dev", "LOCK"), "w") as fh:
