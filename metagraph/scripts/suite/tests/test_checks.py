@@ -2778,6 +2778,39 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual([len(sg["events"]) for sg in arms["right"]["segments"]], [0, 0, 1, 2, 1])
         self.assertEqual(judge(sc, mcp_shaped(ans), "mcp"), ("pass", "pass"))
 
+    def test_an_annotate_re_entry_needs_its_blocked_event(self):
+        # annotate mode ends a path at a re-entry by its path_reason alone (walker.cpp: no lineage, so end_reasons is
+        # empty; the blocked event is pushed where the path ends): such an end explains a short walk only with that
+        # event in its leaf's events (the recorded T-labels-0001 answer's shape, cut short by a re-entry)
+        def annotate(events="blocked", reason="edge_reuse"):
+            sc, ans = self.structural_walk(end="edge_reuse", strategy={"labels": {"mode": "annotate"}})
+            arm = ans["body"]["results"][0]["arms"]["right"]
+            for p in arm["paths"]:
+                p.update(end_reasons={}, end_labels=[], path_reason=reason if p["id"] == 0 else "dead_end")
+            for sg in arm["segments"]:
+                sg["events"] = [x for x in sg["events"] if x["type"] != "label_end"]
+            leaf = arm["segments"][3]
+            if events == "absent":
+                del leaf["events"]
+            elif events != "blocked":
+                leaf["events"] = events
+            return sc, ans
+
+        def judge(sc, ans, arm="direct-local"):
+            return outcome(sc, ans, "walk_in_record", arm)[0], outcome(sc, ans, "invariants", arm)[0]
+        for arm in ("direct-local", "mcp"):
+            self.assertEqual(judge(*annotate(), arm=arm), ("pass", "pass"), arm)
+            sc, ans = annotate([])
+            self.assertEqual(judge(sc, ans, arm), ("fail", "fail"), arm)
+            self.assertIn("path 0 at 30 bp ends by path_reason edge_reuse without a blocked event of it on its leaf",
+                          outcome(sc, ans, "invariants", arm)[1])
+            self.assertEqual(judge(*annotate([], "dead_end"), arm=arm)[0], "fail", arm)
+        sc, ans = annotate("absent")
+        self.assertEqual(judge(sc, ans), ("fail", "fail"))
+        self.assertIn("segments[3].events of path 0 at 30 bp, a path_reason edge_reuse end (absent)",
+                      outcome(sc, ans, "walk_in_record")[1])
+        self.assertEqual(outcome(sc, ans, "walk_in_record", "mcp")[0], "not_exposed")
+
     def test_a_walk_without_its_tree_is_not_shown(self):
         # an MCP answer without its graphlet (the export lost, an arm in summary) shows no walk: walk_in_record is
         # not exposed there and fails on a direct arm (a summary detail), never "no path"; the invariants hold

@@ -3405,7 +3405,9 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
     - `minority`: a quorum knob set (min_successor_labels >= 2 or min_successor_fraction > 0); `below_min_labels`:
       min_live_labels > 1; `split_limit`: max_splits_per_path finite and a route to the leaf through that many
       splits;
-    - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end.
+    - `edge_reuse`, `edge_reuse_rc`, `rejoined_seed`: a blocked event of that reason on the leaf at the path's end,
+      also where the path states the re-entry only as its path_reason (annotate mode: no lineage, end_reasons
+      empty); any structural end, counted or a path_reason, needs the leaf's events list (Missing without it).
     |index| is the arm's _arm_index, built here when not given; |arm| names the arm whose request holds the knobs."""
     out: List[str] = []
     chain = p.get("segments") or []
@@ -3418,13 +3420,16 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
     L = p.get("length_bp")
     where = "path %s at %s bp" % (p.get("id"), L)
     claimed = set(p.get("end_reasons") or {}) & _STATED_STRUCTURAL_ENDS
-    if claimed and not isinstance(leaf.get("events"), list):
+    # annotate mode ends a path at a re-entry by its path_reason alone: no lineage, end_reasons empty (walker.cpp,
+    # the structural end of an annotate walk: finish_path with the block's reason, its blocked event pushed there)
+    by_reason = {p.get("path_reason")} & _STATED_STRUCTURAL_ENDS
+    if (claimed or by_reason) and not isinstance(leaf.get("events"), list):
         # the evidence of a structural end is its leaf's events (§7.0: below complete_to_bp every decision is
         # reported; traverse.cpp writes `events` on every segment of a tree or full detail, a graphlet states them in
         # its E and R records, graphlet_arms lists them on every segment): without the list the end is not shown,
         # never excused (fail on a direct arm, not exposed on the MCP's)
         raise Missing("segments[%s].events of %s, a %s end (%s)" % (
-            chain[-1], where, "/".join(sorted(claimed)),
+            chain[-1], where, "/".join(sorted(claimed)) if claimed else "path_reason %s" % p.get("path_reason"),
             "absent" if "events" not in leaf else "%s, not a list" % type(leaf["events"]).__name__))
     evs = [x for x in _seg_events(leaf) if x.get("at_bp") == L]
     ends = [x for x in evs if x.get("type") == "label_end"]
@@ -3437,6 +3442,11 @@ def _structural_end_problems(sc: dict, ans: dict, armo: dict, p: dict, index: Op
         stated |= {"branch" for x in stated if x in _QUORUM_ENDS}
         for reason in sorted(claimed - stated):
             out.append("%s ends by %s without a label_end event of it on its leaf" % (where, reason))
+        # a re-entry path_reason states its blocked event where the path ends (§6.6: "blocked continuations are
+        # always reported"), in any mode
+        for reason in sorted(by_reason & _BLOCKED_ENDS):
+            if not any(x.get("type") == "blocked" and x.get("reason") == reason for x in evs):
+                out.append("%s ends by path_reason %s without a blocked event of it on its leaf" % (where, reason))
     mlb = _strategy_knob(sc, ans, "branching", "max_label_branches", arm)
     msp = _strategy_knob(sc, ans, "branching", "max_splits_per_path", arm)
     msl = _strategy_knob(sc, ans, "branching", "min_successor_labels", arm)

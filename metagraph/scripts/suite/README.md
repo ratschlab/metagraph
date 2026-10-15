@@ -2599,6 +2599,17 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   extraction/time) and every stored and recorded stop pass. The unit test of the low-complexity note beside a later
   phase stated a selection stop without a predicate and an extension stop without a path search; it states them on
   requests that run those phases.
+- /traverse, an annotate walk's re-entry end needs its blocked event (the follow-up's R1, B2's sibling). In annotate
+  mode the walker ends a path at a re-entry by its path_reason alone (edge_reuse, edge_reuse_rc, rejoined_seed): no
+  lineage, so end_reasons is empty (walker.cpp, finish_path with the block's reason; the blocked event is pushed at
+  that step). The B2 rule keyed on end_reasons and never saw such an end, while _leaf_ends counts the path_reason
+  among the ends that explain a short walk: the recorded T-labels-0001 answer, its right arm cut at 50 bp with
+  path_reason edge_reuse, passed on both arms with its leaf's events absent or empty. A structural path_reason now
+  needs the leaf's events list (Missing without it, as a counted end), and a re-entry path_reason its blocked event at
+  the path's end (in any mode: "blocked continuations are always reported"). The cut with events [] fails on both
+  arms, the cut without the list fails on a direct arm (the MCP arm: see the events-list rule below), the cut that
+  states its blocked event and the recorded answer pass. A re-entry that states its blocked event is still accepted
+  where the truth has no exact minimum (in constrain mode too), the verification's remaining design limit.
 
 ### Validation (offline)
 - 451 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd). Each item's new or revised test fails on
