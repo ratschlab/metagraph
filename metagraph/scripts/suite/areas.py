@@ -2406,11 +2406,17 @@ def _real_repeats(ctx: Ctx) -> List[dict]:
                                 tags=["hard-region", "real-repeat"]))
         if walked < 2 and not rec.region and ln >= 60:
             ts = ctx.flank_for(rec, ctx.truth_at(rec, s0, 40), 250)
+            exp = [OK, INV, ex("walk_in_record", label_scope="record")]
+            if len(unit) <= 40 - K:
+                # a period of at most 40 - k bases repeats a seed k-mer one period on inside the 40 bp seed, so each
+                # arm's step into the repeat's next copy is a step into a seed node (rejoined_seed at 0 bp, SPEC
+                # §6.6): the re-entry the title claims, which a walk minimum of 0 bp leaves untested
+                # (P5-v4-content-02)
+                exp.append(ex("blocked_event", reason="rejoined_seed", max_at_bp=0))
             out.append(scenario(nid(), "N", "a 40 bp seed in %s's (%s)n repeat walked under its header: the record "
                                 "followed to where it re-enters or branches" % (rec.key, unit), "POST /traverse",
                                 traverse_request([_tseed(ts["window"], [rec.accession])], {"bounds": {"max_extension_bp": 200}}),
-                                ts, [OK, INV, ex("walk_in_record", label_scope="record")],
-                                tags=["hard-region", "real-repeat", "traverse"]))
+                                ts, exp, tags=["hard-region", "real-repeat", "traverse"]))
             walked += 1
     return out
 

@@ -476,5 +476,26 @@ class DeterminismPool(unittest.TestCase):
         self.assertFalse([d for d in m["scenarios"] if d["area"] == "D" and d.get("run_unique")])
 
 
+class RepeatReentry(unittest.TestCase):
+    """P5-v4-content-02: the real-repeat walks of a short period assert the re-entry their titles claim."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_reentry(self):
+        s = by_id(built({"N"}))
+        for sid in ("N-realrep-0003", "N-realrep-0006"):
+            sc = s[sid]
+            self.assertIn({"check": "blocked_event", "args": {"reason": "rejoined_seed", "max_at_bp": 0}},
+                          sc["expect"], sid)
+            arms = dict((side, {"segments": [{"id": 0, "events": []}]}) for side in ("left", "right"))
+            ans = checks.normalise_direct(200, {"results": [{"arms": arms}]})
+            self.assertEqual(checks.CHECKS["blocked_event"](sc, ans, {"reason": "rejoined_seed", "max_at_bp": 0},
+                                                            "direct-local")[0], "fail")
+            for side in arms:
+                arms[side]["segments"][0]["events"] = [{"type": "blocked", "reason": "rejoined_seed", "at_bp": 0}]
+            ans = checks.normalise_direct(200, {"results": [{"arms": arms}]})
+            self.assertEqual(checks.CHECKS["blocked_event"](sc, ans, {"reason": "rejoined_seed", "max_at_bp": 0},
+                                                            "direct-local")[0], "pass")
+
+
 if __name__ == "__main__":
     unittest.main()
