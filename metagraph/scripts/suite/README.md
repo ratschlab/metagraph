@@ -2633,10 +2633,13 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   recorded or stored verdict moves. The unit fixture walk_answer stated no list and states an empty one.
 
 ### Validation (offline)
-- 451 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd). Each item's new or revised test fails on
-  c11db9dd's checks.py: the structural-clamp rejection, the missing-events and missing-tree tests, the resolve stop's
-  pre-timer and premature-wall cases, the compound cut and the phase tests (the low-complexity-note test is a
-  correction and passes on both).
+- 454 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd, 451 before the follow-up). Each item's
+  new or revised test fails on c11db9dd's checks.py: the structural-clamp rejection, the missing-events and
+  missing-tree tests, the resolve stop's pre-timer and premature-wall cases, the compound cut and the phase tests (the
+  low-complexity-note test is a correction and passes on both). The follow-up's tests fail on the commit before
+  theirs: the annotate re-entry, the /resolve clamp, the events-list rule (the B2 and R1 tests' MCP invariants);
+  the test of the discovery max_contexts stop beside a predicate's pass covers a rule already there and fails on
+  c11db9dd and on a mutant without that rule, which no other test caught.
 - Copies of v3 (lane-s5e/reeval-S5e) and v4 (doc/v4-c11db9dd) re-evaluated after each item and at the head against
   c11db9dd (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, v4 with `--gate
   gate/policy_v4_rt_mcp.json`): 0 changes of outcome, outcome_runner, check outcome or check detail over 2,900 /
@@ -2648,3 +2651,9 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   verification's 50 B5 / B6 cases (legitimate compositions, single-stop controls, impossible neighbours, the full
   P-modes-0005 scenario with each phase edit): all as intended. Of v4's 123 MCP traverse answers with a graphlet,
   stripped of it, no check turns to fail (walk_in_record failed 100).
+- The follow-up (R1, the /resolve clamp, the events-list rule), re-evaluated after each item and against c11db9dd: 0
+  changes on v3 / v4, compare.reevaluated.json identical but for the table's path and the re-evaluation mark, the v4
+  gate the same 45 problems. The 82 stored /traverse documents (41 full, 41 graphlet; invariants on both arms) and the
+  175 pattern fixtures: unchanged, all /traverse documents pass. The verification's T-labels-0001 probe (the recorded
+  answer cut short by path_reason edge_reuse): with the leaf's events absent or empty it fails its whole scenario on
+  both arms; with its blocked event, and the recorded answer itself, it passes.
