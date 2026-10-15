@@ -318,7 +318,7 @@ class WalksDecisive(unittest.TestCase):
             v4 = by_id(json.load(f))
         order = [x["id"] for x in m["scenarios"]]
         bounds = lambda sid: s[sid]["request"]["strategy"]["bounds"]  # noqa: E731
-        short = {6: 2500, 12: 1000, 18: 5000, 36: 2500}
+        short = {6: 1000, 12: 500, 18: 5000, 36: 1000}     # cold first-call frontiers at about 30 s (VERIFY-V5A)
         long_twin = {6: 10000, 12: 10000, 18: 10000, 36: 10000}   # the v4 test's radius (the owner, 2026-10-15)
         for n in range(1, 37):
             sid = "T-walk-%04d" % n

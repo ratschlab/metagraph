@@ -399,16 +399,18 @@ def gen_T(ctx: Ctx) -> List[dict]:
     #   inconclusive under load).
     # - The four 10,000 bp column walks that never completed in 15 s in v3 or v4 are split. The gate's scenario keeps
     #   the id, asks for the host's cap, 60,000 ms (the MCP refuses above its preset's 15,000 ms, by design: a direct-
-    #   arm walk), and walks what the slowest cold direct rate observed covers in 30 s (v3 and v4: T-walk-0006 83 bp/s,
-    #   -0012 31, -0036 84 per arm; -0018 316 bp/s, 5,000 bp, so that it stays shorter than its twin). Its long twin
+    #   arm walk, whose direct-local repeat 0 is then the cold call), and walks what a cold first call reached in about
+    #   30 s (VERIFY-V5A: the frontiers of v3's and v4's successive 15 s calls chained, since v4's direct-local calls
+    #   ran after the MCP's had warmed the walk's start): 1,000 / 500 / 5,000 / 1,000 bp. Its long twin
     #   (T-longwalk-nnnn, right after it) is the v4 test: 10,000 bp, under the host's cap of 60,000 ms instead of v4's
     #   15,000, which stopped all 32 executions of v3 and v4 by time (the MCP refuses the cap above its preset, by
     #   design: a direct-arm benchmark); whether it completes depends on the load, so it is budget_stress, left out of
     #   the deploy gate (gate_policy's rule) and kept in the full suite. -0024 and -0030 end at stated branches within
     #   their first 4 kb and passed on every arm in 15 s.
-    SHORT = {6: 2500, 12: 1000, 18: 5000, 36: 2500}
+    SHORT = {6: 1000, 12: 500, 18: 5000, 36: 1000}
     LONG_TWIN = {6: 10000, 12: 10000, 18: 10000, 36: 10000}
-    SLOWEST_COLD_BP_S = {6: 83, 12: 31, 18: 316, 36: 84}
+    # the frontier v3's and v4's four successive 15 s calls of the 10 kb walk reached (60 s of cold reads, chained)
+    COLD_FRONTIER_60S = {6: (2731, 6398), 12: (1431, 1643), 18: (8147, 8748), 36: (2244, 2255)}
     HEADER_300 = (4, 14, 22)
     nid = _ids("T-walk")
     nid_long = _ids("T-longwalk")
@@ -444,12 +446,13 @@ def gen_T(ctx: Ctx) -> List[dict]:
                                 L, rec.key, direction, format(ext, ","), kind, long_id, format(LONG_TWIN[i + 1], ",")),
                             "POST /traverse", req, t, exp, timing_class="slow", tags=["walk", kind + "-label"]))
         big = LONG_TWIN[i + 1]
+        front = COLD_FRONTIER_60S[i + 1]
         tl = dict(ctx.flank_for(rec, tw, big + 50), budget_stress={
-            "reason": "a %s bp column-label walk under the load reads thousands of annotation rows at %d bp/s per arm "
-                      "at the slowest cold rate observed (v3 / v4), so whether it completes within the host's 60,000 "
-                      "ms depends on the load: no budget makes it decisive; %s, its window walked %s bp, is the gate's"
-                      % (format(big, ","), SLOWEST_COLD_BP_S[i + 1], sid, format(ext, ",")),
-            "short_twin": sid, "slowest_cold_bp_s": SLOWEST_COLD_BP_S[i + 1]})
+            "reason": "a %s bp column-label walk under the load: 60 s of cold reads (v3's and v4's four successive "
+                      "15 s calls, chained) reached %s / %s bp, so whether one 60,000 ms call completes depends on the "
+                      "load: no budget makes it decisive; %s, its window walked %s bp, is the gate's" % (
+                          format(big, ","), format(front[0], ","), format(front[1], ","), sid, format(ext, ",")),
+            "short_twin": sid, "cold_frontier_60s_v3_v4": list(front)})
         req = traverse_request([_tseed(t["window"], [lab])],
                                {"direction": direction, "bounds": {"max_extension_bp": big, "time_budget_ms": 60000}})
         out.append(scenario(long_id, "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label, under "
