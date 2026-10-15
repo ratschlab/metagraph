@@ -606,12 +606,13 @@ class Discoveries(unittest.TestCase):
         self.assertEqual([p for p in bm.validate([bad]) if "discover" in p], [])     # it names the by-design pair
         bad["mcp"]["by_design"] = ["resolve.job_path"]
         self.assertTrue(any("above the MCP's 1000" in p for p in bm.validate([bad])))
-        # the service's cap of 1,000 (v5 start): 150 names no case, 1,001 the pair
+        # the service's cap of 1,000 (v5 start): 150 names no case, 1,001 the host-answers case, 0 the refusal
         self.assertEqual([c for c in mk({"max_labels": 150, "kind": "column"})["mcp"]["by_design"]
                           if "discover_limit" in c], [])
         self.assertEqual([c for c in mk({"max_labels": 1001, "kind": "column"})["mcp"]["by_design"]
-                          if "discover_limit" in c],
-                         ["resolve.discover_limit_above_cap", "resolve.discover_limit_above_cap_host_answers"])
+                          if "discover_limit" in c], ["resolve.discover_limit_above_cap_host_answers"])
+        self.assertEqual([c for c in mk({"max_labels": 0, "kind": "column"})["mcp"]["by_design"]
+                          if "discover_limit" in c], ["resolve.discover_limit_above_cap"])
 
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_limits(self):
@@ -620,7 +621,10 @@ class Discoveries(unittest.TestCase):
         self.assertIn({"check": "resolve_discover_contains", "args": {"label": "511145"}}, e23["expect"])
         self.assertNotIn("split-case", e23["tags"])
         self.assertEqual(e25["request"]["discover"]["max_labels"], 1001)
-        self.assertIn("resolve.discover_limit_above_cap", e25["mcp"]["by_design"])
+        self.assertEqual([c for c in e25["mcp"]["by_design"] if "discover_limit" in c],
+                         ["resolve.discover_limit_above_cap_host_answers"])
+        self.assertEqual([c for c in s["R-edge-0022"]["mcp"]["by_design"] if "discover_limit" in c],
+                         ["resolve.discover_limit_above_cap"])
         for sid in ("R-discover-0001", "R-discover-0004"):
             d = s[sid]["request"]["discover"]
             self.assertEqual(d["max_labels"], s[sid]["truth"]["discover_v4"]["full_support"] + 1, sid)

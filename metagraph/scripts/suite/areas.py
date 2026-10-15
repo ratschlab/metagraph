@@ -391,7 +391,7 @@ def gen_R(ctx: Ctx) -> List[dict]:
                         "POST /resolve", resolve_request(t["window"], labels=[eco.column], time_budget_ms=400), t,
                         [OK, INV, ex("budget_respected")], tags=["edge", "split-case", "budget", "machine-dependent"]))
     # above the service's cap: the MCP refuses it (invalid_arguments), the host, which has no cap, answers (the table's
-    # resolve.discover_limit_above_cap and resolve.discover_limit_above_cap_host_answers)
+    # resolve.discover_limit_above_cap_host_answers)
     out.append(scenario(nid(), "R", "discover.max_labels 1,001 (above the service's cap of 1,000): the host answers, "
                         "the MCP refuses", "POST /resolve",
                         resolve_request(t["window"][:60], discover={"max_labels": SERVICE_DISCOVER_MAX_LABELS + 1,

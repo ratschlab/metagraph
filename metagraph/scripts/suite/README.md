@@ -2964,7 +2964,7 @@ Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_desig
 
 `build_manifest.py` builds manifest version 5 (`suite_v5.json` / `suite_smoke_v5.json`, smoke tag `smoke-v5`); the
 frozen v1-v4 stay (1387455f rebuilds v4 byte for byte from the record cache it was built from). Phase A builds v5
-dry (lane V5's scratch, content_sha256 355f1544..., relations_sha256 39660cfa..., with the owner's amendments and
+dry (lane V5's scratch, content_sha256 a9dd5534..., relations_sha256 39660cfa..., with the owner's amendments and
 VERIFY-V5A's fixes of 2026-10-15); run_suite.sh keeps v4 as its default until the freeze (Phase B: freeze, smoke,
 default, the gate policy). What changed, by finding:
 
@@ -3047,8 +3047,10 @@ default, the gate policy). What changed, by finding:
 - The service's discovery cap is 1,000 from the v5 start (50 when none is given; the host has none): every discovery
   names `max_labels` (at most 1,000 but the by-design pair) and `kind` on both arms, and the builder refuses another
   (`SERVICE_DISCOVER_MAX_LABELS`). R-edge-0023 (150) is answered on every arm (the source listed or in a full-support
-  tie); R-edge-0025 (1,001) is refused by the MCP and answered by the host (resolve.discover_limit_above_cap /
-  _host_answers, the table's new ids). R-discover-0001 / -0004 ask v4's full-support tie plus one (9, 3), so the
+  tie); R-edge-0025 (1,001) is refused by the MCP and answered by the host
+  (resolve.discover_limit_above_cap_host_answers); R-edge-0022 (0), refused on both sides, names
+  resolve.discover_limit_above_cap (the table's id for the refusal below 1, resolve.discover_limit_above_100 its alias
+  for v1-v4). The service states its cap at backends.<db>.resolve.discover.max_labels of /traverse/capabilities. R-discover-0001 / -0004 ask v4's full-support tie plus one (9, 3), so the
   source must be listed.
 - **SPEC request paths not exercised, by decision** (each one stays out of the manifest for its stated reason):
   - /resolve `select` (policies, `merge_overlapping`, `max_labels_per_seed`), `run_format rle`, `min_block_kmers` /

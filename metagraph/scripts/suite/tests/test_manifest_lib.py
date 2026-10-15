@@ -235,10 +235,12 @@ class V4Builder(unittest.TestCase):
         self.assertIn("resolve.time_budget_above_reserve_below_minimum", r(labels=["562"], time_budget_ms=300))
         both = r(labels=["562"], time_budget_ms=500)
         self.assertFalse({"resolve.time_budget_below_minimum", "resolve.time_budget_above_reserve_below_minimum"} & set(both))
-        self.assertIn("resolve.discover_limit_above_100", r(discover={"max_labels": 0}))
-        # the service's discovery cap is 1,000 since the v5 start (it was 100): above it the pair of the table
-        self.assertIn("resolve.discover_limit_above_cap_host_answers", r(discover={"max_labels": 1001}))
-        self.assertIn("resolve.discover_limit_above_cap", r(discover={"max_labels": 1001}))
+        # the service's discovery cap is 1,000 since the v5 start (it was 100): below 1 both sides refuse, above the
+        # cap the service refuses and the host answers
+        self.assertEqual([i for i in r(discover={"max_labels": 0}) if i.startswith("resolve.discover_limit")],
+                         ["resolve.discover_limit_above_cap"])
+        self.assertEqual([i for i in r(discover={"max_labels": 1001}) if i.startswith("resolve.discover_limit")],
+                         ["resolve.discover_limit_above_cap_host_answers"])
         self.assertFalse([i for i in r(discover={"max_labels": 1000}) if i.startswith("resolve.discover_limit")])
         # G19: an empty seed list
         req = {"seeds": [], "strategy": ml.traverse_request([])["strategy"]}
