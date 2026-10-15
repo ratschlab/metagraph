@@ -3321,9 +3321,10 @@ integration S8i stage 2 and verified (VERIFY-V5A "Stage 2", VERIFY-G "Stage 2" a
 
 ## Small synthetic-graph oracle (lane O, phase 1, 2026-10-15)
 
-The staging suite checks that known examples are found; `oracle/` checks that **every** answer is found,
-none is duplicated and every count is exact (GPT's review of 2026-10-14, "What is missing" items 2-3 and the
-P1 row "independent small-graph oracle"). Design: `ORACLE-DESIGN.md` in the lane directory
+The staging suite checks that known examples are found; `oracle/` checks that **every** answer is found and
+every count is exact. On `/pattern` no result may be duplicated. On `/traverse`, since the verification's fixes
+(H1), no segment, leaf, run or event may be listed twice. (GPT's review of 2026-10-14, "What is missing" items
+2-3 and the P1 row "independent small-graph oracle".) Design: `ORACLE-DESIGN.md` in the lane directory
 (`~/.cache/metagraph-traverse-plans/2026-10-15/lane-oracle/`).
 
 ### Files
@@ -3391,7 +3392,9 @@ build tree's HEAD.
   (`runs/final2_breadth_seed2` … `6`): 8,528 requests, 32,988 answers over the nine configurations; 30,116
   answers equal the oracle (complete sets, exact counts, order, labels and placements, `/resolve` runs and
   candidates), 2,872 budget-probe answers are inconclusive on completeness with every invariant passing, 0
-  disagree. 314,662 corruptions of the passing answers (34 kinds), every one caught.
+  disagree. 314,662 corruptions of the passing answers, of the stated mutation set (34 kinds), every one caught.
+  That is not every possible one-property corruption: the verification found corruption classes outside the
+  set that the comparison then missed. They were closed afterwards (see "After the verification").
 - No candidate engine defect in phase 1's scope. The disagreements of the development runs were all the oracle's
   and are fixed with regressions: the two readings above (`seq_id`, trace); U per level with substitutions; U
   of the orientation a `max_steps` stop left complete beside an `at_least` total.
@@ -3426,9 +3429,15 @@ Readings and notes:
   `superseded` are `label_lost`; `minority`, `below_min_labels` and `split_limit` are `branch`; a skipped
   hairpin is `dead_end`. The `label_end` event states 6.7's reason as its qualifier, and a switched source has
   none. The oracle compares runs against the served enum and events against 6.7.
-- **A skipped hairpin before `rejoined_seed`.** 6.6 ranks `rejoined_seed > edge_reuse_rc > edge_reuse` and
-  does not rank `hairpin`. At even k on PRIMARY, a step into a seed node that is a palindromic k-mer is served
-  as a hairpin. The oracle follows that, and the SPEC could say so.
+- **Two hairpin readings, fitted to the engine at SPEC gaps** (both in SPEC-NOTES.md in the lane directory):
+  - *A skipped hairpin before `rejoined_seed`.* 6.6 ranks `rejoined_seed > edge_reuse_rc > edge_reuse` and does
+    not rank `hairpin`. At even k on PRIMARY, a step into a seed node that is a palindromic k-mer is served as a
+    hairpin. The oracle decides a skipped hairpin first, on every graph mode.
+  - *The branch count on a followed hairpin step.* 13 I3 note 11 ("never counts toward ambiguity, so the split
+    it causes is a divergence") can be read as "the hairpin entry never counts a branch", against 6.4's "every
+    derived entry gets branches + 1". The oracle decides ambiguity over the non-hairpin successors. When a
+    source is ambiguous, every entry derived from it gets branches + 1, the hairpin's included. The first of
+    two disagreement rounds was SPEC-based (88ac1337); this second one was fitted to the engine (2618936f).
 - **Radius.** `bounds.max_extension_bp: 0` is refused (400, range [1, …]), which section 5 does not state.
 - **Trace with merging** is refused (400), as SPEC 13 item 9 states.
 
@@ -3439,7 +3448,8 @@ Readings and notes:
   - 39,441 answers equal the oracle; 4,172 are inconclusive (budget and cap probes, `merge` runs) with every
     invariant passing; 0 disagree.
   - `/traverse` alone: 9,305 seed results and 1,320 tree/summary comparisons.
-  - 405,728 corruptions, 91,066 of them of `/traverse` answers, every one caught.
+  - 405,728 corruptions of the stated mutation set, 91,066 of them of `/traverse` answers, every one caught.
+    Not every possible corruption: the verification's injections found classes the set lacked (below).
 - **No candidate engine defect in phase 2's scope.** The disagreements of the development and first final runs
   were all the oracle's, each fixed with a regression test:
   - followed hairpin steps were not recorded as events;
@@ -3448,3 +3458,29 @@ Readings and notes:
   - a followed hairpin step never counts toward ambiguity (SPEC 13, note 11), but an ambiguous label counts the
     branch on that step too.
 - The suite's offline tests: 512, all passing (`python3 -m unittest discover -s tests`, about 6 minutes).
+
+### After the verification of 2026-10-15
+
+The verification (Opus; the lane directory's `verify/VERIFY-ORACLE.md`) found the oracle independent and its
+"0 disagreements" reproducible on the real 81c620ef build. It also found five places where a wrong engine answer
+would pass, and gaps in coverage and wording. Fixed, each with a regression test that fails without it:
+- **H1:** `/traverse` is compared with multiplicity and order (a run, leaf, event or subtree listed twice;
+  events sorted by `at_bp`; split branches in character order).
+- **H2:** label ends under a finite cost follow 6.7 with 13 I3 note 3. The re-minimisation after a branch
+  exclusion honours `switch_on` and the stay. Extras unreachable within the budget are a predicted 400. The
+  probes T1-T4 are pinned with their 81c620ef answers.
+- **H3:** on a graph without its mask, a completed count is exact or bounds; a withhold on U needs U >
+  `max_contexts`, with the `threshold_upper_bound` note exactly when `lower` ≤ `max_contexts`.
+- **H4:** newly compared: `needed_budget`, every switch's source, target and cost, `row` on CANONICAL and
+  PRIMARY, and the PRIMARY `partial` cut against its ample twin request (M5).
+- **H5:** a merge arm that merged nothing is held to the keep walker strictly; a merge states its
+  `reconverge` events.
+- **M1:** provenance (the binary's sha256 and build HEAD in every report).
+- **M2:** `/resolve` trace queries that tell trace from presence in every seed.
+- **M3:** varied constant-cost `/traverse` requests in every seed.
+- **L1, L2:** sticky later patterns state unknown counts and zero work; the note rule above.
+
+Still judged weakly or not at all:
+- **L3:** the `lower` of a bounds count, held only to ≤ truth.
+- **L4:** the column-coordinate layout of records holding an N, untested; no fixture chain crosses records.
+- **Merge arms that did merge:** judged on their invariants. A handful per run.
