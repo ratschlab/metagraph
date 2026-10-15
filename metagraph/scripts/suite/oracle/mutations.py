@@ -382,6 +382,47 @@ def mutations_for_traverse(request, answer, position, walker=None):
                             v.remove(moved[0])
                     yield f'{arm}:merge_via_wrong_parent', (f'{p}.labels_via_parent',), a
                 break
+            # the costlier entry kept at a merge (the verifier's G13): a run the merge closed and
+            # its label's cheaper continuing run trade places, labels_via_parent following
+            runs_ = aj.get('runs') or []
+            done = False
+            for si, s in enumerate(segs):
+                ps, mm = s.get('parents') or [], s.get('from_bp', 0)
+                if len(ps) < 2 or done:
+                    continue
+                for ci, r in enumerate(runs_):
+                    if r.get('end_reason') is not None or r.get('segment') not in ps or \
+                            r.get('to_bp') != mm:
+                        continue
+                    cont = [j for j, c in enumerate(runs_) if j != ci
+                            and c.get('label') == r.get('label') and c.get('segment') not in ps
+                            and c.get('from_bp', 0) < mm <= c.get('to_bp', 0)
+                            and float(c.get('loss', 0.0)) < float(r.get('loss', 0.0))]
+                    if not cont:
+                        continue
+                    lab = r.get('label')
+                    via0 = s.get('labels_via_parent') or []
+                    came = next((j for j, v in enumerate(via0) if lab in v), None)
+                    if len(via0) != len(ps) or came is None:
+                        continue
+                    a, res2 = mutant()
+                    rr = res2['arms'][arm]['runs']
+                    x, y = rr[ci], rr[cont[0]]
+                    seg_y, to_y, end_y = y.get('segment'), y.get('to_bp'), y.get('end_reason')
+                    # the cheaper run closed on the parent it came through, the costlier one
+                    # continuing in its place, and the label entering by the costlier one's parent
+                    y.update({'segment': ps[came], 'to_bp': mm, 'route_bp': 0})
+                    y.pop('end_reason', None)
+                    x.update({'segment': seg_y, 'to_bp': to_y, 'route_bp': 0})
+                    if end_y is not None:
+                        x['end_reason'] = end_y
+                    via = res2['arms'][arm]['segments'][si]['labels_via_parent']
+                    via[came].remove(lab)
+                    k = ps.index(r['segment'])
+                    via[k] = sorted(via[k] + [lab])
+                    yield f'{arm}:merge_costlier_entry', (f'{p}.merge_min_entry',), a
+                    done = True
+                    break
             # a run ended before the first merge, its reason changed (the keep walker's state)
             m0 = min(s.get('from_bp', 0) for s in segs if len(s.get('parents') or []) > 1)
             early = [i for i, x in enumerate(aj.get('runs') or [])

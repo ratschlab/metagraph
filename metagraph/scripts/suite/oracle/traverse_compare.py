@@ -440,8 +440,11 @@ def _merge_structure(checks, prefix, view, arm_json, res, w, seed, arm, names, s
     - in constrain mode and without a memory budget (7.1's exception, tree and full detail under
       bounds.max_memory_mb), parents[0] brings the most labels (its labels_at_end); a tie keeps
       the arrival order, which the answer does not show, so ties are not judged;
-    - each leaf label's own route (through the parents its lineage entered by) is a keep walk, and
-      the label holds every node of it its steps entered (all of it for a seed run)."""
+    - each run's own route (through the parents its lineage entered by) is a keep walk, and the
+      label holds every node of it its steps entered (all of it for a seed run); a switched-in
+      run whose source label is in no parent's list at an earlier merge (a lineage switched more
+      than once: the JSON names the source label, not its run) is judged from that merge on;
+    - a run the merge closed is not cheaper than its label's continuing run (6.5's min entry)."""
     segs = view.segs
     merged = [s for s in segs.values() if len(s.get('parents') or []) > 1]
     parents_bad, via_bad, first_bad = [], [], []
@@ -473,53 +476,92 @@ def _merge_structure(checks, prefix, view, arm_json, res, w, seed, arm, names, s
     runs = arm_json.get('runs') or []
     route_bad = []
     for pth in arm_json.get('paths') or []:
-        chain = pth.get('segments') or []
-        if not chain or chain[-1] not in view.walk:
-            continue
         for e in pth.get('end_labels') or []:
             ri = e.get('run')
             if not isinstance(ri, int) or not 0 <= ri < len(runs):
                 route_bad.append(('end label without its run', pth.get('id'), e))
+    # every run, not only a leaf's end labels (verification round 3): a label crossing a merge
+    # and ending before a leaf has an own route too
+    kept_index = {}
+
+    def kept(m):
+        if m not in kept_index:
+            kept_index[m] = {(len(y), y[m:], w.walk_node(seed, arm, y, m))
+                             for y in res.walks if len(y) >= m}
+        return kept_index[m]
+    for ri, run in enumerate(runs):
+        seg, to = run.get('segment'), run.get('to_bp', 0)
+        if seg not in view.walk or to > len(view.walk[seg]):
+            continue                      # ArmView's shape check reports it
+        cur, route, stop, lost = seg, view.walk[seg][:to], 0, None
+        while segs[cur].get('parents') or []:
+            s = segs[cur]
+            ps = s['parents']
+            if len(ps) == 1:
+                cur = ps[0]
                 continue
-            run = runs[ri]
-            cur, route, lost = chain[-1], view.walk[chain[-1]], None
-            while (segs[cur].get('parents') or []) and lost is None:
-                s = segs[cur]
-                ps = s['parents']
-                if len(ps) == 1:
-                    cur = ps[0]
-                    continue
-                m = s.get('from_bp', 0)
-                lab, certain = _lineage_label(run, m)
-                via = s.get('labels_via_parent') or []
-                idx = next((j for j, v in enumerate(via) if lab in v), None)
-                if idx is None or idx >= len(ps) or ps[idx] not in view.walk:
-                    # a lineage switched more than once before this merge: not judged
-                    lost = None if not certain else \
-                        ('the lineage enters through no parent', s['id'], lab)
-                    route = None
-                    break
-                route = view.walk[ps[idx]][:m] + route[m:]
-                cur = ps[idx]
-            label = w.label(names.get(e.get('label')))
-            if lost is not None:
-                route_bad.append((pth.get('id'), e.get('label')) + lost)
-                continue
-            if route is None:
-                checks.mark(f'{prefix}.own_routes.unjudged', INCONCLUSIVE,
-                            note='a lineage switched more than once before a merge: its own '
-                                 'route is not judged')
-                continue
-            first = 0 if run.get('entered_by') != 'switch' else run.get('from_bp', 0) + 1
-            if route not in res.walks:
-                route_bad.append(('own route not a keep walk', pth.get('id'), names.get(e.get('label')),
-                                  route))
-            elif label is None or any(not w.holds(label, w.walk_node(seed, arm, route, j))
-                                      for j in range(first, len(route) + 1)):
-                route_bad.append(('the label does not hold its own route', pth.get('id'),
-                                  names.get(e.get('label')), route))
+            m = s.get('from_bp', 0)
+            lab, certain = _lineage_label(run, m)
+            via = s.get('labels_via_parent') or []
+            idx = next((j for j, v in enumerate(via) if lab in v), None)
+            if idx is None or idx >= len(ps) or ps[idx] not in view.walk:
+                if certain:
+                    lost = ('the lineage enters through no parent', s['id'], lab)
+                else:
+                    # a switched-in run's lineage before its switch, through a merge its
+                    # source label did not cross unswitched: judged from this merge on
+                    stop = m
+                break
+            route = view.walk[ps[idx]][:m] + route[m:]
+            cur = ps[idx]
+        name = names.get(run.get('label'))
+        if lost is not None:
+            route_bad.append((ri, name) + lost)
+            continue
+        if stop == 0 and route not in res.walks or stop and \
+                (len(route), route[stop:], w.walk_node(seed, arm, route, stop)) not in kept(stop):
+            route_bad.append(('own route not a keep walk', ri, name, route, stop))
+            continue
+        # a run covers the nodes its steps entered (6.2), a seed run its seed node too; the nodes
+        # after a merge are the same whichever parent led into it
+        label = w.label(name) if name is not None else None
+        first = 0 if run.get('entered_by') != 'switch' else run.get('from_bp', 0) + 1
+        if label is None or any(not w.holds(label, w.walk_node(seed, arm, route, j))
+                                for j in range(first, to + 1)):
+            route_bad.append(('the label does not hold its own route', ri, name, route))
     checks.add(f'{prefix}.own_routes', not route_bad,
-               'each leaf label\'s own route a keep walk the label holds', route_bad[:10])
+               'each run\'s own route (through the parents its lineage entered by) a keep walk the '
+               'label holds', route_bad[:10])
+    # SPEC 6.5 keeps the min (loss, branches) entry of a label on both parents: a run the merge
+    # closed (no end reason, on a parent, ending at the merge) is never cheaper than its label's
+    # run continuing through the merged segment. A run's loss is constant along it, so the loss
+    # part is exact; branches at the merge are not stated (verification round 3, R3.1)
+    kids = {}
+    for s in segs.values():
+        for q in s.get('parents') or []:
+            kids.setdefault(q, []).append(s['id'])
+    closed_bad = []
+    for s in merged:
+        ps, m = s['parents'], s.get('from_bp', 0)
+        below, stack = set(), [s['id']]
+        while stack:
+            x = stack.pop()
+            if x not in below:
+                below.add(x)
+                stack += kids.get(x, [])
+        for r in runs:
+            if r.get('end_reason') is not None or r.get('segment') not in ps or \
+                    r.get('to_bp') != m:
+                continue
+            cont = [c for c in runs if c is not r and c.get('label') == r.get('label')
+                    and c.get('segment') in below and c.get('from_bp', 0) < m <= c.get('to_bp', 0)]
+            if not cont or min(float(c.get('loss', 0.0)) for c in cont) > \
+                    float(r.get('loss', 0.0)) + 1e-9:
+                closed_bad.append((s['id'], names.get(r.get('label')), r.get('loss'),
+                                   [c.get('loss') for c in cont]))
+    checks.add(f'{prefix}.merge_min_entry', not closed_bad,
+               'a run a merge closed is not cheaper than its label\'s continuing run',
+               closed_bad[:10])
 
 
 def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name, names=None,

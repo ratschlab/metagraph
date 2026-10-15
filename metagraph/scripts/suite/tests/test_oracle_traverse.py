@@ -631,7 +631,7 @@ class MergedArmAnswers(unittest.TestCase):
                 kinds.add(name.split(':')[1])
         self.assertEqual(kinds, {'merge_segment_base', 'merge_minority_first',
                                  'merge_via_wrong_parent', 'merge_early_reason',
-                                 'merge_run_label'})
+                                 'merge_run_label', 'merge_costlier_entry'})
 
 
 class ChainRequests(unittest.TestCase):
@@ -659,3 +659,46 @@ class ChainRequests(unittest.TestCase):
                     n += sum(1 for c in res.claims if c[2] == 'loss_budget')
                 self.assertGreater(n, 0, (cfg, seed))
                 self.assertGreater(len(values), 1, (cfg, seed))
+
+
+class MergeEntries(unittest.TestCase):
+    """Verification round 3 (R3.1): the entry a merge keeps. SPEC 6.5 keeps the min (loss,
+    branches) entry of a label on both parents. T-canonical_k10-0076 right: both parents carry
+    c_alpha and c_eps at their ends (each switched at 22); c_alpha (0) came through segment 1 and
+    c_eps (1) through segment 2 with their loss-0 seed lineages, and the loss-1 switched entries
+    were closed by the merge at 23."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(MERGE_DATA) as f:
+            cls.item = {x['id']: x for x in json.load(f)['answers']}['T-canonical_k10-0076']
+
+    def failed(self, answer):
+        out = TC.compare_traverse(config_walker('canonical_k10'), self.item['request'], 200, answer)
+        return {x['check'] for _, c in out for x in c.failed()}
+
+    def test_as_served(self):
+        self.assertEqual(set(), self.failed(self.item['answer']))
+
+    def test_g13_the_costlier_entry_kept_at_the_merge_fails(self):
+        """The verifier's G13: c_eps's loss-1 switched entry from the first parent kept instead of
+        its loss-0 seed entry from the second, runs and labels_via_parent changed consistently."""
+        a = copy.deepcopy(self.item['answer'])
+        aj = a['results'][0]['arms']['right']
+        r1, r2 = aj['runs'][1], aj['runs'][2]
+        r1.update({'segment': 2, 'to_bp': 23, 'route_bp': 0})
+        r1.pop('end_reason')
+        r2.update({'segment': 3, 'to_bp': 35, 'end_reason': 'label_lost', 'route_bp': 0})
+        next(s for s in aj['segments'] if len(s['parents']) > 1)['labels_via_parent'] = [[0, 1], []]
+        self.assertIn('traverse.right.merge_min_entry', self.failed(a))
+
+    def test_f3_a_label_via_a_parent_that_carries_it_only_switched_fails(self):
+        """The verifier's F3 on 0076: every label said to enter by the first parent. Its head
+        holds c_eps (switched in), so labels_via_parent is consistent; but c_eps's continuing seed
+        run, which ends label_lost at 35 before any leaf, has no route through that parent."""
+        a = copy.deepcopy(self.item['answer'])
+        s = next(s for s in a['results'][0]['arms']['right']['segments'] if len(s['parents']) > 1)
+        s['labels_via_parent'] = [[0, 1], []]
+        failed = self.failed(a)
+        self.assertNotIn('traverse.right.labels_via_parent', failed)
+        self.assertIn('traverse.right.own_routes', failed)
