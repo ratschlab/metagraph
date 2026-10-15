@@ -519,3 +519,85 @@ class MergedArmAnswers(unittest.TestCase):
         a = copy.deepcopy(item['answer'])
         a['results'][0]['arms']['right']['runs'][i]['label'] = other
         self.assertIn('traverse.right.displayed_support', self.failed(item, a))
+
+    def merged_arm(self, rid):
+        item = self.items[rid]
+        res = item['answer']['results'][0]
+        arm = next(a for a, aj in res['arms'].items()
+                   if any(len(s.get('parents') or []) > 1 for s in aj['segments']))
+        return item, arm
+
+    def test_r2a_a_display_through_first_parents_is_sound(self):
+        """T-canonical_k10-0051 left, T-canonical_k10-0046 right, T-canonical_k11-0033 left: the
+        leaf's only label entered the merge through the second parent and the leaf is displayed
+        through the first (SPEC 7.1); every merge-structure rule holds."""
+        for rid in ('T-canonical_k10-0051', 'T-canonical_k10-0046', 'T-canonical_k11-0033'):
+            item, arm = self.merged_arm(rid)
+            failed = self.failed(item)
+            self.assertEqual(failed, set(), rid)
+
+    def test_r2a_f1_a_display_through_the_minority_parent_fails(self):
+        """Parents swapped where the first brought more labels (0051: 2 against 1): a display 7.1
+        forbids. On the 1-1 ties of 0046 and 0033 the swap is legal (arrival order, not shown)."""
+        item, arm = self.merged_arm('T-canonical_k10-0051')
+        a = copy.deepcopy(item['answer'])
+        for s in a['results'][0]['arms'][arm]['segments']:
+            if len(s.get('parents') or []) > 1:
+                s['parents'] = s['parents'][::-1]
+                s['labels_via_parent'] = s['labels_via_parent'][::-1]
+                for e in s['events']:
+                    if e['type'] == 'reconverge':
+                        e['segments'] = e['segments'][::-1]
+        self.assertIn(f'traverse.{arm}.first_parent', self.failed(item, a))
+        for rid in ('T-canonical_k10-0046', 'T-canonical_k11-0033'):
+            item, arm = self.merged_arm(rid)
+            a = copy.deepcopy(item['answer'])
+            for s in a['results'][0]['arms'][arm]['segments']:
+                if len(s.get('parents') or []) > 1:
+                    s['parents'] = s['parents'][::-1]
+                    s['labels_via_parent'] = s['labels_via_parent'][::-1]
+            self.assertNotIn(f'traverse.{arm}.first_parent', self.failed(item, a), rid)
+
+    def test_r2a_f3_a_label_entering_by_a_parent_that_never_carried_it_fails(self):
+        """Every label said to enter by the first parent: a lineage with no route through the
+        parent it is said to come by (SPEC 6.5)."""
+        for rid in ('T-canonical_k10-0051', 'T-canonical_k10-0046', 'T-canonical_k11-0033'):
+            item, arm = self.merged_arm(rid)
+            a = copy.deepcopy(item['answer'])
+            for s in a['results'][0]['arms'][arm]['segments']:
+                via = s.get('labels_via_parent') or []
+                if len(via) > 1 and via[1]:
+                    via[0], via[1] = sorted(via[0] + via[1]), []
+            failed = self.failed(item, a)
+            self.assertIn(f'traverse.{arm}.labels_via_parent', failed, rid)
+            self.assertIn(f'traverse.{arm}.own_routes', failed, rid)
+
+    def test_r2a_a_changed_base_before_the_merge_fails(self):
+        """A base of the first parent changed: the display before the merge is no keep walk."""
+        for rid in ('T-canonical_k10-0051', 'T-canonical_k10-0046', 'T-canonical_k11-0033'):
+            item, arm = self.merged_arm(rid)
+            a = copy.deepcopy(item['answer'])
+            segs = a['results'][0]['arms'][arm]['segments']
+            first = next(s for s in segs if len(s.get('parents') or []) > 1)['parents'][0]
+            s = next(s for s in segs if s['id'] == first)
+            q = s['sequence']
+            i = 1 if arm == 'right' else len(q) - 2
+            s['sequence'] = q[:i] + ('A' if q[i] != 'A' else 'C') + q[i + 1:]
+            self.assertIn(f'traverse.{arm}.sound', self.failed(item, a), rid)
+
+    def test_r2a_the_graph_check_is_real(self):
+        """graph_walk: a k-mer outside the index, or an edge used twice, is no graph walk (the
+        triage script's walk_node() is not None held for every string)."""
+        item, arm = self.merged_arm('T-canonical_k10-0046')
+        w = config_walker(item['config'])
+        seed = item['request']['seeds'][0]['sequence']
+        res = item['answer']['results'][0]
+        view = TC.ArmView(res['arms'][arm], arm, {})
+        walk = max(view.walk.values(), key=len)
+        self.assertTrue(TC.graph_walk(w, seed, arm, walk))
+        bad = walk[:5] + ('A' if walk[5] != 'A' else 'C') + walk[6:]
+        self.assertFalse(TC.graph_walk(w, seed, arm, bad))
+        # a homopolymer on BASIC: the walk AA from A^11 uses the edge A^12 twice
+        hw = T.Walker(O.Index([fixtures.Record('c_h', 0, 'h', 'A' * 30)], 11, 'basic'))
+        self.assertTrue(TC.graph_walk(hw, 'A' * 11, 'right', 'A'))
+        self.assertFalse(TC.graph_walk(hw, 'A' * 11, 'right', 'AA'))

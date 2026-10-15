@@ -223,7 +223,7 @@ def compare_arm(checks, w, seed, arm, arm_json, names, strategy, labels, extra, 
             _compare_constrain(checks, prefix, res, view, complete, ctb)
         else:
             _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm,
-                              {l.name: l for l in list(labels) + list(extra)})
+                              {l.name: l for l in list(labels) + list(extra)}, names, strategy)
     return view
 
 
@@ -340,16 +340,172 @@ def _scope_limitation(checks, prefix, arm_json, merges):
                f'a scope limitation observing {merges} merges', limits.get('scope'))
 
 
-def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name):
+def graph_walk(w, seed, arm, walk):
+    """A walk of the index's graph: every node a k-mer of the index, no edge (SPEC 6.6's identity)
+    used twice."""
+    nodes = [w.walk_node(seed, arm, walk, j) for j in range(len(walk) + 1)]
+    if any(x not in w.kmers for x in nodes):
+        return False
+    keys = [w.edge_key(u + v[-1] if arm == 'right' else v[0] + u)
+            for u, v in zip(nodes, nodes[1:])]
+    return len(keys) == len(set(keys))
+
+
+def _chain(view, sid):
+    """The first-parent chain of segment |sid|, root first."""
+    out = [sid]
+    while (view.segs[out[-1]].get('parents') or []) and \
+            view.segs[out[-1]]['parents'][0] in view.segs and len(out) <= len(view.segs):
+        out.append(view.segs[out[-1]]['parents'][0])
+    return out[::-1]
+
+
+def _display_problems(view, res, w, seed, arm):
+    """SPEC 7.1: the displayed walk follows first parents. A displayed walk that is not a keep walk
+    must be a graph walk whose own latest merge m (on its first-parent chain, before its end) it
+    passes as a first-parent display of a keep walk: some keep walk of its length equals it from m
+    on and is at the same node at m. Its part before m is itself a displayed walk, judged at its
+    own latest merge, so a walk with no merge before its end must be a keep walk (VERIFY-ORACLE.md
+    R2.1 (a))."""
+    chains = {sid: _chain(view, sid) for sid in view.walk}
+    index = {}
+
+    def kept(m):
+        if m not in index:
+            index[m] = {(len(y), y[m:], w.walk_node(seed, arm, y, m))
+                        for y in res.walks if len(y) >= m}
+        return index[m]
+    bad = []
+    for x in sorted(view.all_walks() - res.walks, key=len):
+        sid = next((s for s, wk in view.walk.items() if wk.startswith(x)), None)
+        merges = [view.segs[c]['from_bp'] for c in chains.get(sid, [])
+                  if len(view.segs[c].get('parents') or []) > 1
+                  and view.segs[c].get('from_bp', 0) < len(x)]
+        if not merges:
+            bad.append(('no merge before it and no keep walk', x))
+        elif not graph_walk(w, seed, arm, x):
+            bad.append(('not a graph walk', x))
+        else:
+            m = max(merges)
+            if (len(x), x[m:], w.walk_node(seed, arm, x, m)) not in kept(m):
+                bad.append((f'no keep walk equal from its merge at {m}', x))
+        if len(bad) >= 10:
+            break
+    return bad
+
+
+def _lineage_label(run, m):
+    """(label id, certain) of a run's lineage at the node entered by step m: the run's own label
+    when its steps entered that node (from_bp < m) or it is the seed's; else the switch source's,
+    which is certain only if the source's lineage reached that node unswitched -- the JSON names a
+    run's source label, not the source's run (MGT's prev_run), so that is not known here."""
+    if run.get('entered_by') != 'switch' or run.get('from_bp', 0) < m:
+        return run.get('label'), True
+    return run.get('from'), False
+
+
+def _merge_structure(checks, prefix, view, arm_json, res, w, seed, arm, names, strategy):
+    """What SPEC 6.5 and 7.1 state of a merge (VERIFY-ORACLE.md R2.1 (a)):
+    - its parents end at one node, at its from_bp;
+    - labels_via_parent partitions its labels, each listed under a parent whose labels_at_end
+      holds it ("each label still enters through exactly one parent", 6.5);
+    - in constrain mode and without a memory budget (7.1's exception, tree and full detail under
+      bounds.max_memory_mb), parents[0] brings the most labels (its labels_at_end); a tie keeps
+      the arrival order, which the answer does not show, so ties are not judged;
+    - each leaf label's own route (through the parents its lineage entered by) is a keep walk, and
+      the label holds every node of it its steps entered (all of it for a seed run)."""
+    segs = view.segs
+    merged = [s for s in segs.values() if len(s.get('parents') or []) > 1]
+    parents_bad, via_bad, first_bad = [], [], []
+    detail = (strategy.get('output') or {}).get('detail', 'full')
+    budget = 'max_memory_mb' in (strategy.get('bounds') or {}) and detail in ('tree', 'full')
+    for s in merged:
+        ps, m = s['parents'], s.get('from_bp', 0)
+        if any(p not in view.walk or len(view.walk[p]) != m for p in ps) or \
+                len({w.walk_node(seed, arm, view.walk[p], m) for p in ps}) != 1:
+            parents_bad.append((s['id'], ps, m))
+            continue
+        via = s.get('labels_via_parent') or []
+        flat = [x for v in via for x in v]
+        if len(via) != len(ps) or len(flat) != len(set(flat)) or \
+                set(flat) != set(s.get('labels') or []) or \
+                any(not set(v) <= set(segs[p].get('labels_at_end') or []) for p, v in zip(ps, via)):
+            via_bad.append((s['id'], ps, via, s.get('labels'),
+                            [segs[p].get('labels_at_end') for p in ps]))
+        heads = [len(segs[p].get('labels_at_end') or []) for p in ps]
+        if not budget and heads[0] < max(heads):
+            first_bad.append((s['id'], ps, heads))
+    checks.add(f'{prefix}.merge_parents', not parents_bad,
+               'every merge\'s parents end at one node at its from_bp', parents_bad[:10])
+    checks.add(f'{prefix}.labels_via_parent', not via_bad,
+               'labels_via_parent partitions the merged labels, each from a parent holding it',
+               via_bad[:10])
+    checks.add(f'{prefix}.first_parent', not first_bad,
+               'the first parent brings the most labels', first_bad[:10])
+    runs = arm_json.get('runs') or []
+    route_bad = []
+    for pth in arm_json.get('paths') or []:
+        chain = pth.get('segments') or []
+        if not chain or chain[-1] not in view.walk:
+            continue
+        for e in pth.get('end_labels') or []:
+            ri = e.get('run')
+            if not isinstance(ri, int) or not 0 <= ri < len(runs):
+                route_bad.append(('end label without its run', pth.get('id'), e))
+                continue
+            run = runs[ri]
+            cur, route, lost = chain[-1], view.walk[chain[-1]], None
+            while (segs[cur].get('parents') or []) and lost is None:
+                s = segs[cur]
+                ps = s['parents']
+                if len(ps) == 1:
+                    cur = ps[0]
+                    continue
+                m = s.get('from_bp', 0)
+                lab, certain = _lineage_label(run, m)
+                via = s.get('labels_via_parent') or []
+                idx = next((j for j, v in enumerate(via) if lab in v), None)
+                if idx is None or idx >= len(ps) or ps[idx] not in view.walk:
+                    # a lineage switched more than once before this merge: not judged
+                    lost = None if not certain else \
+                        ('the lineage enters through no parent', s['id'], lab)
+                    route = None
+                    break
+                route = view.walk[ps[idx]][:m] + route[m:]
+                cur = ps[idx]
+            label = w.label(names.get(e.get('label')))
+            if lost is not None:
+                route_bad.append((pth.get('id'), e.get('label')) + lost)
+                continue
+            if route is None:
+                checks.mark(f'{prefix}.own_routes.unjudged', INCONCLUSIVE,
+                            note='a lineage switched more than once before a merge: its own '
+                                 'route is not judged')
+                continue
+            first = 0 if run.get('entered_by') != 'switch' else run.get('from_bp', 0) + 1
+            if route not in res.walks:
+                route_bad.append(('own route not a keep walk', pth.get('id'), names.get(e.get('label')),
+                                  route))
+            elif label is None or any(not w.holds(label, w.walk_node(seed, arm, route, j))
+                                      for j in range(first, len(route) + 1)):
+                route_bad.append(('the label does not hold its own route', pth.get('id'),
+                                  names.get(e.get('label')), route))
+    checks.add(f'{prefix}.own_routes', not route_bad,
+               'each leaf label\'s own route a keep walk the label holds', route_bad[:10])
+
+
+def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name, names=None,
+                      strategy=None):
     """on_reconverge merge: the united history is not modelled (SPEC 6.10); its invariants are.
     Under merge the displayed walk follows first parents (SPEC 7.1), so a run's walk is the
     label's own route only after its merges: the label must hold every node of the run's
     displayed support -- the nodes its steps entered (from from_bp + 1) when route_bp is 0, else
     from the latest merge its leaf states (end_labels' route_bp) -- and its end node in any case."""
     checks.mark('completeness', INCONCLUSIVE, note='merge: completeness is the united history\'s')
-    got_walks = view.all_walks()
-    checks.add(f'{prefix}.sound', got_walks <= res.walks, 'every walk an oracle walk',
-               _diff(set(), got_walks - res.walks))
+    display = _display_problems(view, res, w, seed, arm)
+    checks.add(f'{prefix}.sound', not display,
+               'every walk a keep walk, or a graph walk displaying one through first parents from '
+               'its latest merge', display)
     segs = arm_json.get('segments') or []
     merged_segs = [s for s in segs if len(s.get('parents') or []) > 1]
     _scope_limitation(checks, prefix, arm_json, len(merged_segs))
@@ -360,6 +516,8 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
            for e in s.get('events') or [] if e.get('type') == 'reconverge'}
     checks.add(f'{prefix}.reconverge_events', got == want,
                'a reconverge event at each merge, naming its parents', _diff(want, got))
+    _merge_structure(checks, prefix, view, arm_json, res, w, seed, arm, names or {},
+                     strategy or {})
     leaf_route = {}
     for p in arm_json.get('paths') or []:
         for e in p.get('end_labels') or []:
