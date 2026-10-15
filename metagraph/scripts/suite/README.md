@@ -3172,8 +3172,14 @@ One definition, a shared rule of suite_common: item_explained (with EXPLAINABLE_
 by explained_outcome (E: an execution whose only failing items E holds reads service_by_design; any other failure
 still fails) and explained_items (the line's explained_items), which compare.py names, reevaluate.py records,
 merge_run.py takes out of a line before the checks' rule (a recorded explained item of either outcome) and async's
-runner calls through shared_rule. gate.judge's property loop skips an explained item of either outcome (the named case
-on a by-design execution), and the agreement step requires the pair verified, as for every answered case. Any other failure still fails. T-edge-0008 keeps mcp.by_design
+runner calls through shared_rule. **The gate takes the explanation from the table, not from the line**
+(VERIFY-G stage 2: a line's own claim let a not_exposed answer_fields on another path, an r1 claim beside a
+legitimate r0, or a direct-arm line carrying the case's fields pass): gate.table_explanations reads compare's
+table-derived explained items and case (mcp_agreement explained_items / by_design_notes), and the property loop skips
+an item of either outcome only on the MCP arm, only where the table explains it under a case the scenario names; a
+line whose recorded explained_items (or explained_checks, where it records no items: compare's
+explained_checks_recorded) differ from the table's is an agreement problem. The agreement step requires the pair
+verified, as for every answered case. Any other failure still fails. T-edge-0008 keeps mcp.by_design
 (from its request) and carries no mark, so the MCP arm runs it again; the builder's scenario_level_marks and the
 SCENARIO_LEVEL_MARK backstop stay for marks. The table's sha256 is
 d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44 (133 cases); the v4 policy is regenerated for it
@@ -3181,7 +3187,7 @@ d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44 (133 cases); th
 recorded T-edge-0008 MCP executions, re-evaluated under the v5 scenario with this table: service_by_design
 (traverse.duplicate_seeds, E = invariants and answer_fields, items 1 and 2), the pair verified against direct-local;
 a policy requiring T-edge-0008 on both arms raises no problem for it (with E = invariants alone, as a runner without
-item_explained records it, the gate names "required property answer_fields not_exposed" twice).
+item_explained records it, the gate now names the line's other explanation as an agreement problem on each repeat).
 
 ### The loop stops at once on the MCP runner's exit 4 and 5
 run_suite.sh's mcp_after stopped at once only on exit 2 / 3 / 130. Exit 4 (the runner refused the by-design table) and
@@ -3197,8 +3203,14 @@ compare.reevaluated.json computed while the re-evaluation's checks were changed.
 applies one rule to both sets: the comparison's judged_with names the checks that judged the set as its source (the
 run's snapshot for a recorded set; the re-evaluation's checks for a re-evaluated one) and states the checks.py and
 suite_common.py sha256 recorded for them (SNAPSHOT.json; reevaluated.json's checks); otherwise an identity problem asks
-to recompute the comparison. A recorded set without a snapshot is judged as before; a re-evaluated set whose checks
-directory is gone (compared with this tree's) blocks.
+to recompute the comparison. A recorded set without a snapshot is judged as before. A re-evaluated set is evidence by
+its checks' hashes, not its directory: compared with this tree's checks (its re-evaluation's directory gone), it
+stands when their sha256 are the ones reevaluated.json records; and the files the comparison and the gate's property
+reading read now (the re-evaluation's directory, or this tree) must be those, else "re-evaluate the set" (a directory
+edited after its comparison no longer steers the property reading). The advice is the step that clears the problem.
+The comparison also states executions_sha256, the sha256 of the merged lines it read (executions.jsonl,
+executions.reevaluated.jsonl); the gate blocks on identity when the lines it judges are other ones (edited after the
+comparison: "recompute the comparison").
 
 ### A broken snapshot record or a missing executed file is refused, never a crash
 snapshot_refusal read SNAPSHOT.json with read_json, so an empty, torn or unreadable record raised (async's runner
@@ -3234,13 +3246,20 @@ Re-vendor suite_common.py and service_by_design.json (d4b8636c...); checks.py is
   (checks, the matched cases' entries, its outcome rule) for the outcome and E, shared_rule("explained_items") for the
   line's explained_items (explained_item_indices), shared_rule("item_explained") (entry, item) wherever it picks the
   recorded case (EXPLAINABLE_OUTCOMES: fail, not_exposed). A {check, detail_matches} entry can explain a not_exposed
-  reading; a bare check name never does. Without it the runner records E = invariants alone and the gate blocks
-  T-edge-0008's MCP executions on "required property answer_fields not_exposed".
+  reading; a bare check name never does. explained_items are indices over the FULL recorded checks of the line (in
+  the order recorded, before anything is taken out), while the outcome rule judges shared_rule("unmarked_checks")
+  (scenario, "mcp", checks), as reevaluate does. The gate takes an execution's explanation from the table (compare's
+  table-derived explained items and case, MCP arm only), never from the line: a line whose recorded explained_items,
+  or explained_checks where it records no items, are not the table's is an agreement problem ("a runner's explanation
+  is not trusted"), so a runner without the shared rule (E = invariants alone on T-edge-0008) blocks the gate.
 - **T-edge-0008 runs via MCP** (traverse_fetch with its two identical seeds; the service merges them).
-- **Warm-ups** (lane V5): suite_common.select_scenarios pulls a target's warm-ups (`warms`) into every selection that
-  takes the target, each arm in manifest order; the resume rule (suite_common.resume_rewarms) applies only to the ids
-  of one call (`--ids W,T`), never to a pulled warm-up; its re-run is a line with the warm-up's id and the step's
-  repeat, `rerun_for_resume` true and `rerun_target`, on the line and in its raw record (the earlier execution stays).
+- **Warm-ups** (lane V5), shared rules, never a copy: shared_rule("select_scenarios") (manifest, areas, limit, ids)
+  pulls a target's warm-ups (`warms`) into every selection that takes the target, each arm in manifest order;
+  shared_rule("resume_rewarms") (scope, done) is the resume rule, applied only to the ids of one call (`--ids W,T`),
+  never to a pulled warm-up; the re-run is a line with the warm-up's id and the step's repeat and the fields
+  shared_rule("RERUN_FIELDS") names (`rerun_for_resume` true, `rerun_target`), on the line and in its own raw record
+  named by shared_rule("rerun_raw_name") (scenario, arm, repeat, started); the earlier execution stays
+  (is_rerun / judged_lines read it as timing evidence).
 - **The snapshot refusal** (the S8i loader item, with this stage's never-raising refusal): before the snapshot's
   suite_common.py is first executed, pinned_common().snapshot_refusal({checks_dir}) refuses an unreadable, empty or
   torn SNAPSHOT.json and a recorded executed file that is missing, and the invocation exits 5 with the message
@@ -3268,3 +3287,8 @@ Re-vendor suite_common.py and service_by_design.json (d4b8636c...); checks.py is
   record): 589 tests pass (585 + 1 + 1 + 2, each failing on its parent commit); the v3 / v4 re-evaluations equal the
   ones above line for line (every field and check item; the comparisons' scenarios and summaries byte-equal), the v4
   gate the same 46 problems, the v5-on-v4 moves the same.
+- After the verification's follow-ups (the gate's table-derived explanation, a re-evaluated set's hashes, the lines'
+  sha256): 592 tests pass (589 + 1 + 1 + 1, each failing on its parent commit; the failure-only control of the
+  explained-item test now reads two agreement problems, the line's E not being the table's, and no property problem);
+  the v3 / v4 re-evaluations equal the ones above line for line (compare gains executions_sha256), the v4 gate the same
+  46 problems, the v5-on-v4 moves the same, and the dry v5 rebuilt is 72181c4a... again.
