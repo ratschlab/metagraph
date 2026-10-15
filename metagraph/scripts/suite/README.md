@@ -155,8 +155,9 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
    the end, after 24 h (30 min for --smoke), or when the orchestrator stops touching its heartbeat file for an
    hour (a background keeper touches it every `SUITE_HEARTBEAT_S`, 300 s, while the orchestrator lives, so one
    long step does not end the sampling: review N7). Three failing steps of one direct arm in a row stop the loop (exit 1 after the report). The MCP
-   arm follows async's exit codes: the loop stops on the runner's exit 2 / 3 (a start refusal: key file,
-   queue wait ran out) or 130 (interrupted), or after three MCP executions in a row that ended `error` (a
+   arm follows async's exit codes: the loop stops at once on the runner's exit 2 / 3 (a start refusal: key file,
+   queue wait ran out), 4 (the by-design table refused), 5 (the run's snapshot refused) or 130 (interrupted),
+   or after three MCP executions in a row that ended `error` (a
    runner-level failure) or were not recorded (`loop.reason` mcp_exit_N / mcp_interrupted / mcp_errors);
    never on `fail` (exit 1 also means a failing scenario, a result). After an execution that ended `error`
    with its job cancelled (jobs.jsonl `canceled` / `cancel_failed`, no `terminal`), the next step waits
@@ -2789,8 +2790,9 @@ From v5 the manifest marks what the MCP cannot show by its true class: `mcp.not_
 before), `mcp.not_implemented_checks` [{check, reason}] (a missing MCP feature at property level, e.g. the label
 dictionary of T-labels-0003 / -0005 / -0006; the rest of the scenario stays tested via MCP) and
 `mcp.by_design_checks` [{check, case}] (a deliberate service behaviour at property level, e.g. T-edge-0008's
-answer_fields under traverse.duplicate_seeds). Lane V5 adds the fields and gate_policy's derivation; the names are
-read in one place, suite_common.MCP_CHECK_MARKS.
+answer_fields under traverse.duplicate_seeds). Lane V5 adds the fields; the names are read in one place,
+suite_common.MCP_CHECK_MARKS. (Integration S8i stage 2: gate_policy derives no exemption from them, and T-edge-0008 is
+modelled through the table, not a mark.)
 - **What a mark sets aside** (suite_common.checks_marked_aside, the one rule the outcome through unmarked_checks,
   the comparison, the gate and the report apply): on the MCP arm, a marked check recorded reading not_exposed, the
   reading the mark declares. A marked check that reads anything else (pass, fail, finding, inconclusive) is judged as
@@ -2814,7 +2816,8 @@ read in one place, suite_common.MCP_CHECK_MARKS.
   marked items as unmarked not_exposed ones (skipped, partial depth); the report's mark listing names those
   executions "not set aside, every property check is marked; this is a scenario-level mark". A wrong
   all-properties mark is so visible and gate-blocking; lane V5 turns such a mark into a scenario-level one in the
-  manifest (v5's only case, T-edge-0008's answer_fields, by design). The rule is per execution, as
+  manifest (no v5 scenario after integration S8i stage 2, which models T-edge-0008 through the table). The rule is
+  per execution, as
   checks.scenario_outcome's "no property passed" rule: a later repeat whose determinism check passed has a passing
   property.
 - **Gate.** A marked check the MCP read not_exposed is no required-property problem, and with require_agreement
@@ -2919,7 +2922,8 @@ reevaluate.py stops with the reason. A directory without SNAPSHOT.json (this tre
 before; gate._snapshot_document_sha checks the snapshot's suite_common.py against SNAPSHOT.json itself.
 
 ### For async: what the runner mirrors after this integration
-Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_design.json (sha256 39f87b83...), then:
+Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_design.json (sha256 39f87b83...; after
+stage 2 d4b8636c..., below), then:
 - **The deadline window** (S8g): the deadline branch of stated_bound_problem is
   shared_rule("deadline_window_verdict")(scenario, stated, evidence, refs); its undecidable state is rule (c) with
   UNDECIDABLE_NO_ORIGIN (in shared_rule("UNDECIDABLE")); timeout_statement carries pre_exchange_ms / acquire_ms
@@ -2934,10 +2938,11 @@ Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_desig
   wall rule's notes, "; "-joined. Names: GENERIC_CHECKS, LATER_REPEATS_ONLY, SCENARIO_LEVEL_MARK,
   expected_property_checks, every_property_marked, scenario_level_mark_detail, check_keys, checks_marked_aside,
   marked_aside, unmarked_checks.
-- **The loader**: shared_rule("load_checks_bound") on {checks_dir}, the run's snapshot, raises
-  suite_common.SnapshotChanged when the snapshot's checks.py or suite_common.py is not SNAPSHOT.json's; the
-  invocation stops with that message instead of judging with a changed snapshot (SnapshotChanged, EXECUTED_FILES,
-  snapshot_refusal).
+- **The loader** (as corrected by the verification, VERIFY-G "Integration stage 1" §5): before the snapshot's
+  suite_common.py is first executed (use_shared_common, load_checks, load_common), the runner calls its vendored,
+  trusted copy, pinned_common().snapshot_refusal({checks_dir}); a non-empty refusal stops the invocation with the
+  message (exit 5) and sends nothing. shared_rule("load_checks_bound") alone is the snapshot's own copy, which a
+  changed file need not contain (SnapshotChanged, EXECUTED_FILES, snapshot_refusal).
 - Nothing for S8g's identity evidence and headline (the runner records both sha256, host_document.index_fp and the
   record's sha256 already) or for the bench (it drives both runners unchanged: run_direct.py --only, the MCP
   runner's --ids with --repeat 0).
@@ -3103,14 +3108,15 @@ default, the gate policy). What changed, by finding:
   [{check, reason}] for label_dict_contains of T-labels-0003..0006 (not implemented yet via MCP, the walk tested via
   MCP); C-caps-0001 `mcp.not_implemented` as a whole (the MCP's capabilities tool answers the service's view);
   `mcp.by_design_checks` [{check, case}] for a property check the service answers otherwise by design.
-  `gate_policy.py` derives the MCP exemptions (rules mcp_not_implemented_check, mcp_by_design_check;
-  required on direct-local) and prints them by class; gate/declared_v5_rt.json declares nothing (the v4 file stays
+  `gate_policy.py` derived the MCP exemptions (rules mcp_not_implemented_check, mcp_by_design_check; removed in
+  integration S8i stage 2: gate.py applies the marks); gate/declared_v5_rt.json declares nothing (the v4 file stays
   v4's); every v4 suite error of its §2 is fixed. A missing MCP feature is marked at the narrowest scope, and when
   the property-level marks would cover every property check of a scenario that scope is the scenario
   (`build_manifest.scenario_level_marks`, VERIFY-G (c): such a scenario would pass via MCP on its generic checks
   alone): `mcp.not_implemented` with the marks' reasons ("service-side by design: ..."; the manifest has no
   whole-scenario by-design form), and the builder refuses a property-level list that covers them all. T-edge-0008,
-  whose only property check, answer_fields, is service-side by design (traverse.duplicate_seeds), is that case.
+  whose only property check, answer_fields, is service-side by design (traverse.duplicate_seeds), was that case
+  until integration S8i stage 2 modelled it through the table (run via MCP).
 - Every `mcp.by_design` id is a case of the bundled service_by_design.json, else the build fails (a case the table
   lacks explains nothing). The table is lane F-gate's 422644b7 (sha256 39f87b83..., the renamed discovery cases),
   bundled here with its v4 policy so the integration meets the same blobs.
@@ -3136,3 +3142,113 @@ default, the gate policy). What changed, by finding:
   advanced_path 1), MCP 204 scenarios / 414
   executions, direct-local 237 / 273, 4 property checks not required on MCP (derived); REL-same_answer-0003 and
   REL-prefix_equals-0001..0004 required.
+
+## Suite integration S8i, stage 2: lane V5 merged, and the rules that join it (2026-10-15)
+Lane V5 (gr/suite-v5 at 0c165be5, 45 commits on 1387455f) cherry-picked onto fafd20ba in order, with its messages and
+authorship: 44 commits; 5f941931 (lane S8g's table commit 422644b7, already here) came out empty and was skipped. Only
+this README conflicted (V5's section kept after S8i's, without its restated older S7i line). The items below join
+what VERIFY-V5A's final round (the trial merge) and the check of async's runner found between V5 and S8c / S8g.
+
+### One mechanism for the MCP marks
+gate_policy.py derived a `not_required` MCP entry for every mcp.not_implemented_checks / mcp.by_design_checks entry,
+while gate.py applies the same marks itself and sets aside only a marked check the MCP reads not_exposed
+(suite_common.checks_marked_aside). Merged, the exemption silenced a marked check's missing result, failure or
+inconclusive on MCP (test_gate's test_a_marked_check_without_a_result_is_a_missing_one failed on the merge). The
+policy derives no property exemption now; the marks live in the manifest and gate.py applies them. The v5 policy has
+no property check not required.
+
+### T-edge-0008: service-side by design through the table, run via MCP
+The owner classes T-edge-0008's merged duplicate seed as service-side by design. Lane V5 marked the scenario
+mcp.not_implemented, which dropped v4's MCP coverage of the service's seed merge. The merge makes two readings on the
+MCP arm: invariants fails "1 results for 2 seeds (1 distinct)" (which traverse.duplicate_seeds already explained) and
+answer_fields reads not_exposed, "field not in the answer: results.1.duplicate" (checks.evaluate's rule for a missing
+field on the MCP arm). An explains_checks entry explained only failing items, so the table now states
+{"check": "answer_fields", "detail_matches": "field not in the answer: results\\.1\\.duplicate"} and the rule reads
+it on a not_exposed item too: compare.item_explained (a fail item an entry explains, or a not_exposed item whose
+detail a {check, detail_matches} entry matches completely; a name entry never explains a not_exposed reading), used by
+explained_outcome (E), explained_items and answered_verdict. gate.judge's property loop skips an explained
+not_exposed item as it skips an explained failure (the named case on a by-design execution), and the agreement step
+requires the pair verified, as for every answered case. Any other failure still fails. T-edge-0008 keeps mcp.by_design
+(from its request) and carries no mark, so the MCP arm runs it again; the builder's scenario_level_marks and the
+SCENARIO_LEVEL_MARK backstop stay for marks. The table's sha256 is
+d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44 (133 cases); the v4 policy is regenerated for it
+(only by_design_table.sha256 and generated_utc differ), and v4's own declared entry for T-edge-0008 stays v4's. v4's
+recorded T-edge-0008 MCP executions, re-evaluated under the v5 scenario with this table: service_by_design
+(traverse.duplicate_seeds, E = invariants and answer_fields, items 1 and 2), the pair verified against direct-local;
+a policy requiring T-edge-0008 on both arms raises no problem for it (with E = invariants alone, as a runner without
+item_explained records it, the gate names "required property answer_fields not_exposed" twice).
+
+### The loop stops at once on the MCP runner's exit 4 and 5
+run_suite.sh's mcp_after stopped at once only on exit 2 / 3 / 130. Exit 4 (the runner refused the by-design table) and
+5 (it refused the run's snapshot) read as unrecorded executions: two more MCP steps that recorded nothing and the
+direct arms' steps between them ran before the loop stopped as mcp_errors. Both now stop it after the first step
+(`loop.reason` mcp_exit_4 / mcp_exit_5), in the paired and the sequential mode (tests/fake_mcp.py: modes exit4,
+exit5).
+
+### The gate checks which checks computed a recorded set's comparison
+A compare.json computed while the run's snapshot was changed (the refusal's built-in fallback, or other checks), the
+snapshot restored before the gate, passed: every other identity check reads the restored files. For a recorded set
+with a snapshot, gate.compared_with_snapshot_problems requires compare.json's judged_with to name the snapshot as its
+source and to state the checks.py and suite_common.py sha256 SNAPSHOT.json records; otherwise an identity problem asks
+to recompute the comparison. A run without a snapshot and the re-evaluated set are judged as before.
+
+### A broken snapshot record or a missing executed file is refused, never a crash
+snapshot_refusal read SNAPSHOT.json with read_json, so an empty, torn or unreadable record raised (async's runner
+exited 1 with a traceback instead of refusing with exit 5; reevaluate crashed; the merge swallowed it without its
+warning), and it skipped a recorded file it could not read (a deleted suite_common.py loaded another one).
+suite_common.snapshot_record reads the record without raising and names the cause (cannot be read, empty, no JSON, no
+files); snapshot_refusal refuses for it and for a recorded executed file that is missing or unreadable, so
+load_checks_bound and its callers (merge, compare, the gate's property reading, reevaluate) treat both as a changed
+file. snapshot_state never raises: an unreadable record is no snapshot and changed (`SNAPSHOT.json`), and the
+orchestrator's snapshot step stops the run (exit 2) instead of taking a new snapshot over it.
+
+### The dry v5 and its policy on the merged tree (not frozen)
+- The builder on the merged tree (lane V5's command: `SUITE_TRUTH_CACHE=<the record cache v4 was built from>
+  build_manifest.py --no-fetch --out ... --smoke-out ...`): content
+  72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875, relations 39660cfa... (unchanged), 700 scenarios,
+  742 executions per arm, 51 MCP not implemented, 512 with mcp.exposes; the smoke selection abc0596f... (14). Against
+  VERIFY-V5A's ff7afbd7... only T-edge-0008's mcp changed (its tool and arguments back, exposes [budget_respected,
+  invariants, status], no not_implemented). The offline truth re-check: 0 problems.
+- gate/declared_v5_rt.json names that content (it declares nothing). The V5 branch committed no dry manifest and no
+  v5 policy; the policy is generated at the freeze, on this tree.
+- `gate_policy.py <dry v5> --name v5-rt-mcp --arms mcp,direct-local --declared gate/declared_v5_rt.json`: 241
+  selected, 36 excluded (manifest_not_implemented 24, table_not_expressible 27, budget_stress 4, advanced_path 1),
+  MCP 205 scenarios / 416 executions, direct-local 237 / 273, 5 relations required (21 excluded), no property check
+  not required. Against VERIFY-V5A's dry policy: T-edge-0008 runs on MCP (+1 scenario, +2 executions), no
+  exemptions.
+
+### For async: what the runner adds for stage 2
+Re-vendor suite_common.py and service_by_design.json (d4b8636c...); checks.py is S8c's. Besides the S8i list above:
+- **Explained items** (T-edge-0008): the runner's explained_outcome mirrors compare.item_explained: a not_exposed
+  item whose detail a {check, detail_matches} entry matches completely is in E (the outcome, explained_item_indices
+  and the recorded case alike; a name entry never explains a not_exposed item). Without it the runner records E =
+  invariants alone and the gate blocks T-edge-0008's MCP executions on "required property answer_fields
+  not_exposed".
+- **T-edge-0008 runs via MCP** (traverse_fetch with its two identical seeds; the service merges them).
+- **Warm-ups** (lane V5): suite_common.select_scenarios pulls a target's warm-ups (`warms`) into every selection that
+  takes the target, each arm in manifest order; the resume rule (suite_common.resume_rewarms) applies only to the ids
+  of one call (`--ids W,T`), never to a pulled warm-up; its re-run is a line with the warm-up's id and the step's
+  repeat, `rerun_for_resume` true and `rerun_target`, on the line and in its raw record (the earlier execution stays).
+- **The snapshot refusal** (the S8i loader item, with this stage's never-raising refusal): before the snapshot's
+  suite_common.py is first executed, pinned_common().snapshot_refusal({checks_dir}) refuses an unreadable, empty or
+  torn SNAPSHOT.json and a recorded executed file that is missing, and the invocation exits 5 with the message
+  (new: snapshot_record). run_suite.sh stops the loop at once on 4 and 5.
+- The deadline's origin terms: the runner states them as the service rounds them (0.1 ms; bound_s 1 ms); the 2 ms
+  tolerance covers both (wording corrected in S8g's section).
+
+### Validation of stage 2 (offline)
+- 585 tests pass (none skipped, with SUITE_TRUTH_CACHE, the record cache v4 was built from, so lane V5's builder
+  tests run): 527 at fafd20ba + 53 of lane V5 (441 -> 495 on its branch, one of them 422644b7's table test, already
+  here) = 580 after the cherry-picks (one failing there: the marks test above), + 2 (the explained not_exposed
+  item: the rule, the gate) + 1 (exit 4 / 5) + 1 (the comparison's checks) + 1 (the broken snapshot record); V5's
+  policy test is rewritten in place (no exemption derived).
+  Each new test fails on its parent commit.
+- Copies of v3 (lane-s5e/reeval-S5e) and v4 (doc/v4-c11db9dd) re-evaluated at the merged head, against fafd20ba's
+  re-evaluation: the only change is T-edge-0008's two MCP lines on each (explained_checks invariants ->
+  invariants, answer_fields; explained_items [1] -> [1, 2]); outcome, case and every check item unchanged, no class,
+  verification or relation moves; T-edge-0008's checks_not_exposed 2 -> 0 (summary 854 -> 852 on v3, 828 -> 826 on
+  v4). v3 FAIL; the v4 gate 46 problems, the same as fafd20ba's in order, its notes and counts equal.
+- The dry v5's 554 scenarios whose request is v4's on a fresh v4 copy (2,373 executions), against the v4 copy re-
+  evaluated with the v4 manifest: VERIFY-V5A's moves only (path_spells, blocked_event and count_relation pass;
+  N-usecase-0005's MCP inconclusive -> pass; R-edge-0022 / -0023's MCP service_by_design -> fail under v4's cap of 100;
+  T-attempts-0002 r1 is T-attempts-0003's 409).
