@@ -3871,6 +3871,14 @@ class TimeTintTest(unittest.TestCase):
                          "seed 0: the work budget (bounds.max_work_units, 100,000,000 units; used 100,000,275) at 3,618 bp "
                          "(left), 3,617 bp (right)")
         self.assertEqual(blocks.resource_stop_phrase(run, {"raw": "arms/none.json.gz"}), "")
+        # a resource outside the three knobs (the MCP runner's attempt_deadline) is named as the answer names it
+        raw2 = "arms/mcp/raw/T-001.mcp.0.json.gz"
+        os.makedirs(os.path.join(run_dir, "arms", "mcp", "raw"))
+        with gzip.open(os.path.join(run_dir, raw2), "wt", encoding="utf-8") as fh:
+            json.dump({"answer": {"http": 200, "body": {"results": [{"resource_stop": {
+                "resource": "attempt_deadline", "requested": 25000, "used": 22085}}]}}}, fh)
+        self.assertEqual(blocks.resource_stop_phrase(run, {"raw": raw2}),
+                         "seed 0: a stop by attempt_deadline (requested 25,000; used 22,085)")
         self.assertEqual(blocks.resource_stop_phrase(run, {}), "")
         self.assertIsNone(run.policy_file_sha256())
         text = blocks.adjudication(dict(line, outcome="inconclusive", http=200), run, "T-001", False)

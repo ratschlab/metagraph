@@ -704,9 +704,14 @@ def resource_stop_phrase(run, line):
             figures.append("{:,} {}".format(int(st["requested"]), unit).strip())
         if cells._num(st["used"]) is not None:
             figures.append("used {:,}".format(int(st["used"])))
-        text = "seed %d: the %s (%s%s)" % (st["seed"], RESOURCE_WORD.get(res, res + " budget"), st["knob"],
-                                           ("; ".join([""] + figures)) if figures else "")
-        text = text.replace("(%s; " % st["knob"], "(%s, " % st["knob"], 1)
+        if res in RESOURCE_WORD:
+            text = "seed %d: the %s (%s%s)" % (st["seed"], RESOURCE_WORD[res], st["knob"],
+                                               ("; ".join([""] + figures)) if figures else "")
+            text = text.replace("(%s; " % st["knob"], "(%s, " % st["knob"], 1)
+        else:
+            # a resource outside the three knobs (the MCP runner's attempt_deadline: the service's own per-seed
+            # bound): named as the answer names it
+            text = "seed %d: a stop by %s%s" % (st["seed"], res, (" (requested %s)" % "; ".join(figures)) if figures else "")
         if st["at"]:
             text += " at " + st["at"]
         parts.append(text)
