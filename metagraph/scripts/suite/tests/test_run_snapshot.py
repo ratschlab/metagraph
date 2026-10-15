@@ -29,7 +29,7 @@ import run_direct  # noqa: E402
 import suite_common as sc  # noqa: E402
 from fake_host import FakeHost  # noqa: E402
 from test_compare_report import T0, line, write_arm  # noqa: E402
-from test_gate import make_run, manifest_of, mcp_lines, policy_of  # noqa: E402
+from test_gate import TABLE, make_run, manifest_of, mcp_lines, policy_of  # noqa: E402
 from test_orchestrator import SuiteCase, mcp_scenarios  # noqa: E402
 from test_runner import basic_scenarios, make_manifest, scenario  # noqa: E402
 
@@ -303,6 +303,39 @@ class MergeChecksIdentityTest(unittest.TestCase):
         # a snapshot of the live files and a directory without SNAPSHOT.json load as before
         self.assertIsNotNone(cmp.load_checks_module(SUITE))
         self.assertEqual(sc.snapshot_refusal(SUITE), [])
+
+    def test_a_comparison_computed_while_the_snapshot_was_changed_blocks_the_gate(self):
+        # compare.json computed while a snapshot file was changed, the file restored before the gate: the comparison
+        # states other checks than SNAPSHOT.json's (judged_with), so the gate blocks on identity; a comparison of
+        # the snapshot as recorded passes, one that does not state its checks blocks
+        m = manifest_of()
+        for name in sc.EXECUTED_FILES:
+            d = make_run(os.path.join(self.d, "runs", "cmp_" + name.replace(".", "_")), m, mcp_lines(m))
+            self.assertTrue(gate.judge(d, policy_of(m))["passed"])
+            path = os.path.join(d, "scripts", name)
+            with open(path, "rb") as fh:
+                original = fh.read()
+            with open(path, "ab") as fh:
+                fh.write(b"\n# changed while the comparison ran\n")
+            changed = sc.file_sha256(path)
+            sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
+            with open(path, "wb") as fh:
+                fh.write(original)
+            self.assertEqual(sc.snapshot_state(d)[1], [])
+            v = gate.judge(d, policy_of(m))
+            self.assertFalse(v["passed"])
+            self.assertEqual([p["detail"] for p in v["problems"]],
+                             ["compare.json was judged with %s sha256 %s, not the %s SNAPSHOT.json records: recompute "
+                              "the comparison" % (name, changed[:12], sc.file_sha256(path)[:12])])
+            comp = sc.read_json(os.path.join(d, "compare.json"))
+            comp.pop("judged_with")
+            sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+            self.assertEqual([p["detail"] for p in gate.judge(d, policy_of(m))["problems"]],
+                             ["compare.json was not judged with the run's snapshot (judged_with source not stated): "
+                              "recompute the comparison"])
+            # compared again with the snapshot as recorded
+            sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
+            self.assertTrue(gate.judge(d, policy_of(m))["passed"])
 
 
 class ComparisonSnapshotTest(unittest.TestCase):

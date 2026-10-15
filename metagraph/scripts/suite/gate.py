@@ -32,7 +32,8 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   snapshot of its checks, every MCP invocation stating both checks_sha256 and suite_common_sha256, and a recorded
   set without a snapshot blocks (merge_run.checks_identity), the checks that judged the set are the ones their
   snapshot's SNAPSHOT.json records where they have one (suite_common.snapshot_refusal: a changed file is never
-  executed), and the comparison read the by-design table the policy's exclusions were derived from;
+  executed), a recorded set's compare.json was judged with them (compared_with_snapshot_problems), and the
+  comparison read the by-design table the policy's exclusions were derived from;
 - missing: every planned execution and every execution the policy requires is recorded;
 - outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
   the owner's strict gate), not_implemented_mcp (what the MCP cannot express is excluded in the policy), or
@@ -587,6 +588,8 @@ def judge(run_dir, policy, reevaluated=False):
         problems.append(_problem("identity", "the comparison read the by-design table sha256 %s, the policy was derived "
                                              "from %s (regenerate the policy with gate_policy.py, or compare with "
                                              "that table)" % (str(used)[:16], pinned[:16])))
+    if comp is not None and not reevaluated:
+        problems.extend(_problem("identity", x) for x in compared_with_snapshot_problems(run_dir, comp))
     # the property reading with the checks that judged the set: a recorded run's snapshot, a re-evaluation's checks;
     # a snapshot file that is not SNAPSHOT.json's is never executed (the reading falls back to GENERIC_CHECKS)
     judging = cmp.judging_checks(run_dir, reevaluated)
@@ -778,6 +781,25 @@ def _describe_agreement(ma):
     text = ", ".join("%s %s" % (k, ma.get(k)) for k in keys if ma.get(k) is not None)
     detail = ma.get("detail") or ma.get("direct_detail") or ma.get("mcp_detail")
     return (text + ("; " + str(detail)[:200] if detail else "")) or "-"
+
+
+def compared_with_snapshot_problems(run_dir, comp):
+    """Why a recorded set's compare.json is no evidence for the run's snapshot: it does not state that the snapshot
+    judged it (judged_with source snapshot), or the checks.py / suite_common.py sha256 it states are not the ones
+    SNAPSHOT.json records (a comparison computed while the snapshot was changed, the snapshot restored before the
+    gate); [] for a run without a snapshot."""
+    snap, _, _ = sc.snapshot_state(run_dir)
+    if snap is None:
+        return []
+    files = snap.get("files") or {}
+    jw = (comp or {}).get("judged_with")
+    if not isinstance(jw, dict) or jw.get("source") != "snapshot":
+        return ["compare.json was not judged with the run's snapshot (judged_with source %s): recompute the "
+                "comparison" % (jw.get("source") if isinstance(jw, dict) else "not stated")]
+    return ["compare.json was judged with %s sha256 %s, not the %s SNAPSHOT.json records: recompute the comparison"
+            % (name, str(jw.get(key))[:12], str(files.get(name))[:12])
+            for key, name in (("checks_sha256", "checks.py"), ("suite_common_sha256", "suite_common.py"))
+            if jw.get(key) != files.get(name)]
 
 
 def load_compare(run_dir, reevaluated=False):
