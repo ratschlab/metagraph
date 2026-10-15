@@ -3667,3 +3667,15 @@ sizes and seeds 2-6 at twice the size (`runs/v6final_*`).
 - All 16,509 answer files equal round 3's apart from timing.
 - 440,283 of 440,283 corruptions caught, 61 of them merged-arm ones.
 - **No candidate engine defect.**
+
+## Suite integration S8i, stage 3: the oracle merged (2026-10-15)
+Lane O's oracle (gr/suite-oracle at ef0dd05d, verified final in VERIFY-ORACLE.md "Round 5") cherry-picked onto the
+frozen v5 (a76e13b1) in order, 39 commits with their messages and authorship: oracle/, tests/test_oracle_*.py,
+tests/data/oracle_*_answers.json and the section above, which stays its own top-level section after the frozen v5
+(the only conflict, at the first README commit; nothing of either side dropped). The oracle imports only the standard
+library and its own package, and no suite module, the bench or run_suite.sh imports it (test_oracle_core checks the
+oracle's side); its tests import the package, so oracle.compare / oracle.report never shadow the pipeline's modules.
+Validation: 702 tests pass (593 + the oracle's 109); the oracle's 109 pass inside the git worktree and from an export
+outside any git tree (the provenance tests build a git tree of their own); the frozen v5 manifests and both v5 gate
+files are byte-equal to a76e13b1's; the v3 / v4 re-evaluations equal the previous head's line for line, the v4 gate
+the same 46 problems. No server was contacted; the oracle's evidence runs against 81c620ef are in its lane directory.
