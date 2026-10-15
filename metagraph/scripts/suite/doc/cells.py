@@ -42,17 +42,31 @@ def _num(v):
 
 
 def fmt_t(ms):
-    """A duration: `26 ms` under 100 ms, `3.1 s` under 10 s, `18 s` above; `–` for none."""
+    """A duration (never negative): `26 ms` under 100 ms, `3.1 s` under 10 s, `18 s` above; `–` for none.
+    The rounding, half up: whole milliseconds below 100 ms, one decimal in seconds below 10 s, whole seconds
+    above (150 to 249 ms print as 0.2 s)."""
     v = _num(ms)
     if v is None:
         return "–"
     if v < 0.5:
         return "<1 ms"
     if v < 99.5:
-        return "%d ms" % round(v)
+        return "%d ms" % int(v + 0.5)
     if v < 9950:
-        return "%.1f s" % (v / 1000.0)
-    return "%d s" % round(v / 1000.0)
+        return "%.1f s" % (int(v / 100.0 + 0.5) / 10.0)
+    return "%d s" % int(v / 1000.0 + 0.5)
+
+
+def fmt_delta(ms):
+    """A signed difference of two durations, rounded as fmt_t rounds: `−7 ms`, `+0.2 s`, `0 ms` within half a
+    millisecond of zero; `–` for none. Used wherever a difference is printed (a delta, an overhead, a net cost)."""
+    v = _num(ms)
+    if v is None:
+        return "–"
+    if abs(v) < 0.5:
+        return "0 ms"
+    sign = "−" if v < 0 else "+"
+    return sign + fmt_t(abs(v))
 
 
 def _split_unit(text):
@@ -119,9 +133,30 @@ def host_cache_of(line):
     return hc
 
 
+HOST_MARK = {"cold": "c", "aged": "a", WARM_AFTER_INTERRUPTED: "i"}
+
+
 def host_mark(line):
-    hc = host_cache_of(line)
-    return {"cold": "c", "aged": "a"}.get(hc)
+    """The mark on a direct time: c host-cold, a aged, i host-warm after an interrupted execution; none when
+    host-warm (or the host not reached, whose cell carries no time)."""
+    return HOST_MARK.get(host_cache_of(line))
+
+
+def host_marks_text(states):
+    """The mark on an aggregate over executions in the host-cache states `states`: none when every one is
+    host-warm, the letter alone when every one shares the state (`c`), else the letter with its share
+    (`c 2/6`)."""
+    n = len(states)
+    if not n:
+        return None
+    parts = []
+    for state, letter in (("cold", "c"), ("aged", "a"), (WARM_AFTER_INTERRUPTED, "i")):
+        k = sum(1 for st in states if st == state)
+        if k == n:
+            parts.append(letter)
+        elif k:
+            parts.append("%s %d/%d" % (letter, k, n))
+    return " ".join(parts) or None
 
 
 class ArmState(object):
@@ -291,7 +326,7 @@ def aggregate(states, arm):
     bd = sum(1 for m in members if m.glyph_key == "service_by_design")
     ni = sum(1 for m in members if m.glyph_key == "not_implemented_mcp")
     missing = sum(1 for m in members if not m.present)
-    walls, servers = [], []
+    walls, servers, states = [], [], []
     for m in members:
         if not m.present or m.glyph_key in ("service_by_design", "not_implemented_mcp"):
             continue
@@ -301,24 +336,32 @@ def aggregate(states, arm):
         walls.append(l.get("wall_ms"))
         srv = (l.get("server") or {}).get("elapsed_ms") if isinstance(l.get("server"), dict) else None
         servers.append(srv)
-    extra = ""
+        if arm != "mcp" and _num(l.get("wall_ms")) is not None:
+            states.append(host_cache_of(l))
+    extras = []
     if bd:
-        extra += " · %d \\gbd" % bd
+        extras.append("%d \\gbd" % bd)
     if ni:
-        extra += " · %d \\gni" % ni
+        extras.append("%d \\gni" % ni)
     if missing:
-        extra += " · %d \\gnone" % missing
+        extras.append("%d \\gnone" % missing)
     denominator = n - bd - ni - missing
-    text = "ok %d/%d%s" % (ok, denominator, extra)
+    parts = (["ok %d/%d" % (ok, denominator)] if denominator else []) + extras
     if walls:
-        text += " · %s" % fmt_pair(percentile(walls, 50), max(v for v in walls if _num(v) is not None))
+        wall_text = fmt_pair(percentile(walls, 50), max(v for v in walls if _num(v) is not None))
+        mark = host_marks_text(states)
+        if mark:
+            wall_text += "\\tmark{%s}" % mark
+        parts.append(wall_text)
+    text = " · ".join(parts) if parts else "–"
     srv = [v for v in servers if _num(v) is not None]
-    line2 = "[%s]" % fmt_t(percentile(srv, 50)) if srv else "[–]"
+    line2 = "[%s]" % fmt_t(percentile(srv, 50)) if srv else ("[–]" if walls else None)
     return text, line2
 
 
 def glyph_counts(states_list, arm):
-    """`27 ● 1 ◐` for the states of several scenarios on an arm (LaTeX)."""
+    """`27 ● 1 ◐` for the states of several scenarios on an arm (LaTeX): each number bound to its glyph with a
+    thin non-breaking space, a wider gap between the pairs."""
     counts = {}
     for s in states_list:
         k = s[arm].glyph_key
@@ -326,8 +369,8 @@ def glyph_counts(states_list, arm):
     parts = []
     for k in GLYPH_ORDER:
         if counts.get(k):
-            parts.append("%d %s" % (counts[k], GLYPH.get(k, "\\gnone")))
-    return " ".join(parts) if parts else "–"
+            parts.append("%d\\,%s" % (counts[k], GLYPH.get(k, "\\gnone")))
+    return "\\enspace ".join(parts) if parts else "–"
 
 
 def wall_buckets(run, sids, arm):

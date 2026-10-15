@@ -153,7 +153,7 @@ def _error_text(line):
     if code:
         out += " %s" % tt(code)
     if text:
-        out += " “%s”" % esc(text, 160)
+        out += " “%s”" % esc(text, 400)
     return out
 
 
@@ -187,20 +187,29 @@ def _repeat_lines(line, run_, is_mcp):
     checks = [c for c in (line.get("checks") or []) if isinstance(c, dict)]
     passed = [c for c in checks if c.get("outcome") == "pass"]
     others = [c for c in checks if c.get("outcome") != "pass"]
+    # the MCP runner's host-state rule keeps the checks as they read and overrides the execution's outcome to
+    # inconclusive: such checks are labelled, so that their fail glyphs do not read as failures of the run
+    overridden = bool(is_mcp and outcome == "inconclusive" and line.get("inconclusive_reason")
+                      and line.get("inconclusive_reason") != "checks")
     sub = []
     if passed:
         sub.append(("passed", ", ".join("%s \\gpass" % esc(c.get("check")) for c in passed)))
     prev = None
     for c in others:
         detail = c.get("detail") or ""
-        shown = "as above" if (detail and detail == prev) else esc(detail, 240)
+        if detail and detail == prev:
+            shown = "as above"
+        else:
+            shown = esc(detail, 300)
+            if overridden and c.get("outcome") == "fail":
+                shown = "fail, overridden by the host state (below): " + shown
         prev = detail or prev
         sub.append(("%s %s" % (esc(c.get("check")), cells.GLYPH.get(c.get("outcome"), "\\gfail")), shown))
     if is_mcp:
         if line.get("inconclusive_reason") and line.get("inconclusive_reason") != "checks":
             sub.append(("reason", esc(line["inconclusive_reason"])))
         if line.get("verdict_detail"):
-            sub.append(("host state", esc(line["verdict_detail"], 240)))
+            sub.append(("host state", esc(line["verdict_detail"])))
         if line.get("service_by_design_case"):
             sub.append(("by-design case", tt(line["service_by_design_case"])))
         ph = _phases_text(line)

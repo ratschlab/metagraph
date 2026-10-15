@@ -333,6 +333,81 @@ class FakeRunTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(os.path.exists(os.path.join(out, "doc.pdf")))
 
+    def test_replicates_cell_without_evaluated_member(self):
+        """P-pos-reps on mcp: one by-design and one not-implemented member, so the cell shows the standing counts
+        alone, never `ok 0/0`."""
+        chapter = self.tex("chapter_P.tex")
+        self.assertNotIn("ok 0/0", chapter)
+        st = dict((sid, cells.scenario_states(self.runobj, sid)) for sid in ("P-004", "P-005"))
+        text, line2 = cells.aggregate(st, "mcp")
+        self.assertEqual(text, "1 \\gbd · 1 \\gni")
+        self.assertIsNone(line2)
+
+    def test_footnote_on_offending_cells_only(self):
+        """P-003: direct-remote is class same_checks (not clean), direct-local and mcp are clean: only the
+        direct-remote cell carries the footnote mark (I.4: on each offending cell)."""
+        import sections
+        st = cells.scenario_states(self.runobj, "P-003")
+        self.assertFalse(cells.is_clean(st))
+        self.assertIsNone(sections._cell_fn(st["mcp"], 1))
+        self.assertIsNone(sections._cell_fn(st["direct-local"], 1))
+        self.assertEqual(sections._cell_fn(st["direct-remote"], 1), 1)
+        chapter = self.tex("chapter_P.tex")
+        row = [l for l in chapter.splitlines() if l.startswith("direct-local &")][0]
+        self.assertNotIn("\\fn{", row)
+
+    def test_index_sorted(self):
+        main = self.tex()
+        index = main.split("Index of test ids", 1)[1].split("\\end{multicols}", 1)[0]
+        positions = dict((sid, index.find(latex.tt(sid))) for sid in self.runobj.order)
+        self.assertTrue(all(p >= 0 for p in positions.values()), positions)
+        self.assertEqual(sorted(positions, key=positions.get), sorted(self.runobj.order))
+        self.assertNotEqual(list(self.runobj.order), sorted(self.runobj.order))  # the manifest is not sorted
+
+    def test_sessions_text(self):
+        """I.5's mode row names every orchestrator session and the clock offset the comparison applied (not the
+        last session's measurement; VERIFY-SAMPLE H2)."""
+        import sections
+
+        class R(object):
+            run = {"orchestrator": {"sessions": [
+                {"mode": "paired", "started_utc": "2026-10-14T06:10:55Z", "mex_clock_offset_s": 0.12,
+                 "loop": {"state": "done", "completed": 681, "scenarios": 681, "direct_requests": 1587}},
+                {"mode": "paired", "started_utc": "2026-10-14T11:07:00Z", "mex_clock_offset_s": 0.025,
+                 "loop": {"state": "done", "completed": 681, "scenarios": 681, "direct_requests": 3}}]}}
+            comp = {"host_cache": {"clock_offsets_s": {"direct-local": 0.12}}}
+            orchestrator = {}
+        text = sections._sessions_text(R())
+        self.assertIn("session 1 started 2026-10-14 06:10:55, loop done, 681 of 681 scenarios, 1587 direct requests", text)
+        self.assertIn("session 2 started 2026-10-14 11:07:00", text)
+        self.assertIn("+0.120 s against the laptop, applied to direct-local", text)
+        self.assertNotIn("+0.025", text)
+
+    def test_gate_offline(self):
+        """Without a gate.json the gate is judged offline with a policy pinning the manifest and the document
+        says so (VERIFY-SAMPLE M6); without any policy it says none was evaluated."""
+        import gate_policy
+        policy = gate_policy.build_policy(self.runobj.manifest, table=(CASES, {"cases": 5}), manifest_file="m.json",
+                                          arms=("direct-local", "mcp"), warm_every=0)
+        path = os.path.join(self.tmp, "policy.json")
+        with open(path, "w") as fh:
+            json.dump(policy, fh)
+        run = reader.Run(self.run_dir, policy=path)
+        self.assertTrue(run.gate_offline)
+        self.assertIsInstance(run.gate, dict)
+        self.assertIn("passed", run.gate)
+        out = os.path.join(self.tmp, "gated")
+        rc = make_doc.main([self.run_dir, "--out", out, "--no-pdf", "--units", self.mapping_path,
+                            "--prose-dir", self.prose_dir, "--policy", path])
+        self.assertEqual(rc, 0)
+        with open(os.path.join(out, "doc.tex"), encoding="utf-8") as fh:
+            main = fh.read()
+        self.assertIn("evaluated offline by gate.py", main)
+        self.assertIn("GATE %s" % ("PASS" if run.gate["passed"] else "FAIL"), main)
+        self.assertIn("cold / warm / aged / not reached", main)
+        self.assertFalse(self.runobj.gate_offline)
+        self.assertIn("no policy in the suite's gate directory pins this manifest", self.tex())
+
     def test_missing_prose_and_mapping_fail(self):
         out = os.path.join(self.tmp, "fail")
         empty = os.path.join(self.tmp, "empty-prose")
@@ -359,6 +434,47 @@ class CellGrammarTest(unittest.TestCase):
         self.assertEqual(cells.fmt_t(99.6), "0.1 s")
         self.assertEqual(cells.fmt_t(3140), "3.1 s")
         self.assertEqual(cells.fmt_t(18400), "18 s")
+        self.assertEqual(cells.fmt_t(150), "0.2 s")
+
+    def test_fmt_delta(self):
+        """A difference carries its sign; a negative delta never prints as `<1 ms` (VERIFY-SAMPLE H1)."""
+        self.assertEqual(cells.fmt_delta(-6.914), "−7 ms")
+        self.assertEqual(cells.fmt_delta(-146.15), "−0.1 s")
+        self.assertEqual(cells.fmt_delta(183.6), "+0.2 s")
+        self.assertEqual(cells.fmt_delta(0.18), "0 ms")
+        self.assertEqual(cells.fmt_delta(-0.3), "0 ms")
+        self.assertEqual(cells.fmt_delta(-31377), "−31 s")
+        self.assertEqual(cells.fmt_delta(None), "–")
+
+    def test_host_marks(self):
+        """The i mark for a warm execution after an interrupted one; the aggregate's mark alone when every member
+        shares the state, with its share otherwise, none when all are host-warm."""
+        self.assertEqual(cells.host_mark({"host_cache": "warm", "host_cache_after_interrupted": True}), "i")
+        self.assertEqual(cells.host_mark({"host_cache": "cold"}), "c")
+        self.assertIsNone(cells.host_mark({"host_cache": "warm"}))
+        self.assertIsNone(cells.host_mark({"host_cache": "not_reached"}))
+        self.assertEqual(cells.host_marks_text(["cold", "cold", "cold"]), "c")
+        self.assertEqual(cells.host_marks_text(["warm", "cold", "cold", "warm", "warm", "warm"]), "c 2/6")
+        self.assertEqual(cells.host_marks_text(["warm_after_interrupted"]), "i")
+        self.assertEqual(cells.host_marks_text(["cold", "aged"]), "c 1/2 a 1/2")
+        self.assertIsNone(cells.host_marks_text(["warm", "warm"]))
+        self.assertIsNone(cells.host_marks_text([]))
+
+    def test_glyph_counts_bound(self):
+        """Each count is bound to its glyph with a thin non-breaking space and the pairs are set apart."""
+        class S(object):
+            def __init__(self, k):
+                self.glyph_key = k
+        states = [{"mcp": S("pass")}] * 3 + [{"mcp": S("inconclusive")}]
+        self.assertEqual(cells.glyph_counts(states, "mcp"), "3\\,\\gpass\\enspace 1\\,\\ginc")
+
+    def test_cut_at_word_boundary(self):
+        self.assertEqual(latex.cut_text("below the service's 500 ms minimum", 20), "below the service's…")
+        self.assertEqual(latex.cut_text("abcdefghij klmnop qrstuvwxyz", 20), "abcdefghij klmnop…")
+        self.assertEqual(latex.cut_text("short", 20), "short")
+        self.assertEqual(latex.cut_text("x" * 30, 10), "xxxxxxxxx…")
+        self.assertTrue(latex.esc("the answer could not be built and written within bounds", 30).endswith("…"))
+        self.assertNotIn("buil…", latex.esc("the answer could not be built and written within bounds", 30))
 
     def test_fmt_times(self):
         self.assertEqual(cells.fmt_times([3100, 900]), "3.1 / 0.9 s")

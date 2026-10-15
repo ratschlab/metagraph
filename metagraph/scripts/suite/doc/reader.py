@@ -75,7 +75,19 @@ class Run(object):
         self.table, self.table_meta = self._load_table(by_design, reevaluated)
         self.cases = report.report_cases(self.comp, self.dir) or self.table
         self.declared = self._load_declared(declared)
-        self.policy = sc.read_json(policy) if policy else None
+        self.policy, self.policy_path = self._load_policy(policy)
+        self.gate_offline = False
+        self.gate_error = None
+        if not isinstance(self.gate, dict) and isinstance(self.policy, dict):
+            # no verdict recorded in the run: the gate is evaluated offline from the run directory (gate.judge
+            # reads the merged lines, compare.json, the manifest and the plan; it writes nothing)
+            try:
+                self.gate = gate_mod.judge(self.dir, self.policy, reevaluated)
+                self.gate["policy"]["path"] = self.policy_path
+                self.gate_offline = True
+            except Exception as e:  # a run the gate cannot judge: the document says why, never a crash
+                self.gate = None
+                self.gate_error = "%s: %s" % (type(e).__name__, e)
         self.lines = {}
         for r in self.rows:
             self.lines.setdefault((r.get("scenario"), r.get("arm")), []).append(r)
@@ -121,6 +133,30 @@ class Run(object):
                 data["_file"] = name
                 return data
         return None
+
+    def _load_policy(self, policy):
+        """(policy, path): the given policy file, else the first policy of the suite's gate directory pinning the
+        run's manifest (gate/policy_*.json with manifest.content_sha256 equal to the manifest's), else None."""
+        if policy:
+            try:
+                return gate_mod.load_policy(policy), os.path.abspath(policy)
+            except (OSError, ValueError):
+                return sc.read_json(policy), os.path.abspath(policy)
+        sha = self.manifest.get("content_sha256")
+        gate_dir = os.path.join(SUITE_DIR, "gate")
+        if not sha or not os.path.isdir(gate_dir):
+            return None, None
+        for name in sorted(os.listdir(gate_dir)):
+            if not (name.startswith("policy_") and name.endswith(".json")):
+                continue
+            path = os.path.join(gate_dir, name)
+            try:
+                data = gate_mod.load_policy(path)
+            except (OSError, ValueError):
+                continue
+            if (data.get("manifest") or {}).get("content_sha256") == sha:
+                return data, path
+        return None, None
 
     # -- accessors ----------------------------------------------------------------------------------------------
 

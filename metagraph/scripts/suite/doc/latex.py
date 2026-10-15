@@ -26,6 +26,18 @@ def cut_sequences(text):
     return _SEQ_RE.sub(lambda m: "%s...(%d bp)" % (m.group(0)[:16], len(m.group(0))), text)
 
 
+def cut_text(text, limit):
+    """`text` cut to at most `limit` characters with an ellipsis, at a word boundary when one lies in the last
+    two fifths of the kept part (never mid-word otherwise); unchanged when it fits."""
+    if limit is None or len(text) <= limit:
+        return text
+    head = text[:max(0, limit - 1)]
+    space = max(head.rfind(" "), head.rfind("\u00a0"))
+    if space >= int(limit * 0.6):
+        head = head[:space]
+    return head.rstrip(" ,;:(\u00a0") + "…"
+
+
 def esc(text, limit=None):
     """`text` safe inside LaTeX text: specials escaped, control characters and line breaks turned into spaces, long
     sequences cut, symbols the fonts may lack set in the glyph font, cut at `limit` characters with an ellipsis."""
@@ -34,8 +46,7 @@ def esc(text, limit=None):
     t = str(text).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
     t = _CTRL_RE.sub("", t)
     t = cut_sequences(t)
-    if limit is not None and len(t) > limit:
-        t = t[:max(0, limit - 1)].rstrip() + "…"
+    t = cut_text(t, limit)
     out = []
     for ch in t:
         if ch in _SPECIALS:
@@ -57,8 +68,7 @@ def _breakable(text, limit=None):
     raw = str(text) if text is not None else ""
     raw = _CTRL_RE.sub("", raw.replace("\r\n", " ").replace("\n", " ").replace("\r", " "))
     raw = cut_sequences(raw)
-    if limit is not None and len(raw) > limit:
-        raw = raw[:max(0, limit - 1)].rstrip() + "…"
+    raw = cut_text(raw, limit)
     raw = _LONG_RUN_RE.sub(lambda m: "\x00".join(m.group(0)[i:i + 10] for i in range(0, len(m.group(0)), 10)), raw)
     out = []
     for ch in raw:
@@ -82,8 +92,7 @@ def esc_wrap(text, limit=None):
     t = str(text).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
     t = _CTRL_RE.sub("", t)
     t = cut_sequences(t)
-    if limit is not None and len(t) > limit:
-        t = t[:max(0, limit - 1)].rstrip() + "…"
+    t = cut_text(t, limit)
     out = []
     pos = 0
     for m in _TOKEN_RE.finditer(t):
