@@ -601,3 +601,34 @@ class MergedArmAnswers(unittest.TestCase):
         hw = T.Walker(O.Index([fixtures.Record('c_h', 0, 'h', 'A' * 30)], 11, 'basic'))
         self.assertTrue(TC.graph_walk(hw, 'A' * 11, 'right', 'A'))
         self.assertFalse(TC.graph_walk(hw, 'A' * 11, 'right', 'AA'))
+
+    def test_r2_a_merged_arm_is_the_keep_walkers_before_its_first_merge(self):
+        """Before the first merge no head has merged (SPEC 6.5): T-canonical_k10-0046 right, its
+        run ended (label_lost at 7) before the merge at 16 with another reason fails."""
+        item, arm = self.merged_arm('T-canonical_k10-0046')
+        a = copy.deepcopy(item['answer'])
+        run = next(r for r in a['results'][0]['arms'][arm]['runs'] if r['to_bp'] < 16)
+        run['end_reason'] = 'dead_end'
+        self.assertIn(f'traverse.{arm}.claims_before_merge', self.failed(item, a))
+        a = copy.deepcopy(item['answer'])
+        for s in a['results'][0]['arms'][arm]['segments']:
+            s['events'] = [e for e in s['events'] if e['type'] != 'label_end' or e['at_bp'] >= 16]
+        self.assertIn(f'traverse.{arm}.label_end_events_before_merge', self.failed(item, a))
+
+    def test_r2_the_merge_mutations_are_caught(self):
+        """The merged-arm members of the stated mutation set (a display through the minority
+        parent, a label via a parent that did not bring it, a reason before the first merge, a
+        base, a run's label) are generated and caught on the recorded answers."""
+        kinds = set()
+        for item in self.items.values():
+            w = config_walker(item['config'])
+            for name, fam, mutated in M.mutations_for_traverse(item['request'], item['answer'],
+                                                               0, w):
+                if ':merge_' not in name:
+                    continue
+                out = TC.compare_traverse(w, item['request'], 200, mutated)
+                self.assertTrue(any(M.caught(c, fam) for _, c in out), (item['id'], name))
+                kinds.add(name.split(':')[1])
+        self.assertEqual(kinds, {'merge_segment_base', 'merge_minority_first',
+                                 'merge_via_wrong_parent', 'merge_early_reason',
+                                 'merge_run_label'})

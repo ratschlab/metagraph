@@ -23,13 +23,18 @@ COVERED = [
     'hairpin events, seed and dropped labels); forbid and constant costs, switch_on loss/any, the '
     'branch allowance, the quorum, min_live_labels, the split limit, trace support, hairpins skip '
     'and follow, edge_reuse(_rc), rejoined_seed; cap probes (max_steps, max_paths, '
-    'max_live_paths) judged up to complete_to_bp; merge judged on its invariants; tree and '
-    'summary against full',
+    'max_live_paths) judged up to complete_to_bp; merge: an arm that merged nothing held to the '
+    'keep walker, an arm that merged held to it before its first merge and judged after it on the '
+    'displays through first parents, the merge structure (parents, labels_via_parent, the '
+    'majority parent, reconverge events), each leaf label\'s own route and displayed support; '
+    'tree and summary against full',
 ]
 NOT_COVERED = [
     '/traverse: table and hll costs, the graphlet\'s MGT body, output.coordinates, request '
-    'budgets and attempts, beam pruning, growth bins, which co-carrier carries a run under merge, '
-    'merge beyond its invariants', 'patterns longer than k (anchors, long_search paths and supported '
+    'budgets and attempts, beam pruning, growth bins; after a merge, the united history\'s label '
+    'states (which labels reach a node, with which loss and branches), its run ends and events, '
+    'its needed budgets and which walks it continues; ties of the majority parent (arrival '
+    'order)', 'patterns longer than k (anchors, long_search paths and supported '
     'paths)', 'predicates and motif predicates', 'multi-graph servers and in_ram',
     'DNA5 graphs (refused by this build: alphabet_untested)', 'CANONICAL and PRIMARY graphs '
     'without their mask', 'the lower bound of a bounds count beyond lower <= truth, and the '
@@ -124,8 +129,8 @@ def markdown(report):
     s = report['summary']
     lines.append(f"**Verdict: {s['verdict']}.** {s['entries']} answers compared "
                  f"({s['requests']} requests): {s['pass']} pass, {s['fail']} fail, "
-                 f"{s['inconclusive']} inconclusive (budget and cap probes, merge runs that "
-                 f"merged: completeness not judged, invariants judged), {s['exploratory']} with "
+                 f"{s['inconclusive']} inconclusive (budget and cap probes, merge arms after "
+                 f"their first merge: completeness not judged, invariants judged), {s['exploratory']} with "
                  f"an exploratory difference. Mutations of the stated mutation set: "
                  f"{report['mutations']['caught']} of {report['mutations']['applied']} caught, "
                  f"{len(report['mutations']['missed'])} missed.")

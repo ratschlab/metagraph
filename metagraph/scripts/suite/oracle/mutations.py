@@ -339,14 +339,58 @@ def mutations_for_traverse(request, answer, position, walker=None):
                     yield f'{arm}:drop_reconverge', (f'{p}.reconverge_events',), a
                     break
         if aj.get('completeness_scope') == 'united_history' and merged:
-            # merge: only the invariants are asserted (traverse_compare._merge_invariants)
+            # merge: the displays, the merge structure and the state before the first merge are
+            # asserted, the united history after it on its invariants (traverse_compare.
+            # _merge_invariants)
             withseq = [i for i, s in enumerate(segs) if s.get('sequence')]
             if withseq:
                 a, r = mutant()
                 s = r['arms'][arm]['segments'][withseq[-1]]
                 b = s['sequence'][-1]
                 s['sequence'] = s['sequence'][:-1] + ('A' if b != 'A' else 'C')
-                yield f'{arm}:merge_segment_base', (f'{p}.sound', f'{p}.displayed_support'), a
+                yield f'{arm}:merge_segment_base', (f'{p}.sound', f'{p}.displayed_support',
+                                                    f'{p}.own_routes',
+                                                    f'{p}.walks_before_merge'), a
+            by_id = {s['id']: s for s in segs}
+            for si, s in enumerate(segs):
+                ps = s.get('parents') or []
+                if len(ps) < 2:
+                    continue
+                heads = [len(by_id.get(q, {}).get('labels_at_end') or []) for q in ps]
+                # the display through a parent bringing fewer labels (SPEC 7.1; a tie would be
+                # a legal swap)
+                if heads[0] > heads[-1]:
+                    a, r = mutant()
+                    t = r['arms'][arm]['segments'][si]
+                    t['parents'] = t['parents'][::-1]
+                    t['labels_via_parent'] = (t.get('labels_via_parent') or [])[::-1]
+                    for e in t.get('events') or []:
+                        if e.get('type') == 'reconverge':
+                            e['segments'] = (e.get('segments') or [])[::-1]
+                    yield f'{arm}:merge_minority_first', (f'{p}.first_parent',), a
+                # a label said to enter through the first parent, which did not bring it
+                via = s.get('labels_via_parent') or []
+                head0 = set(by_id.get(ps[0], {}).get('labels_at_end') or [])
+                moved = [x for v in via[1:] for x in v if x not in head0]
+                if moved:
+                    a, r = mutant()
+                    t = r['arms'][arm]['segments'][si]
+                    v2 = t['labels_via_parent']
+                    v2[0] = sorted(v2[0] + [moved[0]])
+                    for v in v2[1:]:
+                        if moved[0] in v:
+                            v.remove(moved[0])
+                    yield f'{arm}:merge_via_wrong_parent', (f'{p}.labels_via_parent',), a
+                break
+            # a run ended before the first merge, its reason changed (the keep walker's state)
+            m0 = min(s.get('from_bp', 0) for s in segs if len(s.get('parents') or []) > 1)
+            early = [i for i, x in enumerate(aj.get('runs') or [])
+                     if x.get('to_bp', 0) < m0 and x.get('end_reason') in _OTHER_REASON]
+            if early:
+                a, r = mutant()
+                x = r['arms'][arm]['runs'][early[0]]
+                x['end_reason'] = _OTHER_REASON[x['end_reason']]
+                yield f'{arm}:merge_early_reason', (f'{p}.claims_before_merge',), a
             # a run handed to a label that does not hold its end node (a label holding it too
             # would be an equivalent mutant: merge answers do not judge which co-carrier
             # carries a run)

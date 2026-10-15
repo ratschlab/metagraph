@@ -340,6 +340,34 @@ def _scope_limitation(checks, prefix, arm_json, merges):
                f'a scope limitation observing {merges} merges', limits.get('scope'))
 
 
+def _before_first_merge(checks, prefix, res, view, m0):
+    """Before the arm's first merge (depth m0, the least from_bp of a merged segment) no head has
+    merged, so the merge walker's state is the keep walker's (SPEC 6.5: merging changes state only
+    at a reconvergence): the walks of at most m0 bases, the label ends, the switches and the
+    blocked / hairpin events decided by step m0 are the keep walker's, exactly."""
+    want = {y for y in res.walks if len(y) <= m0}
+    got = {x for x in view.all_walks() if len(x) <= m0}
+    checks.add(f'{prefix}.walks_before_merge', got == want,
+               f'every walk of at most {m0} bases (the first merge)', _diff(want, got))
+    want = {c for c in served_claims(res.claims) if len(c[0]) < m0}
+    got = {c for c in view.claims if len(c[0]) < m0}
+    checks.add(f'{prefix}.claims_before_merge', got == want,
+               f'every label end before the first merge at {m0}', _diff(want, got))
+    want = {(c[0], c[1], c[2], res.needed_at.get((c[0], c[1])) if c[2] == 'loss_budget' else None)
+            for c in res.claims if c[2] != 'switched' and len(c[0]) < m0}
+    got = {e for e in view.label_ends if len(e[0]) < m0}
+    checks.add(f'{prefix}.label_end_events_before_merge', got == want,
+               f'every label end event before the first merge at {m0}', _diff(want, got))
+    want = {s for s in res.switches if len(s[0]) <= m0}
+    got = {s for s in view.switches if len(s[0]) <= m0}
+    checks.add(f'{prefix}.switches_before_merge', got == want,
+               f'every switch into a node up to the first merge at {m0}', _diff(want, got))
+    want = {e for e in res.events if len(e[0]) < m0}
+    got = {e for e in view.events if len(e[0]) < m0}
+    checks.add(f'{prefix}.events_before_merge', got == want,
+               f'every blocked and hairpin step before the first merge at {m0}', _diff(want, got))
+
+
 def graph_walk(w, seed, arm, walk):
     """A walk of the index's graph: every node a k-mer of the index, no edge (SPEC 6.6's identity)
     used twice."""
@@ -518,6 +546,9 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
                'a reconverge event at each merge, naming its parents', _diff(want, got))
     _merge_structure(checks, prefix, view, arm_json, res, w, seed, arm, names or {},
                      strategy or {})
+    if merged_segs:
+        _before_first_merge(checks, prefix, res, view,
+                            min(s.get('from_bp', 0) for s in merged_segs))
     leaf_route = {}
     for p in arm_json.get('paths') or []:
         for e in p.get('end_labels') or []:
