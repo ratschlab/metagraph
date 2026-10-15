@@ -53,13 +53,17 @@ analysis accepts exactly that incompleteness: any other (a stop, a truncated arm
 answer is `result_changed` (another workload).
 
 **Selection** per mode, 16 each, deterministic: the eligible queries ranked by recorded cost (the least wall of the
-direct arms: load only adds time, so the least is the best estimate on a loaded host; the server-stated elapsed time
-understates some, e.g. Q-strands-0003 states 12 ms and takes 9.4 s) in 16 bins of equal width in log10(cost), so the
+direct arms: load only adds time, so the least is the best estimate on a loaded host; the MCP arm's server-stated
+elapsed time can understate, e.g. Q-strands-0003's MCP answers state 12-49 ms where the direct arms state and take
+9.4 s)
+in 16 bins of equal width in log10(cost), so the
 panel spans the cost range rather than following the suite's many sub-10-ms scenarios. Tag minimums first
 (`label_heavy` >= 5 labels in the answer, `long_path` >= 1000 bp of paths or a pattern extended beyond k,
 `long_query` >= 900 k-mers, `large_answer` >= 64 KiB, `heavy` the top tenth by cost), then one query per bin; every
 pick prefers an area of the mode not yet chosen, then a family not yet chosen, then a non-empty result (at most 2
-empty results per mode).
+empty results per mode). "Label-heavy" means at least 5 labels in the answer (70 at most in the panel; the v4 pool
+tops out at 70 labels for traverse and 18 for resolve and pattern): as heavy as the suite's scenarios go, not a label
+stress test.
 
 | mode | areas | tags |
 |---|---|---|
@@ -151,9 +155,11 @@ Per release: `48 x (1 + 6 x 3) = 912` requests (`bench_lib.schedule`, the seed r
 refusal while any run_direct.py runs there: a suite run and a bench run never overlap. The suite's sampler runs on
 mex for the whole session. The **preflight** samples 20 s and refuses to start (exit 4) unless the load guard finds
 the host clean; before every block the last minute's samples are judged and a loaded host is waited for (up to 30
-min, then exit 4); every 12 steps within a block too, and a block that turns loaded stops the run (exit 4:
-it can give no verdict any more; `--continue-loaded` runs on for descriptive numbers). The MCP template's
-`--check-queue` pauses while the search service's queue holds foreign work.
+min, then exit 4). At each block's start and every 12 steps within a block the run stops (exit 4, resumable) when
+the block turned loaded, when the sampler process is gone, or when two checks in a row found no reading of the
+load: such a block can give no verdict any more (`--continue-loaded` runs on for descriptive numbers). The MCP
+template's `--check-queue` pauses while the search service's queue holds foreign work (it ignores the Logan chunks,
+which the load guard covers).
 
 **Recorded**: `bench.json` (panel, seed, arms, options, the MCP template, the guard's thresholds, sessions with
 mex's clock offset), `panel.json`, `manifest.json`, `schedule.json`, `steps.jsonl` (each step's times, exit, outcome
@@ -167,17 +173,26 @@ Each block's window is the union of its executions' intervals, padded 30 s; mex'
 direct-local executions with the orchestrator's clock. A block is **clean** when every sample in its window is at
 or below both thresholds and the samples cover its executions without a gap over 15 s; **loaded** when one sample
 exceeds a threshold; **unguarded** when the load is unknown (no samples, a gap, a sample without a reading, the
-Logan container not reported unless `--allow-missing-sra` declares it stopped). Defaults: `sra_all` CPU <= 100 %
-(one core; the Logan load ran at 5,000-14,000 %) and load1 <= 16. **The load1 default is not calibrated**: no quiet
-sample of mex exists yet. The preflight prints what it saw; set `--load1-max` from it before the first release run
-(the value is recorded in `bench.json` and every verdict states its thresholds).
+Logan container not reported unless `--allow-missing-sra` declares it stopped, a non-finite value). Defaults:
+`sra_all` CPU <= 100 % (one core; the Logan load ran at 5,000-14,000 %) and load1 <= 16. **Neither default is
+calibrated**: no quiet sample of mex exists yet, so neither the Logan container's idle CPU nor the host's idle load1
+is known. The preflight prints what it saw; set `--sra-max` and `--load1-max` from it before the first release run
+(the values are recorded in `bench.json`, every verdict states its thresholds, and the analysis accepts only an
+override that tightens them).
+
+**Not guarded: other people's searches on the staging container.** The guard reads the Logan container's CPU and the
+host's load1 only. A foreign request to the staging container itself (a direct client, another service) runs beside
+the bench unseen, unless it lifts load1 over its limit; the MCP template's `--check-queue` sees only the search
+service's queue. Reserve the window with the people who use the staging host; a later guard could judge the staging
+container's own `cpu_pct` in the gaps between the bench's steps.
 
 ## The analysis (`analyze.py`)
 
 Every measured execution is classed (`success`; `missing`, `timeout`, `transport`, `refusal`, `not_pass`,
 `time_limited`, `incomplete`, `unverified`, `result_changed`); latency statistics use successes only, the others
-are counted and listed apart with their walls. A success must return the result sizes the panel recorded for its
-arm: another size is another workload (`result_changed`).
+are counted and listed apart with their walls. A success must state every result size the panel recorded for its
+arm, and state it alike: another size is another workload (`result_changed`), an answer not stating one cannot be
+shown to be the same workload (`unverified`: a moved or wrapped body is never a success).
 
 - per query and arm: the six walls, median, least, greatest; per query and cycle the paired differences and ratios
   mcp/direct-local, direct-remote/direct-local, mcp/direct-remote, and per query their medians;
@@ -188,13 +203,19 @@ arm: another size is another workload (`result_changed`).
   resampled query's cycles;
 - no tail percentile (p90, p99) for any query or arm: six repeats support median comparisons, not tail claims.
 
-**The performance verdict** is emitted only when the load guard finds every block clean, every scheduled step is
-recorded, the host's release and server instance and the MCP service's capabilities did not change, and every query
+**The performance verdict** is emitted only when the load guard finds every block clean with the run's recorded
+thresholds (an override may only tighten them), every scheduled step is recorded, the deployment's identity is
+stated and unchanged (every block's identity probe states the host's release and server instance, direct-local
+states its start identity, every MCP invocation states the service's capabilities; the release, server instance,
+index fingerprint and service capabilities did not change), the run's panel matches its identity, and every query
 has at least 5 of 6 successes on every arm (`--min-success`). Otherwise it is refused with its reasons, and the
 numbers are descriptive of an uncontrolled run. Exit 0 emitted, 3 refused.
 
-**Release A vs B**: `analyze.py RUN_B --baseline RUN_A`: both runs must emit a verdict, on the same panel, cycles and
-arms; per arm the per-query ratio of medians (B / A), aggregated with the panel's weights, with a bootstrap interval
+**Release A vs B**: `analyze.py RUN_B --baseline RUN_A`: both runs must emit a verdict, on the same panel (whose
+identity binds the recorded result sizes), cycles and arms, with the same harness (pause, warm-up arm, MCP template,
+base URLs, checks mode, the snapshot's run_direct.py, suite_common.py and sampler.py), and their successes must
+state the same result sizes for every query and arm; comparison.json records both harnesses and any threshold
+override. Per arm the per-query ratio of medians (B / A), aggregated with the panel's weights, with a bootstrap interval
 resampling queries within modes and each run's cycles independently. Per arm `regression` when the interval's
 lower end exceeds 1 + tolerance (10 %), `improvement` when its upper end is below 1 - tolerance, `no_regression`
 when its upper end is at most 1 + tolerance, else `inconclusive`. Exit 0 pass, 1 regression, 4 inconclusive, 3
@@ -236,16 +257,23 @@ Only when mex is free of the Logan load (the preflight refuses otherwise) and no
 ## Validation and limits
 
 - Offline only: the tests drive `run_bench.py` end to end against the fake host, a fake MCP runner writing raw
-  answers, a fake `docker` (clean, loaded, turning loaded mid-run), mex in a local directory: the schedule executed
-  in order with no overlapping requests, the request counts, the identity probes, the snapshot passed as
-  `{checks_dir}`, the preflight refusal, the stop on a block turning loaded, `--max-steps` and `--resume` without a
-  repeated execution, Ctrl-C after the step in flight, the lock, the template refusals. The analysis is tested on
-  synthetic recorded runs (exact ratios, intervals, every refusal reason, regression, improvement, inconclusive).
+  answers, a fake `docker` (clean, loaded, turning loaded mid-run, down), mex in a local directory: the schedule
+  executed in order with no overlapping requests, the request counts, the identity probes, the snapshot passed as
+  `{checks_dir}`, the preflight refusal, the stop on a block turning loaded, on a dead sampler and on a sampler
+  without readings, `--max-steps` and `--resume` without a repeated execution, Ctrl-C after the step in flight, the
+  lock, the template refusals. The analysis is tested on synthetic recorded runs (exact ratios, intervals, every
+  refusal reason, regression, improvement, inconclusive). The verification of the lane (VERIFY-BENCH, D1-D8) added
+  a test per defect: an answer stating no recorded size, a panel identity without the sizes, differing successful
+  sizes, loosened thresholds, an unknown or changed identity (index_fp too), the label-list cap and pattern
+  truncation fields, a non-finite reading, a dying sampler, a differing harness.
 - Never run against staging or the real MCP runner. To check in the pilot: the real runner's per-invocation
   overhead (it reads the service's capabilities and the queue before each execution), whether its measured wall
   includes a connection set-up (each MCP step is a fresh runner process; each direct step a fresh connection, whose
-  set-up run_direct.py records apart as `connect_ms`, outside `wall_ms`), and the load1 threshold.
+  set-up run_direct.py records apart as `connect_ms`, outside `wall_ms`), the real runner's treatment of `{repeat} 0`
+  (every bench MCP step uses it: the runner's "cold" index, which should change only labels such as the idempotency
+  key's), the sra_all and load1 thresholds, and the costing (re-estimate from the pilot's walls and step gaps).
 - The panel's recorded walls and costs come from a loaded run; they rank and cost, they are no baseline. The first
   clean run of a release is its baseline.
 - Budget stress (deliberately capped queries, stop reasons, upper bounds) is a separate protocol (GPT's item 5), not
-  part of this panel: capped answers are not eligible here.
+  part of this panel: capped answers are not eligible here, except T-derived-0003's deterministic default label cap,
+  a stated exception (above).

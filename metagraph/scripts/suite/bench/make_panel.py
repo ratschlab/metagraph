@@ -211,8 +211,9 @@ def candidate(run_dir, scenario, arms):
             tags = bl.query_tags(route, body, expected[arm]["sizes"] or {}, expected[arm]["bytes_body"]) \
                 if body is not None else []
     # the least wall of the direct arms' recorded executions: load only adds time, so the least is the best estimate
-    # of the query's own cost on a loaded host (ranking only). Not the server-stated elapsed time: some answers state
-    # less than their request took (a predicate's row reads), and not the MCP arm's walls (its overhead dominates).
+    # of the query's own cost on a loaded host (ranking only). Not the server-stated elapsed time: the MCP arm's answers
+    # can state less than the request took (Q-strands-0003's state 12-49 ms where the direct arms state 9.4 s), and
+    # not the MCP arm's walls (its overhead dominates).
     walls = [r.get("wall_ms") for arm in sc.DIRECT_ARMS for r in arms[arm]
              if isinstance(r.get("wall_ms"), (int, float)) and not isinstance(r.get("wall_ms"), bool)]
     cost = min(walls) if walls else None
