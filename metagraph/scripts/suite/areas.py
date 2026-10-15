@@ -401,12 +401,13 @@ def gen_T(ctx: Ctx) -> List[dict]:
     #   the id, asks for the host's cap, 60,000 ms (the MCP refuses above its preset's 15,000 ms, by design: a direct-
     #   arm walk), and walks what the slowest cold direct rate observed covers in 30 s (v3 and v4: T-walk-0006 83 bp/s,
     #   -0012 31, -0036 84 per arm; -0018 316 bp/s, 5,000 bp, so that it stays shorter than its twin). Its long twin
-    #   (T-longwalk-nnnn, right after it) walks 10,000 bp, or 4,000 bp where triage-v4 V06 proposed that (-0012,
-    #   -0036), under 60,000 ms: whether it completes depends on the load, so it is budget_stress, left out of the
-    #   deploy gate (gate_policy's rule) and kept in the full suite. -0024 and -0030 end at stated branches within
+    #   (T-longwalk-nnnn, right after it) is the v4 test: 10,000 bp, under the host's cap of 60,000 ms instead of v4's
+    #   15,000, which stopped all 32 executions of v3 and v4 by time (the MCP refuses the cap above its preset, by
+    #   design: a direct-arm benchmark); whether it completes depends on the load, so it is budget_stress, left out of
+    #   the deploy gate (gate_policy's rule) and kept in the full suite. -0024 and -0030 end at stated branches within
     #   their first 4 kb and passed on every arm in 15 s.
     SHORT = {6: 2500, 12: 1000, 18: 5000, 36: 2500}
-    LONG_TWIN = {6: 10000, 12: 4000, 18: 10000, 36: 4000}
+    LONG_TWIN = {6: 10000, 12: 10000, 18: 10000, 36: 10000}
     SLOWEST_COLD_BP_S = {6: 83, 12: 31, 18: 316, 36: 84}
     HEADER_300 = (4, 14, 22)
     nid = _ids("T-walk")

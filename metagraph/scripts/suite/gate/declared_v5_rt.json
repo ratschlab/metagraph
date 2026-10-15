@@ -3,7 +3,7 @@
  "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): what the MCP surface cannot show, carried over from declared_v4_rt.json section 1 (approved by the owner on 2026-10-14; the scenario ids are v5's, which keep v4's). Nothing else: the v4 suite errors of declared_v4_rt.json (T-labels-0004, T-budget-0003, T-attempts-0002 r1, REL-prefix_equals-0001/0002/0003) are fixed by v5, R-budget-0001/0002 stay required on direct-local (the owner, 2026-10-15), and the long walks' budget_stress exclusions derive from their tag in gate_policy.py (owner-approved 2026-10-15: T-longwalk-0001..0004). Decided by the owner, never inferred from an answer a run received; each entry names its evidence.",
  "manifest": {
   "file": "manifest/suite_v5.json",
-  "content_sha256": "738020f4f923123ff27dd201595047133c57930a5fe8a3b41d879adee17b233d"
+  "content_sha256": "75e26ae2459c49b08e2685be0b291f435d3c0054abd37d25fcd4a64139689448"
  },
  "exclusions": [
   {

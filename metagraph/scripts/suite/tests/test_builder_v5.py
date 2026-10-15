@@ -319,7 +319,7 @@ class WalksDecisive(unittest.TestCase):
         order = [x["id"] for x in m["scenarios"]]
         bounds = lambda sid: s[sid]["request"]["strategy"]["bounds"]  # noqa: E731
         short = {6: 2500, 12: 1000, 18: 5000, 36: 2500}
-        long_twin = {6: 10000, 12: 4000, 18: 10000, 36: 4000}
+        long_twin = {6: 10000, 12: 10000, 18: 10000, 36: 10000}   # the v4 test's radius (the owner, 2026-10-15)
         for n in range(1, 37):
             sid = "T-walk-%04d" % n
             self.assertEqual(s[sid]["truth"]["start"], v4[sid]["truth"]["start"], sid)    # the same windows
@@ -334,6 +334,10 @@ class WalksDecisive(unittest.TestCase):
                 self.assertTrue(tw["id"].startswith("T-longwalk-"), sid)
                 self.assertEqual(tw["request"]["seeds"], s[sid]["request"]["seeds"])
                 self.assertEqual(tw["request"]["strategy"]["bounds"]["max_extension_bp"], long_twin[n])
+                self.assertEqual(tw["request"]["strategy"]["bounds"]["max_extension_bp"],
+                                 v4[sid]["request"]["strategy"]["bounds"]["max_extension_bp"])
+                self.assertEqual(tw["request"]["strategy"]["bounds"]["time_budget_ms"], 60000)
+                self.assertEqual(tw["truth"]["start"], v4[sid]["truth"]["start"])
                 self.assertIn("budget_stress", tw["tags"])
                 self.assertEqual(tw["truth"]["budget_stress"]["short_twin"], sid)
                 self.assertIn(tw["id"], s[sid]["title"])

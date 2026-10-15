@@ -2964,7 +2964,7 @@ Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_desig
 
 `build_manifest.py` builds manifest version 5 (`suite_v5.json` / `suite_smoke_v5.json`, smoke tag `smoke-v5`); the
 frozen v1-v4 stay (1387455f rebuilds v4 byte for byte from the record cache it was built from). Phase A builds v5
-dry (lane V5's scratch, content_sha256 738020f4..., relations_sha256 39660cfa..., with the owner's amendments of
+dry (lane V5's scratch, content_sha256 75e26ae2..., relations_sha256 39660cfa..., with the owner's amendments of
 2026-10-15); run_suite.sh keeps v4 as its
 default until the freeze (Phase B: freeze, smoke, default, the gate policy from gate/declared_v5_rt.json). What
 changed, by finding:
@@ -3014,8 +3014,9 @@ changed, by finding:
   bp/s) walk 300 bp, the other nine keep 1 kb. T-walk-0006 / -0012 / -0018 / -0036, the gate's walks, ask the host's
   60,000 ms (refused by the MCP above its preset, by design) and walk 2,500 / 1,000 / 5,000 / 2,500 bp, what the
   slowest cold direct rate observed covers in 30 s; each has a long twin right after it on the same window,
-  T-longwalk-0001..0004 (10,000, 4,000, 10,000, 4,000 bp at 60,000 ms), tagged `budget_stress` (truth.budget_stress:
-  whether it completes depends on the load) and kept in the full suite. T-repeat 400 bp, eco's derived-label pair 50
+  T-longwalk-0001..0004, the v4 test (10,000 bp) under the host's 60,000 ms instead of v4's 15,000 (which stopped all
+  32 executions of v3 and v4 by time), tagged `budget_stress` (truth.budget_stress: whether it completes depends on
+  the load) and kept in the full suite. T-repeat 400 bp, eco's derived-label pair 50
   bp, T-coords 250 bp. Every window is drawn as in v4 (the class's margin), so nothing else moves.
 - **Warm-ups** (`warm-up`, truth.warm_up_for; `build_manifest.place_warm_ups` puts each right before its target): a
   resolve of the rows the target reads (the record region under its header: tuples; under its column: rows), itself a
