@@ -337,6 +337,50 @@ class MergeChecksIdentityTest(unittest.TestCase):
             sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
             self.assertTrue(gate.judge(d, policy_of(m))["passed"])
 
+    def test_a_reevaluated_comparison_computed_with_other_checks_blocks_the_gate(self):
+        # the re-evaluated set's rule: compare.reevaluated.json computed while the re-evaluation's checks were
+        # changed (restored before the gate) states other sha256 than reevaluated.json records, so the gate on the
+        # re-evaluated set blocks on identity; one that does not state its checks blocks; compared again it passes
+        m = manifest_of()
+        for name in sc.EXECUTED_FILES:
+            d = make_run(os.path.join(self.d, "runs", "re_" + name.replace(".", "_")), m, mcp_lines(m))
+            checks_dir = os.path.join(self.d, "checks_" + name.replace(".", "_"))
+            os.makedirs(checks_dir)
+            for f in sc.EXECUTED_FILES:
+                shutil.copy2(os.path.join(SUITE, f), checks_dir)
+            shutil.copy(os.path.join(d, "arms", "mcp", "executions.jsonl"),
+                        os.path.join(d, "arms", "mcp", "executions.reevaluated.jsonl"))
+            sc.write_json_atomic(os.path.join(d, "reevaluated.json"), {"checks": {
+                "dir": checks_dir, "checks_sha256": sc.file_sha256(os.path.join(checks_dir, "checks.py")),
+                "suite_common_sha256": sc.file_sha256(os.path.join(checks_dir, "suite_common.py"))}})
+            merge_run.merge(d, reevaluated=True)
+            out = os.path.join(d, "compare.reevaluated.json")
+            sc.write_json_atomic(out, cmp.compare(d, TABLE, reevaluated=True))
+
+            def identity():
+                return [p["detail"] for p in gate.judge(d, policy_of(m), reevaluated=True)["problems"]
+                        if p["kind"] == "identity"]
+            self.assertEqual(identity(), [])
+            path = os.path.join(checks_dir, name)
+            with open(path, "rb") as fh:
+                original = fh.read()
+            with open(path, "ab") as fh:
+                fh.write(b"\n# changed while the comparison ran\n")
+            changed = sc.file_sha256(path)
+            sc.write_json_atomic(out, cmp.compare(d, TABLE, reevaluated=True))
+            with open(path, "wb") as fh:
+                fh.write(original)
+            self.assertEqual(identity(), ["compare.reevaluated.json was judged with %s sha256 %s, not the %s the "
+                                          "re-evaluation records (reevaluated.json): recompute the comparison"
+                                          % (name, changed[:12], sc.file_sha256(path)[:12])])
+            comp = sc.read_json(out)
+            comp.pop("judged_with")
+            sc.write_json_atomic(out, comp)
+            self.assertEqual(identity(), ["compare.reevaluated.json was not judged with the re-evaluation's checks "
+                                          "(judged_with source not stated): recompute the comparison"])
+            sc.write_json_atomic(out, cmp.compare(d, TABLE, reevaluated=True))
+            self.assertEqual(identity(), [])
+
     def test_a_broken_snapshot_record_or_a_missing_executed_file_is_refused_never_a_crash(self):
         # SNAPSHOT.json empty, torn, no object, unreadable, or a file it records deleted (its suite_common.py): the
         # refusal names the cause and the merge, the comparison, the gate's property reading and the re-evaluation
