@@ -1294,6 +1294,46 @@ class StatedReasons(unittest.TestCase):
         for name in sorted(set(c[0] for c in impossible + legitimate)):
             self.assertEqual(judged(name)[0], "pass", name)
 
+    def test_a_discovery_max_contexts_stop_beside_a_predicate_pass(self):
+        # a stop_at_threshold stop of a predicate search's raw discovery is stated max_predicate_contexts wherever the
+        # predicate has a pass (pattern.cpp put_selection renames the engine's max_contexts); a constant normal form
+        # has none and keeps the engine's own threshold (SPEC-pattern-search §19.6)
+        def judged(name, edit):
+            req, body = fixture(name)
+            req, body = copy.deepcopy(req), copy.deepcopy(body)
+            edit(req, body, body["patterns"][0])
+            return outcome({"route": "POST /pattern", "request": req, "truth": {}}, ok_answer(body), "invariants")
+
+        def renamed(req, body, e):   # the stored raw-threshold stop, its reason as the engine named it
+            e["stop"]["reason"] = "max_contexts"
+        o, d = judged("predicate_stop_at_raw", renamed)
+        self.assertEqual(o, "fail")
+        self.assertIn("a discovery stop at max_contexts with a predicate's pass", d)
+        self.assertEqual(judged("predicate_stop_at_raw", lambda req, body, e: None)[0], "pass")
+
+        def unstated(req, body, e):  # no selection stated: whether a pass ran is not shown, so not judged
+            renamed(req, body, e)
+            e.pop("selection", None)
+        self.assertEqual(judged("predicate_stop_at_raw", unstated)[0], "pass")
+
+        def constant(req, body, e):  # a constant normal form under stop_at_threshold: the engine's max_contexts
+            cap = max(0, e["counts"]["contexts"]["value"] - 1)
+            req.update(stop_at_threshold=True, max_contexts=cap)
+            body["limits"].update(stop_at_threshold=True, max_contexts=cap)
+
+            def inexact(c):
+                if isinstance(c, dict):
+                    if c.get("relation") == "exact":
+                        c["relation"] = "at_least"
+                    for v in c.values():
+                        inexact(v)
+            inexact(e["counts"])
+            e.update(stop={"phase": "discovery", "reason": "max_contexts"}, withheld={"reason": "threshold_crossed"},
+                     returned=0, results=[], retrieval_complete=False)
+            if "cut" in e:
+                e["cut"] = None
+        self.assertEqual(judged("predicate_unknown_constant", constant)[0], "pass")
+
     def test_withheld_reasons(self):
         ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731
         self.ok(ctx("exact", 101), withheld="count_above_threshold")
