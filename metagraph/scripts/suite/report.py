@@ -143,10 +143,11 @@ def orchestrator_session(run):
 
 
 def loop_text(loop):
-    """The orchestrator's loop record (run_suite.sh loop_record) in words: its state (reason), the paired loop's
-    completed of planned scenarios (the sequential loop records no per-scenario count), the direct requests, the
-    failed steps and the MCP executions the runner did not record."""
-    out = ["loop %s%s" % (loop.get("state") or "-", (" (%s)" % loop["reason"]) if loop.get("reason") else "")]
+    """The orchestrator's loop record (run_suite.sh loop_record, the last invocation's) in words: its state (reason),
+    the paired loop's completed of planned scenarios (the sequential loop records no per-scenario count), the direct
+    requests, the failed steps and the MCP executions the runner did not record."""
+    out = ["the last invocation's loop %s%s" % (loop.get("state") or "-",
+                                                (" (%s)" % loop["reason"]) if loop.get("reason") else "")]
     if "scenarios" in loop or "completed" in loop:
         out.append("%s of %s scenario(s) completed" % (loop.get("completed", "-"), loop.get("scenarios", "-")))
     if loop.get("direct_requests") is not None:

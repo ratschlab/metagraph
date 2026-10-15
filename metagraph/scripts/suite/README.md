@@ -2420,9 +2420,9 @@ one lane's verification left to another lane's file.
   no disagreement)"; with another verdict a line below it states the same. The gate already failed it (identity).
 - Below the verdict, the loop's failed steps (ARM:SCENARIO:EXIT) and the MCP executions the runner did not record
   (SCENARIO:rREPEAT) are listed whatever the loop's state (a capped loop keeps its failed steps). The Environment
-  table's mode line states the loop as recorded (`report.loop_text`): state (reason), the paired loop's completed of
-  planned scenarios, the direct requests, the failed steps and the MCP executions not recorded; a sequential loop
-  prints its own counts and no "- of -".
+  table's mode line states the last invocation's loop as recorded (`report.loop_text`): state (reason), the paired
+  loop's completed of planned scenarios, the direct requests, the failed steps and the MCP executions not recorded; a
+  sequential loop prints its own counts and no "- of -".
 
 ### A resume says which arm the run's first flags skip again (VERIFY-S-RUNNER follow-up, minor)
 - A run's flags are its first invocation's (lane S7r): a run started with --skip-local and resumed once with

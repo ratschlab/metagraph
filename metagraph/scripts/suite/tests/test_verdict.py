@@ -578,15 +578,15 @@ class LoopAndReleaseReportTest(unittest.TestCase):
         self.assertTrue(v.startswith("**INCOMPLETE"), v)
         self.assertIn("- The paired loop: 1 failed step(s): direct-local:P-002:127; 1 MCP execution(s) the runner "
                       "did not record: P-002:r1.", text)
-        self.assertIn("loop incomplete (failed\\_steps), 1 of 2 scenario(s) completed, 7 direct request(s), 1 failed "
-                      "step(s), 1 MCP execution(s) the runner did not record", text)
+        self.assertIn("the last invocation's loop incomplete (failed\\_steps), 1 of 2 scenario(s) completed, 7 direct "
+                      "request(s), 1 failed step(s), 1 MCP execution(s) the runner did not record", text)
 
     def test_a_sequential_loop_states_its_counts(self):
         text, v = self.run_with(loop={"mode": "sequential", "state": "done", "reason": "", "direct_requests": 6,
                                       "failed_steps": [], "mcp_missing": [], "mcp_missing_count": 0})
         self.assertTrue(v.startswith("**PASS"), v)
-        self.assertIn("sequential: one arm after the other; loop done, 6 direct request(s), 0 failed step(s), 0 MCP "
-                      "execution(s) the runner did not record", text)
+        self.assertIn("sequential: one arm after the other; the last invocation's loop done, 6 direct request(s), 0 "
+                      "failed step(s), 0 MCP execution(s) the runner did not record", text)
         self.assertNotIn("- of -", text)
         self.assertNotIn("The sequential loop:", text)
 
