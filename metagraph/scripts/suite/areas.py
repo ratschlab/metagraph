@@ -572,26 +572,28 @@ def gen_T(ctx: Ctx) -> List[dict]:
                         [ex("status", http=409), ex("answer_fields", equals={"state": "expired"}, any_status=True)],
                         tags=["attempts", "refusal"]))
     req = traverse_request([_tseed(t["window"], [eco.accession])], {"bounds": {"max_extension_bp": 200}})
-    # an id runs once per server process while it is retained (retention_s 3600): the arm's second repeat meets the
-    # duplicate's 409, which states the attempt
-    req["attempt_id"] = "suite-s1-%s" % t["window"][:16]   # the runner appends "-<run id>-<arm>" (run_unique)
+    # an id runs once per server process while it is retained (retention_s 3600); the runner appends "-<run id>-<arm>"
+    # (run_unique), so each arm of a run runs its own attempt once: T-attempts-0002 runs it (a 200 stating its usage
+    # and bound), T-attempts-0003, the same request right after it, meets the retained duplicate (a 409 stating the
+    # attempt). v4 asked both of one scenario's two repeats, so the 200-only checks read inconclusive on the 409
+    # (triage-v4 V04) and the deploy gate needed a declared exclusion; each scenario now decides all of its checks.
+    req["attempt_id"] = "suite-s1-%s" % t["window"][:16]
     # the attempt's bound (SPEC-labeled-traversal-core §6.8: seeds, the effective per-seed budget and the server's
     # allowance, capabilities attempts.allowance_ms 10,000; walk_until_ms below seeds x T + allowance)
-    out.append(scenario(nid(), "T", "an attempt: the response states its usage and bound (409 duplicate when retained)",
+    out.append(scenario(nid(), "T", "an attempt: the response states its usage and bound",
                         "POST /traverse", req, t,
-                        # usage on the 200 only: the duplicate's 409 states {error, attempt}, no usage (SPEC §10.3;
-                        # G17), and then reads inconclusive
-                        [ex("status", http=[200, 409]), INV, ex("answer_fields", present=["usage"]),
+                        [OK, INV, ex("answer_fields", present=["usage"]),
                          ex("answer_fields", equals={"usage.bound.seeds": 1, "usage.bound.time_budget_ms": 15000,
                                                      "usage.bound.allowance_ms": 10000},
-                            present=["usage.bound.walk_until_ms"]),
-                         # the duplicate's 409: its attempt's state and usage, no response-level usage (A-10)
-                         ex("answer_fields", any_status=True, when_http=409,
-                            present=["attempt.state", "attempt.usage"], absent=["usage"])],
-                        tags=["attempts", "retention-dependent", "code-derived"], run_unique=["attempt_id"],
-                        # A2-06: each arm runs its own attempt (the runner appends the arm too); r0 runs it, r1 meets
-                        # its retained duplicate (409) and exercises the shape check; the arms compare like for like
-                        repeat=2))
+                            present=["usage.bound.walk_until_ms"])],
+                        tags=["attempts", "retention-dependent", "code-derived"], run_unique=["attempt_id"]))
+    # the duplicate's 409: its attempt's state and usage, no response-level usage (SPEC §10.3; A-10, G17)
+    out.append(scenario(nid(), "T", "the attempt id of T-attempts-0002 sent again while retained: the 409 duplicate "
+                        "states its attempt", "POST /traverse", copy.deepcopy(req), t,
+                        [ex("status", http=409),
+                         ex("answer_fields", any_status=True, present=["attempt.state", "attempt.usage"],
+                            absent=["usage"])],
+                        tags=["attempts", "retention-dependent", "code-derived"], run_unique=["attempt_id"]))
     # the work budget's slot of T-budget (above): this attempt's seed, whose seed phase v4 measured
     tw = dict(ctx.flank_for(eco, t, 1050), seed_phase=SEED_PHASE_WORK)
     w = work_slot
@@ -2280,6 +2282,12 @@ def gen_C(ctx: Ctx, caps: Dict[str, dict]) -> List[dict]:
 
 
 # ================================================================================================= D: determinism
+def _status_200_only(s: dict) -> bool:
+    """Whether the scenario's status expectation admits a 200 only."""
+    st_ = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
+    return st_.get("http", 200) in (200, [200])
+
+
 def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     """Twenty fast scenarios of other areas, repeated three times: identical answers apart from timing."""
     import copy as _copy
@@ -2287,11 +2295,14 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     picks = []
     want = {"P": 6, "R": 4, "L": 3, "M": 3, "T": 2, "Q": 2}
     for area, n in want.items():
+        # a twin repeats its source's request three times: never one whose answer depends on what ran before it (an
+        # attempt id, run-unique and retained: a D twin would meet its source's 409, P4-builder-truth-03), one that
+        # repeats already, or one whose status allows another answer than a 200
         cands = [s for s in pool if s["area"] == area and s["timing_class"] == "fast" and "refusal" not in s["tags"]
-                 and "machine-dependent" not in s["tags"] and "needs-unique-id" not in s["tags"]
+                 and "machine-dependent" not in s["tags"] and "retention-dependent" not in s["tags"]
                  and "relation" not in s["tags"] and "split-case" not in s["tags"] and "warm-up" not in s["tags"]
-                 and "gate-coverage" not in s["tags"]
-                 and not s.get("body_raw") and not s.get("headers")]
+                 and "gate-coverage" not in s["tags"] and not s.get("run_unique") and s.get("repeat", 1) == 1
+                 and _status_200_only(s) and not s.get("body_raw") and not s.get("headers")]
         step = max(1, len(cands) // n)
         picks += cands[::step][:n]
     # a complete search at m >= 2 (A-12 a: the machine-dependent tag keeps planted searches out of the picks above):

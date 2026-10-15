@@ -438,5 +438,43 @@ class RecordEndViaMcp(unittest.TestCase):
                              [], x["id"])
 
 
+class DeterminismPool(unittest.TestCase):
+    """P4-builder-truth-03: gen_D never twins a scenario whose answer depends on what ran before it (a run-unique,
+    retained attempt id), one that repeats already or one whose status allows another answer than a 200; and V04:
+    the attempt and its duplicate are two scenarios, each deciding all of its checks."""
+
+    def sc(self, sid, area="T", **kw):
+        base = {"id": sid, "area": area, "title": sid, "route": "POST /traverse", "request": {}, "truth": {},
+                "expect": [{"check": "status", "args": {"http": 200}}], "timing_class": "fast", "repeat": 1,
+                "tags": [], "mcp": {"not_implemented": "x"}}
+        base.update(kw)
+        return base
+
+    def test_pool(self):
+        pool = [self.sc("T-a", run_unique=["attempt_id"], tags=["attempts"]),
+                self.sc("T-b", tags=["retention-dependent"]), self.sc("T-c", repeat=2),
+                self.sc("T-d", expect=[{"check": "status", "args": {"http": [200, 409]}}]),
+                self.sc("T-e"), self.sc("T-f")]
+        picks = [d["derived_from"] for d in areas.gen_D(ml.Ctx([], 1), pool)]
+        self.assertEqual(picks, ["T-e", "T-f"])
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_attempt_pair(self):
+        m = built()
+        s = by_id(m)
+        a, dup = s["T-attempts-0002"], s["T-attempts-0003"]
+        self.assertEqual(a["request"], dup["request"])
+        self.assertEqual((a["repeat"], dup["repeat"]), (1, 1))
+        self.assertEqual(a["expect"][0]["args"]["http"], 200)
+        self.assertEqual(dup["expect"][0]["args"]["http"], 409)
+        self.assertEqual(a["run_unique"], dup["run_unique"])
+        order = [x["id"] for x in m["scenarios"]]
+        self.assertEqual(order.index("T-attempts-0003"), order.index("T-attempts-0002") + 1)
+        body = {"error": "duplicate", "attempt": {"state": "finished", "usage": {}}}
+        res = checks.evaluate(dup, checks.normalise_direct(409, body), "direct-local")
+        self.assertEqual(checks.scenario_outcome(res), "pass")
+        self.assertFalse([d for d in m["scenarios"] if d["area"] == "D" and d.get("run_unique")])
+
+
 if __name__ == "__main__":
     unittest.main()
