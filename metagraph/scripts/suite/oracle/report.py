@@ -26,13 +26,16 @@ COVERED = [
     'max_live_paths) judged up to complete_to_bp; merge: an arm that merged nothing held to the '
     'keep walker, an arm that merged held to it before its first merge and judged after it on the '
     'displays through first parents, the merge structure (parents, labels_via_parent, the '
-    'majority parent, reconverge events), each leaf label\'s own route and displayed support; '
+    'majority parent, reconverge events, the min entry against closed runs), each run\'s own '
+    'route and displayed support, dead_end only at a graph tip and label_lost only where no '
+    'successor keeps the label; '
     'tree and summary against full',
 ]
 NOT_COVERED = [
     '/traverse: table and hll costs, the graphlet\'s MGT body, output.coordinates, request '
     'budgets and attempts, beam pruning, growth bins; after a merge, the united history\'s label '
-    'states (which labels reach a node, with which loss and branches), its run ends and events, '
+    'states (which labels reach a node, with which loss and branches), its other run ends and '
+    'events, '
     'its needed budgets and which walks it continues; ties of the majority parent (arrival '
     'order)', 'the row of a CANONICAL k-mer listed without its reverse complement, when it is '
     'not the canonical one: held only to row < node - 1', 'patterns longer than k (anchors, long_search paths and supported '
