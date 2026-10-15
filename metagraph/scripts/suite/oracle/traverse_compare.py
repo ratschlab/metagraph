@@ -368,6 +368,31 @@ def _before_first_merge(checks, prefix, res, view, m0):
                f'every blocked and hairpin step before the first merge at {m0}', _diff(want, got))
 
 
+def _run_reasons(checks, prefix, view, arm_json, w, seed, arm):
+    """A merged arm's runs against their events (verification round 4): a run's end_reason is its
+    label_end event's reason as served (SPEC 13, I3-2: superseded and switched serve as label_lost,
+    minority, below_min_labels and split_limit as branch, hairpin as dead_end), the event being the
+    one on the run's segment at its to_bp (7.1, 13 note 20); and a dead_end run ends at a graph tip,
+    or its event's qualifier is hairpin."""
+    bad = []
+    for r in arm_json.get('runs') or []:
+        reason, sid = r.get('end_reason'), r.get('segment')
+        if reason is None or sid not in view.walk:
+            continue
+        ev = [e for e in view.segs[sid].get('events') or [] if e.get('type') == 'label_end'
+              and e.get('label') == r.get('label') and e.get('at_bp') == r.get('to_bp')]
+        if ev and reason != T.served(ev[0].get('reason')):
+            bad.append(('end_reason is not its event\'s as served', r, ev[0].get('reason')))
+            continue
+        if reason == 'dead_end' and not (ev and ev[0].get('reason') == 'hairpin'):
+            walk = view.walk[sid][:r.get('to_bp', 0)]
+            if w.successors(w.walk_node(seed, arm, walk, len(walk)), arm):
+                bad.append(('dead_end with successors and no hairpin qualifier', r))
+    checks.add(f'{prefix}.run_reasons', not bad,
+               'each run\'s end_reason its event\'s as served; dead_end only at a tip or a hairpin',
+               bad[:10])
+
+
 def _switch_costs(checks, prefix, view, arm_json, strategy):
     """Every switch of a merged arm at the cost model's price (verification round 4): none under
     forbid; under a constant cost every switch event's cost and every switched-in run's cost is
@@ -664,6 +689,7 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
         _before_first_merge(checks, prefix, res, view, m0)
         _end_reasons_after_merge(checks, prefix, view, arm_json, w, seed, arm, m0)
         _switch_costs(checks, prefix, view, arm_json, strategy or {})
+        _run_reasons(checks, prefix, view, arm_json, w, seed, arm)
     leaf_route = {}
     for p in arm_json.get('paths') or []:
         for e in p.get('end_labels') or []:

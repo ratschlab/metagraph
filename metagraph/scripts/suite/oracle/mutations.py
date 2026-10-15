@@ -439,6 +439,18 @@ def mutations_for_traverse(request, answer, position, walker=None):
                             x.get('end_reason') == 'label_lost':
                         x['end_reason'] = 'dead_end'
                 yield f'{arm}:merge_late_dead_end', (f'{p}.end_reasons_after_merge',), a
+            # a run's end_reason after the first merge set to dead_end, its event unchanged (the
+            # verifier's round-4 E3b and G8 miss: a superseded event under a dead_end run)
+            late_runs = [i for i, x in enumerate(aj.get('runs') or [])
+                         if x.get('to_bp', 0) >= m0_ and x.get('end_reason') == 'label_lost'
+                         and any(e.get('type') == 'label_end' and e.get('label') == x.get('label')
+                                 and e.get('at_bp') == x.get('to_bp')
+                                 for s in segs if s['id'] == x.get('segment')
+                                 for e in s.get('events') or [])]
+            if late_runs:
+                a, r = mutant()
+                r['arms'][arm]['runs'][late_runs[0]]['end_reason'] = 'dead_end'
+                yield f'{arm}:merge_late_run_reason', (f'{p}.run_reasons',), a
             # a run ended before the first merge, its reason changed (the keep walker's state)
             m0 = min(s.get('from_bp', 0) for s in segs if len(s.get('parents') or []) > 1)
             early = [i for i, x in enumerate(aj.get('runs') or [])

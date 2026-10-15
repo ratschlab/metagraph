@@ -632,7 +632,7 @@ class MergedArmAnswers(unittest.TestCase):
         self.assertEqual(kinds, {'merge_segment_base', 'merge_minority_first',
                                  'merge_via_wrong_parent', 'merge_early_reason',
                                  'merge_run_label', 'merge_costlier_entry',
-                                 'merge_late_dead_end'})
+                                 'merge_late_dead_end', 'merge_late_run_reason'})
 
 
 class ChainRequests(unittest.TestCase):
@@ -813,3 +813,35 @@ class ReEntryAfterMerge(unittest.TestCase):
         e = next(e for s in aj['segments'] for e in s['events'] if e['type'] == 'switch')
         e['cost'] = 2.0
         self.assertIn('traverse.right.switch_costs', self.failed('T-canonical_k10-0076', a))
+
+
+class RunReasonsAfterMerge(unittest.TestCase):
+    """Verification round 4 (R4.1): a run's end_reason is its label_end event's reason as served
+    (SPEC 13, I3-2), and a dead_end run ends at a graph tip or under the hairpin qualifier. The
+    seed-2 miss on T-canonical_k10-0076: c_eps's run (label_lost at 35, its event superseded)
+    reported dead_end at a node with successors, the event left superseded."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(MERGE_DATA) as f:
+            cls.item = {x['id']: x for x in json.load(f)['answers']}['T-canonical_k10-0076']
+
+    def failed(self, answer):
+        out = TC.compare_traverse(config_walker('canonical_k10'), self.item['request'], 200, answer)
+        return {x['check'] for _, c in out for x in c.failed()}
+
+    def test_a_superseded_run_reported_dead_end_fails(self):
+        a = copy.deepcopy(self.item['answer'])
+        aj = a['results'][0]['arms']['right']
+        for r in aj['runs']:
+            if r.get('end_reason') == 'label_lost':
+                r['end_reason'] = 'dead_end'
+        self.assertIn('traverse.right.run_reasons', self.failed(a))
+
+    def test_a_run_and_its_event_disagreeing_fails(self):
+        """The served mapping alone: c_eps's run stated branch under its superseded event."""
+        a = copy.deepcopy(self.item['answer'])
+        aj = a['results'][0]['arms']['right']
+        next(r for r in aj['runs'] if r.get('end_reason') == 'label_lost'
+             and r.get('to_bp') == 35)['end_reason'] = 'branch'
+        self.assertIn('traverse.right.run_reasons', self.failed(a))
