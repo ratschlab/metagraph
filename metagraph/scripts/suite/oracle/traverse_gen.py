@@ -83,6 +83,7 @@ class TraverseGen:
         self.pg.rng = self.rng
         self.cases = cases
         self.config = config_name
+        self.seed = seed
         self.n = 0
         self.header = index.mode == 'basic' and bool(index.seq_ids)
 
@@ -229,6 +230,51 @@ class TraverseGen:
         return out
 
 
+    def chain_requests(self, count):
+        """Constant-cost requests on the transition chain sw1 -> sw2 -> sw3 at random seeds,
+        values, budgets, switch_on and branching (verification round 2). The random requests
+        rarely meet a lineage that has paid one switch and needs another; here a seed in sw1
+        walking right, or in sw3 walking left, has two switches ahead, so a budget below twice the
+        value ends the second label loss_budget (needed_budget twice the value) and one of at
+        least twice the value takes both. Its own random stream: the other requests stay as
+        they were."""
+        if not self.cases or 'transition' not in self.cases:
+            return []
+        rng = random.Random(f'{self.seed}:{self.config}:chains')
+        recs = {r.name: r for r in self.index.records}
+        chain = ['sw1', 'sw2', 'sw3']
+        out = []
+        for _ in range(count):
+            start = rng.choice(['sw1', 'sw3'])
+            arm = 'right' if start == 'sw1' else 'left'
+            r = recs[start]
+            L = rng.randint(self.k, 25)
+            p = rng.randrange(0, len(r.seq) - L + 1)
+            value = rng.choice([0.5, 1, 2, 3])
+            labels = {'change_cost': {'model': 'constant', 'value': value},
+                      'loss_budget': value * rng.choice([1, 1, 1.5, 1.5, 2, 3])}
+            if rng.random() < 0.4:
+                labels['switch_on'] = 'any'
+            names = self.label_names([start])
+            labels['extra'] = [n for n in self.label_names([c for c in chain if c != start])
+                               if n not in names]
+            strategy = {'output': {'detail': 'full'}, 'direction': arm, 'labels': labels,
+                        'bounds': {'max_extension_bp': 110}}
+            roll = rng.random()
+            if roll < 0.5:
+                strategy['branching'] = {'on_reconverge': 'keep'}
+            elif roll < 0.8:
+                strategy['exhaustive'] = True
+            # else: merge, judged as merged arms are
+            out.append({'id': self.next_id(), 'route': 'traverse', 'class': 'ample',
+                        'request': {'seeds': [{'sequence': r.seq[p:p + L], 'labels': names}],
+                                    'strategy': strategy}})
+        return out
+
+
 def generate(index, walker, config_name, seed, cases, n_random=40, n_caps=12):
+    """The rule cases, the random requests, the cap probes, then the transition-chain requests
+    (n_random // 5, at least 4; last, so the earlier ids are unchanged)."""
     g = TraverseGen(index, walker, seed, config_name, cases)
-    return g.rule_requests() + g.random_requests(n_random) + g.cap_requests(n_caps)
+    return (g.rule_requests() + g.random_requests(n_random) + g.cap_requests(n_caps)
+            + g.chain_requests(max(4, n_random // 5)))

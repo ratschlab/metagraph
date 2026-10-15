@@ -632,3 +632,30 @@ class MergedArmAnswers(unittest.TestCase):
         self.assertEqual(kinds, {'merge_segment_base', 'merge_minority_first',
                                  'merge_via_wrong_parent', 'merge_early_reason',
                                  'merge_run_label'})
+
+
+class ChainRequests(unittest.TestCase):
+    """Verification round 2: the random constant-cost requests met loss_budget only in the fixed
+    rule case; the transition-chain requests draw it at random seeds, values and budgets."""
+
+    def test_every_traverse_config_and_seed_draws_loss_budget_ends(self):
+        from oracle import traverse_gen as G
+        for cfg in ('trav_basic_k11', 'trav_canonical_k11', 'trav_primary_k11'):
+            w = config_walker(cfg)
+            for seed in (1, 2):
+                reqs = G.generate(w.index, w, cfg, seed, CASES, n_random=40, n_caps=12)
+                chains = [r for r in reqs if r['request']['strategy'].get('bounds', {}).get(
+                    'max_extension_bp') == 110 and 'class' in r and r.get('case') is None]
+                self.assertGreaterEqual(len(chains), 4, (cfg, seed))
+                values, n = set(), 0
+                for it in chains:
+                    req = it['request']
+                    st = req['strategy']
+                    values.add((st['labels']['change_cost']['value'], st['labels']['loss_budget']))
+                    s = req['seeds'][0]
+                    res = T.constrain_walk(w, s['sequence'], st['direction'],
+                                           [w.label(x) for x in s['labels']], T.Strategy(st),
+                                           [w.label(x) for x in st['labels']['extra']])
+                    n += sum(1 for c in res.claims if c[2] == 'loss_budget')
+                self.assertGreater(n, 0, (cfg, seed))
+                self.assertGreater(len(values), 1, (cfg, seed))
