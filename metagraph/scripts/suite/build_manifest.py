@@ -431,8 +431,10 @@ def _table_cases() -> set:
 
 
 def validate(scenarios, cases=None) -> list:
-    """Unique ids, every check known to checks.py, the contract's fields present; mcp.not_implemented_checks and
-    mcp.by_design_checks name checks the scenario expects (with a reason, a case of the table |cases|)."""
+    """Unique ids, every check known to checks.py, the contract's fields present; every mcp.by_design id a case of the
+    table |cases| (the bundled service_by_design.json: a case the table lacks explains nothing, so the scenario's
+    MCP answer would read unexplained); mcp.not_implemented_checks and mcp.by_design_checks name checks the scenario
+    expects (with a reason, a case of the table)."""
     problems = []
     seen = set()
     cases = _table_cases() if cases is None else cases
@@ -452,6 +454,10 @@ def validate(scenarios, cases=None) -> list:
         if not any(e["check"] == "status" for e in s["expect"]):
             problems.append("%s: no status expectation" % s["id"])
         expected = set(e["check"] for e in s["expect"])
+        unknown = [c for c in s["mcp"].get("by_design") or [] if c not in cases]
+        if unknown:
+            problems.append("%s: mcp.by_design names %s, not a case of the bundled by-design table" % (
+                s["id"], ", ".join(unknown)))
         for e in s["mcp"].get("not_implemented_checks") or []:
             if not isinstance(e, dict) or e.get("check") not in expected or e.get("check") not in checks.CHECKS \
                     or not str(e.get("reason") or "").strip():

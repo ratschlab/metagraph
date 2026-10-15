@@ -732,6 +732,18 @@ class McpClassesInTheManifest(unittest.TestCase):
         every = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
         self.assertTrue([p for p in bm.validate([every]) if "cover every property check" in p])
 
+    def test_by_design_ids_in_the_table(self):
+        # VERIFY-V5A re-verification item 1: every mcp.by_design id is a case of the bundled table (F-gate's
+        # 422644b7: the renamed discovery cases), else the build fails
+        import build_manifest as bm
+        s = self.sc(by_design=["traverse.duplicate_seeds", "resolve.no_such_case"])
+        self.assertEqual([p for p in bm.validate([s]) if "by-design table" in p],
+                         ["T-x-0001: mcp.by_design names resolve.no_such_case, not a case of the bundled by-design "
+                          "table"])
+        cases = bm._table_cases()
+        for cid in ("resolve.discover_limit_above_cap", "resolve.discover_limit_above_cap_host_answers"):
+            self.assertIn(cid, cases)
+
     def test_scenario_level_marks(self):
         # VERIFY-G (c), the owner's rule: marks covering every property check become mcp.not_implemented (the
         # manifest has no whole-scenario by-design form), the generic checks (status, invariants, budget_respected)
@@ -788,6 +800,8 @@ class McpClassesInTheManifest(unittest.TestCase):
             "by_design": ["traverse.duplicate_seeds"]})
         import build_manifest as bm
         self.assertFalse([x["id"] for x in s.values() if bm.covers_every_property(x)])
+        cases = bm._table_cases()
+        self.assertFalse([(x["id"], c) for x in s.values() for c in x["mcp"].get("by_design") or [] if c not in cases])
         with open(os.path.join(SUITE, "gate", "declared_v5_rt.json")) as f:
             d = json.load(f)
         self.assertEqual((d["exclusions"], d["not_required"], d["relations_excluded"]), ([], [], []))
