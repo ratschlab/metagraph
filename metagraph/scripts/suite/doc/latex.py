@@ -14,6 +14,14 @@ TABCOLSEP_MM = 1.06  # 3 pt, each side of a column
 
 _SPECIALS = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{",
              "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+# The tint markers of an execution time quoted in prose or in a check's text (cells.fmt_exec_text,
+# cells.tint_quoted_times): private-use code points no prose file and no run text uses, which esc turns into
+# doc.sty's \tyellow{...} / \tred{...} after escaping, so that a figure filled into a sentence is escaped like any
+# other text and tinted last (set_tints).
+TINT_OPEN = {"yellow": "\ue000", "red": "\ue001"}
+TINT_CLOSE = "\ue002"
+_TINT_MACRO = {"\ue000": "\\tyellow{", "\ue001": "\\tred{"}
+_TINT_RE = re.compile("[\ue000\ue001\ue002]")
 _SPECIAL_RE = re.compile(r"[\\&%$#_{}~^]")
 _SEQ_RE = re.compile(r"[ACGTNacgtnRYSWKMBDHVU]{41,}")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -55,7 +63,26 @@ def esc(text, limit=None):
             out.append("{\\mdseries\\upshape\\glyphfont %s}" % ch)
         else:
             out.append(ch)
-    return "".join(out)
+    return set_tints("".join(out))
+
+
+def set_tints(text):
+    """The tint markers of `text` (escaped) as doc.sty's macros: `\ue001`61 s`\ue002` -> `\\tred{61 s}`; a tint a
+    cut left open is closed at the end, a close without an open is dropped."""
+    if not _TINT_RE.search(text):
+        return text
+    out, depth = [], 0
+    for ch in text:
+        if ch in _TINT_MACRO:
+            depth += 1
+            out.append(_TINT_MACRO[ch])
+        elif ch == TINT_CLOSE:
+            if depth:
+                depth -= 1
+                out.append("}")
+        else:
+            out.append(ch)
+    return "".join(out) + "}" * depth
 
 
 _BREAK_CHARS = "/.-_:"

@@ -3259,7 +3259,7 @@ class FullDocumentTest(unittest.TestCase):
             self.assertTrue(roots <= {"x"}, sorted(set(ctx.unresolved)))
         v = ctx_b.chapter_values("M")
         self.assertEqual((v["n_time_limited_200"], v["n_time_limited_200_tests"], v["time_limited_200_ids"]), (2, 2, "M-001, M-002"))
-        self.assertEqual(v["time_limited_200_text"], "M-001 60~s on direct-local; M-002 60~s on direct-local".replace("~", " "))
+        self.assertEqual(v["time_limited_200_text"], "M-001 \ue00160 s\ue002 on direct-local; M-002 \ue00160 s\ue002 on direct-local")
         self.assertEqual(v["time_limited_text"], "M-001 on direct-local (pattern 0 time-limited); M-002 on direct-local (pattern 0 time-limited)")
         self.assertEqual(v["n_time_cut_tests"], 0)
         self.assertEqual(v["unit"]["M-protein-level1"]["n_inconclusive_dl"], 1)
@@ -3299,9 +3299,15 @@ class FullDocumentTest(unittest.TestCase):
         ctx = self.ctx(prose, runobj, units_mod.resolve(runobj.manifest, self.mappings["t-perturbed"]))
         text = sections.family_section(ctx, "R", "T-walk").split("\\unithead", 1)[0]
         cut = "right: the record followed for 656 of 1000~bp, stopped by time\\_budget: a stated stop the budget allows"
-        self.assertIn("one of the one walks was stopped by the budget before the record's minimum (R-001 on "
+        self.assertIn("one of the one walks was stopped by a stated budget before the record's minimum (R-001 on "
                       "direct-local r0: %s, on direct-remote r0: %s and on mcp r0: %s); none passed on both direct "
                       "arms." % (cut, cut, cut), text)
+        self.assertNotIn("the walk preset's work cap", text)   # no resource stop in this fixture
+        self.assertIn("since whether one 60,000~ms call completes it depends on the load. Both are direct-arm tests", text)
+        v_t = ctx.chapter_values("R")
+        self.assertEqual((v_t["n_cap_stop_tests"], v_t["cap_stop_ids"], v_t["n_budget_stop_tests"], v_t["budget_stop_ids"]),
+                         (0, "", 1, "R-001"))
+        self.assertEqual(v_t["budget_stop_text"], v_t["time_cut_text"])
         v = ctx_b.chapter_values("R")
         self.assertEqual((v["n_time_cut_tests"], v["time_cut_ids"], v["n_time_cut_untested_tests"], v["time_cut_untested_ids"]),
                          (1, "R-001", 1, "R-001"))
@@ -3768,8 +3774,9 @@ class TimeTintTest(unittest.TestCase):
         self.assertEqual(len(legend), 2)
         sentence = legend[1].split("}\n", 1)[0]
         self.assertIn("above 10 s is set on a \\tyellow{yellow} tint and above 55 s on a \\tred{red} one", sentence)
-        self.assertIn("a difference (a delta, an overhead, how late a 503 was), a budget, a cap and the figures "
-                      "quoted in the prose carry no tint", sentence)
+        self.assertIn("in the tables, the detail blocks and the prose alike, a time quoted from a check's text too; a "
+                      "difference (a delta, an overhead, how late a 503 was), a budget, a cap and a distance in time "
+                      "carry no tint", sentence)
         self.assertEqual(main.count("\\bline{times}"), 1)
         # the two reviewed lines of the cell grammar are as they were, the new one after them
         import sections
@@ -3783,16 +3790,94 @@ class TimeTintTest(unittest.TestCase):
         c4 = main.split("connect\\_ms per arm", 1)[0].rsplit("\\begin{longtable}", 1)[1]
         self.assertNotIn("\\tyellow", c4)
         self.assertNotIn("\\tred", c4)
-        # the prose's figures are plain text (escaped afterwards): a scenario fact prints the time without a macro
+        # the prose's figures are plain text (escaped afterwards): a scenario fact prints the time with its tint as
+        # a marker, never as a macro, and latex.esc sets the macro last
         f = facts.scenario_facts(sections.Context(self.runobj, self.units, {}, {}, {}, list(self.units.chapters)),
                                  "R-001")
-        self.assertEqual(f["dl"]["wall"], "61 s")
-        self.assertEqual(f["dl"]["walls"], "61 s")
-        self.assertIn(f["dl"]["server"], ("31 s", "–"))
+        self.assertEqual(f["dl"]["wall"], "\ue00161 s\ue002")
+        self.assertEqual(f["dl"]["walls"], "\ue00161 s\ue002")
+        self.assertIn(f["dl"]["server"], ("\ue00031 s\ue002", "–"))
         self.assertNotIn("\\t", json.dumps(f["dl"]))
+        self.assertEqual(latex.esc("a pass in %s (host-cold)" % f["dl"]["wall"]), "a pass in \\tred{61 s} (host-cold)")
+        p1 = facts.scenario_facts(sections.Context(self.runobj, self.units, {}, {}, {}, list(self.units.chapters)),
+                                  "P-001")
+        self.assertIn("a pass in \ue00161 s\ue002", p1["dl"]["phrase"])  # P-001's phrase, as the prose quotes it
+        self.assertIn("a pass in \\tred{61 s}", latex.esc(p1["dl"]["phrase"]))
         self.assertEqual(blocks.estimate_lines(["\\bline{a}{\\tred{61 s} and \\tyellow{12} s}"]),
                          blocks.estimate_lines(["\\bline{a}{61 s and 12 s}"]))
         self.assertEqual(blocks.estimate_lines(["x" * 149 + " \\tred{61 s}"]), blocks.estimate_lines(["x" * 149 + " 61 s"]))
+
+    def test_prose_markers_and_quoted_times(self):
+        """A figure quoted in prose carries its tint as a marker (fmt_exec_text) that latex.esc sets as the macro
+        after escaping; an execution time quoted inside a check's or the runner's text (`client wall N ms`, `...
+        after N ms`) is marked by its value (tint_quoted_times, esc_times) and a lateness, a budget or any other
+        figure of the text stays; a marker a cut left open is closed; a close without an open is dropped."""
+        self.assertEqual(cells.fmt_exec_text(900), "0.9 s")
+        self.assertEqual(cells.fmt_exec_text(None), "–")
+        self.assertEqual(cells.fmt_exec_text(12000), "\ue00012 s\ue002")
+        self.assertEqual(cells.fmt_exec_text(61000), "\ue00161 s\ue002")
+        self.assertEqual(latex.esc("in \ue00012 s\ue002, 5 ms & \ue00161 s\ue002"), "in \\tyellow{12 s}, 5 ms \\& \\tred{61 s}")
+        self.assertEqual(latex.esc("in \ue00012 s\ue002", limit=10), "in \\tyellow{12 s}")
+        self.assertEqual(latex.esc("in \ue00012 s\ue002 and more", limit=9), "in \\tyellow{12…}")   # cut inside: closed
+        self.assertEqual(latex.set_tints("x\ue002y"), "xy")
+        self.assertEqual(latex.join_units(latex.esc("a pass in \ue00161 s\ue002")), "a pass in \\tred{61~s}")
+        quoted = "503 deadline delivered 7452 ms after the 3000 ms budget (client wall 10452 ms)"
+        self.assertEqual(cells.tint_quoted_times(quoted),
+                         "503 deadline delivered 7452 ms after the 3000 ms budget (client wall \ue00010452 ms\ue002)")
+        self.assertEqual(cells.esc_times(quoted),
+                         "503 deadline delivered 7452 ms after the 3000 ms budget (client wall \\tyellow{10452 ms})")
+        self.assertEqual(cells.esc_times("client wall 9000 ms"), "client wall 9000 ms")
+        self.assertEqual(cells.esc_times("resolve_timeout after 30395 ms (the settled attempt's settled_at - dispatched_at)"),
+                         "resolve\\_timeout after \\tyellow{30395 ms} (the settled attempt's settled\\_at - dispatched\\_at)")
+        self.assertEqual(cells.esc_times("traversal_resolve_deadline after 61218 ms"),
+                         "traversal\\_resolve\\_deadline after \\tred{61218 ms}")
+        self.assertEqual(cells.esc_times("delivered 25496 ms after the 20000 ms budget"),
+                         "delivered 25496 ms after the 20000 ms budget")
+        self.assertEqual(facts._cut("x (client wall 45496 ms) y", 400), "x (client wall \ue00045496 ms\ue002) y")
+        self.assertEqual(facts._clause("503 deadline delivered 25496 ms after the 20000 ms budget (client wall 45496 ms): "
+                                       "the deadline is read where the work polls it"),
+                         "503 deadline delivered 25496 ms after the 20000 ms budget (client wall \ue00045496 ms\ue002)")
+
+    def test_resource_stop_phrase(self):
+        """A walk a stated resource stopped: the resource, its knob and its figures from the answer's resource_stop
+        (blocks.resource_stops, reader.Run.raw_answer), '' without a raw record or a stop."""
+        import gzip
+        run_dir = os.path.join(self.tmp, "stop-run")
+        os.makedirs(os.path.join(run_dir, "arms", "direct-local", "raw"))
+        raw = "arms/direct-local/raw/T-001.direct-local.0.json.gz"
+        body = {"results": [{"resource_stop": {"resource": "work", "requested": 100000000, "effective": 100000000,
+                                               "used": 100000275, "phase": "traversal"},
+                             "arms": {"left": {"cap_trigger": {"at_bp": 3618, "reason": "resource_limit"}, "complete_to_bp": 3618},
+                                      "right": {"complete_to_bp": 3617}}},
+                            {"outcome": {}}]}
+        with gzip.open(os.path.join(run_dir, raw), "wt", encoding="utf-8") as fh:
+            json.dump({"answer": {"http": 200, "body": body}}, fh)
+
+        class FakeRun(object):
+            dir = run_dir
+            raw_answer = reader.Run.raw_answer
+            policy_path = None
+            policy_file_sha256 = reader.Run.policy_file_sha256
+
+            def budget_ms(self, sid):
+                return None
+        run = FakeRun()
+        line = {"raw": raw, "checks": [{"check": "walk_in_record", "outcome": "inconclusive",
+                                        "detail": "left: the record followed for 3618 of 10000 bp, stopped by resource_limit"}]}
+        self.assertEqual(blocks.resource_stops(run, line), [
+            {"seed": 0, "resource": "work", "knob": "bounds.max_work_units", "requested": 100000000, "used": 100000275,
+             "at": "3,618 bp (left), 3,617 bp (right)"}])
+        self.assertEqual(blocks.resource_stop_phrase(run, line),
+                         "seed 0: the work budget (bounds.max_work_units, 100,000,000 units; used 100,000,275) at 3,618 bp "
+                         "(left), 3,617 bp (right)")
+        self.assertEqual(blocks.resource_stop_phrase(run, {"raw": "arms/none.json.gz"}), "")
+        self.assertEqual(blocks.resource_stop_phrase(run, {}), "")
+        self.assertIsNone(run.policy_file_sha256())
+        text = blocks.adjudication(dict(line, outcome="inconclusive", http=200), run, "T-001", False)
+        self.assertIn("inconclusive: walk\\_in\\_record (left: the record followed for 3618 of 10000 bp, stopped by "
+                      "resource\\_limit) — the stop, as the answer states it: seed 0: the work budget "
+                      "(bounds.max\\_work\\_units, 100,000,000 units; used 100,000,275) at 3,618 bp (left), 3,617 bp (right)",
+                      text)
 
     def test_sty_tokens_and_width(self):
         """doc.sty defines the two colour tokens and the macros; with xelatex, a tinted time sets exactly as wide

@@ -167,7 +167,9 @@ class Context(object):
                 "by_design_table_line": by_design_table_text(run),
                 "n_chapters": len(self.units.chapters), "built_chapters": ", ".join(self.chapters),
                 "readme_path": README_PATH, "readme_commit": self.readme_commit() or "not determined",
-                "logan_caveat": facts.logan_caveat(run), "gate_judged": bool(gate)}
+                "logan_caveat": facts.logan_caveat(run), "gate_judged": bool(gate),
+                # the annotated matrix's column note (annotated_matrix fills both from the unit it picks)
+                "annotated_dimension": "the varied value", "annotated_record_key": False}
 
     def fill(self, text, extra=None):
         """Prose placeholders `{release}` etc. filled from the run (and `extra`, a chapter's, a family's or the
@@ -561,14 +563,18 @@ def gate_summary(ctx):
             how = ("judged offline by gate.py for this document (the run recorded %s); policy %s" % (
                 "a stale gate.json: %s" % stale_gate_text(run) if run.gate_stale else "no gate.json",
                 os.path.basename(pol.get("path") or "–")))
-            how += ", %s version %s (sha256 %s…), arms %s" % (
+            # gate.py's sha256 is that of the policy's canonical JSON; the deploy notes cite the file's bytes, so
+            # both are printed (VERIFY-COLOURS-V5 item 9)
+            file_sha = run.policy_file_sha256() if hasattr(run, "policy_file_sha256") else None
+            how += ", %s version %s (sha256 %s… of the canonical JSON%s), arms %s" % (
                 pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
+                (", %s… of the file" % file_sha[:12]) if file_sha else "",
                 ", ".join((run.policy or {}).get("arms") or []) or "–")
         else:
             # the recorded verdict, in the words of report.py's gate section (gate_headline_parts)
             word, how, _ = report.gate_headline_parts(gate)
-            how = "recorded in the run (%s), arms %s" % (how, ", ".join(
-                (run.policy or {}).get("arms") or gate.get("arms") or []) or "–")
+            how = "recorded in the run (%s; the sha256 is that of the policy's canonical JSON), arms %s" % (
+                how, ", ".join((run.policy or {}).get("arms") or gate.get("arms") or []) or "–")
         counts_text = "%s executions judged, %s passed, %s planned, %s required" % (
             counts.get("judged", "–"), counts.get("passed", "–"), counts.get("planned", "–"),
             counts.get("required", "–"))
@@ -632,11 +638,11 @@ def principal_findings(ctx):
                 if l.get("outcome") == "finding":
                     findings.setdefault(sid, []).append("%s r%s: %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
                                                                         esc(l.get("repeat")),
-                                                                        latex.join_units(esc(_finding_evidence(l)))))
+                                                                        latex.join_units(cells.esc_times(_finding_evidence(l)))))
                 elif l.get("outcome") in ("fail", "error"):
                     failed = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
                     what = ("%s: %s" % (esc(failed[0].get("check")),
-                                        latex.join_units(esc(failed[0].get("detail"), 120)))) if failed \
+                                        latex.join_units(cells.esc_times(failed[0].get("detail"), 120)))) if failed \
                         else esc(cells.WORD.get(l.get("outcome"), l.get("outcome")))
                     failures.setdefault(sid, []).append("%s r%s %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
                                                                        esc(l.get("repeat")), what))
@@ -644,8 +650,16 @@ def principal_findings(ctx):
         for key, who in (("direct_agreement", "direct"), ("mcp_agreement", "mcp")):
             a = e.get(key) or {}
             if a.get("class") == "disagree":
-                disagreements.append("%s (%s: %s)" % (_link_sid(ctx, sid), who, esc(", ".join(
-                    str(c) for c in (a.get("differing_checks") or [])) or "a check differs", 120)))
+                diff = [str(c) for c in (a.get("differing_checks") or [])]
+                if diff:
+                    what = "a check differs: " + ", ".join(diff)
+                else:
+                    # no check differs: the outcomes do (compare's outcome_differs: a time-limited pass against a 503
+                    # deadline, say), with the repeat and compare's reason (VERIFY-COLOURS-V5 item 1)
+                    od = [o for o in (a.get("outcome_differs") or []) if isinstance(o, dict)]
+                    what = "the outcomes differ" + ((", repeat %s: %s" % (od[0].get("repeat"), od[0].get("detail")))
+                                                    if od and od[0].get("detail") else "")
+                disagreements.append("%s (%s: %s)" % (_link_sid(ctx, sid), who, esc(what, 160)))
     comp_rel = run.comp_relations()
     failed_rel = []
     for rid, r in sorted(comp_rel.items()):
@@ -899,8 +913,8 @@ MARK_EXAMPLE = {"superscript digit": "\\ginc\\fn{1}", "not-equal sign": "\\gpass
                 "s": "\\gpass\\tmark{s}", "n": "\\gpass\\tmark{n}", "u": "\\gbd\\tmark{u}", "c": "9.1 s\\tmark{c}",
                 "a": "9.1 s\\tmark{a}", "i": "9.1 s\\tmark{i}", "m": "\\ginc\\tmark{m}"}
 ANNOTATION_DEFAULT = {
-    "column": "a column is one varied value of the unit's dimension; the record key in brackets names the source "
-              "record (the key in appendix D)",
+    "column": "a column is one varied value of the unit's dimension (here {annotated_dimension})"
+              "[[annotated_record_key ?; the key in brackets names the source record (the key in appendix D)]]",
     "glyph": "the glyph is the arm's standing on the test: pass, fail, error, finding, inconclusive, not "
              "implemented via MCP, service-side by design (the legend below)",
     "repeats": "two numbers separated by a slash are the repeats in order (on mcp the cold call, then the warm "
@@ -985,8 +999,9 @@ def times_legend_sentence():
     """The one sentence of the cell grammar on the tints (the owner's decision of 2026-10-15): the thresholds
     printed from cells' constants, the two words on their own tints."""
     return ("a printed execution time (a wall, a server time, a backend time or an MCP phase, alone or as a median, "
-            "p90 or maximum) above %s is set on a %s tint and above %s on a %s one; a difference (a delta, an "
-            "overhead, how late a 503 was), a budget, a cap and the figures quoted in the prose carry no tint" % (
+            "p90 or maximum) above %s is set on a %s tint and above %s on a %s one, in the tables, the detail blocks "
+            "and the prose alike, a time quoted from a check's text too; a difference (a delta, an overhead, how "
+            "late a 503 was), a budget, a cap and a distance in time carry no tint" % (
                 fmt_t(cells.TIME_TINT_YELLOW_MS), cells.TINT_MACRO["yellow"] + "{yellow}",
                 fmt_t(cells.TIME_TINT_RED_MS), cells.TINT_MACRO["red"] + "{red}"))
 
@@ -1082,17 +1097,27 @@ def annotated_matrix(ctx):
                 mark_marked = True
             cs.append(latex.cell_lines(l1, l2, l3))
         rows.append((esc(arm), cs))
+    # a note whose marker sits in no cell of this matrix says so (VERIFY-COLOURS-V5 item 4)
+    unmarked = []
     if not footnote_marked:
         used.append("footnote") if "footnote" not in used else None
+        unmarked.append("footnote")
     if not mark_marked and "mark" not in used:
         used.append("mark")
+        unmarked.append("mark")
     ids = units_ids(ctx, members) + mark("ids")
     out = "\\noindent{\\small The matrix of unit \\hyperref[unit:%s]{\\texttt{%s}} (%s), annotated:}\\par\\nopagebreak\\smallskip\n" % (
         latex.label_key(uid), esc(uid), esc(u.get("unit_title") or ""))
     out += latex.series_table(columns, rows, ids, cells.TIMING_LEGEND["series"] + mark("summary"))
     out += "\\begingroup\\footnotesize\n"
+    # the column note names this unit's dimension and the record-key clause only where the variants carry a key
+    # (VERIFY-COLOURS-V5 item 3)
+    extra = {"annotated_dimension": str(u.get("unit_title") or "the varied value").split(" (")[0],
+             "annotated_record_key": any(_variant(meta[sid], sid).endswith(")") and " (" in _variant(meta[sid], sid)
+                                         for sid in members)}
     for i, key in enumerate(used):
-        out += "\\annline{%d}{%s}\n" % (i + 1, inline(ctx.fill(texts.get(key, key))))
+        text = texts.get(key, key) + (" (not in this matrix)" if key in unmarked else "")
+        out += "\\annline{%d}{%s}\n" % (i + 1, inline(ctx.fill(text, extra)))
     out += "\\par\\endgroup\\medskip\n\n"
     return out
 
@@ -1926,9 +1951,11 @@ def closing_values(ctx):
     s = run.summary()
     v = {}
 
-    def stats(prefix, d, signed=False):
+    def stats(prefix, d, signed=False, tint=True):
+        # a signed difference stays plain (fmt_delta); an execution time (a phase, a cold wall) carries its tint
+        # as a marker for the prose (cells.fmt_exec_text); a connection set-up is no execution time (tint=False)
         d = d if isinstance(d, dict) and d.get("n") else None
-        f = fmt_delta if signed else fmt_t
+        f = fmt_delta if signed else (cells.fmt_exec_text if tint else fmt_t)
         v[prefix + "_p50"] = f(d.get("p50")) if d else None
         v[prefix + "_p90"] = f(d.get("p90")) if d else None
         v[prefix + "_max"] = f(d.get("max")) if d else None
@@ -1956,7 +1983,7 @@ def closing_values(ctx):
         v["cold_warm_%s_ratio_p50" % key] = fmt_n((d.get("ratio") or {}).get("p50"), 2) if d.get("n") else None
     fo = s.get("front_overhead") or {}
     for arm in ("direct-local", "direct-remote"):
-        stats("connect_" + cells.ARM_SHORT[arm], (fo.get("connect_ms") or {}).get(arm))
+        stats("connect_" + cells.ARM_SHORT[arm], (fo.get("connect_ms") or {}).get(arm), tint=False)
     nets = [(e.get("front_overhead") or {}).get("net_ms") for e in (run.comp.get("scenarios") or {}).values()
             if isinstance(e, dict) and isinstance(e.get("front_overhead"), dict)]
     nets = [x for x in nets if cells._num(x) is not None]
@@ -1966,8 +1993,8 @@ def closing_values(ctx):
     pairs = paired_walls(ctx)
     for key, idx in (("dl", 2), ("dr", 3), ("mcp", 4)):
         vals = [p[idx] for p in pairs if p[idx] is not None]
-        v["warm_wall_%s_p50" % key] = fmt_t(cells.percentile(vals, 50)) if vals else None
-        v["warm_wall_%s_p90" % key] = fmt_t(cells.percentile(vals, 90)) if vals else None
+        v["warm_wall_%s_p50" % key] = cells.fmt_exec_text(cells.percentile(vals, 50)) if vals else None
+        v["warm_wall_%s_p90" % key] = cells.fmt_exec_text(cells.percentile(vals, 90)) if vals else None
         v["warm_wall_%s_n" % key] = str(len(vals)) if vals else None
     both = [p for p in pairs if p[2] is not None and p[4] is not None]
     v["paired_dl_mcp_n"] = str(len(both)) if both else None
@@ -1978,8 +2005,8 @@ def closing_values(ctx):
     # the two sides' medians of the paired population, and whether they print in seconds against milliseconds
     dl_med = cells.percentile([p[2] for p in both], 50) if both else None
     mcp_med = cells.percentile([p[4] for p in both], 50) if both else None
-    v["paired_dl_wall_p50"] = fmt_t(dl_med) if both else None
-    v["paired_mcp_wall_p50"] = fmt_t(mcp_med) if both else None
+    v["paired_dl_wall_p50"] = cells.fmt_exec_text(dl_med) if both else None
+    v["paired_mcp_wall_p50"] = cells.fmt_exec_text(mcp_med) if both else None
     v["paired_seconds_to_milliseconds"] = bool(both) and cells._split_unit(fmt_t(mcp_med))[1] == "s" \
         and cells._split_unit(fmt_t(dl_med))[1] == "ms"
     # the backend overhead against the MCP overhead (both against direct-local, medians of separate distributions)
@@ -1999,7 +2026,7 @@ def closing_values(ctx):
         if p50 is not None and (largest is None or p50 > largest[0]):
             largest = (p50, name)
     v["mcp_phase_largest"] = largest[1] if largest else None
-    v["mcp_phase_largest_p50"] = fmt_t(largest[0]) if largest else None
+    v["mcp_phase_largest_p50"] = cells.fmt_exec_text(largest[0]) if largest else None
     fo_ = s.get("front_overhead") or {}
     v["scenarios_without_warm_pair"] = str(fo_["scenarios_without_warm_pair"]) \
         if cells._num(fo_.get("scenarios_without_warm_pair")) is not None else None
@@ -2647,9 +2674,10 @@ def environment_table(ctx):
             _date(info.get("started_utc")), _date(ended))))
     if mcp_run:
         rows.append(("MCP runner", "git head %s; base %s; admin key %s; the service's deployed version is not "
-                                   "recorded in a v4 run" % (
+                                   "recorded by a run of manifest v%s" % (
                                        tt(_short(mcp_run.get("git_head"), 12)), tt(mcp_run.get("base") or "–"),
-                                       esc(mcp_run.get("admin_key") or "–"))))
+                                       esc(mcp_run.get("admin_key") or "–"),
+                                       esc(manifest.get("manifest_version") or "?"))))
     sessions = _sessions_text(run)
     if sessions:
         rows.append(("mode", sessions))

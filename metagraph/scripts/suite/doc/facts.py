@@ -255,8 +255,10 @@ def _clause(text, limit=160):
 
 
 def _cut(text, limit):
+    """`text` cut at `limit`, the execution times it quotes (a check's or the runner's text: cells.tint_quoted_times)
+    carrying their tint as a marker that latex.esc sets."""
     import latex
-    return latex.cut_text(str(text or ""), limit)
+    return cells.tint_quoted_times(latex.cut_text(str(text or ""), limit))
 
 
 def _overridden(line, is_mcp):
@@ -272,7 +274,7 @@ def _wall_text(line, arm):
     """The wall of an execution with its host state where that is not host-warm, on the direct arms ('1.9 s
     (host-cold)'; VERIFY-PLXM M5: a cold first call beside a warm one invites a timing reading the run does not
     isolate); the MCP arm's phrases name the cold and the warm call themselves."""
-    text = fmt_t(line.get("wall_ms"))
+    text = cells.fmt_exec_text(line.get("wall_ms"))
     if arm != "mcp":
         word = HOST_PHRASE.get(cells.host_cache_of(line))
         if word:
@@ -358,18 +360,18 @@ def arm_facts(ctx, sid, arm):
         return f
     lines = st.lines
     first = lines[0]
-    f["wall"] = fmt_t(first.get("wall_ms"))
-    f["walls"] = " / ".join(fmt_t(l.get("wall_ms")) for l in lines)
+    f["wall"] = cells.fmt_exec_text(first.get("wall_ms"))
+    f["walls"] = " / ".join(cells.fmt_exec_text(l.get("wall_ms")) for l in lines)
     for l in lines:
         hc = cells.host_cache_of(l)
         if hc == "cold" and f["wall_cold"] == "–":
-            f["wall_cold"] = fmt_t(l.get("wall_ms"))
+            f["wall_cold"] = cells.fmt_exec_text(l.get("wall_ms"))
         if hc == "warm" and f["wall_warm"] == "–":
-            f["wall_warm"] = fmt_t(l.get("wall_ms"))
+            f["wall_warm"] = cells.fmt_exec_text(l.get("wall_ms"))
             srv = (l.get("server") or {}).get("elapsed_ms") if isinstance(l.get("server"), dict) else None
-            f["server"] = fmt_t(srv)
+            f["server"] = cells.fmt_exec_text(srv)
             be = (l.get("mcp_phases") or {}).get("backend_ms") if isinstance(l.get("mcp_phases"), dict) else None
-            f["backend"] = fmt_t(be)
+            f["backend"] = cells.fmt_exec_text(be)
     # on an MCP arm the status and the code come from the executions the class is read from (blocks.class_lines:
     # the case's executions on an arm the service decided), so that [mcp][class_word], [mcp][http] and [mcp][code]
     # describe one execution where the case covers one repeat only (VERIFY-FINAL R1, VERIFY-FIX2 L3)
@@ -623,7 +625,7 @@ def _stops(ctx, sids):
             for l in run.arm_lines(sid, arm):
                 tl = str(l.get("time_limited") or "")
                 if l.get("http") == 200 and "stop" in tl:
-                    per.append("%s on %s (%s, %s)" % (sid, arm, tl, fmt_t(l.get("wall_ms"))))
+                    per.append("%s on %s (%s, %s)" % (sid, arm, tl, cells.fmt_exec_text(l.get("wall_ms"))))
     return {"n_stopped": len(per), "stop_observed": bool(per), "stop_observed_text": "; ".join(per)}
 
 
@@ -683,7 +685,7 @@ def _time_limitations(ctx, sids):
                 if sid not in by_arm[arm]["all"]:
                     by_arm[arm]["all"].append(sid)
                 if "pattern" in tl:
-                    pat_items.append("%s on %s" % (fmt_t(l.get("wall_ms")), where))
+                    pat_items.append("%s on %s" % (cells.fmt_exec_text(l.get("wall_ms")), where))
                     if sid not in by_arm[arm]["pat"]:
                         by_arm[arm]["pat"].append(sid)
                 if any(w in tl for w in _TIME_CUT_WORDS):
@@ -741,6 +743,50 @@ def _time_limitations(ctx, sids):
         if items:
             parts.append("%s %s" % ("via MCP" if arm == "mcp" else "on " + arm, " and ".join(items)))
     out["time_by_arm_text"] = "; ".join(parts)
+    return out
+
+
+_RESOURCE_STOP_WORDS = ("resource_limit", "max_steps", "max_live_paths", "max_paths", "max_output_bp")
+
+
+def _budget_stops(ctx, sids):
+    """_time_limitations and, with them, the walks a stated resource other than time stopped before they showed
+    their property (an execution answered 200, outcome inconclusive, whose walk check reads 'stopped by
+    resource_limit' or a path cap, the resource, its knob and its figures read from the answer's resource_stop
+    through blocks.resource_stop_phrase; VERIFY-COLOURS-V5 item 2): {n_cap_stop_tests, cap_stop_ids,
+    cap_stop_text: 'sid on arm r<n>: seed 0: the work budget (bounds.max_work_units, 100,000,000 units; used
+    100,000,275) at 3,618 bp (left), ...; the walk check's clause'}, and every walk a budget stopped, time, memory
+    or work, or the attempt's bound ({n_budget_stop_tests, budget_stop_ids, budget_stop_text}: the time cuts and the
+    resource stops together, one entry per test)."""
+    run = ctx.run
+    out = _time_limitations(ctx, sids)
+    cut_ids = [x for x in out["time_cut_ids"].split(", ") if x]
+    cap_ids, cap_per = [], []
+    for sid in sids:
+        items = []
+        for arm in ARMS:
+            for l in run.arm_lines(sid, arm):
+                if l.get("http") != 200 or l.get("outcome") != "inconclusive":
+                    continue
+                checks = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"
+                          and c.get("check") in ("walk_in_record", "walk_end")]
+                walk = next((c for c in checks if any(w in str(c.get("detail") or "") for w in _RESOURCE_STOP_WORDS)), None)
+                if walk is None:
+                    continue
+                stop = blocks.resource_stop_phrase(run, l)
+                clause = blocks._balanced(_cut(walk.get("detail"), 200))
+                items.append("on %s r%s: %s" % (arm, l.get("repeat"), ("%s; %s" % (stop, clause)) if stop else clause))
+        if items:
+            cap_ids.append(sid)
+            cap_per.append("%s %s" % (sid, _join(items)))
+    budget_ids = list(cut_ids) + [sid for sid in cap_ids if sid not in cut_ids]
+    by_sid = dict((t.split(" ", 1)[0], t) for t in out["time_cut_text"].split("; ") if t)
+    for t in cap_per:
+        sid = t.split(" ", 1)[0]
+        by_sid[sid] = (by_sid[sid] + "; " + t.split(" ", 1)[1]) if sid in by_sid else t
+    out.update({"n_cap_stop_tests": len(cap_ids), "cap_stop_ids": ", ".join(cap_ids), "cap_stop_text": "; ".join(cap_per),
+                "n_budget_stop_tests": len(budget_ids), "budget_stop_ids": ", ".join(budget_ids),
+                "budget_stop_text": "; ".join(by_sid[sid] for sid in budget_ids if sid in by_sid)})
     return out
 
 
@@ -946,7 +992,7 @@ def unit_facts(ctx, uid, x=None):
     v = {"id": uid, "n_tests": len(members), "members": ", ".join(members), "x": x}
     v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
-    v.update(_time_limitations(ctx, members))
+    v.update(_budget_stops(ctx, members))
     v.update(_warm_ups(ctx, members))
     v["n_direct_pass_both"] = _direct_pass_both(x, members)
     v["direct_all_pass"] = bool(members) and v["n_direct_pass_both"] == len(members)
@@ -1008,7 +1054,7 @@ def family_facts(ctx, fid):
     v["n_footnoted_late503"] = sum(1 for sid in footnoted if sid in late_ids)
     v["footnoted_all_late503"] = bool(footnoted) and v["n_footnoted_late503"] == len(footnoted)
     v.update(_stops(ctx, members))
-    v.update(_time_limitations(ctx, members))
+    v.update(_budget_stops(ctx, members))
     v.update(_cold_counts(ctx, members))
     v.update(_relations(ctx, rids))
     v.update(_declared(ctx, members, rids))
@@ -1190,7 +1236,7 @@ def chapter_facts(ctx, ch):
         l.get("http") == 200 and l.get("outcome") == "finding" for sid in sids for arm in ARMS for l in run.arm_lines(sid, arm))
     v.update(_late503(ctx, sids))
     v.update(_stops(ctx, sids))
-    v.update(_time_limitations(ctx, sids))
+    v.update(_budget_stops(ctx, sids))
     # the timing, from the summary's own figures (the chapter's summary block reads the same)
     timing = (run.summary().get("timing") or {}).get(ch) or {}
     for arm in ARMS:
@@ -1199,15 +1245,15 @@ def chapter_facts(ctx, ch):
         for state in ("cold", "warm"):
             w = (t.get(state) or {}).get("wall") or {}
             s = (t.get(state) or {}).get("server") or {}
-            v["wall_p50_%s_%s" % (state, k)] = fmt_t(w.get("p50")) if w.get("n") else "–"
-            v["wall_p90_%s_%s" % (state, k)] = fmt_t(w.get("p90")) if w.get("n") else "–"
+            v["wall_p50_%s_%s" % (state, k)] = cells.fmt_exec_text(w.get("p50")) if w.get("n") else "–"
+            v["wall_p90_%s_%s" % (state, k)] = cells.fmt_exec_text(w.get("p90")) if w.get("n") else "–"
             v["n_%s_%s" % (state, k)] = w.get("n") or 0
-            v["server_p50_%s_%s" % (state, k)] = fmt_t(s.get("p50")) if s.get("n") else "–"
+            v["server_p50_%s_%s" % (state, k)] = cells.fmt_exec_text(s.get("p50")) if s.get("n") else "–"
             v["n_server_%s_%s" % (state, k)] = s.get("n") or 0
     backends = [l.get("mcp_phases", {}).get("backend_ms") for sid in sids for l in run.arm_lines(sid, "mcp")
                 if isinstance(l.get("mcp_phases"), dict) and cells.host_cache_of(l) == "warm"
                 and cells._num(l.get("mcp_phases", {}).get("backend_ms")) is not None]
-    v["backend_p50_warm_mcp"] = fmt_t(cells.percentile(backends, 50)) if backends else "–"
+    v["backend_p50_warm_mcp"] = cells.fmt_exec_text(cells.percentile(backends, 50)) if backends else "–"
     v["n_backend_warm_mcp"] = len(backends)
     cold_by_family = [(fam[fid]["n_cold_dl"], fid) for fid in fams if fam[fid]["n_cold_dl"]]
     v["cold_dl_families"] = ", ".join("%s %d" % (fid, n) for n, fid in sorted(cold_by_family, key=lambda t: (-t[0], t[1])))
@@ -1222,6 +1268,9 @@ def chapter_facts(ctx, ch):
     gap_fams = set((ctx.prose.get(ch) or {}).get("coverage_gap_families") or [])
     elsewhere = [sid for sid in footnoted if x[sid]["family"] not in gap_fams]
     v["n_footnoted_elsewhere"] = len(elsewhere)
+    # the footnoted tests of the families the coverage gap discusses itself: when there are none, 'outside <the
+    # family> every test passed' would imply a non-pass inside it (VERIFY-COLOURS-V5 item 7)
+    v["n_footnoted_in_gap"] = len(footnoted) - len(elsewhere)
     v["footnoted_elsewhere_text"] = "; ".join(_members_phrase(x[sid]) for sid in elsewhere)
     blocking = _gate_blocking(ctx, footnoted)
     v["n_footnoted_gate_blocking"] = len(blocking)

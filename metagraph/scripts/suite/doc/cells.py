@@ -63,8 +63,9 @@ def fmt_t(ms):
 # or an MCP phase, alone or as a median, a p90 or a maximum, strictly above TIME_TINT_YELLOW_MS is set on a yellow
 # tint and strictly above TIME_TINT_RED_MS on a red one (doc.sty's timeyellow / timered). The thresholds are this
 # document's own: no budget, timing class or window of the suite is read for them, and nothing else reads them.
-# A difference (fmt_delta: a delta, an overhead, how late a 503 was), a bound (a budget, a cap), a distance in
-# time (started after, ran before) and the figures quoted inside prose (plain text, escaped afterwards) carry none.
+# A difference (fmt_delta: a delta, an overhead, how late a 503 was), a bound (a budget, a cap) and a distance in
+# time (started after, ran before) carry none; a figure quoted in prose or inside a check's text carries its tint
+# as a marker that latex.esc sets (fmt_exec_text, tint_quoted_times, esc_times).
 TIME_TINT_YELLOW_MS = 10000.0
 TIME_TINT_RED_MS = 55000.0
 TINT_MACRO = {"yellow": "\\tyellow", "red": "\\tred"}
@@ -92,6 +93,47 @@ def fmt_exec(ms):
     """An execution time as fmt_t prints it, on its tint when it has one (the cells, the detail blocks' rows, the
     aggregates and the timing tables print their times through this, never through fmt_t directly)."""
     return tinted(fmt_t(ms), ms)
+
+
+# A figure quoted in prose or inside a check's text is plain text that latex.esc escapes afterwards, so its tint
+# travels as a marker (latex.TINT_OPEN / TINT_CLOSE) that esc turns into the macro last. The execution times a
+# check's or the runner's text quotes: budget_respected's 503 evidence (`client wall 10452 ms`) and the MCP runner's
+# host-state rule (`resolve_timeout after 30395 ms`, `traversal_resolve_deadline after 29201 ms`); a lateness
+# (`delivered 7452 ms after`), a budget (`the 3000 ms budget`) and every other figure in such a text stay plain.
+_QUOTED_TIME_RE = re.compile(r"(client wall |(?:deadline|timeout) after )(\d[\d,]*(?:\.\d+)?) ms")
+
+
+def fmt_exec_text(ms):
+    """An execution time as fmt_t prints it, carrying its tint as a marker for a figure quoted in prose (latex.esc
+    sets the macro): the facts the prose files fill in print their times through this."""
+    import latex
+    tint = time_tint(ms)
+    text = fmt_t(ms)
+    return "%s%s%s" % (latex.TINT_OPEN[tint], text, latex.TINT_CLOSE) if tint else text
+
+
+def tint_quoted_times(text):
+    """`text` (plain) with every execution time it quotes as a check's or the runner's text does (_QUOTED_TIME_RE)
+    carrying its tint as a marker; the other figures of the text stay."""
+    import latex
+
+    def mark(m):
+        try:
+            ms = float(m.group(2).replace(",", ""))
+        except ValueError:
+            return m.group(0)
+        tint = time_tint(ms)
+        if not tint:
+            return m.group(0)
+        return "%s%s%s ms%s" % (m.group(1), latex.TINT_OPEN[tint], m.group(2), latex.TINT_CLOSE)
+    return _QUOTED_TIME_RE.sub(mark, str(text or ""))
+
+
+def esc_times(text, limit=None):
+    """latex.esc of a check's or the runner's text with the execution times it quotes on their tints
+    (tint_quoted_times): the detail blocks' finding, checks and host-state lines print such texts through this."""
+    import latex
+    return latex.esc(tint_quoted_times(text), limit)
 
 
 def fmt_delta(ms):

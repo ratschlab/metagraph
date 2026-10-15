@@ -3973,6 +3973,46 @@ opportunities after ( , = _ (`blocks._generic`), so the expectation column of a 
 into the next column. The 164-page v4 document (every chapter, the replayed d1e040aa by-design table, two builds
 byte-identical) is at `~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4/` with its NOTES.md.
 
+### The tints of the printed execution times (2026-10-15, corrected after VERIFY-COLOURS-V5 on 2026-10-16)
+
+The owner's decision of 2026-10-15: every printed execution time above 10 s is set on a yellow tint and above 55 s
+on a red one (`cells.TIME_TINT_YELLOW_MS` / `TIME_TINT_RED_MS`, strictly above; the document's own constants, read
+by nothing else; doc.sty's `timeyellow` FFE866 / `timered` FF8A80 behind black text, `\tyellow{}` / `\tred{}` with
+`\fboxsep` 0pt, so a tinted figure sets exactly as wide as a plain one and the pagination does not move). A wall, a
+server time, a backend time or an MCP phase, alone or as a median, p90 or maximum, in the cells, the replicates
+aggregates, the summary and timing lines, the detail blocks' rows, phases and re-run lines, the closing tables
+(`cells.fmt_exec`, `fmt_times`; the closing tables' `_stats_cells`). A difference (`fmt_delta`: a delta, an overhead,
+how late a 503 was), a budget, a cap, a connection set-up and a distance in time carry none. The figures quoted in
+the prose and inside a check's text carry their tint too (VERIFY-COLOURS-V5 item 1, 2026-10-16): a fact the prose
+files fill in prints its time through `cells.fmt_exec_text`, which carries the tint as a marker (`latex.TINT_OPEN` /
+`TINT_CLOSE`, private-use code points no prose or run text uses) that `latex.esc` turns into the macro after
+escaping (`set_tints`; a marker a cut left open is closed), so the walls, server and backend times of
+`x[<sid>][<arm>]`, the p50 / p90 of the chapter and closing facts and the walls of the time-limited lists are tinted
+in the sentences that quote them; an execution time quoted inside a check's or the runner's text, budget_respected's
+`client wall N ms` and the MCP runner's host-state `... after N ms`, is marked by its value (`cells.tint_quoted_times`,
+`esc_times`; `facts._cut` / `_clause` on the prose side, the finding, checks, host-state and adjudication lines of a
+detail block and I.1's lines on the LaTeX side), while a lateness (`delivered N ms after`) and a budget in the same
+text stay plain. The legend sentence of the cell grammar (I.3, `sections.times_legend_sentence`) states the rule
+and its exemptions.
+
+The other corrections after VERIFY-COLOURS-V5 (2026-10-16): I.1 names a disagreement whose checks agree by its
+outcomes ("the outcomes differ, repeat 0: no time limitation tells the outcomes apart", compare's `outcome_differs`)
+instead of "a check differs"; a walk a stated resource other than time stopped (a /traverse answer's
+`resource_stop`: the work or memory budget) is read from the run's raw record (`reader.Run.raw_answer`,
+`blocks.resource_stops`), the detail block's adjudication names the resource, its knob and its figures (`seed 0: the
+work budget (bounds.max_work_units, 100,000,000 units; used 100,000,275) at 3,618 bp (left), ...`), and chapter T's
+prose reads `n_cap_stop_tests` / `cap_stop_ids` / `cap_stop_text` and, with the time cuts, `n_budget_stop_tests` /
+`budget_stop_text` (`facts._budget_stops`), so "no walk was stopped by its budget" holds for every budget and the
+"depends on the load" clause names the work cap where it stopped a walk; the reading guide's column note names the
+annotated unit's own dimension and its record-key clause only where the variants carry one (`annotated_dimension`,
+`annotated_record_key`), and a note whose marker sits in no cell of that matrix says "(not in this matrix)"; the
+clean rule of I.3 says what the cells do (an unverified by-design pair carries the mark u, its cause in the chapter's
+prose and appendix B, no detail block); the coverage gaps of R, M, N and P print "Outside <the family> every test
+passed" only when that family has a footnoted test (`n_footnoted_in_gap`), else "Every test passed"; R's coverage
+gap has the comma of p. 14 ("Of the four relations, ..."); M's residue claim counts the direct-remote passes beside
+direct-local's; appendix F's MCP runner row names the run's manifest version; the cover's policy sha is labelled as
+the canonical JSON's, with the file's sha beside it (`reader.Run.policy_file_sha256`).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

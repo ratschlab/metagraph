@@ -324,6 +324,40 @@ class Run(object):
         gt = self.manifest.get("ground_truth") or {}
         return [r for r in (gt.get("records") or []) if isinstance(r, dict) and r.get("key")]
 
+    def raw_answer(self, line):
+        """The normalised answer of an execution from the run's raw record (the line's `raw`, a gzipped JSON under
+        the run directory: {scenario, arm, repeat, request, response, answer}), read once; None when the run holds
+        no raw record for the line or it cannot be read (a document never fails over it)."""
+        rel = line.get("raw") if isinstance(line, dict) else None
+        if not isinstance(rel, str) or not rel:
+            return None
+        cache = self.__dict__.setdefault("_raw_cache", {})
+        if rel in cache:
+            return cache[rel]
+        answer = None
+        try:
+            doc = sc.read_gz_json(os.path.join(self.dir, rel)) if hasattr(sc, "read_gz_json") else None
+            if doc is None:
+                import gzip
+                import json
+                with gzip.open(os.path.join(self.dir, rel), "rt", encoding="utf-8") as fh:
+                    doc = json.load(fh)
+            answer = doc.get("answer") if isinstance(doc, dict) else None
+        except (OSError, ValueError, EOFError, AttributeError):
+            answer = None
+        cache[rel] = answer if isinstance(answer, dict) else None
+        return cache[rel]
+
+    def policy_file_sha256(self):
+        """The sha256 of the policy file's bytes (the deploy notes cite it; gate.py's policy_sha256 is the hash of
+        the canonical JSON), or None without a file."""
+        if not self.policy_path:
+            return None
+        try:
+            return sha256_of(self.policy_path)
+        except OSError:
+            return None
+
     def budget_ms(self, sid):
         """The time budget a scenario's request names: /resolve's `bounds.time_budget_ms`, /pattern's top-level
         `time_budget_ms`, /traverse's `strategy.bounds.time_budget_ms` (the preset's merged strategy, every walk

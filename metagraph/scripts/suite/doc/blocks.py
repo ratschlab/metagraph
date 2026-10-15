@@ -359,10 +359,18 @@ def _balanced(text):
     return text + ")" * opened if opened > 0 else text
 
 
+_ARM_HEADS = ("left", "right", "both")
+
+
 def _first_clause(text, limit=200):
     """The evidence clause of a check detail: up to its first ': ' outside a parenthesis (the explanation
-    follows), cut at `limit`, the parentheses balanced."""
-    head, _ = _split_clause(text)
+    follows), cut at `limit`, the parentheses balanced. A walk check's detail names its arms ('left: the record
+    followed for 793 of 1000 bp, stopped by time_budget; right: ...'): the first arm's clause up to ';' is kept
+    with the arm's name (as facts._clause keeps it; VERIFY-T M6: '(walk_in_record: left)' said nothing)."""
+    head, rest = _split_clause(text)
+    if head.strip() in _ARM_HEADS and rest:
+        seg, _ = _split_clause(rest.split(";", 1)[0])
+        return _balanced(latex.cut_text("%s: %s" % (head.strip(), seg.strip()), limit))
     return _balanced(latex.cut_text(head, limit))
 
 
@@ -388,8 +396,8 @@ def adjudication(line, run, sid, is_mcp, state=None):
         if http == 503 and code == "deadline":
             return ("\\textbf{FINDING}: an allowed 503 deadline, but delivered later than max(1 s, the budget) after "
                     "the %s budget (the evidence and the rule below); the property itself was not tested" % esc(budget))
-        return "\\textbf{FINDING}: %s (the evidence and the rule below); the property itself was not tested" % esc(
-            _first_clause(fc[0].get("detail")) if fc else "a stated bound broken")
+        return "\\textbf{FINDING}: %s (the evidence and the rule below); the property itself was not tested" % \
+            cells.esc_times(_first_clause(fc[0].get("detail")) if fc else "a stated bound broken")
     if outcome == "inconclusive":
         if _overridden(line, is_mcp):
             return ("inconclusive: the service's %s (http %s) classified as a host-state outcome by the runner's "
@@ -408,15 +416,22 @@ def adjudication(line, run, sid, is_mcp, state=None):
                 esc(http), (" " + tt(code)) if code else "")
         checks = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
         if checks:
-            return "inconclusive: %s (%s)" % (esc(checks[0].get("check")), esc(_first_clause(checks[0].get("detail"), 160)))
+            out = "inconclusive: %s (%s)" % (esc(checks[0].get("check")),
+                                              cells.esc_times(_first_clause(checks[0].get("detail"), 160)))
+            # a walk a stated resource stopped: the resource, its knob and its figures from the answer (VERIFY-COLOURS-V5
+            # item 2: 'stopped by resource_limit' named neither)
+            stop = resource_stop_phrase(run, line) if "stopped by" in str(checks[0].get("detail") or "") else ""
+            if stop:
+                out += " — the stop, as the answer states it: %s" % esc(stop)
+            return out
         return "inconclusive: the property could not be tested"
     if outcome == "fail":
         failed = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
         if failed:
-            return "\\textbf{FAIL}: %s: %s" % (esc(failed[0].get("check")), esc(failed[0].get("detail"), 200))
+            return "\\textbf{FAIL}: %s: %s" % (esc(failed[0].get("check")), cells.esc_times(failed[0].get("detail"), 200))
         return "\\textbf{FAIL}"
     if outcome == "error":
-        return "\\textbf{ERROR}: no HTTP answer%s" % ((": " + esc(text, 160)) if text else "")
+        return "\\textbf{ERROR}: no HTTP answer%s" % ((": " + cells.esc_times(text, 160)) if text else "")
     if outcome == "not_implemented_mcp":
         return "not exercised via MCP"
     if outcome == "service_by_design":
@@ -640,6 +655,64 @@ def _execution_rows(st, run, sid, arm, is_property):
     return rows
 
 
+# A /traverse resource stop (SPEC-labeled-traversal-core §6.10: results[i].resource_stop {resource, requested,
+# effective, used, phase}): the knob of each resource, its unit and its name in words.
+RESOURCE_KNOB = {"time": "bounds.time_budget_ms", "memory": "bounds.max_memory_mb", "work": "bounds.max_work_units"}
+RESOURCE_UNIT = {"time": "ms", "memory": "MB", "work": "units"}
+RESOURCE_WORD = {"time": "time budget", "memory": "memory budget", "work": "work budget"}
+
+
+def resource_stops(run, line):
+    """[{seed, resource, knob, requested, used, at}] of the seeds whose answer names a resource_stop (a /traverse
+    answer's results[i].resource_stop), from the run's raw record of the execution (reader.Run.raw_answer); `at`
+    is the depth each arm was stopped at ('3,618 bp (left), 3,617 bp (right)': the arms' cap_trigger.at_bp, else
+    complete_to_bp), '' when the answer states none. [] when the run holds no raw record or the answer has none."""
+    ans = run.raw_answer(line) if hasattr(run, "raw_answer") else None
+    body = ans.get("body") if isinstance(ans, dict) else None
+    out = []
+    if not isinstance(body, dict):
+        return out
+    for i, r in enumerate(body.get("results") or []):
+        rs = r.get("resource_stop") if isinstance(r, dict) else None
+        if not isinstance(rs, dict) or not rs.get("resource"):
+            continue
+        res = str(rs["resource"])
+        ats = []
+        for side in ("left", "right", "both"):
+            a = (r.get("arms") or {}).get(side)
+            if not isinstance(a, dict):
+                continue
+            trig = a.get("cap_trigger") if isinstance(a.get("cap_trigger"), dict) else {}
+            bp = trig.get("at_bp") if cells._num(trig.get("at_bp")) is not None else a.get("complete_to_bp")
+            if cells._num(bp) is not None:
+                ats.append("{:,} bp ({})".format(int(bp), side))
+        out.append({"seed": i, "resource": res, "knob": RESOURCE_KNOB.get(res, res),
+                    "requested": rs.get("effective") if cells._num(rs.get("effective")) is not None else rs.get("requested"),
+                    "used": rs.get("used"), "at": ", ".join(ats)})
+    return out
+
+
+def resource_stop_phrase(run, line):
+    """The stops of an execution in words, from the answer: 'seed 0: the work budget (bounds.max_work_units,
+    100,000,000 units; used 100,000,275) at 3,618 bp (left), 3,617 bp (right)'; '' when the answer names none."""
+    parts = []
+    for st in resource_stops(run, line):
+        res = st["resource"]
+        unit = RESOURCE_UNIT.get(res, "")
+        figures = []
+        if cells._num(st["requested"]) is not None:
+            figures.append("{:,} {}".format(int(st["requested"]), unit).strip())
+        if cells._num(st["used"]) is not None:
+            figures.append("used {:,}".format(int(st["used"])))
+        text = "seed %d: the %s (%s%s)" % (st["seed"], RESOURCE_WORD.get(res, res + " budget"), st["knob"],
+                                           ("; ".join([""] + figures)) if figures else "")
+        text = text.replace("(%s; " % st["knob"], "(%s, " % st["knob"], 1)
+        if st["at"]:
+            text += " at " + st["at"]
+        parts.append(text)
+    return "; ".join(parts)
+
+
 def _finding_items(st, arm):
     """[(arm, repeat, check, evidence, explanation)] of the finding checks of an arm's executions: the detail
     split into the evidence clause and the mechanism after it."""
@@ -663,13 +736,13 @@ def finding_text(items, rule):
     shared = len(whys) == 1
     parts = []
     for arm, rep, check, evidence, why in items:
-        text = "%s r%s, %s: %s" % (esc(arm), esc(rep), esc(check), _balanced(esc(evidence, 300)))
+        text = "%s r%s, %s: %s" % (esc(arm), esc(rep), esc(check), _balanced(cells.esc_times(evidence, 300)))
         if why and not shared:
-            text += " — %s" % esc(why, 300)
+            text += " — %s" % cells.esc_times(why, 300)
         parts.append(text)
     text = "; ".join(parts)
     if shared:
-        text += " — %s" % esc(whys[0], 400)
+        text += " — %s" % cells.esc_times(whys[0], 400)
     if rule:
         text += " · rule: " + esc(rule, 400)
     return text
@@ -718,10 +791,10 @@ def _group_text(key, names):
                                    (": " + esc(detail, 240)) if detail else "")
     if kind == "not_exposed":
         return "%s \\ginc{} — not exposed via MCP%s" % (", ".join(esc(n) for n in names),
-                                                       (": " + esc(detail, 240)) if detail else "")
+                                                       (": " + cells.esc_times(detail, 240)) if detail else "")
     # a detail cut at the column's length keeps its parentheses balanced (VERIFY-T L3)
     return "%s %s{}%s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(kind, "\\gfail"),
-                          (" — " + esc(_balanced(latex.cut_text(str(detail), 240)))) if detail else "")
+                          (" — " + cells.esc_times(_balanced(latex.cut_text(str(detail), 240)))) if detail else "")
 
 
 def _texts_line(states):
@@ -974,7 +1047,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
                 continue
             if _overridden(l, arm == "mcp"):
                 if l.get("verdict_detail"):
-                    body.append(latex.bsub("host state (%s)" % label, esc(l["verdict_detail"])))
+                    body.append(latex.bsub("host state (%s)" % label, cells.esc_times(l["verdict_detail"])))
                 groups = _check_groups(l, True, run.check_marks(sid) if hasattr(run, "check_marks") else None)
                 if groups:
                     body.append(latex.bsub("intermediate (%s)" % label, "the evaluation before the host-state rule, kept as recorded: " + "; ".join(
@@ -986,7 +1059,14 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
             groups = [g for g in _check_groups(l, arm == "mcp", marks, explained) if g[0][0] != "finding"]
             if groups and (l.get("outcome") == "fail" or (l.get("outcome") == "inconclusive" and l.get("http") == 200)
                            or l.get("outcome") == "service_by_design"):
-                body.append(latex.bsub("checks (%s)" % label, "; ".join(_group_text(k, names) for k, names in groups)))
+                text = "; ".join(_group_text(k, names) for k, names in groups)
+                # a walk a stated resource stopped: the resource, its knob and its figures from the answer, which the
+                # check's 'stopped by resource_limit' does not name (VERIFY-COLOURS-V5 item 2)
+                stop = resource_stop_phrase(run, l) if any(
+                    "stopped by" in str(k[1]) for k, _ in groups if k[0] == "inconclusive") else ""
+                if stop:
+                    text += " — the stop, as the answer states it: %s" % esc(stop)
+                body.append(latex.bsub("checks (%s)" % label, text))
             ph = _phases_text(l) if arm == "mcp" else None
             if ph:
                 body.append(latex.bsub("mcp phases (%s)" % label, ph))
