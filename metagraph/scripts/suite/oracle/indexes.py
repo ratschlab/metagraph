@@ -20,6 +20,11 @@ CONFIGS = {
     'canonical_k11': ('canonical', 11, True, 'column'),
     'primary_k11': ('primary', 11, True, 'column'),
     'basic_k15': ('basic', 15, True, 'row_diff_brwt_coord'),
+    # even k: k-mers equal to their reverse complement (one row on CANONICAL and PRIMARY; the
+    # palindrome scans of an even-k wrapped PRIMARY graph, SPEC 7.4-7.6)
+    'basic_k10': ('basic', 10, True, 'row_diff_brwt_coord'),
+    'canonical_k10': ('canonical', 10, True, 'column'),
+    'primary_k10': ('primary', 10, True, 'column'),
 }
 # the server flags every config gets: the floor lowered (ORACLE-DESIGN.md section 2) and ample
 # caps, so that no generated request is cut by a server default unless it asks to be

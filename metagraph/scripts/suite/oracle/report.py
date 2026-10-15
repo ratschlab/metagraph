@@ -12,16 +12,19 @@ COVERED = [
     '27, 31), strands both/forward/reverse, scopes any_offset and suffix, max_mismatches 0-3 with '
     'by_mismatches levels and substitutions, modes count/all_or_count/partial, labels "all" with '
     'record placement (BASIC) and labels of both strands (CANONICAL, PRIMARY)',
-    'graph modes BASIC (k 11 and 15), CANONICAL and wrapped PRIMARY (k 11); masked BASIC, and BASIC '
-    'without its mask at max_checked_entries 50 and 0',
-    '/resolve with explicit column and header labels (support kmer; trace exploratory) on BASIC',
+    'graph modes BASIC (k 10, 11, 15), CANONICAL and wrapped PRIMARY (k 10 and 11: even k with '
+    'k-mers equal to their reverse complement); masked graphs, and BASIC k 11 without its mask at '
+    'max_checked_entries 50 and 0, every bounds count held to the SPEC\'s U (the masked count plus '
+    'the source dummies holding the pattern, per level)',
+    '/resolve with explicit column and header labels, support kmer and trace, on BASIC',
     'budget probes (max_steps, stop_at_threshold): invariants of legitimately incomplete answers',
 ]
 NOT_COVERED = [
     '/traverse (phase 2)', 'patterns longer than k (anchors, long_search paths and supported '
     'paths)', 'predicates and motif predicates', 'multi-graph servers and in_ram',
-    'DNA5 graphs (refused by this build: alphabet_untested)', 'even k (palindromic k-mers, the '
-    'palindrome scans of an even-k PRIMARY graph)', 'time stops and the deadline',
+    'DNA5 graphs (refused by this build: alphabet_untested)', 'CANONICAL and PRIMARY graphs '
+    'without their mask', 'the lower bound of a bounds count beyond lower <= truth, and the '
+    'estimate beyond lower <= estimate <= upper', 'time stops and the deadline',
     'the low-complexity note', 'work counters beyond their stated sums',
     '/resolve discover, select and run_format "rle"', 'the information floor (lowered to 0)',
 ]

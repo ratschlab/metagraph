@@ -192,13 +192,19 @@ class Probes(unittest.TestCase):
         answer = R.render_answer(self.index, config, req)
         c = answer['patterns'][0]['counts']['contexts']
         truth = c['value']
-        c.update({'relation': 'bounds', 'lower': truth - 1, 'upper': truth + 5,
-                  'value': truth - 1, 'estimate': truth + 2})
+        dummies = len(O.dummy_contexts(self.index, O.Pattern('dna', 'GAATTC')))
+        # U: the masked count plus the source dummies holding the pattern (SPEC 7.4)
+        c.update({'relation': 'bounds', 'lower': truth - 1, 'upper': truth + dummies,
+                  'value': truth - 1, 'estimate': truth})
         res = C.compare_pattern(self.index, config, req, answer, 100000)
         self.assertEqual(C.PASS, outcome(res), res[0][1].failed())
-        c.update({'lower': truth + 1, 'value': truth + 1})
-        res = C.compare_pattern(self.index, config, req, answer, 100000)
-        self.assertIn('counts.total', [x['check'] for x in res[0][1].failed()])
+        for wrong in ({'lower': truth + 1, 'value': truth + 1},       # the truth outside
+                      {'upper': truth + dummies + 1},                 # an upper that is not U
+                      {'lower': truth, 'value': truth, 'upper': 2 * (truth + dummies)}):
+            bad = copy.deepcopy(answer)
+            bad['patterns'][0]['counts']['contexts'].update(wrong)
+            res = C.compare_pattern(self.index, config, req, bad, 100000)
+            self.assertIn('counts.total', [x['check'] for x in res[0][1].failed()], wrong)
         # on a masked graph a completed discovery must be exact
         res = C.compare_pattern(self.index, self.config, req, answer, 100000)
         self.assertEqual(C.FAIL, outcome(res))

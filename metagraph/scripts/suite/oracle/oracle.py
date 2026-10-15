@@ -372,6 +372,78 @@ def counts(index, pattern, ctxs, scope, strands, max_mismatches):
             'by_offset': by_offset, 'by_orient': by_orient, 'by_mismatches': by_mm}
 
 
+# -- the upper bound U of a graph without its dummy-edge mask (SPEC section 7.4) ----------------
+
+def source_dummies(index):
+    """The source dummy k-mers of the BOSS graph of the index: '$' * j + x[:k - j], 1 <= j < k,
+    for every node x (the first k - 1 bases of a k-mer) that no k-mer enters (no k-mer ends in
+    x). The sink dummies (W = '$') and '$' * k never hold a pattern base."""
+    cache = index.__dict__.get('_dummies')
+    if cache is None:
+        k = index.k
+        nodes = {x[:k - 1] for x in index.kmers}
+        entered = {x[1:] for x in index.kmers}
+        cache = sorted({'$' * j + x[:k - j] for x in nodes - entered for j in range(1, k)})
+        index._dummies = cache
+    return cache
+
+
+def leading_n_run(pattern, orientation):
+    """The leading N run of the oriented pattern that the search skips on a $ACGT graph (SPEC
+    section 7.8): P's for forward and palindromic, P's trailing run for reverse; a window of N
+    only keeps its last position; none for a peptide (X excludes the stops)."""
+    if pattern.kind == 'protein':
+        return 0
+    text = pattern.text if orientation not in ('-', 'reverse') else pattern.text[::-1]
+    n = len(text) - len(text.lstrip('N'))
+    return min(n, pattern.length - 1)
+
+
+def dummy_contexts(index, pattern, scope='any_offset', strands='both', max_mismatches=0):
+    """The contexts a graph without its mask counts in source dummies besides its k-mers
+    (U - the masked count): a dummy holds the oriented pattern at an offset where its '$' run
+    ends at or before the pattern's skipped leading N run, the rest matching within
+    |max_mismatches| ('$' is never a substitute). Contexts of the dummy strings, each once."""
+    k, L = index.k, pattern.length
+    out = []
+    if pattern.no_instance:
+        return out
+    oris = orientations(index, pattern, strands)
+    for d in source_dummies(index):
+        j = len(d) - len(d.lstrip('$'))
+        for p in offsets(k, L, scope):
+            w = d[p:p + L]
+            dollars = max(0, j - p)
+            for o in oris:
+                if dollars > leading_n_run(pattern, o):
+                    continue
+                if dollars == 0:
+                    r = revcomp(w) if o in ('-', 'reverse') else w
+                    subs = pattern.substitutions(r, max_mismatches)
+                else:
+                    # the '$' lie under the leading N run: the rest is read in the orientation
+                    # (for reverse, against the complemented sets of P read backwards)
+                    subs = _oriented_substitutions(pattern, o, w, dollars, max_mismatches)
+                if subs is not None:
+                    out.append(Context(o, d, p, len(subs), subs))
+    return out
+
+
+def _oriented_substitutions(pattern, orientation, w, dollars, m):
+    L = pattern.length
+    subs = []
+    for i in range(dollars, L):
+        if orientation in ('-', 'reverse'):
+            allowed = complement_set(pattern.sets[L - 1 - i])
+        else:
+            allowed = pattern.sets[i]
+        if w[i] not in allowed:
+            subs.append(i)
+            if len(subs) > m:
+                return None
+    return subs
+
+
 # -- labels over a list of returned contexts ------------------------------------------------
 
 def label_view(index, pattern, returned):

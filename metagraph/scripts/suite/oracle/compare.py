@@ -84,8 +84,9 @@ def _clip(value, limit=4000):
 
 # -- counts -------------------------------------------------------------------------------
 
-def judge_count(checks, name, count, truth, exact_required, unit='graph_contexts'):
-    """One count against the true number."""
+def judge_count(checks, name, count, truth, exact_required, unit='graph_contexts', upper=None):
+    """One count against the true number; |upper|: U, the upper bound a bounds count of a graph
+    without its mask states (SPEC section 7.4), when the oracle knows it."""
     if not isinstance(count, dict):
         return checks.add(name, False, f'a count of {truth}', count)
     rel = count.get('relation')
@@ -106,7 +107,10 @@ def judge_count(checks, name, count, truth, exact_required, unit='graph_contexts
               and lo <= truth <= hi)
         if 'estimate' in count:
             ok = ok and lo <= count['estimate'] <= hi
-        return checks.add(name, ok, f'bounds holding {truth}', count)
+        if upper is not None:
+            ok = ok and hi == upper
+        return checks.add(name, ok, f'bounds holding {truth}'
+                          + (f', upper {upper}' if upper is not None else ''), count)
     if rel == 'unknown':
         return checks.add(name, ok_unit and count.get('value') is None, 'unknown: value null',
                           count)
@@ -133,6 +137,21 @@ class Expectation:
         self.counts = O.counts(index, self.pattern, self.ctxs, self.scope, self.strands, self.m)
         self.by_identity = {c.identity: c for c in self.ctxs}
         self.orientations = O.orientations(index, self.pattern, self.strands)
+        self.upper = None
+
+    def with_upper(self, index):
+        """The source-dummy contexts per level (a graph without its mask): U of a count is its
+        masked value plus the dummies of the levels the answer leaves in bounds (SPEC 7.4; with
+        substitutions the check of few unchecked candidates makes levels exact one by one,
+        21.6, and the partitions are totals over the levels)."""
+        if self.upper is None and not self.pattern.slot:
+            dummies = O.dummy_contexts(index, self.pattern, self.scope, self.strands, self.m)
+            self.upper = {}
+            for t in range(self.m + 1):
+                at = [d for d in dummies if d.level == t]
+                self.upper[str(t)] = O.counts(index, self.pattern, at, self.scope, self.strands,
+                                              0)
+        return self.upper
 
 
 def _result_identity(config, r):
@@ -200,7 +219,7 @@ def compare_entry(index, config, request, position, entry, previous_stop=None,
                    'no_stop_codon', entry.get('notes'))
 
     released = _release(checks, config, exp, entry, stopped)
-    _counts(checks, config, exp, entry, stopped, released)
+    _counts(checks, index, config, exp, entry, stopped, released)
     results = entry.get('results')
     if exp.mode != 'count' and isinstance(results, list):
         _results(checks, config, exp, entry, results, released, stopped)
@@ -334,33 +353,53 @@ def _release(checks, config, exp, entry, stopped):
     return exp.ctxs[:max_contexts]
 
 
-def _counts(checks, config, exp, entry, stopped, released):
+def _counts(checks, index, config, exp, entry, stopped, released):
     counts = entry.get('counts')
     if not isinstance(counts, dict) or not isinstance(counts.get('contexts'), dict):
         checks.add('counts.present', False, 'counts.contexts', counts)
         return
     c = counts['contexts']
     truth = exp.counts
+    up = exp.with_upper(index) if not config.masked else None
+    if exp.m:
+        in_bounds = [t for t, v in (c.get('by_mismatches') or {}).items()
+                     if isinstance(v, dict) and v.get('relation') == 'bounds']
+    else:
+        in_bounds = ['0'] if c.get('relation') == 'bounds' else []
+
+    def u(path, key=None, levels=None):
+        """U of a partition: the truth plus the dummies of the levels in bounds."""
+        if up is None:
+            return None
+        base = truth[path] if key is None else truth[path][key]
+        extra = 0
+        for t in (in_bounds if levels is None else levels):
+            if t in up:
+                extra += up[t][path] if key is None else up[t][path][key]
+        return base + extra
     # on a masked graph a completed discovery is exact everywhere; without the mask bounds are
     # allowed unless the release enumerated every candidate (SPEC section 7.4)
     complete_release = released is not None and len(released) == len(exp.ctxs)
     exact_required = not stopped and (config.masked or complete_release
                                       or exp.pattern.no_instance)
-    judge_count(checks, 'counts.total', c, truth['total'], exact_required)
-    judge_count(checks, 'counts.suffix', c.get('suffix'), truth['suffix'], exact_required)
+    judge_count(checks, 'counts.total', c, truth['total'], exact_required, upper=u('total'))
+    judge_count(checks, 'counts.suffix', c.get('suffix'), truth['suffix'], exact_required,
+                upper=u('suffix'))
     bo = c.get('by_offset') or {}
     checks.add('counts.keys.by_offset', set(bo) == set(truth['by_offset']),
                sorted(truth['by_offset']), sorted(bo))
     for p, v in truth['by_offset'].items():
         if p in bo:
-            judge_count(checks, f'counts.by_offset[{p}]', bo[p], v, exact_required)
+            judge_count(checks, f'counts.by_offset[{p}]', bo[p], v, exact_required,
+                        upper=u('by_offset', p))
     key = config.by_key
     bs = c.get(key) or {}
     checks.add('counts.keys.' + key, set(bs) == set(truth['by_orient']), sorted(truth['by_orient']),
                sorted(bs))
     for o, v in truth['by_orient'].items():
         if o in bs:
-            judge_count(checks, f'counts.{key}[{o}]', bs[o], v, exact_required)
+            judge_count(checks, f'counts.{key}[{o}]', bs[o], v, exact_required,
+                        upper=u('by_orient', o))
     other = 'by_orientation' if key == 'by_strand' else 'by_strand'
     checks.add('counts.keys.no_' + other, other not in c, None, c.get(other))
     if exp.m:
@@ -375,7 +414,8 @@ def _counts(checks, config, exp, entry, stopped, released):
             # a stop in the work of level t leaves the levels below t complete (SPEC 21.6)
             below = stop_level is not None and int(t) < stop_level
             judge_count(checks, f'counts.by_mismatches[{t}]', bm[t], v,
-                        exact_required or (below and config.masked))
+                        exact_required or (below and config.masked),
+                        upper=None if up is None else v + up[t]['total'])
             if stop_level is not None and int(t) > stop_level:
                 checks.add(f'counts.by_mismatches[{t}].unknown_above_stop',
                            bm[t].get('relation') == 'unknown', 'unknown', bm[t])

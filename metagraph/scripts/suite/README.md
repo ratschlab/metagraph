@@ -3346,10 +3346,11 @@ P1 row "independent small-graph oracle"). Design: `ORACLE-DESIGN.md` in the lane
 
     python3 metagraph/scripts/suite/oracle/run_oracle.py --metagraph metagraph/build/metagraph --out DIR
 
-It builds six configurations under `DIR/build/` with the engine's CLI (`basic_k11` with the mask and a
+It builds nine configurations under `DIR/build/` with the engine's CLI (`basic_k11` with the mask and a
 `row_diff_brwt_coord` annotation with coordinates and `.seqs`; the same graph without its mask at
 `--pattern-max-checked-entries` 50 and 0; `canonical_k11` and `primary_k11` with column annotations;
-`basic_k15`). For each it starts `server_query` on a free 127.0.0.1 port (floor 0 bits, ample caps), sends about
+`basic_k15`; and at an even k, where k-mers equal to their reverse complement exist, `basic_k10`,
+`canonical_k10`, `primary_k10`). For each it starts `server_query` on a free 127.0.0.1 port (floor 0 bits, ample caps), sends about
 100 requests (60 pattern requests of up to 9 patterns, 12 budget probes, 30 `/resolve` on BASIC), compares
 every answer, applies every applicable corruption to every answer that passed, and stops the server. Output:
 `DIR/oracle_report.json`, `DIR/oracle_report.md` (scope, per-config outcomes, every disagreement with the
@@ -3371,3 +3372,8 @@ on rendered answers in the three graph modes, the review's probes, the generator
 - `/resolve` trace support: a set of live coordinates, each continued by +1; a k-mer that continues none
   starts a new run. A column label's coordinates concatenate the column's indexed records, so a chain can cross
   a record boundary (`trace_record_boundaries`).
+- U of a graph without its mask (SPEC 7.4): the masked count plus the contexts in source dummies (`'$' * j +
+  x[:k - j]` for every node x no k-mer enters), a dummy holding the oriented pattern where its `$` run ends at
+  or before the skipped leading N run (P's trailing run for `reverse`; a window of N only keeps its last
+  position; none for a peptide). With substitutions the check of few unchecked candidates makes levels exact
+  one by one (21.6), so a partition's `upper` is its truth plus the dummies of the levels still in `bounds`.

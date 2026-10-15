@@ -260,6 +260,9 @@ class Fixtures(unittest.TestCase):
         self.assertLess(len(recs['delta3'].seq), 11)
         self.assertLess(len(recs['theta1'].seq), 11)
         self.assertIn('A' * 24, recs['gamma'].seq)
+        for pal in ('ACGTTAACGT', 'GAATTCGAATTC'):
+            self.assertEqual(pal, O.revcomp(pal))
+            self.assertIn(pal, recs['zeta'].seq)
         self.assertIn(O.revcomp(recs['alpha'].seq[96:146]), recs['gamma'].seq)
         # eps: six planted substitutions against alpha[100:200]
         diff = [i for i, (a, b) in enumerate(zip(recs['alpha'].seq[100:200], recs['eps'].seq))

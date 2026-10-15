@@ -63,8 +63,10 @@ def build_records(seed=SEED):
     # planted neighbours of alpha[100:200]: an isolated substitution, a pair and a triple within
     # one k-window
     eps = _substitute(alpha[100:200], [10, 40, 44, 70, 73, 77], rng)
+    # palindromes, among them a palindromic 10-mer and 12-mer (k-mers equal to their reverse
+    # complement at an even k)
     zeta = ('ACGT' * 3 + R[0] + 'GGATCC' + R[1] + 'AT' * 8 + R[2] + 'GCG' * 4 + R[3]
-            + 'CCCGGG' + R[4])
+            + 'CCCGGG' + R[4] + 'ACGTTAACGT' + R[2][:7] + 'GAATTCGAATTC')
     delta1 = F + 'N' + G                  # an N splits the record: no k-mer spans it
     delta2 = _rc(B[10:80]) + R[5]         # the reverse complement of a block alpha holds
     delta3 = 'ACGTTGCA'                   # shorter than k: no k-mer; the last of its column
