@@ -3092,7 +3092,7 @@
   "family": "R-edge",
   "unit_id": "R-edge-refused",
   "unit_type": "refusals",
-  "variant": "200 bp above the request's bounds.max_query_bp 1",
+  "variant": "200 bp above the request's bounds.max_query_bp 100",
   "unit_title": "refused inputs"
  },
  "R-edge-0005": {
@@ -3212,7 +3212,7 @@
   "family": "R-edge",
   "unit_id": "R-edge-refused",
   "unit_type": "refusals",
-  "variant": "a body that is not JSON (an object cut before it",
+  "variant": "a body that is not JSON (an object cut before its end)",
   "unit_title": "refused inputs"
  },
  "R-edge-0020": {
@@ -3220,7 +3220,7 @@
   "family": "R-edge",
   "unit_id": "R-edge-refused",
   "unit_type": "refusals",
-  "variant": "time_budget_ms not above the finalisation reserv",
+  "variant": "time_budget_ms not above the finalisation reserve",
   "unit_title": "refused inputs"
  },
  "R-edge-0021": {
@@ -3244,7 +3244,7 @@
   "family": "R-edge",
   "unit_id": "R-edge-accepted",
   "unit_type": "list",
-  "variant": "discover.max_labels 150 (above the service's 100",
+  "variant": "discover.max_labels 150 (above the service's 100)",
   "unit_title": "accepted edge inputs"
  },
  "R-edge-0024": {
@@ -3252,7 +3252,7 @@
   "family": "R-edge",
   "unit_id": "R-edge-accepted",
   "unit_type": "list",
-  "variant": "time_budget_ms 400 (above the reserve, below the",
+  "variant": "time_budget_ms 400 (above the reserve, below the service's 500)",
   "unit_title": "accepted edge inputs"
  },
  "R-rc-0001": {

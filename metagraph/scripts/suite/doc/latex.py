@@ -48,7 +48,7 @@ def esc(text, limit=None):
 
 
 _BREAK_CHARS = "/.-_:"
-_LONG_RUN_RE = re.compile(r"[A-Za-z0-9]{24,}")
+_LONG_RUN_RE = re.compile(r"[A-Za-z0-9]{14,}")
 
 
 def _breakable(text, limit=None):
@@ -59,7 +59,7 @@ def _breakable(text, limit=None):
     raw = cut_sequences(raw)
     if limit is not None and len(raw) > limit:
         raw = raw[:max(0, limit - 1)].rstrip() + "…"
-    raw = _LONG_RUN_RE.sub(lambda m: "\x00".join(m.group(0)[i:i + 12] for i in range(0, len(m.group(0)), 12)), raw)
+    raw = _LONG_RUN_RE.sub(lambda m: "\x00".join(m.group(0)[i:i + 10] for i in range(0, len(m.group(0)), 10)), raw)
     out = []
     for ch in raw:
         if ch == "\x00":
@@ -68,6 +68,35 @@ def _breakable(text, limit=None):
         out.append(esc(ch))
         if ch in _BREAK_CHARS:
             out.append("\\allowbreak{}")
+    return "".join(out)
+
+
+_TOKEN_RE = re.compile(r"\S{18,}")
+
+
+def esc_wrap(text, limit=None):
+    """`text` escaped as `esc` does, with a break opportunity after . _ / - inside any token of 18+ characters
+    (case ids and field paths quoted in free text), for the narrow columns of the appendix tables."""
+    if text is None:
+        return ""
+    t = str(text).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    t = _CTRL_RE.sub("", t)
+    t = cut_sequences(t)
+    if limit is not None and len(t) > limit:
+        t = t[:max(0, limit - 1)].rstrip() + "…"
+    out = []
+    pos = 0
+    for m in _TOKEN_RE.finditer(t):
+        out.append(esc(t[pos:m.start()]))
+        token = m.group(0)
+        piece = ""
+        for ch in token:
+            piece += esc(ch)
+            if ch in "._/-":
+                piece += "\\allowbreak{}"
+        out.append(piece)
+        pos = m.end()
+    out.append(esc(t[pos:]))
     return "".join(out)
 
 
@@ -107,7 +136,8 @@ def inline(text):
     out = []
     for p in parts:
         if len(p) >= 2 and p.startswith("`") and p.endswith("`"):
-            out.append("\\texttt{%s}" % esc(p[1:-1]))
+            code = p[1:-1]
+            out.append(tt(code) if (len(code) > 24 or "/" in code) else "\\texttt{%s}" % esc(code))
         elif len(p) >= 2 and p.startswith("*") and p.endswith("*"):
             out.append("\\emph{%s}" % esc(p[1:-1]))
         else:
@@ -131,9 +161,10 @@ def col_p(width_mm, align="raggedright"):
     return ">{\\%s\\arraybackslash}p{%.1fmm}" % (align, width_mm)
 
 
-def fit(widths, extra_cols=0, extra_mm=7.0):
-    """Column widths scaled so that a table of these p-columns plus `extra_cols` natural-width columns (numbers,
-    ~`extra_mm` each) and @{} at both ends fits the text width with the 3 pt column separation."""
+def fit(widths, extra_cols=0, extra_mm=15.0):
+    """Column widths scaled so that a table of these p-columns plus `extra_cols` natural-width columns (numbers
+    under a header of up to ten letters, `extra_mm` each) and @{} at both ends fits the text width with the 3 pt
+    column separation."""
     n = len(widths) + extra_cols
     available = TEXT_WIDTH_MM - 2 * TABCOLSEP_MM * (n - 1) - extra_mm * extra_cols
     total = float(sum(widths)) or 1.0
@@ -160,9 +191,9 @@ def _ids_row(ncols, text):
     return "\\multicolumn{%d}{@{}p{%.0fmm}@{}}{\\scriptsize %s}\\\\" % (ncols, TEXT_WIDTH_MM, text)
 
 
-def unit_header(unit_id, title, unit_type, property_tex, needspace=10):
+def unit_header(unit_id, title, unit_type, property_tex, needspace=14):
     """The line above a unit's table: id, title, layout; then the property line; then the label."""
-    return ("\\needspace{%d\\baselineskip}\n\\unithead{%s}{%s}{%s}\n\\propline{%s}\\label{unit:%s}\n" % (
+    return ("\\Needspace{%d\\baselineskip}\n\\unithead{%s}{%s}{%s}\n\\propline{%s}\\label{unit:%s}\n" % (
         needspace, esc(unit_id), title, esc(unit_type), property_tex, label_key(unit_id)))
 
 
@@ -233,7 +264,7 @@ def plain_table(spec, header, rows, caption=None, small=True):
     ncols = len(header)
     lines = ["\\begingroup\\sffamily%s\\setlength\\tabcolsep{3pt}" % ("\\footnotesize" if small else "\\small")]
     if caption:
-        lines.append("\\needspace{6\\baselineskip}\\noindent{\\itshape %s}\\par\\nopagebreak\\vspace{-4pt}" % caption)
+        lines.append("\\Needspace{6\\baselineskip}\\noindent{\\itshape %s}\\par\\nopagebreak\\vspace{-4pt}" % caption)
     lines += ["\\setlength\\LTleft{0pt}\\setlength\\LTright{0pt}",
               "\\begin{longtable}{%s}" % spec]
     lines += ["\\toprule", " & ".join(header) + "\\\\", "\\midrule", "\\endhead",
@@ -249,7 +280,7 @@ def plain_table(spec, header, rows, caption=None, small=True):
 
 def detail_box(scenario_id, body):
     """A breakable grey box for a test's detail block, labelled detail:<id>."""
-    return ("\\phantomsection\\label{detail:%s}\n\\begin{detailbox}\n%s\n\\end{detailbox}\n" % (
+    return ("\\Needspace{8\\baselineskip}\\phantomsection\\label{detail:%s}\n\\begin{detailbox}\n%s\n\\end{detailbox}\n" % (
         label_key(scenario_id), body))
 
 
@@ -261,6 +292,19 @@ def bline(key, text):
 def bsub(key, text):
     """An indented sub-line of a detail block (one check, one repeat)."""
     return "\\bsub{%s}{%s}" % (key, text)
+
+
+def glossary_entry(term, text, see=None):
+    """One glossary entry: the term in bold, the text hanging under it, the cross-references in small grey type."""
+    out = "\\par\\noindent\\hangindent=4mm\\hangafter=1\\textbf{%s}\\quad %s" % (term, text)
+    if see:
+        out += " {\\small\\color{black!60}(see %s)}" % see
+    return out + "\\par\\smallskip\n"
+
+
+def catline(key, text):
+    """A line of the check catalogue: a bold key in the margin, hanging text, in small type."""
+    return "\\catline{%s}{%s}" % (key, text)
 
 
 def section(title, label=None, star=True, level="section", mark=None):

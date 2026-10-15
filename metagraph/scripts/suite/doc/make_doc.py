@@ -8,7 +8,7 @@
 Reads the run directory (manifest, the re-evaluated executions and compare.json when present, else the recorded
 ones, run.json, reevaluated.json, samples, gate.json, arms/mcp/run.json), the unit metadata (the manifest's `doc`
 blocks, else the mapping `--units`, default doc/units/suite_v<version>.json), the prose data (`--prose-dir`,
-default doc/prose/: <chapter>.json, overview.json, glossary.json) and writes DIR/doc.tex with one included file per
+default doc/prose/: <chapter>.json, overview.json, glossary.json, checks.json) and writes DIR/doc.tex with one included file per
 chapter, DIR/doc.sty, then builds DIR/doc.pdf with xelatex (twice; a third time when the .aux changed). Python
 stdlib only; offline; deterministic (no clock in the output).
 
@@ -53,7 +53,8 @@ def read_json(path):
 
 
 def load_prose(prose_dir, units, chapters):
-    """({chapter: prose}, overview, glossary); a missing file or key for a built chapter raises DocError naming it."""
+    """({chapter: prose}, overview, glossary, checks prose); a missing file or key for a built chapter raises DocError
+    naming it. overview.json, glossary.json and checks.json (the shared check catalogue) are optional."""
     prose = {}
     missing = []
     for ch in chapters:
@@ -86,9 +87,11 @@ def load_prose(prose_dir, units, chapters):
                                                    + (" ..." if len(missing) > 30 else "")))
     overview_path = os.path.join(prose_dir, "overview.json")
     glossary_path = os.path.join(prose_dir, "glossary.json")
+    checks_path = os.path.join(prose_dir, "checks.json")
     overview = read_json(overview_path) if os.path.exists(overview_path) else {}
     glossary = read_json(glossary_path) if os.path.exists(glossary_path) else {}
-    return prose, overview, glossary
+    checks_prose = read_json(checks_path) if os.path.exists(checks_path) else {}
+    return prose, overview, glossary, checks_prose
 
 
 def render(template, fields):
@@ -98,14 +101,14 @@ def render(template, fields):
     return out
 
 
-def build_tex(run, units, chapters, prose, overview, glossary):
+def build_tex(run, units, chapters, prose, overview, glossary, checks_prose=None):
     """(main .tex text, {chapter file name: text}) for the run."""
-    ctx = sections.Context(run, units, prose, overview, glossary, chapters)
+    ctx = sections.Context(run, units, prose, overview, glossary, chapters, checks_prose)
     with open(os.path.join(TEMPLATES, "main.tex.in"), "r", encoding="utf-8") as fh:
         template = fh.read()
     part_one = sections.part_one(ctx)
     chapter_files = {}
-    part_two = "\\part*{Part II\\quad Results by area}\\addcontentsline{toc}{part}{Part II\\quad Results by area}\n"
+    part_two = "\\part*{Part II\\qd Results by area}\\addcontentsline{toc}{part}{Part II\\qd Results by area}\n"
     for i, ch in enumerate(chapters):
         name = "chapter_%s.tex" % ch
         chapter_files[name] = sections.chapter(ctx, ch)
@@ -183,12 +186,14 @@ def build_pdf(out_dir, main_path, xelatex):
 def scaffold_prose(prose_dir, units, run):
     """Write the placeholder entries every chapter's prose file lacks; existing text untouched."""
     os.makedirs(prose_dir, exist_ok=True)
+    checks_path = os.path.join(prose_dir, "checks.json")
+    catalogue = (read_json(checks_path) if os.path.exists(checks_path) else {}).get("checks") or {}
     kinds_without_doc = {}
     for sid in run.order:
         ch = (units.by_scenario.get(sid) or {}).get("chapter")
         for e in run.scenario(sid).get("expect") or []:
             name = e.get("check") if isinstance(e, dict) else None
-            if name and not run.check_doc(name):
+            if name and not run.check_doc(name) and not (catalogue.get(name) or {}).get("asserts"):
                 kinds_without_doc.setdefault(name, ch)
     written = []
     for ch in units.chapters:
@@ -245,8 +250,8 @@ def main(argv=None):
         unknown = [c for c in chapters if c not in units.chapters]
         if unknown:
             raise DocError("unknown chapter(s): %s (the run has %s)" % (", ".join(unknown), ", ".join(units.chapters)))
-        prose, overview, glossary = load_prose(args.prose_dir, units, chapters)
-        main_tex, chapter_files, _ = build_tex(run, units, chapters, prose, overview, glossary)
+        prose, overview, glossary, checks_prose = load_prose(args.prose_dir, units, chapters)
+        main_tex, chapter_files, _ = build_tex(run, units, chapters, prose, overview, glossary, checks_prose)
     except (reader.RunError, units_mod.UnitsError, DocError) as e:
         print("make_doc: %s" % e, file=sys.stderr)
         return 2

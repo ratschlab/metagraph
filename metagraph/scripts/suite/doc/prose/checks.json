@@ -1,0 +1,136 @@
+{
+ "_about": "Appendix A of the suite results document, the check catalogue: one entry per check kind, keyed on the check's name in checks.CHECKS. Written from checks.py's code and docstrings as of c11db9dd, as prose a developer who knows the engine but not the suite can read: `asserts` what the check claims of an answer, `inconclusive` when it cannot test that claim, `fails` when it fails, `args` what its arguments mean, `spec` the SPEC sections it rests on, `generic` whether it is one of checks.GENERIC_CHECKS (status, invariants, counts_consistent, budget_respected: they hold on any answer of the route; every other check is a property check, the scenario's own claim). `routes` splits an entry whose rule differs per route. This round holds the ten kinds chapter R (and chapter D's R copies) use; the other 36 follow with their chapters. Where a function has a docstring too, this prose is the catalogue's text and the docstring the source. The `common` paragraphs state the rules checks.evaluate applies to every check before the check itself runs; the catalogue prints them once, at the top of the appendix.",
+ "common": [
+  "Every check reads the normalised answer: the HTTP status, the body, the error (code and text) and, on a direct arm, the headers. The MCP arm's normaliser maps the tool results into the same shape for the fields the service exposes.",
+  "Before a check runs, checks.evaluate applies three rules. A check other than status on an answer whose status is not 200 does not run: it is inconclusive (not testable) when the scenario allows that status, which is the case for an expected refusal and for an allowed 503 deadline (see status), and a failure (no answer to check) otherwise; `budget_respected` on an allowed 503 is the one exception, it judges the 503's timing. A field the check needs that the answer lacks is not exposed on the MCP arm and a failure on a direct arm, where the field is part of the contract. An unknown check name, or a check that raises, is a failure stating why, never a silent pass.",
+  "The execution's outcome follows from its checks by precedence fail, finding, inconclusive, pass; an execution whose property checks all could not test anything is inconclusive even when its generic checks passed; a scenario without a property check (a refusal: its status, code and text are the claim) is judged by its generic checks (I.3).",
+  "A check that cannot test its property because the answer states a hiding (a withheld list, a cut), a stop or a time limitation accepts the statement only once the answer shows it can have happened: for a /resolve stop, a reason of time and a `timing.elapsed_ms` at or after the budget less the reserve. A stated reason that cannot have happened fails the check that met it, and the route's invariants with it; it never makes a check inconclusive."
+ ],
+ "checks": {
+  "status": {
+   "generic": true,
+   "title": "the HTTP status, error code and text",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.5",
+    "SPEC-pattern-search sections 6 and 7.6"
+   ],
+   "args": "http: the expected status (200 when absent) or a list of accepted ones; code: the error code; text: the exact error text; `text_prefix`: the text's beginning; `text_contains`: fragments the text must hold.",
+   "asserts": "The answer's HTTP status is the expected one, and where the expectation states them the error code equals the given code and the error text equals the given text, starts with the given prefix and contains each given fragment. A refusal scenario has this check alone: the status, code and text are its claim.",
+   "inconclusive": "A 503 with the code deadline in place of an expected 200 on /pattern, or on /resolve when the request names `bounds.time_budget_ms`, where the expectation does not itself name the deadline: the answer could not be built and written within its time budget, which the SPECs allow on any host under load. Every other check of that execution reads inconclusive too, except `budget_respected`, which judges the 503's timing.",
+   "fails": "Any other status than the expected one, with the error code and text in the detail; a 503 deadline on a /resolve whose request names no budget (the /resolve deadline is opt-in: without the field there is no deadline whatever the server's cap, so such a 503 is a host defect); an error code or text that differs from the expectation."
+  },
+  "invariants": {
+   "generic": true,
+   "title": "the route's consistency rules on any 200",
+   "spec": [
+    "SPEC-labeled-traversal-core sections 4.2 and 4.5 (/resolve)",
+    "SPEC-pattern-search sections 7.4 to 7.6 (/pattern)",
+    "SPEC-labeled-traversal-core sections 6.7, 7.0 and 7.1 (/traverse)"
+   ],
+   "args": "none (the route decides the rule set).",
+   "asserts": "On a 200 the answer is consistent with itself and with the request under the route's SPEC, whatever the scenario asks. The rules are listed per route below; this round lists /resolve's.",
+   "inconclusive": "Only by the common rule: an answer that is not a 200 and that the scenario allows (an expected refusal, an allowed 503 deadline).",
+   "fails": "Any rule broken; the detail lists up to six problems. A stated stop that cannot have happened (a reason other than time, a time stop before the budget less the reserve) is one of them.",
+   "routes": {
+    "POST /resolve": "`num_kmers` equals L - k + 1 for a query of L bases, or, under a stated stop, equals `stop.resolved_kmers`, with `stop.resolved_bp` equal to `resolved_kmers` + k - 1 (0 for a stop before the first k-mer), `stop.remainder_from_bp` equal to `resolved_kmers`, and `stop.query_kmers` and `query_bp` those of the query; the stop's reason is time and the elapsed time is at or after the budget less the reserve. `graph_runs` are sorted, disjoint and within [0, `num_kmers`). Each label's runs lie within the graph runs and their lengths sum to its `kmers_supported`. A discovery's list is ranked by supported k-mers, most first (not under support trace, whose counts are of trace runs), is at most `max_labels` long (the request's, else the default 1,000), and names no label with more supported k-mers than there are in the graph; its `labels_truncated`, when present, is an object whose kept equals the list's length and `max_labels`, whose total is larger, whose least kept support is at least the most dropped and at most the in-graph k-mer count, whose full-length drops are at most the dropped labels and occur only where the most dropped support equals the in-graph count, and whose least kept support is the last listed label's. With explicit labels every requested label is present in the answer."
+   }
+  },
+  "resolve_runs": {
+   "generic": false,
+   "title": "one label's support profile",
+   "spec": [
+    "SPEC-labeled-traversal-core sections 4.2 and 4.5"
+   ],
+   "args": "label (required): the column or header label to read. On a complete profile: full, the label supports every k-mer as one run [0, `num_kmers`); runs, exactly these runs; covers [lo, hi), some run contains that interval; `run_end_in` [lo, hi], a run from k-mer 0 ends within that range; `run_start_in` [lo, hi], a run to the last k-mer starts within it; kmers, `min_kmers`, `max_kmers` on `kmers_supported`. `prefix_if_stopped`: the scenario's property is a stated stop; `unless_stopped`: a twin of such a scenario, judged on the whole query when complete and on the prefix when stopped.",
+   "asserts": "The label is listed exactly once with its runs, and the arguments hold on its profile. Without a stop they hold on the whole query. With a stated stop (which must be possible: reason time at or after the budget less the reserve) and `prefix_if_stopped` or `unless_stopped`, a full expectation holds on the prefix: the label's `kmers_supported` equals `resolved_kmers`, its runs are [[0, `resolved_kmers`]] and so are the `graph_runs`; the pass reads stopped after x of n k-mers, the prefix fully supported. With a stated stop and neither flag, each argument is decided only where the prefix decides it: it passes where the prefix alone proves it (a covered interval inside the prefix, a run end inside it, a minimum already reached), fails where the prefix contradicts it (a hole in a full support, a run from 0 ending before its range, more support than allowed, too few k-mers left to reach a count) and is inconclusive otherwise.",
+   "inconclusive": "A stop before the first k-mer (`resolved_kmers` 0): nothing of the label to check. With `prefix_if_stopped`, a complete answer: no stop happened, so the prefix property was not tested, although the whole profile holds. Under a stop without the flags, an argument the prefix leaves open (full support of the query, a run that reaches the prefix's end, an interval past it). Also by the common rule on an allowed non-200.",
+   "fails": "The label listed twice or not at all (a missing label is not exposed on the MCP arm); a stop that cannot have happened; on a complete profile any argument broken (the detail names the label, its `kmers_supported` of `num_kmers` and its first runs); on a stopped profile the prefix contradicting an argument, or a full prefix expectation broken."
+  },
+  "resolve_graph_runs": {
+   "generic": false,
+   "title": "the k-mers in the graph",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.2"
+   ],
+   "args": "runs: the expected `graph_runs`, exactly.",
+   "asserts": "`graph_runs` equals the expected list: the query's in-graph k-mers as sorted, disjoint, 0-based half-open runs of k-mer starts. A window cut from a record expects the single run [0, L - k + 1); a window with an N or IUPAC code at position p expects the two runs around the k k-mers that hold it.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "`graph_runs` differs from the expected list (the first six runs in the detail)."
+  },
+  "label_not_full": {
+   "generic": false,
+   "title": "an unrelated label does not support everything",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.2"
+   ],
+   "args": "label: the unrelated label.",
+   "asserts": "The named label is listed and does not support every k-mer of the query: its `kmers_supported` differs from `num_kmers` (a query with no k-mer is not judged). It is the negative half of R-multi's claim that labels are answered independently.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "The unrelated label supports every k-mer; the label missing from the answer (not exposed on the MCP arm)."
+  },
+  "resolve_absent": {
+   "generic": false,
+   "title": "no k-mer in the graph",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.2"
+   ],
+   "args": "none.",
+   "asserts": "`graph_runs` is empty and no listed label supports any k-mer: the query, a random sequence, has no k-mer in the graph.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "`graph_runs` holds a run, or a label reports `kmers_supported` above 0 for an absent sequence."
+  },
+  "resolve_discover_contains": {
+   "generic": false,
+   "title": "a discovery lists the source label",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.2 (discovery, ranking and truncation)",
+    "section 4.5 (a stop before any in-graph k-mer)"
+   ],
+   "args": "label: the source record's column or header label.",
+   "asserts": "The discovery lists the scenario's source label, or leaves it out only as SPEC section 4.2 allows. The discovery collects the labels of the query's in-graph k-mers; with more than `max_labels` of them it keeps the top `max_labels` by supported k-mers (ties by column id, then sequence id) and states `labels_truncated`. The source record's own label supports every in-graph k-mer of a query taken from it (the lengths of `graph_runs` summed; under a stop, the resolved prefix's), so a truncated list may leave it out only in a tie at that support: `min_kept_kmers` and `max_dropped_kmers` both equal to it and `dropped_full_length` at least 1. Such an answer passes, the ranking being all an answer can show (the tie's column ids are not in it). The truncation itself must be the SPEC's: only more than `max_labels` labels are truncated, to exactly `max_labels` (the request's, else the default 1,000).",
+   "inconclusive": "The discovery was stopped before it read the row of any in-graph k-mer (a stop with no label listed, no truncation and no in-graph k-mer in the prefix): there is no profile to rank. Also by the common rule.",
+   "fails": "The label is not in a complete list; `labels_truncated` is not the SPEC's object or not numeric; the list is truncated to a size other than `max_labels` or at a total not above it; a dropped label has more supported k-mers than a kept one; a kept label supports fewer k-mers than the in-graph count while the source supports them all (the top `max_labels` by support would hold it); no dropped label supports every in-graph k-mer."
+  },
+  "clamped": {
+   "generic": false,
+   "title": "a bound lowered to the server's cap is stated",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.5 (/resolve's budget)",
+    "section 5 (/traverse's bounds)"
+   ],
+   "args": "field: the request field; requested and effective: the two values; where: limits (the default, /resolve and /pattern) or strategy (/traverse's strategy.clamped).",
+   "asserts": "limits.clamped (or strategy.clamped) holds an entry for the field with exactly the requested and the effective value: the host lowered the request's bound to its cap and said so. In chapter R: `bounds.time_budget_ms` 70,000 lowered to 60,000.",
+   "inconclusive": "Only by the common rule.",
+   "fails": "No entry for the field in the clamped list, or an entry with other values; the list missing from the answer (not exposed on the MCP arm)."
+  },
+  "budget_respected": {
+   "generic": true,
+   "title": "the server's time against the request's time budget",
+   "spec": [
+    "SPEC-labeled-traversal-core section 4.5 (/resolve)",
+    "SPEC-pattern-search sections 6 and 7.6 (/pattern)",
+    "SPEC-labeled-traversal-core section 6.8 (/traverse)"
+   ],
+   "args": "rule: the SPEC rule in one sentence, printed in the detail block of a finding; `cap_ms`: the route's cap on the budget where the request asks more than it (the effective budget is then the cap).",
+   "asserts": "The host kept the request's effective time budget as its SPEC states it, read from the answer's own deadline record and, for a 503, from the client's wall time; no fixed allowance is granted anywhere, since the capabilities state no bound on one uninterruptible piece. The builder adds this check to every scenario that names a time budget and allows a 200. Its breach is a finding, never a failure: the request was answered.",
+   "inconclusive": "On an allowed 503 deadline whose client wall time is within max(1 s, the budget) after the budget: nothing in the body to judge. Without a client wall time, or without a budget to judge against. On /traverse, an answer with no walked seed (the seed phase alone, which the budget does not govern).",
+   "fails": "An allowed 503 deadline that came before the budget (the answer is a 503 only when it cannot be written by the budget, and the client's interval holds the host's). This is the one failure the check can give; every late answer is a finding.",
+   "routes": {
+    "POST /pattern and POST /resolve": "A 200 whose `timing.elapsed_ms` exceeds `limits.time_budget_ms` (the effective budget: the request's, lowered to the cap) is a finding: past the budget the routes answer 503, never a partial answer (/resolve sets its elapsed time before its last deadline check). An allowed 503 deadline is judged by the client's wall time against the effective budget, min(the requested budget, the cap the builder states as `cap_ms`): a 503 delivered more than max(1 s, the budget) after the budget is a finding (the deadline is read where the work and the delivery poll it, so an unpolled piece of about that length ran; the wall also holds the network and any wait for a request thread, hence the margin); within that margin it is inconclusive; before the budget it fails.",
+    "POST /traverse": "Per walked seed, with the deadline the budget on the seed's clock, never read at depth 0 and the depth-0 reads unpaced (walker.cpp): a time stop before the budget is a finding (the walker stops only once the budget has passed); a budget that passed in the seed phase stops the walk at the first depth-1 checkpoint, so a path longer than 1 bp is a finding; a time stop at a checked depth must come within one read and one head piece after max(budget, seed phase), a stop at depth 1 within the depth-0 level's pieces of each requested arm (six per arm), each piece at most the seed's longest piece and at most the time since the seed phase; a walk with no time stop may run past max(budget, seed phase) only by the pieces that may follow the deadline before a reading that would stop a head below the radius, plus the radius level and the finalisation. A stop late within its pieces, or a seed phase longer than the budget, is a performance fact stated in the detail, not a finding."
+   }
+  },
+  "deterministic": {
+   "generic": false,
+   "title": "the same request answers the same",
+   "spec": [
+    "SPEC-labeled-traversal-core section 6.8 (determinism provided no time budget tripped)",
+    "SPEC-pattern-search section 7.9 (determinism time_limited)"
+   ],
+   "args": "none; the runner passes the earlier repeats of the scenario on the same arm as their answer digests and what made each time-limited.",
+   "asserts": "The answer's digest, the sha256 of the canonical JSON of the normalised answer without its headers and without every timing key, equals the digests of the scenario's earlier repeats on the same arm that no time budget limited. It is left out of a scenario's first repeat, which has nothing to compare, so that repeat's outcome rests on the other checks. In chapter R it appears through chapter D's copies of four R scenarios, repeated three times.",
+   "inconclusive": "This answer is itself time-limited (a 503 deadline, a resolve stopped by time, a pattern or seed stopped by its budget, an attempt's bound): it need not repeat; or no earlier repeat is free of a time limitation (then there is nothing to compare).",
+   "fails": "The digest differs from an earlier repeat's that no time budget limited; or this answer is time-limited and differs, and its stated time limitation cannot have happened (a /resolve stop before the budget less the reserve, a /pattern or /traverse stop before its work time or budget)."
+  }
+ }
+}

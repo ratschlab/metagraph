@@ -13,25 +13,33 @@ if HERE not in sys.path:
 import blocks  # noqa: E402
 import cells  # noqa: E402
 import latex  # noqa: E402
+import report  # noqa: E402
 from cells import ARMS, fmt_t, fmt_pair, fmt_n  # noqa: E402
-from latex import esc, tt, inline, paragraphs  # noqa: E402
+from latex import esc, esc_wrap, tt, inline, paragraphs  # noqa: E402
 
 RELATION_SIGN = {"prefix_equals": "{\\glyphfont ⊑}", "subset": "{\\glyphfont ⊆}", "same_answer": "=",
                  "zero_equals_absent": "{\\glyphfont ≡}"}
-LOAD_CAVEAT_SRA = 400.0
-LOAD_CAVEAT_LOAD1 = 48.0
+LOAD_CAVEAT_SRA = report.LOAD_CAVEAT_SRA_CPU_PCT
+LOAD_CAVEAT_LOAD1 = report.LOAD_CAVEAT_LOAD1
+# Part I's sections: key, the default title, and the id the prose file may use instead of the key
+PART_ONE = [("what", "What the suite tests and how", "I.1"), ("arms", "The three arms and the paired loop", "I.2"),
+            ("classes", "Outcome classes, agreement classes, the verdict rule", "I.3"),
+            ("reading", "How to read a block", "I.4"), ("environment", "Versions and environment", "I.5"),
+            ("verdict", "The verdict and the deploy gate", "I.6"),
+            ("limits", "Known MCP limits and owner-declared exemptions", "I.7")]
 
 
 class Context(object):
     """What every section reads: the run, the unit model, the prose, the chapters to build, the footnotes assigned
     (per chapter) and the per-scenario arm states (computed once)."""
 
-    def __init__(self, run, units, prose, overview, glossary, chapters):
+    def __init__(self, run, units, prose, overview, glossary, chapters, checks_prose=None):
         self.run = run
         self.units = units
         self.prose = prose  # {chapter: prose dict}
         self.overview = overview or {}
         self.glossary = glossary or {}
+        self.checks_prose = checks_prose or {}  # doc/prose/checks.json: {common: [...], checks: {kind: {...}}}
         self.chapters = chapters
         self.states = {}
         self.footnotes = {}  # chapter -> Footnotes
@@ -52,16 +60,33 @@ class Context(object):
         return [sid for sid in self.run.order if (self.units.by_scenario.get(sid) or {}).get("chapter")
                 in self.chapters]
 
-    def fill(self, text):
-        """Prose placeholders `{release}` etc. filled from the run."""
+    def placeholders(self):
+        """The values of the prose placeholders (overview.json `placeholders` names them with their sources)."""
         run = self.run
         manifest = run.manifest
         index = manifest.get("index") or {}
-        values = {"release": run.run.get("release") or "–", "run_id": run.run_id(),
-                  "database": index.get("database") or "–", "k": index.get("k") or "–",
-                  "scenarios": len(run.order), "manifest_version": manifest.get("manifest_version") or "–",
-                  "server_instance": run.run.get("server_instance") or "–",
-                  "index_fp": (run.run.get("index_fp") or "–")[:16]}
+        counts = manifest.get("counts") or {}
+        arms = run.run.get("arms") or {}
+        hc = run.comp.get("host_cache") or {}
+        return {"release": run.run.get("release") or "–", "run_id": run.run_id(),
+                "database": index.get("database") or "–", "k": index.get("k") or "–",
+                "scenarios": len(run.order), "n_scenarios": len(run.order),
+                "manifest_version": manifest.get("manifest_version") or "–",
+                "manifest_sha_short": (manifest.get("content_sha256") or "–")[:16],
+                "n_records": len((manifest.get("ground_truth") or {}).get("records") or []),
+                "n_relations": counts.get("relations", len(run.relations)),
+                "server_instance": run.run.get("server_instance") or "–",
+                "index_fp": (run.run.get("index_fp") or "–")[:16],
+                "local_base": (arms.get("direct-local") or {}).get("base") or "–",
+                "remote_base": (arms.get("direct-remote") or {}).get("base") or "–",
+                "mcp_base": (arms.get("mcp") or {}).get("base") or run.mcp_run.get("base") or "–",
+                "warm_window_s": fmt_n(hc.get("warm_window_s", 60), 0),
+                "load_caveat_sra_cpu_pct": fmt_n(LOAD_CAVEAT_SRA, 0),
+                "load_caveat_load1": fmt_n(LOAD_CAVEAT_LOAD1, 0)}
+
+    def fill(self, text):
+        """Prose placeholders `{release}` etc. filled from the run."""
+        values = self.placeholders()
 
         class _Safe(dict):
             def __missing__(self, key):
@@ -72,9 +97,23 @@ class Context(object):
         except (ValueError, IndexError):
             return str(text)
 
+    def overview_section(self, key):
+        """The overview's entry of a Part I section: `sections` keyed by the section key, or a list of entries
+        with an `id` (I.1 ...) or a `key`."""
+        sections = self.overview.get("sections") or {}
+        if isinstance(sections, dict):
+            return sections.get(key) or {}
+        sid = dict((k, i) for k, _, i in PART_ONE).get(key)
+        for entry in sections:
+            if isinstance(entry, dict) and (entry.get("key") == key or entry.get("id") == sid):
+                return entry
+        return {}
+
+    def section_title(self, key, default):
+        return self.overview_section(key).get("title") or default
+
     def prose_paragraphs(self, section_key):
-        sec = (self.overview.get("sections") or {}).get(section_key) or {}
-        items = sec.get("paragraphs") or []
+        items = self.overview_section(section_key).get("paragraphs") or []
         if not items:
             return latex.placeholder("(overview prose for %s: to be written)" % section_key) + "\n\n"
         return paragraphs([self.fill(p) for p in items])
@@ -134,33 +173,42 @@ def verdict_line(ctx):
     return "\\textbf{\\large %s}\\ %s" % (esc(word), esc(rest, 400))
 
 
-def legend_table():
-    rows = [("\\gpass", "pass", "execution outcome pass on every repeat"),
-            ("\\gfail", "fail", "outcome fail on any repeat"),
-            ("\\gerr", "error", "no HTTP answer (an error outcome)"),
-            ("\\gfind", "finding", "the host broke a stated bound or SPEC promise without failing the request"),
-            ("\\ginc", "inconclusive", "the test could not test its property (an allowed 503 deadline, a withheld "
-                                       "list, a service timeout); with the mark m the repeats' outcomes differ"),
-            ("\\gni", "not implemented via MCP", "MCP agreement class not_implemented_mcp (the manifest's mark, "
-                                                 "or a table case of that agreement)"),
-            ("\\gbd", "service-side by design", "the service answered or refused in the host's place, as its table "
-                                                "documents; the mark u when the pair is unverified"),
-            ("\\gnone", "no execution", "the plan had none (a long scenario on direct-remote); a planned execution "
-                                        "not recorded is footnoted")]
+LEGEND_GLYPH = {"pass": "\\gpass", "fail": "\\gfail", "error": "\\gerr", "finding": "\\gfind",
+                "inconclusive": "\\ginc", "not_implemented": "\\gni", "by_design": "\\gbd", "none": "\\gnone"}
+LEGEND_WORD = {"pass": "pass", "fail": "fail", "error": "error", "finding": "finding", "inconclusive": "inconclusive",
+               "not_implemented": "not implemented via MCP", "by_design": "service-side by design",
+               "none": "no execution"}
+MARK_EXAMPLE = {"superscript digit": "\\ginc\\fn{1}", "not-equal sign": "\\gpass\\gne", "t": "\\gpass\\tmark{t}",
+                "s": "\\gpass\\tmark{s}", "n": "\\gpass\\tmark{n}", "u": "\\gbd\\tmark{u}", "c": "9.1 s\\tmark{c}",
+                "a": "9.1 s\\tmark{a}", "m": "\\ginc\\tmark{m}"}
+
+
+def legend_table(ctx=None):
+    """The glyph legend, the marks and the cell grammar of I.4; the wording of the glyphs and marks comes from the
+    overview prose (`legend`, `marks` of the reading section) when it has them, the symbols always from the macros
+    the tables use."""
+    reading = ctx.overview_section("reading") if ctx else {}
+    legend = [e for e in (reading.get("legend") or []) if isinstance(e, dict) and e.get("key") in LEGEND_GLYPH]
+    marks = [e for e in (reading.get("marks") or []) if isinstance(e, dict) and e.get("mark") in MARK_EXAMPLE]
+    if legend and marks:
+        glyph_rows = []
+        for e in legend:
+            meaning = str(e.get("meaning") or "")
+            prefix = LEGEND_WORD[e["key"]] + ":"
+            if meaning.startswith(prefix):
+                meaning = meaning[len(prefix):].strip()
+            glyph_rows.append([LEGEND_GLYPH[e["key"]], esc(LEGEND_WORD[e["key"]]), inline(meaning)])
+        mark_rows = [[MARK_EXAMPLE[e["mark"]], esc(e.get("on") or ""), inline(e.get("meaning") or "")]
+                     for e in marks]
+        return _legend_tables(glyph_rows, mark_rows, with_clean=False)
+    return _legend_builtin()
+
+
+def _legend_tables(glyph_rows, mark_rows, with_clean=True):
     spec = latex.spec_p([8, 36, 128], aligns=["centering", "raggedright", "raggedright"])
-    glyphs = latex.plain_table(spec, ["", "glyph", "from"], [[g, esc(w), esc(m)] for g, w, m in rows])
-    marks = [("\\ginc\\fn{1}", "any cell", "a detail block follows the table (numbering restarts per chapter)"),
-             ("\\gpass\\gne", "direct-remote or mcp", "disagreement with the reference arm (always footnoted)"),
-             ("\\gpass\\tmark{t}", "direct-remote", "direct class timing: one arm's answer time-limited"),
-             ("\\gpass\\tmark{s} / \\gpass\\tmark{n}", "direct-remote",
-              "same_checks (other answer, same check outcomes) / not_comparable"),
-             ("\\gbd\\tmark{u} / \\gpass\\tmark{n}", "mcp",
-              "by-design pair unverified / not_comparable (no check both arms evaluated)"),
-             ("9.1 s\\tmark{c} / 9.1 s\\tmark{a}", "a time", "this single execution was host-cold / aged (a direct cell "
-                                                            "without a mark is host-warm)"),
-             ("\\ginc\\tmark{m}", "a glyph", "the repeats' outcomes differ (the worst is shown)")]
+    glyphs = latex.plain_table(spec, ["", "glyph", "meaning"], glyph_rows)
     spec2 = latex.spec_p([30, 34, 108])
-    marks_t = latex.plain_table(spec2, ["mark", "on", "meaning"], [[a, esc(b), esc(c)] for a, b, c in marks])
+    marks_t = latex.plain_table(spec2, ["mark", "on", "meaning"], mark_rows)
     grammar = ("\\begingroup\\sffamily\\footnotesize\n"
                "\\bline{line 1}{glyph, marks, wall time(s) in repeat order with the unit once: "
                "\\gpass\\ 3.1 / 0.9 s}\n"
@@ -175,8 +223,35 @@ def legend_table():
              "comparable, a missing planned execution. Series matrices stack the three lines in one cell; list and "
              "pairs rows put lines 1 and 2 in the cell and line 3 in the mcp cell; replicates rows carry aggregates "
              "(ok n/n, wall p50 / max over each member's first host-warm execution, [server p50]); refusal rows "
-             "carry the glyph only, their times as a maximum in the summary line.\n\n")
+             "carry the glyph only, their times as a maximum in the summary line.\n\n") if with_clean else ""
     return glyphs + marks_t + grammar + clean
+
+
+def _legend_builtin():
+    rows = [("\\gpass", "pass", "execution outcome pass on every repeat"),
+            ("\\gfail", "fail", "outcome fail on any repeat"),
+            ("\\gerr", "error", "no HTTP answer (an error outcome)"),
+            ("\\gfind", "finding", "the host broke a stated bound or SPEC promise without failing the request"),
+            ("\\ginc", "inconclusive", "the test could not test its property (an allowed 503 deadline, a withheld "
+                                       "list, a service timeout); with the mark m the repeats' outcomes differ"),
+            ("\\gni", "not implemented via MCP", "MCP agreement class not_implemented_mcp (the manifest's mark, "
+                                                 "or a table case of that agreement)"),
+            ("\\gbd", "service-side by design", "the service answered or refused in the host's place, as its table "
+                                                "documents; the mark u when the pair is unverified"),
+            ("\\gnone", "no execution", "the plan had none (a long scenario on direct-remote); a planned execution "
+                                        "not recorded is footnoted")]
+    glyph_rows = [[g, esc(w), esc(m)] for g, w, m in rows]
+    marks = [("\\ginc\\fn{1}", "any cell", "a detail block follows the table (numbering restarts per chapter)"),
+             ("\\gpass\\gne", "direct-remote or mcp", "disagreement with the reference arm (always footnoted)"),
+             ("\\gpass\\tmark{t}", "direct-remote", "direct class timing: one arm's answer time-limited"),
+             ("\\gpass\\tmark{s} / \\gpass\\tmark{n}", "direct-remote",
+              "same_checks (other answer, same check outcomes) / not_comparable"),
+             ("\\gbd\\tmark{u} / \\gpass\\tmark{n}", "mcp",
+              "by-design pair unverified / not_comparable (no check both arms evaluated)"),
+             ("9.1 s\\tmark{c} / 9.1 s\\tmark{a}", "a time", "this single execution was host-cold / aged (a direct cell "
+                                                            "without a mark is host-warm)"),
+             ("\\ginc\\tmark{m}", "a glyph", "the repeats' outcomes differ (the worst is shown)")]
+    return _legend_tables(glyph_rows, [[a, esc(b), esc(c)] for a, b, c in marks])
 
 
 def classes_tables():
@@ -333,8 +408,8 @@ def mcp_limits(ctx):
     for case, sids in sorted(named.items()):
         c = run.cases.get(case) or run.table.get(case) or {}
         sa = c.get("service_answer") or {}
-        rows.append([tt(case), esc(c.get("scenario_match"), 160), esc(sa.get("missing_argument") or sa.get("detail"), 160),
-                     str(len(sids))])
+        rows.append([tt(case), esc_wrap(c.get("scenario_match"), 160),
+                     esc_wrap(sa.get("missing_argument") or sa.get("detail"), 160), str(len(sids))])
     out += "\\paragraph{Cases of the by-design table of agreement not implemented via MCP that scenarios name}\n"
     out += latex.plain_table(latex.spec_p([50, 60, 52], extra_cols=1, extra_spec="r"),
                              ["case", "scenario match", "missing argument", "scenarios"], rows)
@@ -345,7 +420,7 @@ def mcp_limits(ctx):
         if mcp.get("not_implemented"):
             reasons.setdefault(str(mcp["not_implemented"]), []).append(sid)
     out += "\\paragraph{The manifest's reasons for not implemented via MCP}\n"
-    rows = [[esc(r, 120), str(len(s)), esc(", ".join(s[:8]) + (" …" if len(s) > 8 else ""))]
+    rows = [[esc_wrap(r, 120), str(len(s)), esc(", ".join(s[:8]) + (" …" if len(s) > 8 else ""))]
             for r, s in sorted(reasons.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
     out += latex.plain_table(latex.spec_p([60, 104], extra_cols=1, extra_spec="r"),
                              ["reason", "ids", "scenarios"], [[r[0], r[2], r[1]] for r in rows])
@@ -359,7 +434,7 @@ def mcp_limits(ctx):
             for e in dec.get(kind) or []:
                 if isinstance(e, dict):
                     rows.append([esc(kind.replace("_", " ")), latex.breakable_id(e.get("scenario") or e.get("relation") or "–"),
-                                 esc(", ".join(e.get("arms") or [])), esc(e.get("reason"), 300)])
+                                 esc(", ".join(e.get("arms") or [])), esc_wrap(e.get("reason"), 300)])
         out += latex.plain_table(latex.spec_p([22, 30, 22, 96]), ["kind", "scenario", "arms", "reason"], rows)
     else:
         out += "None given for this manifest.\n\n"
@@ -369,7 +444,7 @@ def mcp_limits(ctx):
 def part_one(ctx):
     run = ctx.run
     out = "\\part*{Part I\\qd Overview}\\addcontentsline{toc}{part}{Part I\\qd Overview}\n\\markright{Overview}\n"
-    out += latex.section("I.1\\qd What the suite tests and how", "sec:I1")
+    out += latex.section("I.1\\qd %s" % esc(ctx.section_title("what", PART_ONE[0][1])), "sec:I1")
     out += ctx.prose_paragraphs("what")
     manifest = run.manifest
     index = manifest.get("index") or {}
@@ -387,9 +462,9 @@ def part_one(ctx):
         value = gt[key]
         if isinstance(value, (list, dict)):
             value = "%d entries" % len(value)
-        rows.append((esc(key.replace("_", " ")), esc(value, 220)))
+        rows.append((esc(key.replace("_", " ")), esc_wrap(value, 220)))
     out += _kv_table(rows)
-    out += latex.section("I.2\\qd The three arms and the paired loop", "sec:I2")
+    out += latex.section("I.2\\qd %s" % esc(ctx.section_title("arms", PART_ONE[1][1])), "sec:I2")
     out += ctx.prose_paragraphs("arms")
     arms = run.run.get("arms") or {}
     rows = []
@@ -401,19 +476,19 @@ def part_one(ctx):
     out += latex.plain_table(latex.spec_p([24, 62, 16, 52], extra_cols=1, extra_spec="r"),
                              ["arm", "base", "state", "connection", "executions"],
                              [[r[0], r[1], r[2], r[4], r[3]] for r in rows])
-    out += latex.section("I.3\\qd Outcome classes, agreement classes, the verdict rule", "sec:I3")
+    out += latex.section("I.3\\qd %s" % esc(ctx.section_title("classes", PART_ONE[2][1])), "sec:I3")
     out += ctx.prose_paragraphs("classes")
     out += classes_tables()
-    out += latex.section("I.4\\qd How to read a block", "sec:I4")
+    out += latex.section("I.4\\qd %s" % esc(ctx.section_title("reading", PART_ONE[3][1])), "sec:I4")
     out += ctx.prose_paragraphs("reading")
-    out += legend_table()
-    out += latex.section("I.5\\qd Versions and environment", "sec:I5")
+    out += legend_table(ctx)
+    out += latex.section("I.5\\qd %s" % esc(ctx.section_title("environment", PART_ONE[4][1])), "sec:I5")
     out += ctx.prose_paragraphs("environment")
     out += environment_table(ctx)
-    out += latex.section("I.6\\qd The verdict and the deploy gate", "sec:I6")
+    out += latex.section("I.6\\qd %s" % esc(ctx.section_title("verdict", PART_ONE[5][1])), "sec:I6")
     out += ctx.prose_paragraphs("verdict")
     out += verdict_and_gate(ctx)
-    out += latex.section("I.7\\qd Known MCP limits and owner-declared exemptions", "sec:I7")
+    out += latex.section("I.7\\qd %s" % esc(ctx.section_title("limits", PART_ONE[6][1])), "sec:I7")
     out += ctx.prose_paragraphs("limits")
     out += mcp_limits(ctx)
     return out
@@ -604,16 +679,17 @@ def unit_section(ctx, chapter, uid):
                 if gm:
                     by_group[g] = gm
         else:
-            by_group[uid] = members
+            variants = [str(meta[sid].get("variant") or sid) for sid in members]
+            by_group[esc(", ".join(variants), 90)] = members
         for g, gm in by_group.items():
             st = dict((sid, ctx.state(sid)) for sid in gm)
             cs = []
             for arm in ARMS:
                 l1, l2 = cells.aggregate(st, arm)
                 cs.append(latex.cell_lines(l1, l2))
-            rows.append((esc(g), len(gm), cs[0], cs[1], cs[2]))
+            rows.append((esc(g) if groups else g, len(gm), cs[0], cs[1], cs[2]))
         ids = units_ids(ctx, members, by_group if groups else None)
-        out += latex.replicates_table(tt(uid) if not groups else esc(u.get("unit_title") or uid)[:30], rows, ids)
+        out += latex.replicates_table("variants" if not groups else esc(u.get("unit_title") or uid)[:30], rows, ids)
         exceptions = []
         for sid in members:
             if fns[sid] is not None:
@@ -635,6 +711,7 @@ def unit_section(ctx, chapter, uid):
             rows.append([latex.sid(sid, detail=fns[sid] is not None) if fns[sid] else latex.breakable_id(sid),
                          esc(meta[sid].get("variant") or "", 60), expected] + cs)
         out += latex.refusals_table(rows, None)
+        out += "\\noindent{\\scriptsize %s}\\par\\smallskip\n" % units_ids(ctx, members)
         states = [ctx.state(sid) for sid in members]
         out += "\\sumline{%d tests · %s · %s}\n" % (len(members), " · ".join(
             "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS), cells.max_wall_text(run, members))
@@ -669,7 +746,7 @@ def unit_section(ctx, chapter, uid):
             rows.append([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid), second] + cs)
         rows += _relation_rows(ctx, u.get("relations") or [])
         out += latex.pairs_table(rows, None, "test")
-    if layout != "replicates" and layout != "series":
+    if layout in ("list", "pairs"):
         out += "\\noindent{\\scriptsize %s}\\par\\smallskip\n" % units_ids(ctx, members)
     out += _unit_blocks(ctx, chapter, uid, members)
     return out
@@ -816,6 +893,29 @@ def closing(ctx):
 
 # -- appendices --------------------------------------------------------------------------------------------------
 
+def _catalogue_entry(ctx, name, entry, chapters_text, generic):
+    """One entry of the check catalogue from checks.json: the title line, the SPEC references, then asserts /
+    inconclusive / fails / args and the per-route rules as hanging lines."""
+    title = inline(entry.get("title") or "")
+    out = "\\Needspace{8\\baselineskip}\\noindent\\textbf{\\texttt{%s}}\\quad %s\\hfill{\\small\\itshape %s check · %s}\\par\\nopagebreak\n" % (
+        esc(name), title, "generic" if generic else "property", chapters_text)
+    spec = entry.get("spec")
+    if isinstance(spec, list) and spec:
+        out += "{\\small\\color{black!60}%s}\\par\\nopagebreak\n" % inline("; ".join(str(x) for x in spec))
+    for key, label in (("asserts", "asserts"), ("inconclusive", "inconclusive"), ("fails", "fails"),
+                       ("args", "arguments")):
+        if entry.get(key):
+            out += latex.catline(label, inline(entry[key])) + "\n"
+    routes = entry.get("routes")
+    if isinstance(routes, dict):
+        for route, text in routes.items():
+            if len(route) > 15:
+                out += "\\catblock{%s}{%s}\n" % (esc(route), inline(text))
+            else:
+                out += latex.catline(esc(route), inline(text)) + "\n"
+    return out + "\\par\\medskip\n"
+
+
 def check_catalogue(ctx):
     run = ctx.run
     sids = ctx.selected_scenarios()
@@ -825,27 +925,42 @@ def check_catalogue(ctx):
         for e in run.scenario(sid).get("expect") or []:
             if isinstance(e, dict) and e.get("check"):
                 kinds.setdefault(e["check"], set()).add(ch)
+    catalogue = ctx.checks_prose.get("checks") if isinstance(ctx.checks_prose.get("checks"), dict) else {}
     prose_checks = {}
     for ch, p in ctx.prose.items():
         for name, text in (p.get("checks") or {}).items():
-            prose_checks.setdefault(name, text)
-    out = "Every check kind a scenario of the built chapters expects: its description (the check function's "
-    out += "docstring in checks.py, else the prose data), whether it is a property check or a generic one, and the "
-    out += "chapters that use it.\n\n"
+            if text:
+                prose_checks.setdefault(name, text)
+    out = ("Every check kind a scenario of the built chapters expects: what it asserts of an answer, when it is "
+           "inconclusive and when it fails, its arguments and the SPEC sections it rests on (the catalogue prose of "
+           "doc/prose/checks.json, else the check function's docstring in checks.py), whether it is a generic check "
+           "(it holds on any answer of its route) or a property check (the scenario's own claim), and the chapters "
+           "that use it.\n\n")
+    common = ctx.checks_prose.get("common") or []
+    if common:
+        out += "\\grouphead{The rules before any check}\n" + paragraphs(common)
     generic = [k for k in sorted(kinds) if not run.is_property(k)]
     props = [k for k in sorted(kinds) if run.is_property(k)]
+    if generic:
+        out += "\\grouphead{Generic checks}\n"
     for name in generic + props:
-        doc = run.check_doc(name)
-        source = "checks.py"
+        if props and name == props[0]:
+            out += "\\grouphead{Property checks}\n"
+        chapters_text = "chapter%s %s" % ("s" if len(kinds[name]) > 1 else "", esc(", ".join(sorted(
+            kinds[name], key=lambda c: ctx.units.chapters.index(c) if c in ctx.units.chapters else 99))))
+        entry = catalogue.get(name)
+        if isinstance(entry, dict) and entry.get("asserts"):
+            out += _catalogue_entry(ctx, name, entry, chapters_text, name in generic)
+            continue
+        doc = prose_checks.get(name)
+        source = "prose"
         if not doc:
-            doc = prose_checks.get(name)
-            source = "prose"
-        text = inline(doc) if (doc and source == "prose") else (esc(doc) if doc else latex.placeholder(
-            "(no description: neither a docstring nor a prose entry)"))
-        out += "\\needspace{4\\baselineskip}\\noindent\\textbf{\\texttt{%s}}\\quad{\\small\\itshape %s check · chapters %s · %s}\\par\n%s\\par\\medskip\n" % (
-            esc(name), "generic" if name in generic else "property",
-            esc(", ".join(sorted(kinds[name], key=lambda c: ctx.units.chapters.index(c) if c in ctx.units.chapters else 99))),
-            source, text)
+            doc = run.check_doc(name)
+            source = "the docstring in checks.py"
+        text = inline(doc) if (doc and source == "prose") else (esc_wrap(doc) if doc else latex.placeholder(
+            "(no description: neither a catalogue entry nor a docstring)"))
+        out += "\\Needspace{4\\baselineskip}\\noindent\\textbf{\\texttt{%s}}\\hfill{\\small\\itshape %s check · %s · %s}\\par\\nopagebreak\n{\\small %s}\\par\\medskip\n" % (
+            esc(name), "generic" if name in generic else "property", chapters_text, source, text)
     return out
 
 
@@ -883,7 +998,7 @@ def by_design_table(ctx):
         if sa.get("code"):
             service.append(tt(sa["code"]))
         if sa.get("text_contains"):
-            service.append("“%s”" % esc(sa["text_contains"], 100))
+            service.append("“%s”" % esc_wrap(sa["text_contains"], 100))
         if sa.get("missing_argument"):
             service.append("missing argument %s" % tt(sa["missing_argument"]))
         if c.get("explains_checks"):
@@ -914,7 +1029,7 @@ def by_design_table(ctx):
                 named.append("%s: %d (%s, …)" % (esc(mark), len(sids_),
                                                  ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_[:3])))
         rows.append([tt(cid) + "\\newline{\\scriptsize %s}" % esc(c.get("agreement") or "–"),
-                     esc(c.get("scenario_match"), 220), "; ".join(service) or "–", "; ".join(direct) or "–",
+                     esc_wrap(c.get("scenario_match"), 220), "; ".join(service) or "–", "; ".join(direct) or "–",
                      "; ".join(named) or "–"])
     out = ("One row per case of the service-by-design table that a scenario of the built chapters names, that an "
            "MCP answer matched, or that belongs to their areas: the case and its agreement class, what it matches, "
@@ -958,15 +1073,27 @@ def relations_appendix(ctx):
     return out
 
 
+def _sort_key(term):
+    t = str(term).lower()
+    for prefix in ("the ", "a "):
+        if t.startswith(prefix):
+            t = t[len(prefix):]
+    return t
+
+
 def glossary(ctx):
-    entries = (ctx.glossary or {}).get("entries") or []
+    """Appendix D: the entries of glossary.json ({term, definition | text, see}) in alphabetical order (a leading
+    article ignored), two columns."""
+    entries = [e for e in ((ctx.glossary or {}).get("entries") or []) if isinstance(e, dict) and e.get("term")]
     if not entries:
         return latex.placeholder("(glossary: to be written)") + "\n\n"
-    out = "\\begin{description}\n"
-    for e in entries:
-        if isinstance(e, dict) and e.get("term"):
-            out += "\\item[%s] %s\n" % (esc(e["term"]), inline(ctx.fill(e.get("text") or "")))
-    return out + "\\end{description}\n\n"
+    out = "\\begin{multicols}{2}\\small\\raggedright\n"
+    for e in sorted(entries, key=lambda e: _sort_key(e["term"])):
+        text = inline(ctx.fill(e.get("definition") or e.get("text") or ""))
+        see = e.get("see")
+        see_text = inline(", ".join(str(x) for x in see)) if isinstance(see, list) and see else None
+        out += latex.glossary_entry(esc(e["term"]), text, see_text)
+    return out + "\\end{multicols}\n\n"
 
 
 def index(ctx):

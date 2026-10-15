@@ -1,27 +1,646 @@
 {
- "_about": "Appendix D (DESIGN-DOC §8): entries in print order; text with the inline markup `code` and *emphasis*; placeholders as in overview.json. Placeholder text in parentheses is to be written.",
+ "_about": "Appendix D of the suite results document, the glossary: `entries` is an ordered list of {term, definition, see} (see: other terms, optional); the generator prints them in this order or sorted, as it prefers, and may link a term that another entry's definition names. Definitions follow the suite's README, DESIGN-test-suite.md, checks.py, compare.py and report.py as of c11db9dd, and the SPECs they cite. Inline markup: `code` and *emphasis*; placeholders as in overview.json.",
  "entries": [
-  {"term": "arm", "text": "(to be written)"},
-  {"term": "host cache state", "text": "(to be written: cold, warm, aged, not reached, warm after an interrupted execution)"},
-  {"term": "cold / warm", "text": "(to be written)"},
-  {"term": "repeat", "text": "(to be written)"},
-  {"term": "execution", "text": "(to be written)"},
-  {"term": "outcome", "text": "(to be written)"},
-  {"term": "class", "text": "(to be written: the direct and the MCP agreement classes)"},
-  {"term": "finding", "text": "(to be written)"},
-  {"term": "inconclusive", "text": "(to be written)"},
-  {"term": "not implemented via MCP", "text": "(to be written)"},
-  {"term": "service-side by design (verified)", "text": "(to be written)"},
-  {"term": "answer-triggered case", "text": "(to be written)"},
-  {"term": "relation", "text": "(to be written)"},
-  {"term": "generic / property check", "text": "(to be written)"},
-  {"term": "wall / server / backend time", "text": "(to be written)"},
-  {"term": "the front", "text": "(to be written)"},
-  {"term": "the Logan caveat", "text": "(to be written)"},
-  {"term": "run id", "text": "(to be written)"},
-  {"term": "release", "text": "(to be written)"},
-  {"term": "server instance", "text": "(to be written)"},
-  {"term": "index fingerprint", "text": "(to be written)"},
-  {"term": "manifest content sha", "text": "(to be written)"}
+  {
+   "term": "scenario",
+   "definition": "One test of the frozen manifest: an id (the family prefix and a number, e.g. R-pos-0013), an area, a title, a route, the exact request body, the ground truth, the expectations (check name and arguments), the MCP mapping, a timing class, a repeat count and tags. The test id of the tables is the scenario id.",
+   "see": [
+    "manifest",
+    "expectation",
+    "unit"
+   ]
+  },
+  {
+   "term": "manifest",
+   "definition": "The frozen, versioned set of scenarios (`manifest/suite_vN.json`), identified by its content sha256 over the canonical JSON of the scenarios; its relations are hashed apart (relations sha256). A run records both; a run on another manifest is another run.",
+   "see": [
+    "scenario",
+    "relation"
+   ]
+  },
+  {
+   "term": "area, chapter",
+   "definition": "The ten groups of scenarios by what they test, one letter each (R resolve, T traverse, P patterns up to k, L patterns longer than k, X peptides, M mismatches, Q predicates and motif, C capabilities and protocol, N negatives and near-misses, D determinism); Part II has one chapter per area.",
+   "see": [
+    "family",
+    "unit"
+   ]
+  },
+  {
+   "term": "family",
+   "definition": "The scenarios that share an id prefix (R-pos, T-walk, N-hard), built by one part of the builder around one question; a family has a title and one paragraph of prose and holds one or more units. Chapter D's families are all D.",
+   "see": [
+    "unit",
+    "area, chapter"
+   ]
+  },
+  {
+   "term": "unit",
+   "definition": "One builder template, one property, varied over one dimension: the tests printed as one table. Its type decides the layout: series (arms as rows, variants as columns), replicates (the same test over many records, aggregated per arm and group), refusals (edge inputs, a glyph per arm), list (the refusals shape with time cells) and pairs (twins, relations and chapter D's repeats, one row each). Every scenario belongs to exactly one unit; the index (appendix E) maps each id to its unit.",
+   "see": [
+    "family",
+    "property line"
+   ]
+  },
+  {
+   "term": "property line",
+   "definition": "The one sentence above a unit's table that states the claim every member of the unit tests; the family prose before the units says what the family checks and why.",
+   "see": [
+    "unit"
+   ]
+  },
+  {
+   "term": "ground truth",
+   "definition": "What a scenario's right answer rests on: the record a window was cut from (its accession.version, taxid column, position in the column), the window's position and strand on the record's forward strand, the record bases around it, and for variants the edits made; for negatives the fact that the sequence is random or shuffled. Records are the 32 genomes of the search service's validation set, fetched at the indexed accession.version.",
+   "see": [
+    "record",
+    "window",
+    "last-record-verified"
+   ]
+  },
+  {
+   "term": "record",
+   "definition": "One indexed sequence, named by its accession.version, which is also its header label; it belongs to a taxid column and has a position in it (`seq_id`). The suite's records are the 32 genomes of the ground truth.",
+   "see": [
+    "column label",
+    "header label"
+   ]
+  },
+  {
+   "term": "window",
+   "definition": "A positive control: a stretch of a record's forward strand cut at a seeded position, of A, C, G and T only, with a DUST score below 2, occurring once on either strand of the fetched sequence, at least 50 bp from any other window. The suite's checks ask for the record among the answers, never for uniqueness in the index.",
+   "see": [
+    "ground truth"
+   ]
+  },
+  {
+   "term": "k-mer",
+   "definition": "A substring of k = 31 bases; the graph's nodes. A query of L bases has L - k + 1 k-mers, numbered by their start, 0-based. On this basic graph a k-mer and its reverse complement are different nodes.",
+   "see": [
+    "basic graph",
+    "run"
+   ]
+  },
+  {
+   "term": "basic graph",
+   "definition": "The index's graph mode: it holds the forward strand of every indexed sequence only (no canonical k-mers), so the reverse complement of a window is another set of k-mers, which the record's labels do not support.",
+   "see": [
+    "k-mer"
+   ]
+  },
+  {
+   "term": "column label",
+   "definition": "A taxid, one column of the annotation; a column supports a k-mer when the k-mer is in the graph and the column is in its annotation row. A column may hold several records.",
+   "see": [
+    "header label",
+    "support"
+   ]
+  },
+  {
+   "term": "header label",
+   "definition": "An accession.version, one indexed sequence of a column, reached through the index's coordinates: it supports a k-mer when some coordinate of its column at the k-mer's row maps to that sequence.",
+   "see": [
+    "column label",
+    "support trace"
+   ]
+  },
+  {
+   "term": "support",
+   "definition": "Of a label at a k-mer: the k-mer is in the graph and carries the label (SPEC-labeled-traversal-core section 4.2). /resolve reports it per label as runs and as `kmers_supported`, the number of supported k-mers.",
+   "see": [
+    "run",
+    "support trace"
+   ]
+  },
+  {
+   "term": "support trace",
+   "definition": "/resolve's support: trace: a header label supports consecutive k-mers only while their coordinates in that sequence are consecutive (+1 per step); a coordinate jump ends the run. Not expressible via MCP.",
+   "see": [
+    "support"
+   ]
+  },
+  {
+   "term": "run",
+   "definition": "In a /resolve answer, a maximal interval of consecutive k-mers with one state, written as a 0-based half-open interval of k-mer starts [a, b): `graph_runs` are the runs of k-mers in the graph, a label's runs those it supports.",
+   "see": [
+    "k-mer",
+    "support"
+   ]
+  },
+  {
+   "term": "discovery",
+   "definition": "A /resolve without labels (discover: kind column or header, `max_labels`): the labels of every in-graph k-mer's row, ranked by supported k-mers, the top `max_labels` kept (ties by column id, then sequence id) and `labels_truncated` stated when more occurred than were kept (kept, total, the least support kept, the most dropped, the dropped labels at full length).",
+   "see": [
+    "support"
+   ]
+  },
+  {
+   "term": "time budget",
+   "definition": "`bounds.time_budget_ms` of a /resolve (`time_budget_ms` of a /pattern, `strategy.bounds.time_budget_ms` of a /traverse): the request's deadline, lowered to the server's cap and stated in limits.clamped when lowered. For /resolve it is opt-in: without the field there is no deadline. The suite's explicit-label resolves name 20,000 ms, as the service sends it.",
+   "see": [
+    "finalisation reserve",
+    "stated stop",
+    "deadline (503)",
+    "clamped"
+   ]
+  },
+  {
+   "term": "finalisation reserve",
+   "definition": "The 250 ms a /resolve keeps of its budget to build and write the answer: the work stops at the budget less the reserve; a budget not above the reserve is refused.",
+   "see": [
+    "time budget",
+    "stated stop"
+   ]
+  },
+  {
+   "term": "stated stop",
+   "definition": "A /resolve answer that stopped at its budget less the reserve and says so in its stop block (reason time, `resolved_kmers`, `query_kmers`, `resolved_bp`, `remainder_from_bp`): it is exactly the resolve of the query's first `resolved_kmers` k-mers, status 200. A stop the answer states but that cannot have happened (another reason, a stop before the budget less the reserve) fails the checks that met it.",
+   "see": [
+    "time budget",
+    "prefix",
+    "deadline (503)"
+   ]
+  },
+  {
+   "term": "prefix",
+   "definition": "The part of the query a stated stop resolved: its first `resolved_kmers` k-mers; a client resolves the rest from base `remainder_from_bp`. The relation `prefix_equals` compares a stopped answer with the full one on their common k-mers.",
+   "see": [
+    "stated stop",
+    "relation"
+   ]
+  },
+  {
+   "term": "deadline (503)",
+   "definition": "The 503 with code deadline that /resolve and /pattern answer when the answer cannot be built and written within the budget: nothing partial is sent. Where the request names a budget the SPECs allow it on any host under load, so the suite reads it as inconclusive (and as a finding when it comes more than max(1 s, the budget) late); on a /resolve without a budget it is a failure.",
+   "see": [
+    "inconclusive",
+    "finding",
+    "machine-dependent"
+   ]
+  },
+  {
+   "term": "clamped",
+   "definition": "The host lowered a request bound to its cap and stated it in limits.clamped (or strategy.clamped) with the requested and the effective value; the check of the same name reads that entry.",
+   "see": [
+    "time budget"
+   ]
+  },
+  {
+   "term": "expectation",
+   "definition": "One entry of a scenario's expect list: a check name and its arguments. The builder validates every expectation against the checks' argument table, so a misspelt argument cannot weaken a check.",
+   "see": [
+    "check",
+    "generic check",
+    "property check"
+   ]
+  },
+  {
+   "term": "check",
+   "definition": "A pure function of a scenario and a normalised answer, in checks.py, shared by every arm; it answers pass, fail, inconclusive, finding or not exposed with a detail. Appendix A describes every kind this run uses.",
+   "see": [
+    "generic check",
+    "property check",
+    "check outcome"
+   ]
+  },
+  {
+   "term": "generic check",
+   "definition": "A check that holds on any answer of its route whatever the scenario asks: status, invariants, `counts_consistent` (/pattern) and `budget_respected`. The builder adds `budget_respected` to every scenario that names a time budget and allows a 200.",
+   "see": [
+    "property check"
+   ]
+  },
+  {
+   "term": "property check",
+   "definition": "Every check that is not generic: the claim the scenario was built to test (`resolve_runs`, `contains_source_context`, `walk_in_record`, ...). An execution whose property checks all could not test anything is inconclusive even when its generic checks passed; a scenario with no property check (a refusal) is judged by its generic checks.",
+   "see": [
+    "generic check",
+    "inconclusive"
+   ]
+  },
+  {
+   "term": "check outcome",
+   "definition": "pass; fail; inconclusive (the check could not test its property on this answer); finding (the host broke a stated bound or SPEC promise without failing the request); not exposed (the MCP answer lacks the field the check reads: recorded, not compared). Neither inconclusive nor finding counts as pass.",
+   "see": [
+    "execution outcome"
+   ]
+  },
+  {
+   "term": "execution",
+   "definition": "One request of one scenario on one arm, one repeat: its HTTP status, wall and server times, host cache state, checks and outcome, and the raw answer. One line of executions.jsonl.",
+   "see": [
+    "repeat",
+    "execution outcome"
+   ]
+  },
+  {
+   "term": "repeat",
+   "definition": "The index of an execution among the scenario's executions on one arm: repeat 0 is the arm's first, later repeats follow within the paired loop. Every tenth scenario and every chapter-D scenario has direct repeats; an MCP scenario the service can express has two (cold, warm).",
+   "see": [
+    "execution",
+    "cold / warm"
+   ]
+  },
+  {
+   "term": "execution outcome",
+   "definition": "From the checks, by precedence: fail, finding, inconclusive, pass; inconclusive also when no check could test anything or every property check could not. Decided without the checks: error (no HTTP answer, an undecodable body, a check that raised), not implemented via MCP, service-side by design. Any outcome outside this vocabulary reads as a failure.",
+   "see": [
+    "check outcome",
+    "scenario outcome"
+   ]
+  },
+  {
+   "term": "scenario outcome",
+   "definition": "Over a scenario's repeats on one arm: the common outcome, else the worst (error over fail over finding over inconclusive); repeats that differ otherwise are mixed, shown with the worst glyph and the mark m.",
+   "see": [
+    "execution outcome",
+    "mixed"
+   ]
+  },
+  {
+   "term": "mixed",
+   "definition": "A scenario whose repeats on one arm have different outcomes (e.g. inconclusive on the cold repeat, pass on the warm one); the table shows the worst glyph with the mark m and the detail block each repeat.",
+   "see": [
+    "scenario outcome"
+   ]
+  },
+  {
+   "term": "inconclusive",
+   "definition": "The test did not test its property: an allowed 503 deadline, a list a legitimate statement hides the source in, a walk a stated resource limit stopped first, a stop that was the property and did not happen, a determinism check with nothing to compare, an MCP answer exposing none of the property's fields, or an MCP execution the service ended by one of its own limits (a host state). Never a pass, never a failure; every inconclusive execution blocks the deploy gate.",
+   "see": [
+    "deadline (503)",
+    "host state",
+    "deploy gate"
+   ]
+  },
+  {
+   "term": "finding",
+   "definition": "A stated bound or SPEC promise the host broke without failing the request: a 200 past its time budget, an allowed 503 deadline more than max(1 s, the budget) late, a walk stopped before its budget or run past it beyond its pieces. Counted apart from failures; a run with findings and no failure reads FINDINGS.",
+   "see": [
+    "check outcome",
+    "verdict"
+   ]
+  },
+  {
+   "term": "error",
+   "definition": "An execution with no HTTP answer (a transport failure, a client time-out), an undecodable body, or a check that raised. Counted with the failures.",
+   "see": [
+    "execution outcome"
+   ]
+  },
+  {
+   "term": "not implemented via MCP",
+   "definition": "The request cannot be asked through the MCP tools: the manifest marks it (`mcp.not_implemented` naming the field: support, `bounds.max_query_bp`, an unknown field, a protocol body), or a case of the by-design table with that agreement names the missing argument (e.g. a 10 kb resolve: the service always sends its own 2,000 bp cap). The MCP cell shows its glyph; the service's own refusal, when one was recorded, is in the detail block or appendix B.",
+   "see": [
+    "service-side by design",
+    "by-design table"
+   ]
+  },
+  {
+   "term": "service-side by design",
+   "definition": "The MCP arm legitimately differs from the direct arms because the search service validated or reshaped the request before the host saw it, or refused it in the host's place, as a case of the by-design table documents (a refusal at submit, a relayed host refusal under the service's code, an answer where the host refuses, a clamped value). A pair is verified when the direct answer matched the case's host side and the MCP answer its service side; otherwise it carries the mark u.",
+   "see": [
+    "by-design table",
+    "answer-triggered case",
+    "verified"
+   ]
+  },
+  {
+   "term": "by-design table",
+   "definition": "The search service's `service_by_design.json` (131 cases at service commit 22d034ba): for each case the request it is about (`scenario_match`), the host's expected answer, the service's answer (outcome `refused_at_submit`, relayed, answered, clamped or `not_expressible`; code, text, stage) and the checks an answered case explains. Scenarios name their cases; an answer may also match a case (answer-triggered). Appendix B lists the cases of this run.",
+   "see": [
+    "service-side by design",
+    "answer-triggered case"
+   ]
+  },
+  {
+   "term": "answer-triggered case",
+   "definition": "A by-design case matched by the MCP answer itself rather than named by the scenario (e.g. the host's /pattern 503 deadline relayed by the service as a failed search): the execution is by design, verified when a direct execution matched the case's host side.",
+   "see": [
+    "by-design table"
+   ]
+  },
+  {
+   "term": "verified",
+   "definition": "Of a by-design pair: every side the case has was checked and held (the direct answer against the case's host side, each MCP execution against its service side; an answered case through the checks it explains). An unverified pair keeps the by-design glyph with the mark u, and the appendix says which side was not verified.",
+   "see": [
+    "service-side by design"
+   ]
+  },
+  {
+   "term": "host state",
+   "definition": "An MCP execution the service ended by one of its own limits before the host answered (a `resolve_timeout` after its inline wait, a relayed `traversal_resolve_deadline`, a relayed /pattern deadline): inconclusive with that reason when the service's own timing shows the limit can have been reached (the host-state rule of the MCP runner, replayed by the re-evaluation), a status failure otherwise.",
+   "see": [
+    "inconclusive",
+    "relayed deadline"
+   ]
+  },
+  {
+   "term": "relayed deadline",
+   "definition": "The host's own 503 deadline coming back through the service under a service code (502 `search_failed` with a `pattern_deadline` text, 503 `traversal_resolve_deadline`, 504 `resolve_timeout`): the host did work, so such an execution counts as having reached the host for the cache states, while a direct 503 deadline is the host's own answer.",
+   "see": [
+    "host state",
+    "host cache state"
+   ]
+  },
+  {
+   "term": "direct agreement class",
+   "definition": "How direct-local and direct-remote compare on a scenario: identical (the same answer digest and no check differing other than through the execution's own clock or repeats), same checks (another answer, the same check outcomes), timing (the outcomes differ only because one arm's answer states a time limitation the other's does not, and the stopped answer is consistent with the complete one), not comparable (no check evaluated on both), disagree. A disagreement fails the run.",
+   "see": [
+    "MCP agreement class",
+    "answer digest"
+   ]
+  },
+  {
+   "term": "MCP agreement class",
+   "definition": "How the MCP arm compares with the reference direct arm on a scenario, check by check and repeat by repeat on the checks both arms evaluated: agree (with its depth: fully checked, partial, generic checks only, a refusal), not comparable (no check compared), disagree, not implemented via MCP, service-side by design (verified or not), missing (no MCP line). A disagreement fails the run.",
+   "see": [
+    "reference arm",
+    "direct agreement class"
+   ]
+  },
+  {
+   "term": "reference arm",
+   "definition": "The direct arm an MCP execution is compared with: direct-local, or, for a check item direct-local left undecided (inconclusive or not exposed) while direct-remote's item of the same repeat is decided, direct-remote's.",
+   "see": [
+    "MCP agreement class"
+   ]
+  },
+  {
+   "term": "relation",
+   "definition": "A comparison of two scenarios' answers on the same arm, evaluated by the comparator on the first repeat of each: `same_answer` (equal bodies without timing, or the same refusal), `prefix_equals` (two resolves of pieces of one sequence agree on their common k-mers), `zero_equals_absent` (a /pattern count of 0 exactly when the /resolve of the same sequence misses a k-mer), subset (every result of one entry among the results of another). Its outcome is pass, fail, inconclusive (the pair cannot test the claim: a non-200, no common k-mer) or not exposed; a failed relation fails the run.",
+   "see": [
+    "prefix"
+   ]
+  },
+  {
+   "term": "arm",
+   "definition": "One of the three routes to the host a scenario is executed on: direct-local, direct-remote and mcp. Every table shows the three side by side.",
+   "see": [
+    "direct-local",
+    "direct-remote",
+    "mcp"
+   ]
+  },
+  {
+   "term": "direct-local",
+   "definition": "The runner on mex sending the request to the container's own port: no proxy, no network; the cleanest server timing and the reference arm of the MCP comparison.",
+   "see": [
+    "arm",
+    "reference arm"
+   ]
+  },
+  {
+   "term": "direct-remote",
+   "definition": "The runner on the laptop sending the same request through the public URL and the nginx front on dnaloc-new: the network and the front are in its wall time. The front cuts at about 120 s, so the long timing class is not run there.",
+   "see": [
+    "arm",
+    "the front"
+   ]
+  },
+  {
+   "term": "mcp",
+   "definition": "The same request asked through the search service's MCP tools on its staging deployment (`traverse_resolve`, `traverse_fetch` and `graphlet_export`, `pattern_search`, the capabilities tools); the service validates and reshapes it, runs it as a job in its queue and calls the host over the public URL. Its answer is normalised to the host's shape for the fields the service exposes.",
+   "see": [
+    "arm",
+    "mcp_phases",
+    "backend time"
+   ]
+  },
+  {
+   "term": "the front",
+   "definition": "The nginx reverse proxy on dnaloc-new that the public URL reaches; every arm but direct-local goes through it (the service too). The front cost is direct-remote minus direct-local on pairs of host-warm executions, the connection set-up apart.",
+   "see": [
+    "direct-remote",
+    "connect time"
+   ]
+  },
+  {
+   "term": "paired loop",
+   "definition": "The run's order per scenario: MCP cold, direct-local, direct-remote, MCP warm, one request in flight against the host at a time. It makes the direct executions host-warm by construction wherever the MCP cold call reached the host.",
+   "see": [
+    "host cache state",
+    "cold / warm"
+   ]
+  },
+  {
+   "term": "host cache state",
+   "definition": "A recency heuristic over all arms, per execution: cold (the scenario's first execution to reach the host in this run), warm (started within 60 s of another execution of the scenario ending on the host), aged (longer after it: unknown), not reached (the host never saw it: a refusal at submit, a request the MCP cannot express), unknown (no start time). Everything timed keys on it; cache residency is never measured.",
+   "see": [
+    "cold / warm",
+    "warm after a cut",
+    "paired loop"
+   ]
+  },
+  {
+   "term": "cold / warm",
+   "definition": "In a cell, the executions in repeat order; an MCP pair reads host-cold then host-warm, a direct cell without a mark is host-warm, a direct time with the mark c was host-cold (a was aged). Family and chapter lines give the wall p50 and p90 for host-cold and host-warm executions apart.",
+   "see": [
+    "host cache state"
+   ]
+  },
+  {
+   "term": "warm after a cut",
+   "definition": "A host-warm execution whose previous host execution of the scenario ended at the host's deadline without an answer (a direct 503 deadline or a relayed one): counted apart from the warm executions in the timing statistics and the overheads, its server time being typically higher.",
+   "see": [
+    "host cache state"
+   ]
+  },
+  {
+   "term": "wall time",
+   "definition": "Of a direct execution: from sending the request to the last byte of the body on an established connection, the connection set-up excluded. Of an MCP execution: the whole tool interaction, from the first submit to the answer.",
+   "see": [
+    "server time",
+    "backend time",
+    "connect time"
+   ]
+  },
+  {
+   "term": "server time",
+   "definition": "The host's own `timing.elapsed_ms` in the answer (the top-level one, else the entries' sum); in brackets under the wall time. A refusal and a 503 carry none.",
+   "see": [
+    "wall time"
+   ]
+  },
+  {
+   "term": "backend time",
+   "definition": "The host call as the search service measured it (`mcp_phases.backend_ms`), on an MCP cell after be; the MCP overhead is the MCP wall minus each direct arm's wall on host-warm pairs, with and without the queue.",
+   "see": [
+    "mcp_phases",
+    "wall time"
+   ]
+  },
+  {
+   "term": "mcp_phases",
+   "definition": "The decomposition of an MCP execution's wall time: submit (the tool's acknowledgement), queue (job created to started), backend (the host call), terminal lag (finished to the client seeing the terminal state) and paging (fetching the results). The closing section tabulates them.",
+   "see": [
+    "backend time"
+   ]
+  },
+  {
+   "term": "connect time",
+   "definition": "The set-up of a fresh connection (TCP, and TLS on the public URL), recorded per direct execution apart from the wall time and reported per arm as part of the front cost.",
+   "see": [
+    "the front",
+    "wall time"
+   ]
+  },
+  {
+   "term": "timing class",
+   "definition": "fast (under about 5 s), slow or long (over 100 s): the client time-out of an execution (120 s, 600 s, 1,800 s) and whether direct-remote runs it (long is not run there, the front cutting at about 120 s).",
+   "see": [
+    "direct-remote"
+   ]
+  },
+  {
+   "term": "machine-dependent",
+   "definition": "A tag on scenarios whose answer depends on the host's load (time budgets: a 200 or a 503 deadline, a stop or none). For /pattern and /resolve the checks allow the 503 deadline on every scenario that names a budget and expects a 200, tagged or not.",
+   "see": [
+    "deadline (503)"
+   ]
+  },
+  {
+   "term": "code-derived",
+   "definition": "A tag on an expectation read from the C++ source or the fixtures that no smoke run had exercised at build time (an exact refusal text): a first failure there may be a suite error rather than the host's.",
+   "see": [
+    "expectation"
+   ]
+  },
+  {
+   "term": "last-record-verified",
+   "definition": "A tag on a scenario whose record is the last of its taxid column, where the index defect of 2026-10-09 (a last record present in the sequences but unannotated) could strike; the truth records the scan's result (ok, or single-record column), and a failure there is listed apart.",
+   "see": [
+    "ground truth"
+   ]
+  },
+  {
+   "term": "load telemetry",
+   "definition": "docker stats of the staging container (CPU, memory) and of the `sra_all` container (the Logan indexing load) and the host load average, sampled every 2 s on mex and joined to each execution's window; contextual figures of the shared host, not the request's own cost.",
+   "see": [
+    "the Logan caveat"
+   ]
+  },
+  {
+   "term": "the Logan caveat",
+   "definition": "The statement that the run's timings were taken while mex carried the Logan load: given when the `sra_all` CPU mean exceeds {load_caveat_sra_cpu_pct} % or the load average mean exceeds {load_caveat_load1} (half of mex's 96 cores) over the run's samples. Such timings are labelled and are not the timing baseline.",
+   "see": [
+    "load telemetry"
+   ]
+  },
+  {
+   "term": "run id",
+   "definition": "The run directory's name, the UTC start time and the release's short hash (e.g. `20261014T061053Z_refseq97-6f945db4`); the arms of a run share it.",
+   "see": [
+    "release"
+   ]
+  },
+  {
+   "term": "release",
+   "definition": "The engine's release string as its capabilities state it (refseq97- and the engine's commit hash); a run that spans two releases tested no single one and never reads PASS.",
+   "see": [
+    "server instance",
+    "index fingerprint"
+   ]
+  },
+  {
+   "term": "server instance",
+   "definition": "The identity of the running server process as its capabilities state it; a change during a run means the server restarted.",
+   "see": [
+    "release"
+   ]
+  },
+  {
+   "term": "index fingerprint",
+   "definition": "`index_fp`, the hash that identifies the loaded index; the manifest records the fingerprint it was built against and the deploy gate pins it.",
+   "see": [
+    "release",
+    "deploy gate"
+   ]
+  },
+  {
+   "term": "feature level",
+   "definition": "What the server offers beyond the base contract, monotonic (SPEC-labeled-traversal-core section 10.3); stated in every /resolve and /traverse answer and recorded with the run's environment.",
+   "see": [
+    "release"
+   ]
+  },
+  {
+   "term": "normalised answer",
+   "definition": "The shape every check reads: the HTTP status, the body, the error (code, text) and, on a direct arm, the headers; the MCP runner maps the tool results into it for the fields the service exposes.",
+   "see": [
+    "answer digest",
+    "check"
+   ]
+  },
+  {
+   "term": "answer digest",
+   "definition": "The sha256 of the canonical JSON of the normalised answer without its headers and without every key named timing (and, for a capabilities document, without its measured and observed figures); the determinism check and the direct agreement read it.",
+   "see": [
+    "normalised answer",
+    "direct agreement class"
+   ]
+  },
+  {
+   "term": "verdict",
+   "definition": "The run's one word: INCOMPLETE (an arm did not finish, a planned execution not recorded), FAIL (a failed or errored execution, a disagreement, a failed relation), FINDINGS (a finding and nothing worse), INCONCLUSIVE (nothing passed, a group that tested nothing, or two deployments in one run), EMPTY, UNVERIFIED (the status-only stub judged), PASS. Inconclusive executions are counted after it, never as passes.",
+   "see": [
+    "deploy gate",
+    "finding"
+   ]
+  },
+  {
+   "term": "deploy gate",
+   "definition": "The strict judgement of a run against a policy (gate.py): it fails on any identity problem, any missing planned or required execution, any fail, error, finding or inconclusive on a gated arm, a mark the policy does not explain, a property check not passed, any disagreement between the gated arms, any required relation not passed, and configuration evidence not recorded live. The v4 gate runs two arms, mcp and direct-local, on the scenarios of POST /resolve, POST /traverse and GET /traverse/capabilities.",
+   "see": [
+    "policy",
+    "declared file",
+    "verdict"
+   ]
+  },
+  {
+   "term": "policy",
+   "definition": "The deploy gate's pinned selection: the manifest's content and relations hashes, the index fingerprint and the by-design table's hash; the scenarios by route; the arms; the exclusions derived from the manifest and the table (a request the MCP has no argument for, an advanced traverse override) with the owner's declared entries; the executions and relations each arm must record.",
+   "see": [
+    "deploy gate",
+    "declared file"
+   ]
+  },
+  {
+   "term": "declared file",
+   "definition": "The owner's versioned list beside a policy: exclusions (a scenario on an arm, with a reason), checks not required (a property the MCP surface never exposes) and relations excluded. The only way past the gate for a scenario the rules do not exclude; Part I prints it.",
+   "see": [
+    "policy",
+    "deploy gate"
+   ]
+  },
+  {
+   "term": "re-evaluation",
+   "definition": "Judging a recorded run again offline with the current checks, without any request (reevaluate.py): every recorded answer is re-checked, the MCP runner's by-design and host-state decisions replayed; outcomes a runner decided without the checks (error, not implemented, by design) are kept. This document reads the re-evaluated set when it exists.",
+   "see": [
+    "check"
+   ]
+  },
+  {
+   "term": "detail block",
+   "definition": "The explanation printed after a unit's table for every test that is not clean: the mark, the id and title, the route, timing class, tags and repeats; the expected line; per arm that is not clean its outcome, status, error, times and every check that did not pass with its detail; the agreement classes; the relations involved; and for a finding the rule it broke.",
+   "see": [
+    "clean",
+    "footnote mark"
+   ]
+  },
+  {
+   "term": "footnote mark",
+   "definition": "The superscript digit on a cell that points at the test's detail block after the table; numbering restarts in every chapter and a test's cells share one mark.",
+   "see": [
+    "detail block"
+   ]
+  },
+  {
+   "term": "clean",
+   "definition": "Of a test: every arm is a pass, not implemented via MCP, a verified by-design pair, or had no execution because the plan had none. A clean test costs one cell or one line; anything else carries a footnote mark and a detail block.",
+   "see": [
+    "detail block"
+   ]
+  }
  ]
 }

@@ -290,7 +290,14 @@ def _classes_text(run, sid, states):
         if ma.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 200)
         dis = ma.get("disagreement")
-        if isinstance(dis, dict) and dis.get("direct_detail"):
+        if isinstance(dis, dict) and dis.get("case") and mcls == "not_implemented_mcp":
+            # the service's refusal matched a by-design case; the direct side is checked against the same case
+            text += "; the service's refusal matched case %s (service side %s, direct side %s%s)" % (
+                tt(dis["case"]), "verified" if dis.get("mcp_verified") else "not verified",
+                "verified" if dis.get("direct_verified") else "not verified",
+                (": " + esc(dis["direct_detail"], 200)) if dis.get("direct_detail") and not dis.get("direct_verified")
+                else "")
+        elif isinstance(dis, dict) and dis.get("direct_detail"):
             text += "; %s" % esc(dis["direct_detail"], 240)
         parts.append(text)
     missing = [arm for arm, st in states.items() if st.missing_planned]

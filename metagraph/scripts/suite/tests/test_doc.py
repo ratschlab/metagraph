@@ -34,6 +34,10 @@ import units as units_mod  # noqa: E402
 V4_MANIFEST = os.path.join(SUITE, "manifest", "suite_v4.json")
 V4_MAPPING = os.path.join(DOC, "units", "suite_v4.json")
 PROSE_DIR = os.path.join(DOC, "prose")
+# the chapters whose prose is written: their files, the overview, the glossary and their check kinds' catalogue
+# entries may hold no placeholder ("to be written"); add a chapter here when its prose lands
+WRITTEN_CHAPTERS = ("R",)
+PLACEHOLDER = "to be written"
 
 
 def v4():
@@ -110,11 +114,21 @@ class ProseTest(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(PROSE_DIR, name)), name)
 
     def test_check_catalogue(self):
-        """Every check kind any v4 scenario expects has a docstring in checks.py or a prose entry."""
+        """Every check kind any v4 scenario expects has a catalogue entry in prose/checks.json, a chapter prose
+        entry or a docstring in checks.py; every catalogue entry names a check of CHECKS, has the four texts and
+        states the generic flag as checks.is_property does."""
         manifest, mapping, units = v4()
         checks = cmp.load_checks_module(SUITE)
         self.assertIsNotNone(checks)
-        prose_checks = set()
+        catalogue = (sc.read_json(os.path.join(PROSE_DIR, "checks.json")) or {}).get("checks") or {}
+        self.assertTrue(catalogue, "prose/checks.json has no entries")
+        for name, entry in catalogue.items():
+            self.assertIn(name, checks.CHECKS, "checks.json describes %s, which CHECKS lacks" % name)
+            for key in ("title", "asserts", "inconclusive", "fails", "args"):
+                self.assertTrue(entry.get(key), "checks.json %s lacks %s" % (name, key))
+            self.assertEqual(bool(entry.get("generic")), not checks.is_property(name),
+                             "checks.json %s: generic flag disagrees with checks.is_property" % name)
+        prose_checks = set(k for k, v in catalogue.items() if v.get("asserts"))
         for ch in units.chapters:
             data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch)) or {}
             prose_checks.update(k for k, v in (data.get("checks") or {}).items() if v)
@@ -128,6 +142,49 @@ class ProseTest(unittest.TestCase):
                 elif not (fn.__doc__ or "").strip() and name not in prose_checks:
                     missing.add(name)
         self.assertEqual(missing, set(), "check kinds without a description: %s" % ", ".join(sorted(missing)))
+
+    def test_prose_written(self):
+        """The written chapters (WRITTEN_CHAPTERS) carry no placeholder: not in their intro, family prose and unit
+        lines, not in the overview, the glossary, nor in the catalogue entries of the check kinds they expect."""
+        manifest, mapping, units = v4()
+        problems = []
+        for ch in WRITTEN_CHAPTERS:
+            data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch)) or {}
+            texts = [("intro", " ".join(data.get("intro") or []))]
+            texts += [("families.%s" % fid, (f or {}).get("prose") or "") for fid, f in (data.get("families") or {}).items()]
+            texts += [("units.%s" % uid, t or "") for uid, t in (data.get("units") or {}).items()]
+            problems += ["%s: %s" % (ch, key) for key, text in texts if PLACEHOLDER in text or not text.strip()]
+            kinds = set(e.get("check") for s in manifest["scenarios"] if s.get("area") == ch
+                        for e in s.get("expect") or [])
+            catalogue = (sc.read_json(os.path.join(PROSE_DIR, "checks.json")) or {}).get("checks") or {}
+            problems += ["checks.json: %s (expected by chapter %s)" % (k, ch) for k in sorted(kinds)
+                         if not (catalogue.get(k) or {}).get("asserts") or PLACEHOLDER in json.dumps(catalogue[k])]
+        overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json")) or {}
+        for key, sec in (overview.get("sections") or {}).items():
+            if not sec.get("paragraphs") or PLACEHOLDER in json.dumps(sec):
+                problems.append("overview.json: %s" % key)
+        glossary = sc.read_json(os.path.join(PROSE_DIR, "glossary.json")) or {}
+        for e in glossary.get("entries") or []:
+            text = e.get("definition") or e.get("text") or ""
+            if PLACEHOLDER in text or not text.strip():
+                problems.append("glossary.json: %s" % e.get("term"))
+        self.assertEqual(problems, [], "placeholders in written prose: " + "; ".join(problems))
+
+    def test_placeholders_declared(self):
+        """Every placeholder the prose uses is one the generator fills, and overview.json declares it."""
+        run_placeholders = set()
+        with open(os.path.join(DOC, "sections.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        body = src.split("def placeholders(self):", 1)[1].split("def fill(self", 1)[0]
+        run_placeholders.update(re.findall(r'"([a-z_0-9]+)":', body))
+        overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json")) or {}
+        declared = set(overview.get("placeholders") or {})
+        used = set()
+        for name in ("overview.json", "glossary.json"):
+            text = json.dumps(sc.read_json(os.path.join(PROSE_DIR, name)) or {})
+            used.update(re.findall(r"\{([a-z_0-9]+)\}", text))
+        self.assertEqual(used - run_placeholders, set(), "placeholders the generator does not fill")
+        self.assertEqual(used - declared, set(), "placeholders overview.json does not declare")
 
     def test_scaffold_keeps_text(self):
         manifest, mapping, units = v4()
@@ -212,6 +269,7 @@ class FakeRunTest(unittest.TestCase):
     def test_build_tex(self):
         self.assertEqual(self.rc, 0)
         main = self.tex()
+        self.assertIn("Index of test ids", main)
         self.assertTrue(os.path.exists(os.path.join(self.out, "doc.sty")))
         for ch in ("P", "R", "M", "S"):
             self.assertIn("\\input{chapter_%s}" % ch, main)

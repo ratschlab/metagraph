@@ -3706,11 +3706,21 @@ never committed.
   `list` (the refusals shape with time cells), `pairs` (twins, relations, D repeats). The metadata comes from the
   manifest's `doc` blocks (v5) or else from the mapping `doc/units/suite_v<version>.json` (v4); a scenario in
   neither is an error, never a silent drop.
-- Prose (`doc/prose/<chapter>.json`, `overview.json`, `glossary.json`): keyed on family and unit ids, never on
-  scenario ids, so a new scenario of an existing unit is covered for free. `--scaffold-prose` writes the
-  placeholder entries a file lacks (existing text untouched). The v4 files hold placeholders marked "(to be
-  written)" where the prose is not yet written; `tests/test_doc.py` fails when a family, a unit or a check kind
-  (without a docstring) has no entry at all.
+- Prose (`doc/prose/<chapter>.json`, `overview.json`, `glossary.json`, `checks.json`): keyed on family and unit
+  ids, never on scenario ids, so a new scenario of an existing unit is covered for free. `<chapter>.json` holds
+  the chapter's intro paragraphs, one title and paragraph per family and one property line per unit;
+  `overview.json` Part I's sections (keyed what / arms / classes / reading / environment / verdict / limits, with
+  the wording of the glyph legend and the marks under `reading`) and the placeholders it uses (`{database}`,
+  `{k}`, `{n_scenarios}`, `{local_base}` ...: `sections.Context.placeholders` fills them from the run);
+  `checks.json` the check catalogue of appendix A (per check kind: title, asserts, inconclusive, fails, args, the
+  SPEC references, per-route rules, and the `common` rules evaluate() applies before any check; it is preferred
+  over the docstring in checks.py); `glossary.json` the entries of appendix D ({term, definition, see}, printed in
+  alphabetical order). Inline markup: `code` and *emphasis*. `--scaffold-prose` writes the placeholder entries a
+  chapter file lacks (existing text untouched). Chapter R, Part I, the glossary and R's check kinds are written
+  (2026-10-15); the other chapters hold placeholders marked "(to be written)". `tests/test_doc.py` fails when a
+  family, a unit or a check kind has no entry at all, when a written chapter (`WRITTEN_CHAPTERS`) still carries a
+  placeholder, when a catalogue entry's generic flag disagrees with `checks.is_property`, or when the prose uses a
+  placeholder the generator does not fill.
 - The cell grammar (`doc/cells.py`): glyph (pass, fail, error, finding, inconclusive, not implemented via MCP,
   service-side by design) + marks (footnote digit, disagreement, timing / same checks / not comparable, cold /
   aged, mixed repeats, unverified) + wall times in repeat order with the unit once, the server time in brackets,
@@ -3718,7 +3728,10 @@ never committed.
   block right after its unit's table (`doc/blocks.py`: expected vs obtained, each check's outcome and detail, the
   classes, the relations, the SPEC rule of a finding). The verdict is report.py's own (`report.verdict_text`,
   extracted so both read the same rule).
-- Tests (`tests/test_doc.py`, offline): the v4 mapping complete and valid, the prose complete, every check kind
-  described, the generator on the fake run of test_compare_report (the .tex, the index, the verdict, the escaping;
-  the PDF when xelatex is installed), the cell grammar, the expectation formatters on chapter R's real
-  expectations.
+- Tests (`tests/test_doc.py`, offline): the v4 mapping complete and valid, the prose complete and the written
+  chapters free of placeholders, every check kind described, the generator on the fake run of
+  test_compare_report (the .tex, the index, the verdict, the escaping; the PDF when xelatex is installed), the
+  cell grammar, the expectation formatters on chapter R's real expectations.
+- The sample of 2026-10-15 (Part I, chapter R, the closing skeleton, the appendices chapter R needs, the index)
+  was built from the v4 run re-evaluated with c11db9dd: `doc/make_doc.py RUN_DIR --out DIR --sample`; its notes
+  for the owner's review are `~/.cache/metagraph-traverse-plans/2026-10-15/doc/sample/SAMPLE-NOTES.md`.

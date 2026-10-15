@@ -50,7 +50,16 @@
   left=4pt,right=4pt,top=3pt,bottom=3pt,before skip=4pt,after skip=8pt,fontupper=\footnotesize}
 \newcommand\bline[2]{\par\noindent\hangindent=22mm\hangafter=1\makebox[22mm][l]{\sffamily\bfseries #1}#2}
 \newcommand\bsub[2]{\par\noindent\hangindent=38mm\hangafter=1\hspace*{6mm}\makebox[32mm][l]{\sffamily #1}#2}
+% a line of the check catalogue (appendix A): a bold key in the margin, hanging text, small type
+\newcommand\catline[2]{\par\noindent\hangindent=24mm\hangafter=1\makebox[24mm][l]{\small\sffamily\bfseries #1}{\small #2}}
+% the same with a key too wide for the margin (a route list): the key on its own line, the text indented under it
+\newcommand\catblock[2]{\par\noindent{\small\sffamily\bfseries #1}\par\nopagebreak{\leftskip=24mm\noindent\small #2\par}}
+% a small heading inside an appendix (a group of catalogue entries)
+\newcommand\grouphead[1]{\par\medskip\noindent{\sffamily\bfseries #1}\par\nopagebreak\smallskip}
 
+% justified prose holds monospace identifiers and URLs: let a line stretch rather than overflow
+\tolerance=400
+\emergencystretch=3em
 \setcounter{secnumdepth}{-1}
 \setcounter{tocdepth}{2}
 \setlength{\parskip}{3pt plus 1pt}
