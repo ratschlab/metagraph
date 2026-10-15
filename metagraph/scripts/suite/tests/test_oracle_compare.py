@@ -242,6 +242,44 @@ class Probes(unittest.TestCase):
                                                         5)[0][1].failed()}
         self.assertEqual({'results.complete'}, failed)
 
+    def test_a_primary_cut_must_not_skip_an_earlier_context_of_a_listed_kmer(self):
+        # final run seed 1 (P-primary_k11-0030): AAAAAA within 3 substitutions, max_contexts 1;
+        # a result moved to the next offset of its k-mer is still a context, but no longer the
+        # first in answer order
+        index, config = fixture_index('primary'), CONFIGS['primary']
+        req = {'mode': 'partial', 'max_contexts': 1, 'max_mismatches': 3, 'strands': 'forward',
+               'patterns': [{'dna': 'AAAAAA'}]}
+        answer = R.render_answer(index, config, req, 1)
+        res = C.compare_pattern(index, config, req, answer, 1)
+        self.assertEqual(C.PASS, outcome(res), res[0][1].failed())
+        r = answer['patterns'][0]['results'][0]
+        exp = res[0][2]
+        later = next(x for x in exp.ctxs if x.kmer == r['kmer'] and x.offset > r['offset']
+                     and x.level == r['mismatches'])
+        r.update({'offset': later.offset, 'instance': later.kmer[later.offset:later.offset + 6],
+                  'substitutions': R._subs(exp.pattern, later.subs)})
+        failed = {x['check'] for x in C.compare_pattern(index, config, req, answer,
+                                                        1)[0][1].failed()}
+        self.assertEqual({'results.complete'}, failed)
+
+    def test_a_withheld_answer_on_u_claims_no_completeness(self):
+        # final breadth runs (P-basic_k11_unchecked-0043 and others): all_or_count withheld on
+        # U while the truth fits max_contexts must still say retrieval_complete false
+        config = C.Config('unchecked', 'basic', 11, masked=False)
+        req = {'mode': 'all_or_count', 'max_contexts': 20, 'patterns': [{'protein': 'TK'}]}
+        answer = R.render_answer(self.index, config, req, 20)
+        e = answer['patterns'][0]
+        truth = e['counts']['contexts']['value']
+        self.assertLessEqual(truth, 20)
+        e['counts']['contexts'].update({'relation': 'bounds', 'lower': truth,
+                                        'upper': 10 ** 6, 'estimate': truth})
+        e.update({'withheld': {'reason': 'count_above_threshold'}, 'results': [],
+                  'returned': 0, 'retrieval_complete': True,
+                  'notes': e['notes'] + ['threshold_upper_bound']})
+        failed = {x['check'] for x in C.compare_pattern(self.index, config, req, answer,
+                                                        20)[0][1].failed()}
+        self.assertIn('release.all_or_count', failed)
+
     def test_slots(self):
         req = {'mode': 'count', 'patterns': [{'dna': 'ACGU'}, {'protein': 'MOK'}, {'dna': ''}]}
         answer = R.render_answer(self.index, self.config, req)

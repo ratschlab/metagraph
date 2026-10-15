@@ -340,9 +340,10 @@ def _release(checks, config, exp, entry, stopped):
             return None
         # a graph without its mask: U above max_contexts may withhold a count that fits
         ok = (withheld == {'reason': 'count_above_threshold'} and results == []
-              and 'threshold_upper_bound' in (entry.get('notes') or []))
+              and rc is False and 'threshold_upper_bound' in (entry.get('notes') or []))
         checks.add('release.all_or_count', ok, 'withheld on U with threshold_upper_bound',
-                   {'withheld': withheld, 'notes': entry.get('notes')})
+                   {'withheld': withheld, 'notes': entry.get('notes'),
+                    'retrieval_complete': rc})
         return None
     # partial
     if total <= max_contexts:
@@ -499,9 +500,25 @@ def _results(checks, config, exp, entry, results, released, stopped):
     want = [c.identity for c in released]
     got = [_result_identity(config, r) for r in results]
     if config.mode == 'primary' and len(released) < len(exp.ctxs):
-        # a partial cut on PRIMARY: the first max_contexts by the answer's own node ids
-        ok = set(got) <= set(exp.by_identity) and len(got) == len(want)
-        checks.add('results.complete', ok, f'{len(want)} contexts of the oracle set', got[:20])
+        # a partial cut on PRIMARY: the first max_contexts by the wrapper's node ids, which the
+        # oracle does not predict; but the k-mers the list holds have known ids, and every
+        # oracle context of those k-mers that precedes the last listed one in answer order
+        # (level, node, offset, orientation) must be listed too
+        nodes_of = {r.get('kmer'): r.get('node') for r in results}
+
+        def key(level, kmer, offset, orientation):
+            return (level if exp.m else 0, nodes_of[kmer], offset,
+                    O.ORIENTATION_RANK.get(orientation, 9))
+        listed = [exp.by_identity[i] for i in got if i in exp.by_identity]
+        last = max((key(x.level, x.kmer, x.offset, x.orientation) for x in listed),
+                   default=None)
+        got_set = set(got)
+        skipped = [x.identity for x in exp.ctxs if x.kmer in nodes_of and last is not None
+                   and key(x.level, x.kmer, x.offset, x.orientation) < last
+                   and x.identity not in got_set]
+        ok = set(got) <= set(exp.by_identity) and len(got) == len(want) and not skipped
+        checks.add('results.complete', ok, f'the first {len(want)} contexts of the oracle set',
+                   {'listed': got[:20], 'skipped_before_the_last': skipped[:20]})
         return
     got_set = set(got)
     missing = [i for i in want if i not in got_set]
