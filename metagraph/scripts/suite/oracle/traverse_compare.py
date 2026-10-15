@@ -368,6 +368,38 @@ def _before_first_merge(checks, prefix, res, view, m0):
                f'every blocked and hairpin step before the first merge at {m0}', _diff(want, got))
 
 
+def _end_reasons_after_merge(checks, prefix, view, w, seed, arm, m0):
+    """After the first merge the label states are not modelled, but two end reasons are structural
+    (SPEC 6.7, verification round 3): a label ends dead_end only at a graph tip (no successor at
+    all), and label_lost only where every successor holding the label (k-mer support; trace is
+    refused with merge) has it re-entered by a switch on that step -- its own lineage there beaten
+    by a cheaper one. The keep oracle's own claims obey both on every v4final request."""
+    bad = []
+    for sid, s in view.segs.items():
+        if sid not in view.walk:
+            continue
+        for e in s.get('events') or []:
+            if e.get('type') != 'label_end' or e.get('at_bp', 0) < m0 or \
+                    e.get('reason') not in ('dead_end', 'label_lost'):
+                continue
+            walk = view.walk[sid][:e['at_bp']]
+            succ = w.successors(w.walk_node(seed, arm, walk, len(walk)), arm)
+            name = view.names.get(e.get('label'))
+            if e['reason'] == 'dead_end':
+                if succ:
+                    bad.append(('dead_end with successors', walk, name, [c for c, _, _ in succ]))
+                continue
+            label = w.label(name) if name is not None else None
+            held = [c for c, v, _ in succ if label is not None and w.holds(label, v)]
+            lone = [c for c in held if not any(k[0] == walk + c and k[2] == name
+                                               for k in view.switches)]
+            if lone:
+                bad.append(('label_lost with a successor holding the label', walk, name, lone))
+    checks.add(f'{prefix}.end_reasons_after_merge', not bad,
+               'dead_end only at a graph tip, label_lost only where no successor keeps the label',
+               bad[:10])
+
+
 def graph_walk(w, seed, arm, walk):
     """A walk of the index's graph: every node a k-mer of the index, no edge (SPEC 6.6's identity)
     used twice."""
@@ -589,8 +621,9 @@ def _merge_invariants(checks, prefix, res, view, arm_json, w, seed, arm, by_name
     _merge_structure(checks, prefix, view, arm_json, res, w, seed, arm, names or {},
                      strategy or {})
     if merged_segs:
-        _before_first_merge(checks, prefix, res, view,
-                            min(s.get('from_bp', 0) for s in merged_segs))
+        m0 = min(s.get('from_bp', 0) for s in merged_segs)
+        _before_first_merge(checks, prefix, res, view, m0)
+        _end_reasons_after_merge(checks, prefix, view, w, seed, arm, m0)
     leaf_route = {}
     for p in arm_json.get('paths') or []:
         for e in p.get('end_labels') or []:

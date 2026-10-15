@@ -423,6 +423,22 @@ def mutations_for_traverse(request, answer, position, walker=None):
                     yield f'{arm}:merge_costlier_entry', (f'{p}.merge_min_entry',), a
                     done = True
                     break
+            # a label_lost end after the first merge reported dead_end (the verifier's E3b): the
+            # node has a successor, so it is no graph tip
+            m0_ = min(s.get('from_bp', 0) for s in segs if len(s.get('parents') or []) > 1)
+            late = [(si, ei) for si, s in enumerate(segs) for ei, e in enumerate(s.get('events') or [])
+                    if e.get('type') == 'label_end' and e.get('reason') == 'label_lost'
+                    and e.get('at_bp', 0) >= m0_]
+            if late:
+                a, r = mutant()
+                si, ei = late[0]
+                e = r['arms'][arm]['segments'][si]['events'][ei]
+                e['reason'] = 'dead_end'
+                for x in r['arms'][arm]['runs']:
+                    if x.get('label') == e.get('label') and x.get('to_bp') == e.get('at_bp') and \
+                            x.get('end_reason') == 'label_lost':
+                        x['end_reason'] = 'dead_end'
+                yield f'{arm}:merge_late_dead_end', (f'{p}.end_reasons_after_merge',), a
             # a run ended before the first merge, its reason changed (the keep walker's state)
             m0 = min(s.get('from_bp', 0) for s in segs if len(s.get('parents') or []) > 1)
             early = [i for i, x in enumerate(aj.get('runs') or [])

@@ -631,7 +631,8 @@ class MergedArmAnswers(unittest.TestCase):
                 kinds.add(name.split(':')[1])
         self.assertEqual(kinds, {'merge_segment_base', 'merge_minority_first',
                                  'merge_via_wrong_parent', 'merge_early_reason',
-                                 'merge_run_label', 'merge_costlier_entry'})
+                                 'merge_run_label', 'merge_costlier_entry',
+                                 'merge_late_dead_end'})
 
 
 class ChainRequests(unittest.TestCase):
@@ -702,3 +703,43 @@ class MergeEntries(unittest.TestCase):
         failed = self.failed(a)
         self.assertNotIn('traverse.right.labels_via_parent', failed)
         self.assertIn('traverse.right.own_routes', failed)
+
+
+class EndReasonsAfterMerge(unittest.TestCase):
+    """Verification round 3 (R3.3): after a merge, dead_end only at a graph tip and label_lost
+    only where no successor keeps the label. T-primary_k11-0023 (seed 1) second seed, right arm:
+    the merge at 21, c_eps (1) label_lost at 32 -- the verifier's E3b miss reported it dead_end."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(MERGE_DATA) as f:
+            cls.item = {x['id']: x for x in json.load(f)['answers']}['T-primary_k11-0023']
+
+    def failed(self, answer):
+        out = TC.compare_traverse(config_walker('primary_k11'), self.item['request'], 200, answer)
+        return {x['check'] for _, c in out for x in c.failed()}
+
+    def test_as_served(self):
+        self.assertEqual(set(), self.failed(self.item['answer']))
+
+    def test_e3b_label_lost_reported_as_dead_end_after_the_merge_fails(self):
+        a = copy.deepcopy(self.item['answer'])
+        aj = a['results'][1]['arms']['right']
+        for r in aj['runs']:
+            if r.get('end_reason') == 'label_lost':
+                r['end_reason'] = 'dead_end'
+        for s in aj['segments']:
+            for e in s['events']:
+                if e['type'] == 'label_end' and e['reason'] == 'label_lost':
+                    e['reason'] = 'dead_end'
+        self.assertIn('traverse.right.end_reasons_after_merge', self.failed(a))
+
+    def test_a_label_kept_by_its_successor_reported_label_lost_fails(self):
+        """The leaf's max_extension_bp end at 40 moved back to 35 as label_lost: the label holds
+        the successor at 35 and nothing re-entered it."""
+        a = copy.deepcopy(self.item['answer'])
+        aj = a['results'][1]['arms']['right']
+        e = next(e for s in aj['segments'] for e in s['events']
+                 if e['type'] == 'label_end' and e['reason'] == 'max_extension_bp')
+        e.update({'reason': 'label_lost', 'at_bp': 35})
+        self.assertIn('traverse.right.end_reasons_after_merge', self.failed(a))
