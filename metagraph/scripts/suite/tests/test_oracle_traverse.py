@@ -36,6 +36,13 @@ def walker(mode='basic', fixture='trav', k=11):
     return _WALKERS[key]
 
 
+def config_walker(config):
+    """The walker of a run config's index (indexes.CONFIGS: mode, k, fixture set)."""
+    from oracle import indexes
+    mode, k, _, _, fset = indexes.CONFIGS[config]
+    return walker(mode, fset, k)
+
+
 def run(case, strategy, arm='right', mode='basic'):
     w = walker(mode)
     seed, labels, extra = CASES[case]
@@ -229,8 +236,7 @@ class RecordedTriplets(unittest.TestCase):
             cls.answers = json.load(f)['answers']
 
     def walker_for(self, config):
-        mode = config.split('_')[1]
-        return walker(mode)
+        return config_walker(config)
 
     def test_every_recorded_answer_and_its_corruptions(self):
         kinds = {'complete': 0, 'incomplete': 0, 'mutations': 0}
@@ -278,7 +284,7 @@ class VerifierInjections(unittest.TestCase):
     def flagged(self, inject, min_applicable=3):
         applicable = 0
         for item in self.answers:
-            w = walker(item['config'].split('_')[1])
+            w = config_walker(item['config'])
             base = TC.compare_traverse(w, item['request'], 200, item['answer'])
             if any(c.outcome() == C.FAIL for _, c in base):
                 continue
@@ -364,3 +370,62 @@ class VerifierInjections(unittest.TestCase):
                 return a
             return None
         self.flagged(inject)
+
+
+class ConstantCostReasons(unittest.TestCase):
+    """Verification H2: the verifier's probes T1-T4 (constant cost 1, keep) and their 81c620ef
+    answers. SPEC 6.7 with 13 I3 note 3: a label with no target at any admissible successor is
+    label_lost (T2, T4's sw2 at 30); an over-budget switch into a target a cheaper predecessor
+    carries is a plain label_lost (T3); a within-budget one is superseded (T4); extras
+    unreachable within the budget are refused (T1, SPEC 5)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(DATA) as f:
+            cls.probes = {p['id']: p for p in json.load(f)['probes']}
+
+    def check(self, name):
+        p = self.probes[name]
+        out = TC.compare_traverse(walker('basic'), p['request'], p['status'], p['answer'])
+        self.assertEqual([], [c for _, ch in out for c in ch.failed()], name)
+        return out
+
+    def test_t1_unreachable_extras_are_refused(self):
+        self.check('T1_no_target_over_budget')
+
+    def test_t2_no_target_within_budget_is_label_lost(self):
+        self.check('T2_no_target_within_budget')
+
+    def test_t3_an_over_budget_switch_into_a_carried_target_is_label_lost(self):
+        self.check('T3_target_carried_over_budget')
+
+    def test_t4_a_within_budget_switch_into_a_carried_target_is_superseded(self):
+        self.check('T4_target_carried_within_budget')
+
+    def test_the_re_minimisation_keeps_the_stay_and_switch_on(self):
+        """SPEC 6.3, 6.4: after a branch exclusion a removed target is re-minimised over the
+        remaining sources, its own stay included, and under switch_on loss never from a source
+        that continues at the successor. The verification found the loop ignoring both."""
+        w = walker('basic')
+        lab = {n: w.label(n) for n in ('sw1', 'sw2', 'sw3')}
+        by_name = {n: l for n, l in lab.items()}
+        # v: a k-mer of sw2's W2 part, which sw2 holds and sw1 does not
+        rec = next(r for r in w.index.records if r.name == 'sw2')
+        v = rec.seq[-11:]
+        self.assertTrue(w.holds(lab['sw2'], v) and not w.holds(lab['sw1'], v))
+        sigma = {'sw1': T.Entry(0.0, 0, 'sw1', ('sw1', 0, 'seed')),
+                 'sw2': T.Entry(1.0, 0, 'sw2', ('sw2', 0, 'switch'))}
+        st = T.Strategy({'labels': {'change_cost': {'model': 'constant', 'value': 0.5},
+                                    'loss_budget': 2}})
+        best = T.derive_entry(w, st, by_name, sigma, lab['sw2'], v, 5)
+        self.assertEqual(('sw1', 0.5), (best.pred, best.loss))       # the switch beats the stay
+        again = T.derive_entry(w, st, by_name, sigma, lab['sw2'], v, 5, exclude={'sw1'})
+        self.assertEqual(('sw2', 1.0), (again.pred, again.loss))     # the stay, once sw1 is out
+        # a source that continues at v is no source under switch_on loss
+        v3 = next(r for r in w.index.records if r.name == 'sw3').seq[:11]
+        self.assertTrue(w.holds(lab['sw2'], v3) and w.holds(lab['sw3'], v3))
+        sigma = {'sw2': T.Entry(0.0, 0, 'sw2', ('sw2', 0, 'seed'))}
+        self.assertIsNone(T.derive_entry(w, st, by_name, sigma, lab['sw3'], v3, 5))
+        anyst = T.Strategy({'labels': {'change_cost': {'model': 'constant', 'value': 0.5},
+                                       'loss_budget': 2, 'switch_on': 'any'}})
+        self.assertEqual('sw2', T.derive_entry(w, anyst, by_name, sigma, lab['sw3'], v3, 5).pred)

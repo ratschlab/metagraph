@@ -254,14 +254,15 @@ class Strategy:
 
 
 class Entry:
-    __slots__ = ('loss', 'branches', 'pred', 'run', 'coords')
+    __slots__ = ('loss', 'branches', 'pred', 'run', 'coords', 'switch_cost')
 
-    def __init__(self, loss, branches, pred, run, coords=None):
+    def __init__(self, loss, branches, pred, run, coords=None, switch_cost=None):
         self.loss = loss
         self.branches = branches
         self.pred = pred          # the predecessor label's name
         self.run = run            # (label name, from_bp, entered_by)
         self.coords = coords      # live chain coordinates under trace
+        self.switch_cost = switch_cost   # the cost of the switch that entered it, if one did
 
 
 class Result:
@@ -270,6 +271,8 @@ class Result:
         self.leaves = {}          # walk -> {label: reason} of the labels that end at the leaf
         self.walks = set()        # every walk prefix of the constrained trie
         self.needed = []          # needed budgets of loss_budget ends
+        self.needed_at = {}       # (walk, label) -> needed_budget of a loss_budget end
+        self.switches = set()     # (walk, from, to, cost) of every switch taken
         self.events = set()       # (walk, char, kind, reason) blocked / hairpin events
 
 
@@ -291,6 +294,62 @@ def supports_seed(w, label, seed, support):
     if support == 'trace':
         return bool(seed_chain(w, label, seed, 'right'))
     return all(w.holds(label, seed[i:i + k]) for i in range(len(seed) - k + 1))
+
+
+def step_chain(w, by_name, entry, v, arm):
+    """The live coordinates of |entry|'s chain that continue to v (+1 right, -1 left)."""
+    if entry.coords is None:
+        return None
+    d = 1 if arm == 'right' else -1
+    lab = by_name[entry.run[0]]
+    table = w.coords.get((lab.kind, lab.name), {})
+    return {g + d for g in entry.coords if table.get(g + d) == v}
+
+
+def label_in_a(w, by_name, sigma, tl, v, arm, trace):
+    """tl in A(v): a permitted label present at v; under trace a live label only along its
+    coordinate chain (SPEC 6.3)."""
+    if not w.holds(tl, v):
+        return False
+    live = sigma.get(tl.name)
+    return not (trace and live is not None and not step_chain(w, by_name, live, v, arm))
+
+
+def derive_entry(w, st, by_name, sigma, tl, v, depth, arm='right', trace=False,
+                 exclude=frozenset()):
+    """The entry of target tl at successor v (SPEC 6.3): the cheapest of its stay and the
+    switches from the sources -- under switch_on loss only a label not in A(v) -- by (loss, stay
+    before switch, branches of the predecessor, column id / seq_id of the predecessor); None when
+    none is within the budget. |exclude|: the sources a branch exclusion took out (6.4): neither
+    their stay nor their switches count, so a removed target is re-minimised over the remaining
+    sources, its own stay included."""
+    best = None
+    stay = sigma.get(tl.name)
+    if stay is not None and tl.name not in exclude:
+        coords = step_chain(w, by_name, stay, v, arm) if trace else None
+        if not trace or coords:
+            best = (stay.loss, 0, stay.branches, tl.order, tl.name, stay, coords)
+    for sn, se in sigma.items():
+        if sn == tl.name or sn in exclude:
+            continue
+        src = by_name[sn]
+        if st.switch_on != 'any' and label_in_a(w, by_name, sigma, src, v, arm, trace):
+            continue
+        cost = st.cost(src, tl)
+        if cost == INF:
+            continue
+        cand = (se.loss + cost, 1, se.branches, src.order, sn, se, None)
+        if best is None or cand[:4] < best[:4]:
+            best = cand
+    if best is None or best[0] > st.loss_budget + 1e-12:
+        return None
+    loss, kind, branches, _, pred, pe, coords = best
+    if kind == 0:
+        return Entry(loss, branches, tl.name, pe.run, coords)
+    if trace:
+        coords = {g for g, x in w.coords.get((tl.kind, tl.name), {}).items() if x == v}
+    return Entry(loss, branches, pred, (tl.name, depth, 'switch'), coords,
+                 switch_cost=st.cost(by_name[pred], tl))
 
 
 def constrain_walk(w, seed, arm, labels, strategy, extra=()):
@@ -348,52 +407,28 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
             else:
                 blocked.append((c, v, e, b))
         # the label states of the admissible successors (SPEC 6.3)
-        states = {}
+        def in_a(tl, v):
+            return label_in_a(w, by_name, sigma, tl, v, arm, trace)
+
+        def derive(tl, v, exclude=frozenset()):
+            return derive_entry(w, st, by_name, sigma, tl, v, depth, arm, trace, exclude)
+
+        states, targets = {}, {}
         trace_breaks = set()
         for c, v, e in admissible:
             sv = {}
+            targets[c] = [tl for tl in permitted if in_a(tl, v)]
             for tl in permitted:
-                if not w.holds(tl, v):
-                    continue
-                stay = sigma.get(tl.name)
-                stay_coords = None
-                if stay is not None and trace:
-                    stay_coords = step_coords(stay, v)
-                    if not stay_coords:
-                        trace_breaks.add(tl.name)
-                        stay = None
-                # candidates ordered by (loss, stay before switch, branches of the predecessor,
-                # column id / seq_id of the predecessor) (SPEC 6.3)
-                best = None
-                if stay is not None:
-                    best = (stay.loss, 0, stay.branches, tl.order, tl.name, stay, stay_coords)
-                for sn, se in sigma.items():
-                    if sn == tl.name:
-                        continue
-                    src = by_name[sn]
-                    continues = (bool(step_coords(se, v)) if trace else w.holds(src, v))
-                    if st.switch_on != 'any' and continues:
-                        # switch_on loss: a switch only from a label that does not continue at v
-                        continue
-                    cost = st.cost(src, tl)
-                    if cost == INF:
-                        continue
-                    cand = (se.loss + cost, 1, se.branches, src.order, sn, se, None)
-                    if best is None or cand[:4] < best[:4]:
-                        best = cand
-                if best is None or best[0] > st.loss_budget + 1e-12:
-                    continue
-                loss, kind, branches, _, pred, pe, coords = best
-                if kind == 0:
-                    sv[tl.name] = Entry(loss, branches, tl.name, pe.run, coords)
-                else:
-                    if trace:
-                        coords = {g for g, x in w.coords.get((tl.kind, tl.name), {}).items()
-                                  if x == v}
-                    sv[tl.name] = Entry(loss, branches, pred, (tl.name, depth, 'switch'), coords)
+                if trace and w.holds(tl, v) and tl.name in sigma and not in_a(tl, v):
+                    trace_breaks.add(tl.name)
+            for tl in targets[c]:
+                entry = derive(tl, v)
+                if entry is not None:
+                    sv[tl.name] = entry
             states[c] = sv
+        vertex = {c: v for c, v, e in admissible}
         # ambiguity and the branch allowance (SPEC 6.4); a followed hairpin step never counts
-        # toward ambiguity, its split is a divergence (SPEC 13, note 11)
+        # toward ambiguity, its split is a divergence (SPEC 13, I3 note 11)
         hairpin_chars = {c for c, v, e in admissible if w.is_hairpin(node, v, e)}
         excluded = set()
         while True:
@@ -408,24 +443,14 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
             if not over:
                 break
             excluded.update(over)
+            # every entry derived from an excluded source leaves every successor; its target is
+            # re-minimised over the remaining sources, its own stay included (6.3, 6.4)
             for c, sv in states.items():
                 for tn in [tn for tn, te in sv.items() if te.pred in excluded]:
                     del sv[tn]
-                    # re-minimised over the remaining sources (forbid: none remain)
-                    tl = by_name[tn]
-                    best = None
-                    for sn, se in sigma.items():
-                        if sn in excluded or sn == tn:
-                            continue
-                        src = by_name[sn]
-                        cost = st.cost(src, tl)
-                        if cost == INF or se.loss + cost > st.loss_budget + 1e-12:
-                            continue
-                        cand = (se.loss + cost, se.branches, src.order, sn, se)
-                        if best is None or cand[:3] < best[:3]:
-                            best = cand
-                    if best is not None:
-                        sv[tn] = Entry(best[0], best[1], best[3], (tn, depth, 'switch'))
+                    entry = derive(by_name[tn], vertex[c], frozenset(excluded))
+                    if entry is not None:
+                        sv[tn] = entry
         feeds = {}
         for c, sv in states.items():
             if c in hairpin_chars:
@@ -477,8 +502,9 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
             elif n in below:
                 reason = 'below_min_labels'
             else:
-                reason = _lost_reason(w, by_name[n], blocked, trace_breaks, n, e, sigma, states,
-                                      permitted, st, res, lambda v, n=n, e=e: carries(n, e, v))
+                reason = _lost_reason(by_name[n], e, blocked, trace_breaks, states, targets,
+                                      vertex, st, res, walk,
+                                      lambda v, n=n, e=e: carries(n, e, v), in_a)
             ended[n] = reason
             end(walk, n, e, reason)
         for c, v, e, b in blocked:
@@ -492,29 +518,41 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
             return
         nsplits = splits + (1 if len(followed) >= 2 else 0)
         for c, v, e in followed:
+            for tn, te in states[c].items():
+                if te.pred != tn:
+                    # the switch event's place: the walk with the step's base (two children
+                    # of a split can hold the same switch)
+                    res.switches.add((walk + c, te.pred, tn, round(te.switch_cost, 9)))
+        for c, v, e in followed:
             visit(walk + c, v, used | {w.edge_key(e)}, states[c], nsplits)
 
     visit('', root, frozenset(), sigma0, 0)
     return res
 
 
-def _lost_reason(w, label, blocked, trace_breaks, name, entry, sigma, states, permitted, st, res,
-                 carries):
-    """Why a label that continues on no followed successor ends (SPEC 6.7)."""
+def _lost_reason(label, entry, blocked, trace_breaks, states, targets, vertex, st, res, walk,
+                 carries, in_a):
+    """Why a label that continues on no followed successor ends (SPEC 6.7 with 13, I3 note 3):
+    a block of a successor that would carry it; trace_break; then the switches from it into a
+    target -- a label of A(v) -- of an admissible successor: `superseded` when one was within the
+    budget (a cheaper predecessor took the target), `loss_budget` when one existed only above
+    it into a target nobody carries there (needed_budget: the cheapest such switch), otherwise
+    `label_lost` (also for an over-budget switch into a target another source carries)."""
     blocks = [b for c, v, e, b in blocked if carries(v)]
     real = [b for b in blocks if b != 'hairpin']
     if real:
         return max(real, key=BLOCK_RANK.get)
     if blocks:
         return 'hairpin'
-    if name in trace_breaks:
+    if label.name in trace_breaks:
         return 'trace_break'
-    # a finite switch from it into a target of an admissible successor
-    needed = None
-    within = False
-    for c, sv in states.items():
-        for tl in permitted:
-            if tl.name == name:
+    within, needed = False, None
+    for c, tls in targets.items():
+        v = vertex[c]
+        if st.switch_on != 'any' and in_a(label, v):
+            continue            # not a source of a switch at v
+        for tl in tls:
+            if tl.name == label.name:
                 continue
             cost = st.cost(label, tl)
             if cost == INF:
@@ -522,12 +560,13 @@ def _lost_reason(w, label, blocked, trace_breaks, name, entry, sigma, states, pe
             total = entry.loss + cost
             if total <= st.loss_budget + 1e-12:
                 within = True
-            elif needed is None or total < needed:
+            elif tl.name not in states[c] and (needed is None or total < needed):
                 needed = total
     if within:
         return 'superseded'
     if needed is not None:
         res.needed.append(needed)
+        res.needed_at[(walk, label.name)] = needed
         return 'loss_budget'
     return 'label_lost'
 

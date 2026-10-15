@@ -78,6 +78,7 @@ class ArmView:
         self.claims = set()
         self.runs = []
         self.label_ends = set()
+        self.switches = set()
         counted = collections.Counter()
         for sid, s in segs.items():
             evs = s.get('events') or []
@@ -87,12 +88,18 @@ class ArmView:
             for e in evs:
                 if sid not in self.walk:
                     continue
-                key = (self.walk[sid][:e.get('at_bp', 0)], e.get('type'), e.get('label'),
-                       e.get('reason'), e.get('char'), e.get('from'), e.get('to'))
-                counted[key] += 1
+                counted[(sid, json.dumps(e, sort_keys=True))] += 1
                 if e.get('type') == 'label_end':
+                    nb = e.get('needed_budget')
                     self.label_ends.add((self.walk[sid][:e['at_bp']], names.get(e.get('label')),
-                                         e.get('reason')))
+                                         e.get('reason'),
+                                         round(float(nb), 9) if nb is not None else None))
+                elif e.get('type') == 'switch':
+                    key = (self.walk[sid][:e.get('at_bp', 0) + 1], names.get(e.get('from')),
+                           names.get(e.get('to')), round(float(e.get('cost', 0.0)), 9))
+                    if key in self.switches:
+                        self.duplicates.append(('a switch twice', key))
+                    self.switches.add(key)
         self.duplicates += [('an event twice', k) for k, n in counted.items() if n > 1]
         for sp in arm_json.get('splits') or []:
             chars = [b.get('char') for b in sp.get('branches') or []]
@@ -262,10 +269,19 @@ def _compare_constrain(checks, prefix, res, view, complete, ctb):
         checks.add(f'{prefix}.claims', view.claims == want,
                    'every label end (walk, label, reason, branches, loss, from_bp, entered_by)',
                    _diff(want, view.claims))
-        want_events = {(c[0], c[1], c[2]) for c in res.claims if c[2] != 'switched'}
+        want_events = {(c[0], c[1], c[2], res.needed_at.get((c[0], c[1]))
+                        if c[2] == 'loss_budget' else None)
+                       for c in res.claims if c[2] != 'switched'}
         checks.add(f'{prefix}.label_end_events', view.label_ends == want_events,
-                   'every label end event with its SPEC 6.7 reason',
+                   'every label end event with its SPEC 6.7 reason (and needed_budget)',
                    _diff(want_events, view.label_ends))
+        got_needed = sorted(round(float(x), 9) for x in view.json.get('needed_budgets') or [])
+        want_needed = sorted(round(x, 9) for x in res.needed)
+        checks.add(f'{prefix}.needed_budgets', got_needed == want_needed, want_needed,
+                   got_needed)
+        checks.add(f'{prefix}.switches', view.switches == res.switches,
+                   'every switch with its source, target and cost',
+                   _diff(res.switches, view.switches))
         want_leaves = {w: ends for w, ends in res.leaves.items()}
         got_leaves = {}
         for wk, p in view.leaves.items():
@@ -378,11 +394,34 @@ def seed_labels(w, seed_json, req_seed, strategy, mode):
     return keep, dropped, False
 
 
+def expected_refusal(request):
+    """A refusal the oracle predicts (SPEC 5): extra labels are switch targets, rejected when
+    unreachable -- under forbid, or when no chain of switches from a seed label enters them
+    within loss_budget (a constant cost: one switch of cost c, so reachable iff c <= budget)."""
+    lab = (request.get('strategy') or {}).get('labels') or {}
+    if not lab.get('extra') or lab.get('mode', 'constrain') != 'constrain':
+        return None
+    cost = lab.get('change_cost') or {'model': 'forbid'}
+    if cost.get('model', 'forbid') == 'forbid':
+        return 'strategy.labels.extra'
+    if cost.get('model') == 'constant' and float(cost.get('value', 0)) > float(
+            lab.get('loss_budget', 0)) + 1e-12:
+        return 'unreachable'
+    return None
+
+
 def compare_traverse(w, request, status, answer):
     """-> [(seed position, Checks)]."""
     out = []
     strategy = request.get('strategy') or {}
     mode = (strategy.get('labels') or {}).get('mode', 'constrain')
+    refusal = expected_refusal(request)
+    if refusal is not None:
+        c = Checks()
+        text = answer.get('error', '') if isinstance(answer, dict) else str(answer)
+        c.add('traverse.refusal', status == 400 and refusal in text,
+              f'400 naming {refusal!r}', [status, text[:300]])
+        return [(None, c)]
     if status != 200 or not isinstance(answer, dict):
         c = Checks()
         c.add('traverse.status', False, 200, [status, answer if not isinstance(answer, dict)
