@@ -32,9 +32,10 @@ running run_direct.py (a suite run and a bench run never overlap), then names th
 The suite's sampler runs on mex for the whole session (SUITE_SAMPLER=0: none; the run is then unguarded and
 analyze.py emits no verdict). The preflight samples --preflight-s seconds and refuses to start (exit 4) unless the
 load guard (load_guard.py) finds the host clean; before every later block the last minute's samples are judged and a
-loaded host is waited for, up to --quiet-wait-s, then the run stops (exit 4, resumable); every 12 steps within a
-block too, and a block that turned loaded stops the run (exit 4: that block can give no verdict; --continue-loaded
-runs on for descriptive numbers). The thresholds
+loaded host is waited for, up to --quiet-wait-s, then the run stops (exit 4, resumable); at each block's start and
+every 12 steps within a block the run stops (exit 4) when the block turned loaded, the sampler stopped, or two
+checks in a row found no reading of the load: such a block can give no verdict (--continue-loaded runs on for
+descriptive numbers). The thresholds
 (--sra-max 100 %, --load1-max 16, --allow-missing-sra) are recorded in bench.json, which the analysis uses.
 
 RESUMABLE: --resume RUN_DIR continues the recorded schedule (never a new seed) with the run's snapshot and options;
@@ -263,6 +264,7 @@ class Bench(object):
         self.used_requests = 0
         self.ran_arms = set()
         self.schedule = []
+        self.unguarded_checks = 0
 
     # -- the lock (run_suite.sh's protocol and document) ------------------------------------------------------
     def lock_json(self):
@@ -532,6 +534,34 @@ class Bench(object):
     def judge_now(self, bench, seconds):
         return lg.judge_samples(self.recent_samples(seconds), bench.get("guard"))
 
+    def sampler_alive(self):
+        return bool(self.sampler_pid) and self.mex.run("kill -0 %s" % self.sampler_pid)[0] == 0
+
+    def live_check(self, bench, block):
+        """Within the run (every CHECK_EVERY_STEPS steps and at each block's start): None to go on, else why the run
+        stops. A block that turned loaded, a sampler that stopped, or two checks in a row without a reading of the
+        host's load can give no performance verdict: stop rather than spend the reserved window (--continue-loaded
+        runs on, its numbers descriptive)."""
+        if not self.sampler_alive():
+            why = "the sampler stopped (pid %s): the load of the rest of the run is unknown" % self.sampler_pid
+        else:
+            res = self.judge_now(bench, RECENT_S)
+            if res["verdict"] == "unguarded":
+                self.unguarded_checks += 1
+            else:
+                self.unguarded_checks = 0
+            if res["verdict"] == "loaded":
+                why = "loaded during block %d (%s)" % (block, res["reason"])
+            elif self.unguarded_checks >= 2:
+                why = "the load is unknown during block %d (%s, twice in a row)" % (block, res["reason"])
+            else:
+                return None
+        if self.args.continue_loaded:
+            log("%s: no performance verdict from this run (--continue-loaded runs on)" % why)
+            return None
+        log("%s: stopping (no performance verdict can come from it; --continue-loaded runs on)" % why)
+        return why
+
     def preflight(self, bench):
         if self.args.no_preflight:
             log("preflight skipped (--no-preflight)")
@@ -714,7 +744,7 @@ class Bench(object):
         self.prepare_mex()
         self.save_session(bench, clock_offset_start_s=self.clock_offset())
         self.start_sampler()
-        self.save_session(bench, sampler_file=self.sampler_rel)
+        self.save_session(bench, sampler_file=self.sampler_rel, sampler_pid=self.sampler_pid)
         self.session["preflight"] = self.preflight(bench)
         state, reason = self.loop(bench, arms)
         return self.finish(bench, arms, state, reason)
@@ -742,6 +772,10 @@ class Bench(object):
                 if not (block is None and self.session.get("preflight", {}).get("verdict") == "clean"):
                     if not self.quiet_before(bench, step["block"]):
                         state, reason = "stopped", "loaded before block %d" % step["block"]
+                        break
+                    why = self.live_check(bench, step["block"]) if self.sampler_pid and block is not None else None
+                    if why:
+                        state, reason = "stopped", why
                         break
                 block = step["block"]
             t0 = time.time()
@@ -793,15 +827,10 @@ class Bench(object):
                 state, reason = "interrupted", "signal"
                 break
             if self.sampler_pid and ran % CHECK_EVERY_STEPS == 0:
-                # a block that turned loaded can give no verdict: stop rather than spend the host's time
-                res = self.judge_now(bench, RECENT_S)
-                if res["verdict"] == "loaded":
-                    if not self.args.continue_loaded:
-                        log("block %d is loaded (%s): stopping (no performance verdict can come from it; "
-                            "--continue-loaded runs on)" % (block, res["reason"]))
-                        state, reason = "stopped", "loaded during block %d" % block
-                        break
-                    log("block %d is loaded (%s): no performance verdict from this run" % (block, res["reason"]))
+                why = self.live_check(bench, block)
+                if why:
+                    state, reason = "stopped", why
+                    break
             pause_end = time.time() + float(bench.get("pause_s") or 0)
             while time.time() < pause_end and not STOP.requested:
                 time.sleep(min(0.1, pause_end - time.time()))

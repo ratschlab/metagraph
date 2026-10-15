@@ -33,6 +33,7 @@ FAKE_DOCKER = r'''#!/bin/sh
 # fake `docker stats --no-stream --format '{{json .}}' STAGING SRA` for the bench tests
 sra="${FAKE_DOCKER_SRA:-0.50%}"
 if [ -n "$FAKE_DOCKER_LOAD_FILE" ] && [ -f "$FAKE_DOCKER_LOAD_FILE" ]; then sra="7700.00%"; fi
+if [ -n "$FAKE_DOCKER_DOWN_FILE" ] && [ -f "$FAKE_DOCKER_DOWN_FILE" ]; then echo "docker: daemon down" >&2; exit 1; fi
 rest='"MemUsage":"1GiB / 128GiB","NetIO":"1kB / 2kB","BlockIO":"0B / 0B"'
 echo "{\"Name\":\"metagraph_refseq33m_experimental\",\"CPUPerc\":\"1.00%\",$rest}"
 echo "{\"Name\":\"metagraph_sra_all\",\"CPUPerc\":\"$sra\",$rest}"
@@ -224,12 +225,61 @@ class RunBenchOffline(BenchCase):
                 pass
             out, err = proc.communicate(timeout=180)
         self.assertEqual(proc.returncode, 4, err)
-        self.assertIn("is loaded", err)
+        self.assertIn("loaded during block", err)
         run_dir = out.strip().splitlines()[-1]
         bench = sc.read_json(os.path.join(run_dir, "bench.json"))
         self.assertEqual(bench["sessions"][-1]["state"], "stopped")
         self.assertTrue(bench["sessions"][-1]["reason"].startswith("loaded during block"))
         self.assertGreater(bench["sessions"][-1]["steps_missing"], 0)
+
+    def start_and_wait(self, host, steps, **env):
+        """run_bench in the background with the sampler; returns (proc, run_dir) once `steps` steps are logged."""
+        cmd = [sys.executable, os.path.join(BENCH, "run_bench.py"), "--panel", self.panel_path, "--seed", "6",
+               "--cycles", "2", "--checks", "stub", "--pause", "0.2", "--preflight-s", "3", "--load1-max",
+               "100000", "--no-analysis"]
+        proc = subprocess.Popen(cmd, env=self.env(host, sampler=True, **env), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, universal_newlines=True, stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+        deadline = time.time() + 120
+        run_dir = None
+        while time.time() < deadline and proc.poll() is None:
+            runs = os.listdir(self.runs) if os.path.isdir(self.runs) else []
+            run_dir = os.path.join(self.runs, runs[0]) if runs else None
+            path = os.path.join(run_dir, "steps.jsonl") if run_dir else None
+            if path and os.path.exists(path) and len(sc.read_jsonl(path)[0]) >= steps:
+                break
+            time.sleep(0.05)
+        return proc, run_dir
+
+    def test_a_sampler_that_dies_stops_the_run(self):
+        # D7: the rest of the window would give no verdict; stop (exit 4, resumable)
+        with FakeHost() as host:
+            proc, run_dir = self.start_and_wait(host, 3)
+            try:
+                pid = int(sc.read_json(os.path.join(run_dir, "bench.json"))["sessions"][-1]["sampler_pid"])
+                os.kill(pid, signal.SIGKILL)
+            except (KeyError, TypeError, ValueError, OSError):
+                proc.kill()
+                raise
+            out, err = proc.communicate(timeout=180)
+        self.assertEqual(proc.returncode, 4, err)
+        bench = sc.read_json(os.path.join(run_dir, "bench.json"))
+        self.assertEqual(bench["sessions"][-1]["state"], "stopped")
+        self.assertIn("the sampler stopped", bench["sessions"][-1]["reason"])
+        self.assertGreater(bench["sessions"][-1]["steps_missing"], 0)
+
+    def test_a_sampler_without_readings_stops_the_run(self):
+        # D7: docker stops answering: two live checks in a row without a reading stop the run
+        down = os.path.join(self.d, "docker-down")
+        with FakeHost() as host:
+            proc, run_dir = self.start_and_wait(host, 3, FAKE_DOCKER_DOWN_FILE=down)
+            with open(down, "w"):
+                pass
+            out, err = proc.communicate(timeout=180)
+        self.assertEqual(proc.returncode, 4, err)
+        bench = sc.read_json(os.path.join(run_dir, "bench.json"))
+        self.assertEqual(bench["sessions"][-1]["state"], "stopped")
+        self.assertIn("the load is unknown", bench["sessions"][-1]["reason"])
 
     def test_max_steps_then_resume(self):
         with FakeHost() as host:
