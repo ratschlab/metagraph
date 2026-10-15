@@ -575,7 +575,10 @@ def _row_problems(config, results, nodes):
     predicts from the co-lexicographic order; when both are listed, row + 1 is their smaller
     node. On PRIMARY the row is the stored k-mer's: node - row - 1 is 0 for the stored
     orientation and one wrapper offset D for a virtual reverse complement, one D per answer,
-    and of a listed pair exactly one is stored."""
+    and of a listed pair exactly one is stored. Bounded only (verification round 2): on CANONICAL
+    the row of a non-canonical k-mer whose reverse complement is not listed, row < node - 1 (its
+    row is the reverse complement's node - 1, and absolute node ids are the engine's: dummy edges
+    shift them)."""
     out = []
     pair_row, offsets = {}, set()
     for r in results:

@@ -3483,7 +3483,13 @@ would pass, and gaps in coverage and wording. Fixed, each with a regression test
 Still judged weakly or not at all:
 - **L3:** the `lower` of a bounds count, held only to ≤ truth.
 - **L4:** the column-coordinate layout of records holding an N, untested; no fixture chain crosses records.
-- **Merge arms that did merge:** judged on their invariants. A handful per run.
+- **Merge arms that did merge** (a handful per run), after their first merge: the united history's label
+  states, run ends, events and needed budgets, and which walks it continues, stay invariant-only. A tie for
+  the majority parent is not judged either. See "Round 2 of the verification" below.
+- **The row of a CANONICAL k-mer listed without its reverse complement**, when that k-mer is not the
+  canonical one, is only bounded: `row < node − 1`. Its row is the reverse complement's node − 1. The oracle
+  knows the colex order but not absolute node ids (dummy edges shift them), so it can predict that node only
+  when the reverse complement is listed too.
 
 #### Validation of the verification round (2026-10-15, against 81c620ef)
 - Six runs on the code of `f5a5e38d` against the 81c620ef Release build. The binary was the `eng-int` worktree's
@@ -3520,13 +3526,14 @@ Still judged weakly or not at all:
     `route_bp` (what of that spelling a label does not carry …) — follows first parents".
 
     In each case the leaf's only label entered the merge through a non-first parent, and the leaf's `route_bp`
-    is that merge. Each extra walk passes the same check:
-    - it is a graph walk;
-    - it equals a keep walk from the merge on;
-    - the keep walk reaches the merge node through the other parent.
+    is that merge. Each extra walk equals a keep walk from the merge on, and that keep walk reaches the merge
+    node through the other parent (`runs/v3final_triage/triage_sound.py` in the lane directory).
 
-    The script is `runs/v3final_triage/triage_sound.py` in the lane directory. The check should have required
-    only that much.
+    *Correction:* the script's "graph walk" test (`walk_node(...) is not None`) holds for every string. The
+    extra walks are graph walks by the verifier's real check (every node a k-mer of the index, no edge
+    twice), which is now the oracle's. The relaxation first proposed here would also have accepted a display
+    through the minority parent, and a label said to enter through a parent that never carried it. The
+    verifier's exact version replaced it (below).
   - *A switch-entered run's first node.* One answer, `T-canonical_k10-0076` right (seed 2).
     `traverse.*.displayed_support` requires a run's label on nodes `from_bp … to_bp`. Two runs `[22, 23)`,
     entered by a switch and closed by the merge at 23, lack their label on node 22. That is the switch
@@ -3534,5 +3541,5 @@ Still judged weakly or not at all:
 
     SPEC 6.2: "Step j adds outward base index j−1 … Runs are half-open `[from_bp, to_bp)` over outward base
     indices". So a run covers the nodes entered by steps `from_bp + 1 … to_bp`; 7.4's `label_sets` say the
-    same in words. The keep walker gives switch-entered claims the same `from_bp`. The check should start at
-    `from_bp + 1`.
+    same in words. The keep walker gives switch-entered claims the same `from_bp`. The check now starts at
+    `max(from_bp + 1, route start)` (below).

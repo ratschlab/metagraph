@@ -34,7 +34,8 @@ NOT_COVERED = [
     'budgets and attempts, beam pruning, growth bins; after a merge, the united history\'s label '
     'states (which labels reach a node, with which loss and branches), its run ends and events, '
     'its needed budgets and which walks it continues; ties of the majority parent (arrival '
-    'order)', 'patterns longer than k (anchors, long_search paths and supported '
+    'order)', 'the row of a CANONICAL k-mer listed without its reverse complement, when it is '
+    'not the canonical one: held only to row < node - 1', 'patterns longer than k (anchors, long_search paths and supported '
     'paths)', 'predicates and motif predicates', 'multi-graph servers and in_ram',
     'DNA5 graphs (refused by this build: alphabet_untested)', 'CANONICAL and PRIMARY graphs '
     'without their mask', 'the lower bound of a bounds count beyond lower <= truth, and the '
