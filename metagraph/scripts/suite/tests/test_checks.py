@@ -1929,6 +1929,58 @@ class ResolveChecks(unittest.TestCase):
             b["stop"] = stop
         return ok_answer(b)
 
+    def test_a_resolve_clamp_is_the_routes(self):
+        # /resolve clamps one field, a time budget above the server's max_time_ms, lowered to it (traverse.cpp
+        # process_resolve_request), and states the budget the work ran under in limits.time_budget_ms
+        def answer(clamped, ran=60000, sent=70000, stop=None, expect_cap=False):
+            sc = {"route": "POST /resolve", "truth": {}, "request": {"sequence": "A" * 100, "labels": ["562", "9606"],
+                                                                     "bounds": {"time_budget_ms": sent}}}
+            a = self.body([[0, 70]] if not stop else [[0, 40]], num=40 if stop else 70,
+                          graph=[[0, 40]] if stop else None, stop=stop)
+            a["body"].update(limits={"time_budget_ms": ran, "finalize_reserve_ms": 250, "clamped": clamped},
+                             timing={"elapsed_ms": 500.0})
+            if expect_cap:   # the scenario's own clamp expectation (R-edge-0021's), the build's cap
+                sc["expect"] = [{"check": "clamped", "args": {"field": "bounds.time_budget_ms", "requested": 70000,
+                                                              "effective": 60000}}]
+            return sc, a
+
+        def inv(sc, a, arm="direct-local"):
+            res = checks.evaluate(dict(sc, expect=list(sc.get("expect") or []) + [
+                {"check": "invariants", "args": {}}]), a, arm)
+            return res[-1]["outcome"], res[-1]["detail"]
+        tb = {"field": "bounds.time_budget_ms", "requested": 70000, "effective": 60000}
+        for arm in ("direct-local", "direct-remote", "mcp"):
+            self.assertEqual(inv(*answer([tb]), arm=arm)[0], "pass", arm)                     # R-edge-0021's clamp
+            self.assertEqual(inv(*answer([tb], expect_cap=True), arm=arm)[0], "pass", arm)
+            self.assertEqual(inv(*answer([], ran=20000, sent=20000), arm=arm)[0], "pass", arm)  # no clamp needed
+        for entries, kw, why in (
+                ([dict(tb, field="bounds.max_query_bp")], {}, "a field /resolve never clamps"),
+                ([{k: v for k, v in tb.items() if k != "requested"}], {}, "states no requested value"),
+                ([dict(tb, effective=0)], {}, "no server cap"),
+                ([dict(tb, requested=50000)], {"sent": 50000}, "no lowering"),
+                ([dict(tb, requested=80000)], {}, "the request sent 70000"),
+                ([tb, tb], {}, "twice"),
+                (["bounds.time_budget_ms"], {}, "not an object"),
+                (tb, {}, "is not a list"),
+                ([dict(tb, effective=50000)], {"ran": 50000, "expect_cap": True}, "the server's cap is 60000"),
+                ([tb], {"ran": 30000}, "the work ran under limits.time_budget_ms 30000"),
+                ([], {}, "limits.time_budget_ms 60000, the request sent 70000, without a clamp of it")):
+            o, d = inv(*answer(entries, **kw))
+            self.assertEqual(o, "fail", (entries, kw))
+            self.assertIn(why, d)
+        # the MCP arm's request is the service's: its requested value and budget are not compared with the scenario's
+        self.assertEqual(inv(*answer([dict(tb, requested=80000)]), arm="mcp")[0], "pass")
+        self.assertEqual(inv(*answer([]), arm="mcp")[0], "pass")
+        # a budget lowered unstated would excuse a premature stop: a stop within a 1,100 ms wall, premature for the
+        # 3,000 ms the request sent, passed beside a fabricated limits.time_budget_ms of 1,000
+        stop = {"phase": "rows", "reason": "time", "resolved_kmers": 40, "query_kmers": 70, "resolved_bp": 70,
+                "query_bp": 100, "remainder_from_bp": 40}
+        sc, a = answer([], ran=1000, sent=3000, stop=stop)
+        res = checks.evaluate(dict(sc, expect=[{"check": "invariants", "args": {}}]), a, "direct-local",
+                              client={"wall_ms": 1100.0})
+        self.assertEqual(res[0]["outcome"], "fail")
+        self.assertIn("limits.time_budget_ms 1000, the request sent 3000, without a clamp of it", res[0]["detail"])
+
     def test_runs(self):
         sc = {"route": "POST /resolve", "request": {"sequence": "A" * 100, "labels": ["562", "9606"]}, "truth": {}}
         full = self.body([[0, 70]])

@@ -2656,6 +2656,9 @@ def _resolve_invariants(sc, ans, a, arm, client=None):
     seq = req.get("sequence", "") if isinstance(req, dict) else ""
     qk = max(0, len(seq) - K + 1)
     num = body.get("num_kmers")
+    # the deadline's terms: a clamp only of what the route clamps, and no budget lowered unstated (the stop rule
+    # reads limits.time_budget_ms)
+    probs += _resolve_clamp_problems(sc, body, arm)
     if stop:
         bad = _resolve_stop_problem(sc, body, client)
         if bad:
@@ -3200,14 +3203,21 @@ def _seeds_derive(sc: dict, arm: Optional[str]) -> bool:
     return any(not (s.get("labels") if isinstance(s, dict) else None) for s in seeds)
 
 
-def _scenario_clamp_cap(sc: dict, field: str) -> Optional[float]:
+def _scenario_clamp_cap(sc: dict, field: str, where: str = "strategy") -> Optional[float]:
     """The cap of a clampable field the scenario knows: the effective value its own `clamped` expectation of that
-    strategy field states (the builder's, from the host's capabilities snapshot), else None."""
+    field states (|where|: "strategy" for /traverse's strategy.clamped, "limits" for /resolve's limits.clamped,
+    check_clamped's default), the builder's from the host's capabilities snapshot; for /resolve's time budget also
+    budget_respected's cap_ms (resolve.time_budget.max_time_ms); else None."""
     for exp in sc.get("expect") or []:
         args = exp.get("args") if isinstance(exp, dict) else None
-        if exp.get("check") == "clamped" and isinstance(args, dict) and args.get("where") == "strategy" and \
+        if not isinstance(args, dict):
+            continue
+        if exp.get("check") == "clamped" and args.get("where", "limits") == where and \
                 args.get("field") == field and _is_num(args.get("effective")):
             return float(args["effective"])
+        if exp.get("check") == "budget_respected" and where == "limits" and field == "bounds.time_budget_ms" and \
+                _is_num(args.get("cap_ms")):
+            return float(args["cap_ms"])
     return None
 
 
@@ -3278,6 +3288,61 @@ def _clamp_problems(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
         if c["field"] in seen:
             out.append("strategy.clamped states %s twice" % c["field"])
         seen.add(c["field"])
+    return out
+
+
+def _resolve_clamp_problems(sc: dict, body: dict, arm: Optional[str]) -> List[str]:
+    """Why a /resolve answer's limits.clamped cannot be the engine's. The route clamps one field, a time budget above
+    the server's resolve.time_budget.max_time_ms, lowered to it (traverse.cpp process_resolve_request: `requested` the
+    value as given, `effective` the cap; a budget not above the finalisation reserve is refused, never raised), and
+    states limits.time_budget_ms, the budget the work ran under. So an entry names bounds.time_budget_ms with a
+    numeric `requested` above its positive `effective`, once; where it is known it agrees with the request (a direct
+    arm's; the MCP arm's request is the service's, not compared), the cap (the scenario's `clamped` expectation or
+    budget_respected's cap_ms) and limits.time_budget_ms. A direct arm's limits.time_budget_ms below the request's
+    budget without that clamp is a lowering the engine never makes unstated."""
+    lim = body.get("limits") if isinstance(body, dict) else None
+    if not isinstance(lim, dict):
+        return []
+    field = "bounds.time_budget_ms"
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    sent = (req.get("bounds") or {}).get("time_budget_ms") if isinstance(req.get("bounds"), dict) else None
+    ran = lim.get("time_budget_ms")
+    lst = lim.get("clamped")
+    if lst is not None and not isinstance(lst, list):
+        return ["limits.clamped %r is not a list" % (lst,)]
+    out, seen = [], set()
+    for c in lst or []:
+        if not isinstance(c, dict):
+            out.append("limits.clamped entry %r is not an object" % (c,))
+            continue
+        f = c.get("field")
+        if f != field:
+            out.append("limits.clamped names %r, a field /resolve never clamps (only %s)" % (f, field))
+            continue
+        if f in seen:
+            out.append("limits.clamped states %s twice" % f)
+            continue
+        seen.add(f)
+        if "requested" not in c:
+            out.append("limits.clamped %s states no requested value" % f)
+            continue
+        rq, eff = c["requested"], c.get("effective")
+        if not _is_num(eff) or eff <= 0:
+            out.append("limits.clamped %s: effective %r is no server cap (a positive number)" % (f, eff))
+        elif not _is_num(rq):
+            out.append("limits.clamped %s: requested %r is not a number" % (f, rq))
+        elif not eff < rq:
+            out.append("limits.clamped %s: %r -> %r is no lowering to the server's cap (/resolve refuses a budget "
+                       "it cannot keep, it never raises one)" % (f, rq, eff))
+        elif arm != "mcp" and rq != sent:
+            out.append("limits.clamped %s: requested %r, the request sent %r" % (f, rq, sent))
+        elif _scenario_clamp_cap(sc, f, "limits") not in (None, eff):
+            out.append("limits.clamped %s: effective %r, the server's cap is %r" % (
+                f, eff, _scenario_clamp_cap(sc, f, "limits")))
+        elif _is_num(ran) and ran != eff:
+            out.append("limits.clamped %s: effective %r, the work ran under limits.time_budget_ms %r" % (f, eff, ran))
+    if arm != "mcp" and field not in seen and _is_num(sent) and _is_num(ran) and ran != sent:
+        out.append("limits.time_budget_ms %r, the request sent %r, without a clamp of it" % (ran, sent))
     return out
 
 

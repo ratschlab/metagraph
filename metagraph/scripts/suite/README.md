@@ -2610,6 +2610,18 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   arms, the cut without the list fails on a direct arm (the MCP arm: see the events-list rule below), the cut that
   states its blocked event and the recorded answer pass. A re-entry that states its blocked event is still accepted
   where the truth has no exact minimum (in constrain mode too), the verification's remaining design limit.
+- /resolve, a clamp is the route's (the follow-up of B1 for /resolve). The route clamps one field: a time budget above
+  the server's resolve.time_budget.max_time_ms is lowered to it and stated in limits.clamped (`requested` the value
+  as given, `effective` the cap), and limits.time_budget_ms states the budget the work ran under (traverse.cpp
+  process_resolve_request; graph/traversal/resolve.cpp clamps nothing; a budget not above the finalisation reserve is
+  refused). The resolve invariants now fail what the route cannot state, as the /traverse rule does: another field,
+  no `requested`, an effective value that is no positive cap, an entry that is no lowering, a field twice, a
+  `limits.clamped` that is not a list; where known, a `requested` other than the direct arm's request (the MCP arm's
+  request is the service's), an effective value other than the cap (the scenario's `clamped` expectation, or
+  budget_respected's cap_ms) or than limits.time_budget_ms. And, on a direct arm, a limits.time_budget_ms below the
+  request's budget without that clamp: the stop rule reads that budget, so a budget lowered unstated would excuse a
+  premature stop (a stop within 1,100 ms of a 3,000 ms request passed beside a stated budget of 1,000). The recorded
+  clamp (R-edge-0021, 70,000 -> 60,000, both direct arms) and every recorded budget pass.
 
 ### Validation (offline)
 - 451 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd). Each item's new or revised test fails on
