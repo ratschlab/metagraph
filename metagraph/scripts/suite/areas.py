@@ -117,6 +117,11 @@ def _columns_sample() -> List[str]:
 WARM_IDS = {"T-repeat-0001": "R-warm-0001", "T-repeat-0002": "R-warm-0002", "T-repeat-0003": "R-warm-0003",
             "T-repeat-0004": "R-warm-0004", "T-labels-0003": "R-warm-0005", "N-hard-0022": "R-warm-0006",
             "T-walk-0009": "R-warm-0007"}
+# A walk whose warm-up is split in two, each resolve with its own 60,000 ms budget: the seed with its left extent
+# (WARM_IDS), then the seed's last k-1 bases with its right extent (this id). T-repeat-0002: its seed rows alone took
+# 17.6 s cold in v3 and more than 22 s in v4, one right-arm row 11.7 s, so the whole 295 bp could exceed one budget
+# under v3's load (VERIFY-V5A's re-verification)
+SPLIT_WARM_IDS = {"T-repeat-0002": "R-warm-0008"}
 # what a walk's warm-up reads beyond the walk's exact minimum on each arm (the rows of the steps that decide it)
 WARM_MARGIN_BP = 45
 
@@ -137,30 +142,38 @@ def warm_up(ctx: Ctx, sid: str, query: str, label: str, truth: dict, target: str
                     warms=target)
 
 
-def region_warm_up(ctx: Ctx, rec, t: dict, left: int, right: int, label: str, target: str, why: str) -> dict:
-    """warm_up (id WARM_IDS[target]) of the record region a walk from the seed |t| must read: the seed, |left| bases
-    before it and |right| after it (cut at a base outside ACGT), against the walk's label."""
+def region_warm_up(ctx: Ctx, rec, t: dict, left: int, right: int, label: str, target: str, why: str,
+                   sid: Optional[str] = None) -> dict:
+    """warm_up (id |sid|, else WARM_IDS[target]) of the record region a walk from the seed |t| must read: the seed,
+    |left| bases before it and |right| after it (cut at a base outside ACGT), against the walk's label."""
     s0 = t["start"] - rec.offset
     a, _, _ = acgt_flank(rec, s0, t["length"], left)
     _, b, _ = acgt_flank(rec, s0, t["length"], right)
     region = ctx.truth_at(rec, a, b - a, flank=0)
     region["flank"] = ""
-    return warm_up(ctx, WARM_IDS[target], region["window"], label, region, target, why,
+    return warm_up(ctx, sid or WARM_IDS[target], region["window"], label, region, target, why,
                    tags=("header-label",) if label == rec.accession else ("column-label",))
 
 
-def minimum_warm_up(ctx: Ctx, sc: dict, label: str, why: str) -> dict:
+def minimum_warm_up(ctx: Ctx, sc: dict, label: str, why: str) -> List[dict]:
     """region_warm_up of what a header walk must read to decide walk_in_record: the seed and, on each requested arm,
     its exact minimum (truth.walk[side].min_bp, _annotate_walks) plus WARM_MARGIN_BP, within the radius; past the
     minimum a time stop no longer hides the property. A cold resolve of a multi-copy region costs seconds per row
-    (VERIFY-V5A: T-repeat-0002's 71 seed rows took 17.6 s cold, one row 11.7 s), so the warm-up reads no more."""
+    (VERIFY-V5A: T-repeat-0002's 71 seed rows took 17.6 s cold, one row 11.7 s), so the warm-up reads no more. A
+    target of SPLIT_WARM_IDS gets two: the seed with its left extent, then the seed's last k-1 bases (the right arm's
+    first k-mers start there) with its right extent."""
     t = sc["truth"]
     rec = ctx.rec(t["genome"])
     radius = sc["request"]["strategy"]["bounds"]["max_extension_bp"]
     walk = t.get("walk") or {}
     ext = dict((side, min(radius, (walk.get(side) or {}).get("min_bp", radius) + WARM_MARGIN_BP)) if side in walk else
                (side, 0) for side in ("left", "right"))
-    return region_warm_up(ctx, rec, t, ext["left"], ext["right"], label, sc["id"], why)
+    if sc["id"] not in SPLIT_WARM_IDS:
+        return [region_warm_up(ctx, rec, t, ext["left"], ext["right"], label, sc["id"], why)]
+    tail = dict(t, start=t["start"] + t["length"] - (K - 1), length=K - 1)
+    return [region_warm_up(ctx, rec, t, ext["left"], 0, label, sc["id"], why + " (the seed and its left arm)"),
+            region_warm_up(ctx, rec, tail, 0, ext["right"], label, sc["id"],
+                           why + " (the seed's last %d bases and its right arm)" % (K - 1), SPLIT_WARM_IDS[sc["id"]])]
 
 
 # ================================================================================================= R: /resolve
@@ -814,7 +827,7 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # the warm-ups, after the area's own scenarios (their ids and draws unchanged; a minimum warm-up reads the walk's
     # exact minimum, known only now); the build places each right before the walk it warms
     by_id_ = dict((x["id"], x) for x in out)
-    out += warm + [minimum_warm_up(ctx, by_id_[sid], label, why) for _, sid, label, why in warm_specs]
+    out += warm + [w for _, sid, label, why in warm_specs for w in minimum_warm_up(ctx, by_id_[sid], label, why)]
     return out
 
 

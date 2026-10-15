@@ -360,7 +360,7 @@ class WalksDecisive(unittest.TestCase):
         for n in range(1, 5):
             sid = "T-repeat-%04d" % n
             self.assertEqual(bounds(sid)["max_extension_bp"], 400, sid)
-            w = s[order[order.index(sid) - 1]]
+            w = s[order[order.index(sid) - (2 if sid in areas.SPLIT_WARM_IDS else 1)]]
             self.assertIn("warm-up", w["tags"], sid)
             self.assertEqual(w["warms"], sid)
             self.assertIn(s[sid]["request"]["seeds"][0]["sequence"], w["request"]["sequence"])
@@ -369,11 +369,25 @@ class WalksDecisive(unittest.TestCase):
         # so the 6-copy B. subtilis region fits a short cold resolve; T-walk-0009's cold seed row gets one too
         for n in range(1, 5):
             sid = "T-repeat-%04d" % n
-            w, t = s[order[order.index(sid) - 1]], s[sid]["truth"]
+            t = s[sid]["truth"]
             radius = bounds(sid)["max_extension_bp"]
             want = [min(radius, t["walk"][side]["min_bp"] + areas.WARM_MARGIN_BP) for side in ("left", "right")]
+            if sid in areas.SPLIT_WARM_IDS:
+                continue
+            w = s[order[order.index(sid) - 1]]
             self.assertEqual(len(w["request"]["sequence"]), want[0] + t["length"] + want[1], sid)
-        self.assertLessEqual(len(s["R-warm-0002"]["request"]["sequence"]), 300)
+        # the re-verification: T-repeat-0002's 295 bp split in two warm-ups, each its own 60,000 ms resolve: the seed
+        # with its left 46 bp, then the seed's last 30 bp with its right 149 bp, both right before the walk
+        t = s["T-repeat-0002"]["truth"]
+        seed = s["T-repeat-0002"]["request"]["seeds"][0]["sequence"]
+        a, b = s["R-warm-0002"], s["R-warm-0008"]
+        self.assertEqual(order[order.index("T-repeat-0002") - 2:order.index("T-repeat-0002")], ["R-warm-0002", "R-warm-0008"])
+        self.assertEqual((len(a["request"]["sequence"]), len(b["request"]["sequence"])), (46 + 100, 30 + 149))
+        self.assertTrue(a["request"]["sequence"].endswith(seed))
+        self.assertTrue(b["request"]["sequence"].startswith(seed[-30:]))
+        self.assertEqual((a["truth"]["start"], b["truth"]["start"]), (t["start"] - 46, t["start"] + 70))
+        for w in (a, b):
+            self.assertEqual((w["warms"], w["request"]["bounds"]["time_budget_ms"]), ("T-repeat-0002", 60000))
         w9 = s[order[order.index("T-walk-0009") - 1]]
         self.assertEqual((w9["id"], w9["request"]["labels"], len(w9["request"]["sequence"])),
                          ("R-warm-0007", ["10710"], 31 + 2 * 100))
@@ -911,9 +925,11 @@ class WarmUpsTravel(unittest.TestCase):
         m = built()
         order = [x["id"] for x in m["scenarios"]]
         pairs = [(x["id"], x["warms"]) for x in m["scenarios"] if x.get("warms")]
-        self.assertEqual(len(pairs), 9)
+        self.assertEqual(len(pairs), 10)
         for w, target in pairs:
-            self.assertEqual(order.index(target), order.index(w) + 1, w)
+            n = sum(1 for _, t in pairs if t == target)                    # a split pair sits together
+            self.assertLessEqual(order.index(target) - order.index(w), n, w)
+            self.assertGreater(order.index(target), order.index(w), w)
         smoke = [x["id"] for x in bm.smoke_of(m)["scenarios"]]
         for w, target in pairs:
             self.assertEqual(w in smoke, target in smoke, w)
