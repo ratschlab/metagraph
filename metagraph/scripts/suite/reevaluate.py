@@ -310,7 +310,7 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
                 outcome, explained, noted = compare.answered_verdict(
                     matched, sc.unmarked_checks(scenario, arm, new_checks), rule)
                 info.update(service_by_design_case=noted, explained_checks=explained,
-                            explained_items=compare.explained_items(new_checks, compare.union_of(matched)))
+                            explained_items=sc.explained_items(new_checks, compare.union_of(matched)))
                 info["note"] = "the table's %s case %s: judged by the checks%s" % (
                     how, noted, ", %s explained" % explained if explained else "")
                 return outcome, None

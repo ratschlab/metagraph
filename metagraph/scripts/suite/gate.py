@@ -42,7 +42,7 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
 - property: on a passing execution every property check the scenario expects (checks.is_property) passed, unless the
   policy lists it as not required for that scenario and arm, or the named answered / clamped case of a by-design
   execution explains the item (its explained_items: a failure, or a not_exposed reading whose detail an
-  {check, detail_matches} entry matches, compare.item_explained; the pair judged below), or (the MCP arm) the
+  {check, detail_matches} entry matches, suite_common.item_explained; the pair judged below), or (the MCP arm) the
   manifest marks it not shown via MCP
   (suite_common.mcp_check_marks: mcp.not_implemented_checks / by_design_checks) and it read not_exposed
   (suite_common.checks_marked_aside; a marked check with no result is a missing result as any other); a passing MCP
@@ -651,10 +651,10 @@ def judge(run_dir, policy, reevaluated=False):
                     continue
                 if out == "pass":
                     continue
-                if out in ("fail", "not_exposed") and _explained_property(r, name, k) and \
+                if out in sc.EXPLAINABLE_OUTCOMES and _explained_property(r, name, k) and \
                         r.get("service_by_design_case") in cmp.case_ids(s):
                     # the named answered / clamped case explains it (a failure, or a field its path removed:
-                    # compare.item_explained): judged with the pair below
+                    # suite_common.item_explained): judged with the pair below
                     continue
                 if prop:
                     if not not_required(policy, sid, arm, name):

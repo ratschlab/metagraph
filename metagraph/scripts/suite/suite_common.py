@@ -2062,6 +2062,69 @@ def outcome_from_checks(checks):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# the by-design table's explanations of check items (compare, merge_run, reevaluate, the gate and async's runner take
+# these: one definition)
+
+# the outcomes an explains_checks entry can explain: a failure, or (a {check, detail_matches} entry only) a field the
+# service's path removed from the answer, which the checks read not_exposed
+EXPLAINABLE_OUTCOMES = ("fail", "not_exposed")
+
+
+def entry_explains(entry, check):
+    """Whether one explains_checks entry names a check item: a name, every item of that check; an object {check,
+    detail_matches} (peer review R4), an item of that check whose detail the regex matches completely (re.fullmatch,
+    re.S)."""
+    name = str(check.get("check"))
+    if isinstance(entry, str):
+        return entry == name
+    if not isinstance(entry, dict) or str(entry.get("check")) != name:
+        return False
+    try:
+        return re.fullmatch(str(entry.get("detail_matches")), str(check.get("detail") or ""), re.S) is not None
+    except re.error:
+        return False
+
+
+def item_explained(entry, check):
+    """Whether one explains_checks entry explains a check item of an execution (an answered / clamped case's E): an
+    item of outcome fail it names (entry_explains: a name or {check, detail_matches}), or an item of outcome
+    not_exposed whose detail a {check, detail_matches} entry matches completely, a field the service's path removed
+    from the answer (traverse.duplicate_seeds: the merged seed's result, "field not in the answer:
+    results.1.duplicate"). A bare check name never explains a not_exposed reading."""
+    outcome = str(check.get("outcome"))
+    if outcome == "fail":
+        return entry_explains(entry, check)
+    return outcome == "not_exposed" and isinstance(entry, dict) and entry_explains(entry, check)
+
+
+def explained_outcome(checks, entries, rule):
+    """(the outcome, E) of an execution an answered / clamped case matched (triage-2 B-01; async's runner
+    explained_outcome at e334715b): F = the failing checks (outcome fail, or one outside CHECK_OUTCOMES), E = the
+    items an entry of |entries| (the matched cases' explains_checks) explains (item_explained), U = F - E. fail when
+    U is non-empty; else r = |rule| over the checks without E: finding when r is finding (a by-design mark never
+    erases one), service_by_design when E is non-empty, else r (a case explaining nothing leaves the checks'
+    outcome). E lists each explained check's name once, in check order."""
+    failing = [c for c in checks if str(c.get("outcome")) == "fail" or str(c.get("outcome")) not in CHECK_OUTCOMES]
+    e_items = [c for c in checks if any(item_explained(entry, c) for entry in entries)]
+    explained = list(dict.fromkeys(str(c.get("check")) for c in e_items))
+    if any(all(c is not x for x in e_items) for c in failing):
+        return "fail", explained
+    rest = [dict(c) for c in checks if all(c is not x for x in e_items)]
+    r = str(rule(rest))
+    if r == "finding":
+        return "finding", explained
+    if e_items:
+        return "service_by_design", explained
+    return r, explained
+
+
+def explained_items(checks, entries):
+    """The indices of an execution's check items |entries| explain (item_explained), in check order: what a line
+    records as explained_items (B5b-06: per ITEM, as async's runner's explained_item_indices since f386a3c0)."""
+    return [i for i, c in enumerate(checks or []) if any(item_explained(entry, c) for entry in entries or [])]
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # statistics
 
 def percentile(values, q):

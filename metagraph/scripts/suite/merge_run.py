@@ -171,8 +171,9 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
         explained = set(row.get("explained_checks") or ())
         if isinstance(items, list) and items:
             # B5b-06: the explained check items (the runner's since f386a3c0, or the re-evaluation's), not every
-            # item of an explained name
-            drop = set(id(c) for i, c in enumerate(checks) if i in items and c.get("outcome") == "fail")
+            # item of an explained name; an item is explainable as suite_common.item_explained reads it
+            drop = set(id(c) for i, c in enumerate(checks)
+                       if i in items and c.get("outcome") in sc.EXPLAINABLE_OUTCOMES)
         elif explained:
             drop = set(id(c) for c in checks if c.get("check") in explained and c.get("outcome") == "fail")
         else:

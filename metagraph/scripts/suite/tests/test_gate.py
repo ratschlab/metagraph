@@ -542,6 +542,33 @@ class ExplainedNotExposedTest(GateCase):
         self.assertFalse(cmp.item_explained("answer_fields", checks[2]))
         self.assertTrue(cmp.item_explained("contains_source_context", checks[1]))
 
+    def test_one_definition_for_every_reader(self):
+        # the explanation of a check item is suite_common's, the shared rule async's runner calls (shared_rule takes
+        # it from the vendored suite_common): compare uses those functions, reevaluate records explained_items with
+        # them, merge_run drops a recorded explained item of either explainable outcome, the gate skips one
+        import importlib.util
+        for name in ("entry_explains", "item_explained", "explained_outcome", "explained_items"):
+            self.assertIs(getattr(cmp, name), getattr(sc, name), name)
+        self.assertEqual(sc.EXPLAINABLE_OUTCOMES, ("fail", "not_exposed"))
+        spec = importlib.util.spec_from_file_location("suite_common_as_vendored", os.path.join(SUITE, "suite_common.py"))
+        vendored = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vendored)
+        checks = [{"check": "status", "outcome": "pass", "detail": "ok"},
+                  {"check": "contains_source_context", "outcome": "fail", "detail": "1 results for 2 seeds"},
+                  {"check": "answer_fields", "outcome": "not_exposed",
+                   "detail": "field not in the answer: results.1.duplicate"}]
+        entries = cmp.explains(MERGED)
+        self.assertEqual(vendored.explained_outcome(checks, entries, vendored.outcome_from_checks),
+                         ("service_by_design", ["contains_source_context", "answer_fields"]))
+        self.assertEqual(vendored.explained_items(checks, entries), [1, 2])
+        self.assertFalse(vendored.item_explained("answer_fields", checks[2]))
+        # merge_run: a recorded line's explained items are taken out before the checks' rule, the not_exposed one too
+        seen = []
+        row = {"scenario": "T-010", "arm": "mcp", "repeat": 0, "outcome": "finding", "checks": checks,
+               "explained_checks": ["contains_source_context", "answer_fields"], "explained_items": [1, 2]}
+        merge_run.stricter_outcomes([row], {}, lambda c: seen.append([x["check"] for x in c]) or "pass")
+        self.assertEqual(seen, [["status"]])
+
     def test_the_gate_accepts_the_verified_pair(self):
         d, pol = self.run_with("merged", (1, 2))
         v = gate.judge(d, pol)
