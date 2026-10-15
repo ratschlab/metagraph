@@ -142,10 +142,11 @@
    "title": "a bound lowered to the server's cap is stated",
    "spec": [
     "SPEC-labeled-traversal-core section 4.5 (/resolve's budget)",
-    "section 5 (/traverse's bounds)"
+    "section 5 (/traverse's bounds) and section 10.3 (strategy.clamped)",
+    "SPEC-pattern-search section 4.5 (the caps) and section 8.3 (limits.clamped)"
    ],
    "args": "field: the request field; requested and effective: the two values; where: limits (the default, /resolve and /pattern) or strategy (/traverse's strategy.clamped).",
-   "asserts": "limits.clamped (or strategy.clamped) holds an entry for the field with exactly the requested and the effective value: the host lowered the request's bound to its cap and said so. In chapter R: `bounds.time_budget_ms` 70,000 lowered to 60,000. In chapter P: `max_contexts` 10,001 lowered to 10,000 (P-modes-0004); on /pattern the list is `limits.clamped`.",
+   "asserts": "limits.clamped (or strategy.clamped) holds an entry for the field with exactly the requested and the effective value: the host lowered the request's bound to its cap and said so. In chapter R: `bounds.time_budget_ms` 70,000 lowered to 60,000. In chapter T: `bounds.time_budget_ms` 70,000 lowered to the server's `max_time_ms` 60,000 and stated in `strategy.clamped` (T-edge-0012). In chapter P: `max_contexts` 10,001 lowered to 10,000 (P-modes-0004); on /pattern the list is `limits.clamped`.",
    "inconclusive": "Only by the common rule.",
    "fails": "No entry for the field in the clamped list, or an entry with other values; the list missing from the answer (not exposed on the MCP arm)."
   },

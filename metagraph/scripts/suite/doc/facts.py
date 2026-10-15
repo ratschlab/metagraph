@@ -216,9 +216,22 @@ def _late_ms(run, sid, line):
     return None
 
 
+_ARM_HEADS = ("left", "right", "both")
+
+
 def _clause(text, limit=160):
-    """A check detail's evidence clause as plain text (the explanation after the first ': ' dropped)."""
-    head, _ = blocks._split_clause(text)
+    """A check detail's evidence clause as plain text (the explanation after the first ': ' dropped). A walk
+    check's detail names its arms ('left: the record followed for 793 of 1000 bp, stopped by time_budget; right:
+    ...'): the first arm's clause up to ';' is kept with the arm's name; a 'not testable: ...' detail keeps the
+    stop it names before the host's parenthesis (VERIFY-T M6: '(walk_in_record: left)' said nothing)."""
+    text = str(text or "")
+    head, rest = blocks._split_clause(text)
+    if head.strip() in _ARM_HEADS and rest:
+        seg, _ = blocks._split_clause(rest.split(";", 1)[0])
+        return blocks._balanced(_cut("%s: %s" % (head.strip(), seg.strip()), limit))
+    if head.strip() == "not testable" and rest:
+        seg = rest.split(" (", 1)[0] if " (" in rest else blocks._split_clause(rest)[0]
+        return blocks._balanced(_cut("not testable: %s" % seg.strip(), limit))
     return blocks._balanced(_cut(head, limit))
 
 
@@ -233,13 +246,28 @@ def _overridden(line, is_mcp):
     return blocks._overridden(line, is_mcp)
 
 
+HOST_PHRASE = {"cold": "host-cold", "aged": "host-aged", cells.WARM_AFTER_INTERRUPTED: "warm after an interrupted execution"}
+
+
+def _wall_text(line, arm):
+    """The wall of an execution with its host state where that is not host-warm, on the direct arms ('1.9 s
+    (host-cold)'; VERIFY-PLXM M5: a cold first call beside a warm one invites a timing reading the run does not
+    isolate); the MCP arm's phrases name the cold and the warm call themselves."""
+    text = fmt_t(line.get("wall_ms"))
+    if arm != "mcp":
+        word = HOST_PHRASE.get(cells.host_cache_of(line))
+        if word:
+            text += " (%s)" % word
+    return text
+
+
 def exec_phrase(run, sid, line, arm, wall=None):
-    """One execution in a few plain words: the outcome, its qualifier and the time (`wall` overrides the time's
-    text, so that repeats alike apart from their walls share one phrase)."""
+    """One execution in a few plain words: the outcome, its qualifier and the time with its host state where not
+    host-warm (`wall` overrides the time's text, so that repeats alike apart from their walls share one phrase)."""
     outcome = line.get("outcome")
     http = line.get("http")
     code, text = _err(line)
-    wall = wall or fmt_t(line.get("wall_ms"))
+    wall = wall or _wall_text(line, arm)
     budget = run.budget_ms(sid)
     late = _late_ms(run, sid, line)
     if outcome == "pass":
@@ -303,7 +331,7 @@ def arm_facts(ctx, sid, arm):
          "wall": "–", "walls": "–", "wall_cold": "–", "wall_warm": "–", "server": "–", "backend": "–",
          "http": "", "code": "", "host": "", "host_word": "", "late": "", "phrase": "", "phrase_cold": "",
          "phrase_warm": "", "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean),
-         "time_limited": "", "checks": {}}
+         "time_limited": "", "checks": {}, "n_outside_case": 0, "outside_case_phrase": ""}
     if not st.present:
         f["phrase"] = "no execution recorded although the run planned one" if st.missing_planned else "no execution"
         return f
@@ -352,9 +380,16 @@ def arm_facts(ctx, sid, arm):
             f["phrase"] += " (refused at submit: %s)" % _status_text(answered)
         return f
     if st.glyph_key == "service_by_design":
-        f["phrase"] = "by design (%s)" % (_status_text(answered) if answered else "no status recorded")
+        covered = next((l for l in lines if l.get("http") is not None and cells.by_design_line(st, l)), None) or answered
+        f["phrase"] = "by design (%s)" % (_status_text(covered) if covered else "no status recorded")
         if "u" in st.glyph_marks:
-            f["phrase"] += ", the pair unverified"
+            f["phrase"] += ", the pair unverified (%s)" % blocks.unverified_reason(st.agreement, st)
+        # the other repeat the case did not match: a separate host answer with its recorded outcome
+        others = blocks.other_repeats(st)
+        f["n_outside_case"] = len(others)
+        f["outside_case_phrase"] = "; ".join("r%s outside the case %s" % (r, exec_phrase(run, sid, l, arm)) for r, l in others)
+        if others:
+            f["phrase"] += "; " + f["outside_case_phrase"]
         return f
     phrases = [exec_phrase(run, sid, l, arm) for l in lines]
     if arm == "mcp":
@@ -375,7 +410,7 @@ def arm_facts(ctx, sid, arm):
     elif len(set(exec_phrase(run, sid, l, arm, wall="\x00") for l in lines)) == 1:
         # the repeats alike apart from their walls: one phrase, the walls in repeat order
         text = exec_phrase(run, sid, lines[0], arm, wall="\x00").replace(
-            "\x00", " / ".join(fmt_t(l.get("wall_ms")) for l in lines)) + " (r%s)" % " / r".join(
+            "\x00", " / ".join(_wall_text(l, arm) for l in lines)) + " (r%s)" % " / r".join(
             str(l.get("repeat")) for l in lines)
     else:
         text = "; ".join("r%s %s" % (l.get("repeat"), p) for l, p in zip(lines, phrases))
@@ -425,7 +460,7 @@ def _members_phrase(f, exercised_only=True):
         a = f[ARM_KEY[arm]]
         if not a["present"]:
             continue
-        if exercised_only and arm == "mcp" and a["standing"] in ("not exercised", "by design"):
+        if exercised_only and arm == "mcp" and a["standing"] in ("not exercised", "by design") and not a["n_outside_case"]:
             continue
         parts.append("%s %s" % (arm, a["phrase"]))
     return "%s: %s" % (_label(f), "; ".join(parts) if parts else "no exercised arm")
@@ -474,6 +509,19 @@ def _standing_counts(ctx, sids, prefix=""):
                                                    and "u" in st.glyph_marks)
     v[prefix + "n_mcp_by_design_verified"] = v[prefix + "n_mcp_by_design"] - v[prefix + "n_mcp_by_design_unverified"]
     v[prefix + "mcp_by_design_all_verified"] = v[prefix + "n_mcp_by_design_unverified"] == 0
+    # why a pair is unverified (blocks.unverified_cause): the direct side did not match the case, or the other MCP
+    # repeat outside the case has no direct answer to compare with (VERIFY-QCND H3); a pair may count under both
+    causes, texts = {}, []
+    for sid in sids:
+        st = ctx.state(sid)["mcp"]
+        if st.present and st.glyph_key == "service_by_design" and "u" in st.glyph_marks:
+            for c in (blocks.unverified_cause(st.agreement) or "direct").split("+"):
+                causes.setdefault(c, []).append(sid)
+            texts.append("%s (%s)" % (sid, blocks.unverified_reason(st.agreement, st)))
+    for c in ("direct", "other_repeat"):
+        v["%sn_mcp_by_design_unverified_%s" % (prefix, c)] = len(causes.get(c) or [])
+        v["%smcp_by_design_unverified_%s_ids" % (prefix, c)] = ", ".join(causes.get(c) or []) or "none"
+    v[prefix + "mcp_by_design_unverified_text"] = "; ".join(texts)
     return v
 
 
@@ -507,6 +555,7 @@ def _late503(ctx, sids):
     lates = []
     ids = []
     per = []
+    by_arm = dict((arm, []) for arm in ARMS)
     for sid in sids:
         items = []
         for arm in ARMS:
@@ -516,12 +565,19 @@ def _late503(ctx, sids):
                     continue
                 lates.append(late)
                 items.append("%s on %s%s" % (fmt_t(late), arm, " (a finding)" if l.get("outcome") == "finding" else ""))
+                if sid not in by_arm[arm]:
+                    by_arm[arm].append(sid)
         if items:
             ids.append(sid)
             per.append("%s %s" % (sid, _join(items)))
-    return {"n_late503": len(lates), "n_late503_tests": len(ids), "late503_ids": ", ".join(ids),
-            "late503_min": fmt_t(min(lates)) if lates else "–", "late503_max": fmt_t(max(lates)) if lates else "–",
-            "late503_text": "; ".join(per)}
+    out = {"n_late503": len(lates), "n_late503_tests": len(ids), "late503_ids": ", ".join(ids),
+           "late503_min": fmt_t(min(lates)) if lates else "–", "late503_max": fmt_t(max(lates)) if lates else "–",
+           "late503_text": "; ".join(per)}
+    # the tests with a 503 deadline per arm (VERIFY-PLXM M4: the counts per direct arm)
+    for arm in ARMS:
+        out["n_late503_tests_%s" % ARM_KEY[arm]] = len(by_arm[arm])
+        out["late503_%s_ids" % ARM_KEY[arm]] = ", ".join(by_arm[arm]) or "none"
+    return out
 
 
 def _stops(ctx, sids):
@@ -561,6 +617,7 @@ def _time_limitations(ctx, sids):
     from the run})."""
     run = ctx.run
     all_ids, all_per, pat_ids, pat_per, pat_n, cut_ids, cut_per, untested = [], [], [], [], 0, [], [], []
+    by_arm = dict((arm, {"all": [], "pat": []}) for arm in ARMS)
     for sid in sids:
         items, pat_items, cut_items = [], [], []
         for arm in ARMS:
@@ -570,8 +627,12 @@ def _time_limitations(ctx, sids):
                     continue
                 where = _arm_repeat(run, sid, arm, l)
                 items.append((where, tl))
+                if sid not in by_arm[arm]["all"]:
+                    by_arm[arm]["all"].append(sid)
                 if "pattern" in tl:
                     pat_items.append("%s on %s" % (fmt_t(l.get("wall_ms")), where))
+                    if sid not in by_arm[arm]["pat"]:
+                        by_arm[arm]["pat"].append(sid)
                 if any(w in tl for w in _TIME_CUT_WORDS):
                     checks = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
                     walk = next((c for c in checks if c.get("check") in ("walk_in_record", "walk_end")),
@@ -591,19 +652,43 @@ def _time_limitations(ctx, sids):
         if cut_items:
             cut_ids.append(sid)
             cut_per.append("%s %s" % (sid, _join(cut_items)))
-            if not any(ctx.state(sid)[arm].present and ctx.state(sid)[arm].glyph_key == "pass" for arm in ARMS):
+            # untested: no execution on any arm and no repeat passed (VERIFY-T L6: per execution, not the arm's
+            # worst over its repeats)
+            if not any(l.get("outcome") == "pass" for arm in ARMS for l in run.arm_lines(sid, arm)):
                 untested.append(sid)
     n_all = 0
     for sid in all_ids:
         for arm in ARMS:
             n_all += sum(1 for l in run.arm_lines(sid, arm) if str(l.get("time_limited") or "") and l.get("http") == 200
                          and l.get("outcome") == "inconclusive")
-    return {"n_time_limited": n_all, "n_time_limited_tests": len(all_ids), "time_limited_ids": ", ".join(all_ids),
-            "time_limited_text": "; ".join(all_per),
-            "n_time_limited_200": pat_n, "n_time_limited_200_tests": len(pat_ids),
-            "time_limited_200_ids": ", ".join(pat_ids), "time_limited_200_text": "; ".join(pat_per),
-            "n_time_cut_tests": len(cut_ids), "time_cut_ids": ", ".join(cut_ids), "time_cut_text": "; ".join(cut_per),
-            "n_time_cut_untested_tests": len(untested), "time_cut_untested_ids": ", ".join(untested)}
+    out = {"n_time_limited": n_all, "n_time_limited_tests": len(all_ids), "time_limited_ids": ", ".join(all_ids),
+           "time_limited_text": "; ".join(all_per),
+           "n_time_limited_200": pat_n, "n_time_limited_200_tests": len(pat_ids),
+           "time_limited_200_ids": ", ".join(pat_ids), "time_limited_200_text": "; ".join(pat_per),
+           "n_time_cut_tests": len(cut_ids), "time_cut_ids": ", ".join(cut_ids), "time_cut_text": "; ".join(cut_per),
+           "n_time_cut_untested_tests": len(untested), "time_cut_untested_ids": ", ".join(untested)}
+    # the same per arm (VERIFY-PLXM M4: the withheld lists per direct arm, the MCP ones apart)
+    for arm in ARMS:
+        k = ARM_KEY[arm]
+        out["n_time_limited_tests_%s" % k] = len(by_arm[arm]["all"])
+        out["time_limited_%s_ids" % k] = ", ".join(by_arm[arm]["all"]) or "none"
+        out["n_time_limited_200_tests_%s" % k] = len(by_arm[arm]["pat"])
+        out["time_limited_200_%s_ids" % k] = ", ".join(by_arm[arm]["pat"]) or "none"
+    # one text per arm: the tests a 503 deadline and the tests a time-limited 200 left inconclusive there
+    # ('on direct-local six by a 503 deadline (…) and one by a 200 limited by time (…); on direct-remote …')
+    parts = []
+    for arm in ARMS:
+        items = []
+        d503 = [sid for sid in sids if any(_late_ms(run, sid, l) is not None for l in run.arm_lines(sid, arm))]
+        if d503:
+            items.append("%s by a 503 deadline (%s)" % (number_word(len(d503)), ", ".join(d503)))
+        if by_arm[arm]["all"]:
+            items.append("%s by a 200 limited by time (%s)" % (number_word(len(by_arm[arm]["all"])),
+                                                              ", ".join(by_arm[arm]["all"])))
+        if items:
+            parts.append("%s %s" % ("via MCP" if arm == "mcp" else "on " + arm, " and ".join(items)))
+    out["time_by_arm_text"] = "; ".join(parts)
+    return out
 
 
 def _relations(ctx, rids):
@@ -627,14 +712,16 @@ def _relations(ctx, rids):
         key = tuple(entry[ARM_KEY[arm]] for arm in ARMS)
         patterns.setdefault(key, []).append(rid)
     parts = []
+    words = {"not_exposed": "not evaluated (not exposed)", "not exposed": "not evaluated (not exposed)",
+             "not_evaluated": "not evaluated"}
     for key, ids in patterns.items():
         if len(set(key)) == 1:
-            how = "%s on every arm" % key[0]
+            how = "%s on every arm" % words.get(key[0], key[0])
         else:
             by_outcome = {}
             for arm, o in zip(ARMS, key):
                 by_outcome.setdefault(o, []).append(arm)
-            how = ", ".join("%s on %s" % (o, _join(arms)) for o, arms in by_outcome.items())
+            how = ", ".join("%s on %s" % (words.get(o, o), _join(arms)) for o, arms in by_outcome.items())
         parts.append("%s %s" % (_ids_short(ids), how))
     v["relations_text"] = "; ".join(parts)
     return v
@@ -791,38 +878,61 @@ def family_facts(ctx, fid):
     return v
 
 
+def claim_items(fp):
+    """A family's claims as [(text, members or None)]: the prose's `claim` (a string over `claim_members`, or a
+    list of strings or of {claim, members} each over its own members, so that a family of two units states one
+    claim per unit: VERIFY-PLXM H1, M-protein's residue claim apart from its cap claim)."""
+    claim = fp.get("claim")
+    if not claim:
+        return []
+    if isinstance(claim, list):
+        out = []
+        for item in claim:
+            if isinstance(item, dict) and item.get("claim"):
+                out.append((str(item["claim"]), item.get("members")))
+            elif isinstance(item, str) and item:
+                out.append((item, None))
+        return out
+    return [(str(claim), fp.get("claim_members"))]
+
+
 def _claims(ctx, ch, fam):
-    """The families' claims (the prose's `claim`, over `claim_members` or every member) sorted by what the direct
-    arms showed: held (every claim member passes on both direct arms), held in part (some), unsupported (none, or
-    a failure)."""
+    """The families' claims (claim_items: the prose's `claim`, over its members or every member) sorted by what
+    the direct arms showed: held (every claim member passes on both direct arms), held in part (some), unsupported
+    (none, or a failure). A claim's text is filled on the family's values (a conditional on `manifest_version`
+    for a property only one manifest's member tests: VERIFY-T H4)."""
     prose = (ctx.prose.get(ch) or {}).get("families") or {}
     held, unsupported = [], []
     for fid in ctx.units.chapter_families(ch):
         fp = prose.get(fid) or {}
-        claim = fp.get("claim")
-        if not claim:
-            continue
         fv = fam[fid]
-        members = [sid for sid in (fp.get("claim_members") or []) if sid in fv["x"]] or list(fv["x"])
-        x = fv["x"]
-        n = sum(1 for sid in members if x[sid]["dl"]["pass"] and (x[sid]["dr"]["pass"] or not x[sid]["dr"]["present"]))
-        failed = any(x[sid][k]["standing"] in ("fail", "error", "other") for sid in members for k in ("dl", "dr")) \
-            or any(ctx.state(sid)["direct-remote"].ne for sid in members)
-        if failed:
-            unsupported.append("%s (%s: %d of %d, with a failure or a disagreement; I.1)" % (claim, fid, n, len(members)))
-        elif n == len(members):
-            held.append("%s (%s)" % (claim, fid))
-        elif n:
-            held.append("%s (%s, %d of %d)" % (claim, fid, n, len(members)))
-        else:
-            words = []
-            for sid in members:
-                for k in ("dl", "dr"):
-                    w = x[sid][k]["standing"]
-                    if x[sid][k]["present"] and w not in words:
-                        words.append(w)
-            unsupported.append("%s (%s: %s on the direct arms)" % (claim, fid, " / ".join(words) or "no execution"))
+        for claim, wanted in claim_items(fp):
+            _claim(ctx, fid, fv, fill(claim, fv, ctx.unresolved), wanted, held, unsupported)
     return held, unsupported
+
+
+def _claim(ctx, fid, fv, claim, wanted, held, unsupported):
+    """One claim sorted into `held` or `unsupported` by the direct arms' standing on its members (`wanted`, else
+    every member of the family)."""
+    members = [sid for sid in (wanted or []) if sid in fv["x"]] or list(fv["x"])
+    x = fv["x"]
+    n = sum(1 for sid in members if x[sid]["dl"]["pass"] and (x[sid]["dr"]["pass"] or not x[sid]["dr"]["present"]))
+    failed = any(x[sid][k]["standing"] in ("fail", "error", "other") for sid in members for k in ("dl", "dr")) \
+        or any(ctx.state(sid)["direct-remote"].ne for sid in members)
+    if failed:
+        unsupported.append("%s (%s: %d of %d, with a failure or a disagreement; I.1)" % (claim, fid, n, len(members)))
+    elif n == len(members):
+        held.append("%s (%s)" % (claim, fid))
+    elif n:
+        held.append("%s (%s, %d of %d)" % (claim, fid, n, len(members)))
+    else:
+        words = []
+        for sid in members:
+            for k in ("dl", "dr"):
+                w = x[sid][k]["standing"]
+                if x[sid][k]["present"] and w not in words:
+                    words.append(w)
+        unsupported.append("%s (%s: %s on the direct arms)" % (claim, fid, " / ".join(words) or "no execution"))
 
 
 def chapter_facts(ctx, ch):

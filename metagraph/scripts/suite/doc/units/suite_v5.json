@@ -3911,7 +3911,7 @@
   "family": "T-labels",
   "unit_id": "T-labels",
   "unit_type": "list",
-  "variant": "derived column labels on eco (93 records in its ",
+  "variant": "derived column labels on eco…",
   "unit_title": "label modes and kinds"
  },
  "T-labels-0004": {
@@ -3927,7 +3927,7 @@
   "family": "T-labels",
   "unit_id": "T-labels",
   "unit_type": "list",
-  "variant": "derived column labels on cal (9 records in its c",
+  "variant": "derived column labels on cal (9 records in its column)",
   "unit_title": "label modes and kinds"
  },
  "T-labels-0006": {
@@ -4183,7 +4183,7 @@
   "family": "T-seeds",
   "unit_id": "T-seeds",
   "unit_type": "list",
-  "variant": "three distinct seeds of three records in one req",
+  "variant": "three distinct seeds of three records in one request",
   "unit_title": "three seeds in one request"
  },
  "T-graphlet-0001": {
@@ -4215,7 +4215,7 @@
   "family": "T-quorum",
   "unit_id": "T-quorum",
   "unit_type": "list",
-  "variant": "bounds.min_live_labels 2 on a seed of one header",
+  "variant": "bounds.min_live_labels 2 on a seed of one header label",
   "unit_title": "min_live_labels"
  },
  "T-strand-0001": {
@@ -4793,7 +4793,7 @@
   "family": "P-modes",
   "unit_id": "P-modes",
   "unit_type": "series",
-  "variant": "stop_at_threshold with max_contexts ",
+  "variant": "stop_at_threshold with max_contexts 3",
   "unit_title": "modes and max_contexts"
  },
  "P-modes-0006": {
@@ -4863,7 +4863,7 @@
   "family": "P-floor",
   "unit_id": "P-floor",
   "unit_type": "list",
-  "variant": "14 positions with four two-base codes (24 bi",
+  "variant": "14 positions with four two-base codes…",
   "unit_title": "the information floor"
  },
  "P-floor-0002": {
@@ -4951,7 +4951,7 @@
   "family": "P-edge",
   "unit_id": "P-edge",
   "unit_type": "refusals",
-  "variant": "bad alphabet slots beside an answered patter",
+  "variant": "bad alphabet slots beside an answered pattern",
   "unit_title": "refused and accepted pattern lists"
  },
  "P-edge-0004": {
@@ -5031,7 +5031,7 @@
   "family": "P-more",
   "unit_id": "P-more",
   "unit_type": "list",
-  "variant": "IUPAC codes at the first and the last positi",
+  "variant": "IUPAC codes at the first and the last position",
   "unit_title": "edge positions and a cap above the count"
  },
  "P-more-0002": {
@@ -5039,7 +5039,7 @@
   "family": "P-more",
   "unit_id": "P-more",
   "unit_type": "list",
-  "variant": "partial with max_contexts 10,000 above the c",
+  "variant": "partial with max_contexts 10,000 above the count",
   "unit_title": "edge positions and a cap above the count"
  },
  "P-heavy-0001": {
@@ -5390,7 +5390,7 @@
   "family": "L-caps",
   "unit_id": "L-caps",
   "unit_type": "list",
-  "variant": "supported paths with max_annotation_work 10 ",
+  "variant": "supported paths with max_annotation_work 10…",
   "unit_title": "path caps"
  },
  "L-memory-0001": {
@@ -5398,7 +5398,7 @@
   "family": "L-memory",
   "unit_id": "L-memory",
   "unit_type": "list",
-  "variant": "A^100000 on a self-loop, paths, max_memory_m",
+  "variant": "A^100000 on a self-loop, paths, max_memory_mb 1",
   "unit_title": "memory bound"
  },
  "L-long-0001": {
@@ -5438,7 +5438,7 @@
   "family": "L-long",
   "unit_id": "L-long-other",
   "unit_type": "list",
-  "variant": "100 bp of mpn as its reverse complement, str",
+  "variant": "100 bp of mpn as its reverse complement…",
   "unit_title": "strands, IUPAC and a homopolymer with paths"
  },
  "L-long-0006": {
@@ -5446,7 +5446,7 @@
   "family": "L-long",
   "unit_id": "L-long-other",
   "unit_type": "list",
-  "variant": "a 60 bp IUPAC pattern (3 two-base codes) wit",
+  "variant": "a 60 bp IUPAC pattern (3 two-base codes)…",
   "unit_title": "strands, IUPAC and a homopolymer with paths"
  },
  "L-long-0007": {
@@ -6336,7 +6336,7 @@
   "family": "X-edge",
   "unit_id": "X-edge-other",
   "unit_type": "refusals",
-  "variant": "11 residues (33 bases > k) without long_sear",
+  "variant": "11 residues (33 bases > k) without long_search",
   "unit_title": "code, length and alphabet edges"
  },
  "X-edge-0007": {
@@ -6716,7 +6716,7 @@
   "family": "M-order",
   "unit_id": "M-order",
   "unit_type": "list",
-  "variant": "a 20-mer, max_mismatches 1, partial max_cont",
+  "variant": "a 20-mer, max_mismatches 1, partial max_contexts 5",
   "unit_title": "level order under a cut or stop"
  },
  "M-order-0002": {
@@ -6836,7 +6836,7 @@
   "family": "M-refusal",
   "unit_id": "M-refusal",
   "unit_type": "refusals",
-  "variant": "a 40-mer at max_mismatches 2 (long_search No",
+  "variant": "a 40-mer at max_mismatches 2 (long_search None)",
   "unit_title": "max_mismatches values and combinations"
  },
  "M-refusal-0011": {
@@ -6844,7 +6844,7 @@
   "family": "M-refusal",
   "unit_id": "M-refusal",
   "unit_type": "refusals",
-  "variant": "a 40-mer at max_mismatches 2 (long_search pa",
+  "variant": "a 40-mer at max_mismatches 2 (long_search paths)",
   "unit_title": "max_mismatches values and combinations"
  },
  "M-refusal-0012": {
@@ -6996,7 +6996,7 @@
   "family": "Q-more",
   "unit_id": "Q-more",
   "unit_type": "list",
-  "variant": "the reverse complement of a mja window, cont",
+  "variant": "the reverse complement of a mja window…",
   "unit_title": "context strands, or(), and a bad at_least"
  },
  "Q-more-0002": {
@@ -8054,7 +8054,7 @@
   "family": "N-usecase",
   "unit_id": "N-usecase-strand",
   "unit_type": "list",
-  "variant": "a primer pair on the forward strand only (on",
+  "variant": "a primer pair on the forward strand only…",
   "unit_title": "the wrong strand"
  },
  "N-usecase-0006": {
@@ -8086,7 +8086,7 @@
   "family": "N-usecase",
   "unit_id": "N-usecase-floor",
   "unit_type": "list",
-  "variant": "too degenerate (20 N + 11 bases, 22 bits",
+  "variant": "too degenerate (20 N + 11 bases, 22 bits)",
   "unit_title": "too short, too degenerate"
  },
  "N-usecase-0010": {

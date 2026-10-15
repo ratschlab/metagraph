@@ -763,8 +763,9 @@ class ReviewRoundTwoTest(unittest.TestCase):
             self.assertEqual(cls, expected, sid)
         chapter = self.tex("chapter_P.tex")
         self.assertIn("host expectation", chapter)
-        self.assertIn("refused before host execution · not expressible through MCP · answered after service "
-                      "normalization · host refusal relayed through the service", chapter)
+        self.assertIn("refused before host execution · not expressible through MCP · answered by the service in the "
+                      "host's place · answered after service normalization · host refusal relayed through the "
+                      "service · answered by the host through the service", chapter)
         # P-002: the MCP answered 200 where the host refuses and its checks failed: a disagreement, never a
         # "normalised" answer (no by-design case explains it) and no explanation row
         row = [l for l in chapter.splitlines() if l.startswith("\\hyperref[detail:P-002]")][0]
@@ -1602,9 +1603,10 @@ class VerifyRoundThreeTest(unittest.TestCase):
                 entry = data["families"].get(fid) or {}
                 if not entry.get("claim") and not any(p.startswith("%s.json: families.%s" % (ch, fid)) for p in ROUND2_PENDING):
                     problems.append("%s.json: %s has no claim" % (ch, fid))
-                for sid in entry.get("claim_members") or []:
-                    if sid not in members(fid):
-                        problems.append("%s.json: claim member %s is not a member of %s" % (ch, sid, fid))
+                for _, wanted in facts.claim_items(entry):
+                    for sid in wanted or []:
+                        if sid not in members(fid):
+                            problems.append("%s.json: claim member %s is not a member of %s" % (ch, sid, fid))
             for fid in data.get("coverage_gap_families") or []:
                 if fid not in any_fams:
                     problems.append("%s.json: coverage_gap_families names %s" % (ch, fid))
@@ -1643,9 +1645,10 @@ class VerifyRoundThreeTest(unittest.TestCase):
         self.assertEqual(fv["mcp_normalised_variants"], "20 bp")
         self.assertIn("P-001", fv["x"])
         self.assertEqual(fv["x"]["P-001"]["dl"]["standing"], "pass")
-        self.assertEqual(fv["x"]["P-001"]["dl"]["phrase"], "a pass in 9 ms / 6 ms (r0 / r1)")
+        # the host state of a direct execution is said where it is not host-warm (VERIFY-PLXM M5)
+        self.assertEqual(fv["x"]["P-001"]["dl"]["phrase"], "a pass in 9 ms (host-cold) / 6 ms (r0 / r1)")
         self.assertEqual(fv["x"]["P-001"]["dr"]["phrase"], "both repeats a pass in 0.1 s")
-        self.assertEqual(fv["x"]["P-003"]["dl"]["phrase"], "the expected refusal (http 400) in 4 ms")
+        self.assertEqual(fv["x"]["P-003"]["dl"]["phrase"], "the expected refusal (http 400) in 4 ms (host-cold)")
         self.assertEqual(fv["n_pass_dl"], 4)
         self.assertEqual(fv["n_relations"], 0)
         self.assertEqual(fv["n_declared_relations"], 0)
@@ -2753,7 +2756,7 @@ class FullDocumentTest(unittest.TestCase):
         self.assertIn("Two tests read inconclusive on direct-local and zero on direct-remote, and two tests answered "
                       "a 200 whose list the deadline withheld on at least one arm (M-001, M-002)", conc_b)
         self.assertIn("In this run 1 of the 1 M-planted tests read inconclusive on direct-local and 0 on direct-remote "
-                      "(one answered a 200 whose list was withheld on at least one arm: M-001)", gap_b)
+                      "(on direct-local one by a 200 limited by time (M-001))", gap_b)
         self.assertIn("Of the 1 substituted residues 1 read inconclusive on direct-local and 0 on direct-remote; no "
                       "substituted residue was found at level 1 on direct-local, so the residue claim rests on no "
                       "evidence from this host", gap_b)
@@ -2789,7 +2792,8 @@ class FullDocumentTest(unittest.TestCase):
         T = self.prose["T"]
         ctx_a, conc_a, gap_a, fam_a = self.render("t-plain", "R", T, ["T-walk"])
         ctx_b, conc_b, gap_b, fam_b = self.render("t-perturbed", "R", T, ["T-walk"])
-        self.assertIn("In this run no walk was cut by its time budget before it showed its property.", gap_a)
+        self.assertIn("In this run no walk was cut by its time budget or the attempt's bound before it showed its "
+                      "property.", gap_a)
         self.assertIn("In this run 1 test had such an execution (R-001). On one of them (R-001) no arm and no repeat "
                       "showed the property, so the walk at that radius rests on no evidence from this host", gap_b)
         self.assertIn("a direct arm failed, errored or disagreed with the other", conc_a)
@@ -2814,7 +2818,9 @@ class FullDocumentTest(unittest.TestCase):
         self.assertEqual(v["n_time_limited"], 3)
         self.assertEqual(v["n_time_limited_200"], 0)
         self.assertEqual(v["x"]["R-001"]["dl"]["time_limited"], "seed 0 stopped by its time budget")
-        self.assertEqual(v["x"]["R-001"]["dl"]["checks"]["walk_in_record"]["evidence"], "right")  # the clause before ': '
+        # the first arm's clause with its name, the explanation after the second ': ' dropped (VERIFY-T M6)
+        self.assertEqual(v["x"]["R-001"]["dl"]["checks"]["walk_in_record"]["evidence"],
+                         "right: the record followed for 656 of 1000 bp, stopped by time_budget")
         self.assertEqual(v["x"]["R-001"]["dl"]["checks"]["walk_in_record"]["detail"],
                          "right: the record followed for 656 of 1000 bp, stopped by time_budget: a stated stop the budget allows")
         self.assertEqual(v["fam"]["T-walk"]["n_time_cut_tests"], 1)
@@ -2842,6 +2848,185 @@ class FullDocumentTest(unittest.TestCase):
                     if cid:
                         named.add(cid)
         self.assertEqual(sorted(named - set(cases)), [])
+
+
+class _Stub(object):
+    """A bare object with the attributes given (a Run or a Context stand-in for the unit tests below)."""
+
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class VerifiedFullDocumentTest(unittest.TestCase):
+    """The fixes after the Opus verifications of the full v4 document (VERIFY-T, VERIFY-PLXM, VERIFY-QCND,
+    2026-10-15): the /traverse budget read from strategy.bounds; a by-design arm's repeat outside the case shown
+    with its recorded outcome; why a pair is unverified, from the comparison's fields; a 2xx the service answered
+    in the host's place; a check that did not apply left out of 'property tested'; an accepted input's property
+    expectations in a refusals row; a walk check's clause; the host state on a direct phrase; several claims per
+    family, each over its members, with a conditional on the manifest; the coverage line's exercised repeats."""
+
+    def test_budget_ms_reads_every_route(self):
+        scenarios = {"t": {"route": "POST /traverse", "request": {"strategy": {"bounds": {"time_budget_ms": 15000}}}},
+                     "r": {"route": "POST /resolve", "request": {"bounds": {"time_budget_ms": 2500}}},
+                     "p": {"route": "POST /pattern", "request": {"time_budget_ms": 60000}},
+                     "n": {"route": "POST /pattern", "request": {}}}
+        run = _Stub(scenario=lambda sid: scenarios.get(sid) or {})
+        run.budget_ms = lambda sid: reader.Run.budget_ms(run, sid)
+        self.assertEqual(reader.Run.budget_ms(run, "t"), 15000)
+        self.assertEqual(reader.Run.budget_ms(run, "r"), 2500)
+        self.assertEqual(reader.Run.budget_ms(run, "p"), 60000)
+        self.assertIsNone(reader.Run.budget_ms(run, "n"))
+        self.assertEqual(blocks._budget_text(run, "t"), "15,000 ms")
+        self.assertEqual(blocks._budget_text(run, "n"), "none")
+
+    @staticmethod
+    def _by_design_arm(other_outcome="pass", other_class="no_direct_reference", direct_verified=True):
+        """An MCP arm standing by design on r0 (the host's deadline relayed) with r1 outside the case."""
+        st = cells.ArmState("mcp")
+        st.present = True
+        st.glyph_key = "service_by_design"
+        st.glyph_marks = ["u"]
+        covered = {"scenario": "N-1", "arm": "mcp", "repeat": 0, "outcome": "service_by_design", "http": 502,
+                   "wall_ms": 63000.0, "host_cache": "cold", "service_by_design_case": "pattern.deadline_ends_task",
+                   "error": {"code": "search_failed", "text": "pattern_deadline"},
+                   "checks": [{"check": "status", "outcome": "fail", "detail": "http 502"},
+                              {"check": "source_absent", "outcome": "fail", "detail": "no answer", "property": True}]}
+        other = {"scenario": "N-1", "arm": "mcp", "repeat": 1, "outcome": other_outcome, "http": 200, "wall_ms": 22000.0,
+                 "host_cache": "warm", "inconclusive_reason": "checks" if other_outcome == "inconclusive" else None,
+                 "time_limited": "pattern 0 time-limited" if other_outcome == "inconclusive" else "",
+                 "checks": [{"check": "status", "outcome": "pass", "detail": "http 200"},
+                            {"check": "source_absent", "outcome": other_outcome, "property": True,
+                             "detail": "absent" if other_outcome == "pass" else "list cut (cut time)"}]}
+        st.lines = [covered, other]
+        st.agreement = {"class": "service_by_design", "by": "answer", "case": "pattern.deadline_ends_task",
+                        "repeats": [0], "verified": False, "direct_verified": direct_verified,
+                        "direct_detail": "repeat(s) ['direct-local r0', 'direct-remote r0'] match" if direct_verified
+                        else "no direct execution answered {'http': 503, 'code': 'deadline'} (direct_mismatch timing: unverified)",
+                        "mcp_verified": True, "other_repeats": {"class": other_class, "mcp_outcome": other_outcome}}
+        return st
+
+    def test_by_design_repeat_outside_the_case(self):
+        """VERIFY-PLXM H2, VERIFY-QCND H2: the case's repeat reads by design, the other repeat its recorded outcome
+        with its property cell; the coverage line counts the arm as exercised on that repeat."""
+        st = self._by_design_arm("pass")
+        self.assertTrue(cells.by_design_line(st, st.lines[0]))
+        self.assertFalse(cells.by_design_line(st, st.lines[1]))
+        self.assertEqual([l["repeat"] for l in cells.exercised_lines(st)], [1])
+        run = _Stub(scenario=lambda sid: {"route": "POST /pattern", "request": {"time_budget_ms": 60000}},
+                    marked_aside=lambda sid, line: {}, cases={}, budget_ms=lambda sid: 60000)
+        rows = blocks._execution_rows(st, run, "N-1", "mcp", lambda n: n == "source_absent")
+        self.assertEqual(rows[0][1], "\\gbd\\ by design")
+        self.assertEqual(rows[0][5], "–")
+        self.assertEqual(rows[1][1], "\\gpass\\ pass")
+        self.assertEqual(rows[1][5], "yes (1 of 1)")
+        self.assertEqual(rows[1][4], "60,000 ms")
+        st2 = self._by_design_arm("inconclusive")
+        rows = blocks._execution_rows(st2, run, "N-1", "mcp", lambda n: n == "source_absent")
+        self.assertEqual(rows[1][1], "\\ginc\\ inconclusive (by the checks)")
+        self.assertEqual(rows[1][5], "no")
+        # the one phrase of the arm names the other repeat and why the pair is unverified
+        run.cases = {"pattern.deadline_ends_task": {"service_answer": {"outcome": "relayed"}}}
+        text = blocks._not_exercised_text(st, run, "N-1", {"pattern.deadline_ends_task": "the deadline relayed"})
+        self.assertIn("repeat r1 outside the case: r1 recorded pass (the row below)", text)
+        self.assertIn("UNVERIFIED pair: r1 outside the case (a pass) has no direct answer of the same kind to compare with", text)
+        # the coverage line: exercised on one repeat, passed there
+        states = {"N-1": {"mcp": st}, "N-2": {"mcp": st2}}
+        self.assertEqual(cells.coverage_text(states, "mcp"), "exercised 2/2 (2 on one repeat only, the other by design), passed 1")
+        # a not-exercised arm's refusal rows stay not exercised, whatever the runner wrote
+        ni = cells.ArmState("mcp")
+        ni.present, ni.glyph_key = True, "not_implemented_mcp"
+        ni.lines = [{"repeat": 0, "outcome": "service_by_design", "http": 400}]
+        self.assertTrue(cells.by_design_line(ni, ni.lines[0]))
+        self.assertEqual(cells.coverage_text({"R-1": {"mcp": ni}}, "mcp"), "not exercised (1\\,\\gni{})")
+
+    def test_unverified_reason_from_the_comparison(self):
+        """VERIFY-PLXM H3, VERIFY-QCND H3: the reason is the comparison's, not a fixed sentence."""
+        st = self._by_design_arm("pass")
+        self.assertEqual(blocks.unverified_reason(st.agreement, st),
+                         "r1 outside the case (a pass) has no direct answer of the same kind to compare with")
+        self.assertEqual(blocks.unverified_cause(st.agreement), "other_repeat")
+        st = self._by_design_arm("pass", other_class="agree", direct_verified=False)
+        self.assertEqual(blocks.unverified_reason(st.agreement, st),
+                         "the direct side did not match the case: no direct execution answered http 503 deadline "
+                         "(a timing difference, not a disagreement)")
+        self.assertEqual(blocks.unverified_cause(st.agreement), "direct")
+        st = self._by_design_arm("inconclusive", direct_verified=None)
+        self.assertEqual(blocks.unverified_cause(st.agreement), "direct+other_repeat")
+        self.assertIn("; r1 outside the case (an inconclusive execution) has no direct answer", blocks.unverified_reason(st.agreement, st))
+        self.assertIsNone(blocks.unverified_reason({"class": "service_by_design", "verified": True}))
+        self.assertIsNone(blocks.unverified_cause({"class": "agree"}))
+        # the classes line and the facts read the same reason
+        self.assertIn("UNVERIFIED: r1 outside the case", blocks._classes_text(
+            _Stub(comp_entry=lambda sid: {"mcp_agreement": self._by_design_arm("pass").agreement}, depth={}),
+            "N-1", {"mcp": self._by_design_arm("pass")})[0])
+
+    def test_service_answered_in_the_hosts_place(self):
+        """VERIFY-QCND H5: a 2xx the service answered from its own data (the host not reached) is no refusal."""
+        cases = {"capabilities.traverse_capabilities_document": {"service_answer": {"outcome": "answered"}},
+                 "case.refused": {"service_answer": {"outcome": "refused_at_submit", "code": "pattern_invalid"}}}
+        answered = [{"http": 200, "outcome": "inconclusive", "inconclusive_reason": "checks", "host_cache": "not_reached",
+                     "service_by_design_case": "capabilities.traverse_capabilities_document"}]
+        cls, words = blocks.mcp_class(answered, {}, {"case": "capabilities.traverse_capabilities_document"}, cases)
+        self.assertEqual(cls, "service_answered")
+        self.assertIn("from the service's own data, the host not reached", words)
+        self.assertEqual(blocks.MCP_CLASS_WORD[cls], "answered by the service in the host's place")
+        refused = [{"http": 200, "outcome": "service_by_design", "host_cache": "not_reached",
+                    "error": {"code": "pattern_invalid", "text": "x"}}]
+        self.assertEqual(blocks.mcp_class(refused, {}, {"case": "case.refused"}, cases)[0], "refused_before_host")
+        self.assertIn("answered by the service in the host's place", sections.EDGE_LEGEND)
+        self.assertIn("answered by the host through the service", sections.EDGE_LEGEND)
+
+    def test_check_that_did_not_apply(self):
+        """VERIFY-T M9: answer_fields with when_http on another status tested nothing."""
+        line = {"checks": [{"check": "status", "outcome": "pass", "detail": "http 200"},
+                           {"check": "answer_fields", "outcome": "pass", "detail": "fields as expected", "property": True},
+                           {"check": "answer_fields", "outcome": "pass", "property": True,
+                            "detail": "http 200: the fields are checked on an http 409 only"}]}
+        self.assertTrue(cells.check_not_applicable(line["checks"][2]))
+        self.assertFalse(cells.check_not_applicable(line["checks"][1]))
+        self.assertEqual(cells.property_tested(line), ("yes", 1, 1))
+        self.assertEqual(blocks._property_cell(line, None), "yes (1 of 1)")
+
+    def test_accepted_input_in_a_refusals_row(self):
+        """VERIFY-T M7: an accepted input's property expectations follow its status."""
+        is_prop = lambda n: n in ("answer_fields", "clamped")
+        dup = {"expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                          {"check": "answer_fields", "args": {"equals": {"results.1.duplicate": True}}}]}
+        text, _ = blocks.refusal_expected(dup, None, is_prop)
+        self.assertEqual(text, "http 200 · \\texttt{results.\\allowbreak{}1.\\allowbreak{}duplicate} = \\texttt{true}")
+        clamp = {"expect": [{"check": "status", "args": {"http": 200}},
+                            {"check": "clamped", "args": {"field": "bounds.time_budget_ms", "requested": 70000,
+                                                         "effective": 60000, "where": "strategy"}}]}
+        self.assertTrue(blocks.refusal_expected(clamp, None, is_prop)[0].startswith("http 200 · clamped "))
+        refused = {"expect": [{"check": "status", "args": {"http": 400, "text": "no"}},
+                              {"check": "answer_fields", "args": {"present": ["usage"]}}]}
+        self.assertEqual(blocks.refusal_expected(refused, None, is_prop)[0], "http 400 \\texttt{no}")
+        self.assertEqual(blocks.expect_text("answer_fields", {"present": ["usage"], "absent": ["x"], "when_http": 409}),
+                         "present \\texttt{usage}; absent \\texttt{x} (on http 409)")
+
+    def test_walk_clause_and_host_state(self):
+        """VERIFY-T M6 and VERIFY-PLXM M5: the walk check's first arm with its clause; a direct execution's host
+        state beside its time."""
+        self.assertEqual(facts._clause("left: the record followed for 793 of 1000 bp, stopped by time_budget; right: 1 route(s)"),
+                         "left: the record followed for 793 of 1000 bp, stopped by time_budget")
+        self.assertEqual(facts._clause("not testable: seed 0 stopped by its attempt's duration bound (stated by the host: x)"),
+                         "not testable: seed 0 stopped by its attempt's duration bound")
+        self.assertEqual(facts._clause("seed 0 not walked (outcome 'failed'): nothing to follow"), "seed 0 not walked (outcome 'failed')")
+        self.assertEqual(facts._wall_text({"wall_ms": 1900.0, "host_cache": "cold"}, "direct-local"), "1.9 s (host-cold)")
+        self.assertEqual(facts._wall_text({"wall_ms": 99.0, "host_cache": "warm"}, "direct-remote"), "99 ms")
+        self.assertEqual(facts._wall_text({"wall_ms": 1900.0, "host_cache": "cold"}, "mcp"), "1.9 s")
+        run = _Stub(scenario=lambda sid: {}, budget_ms=lambda sid: None)
+        self.assertEqual(facts.exec_phrase(run, "x", {"outcome": "pass", "http": 200, "wall_ms": 70.0, "host_cache": "cold"},
+                                           "direct-local"), "a pass in 70 ms (host-cold)")
+
+    def test_claim_items(self):
+        """VERIFY-PLXM H1 and VERIFY-T H4: a family's claims as a list, each over its members."""
+        self.assertEqual(facts.claim_items({"claim": "a", "claim_members": ["M-1"]}), [("a", ["M-1"])])
+        self.assertEqual(facts.claim_items({"claim": [{"claim": "a", "members": ["M-1"]}, "b"]}), [("a", ["M-1"]), ("b", None)])
+        self.assertEqual(facts.claim_items({}), [])
+        self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 4}), "a")
+        self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 5}), "a, and b")
 
 
 if __name__ == "__main__":

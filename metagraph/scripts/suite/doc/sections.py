@@ -667,12 +667,17 @@ def _arm_reason(lines, st, name=None, run=None, sid=None):
         return "no execution"
     if st.glyph_key == "not_implemented_mcp":
         return "not exercised via MCP"
-    if st.glyph_key == "service_by_design":
-        return "decided by the service (by design)"
     words = []
     is_mcp = getattr(st, "arm", None) == "mcp"
     marks = run.check_marks(sid) if (run is not None and sid and is_mcp) else {}
     for l in lines:
+        if is_mcp and cells.by_design_line(st, l):
+            # the case's own repeat; the other repeat outside the case reads its recorded outcome below
+            # (VERIFY-QCND H2)
+            w = "decided by the service (by design)"
+            if w not in words:
+                words.append(w)
+            continue
         http = l.get("http")
         code = (l.get("error") or {}).get("code") if isinstance(l.get("error"), dict) else None
         aside = run.marked_aside(sid, l) if marks else {}
@@ -734,9 +739,10 @@ def untested_properties(ctx):
                             if w not in words:
                                 words.append(w)
                         reasons.append((arm, "; ".join(words)))
-                    # the expectation in words when the missing members share it, else the check's name alone
+                    # the expectation in words when every member expecting the check shares it (the passed ones
+                    # included: the count is over all of them), else the check's name alone
                     texts = []
-                    for sid in missing:
+                    for sid in expecting:
                         e = next((e for e in run.scenario(sid).get("expect") or []
                                   if isinstance(e, dict) and e.get("check") == name), {})
                         t = blocks.expect_text(name, e.get("args"))
@@ -1376,7 +1382,9 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
     run = ctx.run
     states = [ctx.state(sid) for sid in sids]
     out = "\\begingroup\\sffamily\\footnotesize\n"
-    out += "\\bline{chapter %s}{%d tests · %d units in %d families}\n" % (esc(chapter), len(sids), n_units, n_families)
+    out += "\\bline{chapter %s}{%d test%s · %d unit%s in %d famil%s}\n" % (
+        esc(chapter), len(sids), "" if len(sids) == 1 else "s", n_units, "" if n_units == 1 else "s", n_families,
+        "y" if n_families == 1 else "ies")
     out += "\\bline{standing}{%s (by glyph, I.3)}\n" % " · ".join("%s %s" % (esc(arm), cells.glyph_counts(states, arm))
                                                                  for arm in ARMS)
     per_area = (run.summary().get("per_area") or {}).get(chapter) or {}
@@ -1493,7 +1501,7 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     first = next((l for l in st.lines if l.get("http") is not None), None)
     code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
     status = "http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "") if first else "–"
-    if cls in ("refused_before_host", "relayed", "host_state", "refused_unexplained"):
+    if cls in ("refused_before_host", "service_answered", "relayed", "host_state", "refused_unexplained"):
         text = "%s\\ %s\\newline %s" % (glyph, esc(blocks.MCP_CLASS_WORD[cls]), status)
         return text, None
     if cls == "normalised":
@@ -1514,8 +1522,9 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
 
 EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the class in words follows from whether "
                "the host was reached, the error's source and the by-design case (appendix B): refused before host "
-               "execution · not expressible through MCP · answered after service normalization · host refusal "
-               "relayed through the service")
+               "execution · not expressible through MCP · answered by the service in the host's place · answered "
+               "after service normalization · host refusal relayed through the service · answered by the host "
+               "through the service")
 
 
 def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
@@ -1634,8 +1643,8 @@ def unit_section(ctx, chapter, uid):
                 cs.append(latex.cell_lines(l1, l2))
             rows.append((esc(g) if groups else g, len(gm), cs[0], cs[1], cs[2]))
         ids = units_ids(ctx, members, by_group if groups else None)
-        out += latex.replicates_table("variants" if not groups else esc(u.get("unit_title") or uid)[:30], rows, ids,
-                                      legend)
+        out += latex.replicates_table("variants" if not groups else esc(latex.cut_text(u.get("unit_title") or uid, 60)),
+                                      rows, ids, legend)
         # the coverage per arm in words (exercised, passed, not exercised), then the exceptions if any: an
         # "exceptions: none" alone must not read as coverage (the owner's review, point 4)
         all_states = dict((sid, ctx.state(sid)) for sid in members)
@@ -1656,14 +1665,17 @@ def unit_section(ctx, chapter, uid):
         prev = None
         for sid in members:
             st = ctx.state(sid)
-            expected, prev = blocks.refusal_expected(run.scenario(sid), prev)
+            expected, prev = blocks.refusal_expected(run.scenario(sid), prev, run.is_property)
             cs = [st[arm].glyph_tex(_cell_fn(st[arm], fns[sid])) for arm in ("direct-local", "direct-remote")]
             mcp_cell, note = _mcp_edge_cell(ctx, sid, st["mcp"], fns[sid], with_times=False)
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
                           esc_wrap(_variant(meta[sid])), expected] + cs + [mcp_cell], note))
         out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + (("; " + rk) if rk else ""))
         states = [ctx.state(sid) for sid in members]
-        out += "\\sumline{%s: %d test%s · %s · %s}\n" % (tt(uid), len(members), "" if len(members) == 1 else "s", " · ".join(
+        # the unit's line (the wall max per arm) is labelled as the unit's where the unit shares its family's id,
+        # so that it is not read as a repeat of the family's line with p50 / p90 (VERIFY-T L1, VERIFY-PLXM L3)
+        label = tt(uid) + (" (the refusals unit)" if u.get("family") == uid else "")
+        out += "\\sumline{%s: %d test%s · %s · %s}\n" % (label, len(members), "" if len(members) == 1 else "s", " · ".join(
             "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS),
             latex.join_units(cells.max_wall_text(run, members)))
     elif layout == "list":
@@ -1698,7 +1710,9 @@ def unit_section(ctx, chapter, uid):
             second = esc(_variant(meta[sid]))
             src = run.scenario(sid).get("derived_from")
             if src:
-                second = "%s · %s" % (latex.sid(src, units.unit_of(src)), second)
+                variant = (meta[sid] or {}).get("variant")
+                second = latex.sid(src, units.unit_of(src)) if (not variant or variant == src) else \
+                    "%s · %s" % (latex.sid(src, units.unit_of(src)), second)
             rows.append([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid), second] + cs)
         rows += _relation_rows(ctx, u.get("relations") or [])
         out += latex.pairs_table(rows, units_ids(ctx, members), "test", legend)
@@ -1760,6 +1774,9 @@ def chapter(ctx, ch):
         if gap else latex.placeholder("(coverage gap: to be written)") + "\n\n"
     lines = untested_lines(ctx, ch)
     if lines:
+        # how the list counts, against the conclusion's 'n of m' (VERIFY-T L10: the two counts side by side)
+        out += ("The properties below are counted over every arm: a test passes a property when any execution on "
+                "any arm passed it, whereas the conclusion's n of m counts the tests passing on both direct arms.\n")
         out += "\\begin{itemize}\\setlength\\itemsep{0pt}\n" + "".join("\\item %s\n" % l for l in lines) + "\\end{itemize}\n"
     else:
         out += "Every property check of this chapter was passed by at least one execution of each test.\n\n"
@@ -2374,9 +2391,9 @@ def by_design_table(ctx):
             if ma.get("case") == cid and ma.get("class") == "service_by_design":
                 mark = "verified" if ma.get("verified") else "unverified"
                 if not ma.get("verified"):
-                    dis = ma.get("disagreement") if isinstance(ma.get("disagreement"), dict) else {}
-                    if dis.get("direct_detail"):
-                        unverified_detail.append("%s: %s" % (sid, dis["direct_detail"]))
+                    reason = blocks.unverified_reason(ma, ctx.state(sid)["mcp"])
+                    if reason:
+                        unverified_detail.append("%s: %s" % (sid, reason))
             elif ma.get("case") == cid:
                 mark = (ma.get("class") or "").replace("_", " ")
                 dis = ma.get("disagreement") if isinstance(ma.get("disagreement"), dict) else {}
@@ -2404,13 +2421,14 @@ def by_design_table(ctx):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
         rows.append(first + [matches, "; ".join(service) or "–", "; ".join(direct) or "–", "; ".join(named) or "–"])
         if unverified_detail:
-            rows[-1] = (rows[-1], "{\\footnotesize not verified on the direct side: %s}" % latex.join_units(esc_wrap(
+            rows[-1] = (rows[-1], "{\\footnotesize unverified: %s}" % latex.join_units(esc_wrap(
                 "; ".join(unverified_detail))))
     out = ("One row per case of the service-by-design table that a scenario of the built chapters names, that an "
            "MCP answer matched, or that belongs to their areas: the case and its agreement class, what it matches "
            "(and the short reason the tables use), the service's answer, the direct expectation, and the scenarios "
-           "naming it with their verification; where the direct side did not match the case, the comparison's "
-           "detail is under the row.\n\n")
+           "naming it with their verification; where a pair is unverified (the direct side did not match the case, "
+           "or another MCP repeat outside the case has no direct answer to compare with), the reason is under the "
+           "row.\n\n")
     out += latex.plain_table(latex.spec_p([30, 38, 40, 36, 30]),
                              ["case", "matches", "service", "direct", "scenarios"], rows)
     return out

@@ -6,6 +6,7 @@ layouts in sections.py only format it.
 """
 
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -290,6 +291,28 @@ def is_clean(states):
     return all(s.clean for s in states.values())
 
 
+SERVICE_DECIDED = ("service_by_design", "not_implemented_mcp")
+
+
+def by_design_line(st, line):
+    """Whether an execution of an MCP arm standing not exercised or by design is one the service decided in the
+    host's place: every line of a not-exercised arm (a refusal the table files under not implemented reads not
+    exercised whatever the runner wrote), and of a by-design arm the lines whose recorded outcome is the service's
+    (service_by_design: the case's repeats, compare's `repeats`). The other repeat of a by-design arm (compare's
+    `other_repeats`: a separate host answer the case did not match, a 200 that passed or was cut by time) keeps its
+    recorded outcome (VERIFY-PLXM H2, VERIFY-QCND H2)."""
+    if st.glyph_key == "not_implemented_mcp":
+        return True
+    if st.glyph_key == "service_by_design":
+        return line.get("outcome") in SERVICE_DECIDED
+    return False
+
+
+def exercised_lines(st):
+    """The executions of an arm the service did not decide in the host's place (by_design_line)."""
+    return [l for l in st.lines if not by_design_line(st, l)]
+
+
 # -- cells -------------------------------------------------------------------------------------------------------
 
 def server_text(st):
@@ -370,24 +393,40 @@ def aggregate(states, arm):
 
 def coverage_text(states, arm):
     """The coverage of a replicates unit on an arm, in words: `exercised 6/6, passed 6`, or `not exercised (3 ○)`
-    when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`."""
+    when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`. A member standing
+    by design whose other repeat the case did not match (by_design_line: a separate host answer) is exercised on
+    that repeat: `exercised 14/22 (3 on one repeat only, the other by design), passed 9` (VERIFY-PLXM H2)."""
     members = [s[arm] for s in states.values()]
     n = len(members)
-    exercised = [m for m in members if m.present and m.glyph_key not in ("service_by_design",
-                                                                            "not_implemented_mcp")]
+    exercised = [m for m in members if m.present and m.glyph_key not in SERVICE_DECIDED]
+    partly = [m for m in members if m.present and m.glyph_key in SERVICE_DECIDED and exercised_lines(m)]
     passed = sum(1 for m in exercised if m.worst == "pass")
+    passed += sum(1 for m in partly if all(l.get("outcome") == "pass" for l in exercised_lines(m)))
     rest = {}
     for m in members:
-        if m in exercised:
+        if m in exercised or m in partly:
             continue
         rest[m.glyph_key] = rest.get(m.glyph_key, 0) + 1
     rest_text = " ".join("%d\\,%s{}" % (rest[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if rest.get(k))
-    if not exercised:
+    if not exercised and not partly:
         return "not exercised (%s)" % rest_text if rest_text else "not exercised"
-    text = "exercised %d/%d, passed %d" % (len(exercised), n, passed)
+    text = "exercised %d/%d" % (len(exercised) + len(partly), n)
+    if partly:
+        text += " (%d on one repeat only, the other by design)" % len(partly)
+    text += ", passed %d" % passed
     if rest_text:
         text += "; not exercised %s" % rest_text
     return text
+
+
+_NOT_APPLICABLE_RE = re.compile(r"^http \S+: the fields are checked on an http \S+ only$")
+
+
+def check_not_applicable(check):
+    """Whether a recorded check item did not apply to the answer it was read on (checks.py's `answer_fields` with
+    `when_http` on another status passes with the detail 'http 200: the fields are checked on an http 409 only'):
+    nothing of it was tested, so it is neither counted as tested nor as untested (VERIFY-T M9)."""
+    return bool(_NOT_APPLICABLE_RE.match(str(check.get("detail") or "")))
 
 
 def property_tested(line, is_property=None, aside=None):
@@ -397,7 +436,7 @@ def property_tested(line, is_property=None, aside=None):
     (check name, occurrence) of the items a property-level mark of the manifest sets aside on this MCP execution
     (suite_common.checks_marked_aside: marked not implemented via MCP or service-side by design, read not_exposed):
     they are neither tested nor untested here and are left out of the count (the caller names them)."""
-    checks = [c for c in (line.get("checks") or []) if isinstance(c, dict)]
+    checks = [c for c in (line.get("checks") or []) if isinstance(c, dict) and not check_not_applicable(c)]
     if aside:
         seen = {}
         kept = []

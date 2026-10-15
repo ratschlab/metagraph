@@ -325,13 +325,17 @@ class Run(object):
         return [r for r in (gt.get("records") or []) if isinstance(r, dict) and r.get("key")]
 
     def budget_ms(self, sid):
-        """The time budget a scenario's request names (bounds.time_budget_ms, else a top-level time_budget_ms),
-        or None."""
+        """The time budget a scenario's request names: /resolve's `bounds.time_budget_ms`, /pattern's top-level
+        `time_budget_ms`, /traverse's `strategy.bounds.time_budget_ms` (the preset's merged strategy, every walk
+        request carries one; VERIFY-T H1, VERIFY-QCND H1), or None."""
         req = self.scenario(sid).get("request") or {}
         if not isinstance(req, dict):
             return None
         bounds = req.get("bounds") if isinstance(req.get("bounds"), dict) else {}
-        for v in (bounds.get("time_budget_ms"), req.get("time_budget_ms"), req.get("budget_ms")):
+        strategy = req.get("strategy") if isinstance(req.get("strategy"), dict) else {}
+        sbounds = strategy.get("bounds") if isinstance(strategy.get("bounds"), dict) else {}
+        for v in (bounds.get("time_budget_ms"), req.get("time_budget_ms"), req.get("budget_ms"),
+                  sbounds.get("time_budget_ms")):
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 return v
         return None

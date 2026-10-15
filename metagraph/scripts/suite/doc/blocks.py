@@ -81,6 +81,23 @@ def _budget(args):
     return text
 
 
+def _answer_fields(args):
+    """`answer_fields`: the fields an answer must carry, equal, be without (dotted paths), on a status when
+    `when_http` names one: `results.1.duplicate = true`, `present usage`, `absent usage (on http 409)`."""
+    parts = []
+    eq = args.get("equals")
+    if isinstance(eq, dict) and eq:
+        parts.append(", ".join("%s = %s" % (tt(k), tt(_runs(v))) for k, v in eq.items()))
+    if args.get("present"):
+        parts.append("present %s" % ", ".join(tt(p) for p in args["present"]))
+    if args.get("absent"):
+        parts.append("absent %s" % ", ".join(tt(p) for p in args["absent"]))
+    text = "; ".join(parts) if parts else "fields as expected"
+    if args.get("when_http") is not None:
+        text += " (on http %s)" % esc(args["when_http"])
+    return text
+
+
 _GENERIC_BREAK = "(,=_.:/\"[{"
 
 
@@ -110,6 +127,7 @@ EXPECT_TEXT = {
     "budget_respected": _budget,
     "deterministic": lambda a: "deterministic (the digest of the earlier repeats)",
     "counts_consistent": lambda a: "counts consistent",
+    "answer_fields": _answer_fields,
 }
 
 
@@ -142,9 +160,11 @@ def expected_text(scenario, is_property=None, limit=None):
     return text
 
 
-def refusal_expected(scenario, previous=None):
+def refusal_expected(scenario, previous=None, is_property=None):
     """The expected column of a refusals row: the status expectation; 'the same text' when it repeats the
-    previous row's."""
+    previous row's; for an accepted input (a 2xx status) the property expectations the row carries follow the
+    status, so that a ● there shows its claim (VERIFY-T M7: T-edge-0008's `results.1.duplicate = true`, T-edge-0012's
+    clamped budget)."""
     for e in scenario.get("expect") or []:
         if isinstance(e, dict) and e.get("check") == "status":
             args = e.get("args") or {}
@@ -152,7 +172,13 @@ def refusal_expected(scenario, previous=None):
             if previous is not None and text and text == previous:
                 head = "http %s" % args.get("http") if args.get("http") is not None else ""
                 return (head + " the same text").strip(), text
-            return _status(args), text
+            head = _status(args)
+            if not host_expects_refusal(scenario):
+                props = [x for x in ordered_expectations(scenario, is_property)
+                         if x.get("check") != "status" and (is_property is None or is_property(x.get("check")))]
+                if props:
+                    head += " · " + " · ".join(expect_text(x.get("check"), x.get("args")) for x in props)
+            return head, text
     return "–", None
 
 
@@ -160,6 +186,7 @@ def refusal_expected(scenario, previous=None):
 
 MCP_CLASS_WORD = {"not_expressible": "not expressible through MCP",
                   "refused_before_host": "refused before host execution",
+                  "service_answered": "answered by the service in the host's place",
                   "normalised": "answered after service normalization",
                   "relayed": "host refusal relayed through the service",
                   "answered": "answered by the host through the service",
@@ -200,10 +227,12 @@ def mcp_class(lines, scenario, agreement, cases):
 
     Returns (class key, the evidence in a few words, LaTeX). Keys: not_expressible (no answer recorded, the manifest's
     mark or the table's not-expressible case), refused_before_host (the service answered a refusal without
-    calling the host), relayed (the service called the host and relayed its refusal under its own code),
-    normalised (the service reshaped the request and the host answered where it would have refused the
-    original), answered (the host answered through the service), host_state (the service ended the call by its
-    own limit), refused_unexplained (a refusal that failed: no case explains it), none (no execution)."""
+    calling the host), service_answered (the service answered a 2xx from its own data without calling the host:
+    the capabilities tools' own documents; VERIFY-QCND H5), relayed (the service called the host and relayed its
+    refusal under its own code), normalised (the service reshaped the request and the host answered where it would
+    have refused the original), answered (the host answered through the service), host_state (the service ended
+    the call by its own limit), refused_unexplained (a refusal that failed: no case explains it), none (no
+    execution)."""
     lines = [l for l in lines if isinstance(l, dict)]
     agreement = agreement or {}
     if not lines:
@@ -236,6 +265,11 @@ def mcp_class(lines, scenario, agreement, cases):
         # is the one exception: the service called the host and relays its refusal under its own code)
         if service_outcome == "relayed":
             return "relayed", "%s; the host was called and its refusal relayed" % status_text
+        if isinstance(http, int) and http < 400 and not code and service_outcome != "refused_at_submit":
+            # a 2xx without an error code from the service's own data (the capabilities tools answer the service's
+            # view of the host; the table's service outcome is `answered`): no refusal, and nothing of the host's
+            # answer to compare
+            return "service_answered", "%s from the service's own data, the host not reached" % status_text
         if service_outcome == "not_expressible" or agreement.get("class") == "not_implemented_mcp":
             return "refused_before_host", "%s at submit (the table: not expressible)" % status_text
         return "refused_before_host", "%s at submit" % status_text
@@ -263,11 +297,19 @@ def _err(line):
     return err.get("code"), err.get("text")
 
 
+LONG_CODE = 25
+
+
 def _status_cell(line):
+    """`503 deadline`; a code of more than LONG_CODE characters (`traversal_resolve_deadline`, 26) in a top-aligned
+    box that wraps at its underscores, so that the block's table stays within the margin (VERIFY-QCND L7); the
+    shorter codes of the frozen chapter R sample (`resolve_query_too_long`) print as before."""
     http = line.get("http")
     code, _ = _err(line)
     if http is None:
         return "–"
+    if code and len(str(code)) > LONG_CODE:
+        return "\\parbox[t]{27mm}{\\raggedright\\strut %s %s}" % (esc(http), tt(code))
     return "%s%s" % (esc(http), (" " + tt(code)) if code else "")
 
 
@@ -407,10 +449,84 @@ def _arm_adjudication(st, run, sid, arm):
     return text
 
 
+def _direct_detail_words(detail):
+    """compare's `direct_detail` of an unverified by-design pair in words: 'no direct execution answered
+    {'http': 503, 'code': 'deadline'} (direct_mismatch timing: unverified)' reads 'no direct execution answered
+    http 503 deadline (a timing difference, not a disagreement)'; any other detail as recorded."""
+    text = str(detail or "")
+    m = re.match(r"no direct execution answered \{'http': (\d+)(?:, 'code': '([^']*)')?\}(?: \(direct_mismatch (\w+)[^)]*\))?",
+                 text)
+    if m:
+        out = "no direct execution answered http %s%s" % (m.group(1), (" " + m.group(2)) if m.group(2) else "")
+        if m.group(3) == "timing":
+            out += " (a timing difference, not a disagreement)"
+        elif m.group(3):
+            out += " (direct mismatch: %s)" % m.group(3)
+        return out
+    return text
+
+
+OUTCOME_PHRASE = {"pass": "a pass", "inconclusive": "an inconclusive execution", "fail": "a failure", "error": "an error",
+                  "finding": "a finding"}
+
+
+def other_repeats(st):
+    """The repeats of a by-design MCP arm the case did not match, with their lines (cells.exercised_lines)."""
+    return [(l.get("repeat"), l) for l in cells.exercised_lines(st)]
+
+
+def unverified_reason(ma, st=None):
+    """Why a by-design pair is unverified, from compare's mcp_agreement, in plain text: the direct side did not
+    match the case (`direct_verified` false or None, with `direct_detail`), or the other MCP repeat outside the
+    case (`other_repeats`: a separate host answer) has no direct answer to compare with or disagrees, so the pair
+    as a whole is not verified although the case's own repeat is (VERIFY-PLXM H3, VERIFY-QCND H3). None when the
+    pair is verified or the class is not by design."""
+    ma = ma or {}
+    if ma.get("class") != "service_by_design" or ma.get("verified") is not False:
+        return None
+    parts = []
+    if ma.get("direct_verified") is not True:
+        dis = ma.get("disagreement") if isinstance(ma.get("disagreement"), dict) else {}
+        detail = ma.get("direct_detail") or dis.get("direct_detail")
+        parts.append("the direct side did not match the case" + ((": " + _direct_detail_words(detail)) if detail else ""))
+    others = ma.get("other_repeats")
+    reps = [r for r, _ in other_repeats(st)] if st is not None else []
+    which = ("r%s" % ", r".join(str(r) for r in reps)) if reps else "the other repeat"
+    for p in ([others] if isinstance(others, dict) else (others or [])):
+        if not isinstance(p, dict) or p.get("class") in ("agree", "service_by_design", None):
+            continue
+        outcome = p.get("mcp_outcome")
+        what = OUTCOME_PHRASE.get(outcome, ("a %s" % cells.WORD.get(outcome, str(outcome))) if outcome else "an execution")
+        if p.get("class") == "no_direct_reference":
+            parts.append("%s outside the case (%s) has no direct answer of the same kind to compare with" % (which, what))
+        elif p.get("class") == "disagree":
+            parts.append("%s outside the case (%s) disagrees with the reference arm" % (which, what))
+        else:
+            parts.append("%s outside the case reads %s" % (which, str(p.get("class")).replace("_", " ")))
+    return "; ".join(parts) if parts else "one side did not match the case"
+
+
+def unverified_cause(ma):
+    """'direct' (the direct side did not match the case), 'other_repeat' (a repeat outside the case without a
+    direct reference or disagreeing), both joined with '+', or None for a verified or not by-design pair."""
+    ma = ma or {}
+    if ma.get("class") != "service_by_design" or ma.get("verified") is not False:
+        return None
+    causes = []
+    if ma.get("direct_verified") is not True:
+        causes.append("direct")
+    others = ma.get("other_repeats")
+    if any(isinstance(p, dict) and p.get("class") not in ("agree", "service_by_design", None)
+           for p in ([others] if isinstance(others, dict) else (others or []))):
+        causes.append("other_repeat")
+    return "+".join(causes) or "direct"
+
+
 def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
     """The one phrase of an MCP arm the service refused or could not express (the owner's review, point 4): the
     class of the outcome with the recorded status and code, the short local reason unless the unit's note under
-    the table carries it (`unit_note`), an unverified pair's detail, and the pointer to appendix B."""
+    the table carries it (`unit_note`), the other repeat outside the case with its recorded outcome, an unverified
+    pair's reason, and the pointer to appendix B."""
     cls, _ = mcp_class(st.lines, run.scenario(sid), st.agreement, run.cases)
     case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
                                              if l.get("service_by_design_case")), None)
@@ -420,13 +536,20 @@ def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
     if not unit_note:
         parts.append(short_reason(run, sid, case, short_reasons))
     if cls != "not_expressible":
-        first = next((l for l in st.lines if l.get("http") is not None), None)
+        first = next((l for l in st.lines if l.get("http") is not None and cells.by_design_line(st, l)), None) \
+            or next((l for l in st.lines if l.get("http") is not None), None)
         code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
         status = ("http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "")) if first else None
         parts.append("%s%s" % (esc(MCP_CLASS_WORD.get(cls, cls)), (" (%s)" % status) if status else ""))
+    others = other_repeats(st)
+    if others:
+        reps = ["r%s" % esc(r) for r, _ in others]
+        parts.append("%s %s outside the case: %s (the row%s below)" % (
+            "repeat" if len(others) == 1 else "repeats", esc(", ".join(reps)),
+            esc("; ".join("r%s recorded %s" % (r, cells.WORD.get(l.get("outcome"), str(l.get("outcome"))))
+                          for r, l in others)), "" if len(others) == 1 else "s"))
     if st.glyph_key == "service_by_design" and st.agreement.get("verified") is False:
-        parts.append("UNVERIFIED pair: %s" % esc(((st.agreement.get("disagreement") or {}).get("direct_detail")
-                                                 or "the direct side did not match the case"), 200))
+        parts.append("UNVERIFIED pair: %s" % esc(unverified_reason(st.agreement, st), 240))
     tail = ("the note under the table and " if unit_note else "") + (("case %s in B" % tt(case)) if case else "B")
     parts.append(tail)
     return "%s\\ %s: %s" % (glyph, head, "; ".join(parts))
@@ -440,6 +563,10 @@ def short_reason(run, sid, case, short_reasons=None):
         return inline(short_reasons[case])
     ni = (run.scenario(sid).get("mcp") or {}).get("not_implemented")
     if ni:
+        # a reason the manifest words with its own article ('the raw /pattern/capabilities document') is not
+        # "the request's the ..." (VERIFY-QCND L3)
+        if str(ni).lower().startswith(("the ", "a ", "an ")):
+            return "%s cannot be expressed through the tools" % esc(ni, 80)
         return "the request's %s cannot be expressed through the tools" % esc(ni, 80)
     c = (run.cases or {}).get(case) or {}
     sa = c.get("service_answer") or {}
@@ -483,9 +610,10 @@ def _execution_rows(st, run, sid, arm, is_property):
     several = len(st.lines) > 1
     for l in st.lines:
         outcome = l.get("outcome")
-        if st.glyph_key in ("not_implemented_mcp", "service_by_design"):
+        if cells.by_design_line(st, l):
             # the arm's standing, as the cell shows it: a refusal the table files under not implemented reads
-            # not exercised (○) in the row too, whatever outcome the runner recorded for the execution
+            # not exercised (○) in the row too, whatever outcome the runner recorded for the execution; the other
+            # repeat of a by-design arm, outside the case, keeps its recorded outcome (VERIFY-PLXM H2)
             outcome = st.glyph_key
         glyph = cells.GLYPH.get(outcome, "\\gfail")
         word = OUTCOME_WORD.get(outcome, esc(cells.WORD.get(outcome, str(outcome))))
@@ -583,8 +711,9 @@ def _group_text(key, names):
     if kind == "not_exposed":
         return "%s \\ginc{} — not exposed via MCP%s" % (", ".join(esc(n) for n in names),
                                                        (": " + esc(detail, 240)) if detail else "")
+    # a detail cut at the column's length keeps its parentheses balanced (VERIFY-T L3)
     return "%s %s{}%s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(kind, "\\gfail"),
-                          (" — " + esc(detail, 240)) if detail else "")
+                          (" — " + esc(_balanced(latex.cut_text(str(detail), 240)))) if detail else "")
 
 
 def _texts_line(states):
@@ -694,14 +823,15 @@ def _classes_text(run, sid, states):
         if ma.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 160)
         if mcls == "service_by_design" and ma.get("verified") is False:
-            dis = ma.get("disagreement") if isinstance(ma.get("disagreement"), dict) else {}
-            text += "; UNVERIFIED: %s" % esc(dis.get("direct_detail") or dis.get("mcp_detail") or "one side did not "
-                                                                                                "match the case", 200)
+            text += "; UNVERIFIED: %s" % esc(unverified_reason(ma, states.get("mcp")), 240)
         parts.append(text)
     missing = [arm for arm, st in states.items() if st.missing_planned]
     if missing:
         parts.append("planned execution(s) not recorded: %s" % esc(", ".join(missing)))
     return parts
+
+
+RELATION_NOT_EVALUATED = {"not_exposed": "not evaluated: not exposed via MCP", "not_evaluated": "not evaluated"}
 
 
 def _relations_text(run, sid, units):
@@ -720,8 +850,14 @@ def _relations_text(run, sid, units):
             a = arms.get(arm) or {}
             if not a:
                 continue
-            per_arm.append("%s %s{}" % (esc(cells.ARM_SHORT.get(arm, arm)), cells.GLYPH.get(a.get("outcome"), "\\ginc")))
-            if a.get("detail") and a.get("outcome") != "pass":
+            o = a.get("outcome")
+            if o in RELATION_NOT_EVALUATED:
+                # the relation could not be evaluated on this arm (a raw answer or a field is missing via MCP):
+                # neither passed nor inconclusive, the dash the sum line prints (VERIFY-QCND L5)
+                per_arm.append("%s \\gnone{} (%s)" % (esc(cells.ARM_SHORT.get(arm, arm)), RELATION_NOT_EVALUATED[o]))
+            else:
+                per_arm.append("%s %s{}" % (esc(cells.ARM_SHORT.get(arm, arm)), cells.GLYPH.get(o, "\\ginc")))
+            if a.get("detail") and o != "pass":
                 details.append((arm, a["detail"]))
         other = rel.get("b") if rel.get("a") == sid else rel.get("a")
         text = "%s (%s, with %s): %s" % (latex.breakable_id(rel.get("id")), esc(rel.get("title"), 100),
@@ -807,9 +943,11 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     # of the other executions grouped by reason
     for arm in cells.ARMS:
         st = states[arm]
-        if not st.present or st.glyph_key in ("not_implemented_mcp", "service_by_design"):
+        if not st.present:
             continue
         for l in st.lines:
+            if cells.by_design_line(st, l):
+                continue
             label = "%s r%s" % (esc(cells.ARM_SHORT.get(arm, arm)), esc(l.get("repeat")))
             for rr in l.get("warm_up_reruns") or []:
                 if isinstance(rr, dict):
