@@ -53,8 +53,12 @@ DEFAULT_CAPABILITIES = os.path.join(truth.TRUTH_DIR, "staging_capabilities")
 # the telomeric seed's re-entry, an all_or_count hard region never withheld, a peptide, a count in suffix scope
 # (properties the MCP may not expose), a 31-mer of a real repeat, and the max_mismatches 0 relation pair.
 SMOKE_TAG = "smoke-v%d" % MANIFEST_VERSION
+# v5 adds the warm-ups of the two smoke scenarios that have one (R-twin-0002 before R-budget-0001, R-warm-0006
+# before N-hard-0022), so that the smoke run meets them as the full run does, and a forced cap via MCP (T-caps-0002):
+# 14 scenarios, 32 direct requests of a paired smoke run (R-budget-0001 repeats twice) with the closing GETs
 SMOKE_IDS = ("R-budget-0001", "R-junction-0001", "T-end-0001", "T-budget-0001", "N-hard-0022", "N-hard-0005",
-             "X-peptide10-0009", "P-exact-0001", "N-realrep-0007", "M-refusal-0012", "M-twin-0001")
+             "X-peptide10-0009", "P-exact-0001", "N-realrep-0007", "M-refusal-0012", "M-twin-0001",
+             "R-twin-0002", "R-warm-0006", "T-caps-0002")
 CONVENTIONS = {
     "truth.start": "0-based position of the window's first base on the record's forward strand (whole-record coordinates)",
     "truth.window": "the record's bases on its forward strand (for a '-' source the reverse complement of the pattern)",

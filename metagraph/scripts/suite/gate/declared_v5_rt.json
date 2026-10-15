@@ -3,7 +3,7 @@
  "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): what the MCP surface cannot show (carried over from declared_v4_rt.json section 1, approved by the owner on 2026-10-14; the scenario ids are v5's, which keep v4's), and the scenarios whose property is inherently time-dependent (budget_stress, lane V5: new, for the owner's review before the freeze). The v4 suite errors of declared_v4_rt.json (T-labels-0004, T-budget-0003, T-attempts-0002 r1, REL-prefix_equals-0001/0002/0003) are fixed by v5 and not carried. Decided by the owner, never inferred from an answer a run received; each entry names its evidence.",
  "manifest": {
   "file": "manifest/suite_v5.json",
-  "content_sha256": "83f160dc49db7918ba6b4634cc197631fcb0094b907e4efe7c397ca3d131f616"
+  "content_sha256": "409987ccfaf81641d95f5948f5ea7493a22ca44ce63c509dbe166ecbb20d5e7f"
  },
  "exclusions": [
   {
