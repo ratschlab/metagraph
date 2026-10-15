@@ -2964,7 +2964,8 @@ Re-vendor checks.py (S8c: no runner logic), suite_common.py and service_by_desig
 
 `build_manifest.py` builds manifest version 5 (`suite_v5.json` / `suite_smoke_v5.json`, smoke tag `smoke-v5`); the
 frozen v1-v4 stay (1387455f rebuilds v4 byte for byte from the record cache it was built from). Phase A builds v5
-dry (lane V5's scratch, content_sha256 409987cc..., relations_sha256 39660cfa...); run_suite.sh keeps v4 as its
+dry (lane V5's scratch, content_sha256 738020f4..., relations_sha256 39660cfa..., with the owner's amendments of
+2026-10-15); run_suite.sh keeps v4 as its
 default until the freeze (Phase B: freeze, smoke, default, the gate policy from gate/declared_v5_rt.json). What
 changed, by finding:
 
@@ -3004,14 +3005,18 @@ changed, by finding:
   `resolve.time_budget_above_host_max` names only a budget above the snapshot's cap.
 - **The stated stop** (V05 with VERIFY-V4's amendment): R-budget-0001 resolves eco's 5 kb second half (eco's
   10 kb never completed here) under 700 ms, R-budget-0002 pae's 10 kb under 420 ms: the work deadline (budget -
-  250 ms) inside the warm work, after each one's complete twin (R-twin-0002 / -0004 at 60,000 ms, the warm-up). A
-  stop still depends on batch times: tagged `budget_stress` (truth.budget_stress), repeat 2, and excluded from the
-  deploy gate by the declared file; a complete answer reads inconclusive (lane G1's rule).
-- **Walks** (V06, G24): the 1 kb header T-walks walk 300 bp (the MCP's walk preset caps the budget at 15 s; cold
-  rates 36-58 bp/s); T-walk-0006 / -0012 / -0018 / -0036 ask the host's 60,000 ms (refused by the MCP above its
-  preset, by design) and walk 2,500 / 1,000 / 10,000 / 2,500 bp, what the slowest cold direct rate observed covers in
-  30 s; T-repeat 400 bp, eco's derived-label pair 50 bp, T-coords 250 bp. Every window is drawn as in v4 (the
-  class's margin), so nothing else moves.
+  250 ms) inside the warm work, after each one's complete twin (R-twin-0002 / -0004 at 60,000 ms, the warm-up;
+  truth.stop_design). A stop still depends on batch times; the owner keeps both in the deploy gate, required on
+  direct-local (2026-10-15), one repeat each (a repeat decides on its own); a complete answer reads inconclusive
+  (lane G1's rule).
+- **Walks** (V06, G24, as the owner amended them on 2026-10-15): the three 1 kb header walks a cold first call left
+  inconclusive in v4 (T-walk-0004, -0014, -0022; the MCP's walk preset caps the budget at 15 s, cold rates 36-58
+  bp/s) walk 300 bp, the other nine keep 1 kb. T-walk-0006 / -0012 / -0018 / -0036, the gate's walks, ask the host's
+  60,000 ms (refused by the MCP above its preset, by design) and walk 2,500 / 1,000 / 5,000 / 2,500 bp, what the
+  slowest cold direct rate observed covers in 30 s; each has a long twin right after it on the same window,
+  T-longwalk-0001..0004 (10,000, 4,000, 10,000, 4,000 bp at 60,000 ms), tagged `budget_stress` (truth.budget_stress:
+  whether it completes depends on the load) and kept in the full suite. T-repeat 400 bp, eco's derived-label pair 50
+  bp, T-coords 250 bp. Every window is drawn as in v4 (the class's margin), so nothing else moves.
 - **Warm-ups** (`warm-up`, truth.warm_up_for; `build_manifest.place_warm_ups` puts each right before its target): a
   resolve of the rows the target reads (the record region under its header: tuples; under its column: rows), itself a
   positive check (R-warm-0001..0004 before T-repeat-0001..0004, R-warm-0005 before T-labels-0003, R-warm-0006, the
@@ -3060,18 +3065,22 @@ changed, by finding:
   status passed, only where its MCP request is the baseline's (traverse_resolve's time budget aside) and restricted to
   its checks; the manifest states the baseline (`mcp_exposure_baseline`). 504 v5 scenarios carry a list.
 - gate/declared_v5_rt.json carries the owner's v4 §1 entries (C-caps-0001 on MCP; label_dict_contains on
-  T-labels-0003 / -0005 and answer_fields on T-edge-0008 not required on MCP) and adds R-budget-0001 / -0002 on
-  direct-local (budget_stress, for the owner); every v4 suite error of §2 is fixed and dropped.
+  T-labels-0003 / -0005 and answer_fields on T-edge-0008 not required on MCP) and adds nothing; every v4 suite error
+  of §2 is fixed and dropped.
+- `gate_policy.py` excludes a scenario tagged `budget_stress` on every arm (rule budget_stress, the manifest's
+  truth.budget_stress.reason, printed by describe()): no declared entry; the owner approved it for T-longwalk-0001..0004
+  (2026-10-15).
 
 ### Validation (offline, Phase A)
-- The dry v5 against v4 (scenario by scenario): 693 scenarios (12 added: R-warm-0001..0006, T-attempts-0003,
-  T-caps-0002..0004, T-quorum-0002, T-seeds-0002; none dropped); 182 changed beyond mcp.exposes and the smoke tag, each
-  to one finding above; 107 unchanged; 392 only gained mcp.exposes or the smoke tag.
-- Every truth re-checked against the cached records (627 windows, 615 flanks, all ACGT, 15 copies; 46 walk minima,
+- The dry v5 against v4 (scenario by scenario): 697 scenarios (16 added: R-warm-0001..0006, T-longwalk-0001..0004,
+  T-attempts-0003, T-caps-0002..0004, T-quorum-0002, T-seeds-0002; none dropped); 171 changed beyond mcp.exposes and
+  the smoke tag, each to one finding above; 107 unchanged; 403 only gained mcp.exposes or the smoke tag.
+- Every truth re-checked against the cached records (631 windows, 619 flanks, all ACGT, 15 copies; 46 walk minima,
   12 header runs, 2 trie head counts, 34 chance bounds, 3 reverse negatives recomputed; 8 warm-ups placed and
   matching; 13 discoveries explicit): 0 problems.
-- The v4 answers judged by v5's expectations where the request is v4's (545 scenarios): every new check passes on
+- The v4 answers judged by v5's expectations where the request is v4's (554 scenarios): every new check passes on
   every arm and repeat; N-usecase-0005's MCP executions turn inconclusive -> pass (a property the MCP exposes);
   v4's T-attempts-0002 repeat-1 409 is T-attempts-0003's answer in v5 (pass there).
-- The v5 gate policy derives from the dry build with the declared file: 234 selected, MCP 202 scenarios / 410
-  executions, direct-local 232 / 266; REL-same_answer-0003 and REL-prefix_equals-0002 / -0004 required.
+- The v5 gate policy derives from the dry build with the declared file: 238 selected, 36 excluded (4 budget_stress),
+  MCP 202 scenarios / 410 executions, direct-local 234 / 268; REL-same_answer-0003 and REL-prefix_equals-0001..0004
+  required.
