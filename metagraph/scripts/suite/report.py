@@ -279,10 +279,13 @@ def judged_with_text(judged):
         "a change of the tree since the run reaches this comparison" % (md(judged.get("dir") or "-"), sha)
 
 
-def report_cases(comp):
-    """The by-design table compare judged the run with (compare.json by_design_table), loaded; {} without one."""
+def report_cases(comp, run_dir=None):
+    """The by-design table compare judged the run with (compare.json by_design_table, a path inside the run relative
+    to |run_dir|: compare.run_relative), loaded; {} without one."""
     info = (comp or {}).get("by_design_table")
     path = (info or {}).get("path") if isinstance(info, dict) else None
+    if path and run_dir:
+        path = cmp.run_path(path, run_dir)
     if not path or not os.path.exists(path):
         return {}
     try:
@@ -1261,7 +1264,8 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     is_property = gate_mod._is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
     depth = agreement_depth(comp, rows, is_property)
     missing = gate_mod.missing_planned(run_dir, manifest, rows)
-    parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest, report_cases(comp)))
+    parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest,
+                                 report_cases(comp, run_dir)))
     parts.append(gate_section(run_dir, reevaluated, max_failures))
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures, run))

@@ -2404,7 +2404,10 @@ one lane's verification left to another lane's file.
   table its re-evaluation replayed. run_suite.sh passes `--by-design "$SNAP/service_by_design.json"` to compare
   itself unless --by-design names another table.
 - compare.json `judged_with` {source, dir, checks_sha256, snapshot_changed, by_design: snapshot | live | other |
-  null}; the report's Environment table states it ("comparison judged with": the run's snapshot, the
+  null}; a path inside the run directory (the snapshot's `dir`, by_design_table's `path`) is stored relative to it
+  (`compare.run_relative`; report.report_cases reads it against RUN_DIR), so a report regenerated after the run
+  directory moved reads the same table and states the same MCP limits (VERIFY-SUITE-INT follow-up 3; with the
+  absolute path the moved run lost its table and read INCONCLUSIVE). The report's Environment table states it ("comparison judged with": the run's snapshot, the
   re-evaluation's checks, or this tree's checks.py with the remark that a change of the tree since the run reaches
   the comparison) and the table's origin beside its sha256. merge_run's stricter outcomes already used the snapshot.
 - The snapshot's checks.py imports the snapshot's suite_common.py in the verdict pipeline too

@@ -321,6 +321,62 @@ print(json.dumps({
 '''
 
 
+class MovedRunTest(unittest.TestCase):
+    """compare.json names the run's snapshot (its table, its checks) relative to RUN_DIR: a report regenerated after
+    the run directory moved reads the same table and states the same."""
+
+    CASE = "capabilities.traverse_capabilities_document"
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_a_moved_copy_re_reports_identically(self):
+        # C-caps-0001 inconclusive via MCP by a limit the table states (the snapshot's table, read through compare.json)
+        caps = {"id": "C-caps-0001", "area": "C", "route": "GET /traverse/capabilities", "request": None,
+                "mcp": {"tool": "traverse_capabilities", "arguments": {}, "by_design": [self.CASE]},
+                "expect": [{"check": "status", "args": {"http": 200}}, {"check": "capabilities_doc", "args": {}}]}
+        S = [dict(caps, id="P-001", area="P", route="POST /pattern", mcp={"tool": "pattern_search", "arguments": {}},
+                  expect=[{"check": "status", "args": {"http": 200}}], title="p"), caps]
+        manifest = {"manifest_version": 1, "content_sha256": sc.scenarios_sha256(S), "scenarios": S}
+        run_dir = os.path.join(self.d, "runs", "RUN1")
+        status = {"check": "status", "outcome": "pass", "detail": "http 200"}
+        mcp = [line("P-001", "mcp", r, T0 + 10 + r, 20.0, checks=[status]) for r in (0, 1)]
+        for r in (0, 1):
+            ln = line("C-caps-0001", "mcp", r, T0 + 20 + r, 20.0, area="C", outcome="inconclusive",
+                      checks=[status, {"check": "capabilities_doc", "outcome": "not_exposed",
+                                       "detail": "field not in the answer: release"}])
+            ln.update(service_by_design_case=self.CASE, explained_checks=[], explained_items=[])
+            mcp.append(ln)
+        rows = {"direct-local": [line(x["id"], "direct-local", 0, T0 + i, 20.0, area=x["area"],
+                                      checks=[dict(status, check=e["check"]) for e in x["expect"]])
+                                 for i, x in enumerate(S)], "mcp": mcp}
+        for arm, lines in rows.items():
+            os.makedirs(os.path.join(run_dir, "arms", arm), exist_ok=True)
+            sc.write_json_atomic(os.path.join(run_dir, "arms", arm, "manifest.json"), manifest)
+            write_arm(run_dir, arm, lines)
+        sc.write_json_atomic(os.path.join(run_dir, "orchestrator.json"), {"sessions": [{
+            "mode": "paired", "mcp_cmd": "x {ids} {out}", "checks": "checks", "warm_every": "0", "skip_remote": "1",
+            "loop": {"mode": "paired", "state": "done", "scenarios": 2, "completed": 2}}]})
+        sc.take_snapshot(SUITE, run_dir, "c", 0)
+        merge_run.merge(run_dir)
+        comp = cmp.compare(run_dir, cmp.load_by_design(cmp.table_for(run_dir)[0]))
+        sc.write_json_atomic(os.path.join(run_dir, "compare.json"), comp)
+
+        def text_of(d):
+            return [x for x in report.build_report(d).splitlines() if not x.startswith(("date:", "| generated"))]
+        before = text_of(run_dir)
+        self.assertIn("C-caps-0001 mcp r0,1 (capabilities.traverse\\_capabilities\\_document)", "\n".join(before))
+        moved = os.path.join(self.d, "moved", "RUN1")
+        os.makedirs(os.path.dirname(moved))
+        os.rename(run_dir, moved)
+        self.assertEqual(text_of(moved), before)
+        self.assertEqual((comp["by_design_table"]["path"], comp["judged_with"]["dir"]),
+                         (os.path.join("scripts", "service_by_design.json"), "scripts"))
+
+
 class SnapshotSuiteCommonTest(unittest.TestCase):
     """The snapshot's checks.py imports the snapshot's suite_common in the verdict pipeline (compare, the gate's and
     the report's property reading, merge_run's stricter outcomes), never this tree's: a change of a suite_common helper
@@ -435,8 +491,8 @@ class RunSuiteSnapshotTest(SuiteCase):
                           for r in comp["relations"]],
                          [("REL-1", {"direct-local": "pass", "direct-remote": "pass", "mcp": "not_evaluated"})])
         self.assertEqual((comp["judged_with"]["source"], comp["judged_with"]["dir"], comp["judged_with"]["by_design"]),
-                         ("snapshot", os.path.join(run_dir, "scripts"), "snapshot"))
-        self.assertEqual(comp["by_design_table"]["path"], os.path.join(run_dir, "scripts", "service_by_design.json"))
+                         ("snapshot", "scripts", "snapshot"))
+        self.assertEqual(comp["by_design_table"]["path"], os.path.join("scripts", "service_by_design.json"))
         with open(os.path.join(run_dir, "report.md")) as fh:
             text = fh.read()
         self.assertIn("**PASS", text)

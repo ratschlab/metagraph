@@ -744,6 +744,20 @@ def snapshot_table(run_dir):
     return path if os.path.isfile(path) else None
 
 
+def run_relative(path, run_dir):
+    """|path| relative to RUN_DIR when it lies inside it (the run's snapshot), so compare.json still names it after the
+    run directory moved (report.report_cases, run_path); any other path as given."""
+    if not path:
+        return path
+    p, root = os.path.abspath(path), os.path.abspath(run_dir)
+    return os.path.relpath(p, root) if os.path.commonpath([p, root]) == root else path
+
+
+def run_path(path, run_dir):
+    """The inverse of run_relative: a relative path read against RUN_DIR."""
+    return path if not path or os.path.isabs(path) else os.path.join(run_dir, path)
+
+
 def table_origin(run_dir, table_info):
     """Where the table a comparison read comes from: "snapshot" (the run's, snapshot_table), "live" (the one next to
     this script), "other" (a path given), None (no table)."""
@@ -3149,8 +3163,12 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         "release": run.get("release"), "server_instance": run.get("server_instance"),
         "manifest_sha256": (run.get("manifest") or {}).get("computed_sha256")
         or (run.get("manifest") or {}).get("content_sha256"),
-        "arms": arms_present, "unparsable_lines": bad, "by_design_table": table_info, "references": references,
-        "judged_with": dict(judged_with, by_design=table_origin(run_dir, table_info)),
+        # the snapshot's table and checks relative to RUN_DIR (run_relative): a moved run still names them
+        "arms": arms_present, "unparsable_lines": bad,
+        "by_design_table": dict(table_info, path=run_relative(table_info.get("path"), run_dir))
+        if isinstance(table_info, dict) else table_info, "references": references,
+        "judged_with": dict(judged_with, dir=run_relative(judged_with["dir"], run_dir),
+                            by_design=table_origin(run_dir, table_info)),
         "warnings": warnings,
         "host_cache": run.get("host_cache"), "reevaluation": run.get("reevaluation") if reevaluated else None,
         "order": order, "scenarios": scenarios, "relations": relations,
