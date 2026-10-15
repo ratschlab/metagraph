@@ -60,6 +60,45 @@ class Generator(unittest.TestCase):
         self.assertGreater(supported, 15)
 
 
+class Breadth(unittest.TestCase):
+    """Verification M2, M3: every seed draws /resolve trace requests that tell trace from k-mer
+    presence, and varied constant-cost /traverse requests."""
+
+    def test_resolve_trace_requests_discriminate_in_every_seed(self):
+        idx = fixture_index()
+        for seed in range(1, 7):
+            reqs = requests_gen.generate(idx, 'basic_k11', seed, True, True, True, 0, 0, 30)
+            telling = 0
+            for item in reqs:
+                req = item['request']
+                if req.get('support') != 'trace':
+                    continue
+                try:
+                    trace = O.resolve(idx, req['sequence'], req['labels'], support='trace')
+                    kmer = O.resolve(idx, req['sequence'], req['labels'])
+                except ValueError:
+                    continue            # a refused label (a record shorter than k)
+                telling += trace['labels'] != kmer['labels']
+            self.assertGreaterEqual(telling, 3, seed)
+
+    def test_constant_cost_requests_vary_in_every_seed(self):
+        from oracle import traverse_gen, traverse_oracle
+        idx = fixture_index()
+        w = traverse_oracle.Walker(idx)
+        settings = set()
+        for seed in range(1, 7):
+            reqs = traverse_gen.generate(idx, w, 'basic_k11', seed, None, 80, 0)
+            costs = [(r['request']['strategy']['labels']['change_cost']['value'],
+                      r['request']['strategy']['labels']['loss_budget'],
+                      r['request']['strategy']['labels'].get('switch_on', 'loss'))
+                     for r in reqs
+                     if ((r['request']['strategy'].get('labels') or {}).get('change_cost') or {})
+                     .get('model') == 'constant']
+            self.assertGreaterEqual(len(costs), 8, seed)
+            settings |= set(costs)
+        self.assertGreaterEqual(len(settings), 8)
+
+
 class Report(unittest.TestCase):
     def test_markdown_states_scope_disagreements_and_missed_mutations(self):
         rep = {'engine': {'path': '/x/metagraph', 'version': 'v'}, 'seed': 1,

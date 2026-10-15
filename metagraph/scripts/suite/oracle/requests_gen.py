@@ -258,6 +258,52 @@ class Gen:
                         'request': req})
         return out
 
+    def periodic_runs(self):
+        """(record, start, end, period) of the maximal periodic runs (period 1-7) long enough
+        that whole periods can be deleted and k bases of the run remain."""
+        k = self.k
+        out = []
+        for r in self.index.indexed:
+            s = r.seq
+            for p in range(1, 8):
+                i = p
+                while i < len(s):
+                    j = i
+                    while j < len(s) and s[j] == s[j - p] and s[j] in O.BASES:
+                        j += 1
+                    a = i - p
+                    if j - a >= k + p and all(c in O.BASES for c in s[a:j]):
+                        if not any(x[0] is r and x[1] <= a and j <= x[2] for x in out):
+                            out.append((r, a, j, p))
+                    i = j + 1
+        return out
+
+    def trace_requests(self, header_labels=True):
+        """Queries that tell trace from k-mer presence (verification M2): a window across a
+        periodic run with whole periods deleted from it. Every k-mer stays in the record, but
+        the coordinate chain jumps where the query leaves the run, so a trace run breaks where
+        a presence run does not."""
+        rng = self.rng
+        k = self.k
+        out = []
+        for r, a, e, p in self.periodic_runs():
+            s = r.seq
+            n = (e - a) // p
+            j = rng.randint(1, max(1, (e - a - k) // p))          # periods deleted
+            if (e - a) - j * p < k:
+                continue
+            fl = min(a, rng.randint(k, 20))
+            fr = min(len(s) - e, rng.randint(k, 20))
+            x = a + p * rng.randint(0, n - j)                     # where the deletion starts
+            query = s[a - fl:x] + s[x + j * p:e + fr]
+            if not all(c in O.BASES for c in query) or len(query) < k:
+                continue
+            labels = [r.column] + ([r.name] if header_labels else [])
+            rng.shuffle(labels)
+            out.append({'id': self.next_id('R'), 'route': 'resolve', 'class': 'ample',
+                        'request': {'sequence': query, 'labels': labels, 'support': 'trace'}})
+        return out
+
     def resolve_requests(self, count, header_labels=True):
         """Queries cut from the records (whole windows, junctions of two, a substituted base, a
         reverse complement, a window holding the record N or an inserted N); the labels mix the
@@ -332,4 +378,6 @@ def generate(index, config_name, seed, labels_ok, resolve_ok, header_labels, n_p
     reqs += g.budget_requests(n_budget)
     if resolve_ok:
         reqs += g.resolve_requests(n_resolve, header_labels)
+        if n_resolve and index.mode == 'basic':
+            reqs += g.trace_requests(header_labels)
     return reqs

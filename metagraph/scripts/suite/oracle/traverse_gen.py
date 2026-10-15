@@ -148,6 +148,8 @@ class TraverseGen:
             # parent's evidence per label
             merging = not strategy.get('exhaustive') and (strategy.get('branching') or {}).get(
                 'on_reconverge') != 'keep'
+            if mode == 'constrain' and rng.random() < 0.5 and all('labels' in s for s in seeds):
+                self._constant_cost(strategy, seeds)
             if (mode == 'constrain' and self.header and not merging and rng.random() < 0.2
                     and all('labels' not in s or all(n in [r.name for r in self.index.indexed]
                                                     for n in s['labels']) for s in seeds)):
@@ -155,6 +157,26 @@ class TraverseGen:
             out.append({'id': self.next_id(), 'route': 'traverse', 'class': 'ample',
                         'request': {'seeds': seeds, 'strategy': strategy}})
         return out
+
+    def _constant_cost(self, strategy, seeds):
+        """A constant change cost drawn per request (verification M3): its value, budget and
+        switch_on, and up to three extra labels of the seed labels' kind that no seed names;
+        an extra above the budget is unreachable, a refusal the oracle predicts (SPEC 5)."""
+        rng = self.rng
+        value = rng.choice([0.5, 1, 1, 2])
+        budget = rng.choice([0, 0.5, 1, 1, 2, 3]) if rng.random() < 0.15 else \
+            rng.choice([value, value, 2 * value, 3 * value])
+        lab = strategy.setdefault('labels', {})
+        lab['change_cost'] = {'model': 'constant', 'value': value}
+        lab['loss_budget'] = budget
+        if rng.random() < 0.4:
+            lab['switch_on'] = 'any'
+        named = {n for s in seeds for n in s.get('labels') or []}
+        kinds = {self.w.label(n).kind for n in named if self.w.label(n) is not None}
+        kind = 'header' if kinds == {'header'} else 'column'
+        pool = [l.name for l in self.w.labels_of_kind(kind) if l.name not in named]
+        if pool and rng.random() < 0.8:
+            lab['extra'] = rng.sample(pool, min(len(pool), rng.randint(1, 3)))
 
     def cap_requests(self, count):
         """Cap probes: the incomplete member of the triplets (SPEC 6.10)."""
