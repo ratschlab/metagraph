@@ -129,12 +129,35 @@ class Provenance(unittest.TestCase):
     """Verification M1: the report names the binary by its content and its build tree's HEAD."""
 
     def test_a_binary_in_a_git_tree(self):
-        here = os.path.abspath(__file__)
-        p = report.engine_provenance(here)
+        """In a git tree of its own (the suite may run from an export outside any checkout): the
+        tree's HEAD and its uncommitted metagraph/src files."""
+        import shutil
+        import subprocess
+        if shutil.which('git') is None:
+            self.skipTest('git is not installed')
+        with tempfile.TemporaryDirectory() as d:
+            def git(*args):
+                subprocess.run(['git', '-C', d, '-c', 'user.email=oracle@test', '-c',
+                                'user.name=oracle', '-c', 'commit.gpgsign=false'] + list(args),
+                               check=True, capture_output=True)
+            os.makedirs(os.path.join(d, 'metagraph', 'src'))
+            os.makedirs(os.path.join(d, 'metagraph', 'build'))
+            src = os.path.join(d, 'metagraph', 'src', 'a.cpp')
+            with open(src, 'w') as f:
+                f.write('int main() {}\n')
+            git('init', '-q')
+            git('add', 'metagraph/src/a.cpp')
+            git('commit', '-q', '-m', 'a')
+            with open(src, 'a') as f:
+                f.write('// changed\n')
+            path = os.path.join(d, 'metagraph', 'build', 'metagraph')
+            with open(path, 'wb') as f:
+                f.write(b'an engine')
+            p = report.engine_provenance(path)
         self.assertEqual(64, len(p['sha256']))
-        self.assertEqual(os.path.getsize(here), p['size'])
+        self.assertEqual(9, p['size'])
         self.assertRegex(p['build_head'] or '', '^[0-9a-f]{40}$')
-        self.assertIsInstance(p['build_src_uncommitted'], int)
+        self.assertEqual(1, p['build_src_uncommitted'])
         self.assertIn(p['sha256'], report.markdown(self.minimal(p)))
 
     def test_a_binary_outside_a_git_tree(self):

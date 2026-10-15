@@ -80,7 +80,9 @@ def engine_provenance(path):
     out['build_tree'] = top
     out['build_head'] = git('rev-parse', 'HEAD') if top else None
     if top:
-        status = git('status', '--porcelain', '--', 'metagraph/src')
+        # the pathspec from the tree's top: relative to the binary's directory (metagraph/build)
+        # it named metagraph/build/metagraph/src and always counted 0
+        status = git('status', '--porcelain', '--', ':/metagraph/src')
         out['build_src_uncommitted'] = len(status.splitlines()) if status is not None else None
     return out
 
