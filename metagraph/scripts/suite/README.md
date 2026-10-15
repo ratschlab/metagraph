@@ -1967,7 +1967,8 @@ by lane S6c; everything below was open.
   has a session per step. Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
   --strict-identity (exit 3) and for gate.py (kind identity). Without a snapshot (a run before lane S7r) only arms
   stating different sha256 are named. The outcomes merge_run makes stricter with checks.scenario_outcome are the
-  snapshot's checks' for a recorded set.
+  snapshot's checks' for a recorded set; compare, the gate and the report judge with them too (section "Suite
+  integration S7i").
 - **A gated resume of a run started before the snapshot existed always fails the checks identity.** Its first
   resume takes the snapshot, and the sessions of its earlier invocations cannot state a checks sha256: they are
   `unverified`, an error with a snapshot. This is the strict gate's intent (what judged those executions is not
@@ -2380,3 +2381,28 @@ one lane's verification left to another lane's file.
   still passed every earlier repeat with an answer, so a run recorded with an errored repeat and then re-evaluated
   got back the false determinism failure the recording avoided. It applies feeds_previous to the recorded line, as
   the runners do (test_reevaluate's test_unanswered_repeat_feeds_no_previous).
+
+### The comparison judges a recorded run with the run's snapshot (P6-end-to-end-03, the comparison stage)
+- Lane S7r pinned the arms to the run's snapshot (RUN_DIR/scripts), but compare.py loaded checks.py next to itself
+  for checks.evaluate_relation and the /traverse content rule and read this directory's service_by_design.json; the
+  gate's and the report's property reading (`is_property`) did the same. A checks change landing in the tree during
+  a run reached the recorded verdict silently: the arms all `pass` with the snapshot, checks_identity clean, the
+  verdict PASS -> FAIL ("2 failed relation(s)", VERIFY-S-RUNNER §1).
+- `compare.judging_checks(run_dir, reevaluated)` names the checks.py that judges a set beyond its arms: a recorded
+  set's snapshot when RUN_DIR/scripts holds checks.py (source `snapshot`; `snapshot_changed` lists its files whose
+  sha256 is no longer SNAPSHOT.json's), a re-evaluated set's re-evaluation checks (`reevaluation`), else this
+  directory's (`live`: a run older than the snapshot, as v3 and v4). compare's relations and content rule, gate.py's
+  and report.py's property reading load it. `compare.table_for` reads, when no --by-design is given, a recorded
+  set's snapshot table (`snapshot_table`: the one its MCP arm read beside {checks_dir}); a re-evaluated set keeps the
+  table its re-evaluation replayed. run_suite.sh passes `--by-design "$SNAP/service_by_design.json"` to compare
+  itself unless --by-design names another table.
+- compare.json `judged_with` {source, dir, checks_sha256, snapshot_changed, by_design: snapshot | live | other |
+  null}; the report's Environment table states it ("comparison judged with": the run's snapshot, the
+  re-evaluation's checks, or this tree's checks.py with the remark that a change of the tree since the run reaches
+  the comparison) and the table's origin beside its sha256. merge_run's stricter outcomes already used the snapshot.
+- Not pinned: a snapshot's checks.py imports `suite_common` by name, and in the comparison (as in merge_run) that
+  resolves to this directory's suite_common.py, already loaded; the arms import the snapshot's own.
+- tests/test_run_snapshot.py: ComparisonSnapshotTest (judging_checks / table_for; the gate's and the report's
+  property reading and the report's statement) and RunSuiteSnapshotTest.test_a_checks_change_during_the_run_does_
+  not_reach_the_comparison (a copy of the suite, one same_answer relation, an evaluate_relation failing every
+  relation appended to the copy's checks.py after the first request: REL-1 passes on both direct arms, PASS).

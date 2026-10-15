@@ -200,6 +200,26 @@ def stated_mcp_limit(line, scenario, cases, comp=None):
     return None
 
 
+TABLE_ORIGIN = {"snapshot": "; the run's snapshot (scripts/service_by_design.json)",
+                "live": "; this tree's", "other": "; a table given to compare"}
+
+
+def judged_with_text(judged):
+    """Which checks.py judged the comparison's relations and content rule and the property reading
+    (compare.judging_checks, compare.json judged_with): the run's snapshot, a re-evaluation's checks or this tree's."""
+    if not isinstance(judged, dict):
+        return "not stated (a comparison of before the field)"
+    sha = md(short(judged.get("checks_sha256"), 12))
+    if judged.get("source") == "snapshot":
+        changed = judged.get("snapshot_changed") or []
+        return "checks.py of the run's snapshot (scripts/, sha256 %s)%s" % (
+            sha, ("; its %s changed after it was taken (SNAPSHOT.json)" % md(", ".join(changed))) if changed else "")
+    if judged.get("source") == "reevaluation":
+        return "checks.py of the re-evaluation (%s, sha256 %s)" % (md(judged.get("dir") or "-"), sha)
+    return "checks.py of this tree (%s, sha256 %s): the set has no snapshot (or re-evaluation checks) of its own, so " \
+        "a change of the tree since the run reaches this comparison" % (md(judged.get("dir") or "-"), sha)
+
+
 def report_cases(comp):
     """The by-design table compare judged the run with (compare.json by_design_table), loaded; {} without one."""
     info = (comp or {}).get("by_design_table")
@@ -498,8 +518,10 @@ def environment_section(run, comp, rows, samples):
                    if "direct-local" in offsets else "offset not measured")))
     if comp.get("by_design_table"):
         t = comp["by_design_table"]
-        kv.append(("by-design table", "%s case(s), service commit %s, sha256 %s" % (
-            md(t.get("cases")), md(short(t.get("service_commit"), 8)), md(short(t.get("sha256"), 12)))))
+        kv.append(("by-design table", "%s case(s), service commit %s, sha256 %s%s" % (
+            md(t.get("cases")), md(short(t.get("service_commit"), 8)), md(short(t.get("sha256"), 12)),
+            TABLE_ORIGIN.get((comp.get("judged_with") or {}).get("by_design"), ""))))
+    kv.append(("comparison judged with", judged_with_text(comp.get("judged_with"))))
     for arm, info in sorted((run.get("arms") or {}).items(), key=lambda kv_: kv_[0]):
         info = info or {}
         load_s, load_e = info.get("host_load_start"), info.get("host_load_end")
@@ -1168,7 +1190,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
              "subtitle: \"/traverse, /resolve, /pattern on %s\"" % ascii_safe(
                  ((manifest or {}).get("index") or {}).get("database") or "refseq33m-experimental"),
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
-    is_property = gate_mod._is_property_fn(cmp.reevaluation_checks_dir(run_dir) if reevaluated else None)
+    is_property = gate_mod._is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
     depth = agreement_depth(comp, rows, is_property)
     missing = gate_mod.missing_planned(run_dir, manifest, rows)
     parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest, report_cases(comp)))

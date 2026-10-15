@@ -6,6 +6,7 @@ the gate) and makes outcomes stricter with the snapshot's checks."""
 
 import contextlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -19,11 +20,15 @@ SUITE = os.path.dirname(HERE)
 sys.path.insert(0, SUITE)
 sys.path.insert(0, HERE)
 
+import compare as cmp  # noqa: E402
+import gate  # noqa: E402
 import merge_run  # noqa: E402
+import report  # noqa: E402
 import run_direct  # noqa: E402
 import suite_common as sc  # noqa: E402
 from fake_host import FakeHost  # noqa: E402
 from test_compare_report import T0, line, write_arm  # noqa: E402
+from test_gate import make_run, manifest_of, mcp_lines, policy_of  # noqa: E402
 from test_orchestrator import SuiteCase, mcp_scenarios  # noqa: E402
 from test_runner import basic_scenarios, make_manifest, scenario  # noqa: E402
 
@@ -36,6 +41,13 @@ def evaluate(scenario, answer, arm, previous=None, client=None):
 
 def scenario_outcome(results):
     return "fail"
+'''
+# checks.py as a change landing in the tree during a run would leave it: every relation fails
+FAILING_RELATIONS = '''
+
+def evaluate_relation(rel, a_scenario, a_answer, b_scenario, b_answer, arm):
+    return {"relation": rel.get("id"), "type": rel.get("type"), "a": rel.get("a"), "b": rel.get("b"),
+            "outcome": "fail", "detail": "a checks change that landed during the run"}
 '''
 
 
@@ -207,7 +219,106 @@ class MergeChecksIdentityTest(unittest.TestCase):
                          ["the run's snapshot changed after it was taken: scripts/checks.py"])
 
 
+class ComparisonSnapshotTest(unittest.TestCase):
+    """compare, the gate's and the report's property reading judge a recorded set with the run's snapshot (its
+    checks.py and table) when it has one, else with this tree's, and say which."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.run_dir = os.path.join(self.d, "runs", "RUN1")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_the_checks_and_the_table_of_a_recorded_set(self):
+        os.makedirs(self.run_dir)
+        live = cmp.judging_checks(self.run_dir)
+        self.assertEqual((live["source"], live["dir"]), ("live", SUITE))
+        self.assertEqual(cmp.table_for(self.run_dir)[0], cmp.DEFAULT_BY_DESIGN)
+        sc.take_snapshot(SUITE, self.run_dir, "c", 0)
+        snap = os.path.join(self.run_dir, "scripts")
+        self.assertEqual(cmp.judging_checks(self.run_dir), {
+            "source": "snapshot", "dir": snap, "checks_sha256": sc.file_sha256(os.path.join(SUITE, "checks.py")),
+            "snapshot_changed": []})
+        self.assertEqual(cmp.table_for(self.run_dir)[0], os.path.join(snap, "service_by_design.json"))
+        self.assertEqual(cmp.table_for(self.run_dir, "")[0], "")             # a table given (none) still wins
+        # a re-evaluated set is judged with the re-evaluation's checks and table, never the snapshot's
+        self.assertEqual(cmp.judging_checks(self.run_dir, reevaluated=True)["source"], "live")
+        self.assertEqual(cmp.table_for(self.run_dir, None, True)[0], cmp.DEFAULT_BY_DESIGN)
+        with open(os.path.join(snap, "checks.py"), "a") as fh:
+            fh.write(FAILING_RELATIONS)
+        self.assertEqual(cmp.judging_checks(self.run_dir)["snapshot_changed"], ["checks.py"])
+
+    def test_the_gate_and_the_report_read_properties_with_the_snapshot(self):
+        m = manifest_of()
+        d = make_run(self.run_dir, m, mcp_lines(m))
+        sc.take_snapshot(SUITE, d, "c", 0)
+        seen = []
+        real = gate._is_property_fn
+
+        def spy(checks_dir=None):
+            seen.append(checks_dir)
+            return real(checks_dir)
+        gate._is_property_fn = spy
+        try:
+            gate.judge(d, policy_of(m))
+            os.remove(os.path.join(d, "compare.json"))
+            text = report.build_report(d)
+        finally:
+            gate._is_property_fn = real
+        self.assertEqual(seen, [os.path.join(d, "scripts")] * 2)
+        self.assertIn("checks.py of the run's snapshot (scripts/, sha256 %s)" % sc.file_sha256(
+            os.path.join(SUITE, "checks.py"))[:12], text)
+        self.assertIn("the run's snapshot (scripts/service_by_design.json)", text)
+        comp = sc.read_json(os.path.join(d, "compare.json"))
+        self.assertEqual((comp["judged_with"]["source"], comp["judged_with"]["by_design"]), ("snapshot", "snapshot"))
+        # a run without a snapshot says the tree's checks judged it
+        shutil.rmtree(os.path.join(d, "scripts"))
+        os.remove(os.path.join(d, "compare.json"))
+        self.assertIn("checks.py of this tree (%s" % SUITE.replace("_", "\\_"), report.build_report(d))
+
+
 class RunSuiteSnapshotTest(SuiteCase):
+    def test_a_checks_change_during_the_run_does_not_reach_the_comparison(self):
+        # a copy of the suite runs a paired run with one same_answer relation; after the first request the copy's
+        # checks.py gets an evaluate_relation failing every relation: the comparison judges the relations with the
+        # run's snapshot and its table, so the verdict stays PASS (before, compare loaded the tree's checks.py and
+        # read FAIL, "1 failed relation" per arm), and the report says what judged it
+        suite = os.path.join(self.d, "suite")
+        os.makedirs(suite)
+        for name in os.listdir(SUITE):
+            if name.endswith((".py", ".sh", ".json")):
+                shutil.copy2(os.path.join(SUITE, name), suite)
+        m = make_manifest(self.mpath, [dict(s, mcp={"tool": "pattern_search", "arguments": {}}) for s in
+                                       [scenario("S-%02d" % i, "S", "POST /slow", {"sleep_s": 0.2}) for i in range(4)]])
+        m["relations"] = [{"id": "REL-1", "type": "same_answer", "a": "S-00", "b": "S-01"}]
+        with open(self.mpath, "w") as fh:
+            json.dump(m, fh)
+        cmd = [os.path.join(suite, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+               "--warm-every", "0", "--checks", "checks", "--mcp-cmd", self.mcp_cmd()]
+        with FakeHost() as host:
+            proc = subprocess.Popen(cmd, env=self.env(host), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True, stdin=subprocess.DEVNULL)
+            deadline = time.time() + 60
+            while time.time() < deadline and sum(1 for _, x in host.log if x == "/slow") < 1:
+                time.sleep(0.02)
+            with open(os.path.join(suite, "checks.py"), "a") as fh:
+                fh.write(FAILING_RELATIONS)
+            out, err = proc.communicate(timeout=180)
+        self.assertEqual(proc.returncode, 0, err)
+        run_dir = out.strip().splitlines()[-1]
+        comp = sc.read_json(os.path.join(run_dir, "compare.json"))
+        self.assertEqual([(r["id"], dict((arm, v["outcome"]) for arm, v in r["arms"].items()))
+                          for r in comp["relations"]],
+                         [("REL-1", {"direct-local": "pass", "direct-remote": "pass", "mcp": "not_evaluated"})])
+        self.assertEqual((comp["judged_with"]["source"], comp["judged_with"]["dir"], comp["judged_with"]["by_design"]),
+                         ("snapshot", os.path.join(run_dir, "scripts"), "snapshot"))
+        self.assertEqual(comp["by_design_table"]["path"], os.path.join(run_dir, "scripts", "service_by_design.json"))
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            text = fh.read()
+        self.assertIn("**PASS", text)
+        self.assertIn("checks.py of the run's snapshot", text)
+
     def test_a_checks_change_during_the_run_does_not_reach_it(self):
         # a copy of the suite runs a paired run; a checks change lands in the copy after the first scenario: every
         # later step still judges with the run's snapshot (before it, direct-remote's later steps imported the

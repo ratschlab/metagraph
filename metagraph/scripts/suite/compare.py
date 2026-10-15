@@ -737,16 +737,40 @@ def gate_configuration_problems(run_dir, cases=None, reevaluated=False):
     return out
 
 
+def snapshot_table(run_dir):
+    """The by-design table of a run's snapshot (RUN_DIR/scripts/service_by_design.json, suite_common.SNAPSHOT_FILES),
+    None when the run has none."""
+    path = os.path.join(sc.snapshot_dir(run_dir), "service_by_design.json")
+    return path if os.path.isfile(path) else None
+
+
+def table_origin(run_dir, table_info):
+    """Where the table a comparison read comes from: "snapshot" (the run's, snapshot_table), "live" (the one next to
+    this script), "other" (a path given), None (no table)."""
+    path = (table_info or {}).get("path") if isinstance(table_info, dict) else None
+    if not path:
+        return None
+    if snapshot_table(run_dir) and os.path.abspath(snapshot_table(run_dir)) == os.path.abspath(path):
+        return "snapshot"
+    return "live" if os.path.abspath(DEFAULT_BY_DESIGN) == os.path.abspath(path) else "other"
+
+
 def table_for(run_dir, by_design=None, reevaluated=False):
     """(the table's path, warnings): |by_design| when given ('' = no table), else for a re-evaluated set the table its
-    re-evaluation replayed (reevaluated.json by_design.path, B-10) where it is still there, else DEFAULT_BY_DESIGN; a
-    warning when the table read differs (sha256) from the one the re-evaluation replayed."""
+    re-evaluation replayed (reevaluated.json by_design.path, B-10) where it is still there, for a recorded set the
+    table of the run's snapshot (snapshot_table: the one its MCP arm judged with, whatever the tree holds since), else
+    DEFAULT_BY_DESIGN; a warning when the table read differs (sha256) from the one the re-evaluation replayed."""
     warnings = []
     mark = (merge_run.reevaluation_mark(run_dir) or {}) if reevaluated else {}
     used = mark.get("by_design") if isinstance(mark.get("by_design"), dict) else None
     path = by_design
     if path is None:
-        path = used.get("path") if used and used.get("path") and os.path.exists(used["path"]) else DEFAULT_BY_DESIGN
+        if used and used.get("path") and os.path.exists(used["path"]):
+            path = used["path"]
+        elif not reevaluated and snapshot_table(run_dir):
+            path = snapshot_table(run_dir)
+        else:
+            path = DEFAULT_BY_DESIGN
     if reevaluated and path:
         sha = None
         if os.path.exists(path):
@@ -2900,15 +2924,38 @@ def reevaluation_checks_dir(run_dir):
     return d if d and os.path.exists(os.path.join(d, "checks.py")) else None
 
 
+def judging_checks(run_dir, reevaluated=False):
+    """The checks.py that judges a set beyond its arms (the comparison's /traverse content rule and its relations,
+    the gate's and the report's property reading): {source, dir, checks_sha256, snapshot_changed}. A re-evaluated
+    set: the checks its re-evaluation used (reevaluation_checks_dir; source "reevaluation"). A recorded set: the
+    run's snapshot RUN_DIR/scripts when it holds checks.py (source "snapshot": the checks its arms judged with, so a
+    change of the tree during or after the run reaches no verdict of it; snapshot_changed names the snapshot's files
+    whose sha256 is no longer SNAPSHOT.json's), else this directory's (source "live": a run older than the snapshot,
+    or one whose re-evaluation's checks are gone)."""
+    if reevaluated:
+        d = reevaluation_checks_dir(run_dir)
+        source = "reevaluation" if d else "live"
+    else:
+        d = sc.snapshot_dir(run_dir) if os.path.isfile(os.path.join(sc.snapshot_dir(run_dir), "checks.py")) else None
+        source = "snapshot" if d else "live"
+    d = os.path.abspath(d or os.path.dirname(os.path.abspath(__file__)))
+    out = {"source": source, "dir": d, "checks_sha256": sc.file_sha256(os.path.join(d, "checks.py"))}
+    if source == "snapshot":
+        out["snapshot_changed"] = sc.snapshot_state(run_dir)[1]
+    return out
+
+
 def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=False, warnings=None):
     """compare.json's content for a merged run directory (of its re-evaluated set with |reevaluated|: the merged
     executions.reevaluated.jsonl and run.reevaluated.json); by_design is load_by_design's (cases, info);
-    relation_evaluator as evaluate_relations takes it ("auto": checks.py next to this script when present, for
-    the re-evaluated set the re-evaluation's checks.py), whose module also reads /traverse answers for the direct
-    arms' timing rule; |warnings| (table_for's) are kept in the result."""
+    relation_evaluator as evaluate_relations takes it ("auto": the checks.py of judging_checks when present: the
+    run's snapshot for a recorded set, the re-evaluation's for the re-evaluated set, else the one next to this
+    script), whose module also reads /traverse answers for the direct arms' timing rule; |warnings| (table_for's) are
+    kept in the result, and `judged_with` states the checks and the table's origin."""
     run = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated)), {}) or {}
     rows, bad = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
-    checks_mod = load_checks_module(reevaluation_checks_dir(run_dir) if reevaluated else None)
+    judged_with = judging_checks(run_dir, reevaluated)
+    checks_mod = load_checks_module(judged_with["dir"])
     if relation_evaluator == "auto":
         relation_evaluator = getattr(checks_mod, "evaluate_relation", None) if checks_mod is not None else None
     samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
@@ -3102,6 +3149,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         "manifest_sha256": (run.get("manifest") or {}).get("computed_sha256")
         or (run.get("manifest") or {}).get("content_sha256"),
         "arms": arms_present, "unparsable_lines": bad, "by_design_table": table_info, "references": references,
+        "judged_with": dict(judged_with, by_design=table_origin(run_dir, table_info)),
         "warnings": warnings,
         "host_cache": run.get("host_cache"), "reevaluation": run.get("reevaluation") if reevaluated else None,
         "order": order, "scenarios": scenarios, "relations": relations,

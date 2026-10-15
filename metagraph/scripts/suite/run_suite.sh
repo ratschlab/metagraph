@@ -1174,8 +1174,14 @@ if [[ -n "$GATE" ]]; then
 else
   "$PY" "$HERE/merge_run.py" "$RUN_DIR"
 fi
+# The comparison judges with the run's snapshot: its checks.py (compare.judging_checks) and its table, the one the MCP
+# arm read beside {checks_dir}, unless --by-design names another
 CMP_ARGS=("$RUN_DIR" --no-merge)
-[[ -z "$BY_DESIGN" ]] || CMP_ARGS+=(--by-design "$BY_DESIGN")
+if [[ -n "$BY_DESIGN" ]]; then
+  CMP_ARGS+=(--by-design "$BY_DESIGN")
+elif [[ -f "$SNAP/service_by_design.json" ]]; then
+  CMP_ARGS+=(--by-design "$SNAP/service_by_design.json")
+fi
 "$PY" "$HERE/compare.py" "${CMP_ARGS[@]}"
 GATE_RC=0
 if [[ -n "$GATE" ]]; then

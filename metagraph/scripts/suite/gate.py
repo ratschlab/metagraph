@@ -509,8 +509,8 @@ def judge(run_dir, policy, reevaluated=False):
         problems.append(_problem("identity", "the comparison read the by-design table sha256 %s, the policy was derived "
                                              "from %s (regenerate the policy with gate_policy.py, or compare with "
                                              "that table)" % (str(used)[:16], pinned[:16])))
-    checks_dir = cmp.reevaluation_checks_dir(run_dir) if reevaluated else None
-    is_property = _is_property_fn(checks_dir)
+    # the property reading with the checks that judged the set: a recorded run's snapshot, a re-evaluation's checks
+    is_property = _is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
     passed = judged = 0
     by_design_mcp_only = 0
     for (sid, arm, rep), r in sorted(recorded.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)),
