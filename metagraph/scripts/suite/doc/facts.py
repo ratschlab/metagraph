@@ -371,7 +371,8 @@ def arm_facts(ctx, sid, arm):
         f["detail"] = blocks._balanced(_cut(props[0].get("detail"), 400))
         f["evidence"] = _clause(props[0].get("detail"), 200)
     if arm == "mcp":
-        cls, _ = blocks.mcp_class(lines, run.scenario(sid), st.agreement, run.cases)
+        # the class of a by-design arm is read from the case's executions (blocks.class_lines; VERIFY-FINAL R1)
+        cls, _ = blocks.mcp_class(blocks.class_lines(st), run.scenario(sid), st.agreement, run.cases)
         f["class"] = cls
         f["class_word"] = blocks.MCP_CLASS_WORD.get(cls, cls)
     if st.glyph_key == "not_implemented_mcp":

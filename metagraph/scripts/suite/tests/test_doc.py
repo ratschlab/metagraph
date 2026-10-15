@@ -2881,8 +2881,9 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         self.assertEqual(blocks._budget_text(run, "n"), "none")
 
     @staticmethod
-    def _by_design_arm(other_outcome="pass", other_class="no_direct_reference", direct_verified=True):
-        """An MCP arm standing by design on r0 (the host's deadline relayed) with r1 outside the case."""
+    def _by_design_arm(other_outcome="pass", other_class="no_direct_reference", direct_verified=True, case_repeat=0):
+        """An MCP arm standing by design on r0 (the host's deadline relayed) with r1 outside the case; with
+        `case_repeat` 1 the case covers r1 and r0 is the repeat outside it (M-planted-0015 on the v4 run)."""
         st = cells.ArmState("mcp")
         st.present = True
         st.glyph_key = "service_by_design"
@@ -2899,8 +2900,12 @@ class VerifiedFullDocumentTest(unittest.TestCase):
                             {"check": "source_absent", "outcome": other_outcome, "property": True,
                              "detail": "absent" if other_outcome == "pass" else "list cut (cut time)"}]}
         st.lines = [covered, other]
+        if case_repeat == 1:
+            covered["repeat"], other["repeat"] = 1, 0
+            covered["host_cache"], other["host_cache"] = "warm", "cold"
+            st.lines = [other, covered]
         st.agreement = {"class": "service_by_design", "by": "answer", "case": "pattern.deadline_ends_task",
-                        "repeats": [0], "verified": False, "direct_verified": direct_verified,
+                        "repeats": [case_repeat], "verified": False, "direct_verified": direct_verified,
                         "direct_detail": "repeat(s) ['direct-local r0', 'direct-remote r0'] match" if direct_verified
                         else "no direct execution answered {'http': 503, 'code': 'deadline'} (direct_mismatch timing: unverified)",
                         "mcp_verified": True, "other_repeats": {"class": other_class, "mcp_outcome": other_outcome}}
@@ -2939,6 +2944,72 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         ni.lines = [{"repeat": 0, "outcome": "service_by_design", "http": 400}]
         self.assertTrue(cells.by_design_line(ni, ni.lines[0]))
         self.assertEqual(cells.coverage_text({"R-1": {"mcp": ni}}, "mcp"), "not exercised (1\\,\\gni{})")
+
+    def test_class_from_the_cases_execution(self):
+        """VERIFY-FINAL R1: where the case covers r1 only (r0 a 200 outside the case), the class word and the
+        status of the arm's phrase, the arm facts and the edge cell all come from r1, the relayed 502: never
+        'answered by the host' (r0's class) beside 'http 502' (r1's status)."""
+        st = self._by_design_arm("inconclusive", case_repeat=1)
+        self.assertEqual([l["repeat"] for l in st.lines], [0, 1])
+        self.assertEqual([l["repeat"] for l in blocks.class_lines(st)], [1])
+        scenario = {"route": "POST /pattern", "request": {"time_budget_ms": 60000},
+                    "expect": [{"check": "status", "args": {"http": 200}}]}
+        cases = {"pattern.deadline_ends_task": {"service_answer": {"outcome": "relayed"}}}
+        run = _Stub(scenario=lambda sid: scenario, cases=cases, budget_ms=lambda sid: 60000,
+                    is_property=lambda name: name == "source_absent", marked_aside=lambda sid, line: {})
+        # the first answered execution alone (r0, the 200) would read answered: the regression
+        self.assertEqual(blocks.mcp_class(st.lines, scenario, st.agreement, cases)[0], "answered")
+        self.assertEqual(blocks.mcp_class(blocks.class_lines(st), scenario, st.agreement, cases)[0], "relayed")
+        short = (sc.read_json(os.path.join(PROSE_DIR, "cases.json")) or {}).get("short") or {}
+        text = blocks._not_exercised_text(st, run, "N-1", short)
+        self.assertIn("host refusal relayed through the service (http 502 \\texttt{search\\_\\allowbreak{}failed})", text)
+        self.assertNotIn("answered by the host", text)
+        self.assertIn("repeat r0 outside the case: r0 recorded inconclusive (the row below)", text)
+        # the short reason is the one clause; the verification rule is appendix B's (R2)
+        self.assertIn("comes back as 502", text)
+        self.assertNotIn("the pair is verified where", text)
+        # the arm facts (the class word the prose may print) read the same execution
+        f = facts.arm_facts(_Stub(run=run, state=lambda sid: {"mcp": st}), "N-1", "mcp")
+        self.assertEqual((f["class"], f["class_word"]), ("relayed", "host refusal relayed through the service"))
+        self.assertTrue(f["phrase"].startswith("by design (http 502 search_failed), the pair unverified"), f["phrase"])
+        self.assertIn("r0 outside the case inconclusive", f["phrase"])
+        # the case on r0 (the 19 other blocks of the v4 run) reads as before
+        st0 = self._by_design_arm("inconclusive")
+        self.assertEqual([l["repeat"] for l in blocks.class_lines(st0)], [0])
+        self.assertIn("host refusal relayed through the service (http 502", blocks._not_exercised_text(st0, run, "N-1", short))
+        # an arm the service did not decide reads every execution
+        plain = cells.ArmState("mcp")
+        plain.present, plain.glyph_key, plain.lines = True, "pass", [{"repeat": 0, "http": 200}, {"repeat": 1, "http": 200}]
+        self.assertEqual(len(blocks.class_lines(plain)), 2)
+
+    def test_short_reason_one_clause_and_the_verification_rule_in_b(self):
+        """VERIFY-FINAL R2: the deadline case's short reason is one clause (the owner's rule for cases.json), and
+        its verification rule is printed in appendix B under the short reason, nowhere else."""
+        cases = sc.read_json(os.path.join(PROSE_DIR, "cases.json")) or {}
+        short = cases["short"]["pattern.deadline_ends_task"]
+        self.assertNotIn(";", short)
+        self.assertLessEqual(len(short.split()), 25, short)
+        rule = cases["verification"]["pattern.deadline_ends_task"]
+        self.assertIn("verified where a direct arm answered the 503 too", rule)
+        self.assertIn("unverified where no direct arm answered the 503", rule)
+        self.assertIn("no direct 200 to compare with", rule)
+        self.assertEqual(sorted(set(cases["verification"]) - set(cases["short"])), [])
+        table = {"pattern.deadline_ends_task": {"areas": ["M"], "agreement": "by_design", "scenario_match": "a 503",
+                                                "service_answer": {"outcome": "relayed", "http": 502, "code": "search_failed"},
+                                                "direct_expectation": {"http": 503}},
+                 "pattern.caps_zero": {"areas": ["M"], "agreement": "by_design", "scenario_match": "a cap of 0",
+                                       "service_answer": {"outcome": "refused_at_submit"}}}
+        ctx = _Stub(run=_Stub(order=[], table=table, cases={}), units=_Stub(by_scenario={}, unit_of=lambda s: None),
+                    chapters=["M"], selected_scenarios=lambda: [], short_reasons=lambda: cases["short"],
+                    verification_rules=lambda: cases["verification"])
+        text = sections.by_design_table(ctx)
+        self.assertIn("in short: the host's /pattern 503 deadline ends the service's task at once", text)
+        self.assertEqual(text.count("verification: "), 1)
+        self.assertLess(text.index("in short: the host's /pattern 503"), text.index("verification: the pair is verified where"))
+        self.assertIn("with the case's verification rule where it has one of its own", text)
+        # a case without a rule prints its short reason alone
+        self.assertIn("in short: the service's request model takes every cap", text)
+        self.assertEqual(sections.Context.verification_rules(_Stub(cases_prose={})), {})
 
     def test_unverified_reason_from_the_comparison(self):
         """VERIFY-PLXM H3, VERIFY-QCND H3: the reason is the comparison's, not a fixed sentence."""

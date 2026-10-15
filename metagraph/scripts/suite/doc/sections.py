@@ -56,7 +56,7 @@ class Context(object):
         self.glossary = glossary or {}
         self.checks_prose = checks_prose or {}  # doc/prose/checks.json: {common: [...], checks: {kind: {...}}}
         self.closing = closing or {}  # doc/prose/closing.json
-        self.cases_prose = cases or {}  # doc/prose/cases.json: {short: {case id: text}}
+        self.cases_prose = cases or {}  # doc/prose/cases.json: {short: {case id: text}, verification: {case id: text}}
         self.sample = sample
         self.chapters = chapters
         self.states = {}
@@ -85,6 +85,12 @@ class Context(object):
 
     def short_reasons(self):
         s = self.cases_prose.get("short")
+        return s if isinstance(s, dict) else {}
+
+    def verification_rules(self):
+        """doc/prose/cases.json `verification`: the rule by which a case's pairs are verified or not, printed in
+        appendix B under the case's short reason and nowhere else (the short reason stays one clause)."""
+        s = self.cases_prose.get("verification")
         return s if isinstance(s, dict) else {}
 
     def placeholders(self):
@@ -1489,7 +1495,8 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     and the service's code (the owner's review, point 5); for an exercised execution with `with_times` the usual
     time cell. Returns (cell LaTeX, note under the row or None)."""
     run = ctx.run
-    cls, evidence = blocks.mcp_class(st.lines, run.scenario(sid), st.agreement, run.cases)
+    lines = blocks.class_lines(st)  # a by-design arm's class and status from the case's executions (VERIFY-FINAL R1)
+    cls, evidence = blocks.mcp_class(lines, run.scenario(sid), st.agreement, run.cases)
     glyph = st.glyph_tex(_cell_fn(st, footnote))
     note = None
     if cls == "none":
@@ -1498,7 +1505,7 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
         case = st.agreement.get("case")
         reason = blocks.short_reason(run, sid, case, ctx.short_reasons())
         return "%s\\ %s\\newline %s; see B" % (glyph, esc(blocks.MCP_CLASS_WORD[cls]), reason), None
-    first = next((l for l in st.lines if l.get("http") is not None), None)
+    first = next((l for l in lines if l.get("http") is not None), None)
     code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
     status = "http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "") if first else "–"
     if cls in ("refused_before_host", "service_answered", "relayed", "host_state", "refused_unexplained"):
@@ -2352,6 +2359,7 @@ def by_design_table(ctx):
         if set(c.get("areas") or []) & set(ctx.chapters):
             wanted.add(cid)
     short = ctx.short_reasons()
+    rules = ctx.verification_rules()
     rows = []
     for cid in sorted(wanted):
         c = run.table.get(cid) or run.cases.get(cid) or {}
@@ -2419,13 +2427,16 @@ def by_design_table(ctx):
         matches = latex.join_units(esc_wrap(c.get("scenario_match"), 600))
         if short.get(cid):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
+        if rules.get(cid):
+            matches += "\\newline{\\scriptsize verification: %s}" % inline(rules[cid])
         rows.append(first + [matches, "; ".join(service) or "–", "; ".join(direct) or "–", "; ".join(named) or "–"])
         if unverified_detail:
             rows[-1] = (rows[-1], "{\\footnotesize unverified: %s}" % latex.join_units(esc_wrap(
                 "; ".join(unverified_detail))))
     out = ("One row per case of the service-by-design table that a scenario of the built chapters names, that an "
            "MCP answer matched, or that belongs to their areas: the case and its agreement class, what it matches "
-           "(and the short reason the tables use), the service's answer, the direct expectation, and the scenarios "
+           "(and the short reason the tables use, with the case's verification rule where it has one of its own), "
+           "the service's answer, the direct expectation, and the scenarios "
            "naming it with their verification; where a pair is unverified (the direct side did not match the case, "
            "or another MCP repeat outside the case has no direct answer to compare with), the reason is under the "
            "row.\n\n")

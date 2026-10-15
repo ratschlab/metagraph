@@ -522,12 +522,21 @@ def unverified_cause(ma):
     return "+".join(causes) or "direct"
 
 
+def class_lines(st):
+    """The executions an MCP arm's class (mcp_class) is read from: on an arm standing by design or not exercised
+    the executions the service decided in the host's place (cells.by_design_line: the case's repeats), so that
+    the class word and the status come from the same execution where the case covers one repeat only (a 200 of
+    the other repeat, outside the case, is not the arm's class; VERIFY-FINAL R1); every execution otherwise."""
+    return [l for l in st.lines if cells.by_design_line(st, l)] or st.lines
+
+
 def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
     """The one phrase of an MCP arm the service refused or could not express (the owner's review, point 4): the
-    class of the outcome with the recorded status and code, the short local reason unless the unit's note under
-    the table carries it (`unit_note`), the other repeat outside the case with its recorded outcome, an unverified
-    pair's reason, and the pointer to appendix B."""
-    cls, _ = mcp_class(st.lines, run.scenario(sid), st.agreement, run.cases)
+    class of the outcome with the recorded status and code (both read from the case's executions, class_lines),
+    the short local reason unless the unit's note under the table carries it (`unit_note`), the other repeat
+    outside the case with its recorded outcome, an unverified pair's reason, and the pointer to appendix B."""
+    lines = class_lines(st)
+    cls, _ = mcp_class(lines, run.scenario(sid), st.agreement, run.cases)
     case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
                                              if l.get("service_by_design_case")), None)
     glyph = "\\gni" if st.glyph_key == "not_implemented_mcp" else "\\gbd"
@@ -536,8 +545,7 @@ def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
     if not unit_note:
         parts.append(short_reason(run, sid, case, short_reasons))
     if cls != "not_expressible":
-        first = next((l for l in st.lines if l.get("http") is not None and cells.by_design_line(st, l)), None) \
-            or next((l for l in st.lines if l.get("http") is not None), None)
+        first = next((l for l in lines if l.get("http") is not None), None)
         code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
         status = ("http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "")) if first else None
         parts.append("%s%s" % (esc(MCP_CLASS_WORD.get(cls, cls)), (" (%s)" % status) if status else ""))
