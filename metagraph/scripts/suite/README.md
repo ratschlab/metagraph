@@ -3455,7 +3455,7 @@ Readings and notes:
   - followed hairpin steps were not recorded as events;
   - "would carry" under trace must follow the coordinate chain;
   - the `merge` invariant now checks displayed support (§7.1);
-  - a followed hairpin step never counts toward ambiguity (SPEC 13, note 11), but an ambiguous label counts the
+  - a followed hairpin step never counts toward ambiguity (SPEC 13, I3 note 11), but an ambiguous label counts the
     branch on that step too.
 - The suite's offline tests: 512, all passing (`python3 -m unittest discover -s tests`, about 6 minutes).
 
@@ -3484,3 +3484,55 @@ Still judged weakly or not at all:
 - **L3:** the `lower` of a bounds count, held only to ≤ truth.
 - **L4:** the column-coordinate layout of records holding an N, untested; no fixture chain crosses records.
 - **Merge arms that did merge:** judged on their invariants. A handful per run.
+
+#### Validation of the verification round (2026-10-15, against 81c620ef)
+- Six runs on the code of `f5a5e38d` against the 81c620ef Release build. The binary was the `eng-int` worktree's
+  `metagraph_DNA`, sha256 `63b22686…`, HEAD 81c620efd, `src/` clean; each report records this.
+  - Seed 1 ran at the default sizes (`runs/v3final_seed1` in the lane directory).
+  - Seeds 2-6 ran at twice the size (`runs/v3final_breadth_seed2` … `6`).
+  - Every route and all twelve configurations.
+- 16,142 requests: 7,128 `/pattern`, 1,484 `/resolve`, 7,530 `/traverse`.
+- 43,961 answers:
+  - 40,469 equal the oracle;
+  - 3,488 are inconclusive (budget and cap probes, merge arms that merged), with every invariant passing;
+  - **4 disagree, and all 4 are oracle errors in the invariants of merged arms**, described below.
+- 437,309 corruptions of the stated mutation set, 122,059 of them of `/traverse` answers, every one caught.
+- Coverage per seed of what the verification found missing:
+  - 14-15 `/resolve` trace queries whose trace answer differs from k-mer presence;
+  - 120-246 constant-cost `/traverse` requests over 25-33 (value, budget, `switch_on`) settings, with
+    37-81 switches, 9-16 `superseded`, 8-22 `label_lost` and 3 `loss_budget` label ends;
+  - 5-13 predicted refusals of unreachable extras;
+  - 13-23 PRIMARY twins;
+  - 9-26 withholds on graphs without their mask;
+  - 96-217 merge arms that merged nothing, held to the keep walker;
+  - 3-5 merged arms, each with its `reconverge` event.
+  - The three `loss_budget` ends per seed all come from the fixed rule case. The random constant-cost
+    requests have not yet produced one.
+- **No candidate engine defect.** Per the coordinator's rule, the 4 disagreements are classified, not fitted.
+  The oracle code is unchanged.
+  - *A displayed walk across a merge is not a label's walk.* Three answers:
+    - `T-canonical_k10-0051` left (seed 2);
+    - `T-canonical_k10-0046` right (seed 4);
+    - `T-canonical_k11-0033` left (seed 6).
+
+    `traverse.*.sound` requires every displayed walk of a merged arm to be a walk of the keep walker. SPEC 7.1
+    says otherwise: "The displayed walk — a path's `segments` chain and spelled bases, its `continuation`, and
+    `route_bp` (what of that spelling a label does not carry …) — follows first parents".
+
+    In each case the leaf's only label entered the merge through a non-first parent, and the leaf's `route_bp`
+    is that merge. Each extra walk passes the same check:
+    - it is a graph walk;
+    - it equals a keep walk from the merge on;
+    - the keep walk reaches the merge node through the other parent.
+
+    The script is `runs/v3final_triage/triage_sound.py` in the lane directory. The check should have required
+    only that much.
+  - *A switch-entered run's first node.* One answer, `T-canonical_k10-0076` right (seed 2).
+    `traverse.*.displayed_support` requires a run's label on nodes `from_bp … to_bp`. Two runs `[22, 23)`,
+    entered by a switch and closed by the merge at 23, lack their label on node 22. That is the switch
+    source's node.
+
+    SPEC 6.2: "Step j adds outward base index j−1 … Runs are half-open `[from_bp, to_bp)` over outward base
+    indices". So a run covers the nodes entered by steps `from_bp + 1 … to_bp`; 7.4's `label_sets` say the
+    same in words. The keep walker gives switch-entered claims the same `from_bp`. The check should start at
+    `from_bp + 1`.
