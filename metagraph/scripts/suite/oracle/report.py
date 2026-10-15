@@ -39,6 +39,47 @@ NOT_COVERED = [
 ]
 
 
+def engine_provenance(path):
+    """What was actually run (verification M1: "--version" alone hid a build of another commit):
+    the binary's real path, size, sha256 and modification time, its --version, and the git HEAD of
+    the tree that holds it with how many of that tree's metagraph/src files are uncommitted."""
+    import datetime
+    import hashlib
+    import os
+    import subprocess
+    out = {'path': path}
+    try:
+        real = os.path.realpath(path)
+        h = hashlib.sha256()
+        with open(real, 'rb') as f:
+            for block in iter(lambda: f.read(1 << 20), b''):
+                h.update(block)
+        st = os.stat(real)
+        out.update({'realpath': real, 'size': st.st_size, 'sha256': h.hexdigest(),
+                    'mtime_utc': datetime.datetime.fromtimestamp(
+                        st.st_mtime, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')})
+    except OSError as e:
+        out['error'] = str(e)
+        return out
+    try:
+        out['version'] = subprocess.run([real, '--version'], capture_output=True, text=True,
+                                        timeout=60).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        out['version'] = None
+    d = os.path.dirname(real)
+
+    def git(*args):
+        res = subprocess.run(['git', '-C', d] + list(args), capture_output=True, text=True)
+        return res.stdout.strip() if res.returncode == 0 else None
+    top = git('rev-parse', '--show-toplevel')
+    out['build_tree'] = top
+    out['build_head'] = git('rev-parse', 'HEAD') if top else None
+    if top:
+        status = git('status', '--porcelain', '--', 'metagraph/src')
+        out['build_src_uncommitted'] = len(status.splitlines()) if status is not None else None
+    return out
+
+
 def _compact(value, limit=3000):
     text = json.dumps(value, sort_keys=True)
     return text if len(text) <= limit else text[:limit] + ' ...'
@@ -72,17 +113,22 @@ def write(path_json, path_md, report):
 
 
 def markdown(report):
-    lines = ['# Oracle suite report (lane O, phase 1)', '']
-    lines.append(f"Engine: `{report['engine']['path']}` ({report['engine'].get('version', '?')}). "
+    lines = ['# Oracle suite report (lane O: /pattern, /resolve, /traverse)', '']
+    eng = report['engine']
+    lines.append(f"Engine: `{eng.get('realpath', eng['path'])}`, sha256 `{eng.get('sha256', '?')}`, "
+                 f"modified {eng.get('mtime_utc', '?')}, {eng.get('version') or '?'}; build tree "
+                 f"`{eng.get('build_tree')}` at HEAD `{eng.get('build_head')}` "
+                 f"({eng.get('build_src_uncommitted', '?')} uncommitted files under metagraph/src). "
                  f"Seed {report['seed']}. {report['started_utc']} to {report['ended_utc']}.")
     lines.append('')
     s = report['summary']
     lines.append(f"**Verdict: {s['verdict']}.** {s['entries']} answers compared "
                  f"({s['requests']} requests): {s['pass']} pass, {s['fail']} fail, "
-                 f"{s['inconclusive']} inconclusive (budget probes: completeness not judged, "
-                 f"invariants judged), {s['exploratory']} with an exploratory difference. "
-                 f"Mutations: {report['mutations']['caught']} of {report['mutations']['applied']} "
-                 f"caught, {len(report['mutations']['missed'])} missed.")
+                 f"{s['inconclusive']} inconclusive (budget and cap probes, merge runs that "
+                 f"merged: completeness not judged, invariants judged), {s['exploratory']} with "
+                 f"an exploratory difference. Mutations of the stated mutation set: "
+                 f"{report['mutations']['caught']} of {report['mutations']['applied']} caught, "
+                 f"{len(report['mutations']['missed'])} missed.")
     lines.append('')
     lines.append('## Scope')
     lines.append('')

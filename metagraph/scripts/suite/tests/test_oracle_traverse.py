@@ -1,7 +1,8 @@
 """Offline tests of the lane O /traverse oracle (ORACLE-DESIGN.md section 10): the walk rule and the
 reference walker on the traversal fixture's cases, whose outcomes are known analytically (several
 are the SPEC's own statements); the two independent computations of section 6.9's E against each
-other; and the mutation triplets on recorded engine answers (81c620ef), offline."""
+other; and the mutation triplets on recorded engine answers, offline (their build:
+tests/data/oracle_traverse_answers.json, field engine)."""
 
 import json
 import os
@@ -217,7 +218,7 @@ class SpecContract(unittest.TestCase):
 
 
 class RecordedTriplets(unittest.TestCase):
-    """Members 1-3 on answers the 81c620ef build gave: each answer passes (or, truncated or merged,
+    """Members 1-3 on recorded engine answers: each answer passes (or, truncated or merged,
     is inconclusive on completeness with its invariants passing), and each corruption fails the
     check meant to catch it."""
 

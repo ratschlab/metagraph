@@ -86,6 +86,35 @@ class Report(unittest.TestCase):
             self.assertIn(words, md)
 
 
+class Provenance(unittest.TestCase):
+    """Verification M1: the report names the binary by its content and its build tree's HEAD."""
+
+    def test_a_binary_in_a_git_tree(self):
+        here = os.path.abspath(__file__)
+        p = report.engine_provenance(here)
+        self.assertEqual(64, len(p['sha256']))
+        self.assertEqual(os.path.getsize(here), p['size'])
+        self.assertRegex(p['build_head'] or '', '^[0-9a-f]{40}$')
+        self.assertIsInstance(p['build_src_uncommitted'], int)
+        self.assertIn(p['sha256'], report.markdown(self.minimal(p)))
+
+    def test_a_binary_outside_a_git_tree(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'metagraph')
+            with open(path, 'wb') as f:
+                f.write(b'not an engine')
+            p = report.engine_provenance(path)
+            self.assertIsNone(p['build_head'])
+            self.assertEqual(13, p['size'])
+
+    def minimal(self, engine):
+        return {'engine': engine, 'seed': 1, 'started_utc': 'a', 'ended_utc': 'b',
+                'summary': {'verdict': 'PASS', 'entries': 0, 'requests': 0, 'pass': 0,
+                            'fail': 0, 'inconclusive': 0, 'exploratory': 0},
+                'configs': {}, 'disagreements': [], 'exploratory': [],
+                'mutations': {'applied': 0, 'caught': 0, 'by_mutation': {}, 'missed': []}}
+
+
 class Command(unittest.TestCase):
     def test_a_non_empty_out_dir_is_refused(self):
         with tempfile.TemporaryDirectory() as d:

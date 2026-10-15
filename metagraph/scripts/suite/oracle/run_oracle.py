@@ -260,8 +260,7 @@ def main(argv=None):
     signal.signal(signal.SIGINT, _signal)
     signal.signal(signal.SIGTERM, _signal)
 
-    version = subprocess.run([mg, '--version'], capture_output=True, text=True).stdout.strip()
-    rep = {'engine': {'path': mg, 'version': version}, 'seed': args.seed,
+    rep = {'engine': report.engine_provenance(mg), 'seed': args.seed,
            'started_utc': utc(), 'configs': {}, 'requests': [], 'disagreements': [],
            'exploratory': [],
            'mutations': {'applied': 0, 'caught': 0, 'missed': [], 'by_mutation': {}},

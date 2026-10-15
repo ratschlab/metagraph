@@ -3378,7 +3378,15 @@ on rendered answers in the three graph modes, the review's probes, the generator
   position; none for a peptide). With substitutions the check of few unchecked candidates makes levels exact
   one by one (21.6), so a partition's `upper` is its truth plus the dummies of the levels still in `bounds`.
 
-### Validation against the 81c620ef build (2026-10-15)
+### Validation of phase 1 (2026-10-15)
+
+*Correction (verification of 2026-10-15, M1).* These runs used the main tree's binary
+`metagraph/build/metagraph_DNA`, linked 2026-10-13 16:14. It is an engine older than 81c620ef: it predates 14
+engine commits. The earlier wording "against the 81c620ef build" was wrong. The verification re-ran every request
+against the 81c620ef Release build (worktree `eng-int`, HEAD 81c620efd, `src/` clean) and got the same answers,
+byte for byte apart from timing, so the numbers below stand. Every report now records the binary's sha256 and its
+build tree's HEAD.
+
 - Seed 1 at the default sizes (`runs/final2_seed1` in the lane directory) and seeds 2-6 at twice the size
   (`runs/final2_breadth_seed2` … `6`): 8,528 requests, 32,988 answers over the nine configurations; 30,116
   answers equal the oracle (complete sets, exact counts, order, labels and placements, `/resolve` runs and
@@ -3410,7 +3418,7 @@ phase-1 configurations get random seeds.
   run's displayed support.
 
 `tree` and `summary` are compared against `full`. `run_oracle.py --routes traverse` runs this alone. Offline:
-`python3 -m unittest tests.test_oracle_traverse`, which includes the triplets on 53 recorded 81c620ef answers
+`python3 -m unittest tests.test_oracle_traverse`, which includes the triplets on 53 recorded engine answers
 in `tests/data/`.
 
 Readings and notes:
@@ -3424,7 +3432,7 @@ Readings and notes:
 - **Radius.** `bounds.max_extension_bp: 0` is refused (400, range [1, …]), which section 5 does not state.
 - **Trace with merging** is refused (400), as SPEC 13 item 9 states.
 
-#### Validation of phase 2 against the 81c620ef build (2026-10-15)
+#### Validation of phase 2 (2026-10-15; the build: see the correction under phase 1's validation)
 - Six runs on the code of `2618936f`: seed 1 at the default sizes (`runs/p2final3_seed1` in the lane directory)
   and seeds 2-6 at twice the size (`runs/p2final3_breadth_seed2` … `6`), every route, all twelve configurations.
   - 16,058 requests: 7,128 `/pattern`, 1,400 `/resolve`, 7,530 `/traverse`.
