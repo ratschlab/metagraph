@@ -2622,6 +2622,15 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   request's budget without that clamp: the stop rule reads that budget, so a budget lowered unstated would excuse a
   premature stop (a stop within 1,100 ms of a 3,000 ms request passed beside a stated budget of 1,000). The recorded
   clamp (R-edge-0021, 70,000 -> 60,000, both direct arms) and every recorded budget pass.
+- /traverse, every segment states its events list (the stricter rule the B2 item left optional). The engine writes
+  `events`, a list of event objects, on every segment of a tree or full detail (traverse.cpp arm_to_json; never
+  truncated), and graphlet_arms gives every parsed segment its list. The /traverse invariants now fail a segment
+  without the list (absent, null, another type, or entries that are not objects) on every arm, whatever ends its paths
+  claim. On a direct arm this only adds a clear diagnosis beside the structural-end rules; on the MCP arm it closes
+  the verification's theoretical gap: a JSON segment there without its events, on a path walk_in_record does not
+  read, gave not_exposed invariants beside a passing walk, which the gate tolerates for a generic check. Measured:
+  every recorded JSON segment of v3 / v4 (3,912) and of the 41 stored full documents (1,428) states its list; no
+  recorded or stored verdict moves. The unit fixture walk_answer stated no list and states an empty one.
 
 ### Validation (offline)
 - 451 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd). Each item's new or revised test fails on

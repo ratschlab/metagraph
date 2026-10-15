@@ -4282,6 +4282,15 @@ def _traverse_invariants(sc, ans, a, arm):
                         i, side, armo.get("status"), armo.get("complete_to_bp"), radius))
             if walks == "complete" and armo.get("status") != "complete":
                 probs.append("result %d: walks complete but the %s arm is %s" % (i, side, armo.get("status")))
+            # the engine writes `events`, a list of event objects, on every segment of a tree or full detail
+            # (traverse.cpp arm_to_json; never truncated), and graphlet_arms lists them on every segment it parses:
+            # a segment without the list holds back the evidence of the decisions on it, on every arm (an MCP answer
+            # with JSON segments included), whatever ends its paths claim
+            bare = [s.get("id") for s in armo.get("segments") or [] if isinstance(s, dict) and
+                    (not isinstance(s.get("events"), list) or not all(isinstance(x, dict) for x in s["events"]))]
+            if bare:
+                probs.append("result %d %s: segment(s) %s without an events list of objects (the engine writes one "
+                             "on every segment of a tree or full detail)" % (i, side, bare[:6]))
             segs = {s["id"]: s for s in armo.get("segments", [])}
             for p in armo.get("paths", []):
                 chain = p.get("segments", [])

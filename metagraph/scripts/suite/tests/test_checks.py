@@ -1643,13 +1643,14 @@ class StatedReasons(unittest.TestCase):
 
     def walk_answer(self, sc, n, trig, counters, limitation, bounds=None, timing=None, resource_stop=None):
         """A walk of scenario |sc| (v2 manifest) following its record for n bp on the requested arm, stopped by
-        |trig|."""
+        |trig| (its segment's events list, which the engine writes on every segment, empty)."""
         t = sc["truth"]
         side = sc["request"]["strategy"]["direction"]
         cont = checks._seed_frame(t, {"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]},
                                   side, t["length"])[0]
         arm = {"status": "truncated", "complete_to_bp": n, "cap_trigger": {"reason": trig, "at_bp": n},
-               "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": n, "sequence": cont(n)}],
+               "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": n, "sequence": cont(n),
+                             "events": []}],
                "paths": [{"id": 0, "segments": [0], "length_bp": n, "path_reason": trig, "end_reasons": {trig: 1}}],
                "counters": counters, "limitations": [limitation] if limitation else []}
         b = dict(sc["request"]["strategy"]["bounds"], max_steps=1000000)
@@ -2843,7 +2844,11 @@ class TraverseChecks(unittest.TestCase):
                     self.assertIn("field not in the answer", d)
                     self.assertIn("segments[3].events of path 0 at 30 bp, a branch end", d)
                     self.assertNotIn("raised", d)
-                self.assertEqual(judge(sc, ans, "mcp"), ("not_exposed", "not_exposed"), (value, kw))
+                # on the MCP arm the walk is not shown; a JSON segment without the list fails the invariants there
+                # too (the engine writes it on every segment of a tree or full detail)
+                self.assertEqual(judge(sc, ans, "mcp"), ("not_exposed", "fail"), (value, kw))
+                self.assertIn("segment(s) [3] without an events list of objects",
+                              outcome(sc, ans, "invariants", "mcp")[1])
         # the missing evidence never hides a failure the answer shows (the MCP arm included)
         sc, ans = broken("absent", **fabricated)
         ans["body"]["results"][0]["arms"]["right"]["paths"][1]["length_bp"] = 99
@@ -2854,14 +2859,23 @@ class TraverseChecks(unittest.TestCase):
         # the empty list states no event: the end is unstated (fail on both arms), as before
         sc, ans = broken([], **fabricated)
         self.assertEqual(judge(sc, ans, "mcp"), ("fail", "fail"))
-        # an end that is no structural one needs no events: a path to the radius without the list passes
+        # an end that is no structural one needs no events of it, but every segment states its list: without the
+        # lists the invariants fail on both arms, by that rule alone (no structural end is claimed)
         sc, ans = self.structural_walk(strategy=mlb2)
         right = ans["body"]["results"][0]["arms"]["right"]
         for p in right["paths"]:
             p["end_reasons"] = {"max_extension_bp": 1} if p["id"] == 0 else p["end_reasons"]
         for sg in right["segments"]:
             sg.pop("events")
-        self.assertEqual(outcome(sc, ans, "invariants")[0], "pass")
+        for arm in ("direct-local", "mcp"):
+            o, d = outcome(sc, ans, "invariants", arm)
+            self.assertEqual(o, "fail", arm)
+            self.assertIn("segment(s) [0, 1, 2, 3, 4] without an events list of objects", d)
+            self.assertNotIn("field not in the answer", d)
+        # an events list must hold event objects
+        sc, ans = self.structural_walk(strategy=mlb2)
+        ans["body"]["results"][0]["arms"]["right"]["segments"][1]["events"] = ["blocked"]
+        self.assertIn("segment(s) [1] without an events list of objects", outcome(sc, ans, "invariants", "mcp")[1])
         # a graphlet states every event (§7.5): every parsed segment lists its own, empty where it has none (a
         # re-entry end here: mcp_shaped writes no split flags, which a branch end needs)
         sc, ans = self.structural_walk(end="edge_reuse")
@@ -2901,7 +2915,8 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(judge(sc, ans), ("fail", "fail"))
         self.assertIn("segments[3].events of path 0 at 30 bp, a path_reason edge_reuse end (absent)",
                       outcome(sc, ans, "walk_in_record")[1])
-        self.assertEqual(outcome(sc, ans, "walk_in_record", "mcp")[0], "not_exposed")
+        # on the MCP arm the walk is not shown, and the JSON segment without its list fails the invariants
+        self.assertEqual(judge(sc, ans, "mcp"), ("not_exposed", "fail"))
 
     def test_a_walk_without_its_tree_is_not_shown(self):
         # an MCP answer without its graphlet (the export lost, an arm in summary) shows no walk: walk_in_record is
