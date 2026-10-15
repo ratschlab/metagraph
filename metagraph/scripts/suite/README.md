@@ -2786,14 +2786,17 @@ dictionary of T-labels-0003 / -0005 / -0006; the rest of the scenario stays test
 `mcp.by_design_checks` [{check, case}] (a deliberate service behaviour at property level, e.g. T-edge-0008's
 answer_fields under traverse.duplicate_seeds). Lane V5 adds the fields and gate_policy's derivation; the names are
 read in one place, suite_common.MCP_CHECK_MARKS.
-- **What a mark sets aside** (suite_common.marked_aside / unmarked_checks): on the MCP arm, a marked check that
-  reads not_exposed, the reading the mark declares. A marked check that reads anything else (pass, fail, finding,
-  inconclusive) is judged as any check: a mark hides no result.
+- **What a mark sets aside** (suite_common.checks_marked_aside, the one rule the outcome through unmarked_checks,
+  the comparison, the gate and the report apply): on the MCP arm, a marked check recorded reading not_exposed, the
+  reading the mark declares. A marked check that reads anything else (pass, fail, finding, inconclusive) is judged as
+  any check: a mark hides no result. A marked check with no result on the execution is a missing result as before
+  the marks (the runner drops nothing: it judges on unmarked_checks).
 - **Outcome.** reevaluate.py's outcome rule (and an answered case's verdict) and merge_run.stricter_outcomes judge an
   MCP execution on its checks less the set-aside items, so a marked check never makes it inconclusive ("every
   property not exposed") and so never untested in the report.
-- **Gate.** A marked check the MCP read not_exposed, or did not read, is no required-property problem, and with
-  require_agreement no property "not compared with the reference" (gate.uncompared_properties leaves it out).
+- **Gate.** A marked check the MCP read not_exposed is no required-property problem, and with require_agreement
+  no property "not compared with the reference" (gate.uncompared_properties leaves it out). One the MCP did not read
+  on a passing execution is "the expected check ... has no result" (a property problem), and uncompared.
 - **Comparison.** compare.check_agreement compares a set-aside item with nothing (removed from both sides by check
   and occurrence): it is neither counted as skipped (checks_not_exposed) nor unmatched, and the scenario's
   mcp_agreement lists it as `marked_checks` [{repeat, check, mark}] with `checks_marked`, summed in the summary;

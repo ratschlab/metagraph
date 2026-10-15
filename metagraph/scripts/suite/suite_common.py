@@ -1814,26 +1814,53 @@ def mcp_check_marks(scenario):
 
 
 def marked_aside(scenario, arm, item, marks=None):
-    """The mark (mcp_check_marks' entry) that sets a check result aside: on the MCP arm, a check the scenario marks
+    """The mark (mcp_check_marks' entry) that sets one check result aside: on the MCP arm, a check the scenario marks
     that reads not_exposed, what the mark declares; None otherwise. A marked check that reads anything else (pass,
     fail, finding, inconclusive) is judged as any check: a mark hides no result. |marks|: mcp_check_marks(scenario)
-    when the caller has it."""
+    when the caller has it. The readers of an execution apply checks_marked_aside, which builds on this."""
     if arm != "mcp" or not isinstance(item, dict) or item.get("outcome") != "not_exposed":
         return None
     marks = mcp_check_marks(scenario) if marks is None else marks
     return marks.get(item.get("check"))
 
 
-def unmarked_checks(scenario, arm, checks):
-    """|checks| without the items marked_aside sets aside: what the outcome rule (outcome_from_checks,
-    checks.scenario_outcome), the comparison and the gate judge an MCP execution on, so a marked check never makes
-    it inconclusive (not exposed) or untested; |checks| itself when nothing is set aside (every arm but MCP, every
-    scenario without marks)."""
-    marks = mcp_check_marks(scenario) if arm == "mcp" else {}
+def check_keys(checks):
+    """[(check name, its occurrence among the items of that name)] of a check list, in list order: how the
+    comparison, the gate and the report address one item of a check that occurs more than once."""
+    seen, out = {}, []
+    for c in checks if isinstance(checks, list) else []:
+        name = c.get("check") if isinstance(c, dict) else None
+        out.append((name, seen.get(name, 0)))
+        seen[name] = seen.get(name, 0) + 1
+    return out
+
+
+def checks_marked_aside(scenario, arm, checks, marks=None):
+    """{(check name, occurrence) (check_keys): mark} of the items of an execution's |checks| the scenario's
+    property-level marks set aside: the one rule the outcome (unmarked_checks), the comparison, the gate and the
+    report apply. An item is set aside only as it is recorded reading not_exposed (marked_aside); a marked check read
+    otherwise, or with no result on the execution, is judged as any check (a mark hides no result, and a missing
+    result stays a missing one: the runner drops nothing, it judges on unmarked_checks). {} on every arm but MCP and
+    for a scenario without marks. |marks|: mcp_check_marks(scenario) when the caller has it."""
+    marks = (mcp_check_marks(scenario) if marks is None else marks) if arm == "mcp" else {}
     if not marks or not isinstance(checks, list):
+        return {}
+    out = {}
+    for c, key in zip(checks, check_keys(checks)):
+        m = marked_aside(None, arm, c, marks)
+        if m is not None:
+            out[key] = m
+    return out
+
+
+def unmarked_checks(scenario, arm, checks):
+    """|checks| without the items checks_marked_aside sets aside: what the outcome rule (outcome_from_checks,
+    checks.scenario_outcome) judges an MCP execution on, so a marked check never makes it inconclusive (not exposed)
+    or untested; |checks| itself when nothing is set aside (every arm but MCP, every scenario without marks)."""
+    aside = checks_marked_aside(scenario, arm, checks)
+    if not aside:
         return checks
-    kept = [c for c in checks if marked_aside(scenario, arm, c, marks) is None]
-    return checks if len(kept) == len(checks) else kept
+    return [c for c, key in zip(checks, check_keys(checks)) if key not in aside]
 
 
 def outcome_from_checks(checks):

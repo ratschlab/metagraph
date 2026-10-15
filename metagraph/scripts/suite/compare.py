@@ -2274,9 +2274,9 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, 
     which fell back is left out, the other arm's executions that gave an item are in). The class: disagree (a
     differing check outside E, or one side alone errored), service_by_design (only items of E differ),
     not_comparable (no check compared), agree. |marks| (suite_common.mcp_check_marks of the scenario): an MCP item a
-    property-level mark sets aside (suite_common.marked_aside: the marked check read not_exposed) is compared with
-    nothing, neither skipped as not exposed nor unmatched, and is listed as `marked_checks` {repeat, check, mark}
-    (`checks_marked` their number) when there is one."""
+    property-level mark sets aside (suite_common.checks_marked_aside of the execution's checks: the marked check read
+    not_exposed) is compared with nothing, neither skipped as not exposed nor unmatched, and is listed as
+    `marked_checks` {repeat, check, mark} (`checks_marked` their number) when there is one."""
     explained = explained or {}
     marks = marks or {}
     marked = []
@@ -2311,8 +2311,11 @@ def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None, 
             for x in d_e:
                 x["repeat"] = r.get("repeat")
             by_design.extend(d_e)
-        aside = set((c.get("check"), k) for c, k in _with_occurrence(mine)
-                    if sc.marked_aside(None, "mcp", c, marks) is not None)
+        # the rule reads the whole execution; its items are found among those left after E by identity
+        full = r.get("checks") or []
+        aside_keys = sc.checks_marked_aside(None, "mcp", full, marks)
+        aside_ids = set(id(c) for c, key in zip(full, sc.check_keys(full)) if key in aside_keys)
+        aside = set((c.get("check"), k) for c, k in _with_occurrence(mine) if id(c) in aside_ids)
         if aside:
             _, mine = _split_by_keys(mine, aside)
             _, theirs = _split_by_keys(theirs, aside)

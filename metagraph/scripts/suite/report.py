@@ -795,7 +795,7 @@ def agreement_depth(comp, rows, is_property, manifest=None):
     reference_fallbacks, from that arm's: compare.reference_checks): {scenario: {class (DEPTH_CLASSES), not_compared
     (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
     where the MCP does not expose them)}}. An MCP item a property-level mark of |manifest|'s scenario sets aside
-    (suite_common.marked_aside) is neither compared nor skipped: the mark states it, and the report lists it."""
+    (suite_common.checks_marked_aside) is neither compared nor skipped: the mark states it, and the report lists it."""
     scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     by = {}
     for r in rows:
@@ -817,6 +817,7 @@ def agreement_depth(comp, rows, is_property, manifest=None):
         marks = sc.mcp_check_marks(scen.get(sid))
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
             mine = mcp[rep].get("checks") or []
+            aside = sc.checks_marked_aside(None, "mcp", mine, marks)
             theirs, _ = cmp.reference_checks(mine, (ref.get(rep) or ref0).get("checks") or [],
                                              (alt.get(rep) or alt0 or {}).get("checks") if alt else None)
             has_prop = has_prop or any(is_property(c.get("check")) for c in mine + theirs)
@@ -828,10 +829,10 @@ def agreement_depth(comp, rows, is_property, manifest=None):
             for name in set(ca) & set(cb):
                 if not is_property(name):
                     continue
-                for oa, ob in zip(ca[name], cb[name]):
+                for k, (oa, ob) in enumerate(zip(ca[name], cb[name])):
                     if oa in JUDGED and ob in JUDGED:
                         compared.add(name)
-                    elif sc.marked_aside(None, "mcp", {"check": name, "outcome": oa}, marks) is not None:
+                    elif (name, k) in aside:
                         if ob in ("fail", "finding"):
                             hidden.add(name)   # the reference's failure stays named: a mark hides no result
                     else:

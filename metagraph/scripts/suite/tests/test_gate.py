@@ -1190,6 +1190,28 @@ class PropertyMarksTest(GateCase):
         self.assertIn(("T-001", "mcp", 0), [(p["scenario"], p["arm"], p["repeat"])
                                             for p in self.problems(v, "outcome")])
 
+    def test_a_marked_check_without_a_result_is_a_missing_one(self):
+        # the mark declares a not_exposed reading: a passing MCP line that has no result for the marked check (a
+        # runner that dropped it) is the missing expected result it is without the mark, and with require_agreement
+        # an uncompared property
+        m = self.manifest()
+        dropped = dict((("T-001", r), {"checks": checks_for("T-001", r)[:2], "outcome": "pass"}) for r in (0, 1))
+        self.assertEqual(sc.checks_marked_aside(m["scenarios"][0], "mcp", dropped[("T-001", 0)]["checks"]), {})
+        v = gate.judge(self.marked_run(m, "dropped", direct=False, change=dropped), policy_of(m))
+        self.assertFalse(v["passed"])
+        self.assertEqual([(p["scenario"], p["repeat"], p["detail"]) for p in self.problems(v, "property")],
+                         [("T-001", r, "the expected check answer_fields has no result on a passing execution")
+                          for r in (0, 1)])
+        d = self.marked_run(m, "dropped-agree", direct=True, change=dropped)
+        v = gate.judge(d, policy_of(m, arms=("direct-local", "direct-remote", "mcp"), require_agreement=True))
+        self.assertIn("required property answer_fields not compared with direct-local",
+                      [p["detail"] for p in self.problems(v, "agreement") if p["scenario"] == "T-001"])
+        # the reading the mark declares stays set aside (R-002's by-design mark, read not_exposed, in the same runs)
+        self.assertFalse([p for p in v["problems"] if p["scenario"] == "R-002"], gate.render(v))
+        rows = self.rows(d)
+        self.assertEqual(sc.checks_marked_aside(m["scenarios"][1], "mcp", rows[("R-002", "mcp", 0)]["checks"]),
+                         {("answer_fields", 0): {"mark": "by_design", "case": self.BD["case"]}})
+
     def test_compare_and_report_set_it_aside_and_list_it(self):
         texts = {}
         for marked in (False, True):
