@@ -437,11 +437,60 @@ class CompareTest(unittest.TestCase):
         self.assertIs(cmp.answer_case_of(cases, "POST /pattern", 502, relayed["error"]), case)
         self.assertIsNone(cmp.answer_case_of(cases, "POST /pattern", 503, relayed["error"]))
 
+    def test_discovery_cap_cases(self):
+        # async's fb66f1dd: the service's discovery cap 1000 (was 100), default 50 (was 20); the host has none. The
+        # renamed cases state it with request predicates (the cap a reference into the live document, the table's
+        # block its recorded value); the old ids stay as aliases the manifests v1-v4 name, without a request (v4's
+        # R-edge-0023 sends 150) and with a text the refusal at any cap contains
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        low, high = cases["resolve.discover_limit_above_cap"], cases["resolve.discover_limit_above_cap_host_answers"]
+        ref = "backends.refseq33m-experimental.resolve.discover.max_labels"
+        self.assertEqual(high["request"][1], {"path": "limit", "gt": {"service": ref}})
+        self.assertEqual(low["request"][1], {"path": "limit", "lt": 1})
+        self.assertEqual(sc.lookup(cases.blocks["service"], "backends.refseq33m-experimental.resolve.discover"),
+                         (True, {"max_labels": 1000, "default_max_labels": 50}))
+        for old, new in (("resolve.discover_limit_above_100", low), ("resolve.discover_limit_above_100_host_answers",
+                                                                     high)):
+            self.assertEqual(cases[old]["alias_of"], new["id"])
+            self.assertNotIn("request", cases[old])
+            self.assertEqual((cases[old]["direct_expectation"], cases[old]["agreement"]),
+                             (new["direct_expectation"], new["agreement"]))
+        # the manifests v1-v4 still load with the table; a v5 scenario must satisfy the renamed case's request
+        for name in ("suite_v1", "suite_v2", "suite_v3", "suite_v4"):
+            m = sc.read_json(os.path.join(SUITE, "manifest", name + ".json"))
+            self.assertEqual(cmp.request_scenario_problems(cases, m["scenarios"]), [], name)
+
+        def v5(case_id, limit):
+            return {"id": "R-v5", "route": "POST /resolve", "mcp": {"tool": "traverse_resolve", "by_design": [case_id],
+                                                                   "arguments": {"discover": True, "limit": limit}}}
+        self.assertEqual(cmp.request_scenario_problems(cases, [v5(high["id"], 1001), v5(low["id"], 0)]), [])
+        for case_id, limit in ((high["id"], 1000), (high["id"], 150), (low["id"], 1), (low["id"], 1500)):
+            self.assertEqual(len(cmp.request_scenario_problems(cases, [v5(case_id, limit)])), 1, (case_id, limit))
+        # the cap reads the run's live document first (a deployment before fb66f1dd states 100: a mismatch with the
+        # table's 1000, judged with the live value)
+        live = {"backends": {"refseq33m-experimental": {"resolve": {"discover": {"max_labels": 100}}}}}
+        refs = sc.References(cases.blocks, live={"service": live})
+        evidence = cmp.RequestEvidence()
+        self.assertTrue(cmp.request_holds(high, v5(high["id"], 150), None, refs, evidence)[0])
+        self.assertFalse(cmp.request_holds(high, v5(high["id"], 150), None, cases.refs)[0])
+        self.assertEqual(evidence.sources, {high["id"]: {ref: "live"}})
+        self.assertEqual([(m["ref"], m["live"], m["table"]) for m in evidence.mismatches], [(ref, 100, 1000)])
+        # the refusal texts: the renamed cases the cap 1000's, the aliases any cap's (the recorded v3 / v4 runs)
+        for text, renamed in (("`limit` must be an integer in 1..1000, got 1500", True),
+                              ("`limit` must be an integer in 1..100, got 150", False)):
+            ans = {"http": None, "error": {"code": "invalid_arguments", "text": text}}
+            self.assertIs(cmp.service_answers(high["service_answer"], ans), renamed, text)
+            self.assertTrue(cmp.service_answers(cases["resolve.discover_limit_above_100_host_answers"][
+                "service_answer"], ans), text)
+
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
-        self.assertEqual(info["cases"], 131)   # async's vendored table at 31a2e41f (e427d503's edit, case 131)
-        # lane S7v: the vocabulary's wall_rule entry states budget_minus_reserve's threshold (B - 1 s, the name kept)
-        self.assertEqual(info["sha256"], "d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61")
+        # async's vendored table at 31a2e41f (e427d503's edit, case 131), and lane S8g's discovery cap (two renamed
+        # cases, their old ids kept as aliases: 133)
+        self.assertEqual(info["cases"], 133)
+        # lane S7v: the vocabulary's wall_rule entry states budget_minus_reserve's threshold (B - 1 s, the name kept);
+        # lane S8g: the discovery cap 1000 of async's fb66f1dd
+        self.assertEqual(info["sha256"], "39f87b83e0b0004ace6e062dddf1e95eafd6595f6bbdba6387c10719bec6b228")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
         entry, = cases["traverse.duplicate_seeds"]["explains_checks"]
@@ -1754,6 +1803,7 @@ class RequestPredicatesTest(unittest.TestCase):
             "mismatch.above_kind_cap", "pattern.caps_zero", "pattern.path_caps_without_long_search",
             "pattern.predicate_caps_without_predicate", "pattern.predicate_form_other",
             "pattern.predicate_options_noop_without_predicate", "pattern.predicate_options_without_predicate",
+            "resolve.discover_limit_above_cap", "resolve.discover_limit_above_cap_host_answers",
             "resolve.time_budget_above_host_max", "resolve.time_budget_unnamed", "traverse.advanced_path_disabled",
             "traverse.bounds_budget_above_preset_row", "traverse.bounds_knob_above_service_maximum",
             "traverse.empty_seeds"]))

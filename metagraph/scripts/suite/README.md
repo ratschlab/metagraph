@@ -2809,3 +2809,27 @@ read in one place, suite_common.MCP_CHECK_MARKS.
   shared_rule("unmarked_checks")(scenario, "mcp", checks); until then a recorded line it made inconclusive by a
   marked check stays so in the recorded set (merge_run only makes outcomes stricter) and is corrected by a
   re-evaluation.
+
+### The by-design table: the discovery cap 1000 (async fb66f1dd, 2026-10-15)
+The service's discovery cap goes from 100 to 1000 and its default from 20 to 50 with async's bundle
+(fix/owner-1015-pattern-discover fb66f1dd), which lands before v5; the host has no discovery cap (default 1000,
+minimum 1). service_by_design.json (sha256 39f87b83e0b0004ace6e062dddf1e95eafd6595f6bbdba6387c10719bec6b228, 133
+cases; the note is the lane's TABLE-DIFF.md):
+- **Renamed cases** (the ids lane V5's manifest names): resolve.discover_limit_above_cap (max_labels / limit below 1:
+  both refuse; request [discover equals true, limit lt 1]) and resolve.discover_limit_above_cap_host_answers (above
+  the cap: the service refuses, the host answers; request [discover equals true, limit gt {"service":
+  "backends.refseq33m-experimental.resolve.discover.max_labels"}], the path the live GET /traverse/capabilities
+  states the cap at). Both state the refusal "`limit` must be an integer in 1..1000" (max_limit 1000), the route's
+  "discover.max_labels must be an integer in 1..1000, got <value>" and the default 50; `source` lines at fb66f1dd
+  (`source_commit`).
+- **Aliases** for the manifests v1-v4: resolve.discover_limit_above_100 and
+  resolve.discover_limit_above_100_host_answers stay, `alias_of` the renamed case, without its request (v4's
+  R-edge-0023 sends 150, which does not exceed 1000) and
+  with the text any cap's refusal contains ("`limit` must be an integer in 1.."), so v1-v4 load and their recorded
+  runs read as before. On a deployment with the cap 1000 the service answers R-edge-0023's 150 and its pair reads
+  unverified until v5 sends a limit above the cap.
+- **The block** states backends.refseq33m-experimental.resolve.discover {max_labels 1000, default_max_labels 50} (a
+  reference must be stated by the table's own block; the live document wins, a deployment before fb66f1dd reading
+  as a configuration mismatch 100 live / 1000 in the table).
+- gate/policy_v4_rt_mcp.json is regenerated for the table's sha256 (only by_design_table and generated_utc differ).
+  The builder manifest_lib.py still names the old ids (lane V5's).
