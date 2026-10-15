@@ -84,7 +84,8 @@ def _clip(value, limit=4000):
 
 # -- counts -------------------------------------------------------------------------------
 
-def judge_count(checks, name, count, truth, exact_required, unit='graph_contexts', upper=None):
+def judge_count(checks, name, count, truth, exact_required, unit='graph_contexts', upper=None,
+                completed=False):
     """One count against the true number; |upper|: U, the upper bound a bounds count of a graph
     without its mask states (SPEC section 7.4), when the oracle knows it."""
     if not isinstance(count, dict):
@@ -97,6 +98,9 @@ def judge_count(checks, name, count, truth, exact_required, unit='graph_contexts
                           {'value': truth, 'relation': 'exact', 'unit': unit}, count)
     if exact_required:
         return checks.add(name, False, {'value': truth, 'relation': 'exact', 'unit': unit}, count)
+    if completed and rel in ('at_least', 'unknown'):
+        # SPEC 7.4: without a stop a count of a graph without its mask is exact or bounds
+        return checks.add(name, False, f'exact or bounds for {truth} (no stop)', count)
     if rel == 'at_least':
         v = count.get('value')
         return checks.add(name, ok_unit and isinstance(v, int) and 0 <= v <= truth,
@@ -204,6 +208,17 @@ def compare_entry(index, config, request, position, entry, previous_stop=None,
 
     if previous_stop is not None and not pat.no_instance:
         checks.add('stop.sticky', stop == previous_stop, previous_stop, stop)
+        cc = (entry.get('counts') or {}).get('contexts') or {}
+        parts = [cc, cc.get('suffix') or {}] + [v for key in ('by_offset', 'by_strand',
+                                                            'by_orientation', 'by_mismatches')
+                                                for v in (cc.get(key) or {}).values()]
+        work = entry.get('work') or {}
+        zero = all(v == 0 for k, v in work.items() if isinstance(v, (int, float))) and all(
+            v == 0 for v in (work.get('steps_by_mismatches') or {}).values())
+        checks.add('stop.sticky_unknown', all(isinstance(p, dict) and p.get('relation') ==
+                                              'unknown' for p in parts) and zero,
+                   'unknown counts and zero work after an earlier budget stop',
+                   {'relation': cc.get('relation'), 'work': work})
     stopped = stop is not None
     if stopped:
         checks.mark('completeness', INCONCLUSIVE,
@@ -324,26 +339,34 @@ def _release(checks, config, exp, entry, stopped):
             checks.add('release.stopped_cut', bool(ok), f'a cut, at most {max_contexts} results',
                        {'cut': cut, 'returned': len(results)})
         return None
-    unmasked_bounds = (not config.masked and entry.get('counts', {}).get('contexts', {})
-                       .get('relation') == 'bounds')
+    count = entry.get('counts', {}).get('contexts', {})
+    unmasked_bounds = not config.masked and count.get('relation') == 'bounds'
+    note = 'threshold_upper_bound' in (entry.get('notes') or [])
     if mode == 'all_or_count':
-        if total <= max_contexts and not unmasked_bounds:
+        if unmasked_bounds:
+            # SPEC 7.4, 7.5: a bounds total was not released (a release enumerates every
+            # candidate and makes it exact): withheld on U, which must exceed max_contexts;
+            # the note threshold_upper_bound exactly when lower is within it
+            lower, upper = count.get('lower'), count.get('upper')
+            ok = (withheld == {'reason': 'count_above_threshold'} and results == []
+                  and rc is False and isinstance(upper, int) and upper > max_contexts
+                  and note == (isinstance(lower, int) and lower <= max_contexts))
+            checks.add('release.all_or_count', ok,
+                       f'withheld on U > {max_contexts}, the note iff lower <= {max_contexts}',
+                       {'withheld': withheld, 'lower': lower, 'upper': upper, 'notes':
+                        entry.get('notes'), 'retrieval_complete': rc})
+            return None
+        checks.add('release.no_threshold_note', not note,
+                   'threshold_upper_bound only for a decision on U', entry.get('notes'))
+        if total <= max_contexts:
             checks.add('release.all_or_count', withheld is None and cut is None and rc is True,
                        'released, complete',
                        {'withheld': withheld, 'cut': cut, 'retrieval_complete': rc})
             return exp.ctxs
-        if total > max_contexts:
-            ok = (withheld == {'reason': 'count_above_threshold'} and results == []
-                  and rc is False)
-            checks.add('release.all_or_count', ok, 'withheld count_above_threshold',
-                       {'withheld': withheld, 'returned': returned, 'retrieval_complete': rc})
-            return None
-        # a graph without its mask: U above max_contexts may withhold a count that fits
         ok = (withheld == {'reason': 'count_above_threshold'} and results == []
-              and rc is False and 'threshold_upper_bound' in (entry.get('notes') or []))
-        checks.add('release.all_or_count', ok, 'withheld on U with threshold_upper_bound',
-                   {'withheld': withheld, 'notes': entry.get('notes'),
-                    'retrieval_complete': rc})
+              and rc is False)
+        checks.add('release.all_or_count', ok, 'withheld count_above_threshold',
+                   {'withheld': withheld, 'returned': returned, 'retrieval_complete': rc})
         return None
     # partial
     if total <= max_contexts:
@@ -393,16 +416,18 @@ def _counts(checks, index, config, exp, entry, stopped, released):
     complete_release = released is not None and len(released) == len(exp.ctxs)
     exact_required = not stopped and (config.masked or complete_release
                                       or exp.pattern.no_instance)
-    judge_count(checks, 'counts.total', c, truth['total'], exact_required, upper=u('total'))
+    completed = not stopped
+    judge_count(checks, 'counts.total', c, truth['total'], exact_required, upper=u('total'),
+                completed=completed)
     judge_count(checks, 'counts.suffix', c.get('suffix'), truth['suffix'], exact_required,
-                upper=u('suffix'))
+                upper=u('suffix'), completed=completed)
     bo = c.get('by_offset') or {}
     checks.add('counts.keys.by_offset', set(bo) == set(truth['by_offset']),
                sorted(truth['by_offset']), sorted(bo))
     for p, v in truth['by_offset'].items():
         if p in bo:
             judge_count(checks, f'counts.by_offset[{p}]', bo[p], v, exact_required,
-                        upper=u('by_offset', p))
+                        upper=u('by_offset', p), completed=completed)
     key = config.by_key
     bs = c.get(key) or {}
     checks.add('counts.keys.' + key, set(bs) == set(truth['by_orient']), sorted(truth['by_orient']),
@@ -410,7 +435,7 @@ def _counts(checks, index, config, exp, entry, stopped, released):
     for o, v in truth['by_orient'].items():
         if o in bs:
             judge_count(checks, f'counts.{key}[{o}]', bs[o], v, exact_required,
-                        upper=u('by_orient', o))
+                        upper=u('by_orient', o), completed=completed)
     other = 'by_orientation' if key == 'by_strand' else 'by_strand'
     checks.add('counts.keys.no_' + other, other not in c, None, c.get(other))
     if exp.m:
@@ -426,7 +451,7 @@ def _counts(checks, index, config, exp, entry, stopped, released):
             below = stop_level is not None and int(t) < stop_level
             judge_count(checks, f'counts.by_mismatches[{t}]', bm[t], v,
                         exact_required or (below and config.masked),
-                        upper=None if up is None else v + up[t]['total'])
+                        upper=None if up is None else v + up[t]['total'], completed=completed)
             if stop_level is not None and int(t) > stop_level:
                 checks.add(f'counts.by_mismatches[{t}].unknown_above_stop',
                            bm[t].get('relation') == 'unknown', 'unknown', bm[t])

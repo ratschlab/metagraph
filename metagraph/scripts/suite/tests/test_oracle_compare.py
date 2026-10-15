@@ -345,3 +345,92 @@ class RowsAndTwins(unittest.TestCase):
         failed = {x['check'] for x in C.compare_pattern(index, config, req, answer, 5,
                                                         twins)[0][1].failed()}
         self.assertIn('results.complete', failed)
+
+
+class UnmaskedRelations(unittest.TestCase):
+    """Verification H3 (G3-G5) and L1-L2: on a graph without its mask a completed count is exact
+    or bounds; a withhold on U needs U > max_contexts, with the note threshold_upper_bound exactly
+    when lower <= max_contexts; a sticky later pattern answers unknown counts with zero work."""
+
+    def setUp(self):
+        self.index = fixture_index('basic')
+        self.config = C.Config('unmasked', 'basic', 11, masked=False)
+
+    def failed(self, req, answer, mc=100000):
+        return {x['check'].split('[')[0] for _, ch, _ in
+                C.compare_pattern(self.index, self.config, req, answer, mc) for x in ch.failed()}
+
+    def test_g3_g4_a_completed_count_is_never_unknown_or_at_least(self):
+        req = {'mode': 'count', 'patterns': [{'dna': 'GAATTC'}]}
+        for relation in ('unknown', 'at_least'):
+            answer = R.render_answer(self.index, self.config, req)
+            c = answer['patterns'][0]['counts']['contexts']
+            c.update({'relation': relation, 'value': None if relation == 'unknown' else 0})
+            self.assertIn('counts.total', self.failed(req, answer), relation)
+
+    def record_start_pattern(self):
+        """A record's first bases with at least two contexts, some source dummy holding them
+        (U above the truth)."""
+        for r in self.index.records:
+            for L in (4, 5, 6, 3):
+                p = O.Pattern('dna', r.seq[:L])
+                if p.slot or len(O.contexts(self.index, p)) < 2:
+                    continue
+                if O.dummy_contexts(self.index, p):
+                    return r.seq[:L]
+        self.fail('no record-start pattern with two contexts')
+
+    def bounded_withhold(self, pattern, mc, note, slack=0):
+        req = {'mode': 'all_or_count', 'max_contexts': mc, 'patterns': [{'dna': pattern}]}
+        exp = C.Expectation(self.index, req, req['patterns'][0])
+        truth = exp.counts['total']
+        dummies = exp.with_upper(self.index)['0']
+        answer = R.render_answer(self.index, self.config, dict(req, max_contexts=100000))
+        e = answer['patterns'][0]
+        c = e['counts']['contexts']
+
+        def b(v, extra):
+            return {'relation': 'bounds', 'unit': 'graph_contexts', 'value': v, 'lower': v,
+                    'upper': v + extra, 'estimate': v}
+        c.update(b(truth - slack, dummies['total'] + slack))
+        c['suffix'] = b(exp.counts['suffix'], dummies['suffix'])
+        for p in c['by_offset']:
+            c['by_offset'][p] = b(exp.counts['by_offset'][p], dummies['by_offset'][p])
+        for o in c['by_strand']:
+            c['by_strand'][o] = b(exp.counts['by_orient'][o], dummies['by_orient'][o])
+        e.update({'withheld': {'reason': 'count_above_threshold'}, 'results': [],
+                  'returned': 0, 'retrieval_complete': False,
+                  'notes': (['threshold_upper_bound'] if note else [])
+                  + ['estimate_sampled_dummy_fraction']})
+        return req, answer, truth, truth + dummies['total']
+
+    def test_g5_a_withhold_on_u_needs_u_above_max_contexts(self):
+        # a start of a record: source dummies hold it, U > truth
+        pattern = self.record_start_pattern()
+        req, answer, truth, U = self.bounded_withhold(pattern, 10 ** 4, True)
+        self.assertGreater(U, truth)
+        self.assertIn('release.all_or_count', self.failed(req, answer, 10 ** 4))
+        req, answer, truth, U = self.bounded_withhold(pattern, U - 1, True)
+        self.assertNotIn('release.all_or_count', self.failed(req, answer, U - 1))
+
+    def test_l2_the_note_exactly_when_lower_is_within_max_contexts(self):
+        """The truth above max_contexts but lower within it: the note is due (SPEC 7.5: when
+        its lower <= max_contexts), which the comparison required only when the truth fit."""
+        pattern = self.record_start_pattern()
+        exp_truth = len(O.contexts(self.index, O.Pattern('dna', pattern)))
+        self.assertGreater(exp_truth, 1)
+        mc = exp_truth - 1
+        req, answer, truth, U = self.bounded_withhold(pattern, mc, False, slack=1)
+        self.assertIn('release.all_or_count', self.failed(req, answer, mc))
+        req, answer, truth, U = self.bounded_withhold(pattern, mc, True, slack=1)
+        self.assertNotIn('release.all_or_count', self.failed(req, answer, mc))
+
+    def test_l1_a_sticky_later_pattern_states_no_work(self):
+        index, config = fixture_index('basic'), CONFIGS['basic']
+        req = {'mode': 'count', 'max_steps': 10 ** 6,
+               'patterns': [{'iupac': 'GNNNA'}, {'dna': 'ACGTA'}]}
+        answer = R.render_answer(index, config, req, 100000, (0, 2))
+        self.assertEqual(C.INCONCLUSIVE, outcome(C.compare_pattern(index, config, req, answer)))
+        answer['patterns'][1]['work']['steps'] = 3
+        failed = {x['check'] for x in C.compare_pattern(index, config, req, answer)[1][1].failed()}
+        self.assertIn('stop.sticky_unknown', failed)
