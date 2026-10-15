@@ -198,8 +198,8 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
 7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
    included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
    left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to
-   manifest/suite_smoke_v4.json; without `--manifest` a full run takes manifest/suite_v4.json (v1-v3 stay for
-   reproducing earlier runs).
+   manifest/suite_smoke_v5.json; without `--manifest` a full run takes manifest/suite_v5.json (the frozen v5, below;
+   v1-v4 stay for reproducing earlier runs).
    The MCP runner paces its own requests.
 8. Samples (review M5): the mex samplers write ~/suite-dev/runs/<id>/samples/; every invocation pulls the
    whole directory on exit (also after Ctrl-C) and at its start, merge_run deduplicates.
@@ -3292,3 +3292,29 @@ Re-vendor suite_common.py and service_by_design.json (d4b8636c...); checks.py is
   explained-item test now reads two agreement problems, the line's E not being the table's, and no property problem);
   the v3 / v4 re-evaluations equal the ones above line for line (compare gains executions_sha256), the v4 gate the same
   46 problems, the v5-on-v4 moves the same, and the dry v5 rebuilt is 72181c4a... again.
+
+## The frozen v5 (2026-10-15)
+
+The owner approved the freeze of v5 on 2026-10-15 at content 72181c4a..., the dry v5 built on the merged tree of
+integration S8i stage 2 and verified (VERIFY-V5A "Stage 2", VERIFY-G "Stage 2" and its follow-ups).
+- `manifest/suite_v5.json` and `manifest/suite_smoke_v5.json`, built on this tree with `SUITE_TRUTH_CACHE=<the record
+  cache v4 was built from> build_manifest.py --no-fetch` from the capabilities snapshot of release refseq97-6f945db4
+  (truth/staging_capabilities/, each document's sha256 in the manifest's index): 700 scenarios, 742 executions per
+  arm, content_sha256 72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875, relations
+  39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86; smoke 14 scenarios (14 executions), content_sha256
+  abc0596fef7977dc0fa7d51bf7b8d0194e6427ed726f0a9acf12605116546e8d. Both equal the verified dry build but for
+  created_utc. The by-design table they name is d4b8636c... (133 cases).
+- `gate/policy_v5_rt_mcp.json` (sha256 23ba28f5...), generated on this tree with `gate_policy.py
+  manifest/suite_v5.json --name v5-rt-mcp --arms mcp,direct-local --declared gate/declared_v5_rt.json --out
+  gate/policy_v5_rt_mcp.json`: 241 scenarios selected; 36 excluded (manifest_not_implemented 24,
+  table_not_expressible 27, budget_stress 4, advanced_path 1; one exclusion may carry several rules); required on
+  MCP 205 scenarios / 416 executions, on direct-local 237 / 273; relations REL-same_answer-0003 (both arms) and
+  REL-prefix_equals-0001..0004 (direct-local) required, 21 excluded; no property check not required (gate.py
+  applies the manifest's MCP marks). gate/declared_v5_rt.json names the frozen content and declares nothing.
+- run_suite.sh takes v5 by default (`--smoke`: suite_smoke_v5.json), as the frozen v4 was made its default;
+  build_manifest.py refuses to overwrite either; v1-v4 stay for reproducing earlier runs. test_manifest_lib's
+  frozen-manifest test covers v5, and test_gate pins the policy (regenerated exactly, its figures, the contents).
+- Before the first v5 run (VERIFY-V5A phase B): the service at async's fb66f1dd or later (the discovery cap 1,000,
+  for R-edge-0022 / -0023 / -0025); async's runner re-vendored (suite_common, the table d4b8636c...) and calling the
+  shared rules of the runner list above (the explanation, the warm-ups, the snapshot refusal); R-budget-0001 / -0002
+  block whenever no stop happens (their windows rest on eco's 230 ms lookup).

@@ -77,7 +77,7 @@
 # is gone is removed) and refuses to start while any run_direct.py runs under ~/suite-dev, both before any
 # request to the host (a new run's release GET comes after them). --max-requests N
 # caps the direct arms' requests of this invocation in total (closing capabilities GETs included);
-# --smoke defaults it to 40 and the manifest to manifest/suite_smoke_v4.json. --checks picks the direct arms'
+# --smoke defaults it to 40 and the manifest to manifest/suite_smoke_v5.json. --checks picks the direct arms'
 # checks: auto (the default; --resume keeps the run's choice) runs checks.py when it is next to this script,
 # else the stub; checks requires checks.py; stub runs checks_stub.py even beside checks.py. The stub runs only
 # for manifests that expect nothing but the HTTP status, unless --allow-stub.
@@ -350,7 +350,7 @@ PYEOF
   log "resuming $RUN_ID$( [[ -z "$RESTORED" ]] || printf '; the run'"'"'s own options: %s' "${RESTORED%, }")"
 else
   if [[ -z "$MANIFEST" ]]; then
-    if [[ $SMOKE == 1 ]]; then MANIFEST="$HERE/manifest/suite_smoke_v4.json"; else MANIFEST="$HERE/manifest/suite_v4.json"; fi
+    if [[ $SMOKE == 1 ]]; then MANIFEST="$HERE/manifest/suite_smoke_v5.json"; else MANIFEST="$HERE/manifest/suite_v5.json"; fi
   fi
   [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || die "no manifest (${MANIFEST:-none}); pass --manifest"
   # A new run is named after the lock is taken (the release GET below): review N4.

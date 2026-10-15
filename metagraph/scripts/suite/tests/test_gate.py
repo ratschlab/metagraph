@@ -330,6 +330,34 @@ class PolicyTest(GateCase):
             p.pop("generated_utc")
         self.assertEqual(shipped, fresh)
 
+    def test_shipped_v5_policy_is_regenerated_exactly(self):
+        # the frozen v5 (the owner's approval, 2026-10-15) and its deploy-gate policy, regenerated with the command
+        # DECLARED-v5 states: the figures the owner approved, no property exemption (gate.py applies the marks)
+        shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v5_rt_mcp.json"))
+        m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v5.json"))
+        self.assertEqual((m["content_sha256"], m["relations_sha256"]),
+                         ("72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875",
+                          "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
+        smoke = sc.read_json(os.path.join(SUITE, "manifest", "suite_smoke_v5.json"))
+        self.assertEqual(smoke["content_sha256"], "abc0596fef7977dc0fa7d51bf7b8d0194e6427ed726f0a9acf12605116546e8d")
+        declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v5_rt.json"))
+        self.assertEqual(declared["manifest"]["content_sha256"], m["content_sha256"])
+        fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v5.json",
+                                         name="v5-rt-mcp", declared_file="gate/declared_v5_rt.json",
+                                         declared=declared)
+        for p in (shipped, fresh):
+            p.pop("generated_utc")
+        self.assertEqual(shipped, fresh)
+        c = shipped["counts"]
+        self.assertEqual((c["selected"], c["excluded"], c["relations_required"], c["properties_not_required"]),
+                         (241, 36, 5, 0))
+        self.assertEqual(c["exclusions_by_rule"], {"advanced_path": 1, "budget_stress": 4,
+                                                   "manifest_not_implemented": 24, "table_not_expressible": 27})
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 205, "executions": 416},
+                                         "direct-local": {"scenarios": 237, "executions": 273}})
+        self.assertEqual([r["relation"] for r in shipped["relations"]],
+                         ["REL-same_answer-0003"] + ["REL-prefix_equals-%04d" % i for i in range(1, 5)])
+
     def test_cli_writes_policy_and_ids(self):
         mpath, pol, ids = (os.path.join(self.tmp, n) for n in ("m.json", "p.json", "ids.txt"))
         sc.write_json_atomic(mpath, self.m)
