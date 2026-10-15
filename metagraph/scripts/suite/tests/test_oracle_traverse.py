@@ -134,6 +134,19 @@ class Rules(unittest.TestCase):
         # BASIC holds one strand: no hairpin
         self.assertNotIn('hairpin', {c[2] for c in run('hairpin', {'exhaustive': True}).claims})
 
+    def test_a_followed_hairpin_never_counts_toward_ambiguity(self):
+        """SPEC 13, note 11 (final breadth run seed 4, T-primary_k10-0036): at the palindromic
+        10-mer ATATATATAT both followed hairpin steps carry c_zeta; under the allowance 0 the
+        label goes on along both, with branches 0, instead of ending with branch."""
+        w = walker('primary', 'records', 10)
+        seed = 'CGGCGGCGGCGCACTAGAAGTAAATCTGCCTC'
+        st = T.Strategy({'branching': {'hairpins': 'follow', 'on_reconverge': 'keep'},
+                         'bounds': {'max_extension_bp': 40}})
+        res = T.constrain_walk(w, seed, 'left', [w.label('c_zeta')], st)
+        self.assertEqual({('GTGCAGCTTTTACACTCTGATTATATATATAGAATGGGGT', 'max_extension_bp', 0),
+                          ('GTGCAGCTTTTACACTCTGATTATATATATAT', 'edge_reuse_rc', 0)},
+                         {(c[0], c[2], c[3]) for c in res.claims})
+
     def test_trace_follows_one_coordinate_chain(self):
         kmer = run('trace', {'branching': {'on_reconverge': 'keep'},
                              'bounds': {'max_extension_bp': 45}})

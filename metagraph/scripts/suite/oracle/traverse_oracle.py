@@ -392,11 +392,15 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
                                   if x == v}
                     sv[tl.name] = Entry(loss, branches, pred, (tl.name, depth, 'switch'), coords)
             states[c] = sv
-        # ambiguity and the branch allowance (SPEC 6.4)
+        # ambiguity and the branch allowance (SPEC 6.4); a followed hairpin step never counts
+        # toward ambiguity, its split is a divergence (SPEC 13, note 11)
+        hairpin_chars = {c for c, v, e in admissible if w.is_hairpin(node, v, e)}
         excluded = set()
         while True:
             feeds = {}
             for c, sv in states.items():
+                if c in hairpin_chars:
+                    continue
                 for tn, te in sv.items():
                     feeds.setdefault(te.pred, set()).add(c)
             over = [s for s, cs in feeds.items() if len(cs) >= 2 and s not in excluded
@@ -424,11 +428,15 @@ def constrain_walk(w, seed, arm, labels, strategy, extra=()):
                         sv[tn] = Entry(best[0], best[1], best[3], (tn, depth, 'switch'))
         feeds = {}
         for c, sv in states.items():
+            if c in hairpin_chars:
+                continue
             for tn, te in sv.items():
                 feeds.setdefault(te.pred, set()).add(c)
         for s, cs in feeds.items():
             if len(cs) >= 2:
-                for sv in states.values():
+                for c, sv in states.items():
+                    if c in hairpin_chars:
+                        continue
                     for te in sv.values():
                         if te.pred == s:
                             te.branches = sigma[s].branches + 1
@@ -557,8 +565,10 @@ def label_walks(w, seed, arm, labels, radius, hairpins='skip'):
                           else 'hairpin' if blocks else 'label_lost')
                 out.add((walk, l.name, reason, branches))
                 return
-            nb = branches + (1 if len(go) >= 2 else 0)
+            # a followed hairpin step never counts toward ambiguity (SPEC 13, note 11)
+            plain = [x for x in go if not w.is_hairpin(node, x[1], x[2])]
+            nb = branches + (1 if len(plain) >= 2 else 0)
             for c, v, e in go:
-                visit(walk + c, v, used | {w.edge_key(e)}, nb)
+                visit(walk + c, v, used | {w.edge_key(e)}, nb if (c, v, e) in plain else branches)
         visit('', root, frozenset(), 0)
     return out
