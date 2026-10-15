@@ -140,6 +140,11 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                              double presence_fraction = 0.0) const;
 
   private:
+    std::vector<std::pair<Label, size_t>>
+    get_header_counts(std::string_view sequence, size_t num_top_labels,
+                      double discovery_fraction, double presence_fraction,
+                      bool with_kmer_counts) const;
+
     DeBruijnGraph &dbg_;
     std::unique_ptr<annot::CoordToHeader> coord_to_header_;
 };
