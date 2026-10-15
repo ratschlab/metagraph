@@ -27,8 +27,9 @@ COVERED = [
     'keep walker, an arm that merged held to it before its first merge and judged after it on the '
     'displays through first parents, the merge structure (parents, labels_via_parent, the '
     'majority parent, reconverge events, the min entry against closed runs), each run\'s own '
-    'route and displayed support, dead_end only at a graph tip and label_lost only where no '
-    'successor keeps the label; '
+    'route and displayed support, dead_end only at a graph tip or a hairpin and label_lost only '
+    'where no successor keeps the label or a strictly cheaper switch re-entered it, each run\'s '
+    'end_reason its event\'s as served, every switch at the cost model\'s price; '
     'tree and summary against full',
 ]
 NOT_COVERED = [
@@ -86,7 +87,8 @@ def engine_provenance(path):
     out['build_tree'] = top
     # the tree's HEAD now, not necessarily the commit the binary was built from: the binary
     # prints no commit (its --version is the release number), so the staleness below is judged
-    # by time (verification round 3)
+    # by time (verification round 3). Its limit (round 4): a build from an older checkout made
+    # after the last src commit, or one linked before later src edits, is not flagged
     out['build_head'] = git('rev-parse', 'HEAD') if top else None
     if top:
         # the pathspec from the tree's top: relative to the binary's directory (metagraph/build)

@@ -3607,6 +3607,15 @@ The verifier ruled that the oracle can merge and that "no candidate engine defec
     the report). The main tree's binary that phases 1 and 2 used first is flagged this way; the eng-int
     build is not.
   - Every git call runs with `--no-optional-locks`, so the engine tree's index is never rewritten.
+  - *The limit of judging by time* (verification round 4, R4.3). Only "linked before the last commit touching
+    `metagraph/src`" is caught. Two kinds of build are not:
+    - a build made from an older checkout after that commit, such as a branch switched back, or a tree that
+      gets the commit later by a pull or rebase whose committer time precedes the link;
+    - a binary linked before uncommitted `src` edits made afterwards.
+
+    `build_src_uncommitted` reports the second case only while the edits stay uncommitted. Only the sha256
+    pins the binary itself. The engine prints no commit that would let the report name the commit it was
+    built from.
 - **End reasons after a merge.**
   - `dead_end` only at a graph tip.
   - `label_lost` only where no successor keeps the label. A successor holding it counts only if the label was
