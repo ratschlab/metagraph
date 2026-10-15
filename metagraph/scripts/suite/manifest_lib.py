@@ -177,16 +177,19 @@ class Ctx:
 
     def truth_at(self, rec: Record, s: int, L: int, flank: int = K - 1, strand: str = "+") -> dict:
         """Truth of the bases rec.seq[s:s+L] (s an index into the fetched span): record coordinates (0-based start),
-        the window as the record holds it on its forward strand, and a flank to recompute the source contexts."""
+        the window as the record holds it on its forward strand, and a flank to recompute the source contexts (cut at
+        a base outside ACGT: acgt_flank)."""
         seq = rec.seq
-        a = max(0, s - flank)
-        b = min(len(seq), s + L + flank)
-        return {
+        a, b, cut = acgt_flank(rec, s, L, flank)
+        out = {
             "record": rec.accession, "genome": rec.key, "taxid": rec.column, "seq_id": rec.seq_id,
             "record_length": rec.length, "start": rec.offset + s, "length": L, "strand": strand,
             "window": seq[s:s + L], "flank": seq[a:b], "flank_start": rec.offset + a,
             "fetched_span": [rec.offset, rec.offset + len(seq)],
         }
+        if cut:
+            out["flank_cut"] = cut
+        return out
 
     def rc_negative_window(self, rng: random.Random, rec: Record, L: int, tries: int = 50, **kw: Any) -> dict:
         """A window as window() picks it whose reverse complement shares no k-mer with the record's forward strand
@@ -201,14 +204,40 @@ class Ctx:
         raise ValueError("no %d bp window of %s without a reverse k-mer in its record" % (L, rec.key))
 
     def flank_for(self, rec: Record, t: dict, extra: int) -> dict:
-        """The same truth with a flank of |extra| bases each side (traversal walks)."""
+        """The same truth with a flank of |extra| bases each side (traversal walks), cut at a base outside ACGT
+        (acgt_flank)."""
         s = t["start"] - rec.offset
         out = dict(t)
-        a = max(0, s - extra)
-        b = min(len(rec.seq), s + t["length"] + extra)
+        a, b, cut = acgt_flank(rec, s, t["length"], extra)
         out["flank"] = rec.seq[a:b]
         out["flank_start"] = rec.offset + a
+        out.pop("flank_cut", None)
+        if cut:
+            out["flank_cut"] = cut
         return out
+
+
+def acgt_flank(rec: Record, s: int, L: int, extra: int) -> Tuple[int, int, Dict[str, dict]]:
+    """The flank [a, b) of the window rec.seq[s:s+L] (indices into the fetched span), |extra| bases each side within
+    the span, cut before the first base outside ACGT on each side: no k-mer of the graph holds such a base (the
+    alphabet is $ACGT, SPEC-pattern-search §8.2), so a walk cannot pass it and no source context holds it. The cut is
+    stated per side as {at (the record coordinate of that base), base}: a structural end of the truth like the
+    record's end (T-walk-0018's left flank held an IUPAC S 4,898 bp from its seed, triage-v4 V03)."""
+    seq = rec.seq
+    a = max(0, s - extra)
+    b = min(len(seq), s + L + extra)
+    cut: Dict[str, dict] = {}
+    for x in range(s - 1, a - 1, -1):
+        if seq[x] not in "ACGT":
+            cut["left"] = {"at": rec.offset + x, "base": seq[x]}
+            a = x + 1
+            break
+    for x in range(s + L, b):
+        if seq[x] not in "ACGT":
+            cut["right"] = {"at": rec.offset + x, "base": seq[x]}
+            b = x
+            break
+    return a, b, cut
 
 
 def reverse_kmers_in_record(rec: Record, window: str, k: int = K) -> List[int]:
@@ -232,6 +261,8 @@ def walk_expectations(seq: str, plans: List[Tuple[int, int, List[str], int]], k:
     either strand (edge_reuse / rejoined_seed), the record's end, or E. branch_by_bp: the first step whose
     context has a second successor on the forward strand (the record's own copies, which the header certainly
     labels: the walk must state a split or branch event by then), None when there is none within E.
+    A base outside ACGT ends the record's walk where the next step would take it ("first": "non_acgt"; no k-mer of
+    the graph holds it), and a k-mer holding one is no successor anywhere.
     One pass per strand over the record for all plans (the verification's h1c.py method)."""
     need: Dict[Tuple[str, str], List[set]] = {}
     for s0, L, sides, E in plans:
@@ -252,6 +283,8 @@ def walk_expectations(seq: str, plans: List[Tuple[int, int, List[str], int]], k:
     for strand, text in ((0, seq), (1, st.revcomp(seq))):
         for i in range(len(text) - k + 1):
             km = text[i:i + k]
+            if km[0] not in "ACGT" or km[-1] not in "ACGT":
+                continue   # no k-mer of the graph (a context looked up is ACGT, so only its added base can be another)
             v = ctx_r.get(km[:-1])
             if v is not None:
                 v[0].add(km[-1])
@@ -283,12 +316,18 @@ def walk_expectations(seq: str, plans: List[Tuple[int, int, List[str], int]], k:
                     if p >= len(seq):
                         first, at = "record_end", j
                         break
+                    if seq[p] not in "ACGT":
+                        first, at = "non_acgt", j
+                        break
                     succ = ctx_r[seq[p - k + 1:p]]
                     edge, kmer = seq[p - k:p + 1], seq[p - k + 1:p + 1]
                 else:
                     p = s0 - 1 - j
                     if p < 0:
                         first, at = "record_end", j
+                        break
+                    if seq[p] not in "ACGT":
+                        first, at = "non_acgt", j
                         break
                     succ = ctx_l[seq[p + 1:p + k]]
                     edge, kmer = seq[p:p + k + 1], seq[p:p + k]
@@ -306,12 +345,12 @@ def walk_expectations(seq: str, plans: List[Tuple[int, int, List[str], int]], k:
                 for j in range(at, E):
                     if side == "right":
                         p = s0 + L + j
-                        if p >= len(seq):
+                        if p >= len(seq) or seq[p] not in "ACGT":
                             break
                         succ = ctx_r.get(seq[p - k + 1:p])
                     else:
                         p = s0 - 1 - j
-                        if p < 0:
+                        if p < 0 or seq[p] not in "ACGT":
                             break
                         succ = ctx_l.get(seq[p + 1:p + k])
                     if succ is not None and len(succ[1]) > 1:

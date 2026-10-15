@@ -154,5 +154,52 @@ class IndexEmpirical(unittest.TestCase):
             self.assertTrue(s["truth"]["index_empirical"]["claim"], s["id"])
 
 
+class FlankCut(unittest.TestCase):
+    """triage-v4 V03: a truth flank ends before a base outside ACGT (no k-mer of the graph holds it), stated as a
+    structural end; the exact walk minimum stops there too."""
+
+    def rec(self, seq):
+        return types.SimpleNamespace(key="r", seq=seq, offset=1000, accession="R.1", column="1", seq_id=0,
+                                     length=len(seq) + 1000, region=None)
+
+    def test_flank_cut_both_sides(self):
+        rng = random.Random(3)
+        left = "".join(rng.choice("ACGT") for _ in range(50))
+        right = "".join(rng.choice("ACGT") for _ in range(50))
+        seq = left[:10] + "S" + left[11:] + "ACGTACGTAC" + right[:30] + "N" + right[31:]
+        ctx = ml.Ctx([], 1)
+        t = ctx.truth_at(self.rec(seq), 50, 10, flank=40)
+        self.assertEqual(t["flank_start"], 1000 + 11)
+        self.assertEqual(t["flank"], seq[11:90])
+        self.assertEqual(t["flank_cut"], {"left": {"at": 1010, "base": "S"}, "right": {"at": 1090, "base": "N"}})
+        w = ctx.flank_for(self.rec(seq), t, 45)
+        self.assertEqual((w["flank_start"], len(w["flank"])), (1011, 79))
+        clean = ctx.truth_at(self.rec(left + "ACGTACGTAC" + right), 50, 10, flank=30)
+        self.assertNotIn("flank_cut", clean)
+        self.assertNotIn("flank_cut", ctx.flank_for(self.rec(left + "ACGTACGTAC" + right), t, 20))
+
+    def test_walk_minimum_stops_at_the_base(self):
+        rng = random.Random(5)
+        seq = "".join(rng.choice("ACGT") for _ in range(400))
+        seq = seq[:300] + "S" + seq[301:]
+        r = ml.walk_expectations(seq, [(100, 40, ["right"], 250)])[0]["right"]
+        self.assertEqual((r["first"], r["min_bp"]), ("non_acgt", 160))
+        # a k-mer holding the base is no successor: the walk's context at 200 met again elsewhere, followed by an N,
+        # leaves the context one successor (counted as a second one it would read as ambiguous at 60 bp)
+        ctx30 = seq[170:200]
+        seq2 = seq[:300] + "A" + seq[301:] + "ACGT" + ctx30 + "N" + "TTGCA"
+        r2 = ml.walk_expectations(seq2, [(100, 40, ["right"], 150)])[0]["right"]
+        self.assertEqual((r2["first"], r2["min_bp"]), ("max_extension", 150))
+        seq3 = seq[:300] + "A" + seq[301:] + "ACGT" + ctx30 + {"A": "C"}.get(seq[200], "A") + "TTGCA"
+        r3 = ml.walk_expectations(seq3, [(100, 40, ["right"], 150)])[0]["right"]
+        self.assertEqual((r3["first"], r3["min_bp"]), ("ambiguous", 60))
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_t_walk_0018(self):
+        t = by_id(built({"R", "T"}))["T-walk-0018"]["truth"]
+        self.assertEqual(t["flank_cut"], {"left": {"at": 70345, "base": "S"}})
+        self.assertEqual(t["start"] - t["flank_start"], 4898)
+
+
 if __name__ == "__main__":
     unittest.main()
