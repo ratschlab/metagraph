@@ -390,11 +390,24 @@ def coverage_text(states, arm):
     return text
 
 
-def property_tested(line, is_property=None):
+def property_tested(line, is_property=None, aside=None):
     """What an execution tested of its scenario's property checks: ('yes' | 'partly' | 'no' | 'n/a', passed,
     total). A check is a property check by its recorded `property` flag, else by `is_property(name)`; a scenario
-    without one (a refusal, whose status is the claim) reads n/a with its generic checks."""
+    without one (a refusal, whose status is the claim) reads n/a with its generic checks. |aside|: the keys
+    (check name, occurrence) of the items a property-level mark of the manifest sets aside on this MCP execution
+    (suite_common.checks_marked_aside: marked not implemented via MCP or service-side by design, read not_exposed):
+    they are neither tested nor untested here and are left out of the count (the caller names them)."""
     checks = [c for c in (line.get("checks") or []) if isinstance(c, dict)]
+    if aside:
+        seen = {}
+        kept = []
+        for c in checks:
+            name = c.get("check")
+            key = (name, seen.get(name, 0))
+            seen[name] = seen.get(name, 0) + 1
+            if key not in aside:
+                kept.append(c)
+        checks = kept
     props = [c for c in checks if (c.get("property") is True or (c.get("property") is None and is_property
                                                                    and is_property(c.get("check"))))]
     if not props:

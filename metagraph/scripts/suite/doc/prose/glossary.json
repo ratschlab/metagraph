@@ -72,6 +72,13 @@
    ]
   },
   {
+   "term": "property-level mark (manifest v5)",
+   "definition": "A mark of one check of a scenario, not of the scenario: the manifest's `mcp.not_implemented_checks` (a feature the MCP tools lack, with its reason) or `mcp.by_design_checks` (a deliberate service behaviour, with its table case). On the MCP arm a marked check that reads not exposed is set aside: neither compared, nor skipped, nor untested; the rest of the scenario stays tested via MCP, and the detail block and the untested-property lines name the mark. A marked check that reads anything else is judged as any check (a mark hides no result). When the marks cover every property check of an execution nothing of the claim was tested through the tools: a scenario-level mark, read inconclusive, never a pass on the generic checks alone (suite_common.mcp_check_marks, checks_marked_aside, every_property_marked).",
+   "see": [
+    "service-side by design"
+   ]
+  },
+  {
    "term": "service-side by design",
    "definition": "The MCP arm legitimately differs because the service refused before host execution, relayed the host's refusal under its own code, answered after normalising the request, or set a value the request did not name, as its table documents. Verified when the direct answer matched the case's host side and the MCP answer its service side; else mark u.",
    "see": [

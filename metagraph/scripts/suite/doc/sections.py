@@ -21,6 +21,7 @@ import gate as gate_mod  # noqa: E402
 import latex  # noqa: E402
 import reader  # noqa: E402
 import report  # noqa: E402
+import suite_common as sc  # noqa: E402
 from cells import ARMS, fmt_t, fmt_delta, fmt_pair, fmt_n  # noqa: E402
 from latex import esc, esc_wrap, tt, inline, paragraphs  # noqa: E402
 
@@ -124,6 +125,8 @@ class Context(object):
                 "load_caveat_line": load_caveat_line(run),
                 "verdict_word": (run.verdict or "–").split(" ")[0],
                 "verdict_text": run.verdict or "–",
+                "verdict_headline": run.verdict_headline or "–",
+                "n_reruns_for_resume": len(run.reruns),
                 "n_findings": sum((totals.get(a) or {}).get("outcomes", {}).get("finding", 0) for a in ARMS),
                 "n_inconclusive": sum((totals.get(a) or {}).get("outcomes", {}).get("inconclusive", 0) for a in ARMS),
                 "n_failures": sum((totals.get(a) or {}).get("outcomes", {}).get(k, 0) for a in ARMS
@@ -520,9 +523,15 @@ def front_matter(ctx):
 
 
 def verdict_line(ctx):
+    """The run verdict on the cover and in I.1: the verdict word large, its reason, and for a run with a deploy
+    gate's verdict (recorded, or judged offline for this document) the label report.py gives the ordinary verdict
+    beside a gate (report.verdict_headline: the gate is the decision, this verdict is exploratory)."""
     v = ctx.run.verdict or "–"
     word, _, rest = v.partition(" ")
-    return "\\textbf{\\large %s}\\ %s" % (esc(word), esc(rest, 400))
+    out = "\\textbf{\\large %s}\\ %s" % (esc(word), esc(rest, 400))
+    if ctx.run.gated:
+        out += "\\\\{\\small %s}" % esc(report.exploratory_label("beside"))
+    return out
 
 
 def gate_summary(ctx):
@@ -536,13 +545,17 @@ def gate_summary(ctx):
         word = "GATE PASS" if gate.get("passed") else "GATE FAIL"
         problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
         if run.gate_offline:
-            how = ("judged offline by gate.py for this document (the run recorded no gate.json); policy %s" %
-                   os.path.basename(pol.get("path") or "–"))
+            how = ("judged offline by gate.py for this document (the run recorded %s); policy %s" % (
+                "a stale gate.json: %s" % stale_gate_text(run) if run.gate_stale else "no gate.json",
+                os.path.basename(pol.get("path") or "–")))
+            how += ", %s version %s (sha256 %s…), arms %s" % (
+                pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
+                ", ".join((run.policy or {}).get("arms") or []) or "–")
         else:
-            how = "recorded in the run, judged %s" % str(gate.get("judged_utc") or "–")[:19].replace("T", " ")
-        how += ", %s version %s (sha256 %s…), arms %s" % (
-            pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
-            ", ".join((run.policy or {}).get("arms") or []) or "–")
+            # the recorded verdict, in the words of report.py's gate section (gate_headline_parts)
+            word, how, _ = report.gate_headline_parts(gate)
+            how = "recorded in the run (%s), arms %s" % (how, ", ".join(
+                (run.policy or {}).get("arms") or gate.get("arms") or []) or "–")
         counts_text = "%s executions judged, %s passed, %s planned, %s required" % (
             counts.get("judged", "–"), counts.get("passed", "–"), counts.get("planned", "–"),
             counts.get("required", "–"))
@@ -551,12 +564,22 @@ def gate_summary(ctx):
         problems_text = "%d problem%s%s" % (len(problems), "" if len(problems) == 1 else "s",
                                              (" (%s)" % by_kind) if by_kind else "")
         return word, how, counts_text, problems_text
-    how = "no gate.json in the run"
+    how = ("a stale gate.json in the run (%s)" % stale_gate_text(run)) if run.gate_stale else "no gate.json in the run"
     if run.gate_error:
         how += ", and gate.py could not judge it offline: %s" % latex.cut_text(str(run.gate_error), 200)
     elif run.policy is None:
         how += ", and no policy in the suite's gate directory pins this manifest, so none was judged offline"
     return "not evaluated", how, None, None
+
+
+def stale_gate_text(run):
+    """Why a recorded gate.json is stale (gate.stale_inputs): the verdict of <utc> judged other contents of the
+    named files than the run has now (the report's 'GATE verdict STALE')."""
+    rec = run.gate_recorded or {}
+    pol = rec.get("policy") or {}
+    return "the verdict of %s (policy %s, %s) judged other contents of %s than the run has now" % (
+        str(rec.get("judged_utc") or "–")[:19].replace("T", " "), pol.get("name") or "–",
+        "PASS" if rec.get("passed") else "FAIL", ", ".join(run.gate_stale))
 
 
 def gate_line(ctx):
@@ -635,8 +658,11 @@ def principal_findings(ctx):
     return out
 
 
-def _arm_reason(lines, st):
-    """Why an arm did not pass a property, in a few words, from its lines."""
+def _arm_reason(lines, st, name=None, run=None, sid=None):
+    """Why an arm did not pass a property, in a few words, from its lines. For the MCP arm a check |name| the
+    manifest marks at property level (suite_common.mcp_check_marks) that read not_exposed reads as the mark says
+    (not implemented via MCP, or service-side by design), never as untested; an execution inconclusive by a
+    scenario-level mark (suite_common.SCENARIO_LEVEL_MARK) says so."""
     if not lines:
         return "no execution"
     if st.glyph_key == "not_implemented_mcp":
@@ -644,10 +670,20 @@ def _arm_reason(lines, st):
     if st.glyph_key == "service_by_design":
         return "decided by the service (by design)"
     words = []
+    is_mcp = getattr(st, "arm", None) == "mcp"
+    marks = run.check_marks(sid) if (run is not None and sid and is_mcp) else {}
     for l in lines:
         http = l.get("http")
         code = (l.get("error") or {}).get("code") if isinstance(l.get("error"), dict) else None
-        if l.get("outcome") == "pass":
+        aside = run.marked_aside(sid, l) if marks else {}
+        marked = next((m for (n, _), m in aside.items() if n == name), None) if name else None
+        if marked:
+            w = ("not implemented via MCP (the manifest's property-level mark: %s)" % marked.get("reason")
+                 if marked.get("mark") == "not_implemented" else
+                 "service-side by design (the manifest's property-level mark, case %s)" % marked.get("case"))
+        elif is_mcp and blocks.scenario_level_mark(l):
+            w = "every property check marked as not shown via MCP (a scenario-level mark)"
+        elif l.get("outcome") == "pass":
             w = "pass"
         elif http == 503 and code == "deadline":
             w = "503 deadline (allowed)" if l.get("outcome") == "inconclusive" else "503 deadline, a finding"
@@ -694,7 +730,7 @@ def untested_properties(ctx):
                     for arm in ARMS:
                         words = []
                         for sid in missing:
-                            w = _arm_reason(run.arm_lines(sid, arm), ctx.state(sid)[arm])
+                            w = _arm_reason(run.arm_lines(sid, arm), ctx.state(sid)[arm], name, run, sid)
                             if w not in words:
                                 words.append(w)
                         reasons.append((arm, "; ".join(words)))
@@ -1164,6 +1200,9 @@ def provenance_table(ctx):
             len(sessions), esc(first.get("mode") or "–"), esc(loop.get("completed", "–")), esc(loop.get("scenarios", "–")),
             (", %s" % esc(loop.get("state"))) if loop.get("state") else "",
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
+    rows.append(("comparison", comparison_lines_text(run, short=True)))
+    if run.reruns:
+        rows.append(("warm-ups run again", reruns_text(run)))
     lf = run.load or {}
     caveat = ""
     if (lf.get("sra_mean") or 0) > LOAD_CAVEAT_SRA or (lf.get("load_mean") or 0) > LOAD_CAVEAT_LOAD1:
@@ -1171,6 +1210,55 @@ def provenance_table(ctx):
     rows.append(("host load", "%d samples; sra\\_all CPU mean %s\\%%, load1 mean %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("load_mean"), 1), caveat)))
     return _kv_table(rows)
+
+
+def comparison_lines_text(run, short=False):
+    """Whether the comparison read the very lines this document reads: compare.json's `executions_sha256` (stated
+    since 2026-10-15; the gate judges only those lines with it) against the executions file's sha256 now."""
+    stated = run.compare_executions_sha256
+    now = run.executions_sha256
+    if not stated:
+        text = "%s states no executions sha256 (a comparison before 2026-10-15); this document reads %s, sha256 %s…" % (
+            tt(sc.reevaluated_name("compare.json", run.reevaluated)), tt(run.executions_file), tt(_short(now, 12)))
+        return text
+    if stated == now:
+        return "%s read %s with sha256 %s…, the lines this document reads" % (
+            tt(sc.reevaluated_name("compare.json", run.reevaluated)), tt(run.executions_file), tt(_short(now, 12)))
+    return ("%s read %s with sha256 %s…; the file now has sha256 %s…: \\textbf{the comparison's classes describe "
+            "other lines} (recompute it)%s" % (
+                tt(sc.reevaluated_name("compare.json", run.reevaluated)), tt(run.executions_file),
+                tt(_short(stated, 12)), tt(_short(now, 12)), "" if short else "; the gate names this as an identity problem"))
+
+
+def reruns_text(run):
+    """The warm-ups run again for a resume in one line: how many, per arm, what they are (timing evidence)."""
+    per_arm = run.rerun_counts()
+    return ("%d (%s): after an interruption between a warm-up and its target the warm-up ran again right before "
+            "the target; timing evidence beside the target's execution, never an outcome (appendix F)" % (
+                len(run.reruns), ", ".join("%s %d" % (esc(a), n) for a, n in sorted(per_arm.items())) or "per arm not stated"))
+
+
+def reruns_table(ctx):
+    """Appendix F: every warm-up run again for a resume (run.json reruns_for_resume), as the report's section
+    lists them: the warm-up, its arm and repeat, wall, http, the target and the target execution it ran before."""
+    run = ctx.run
+    if not run.reruns:
+        return ""
+    rows = []
+    for r in run.reruns:
+        t = r.get("target_execution")
+        rows.append([latex.breakable_id(str(r.get("scenario"))), esc(r.get("arm")), esc(r.get("repeat")),
+                     fmt_t(r.get("wall_ms")), esc(r.get("http")), latex.breakable_id(str(r.get("rerun_target"))),
+                     ("repeat %s" % esc(t[2])) if isinstance(t, list) and len(t) > 2 else "did not run after it",
+                     fmt_n(r.get("before_s"), 3) if isinstance(t, list) else "–"])
+    out = "\\parhead{Warm-ups run again for a resume}\n"
+    out += ("A resume after an interruption between a warm-up and its target ran the warm-up again right before the "
+            "target, on every arm that ran the target (suite\\_common.resume\\_rewarms). These re-runs are timing "
+            "evidence only: the warm-up's outcome is its first execution's, and no table of Part II counts them.\n\n")
+    out += latex.plain_table(latex.spec_p([34, 18, 10, 14, 10, 34, 22, 14]),
+                             ["warm-up", "arm", "repeat", "wall", "http", "target", "target execution",
+                              "s before the target"], rows)
+    return out
 
 
 def limitations_table(ctx):
@@ -2266,7 +2354,12 @@ def by_design_table(ctx):
         if sa.get("missing_argument"):
             service.append("missing argument %s" % tt(sa["missing_argument"]))
         if c.get("explains_checks"):
-            service.append("explains %s" % esc(", ".join(c["explains_checks"])))
+            # an entry is a check name (every item of it) or {check, detail_matches} (an item whose detail the
+            # regex matches: suite_common.entry_explains)
+            service.append("explains %s" % ", ".join(
+                esc(e) if isinstance(e, str) else "%s (detail matching %s)" % (
+                    esc(e.get("check")), tt(e.get("detail_matches"), 80)) for e in c["explains_checks"]
+                if isinstance(e, (str, dict))))
         direct = []
         if de.get("http") is not None:
             direct.append("http %s" % esc(de["http"]))
@@ -2519,6 +2612,9 @@ def environment_table(ctx):
     rows.append(("samples", "%d; sra\\_all CPU mean %s\\%%, max %s\\%%; load1 mean %s, max %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("sra_max")), fmt_n(lf.get("load_mean"), 1),
         fmt_n(lf.get("load_max"), 1), caveat)))
+    rows.append(("comparison", comparison_lines_text(run)))
+    if run.reruns:
+        rows.append(("warm-ups run again for a resume", reruns_text(run)))
     hc = comp.get("host_cache") or {}
     rows.append(("host cache", "cold = the scenario's first execution on the host in this run; warm = another "
                                "within %s s; aged = older; the MCP pair runs cold then warm, the direct arms between "
@@ -2661,6 +2757,7 @@ def appendices(ctx):
     out += latex.section("F\\qd %s" % titles["F"], "app:F")
     out += appendix_lead(ctx, "appendix_F")
     out += "\\parhead{Environment}\n" + environment_table(ctx)
+    out += reruns_table(ctx)
     out += appendix_rules(ctx)
     out += "\\parhead{Vocabulary}\n" + classes_tables()
     out += "\\parhead{The deploy gate}\n" + gate_problems(ctx)

@@ -3884,6 +3884,46 @@ and `test_timing_wordings` bans the removed wordings ("point to", "reflects the"
   rounds 4 and 5 and the final patch changed no table cell, only the prose's sources and wording, the record key's places, the plots' size and
   labels, the depth line and the variant labels' separators.
 
+### The rebase onto the suite at 07dfa487 (F-gate, the frozen v5, the oracle; 2026-10-15)
+
+`gr/suite-doc` (8 commits on c11db9dd) rebased onto 07dfa487. Two conflicts: `report.py`, where the doc lane had
+extracted `verdict_text` and F-gate had made a gated report lead with the gate's verdict and added the UNVERIFIED
+branches (a run, or an arm, with executions and no pass), resolved so that `verdict_text` holds the whole rule
+(`no_pass_arms` among its facts) and `verdict_section` prints its headline through `verdict_headline` (the
+exploratory label of a gated report, `exploratory_label`); and this README (both sections kept, this one last).
+The document states the report's verdict and gate line by the same code as `report.py`: the cover's run verdict is
+`verdict_text`'s, labelled exploratory (`report.exploratory_label("beside")`) when the document shows a gate verdict;
+the cover's gate line is the run's `gate.json` when recorded and current (its words `report.gate_headline_parts`,
+the ones the report's gate section prints), else, when `gate.stale_inputs` names files the run changed after the
+verdict (the report's "GATE verdict STALE"), the stale verdict is named and the gate is judged offline by `gate.py`
+with the policy pinning the manifest, as a run without `gate.json` is; else "not evaluated". The generator reads
+the newer run fields without breaking v4: a warm-up's re-run for a resume (`merge_run`: never a line of the merged
+set, `warm_up_reruns` on its target's line and `run.json` `reruns_for_resume`) is a row of I.4 and a table of
+appendix F, a line in the target's detail block and its raw file in the artifacts, never an outcome; the
+comparison's `executions_sha256` is held against the executions file the document reads (I.4 and appendix F: "the
+lines this document reads", or the sha256 of other lines, or "states no executions sha256" for a comparison before
+2026-10-15); the check items the by-design table explains (compare's `mcp_agreement.explained_items`, the gate's
+reading, never the line's own claim) are grouped as explained in the detail block; the v5 manifest's property-level
+marks (`suite_common.mcp_check_marks`: `mcp.not_implemented_checks`, `mcp.by_design_checks`) read as "not
+implemented via MCP (the manifest's property-level mark: reason)" or "service-side by design (… case)" for that
+check, in the detail block's checks line, the "property tested?" cell (the marked items counted apart) and the
+untested-property lines' per-arm reasons, never as untested or as a failed check; an execution inconclusive by a
+scenario-level mark (`suite_common.SCENARIO_LEVEL_MARK`: the marks cover every property check) reads as such in
+the rows, the adjudication and the MCP class (`marked`), never as a host state; a check read `not_exposed` carries
+the inconclusive glyph and the words, never the failure glyph; a by-design case's `explains_checks` entry that is an
+object ({check, detail_matches}, the d4b8636c table) prints in appendix B; the glossary has the property-level mark.
+The mapping file is picked by the run's manifest content sha among `doc/units/*.json` (`units.default_mapping_path`),
+else by the version name. The chapter R sample rebuilt from the v4 run (`sample-rebased/`, no option; `sample-rebased-
+table/` with `--by-design` naming the table the re-evaluation replayed, d1e040aa, extracted from git) is byte-identical
+to `sample-final/` in `chapter_R.tex`, `doc.sty` and the three `plot_*.csv`; `doc.tex` differs in the cover (the
+exploratory label; the offline gate 45 -> 50 problems: 5 identity, of which one is the F-gate table problem the
+rebase expected (the comparison read d1e040aa, the regenerated v4 policy pins d4b8636c), one the MCP arm's
+unobserved index_fp (the v4 runner recorded no `service_capabilities.host_document`), two the re-evaluation's
+checks directory (the main tree, now at 07dfa487) no longer holding the checks.py and suite_common.py the
+re-evaluation records, one the comparison stating no executions sha256), the I.4 and appendix F rows above, the
+glossary entry and the README pin, and, without `--by-design`, the by-design table (the replayed d1e040aa table is
+no longer in the tree: the live d4b8636c one prints with the WARNING, appendix B two cases longer).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

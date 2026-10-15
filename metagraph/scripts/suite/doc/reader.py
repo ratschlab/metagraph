@@ -88,16 +88,17 @@ def excluded_repeats(entry):
     return out
 
 
-def depth_over_compared_repeats(comp, rows, is_property):
+def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
     """report.agreement_depth judged over the MCP repeats compare compared: the executions of an excluded repeat
     (excluded_repeats) are left out before the depth is read, and every entry names `repeats_compared` and
     `repeats_excluded` ([{repeat, reason}]), so that 'fully checked' holds over the compared repeats and the
-    detail block, the chapter line and the prose can name the excluded one."""
+    detail block, the chapter line and the prose can name the excluded one. |manifest|: its property-level marks
+    (suite_common.mcp_check_marks) set an MCP item aside as the report does (neither compared nor skipped)."""
     scen = (comp or {}).get("scenarios") or {}
     excl = dict((sid, excluded_repeats(e)) for sid, e in scen.items())
     left_out = set((sid, r) for sid, items in excl.items() for r, _ in items)
     kept = [r for r in rows if not (r.get("arm") == "mcp" and (r.get("scenario"), r.get("repeat")) in left_out)]
-    depth = report.agreement_depth(comp, kept, is_property)
+    depth = report.agreement_depth(comp, kept, is_property, manifest)
     for sid, d in depth.items():
         reps = set(r.get("repeat") for r in kept if r.get("scenario") == sid and r.get("arm") == "mcp")
         d["repeats_compared"] = sorted(reps, key=lambda k: (not isinstance(k, int), str(k)))
@@ -128,14 +129,33 @@ class Run(object):
         if not rows and not os.path.exists(os.path.join(self.dir, sc.reevaluated_name("executions.jsonl",
                                                                                      reevaluated))):
             raise RunError("%s: no executions file (merge the run first)" % run_dir)
-        self.rows = rows
+        self.rows = sc.judged_lines(rows) if hasattr(sc, "judged_lines") else rows
         self.unparsable = bad
+        # the lines this document reads, by sha256, against the ones the comparison states it read (compare.json
+        # executions_sha256, since 2026-10-15; a comparison before that states none)
+        self.executions_file = sc.reevaluated_name("executions.jsonl", reevaluated)
+        self.executions_sha256 = sha256_of(os.path.join(self.dir, self.executions_file))
         self.comp = report.load_compare(self.dir, by_design, reevaluated)
+        self.compare_executions_sha256 = self.comp.get("executions_sha256") if isinstance(self.comp, dict) else None
         self.reeval = sc.read_json(os.path.join(self.dir, "reevaluated.json")) if reevaluated else None
         self.samples, _ = sc.read_jsonl(os.path.join(self.dir, "samples.jsonl"))
         self.load = report.load_figures(self.samples)
         self.gate = (sc.read_json(os.path.join(self.dir, sc.reevaluated_name("gate.json", reevaluated)))
                      or sc.read_json(os.path.join(self.dir, "gate.json")))
+        # a recorded verdict that judged other contents of the run than it has now (a later resume without --gate)
+        # no longer describes the run: it is named stale, as the report names it, and the gate is judged offline
+        self.gate_recorded = self.gate if isinstance(self.gate, dict) else None
+        self.gate_stale = []
+        if self.gate_recorded is not None and hasattr(gate_mod, "stale_inputs"):
+            try:
+                self.gate_stale = list(gate_mod.stale_inputs(self.dir, self.gate_recorded, reevaluated))
+            except Exception:  # a verdict the staleness rule cannot read: taken as recorded
+                self.gate_stale = []
+            if self.gate_stale:
+                self.gate = None
+        # the warm-ups run again for a resume (merge_run: run.json reruns_for_resume, each with its target
+        # execution; the target's line carries them as warm_up_reruns): timing evidence, never an outcome
+        self.reruns = [r for r in (self.run.get("reruns_for_resume") or []) if isinstance(r, dict)]
         self.mcp_run = sc.read_json(os.path.join(self.dir, "arms", "mcp", "run.json")) or {}
         self.orchestrator = sc.read_json(os.path.join(self.dir, "orchestrator.json")) or {}
         judged = cmp.judging_checks(self.dir, reevaluated) or {}
@@ -143,7 +163,8 @@ class Run(object):
         self.checks_dir = checks_dir or judged.get("dir") or SUITE_DIR
         self.checks = cmp.load_checks_module(self.checks_dir)
         self.is_property = gate_mod._is_property_fn(self.checks_dir)
-        self.depth = depth_over_compared_repeats(self.comp, self.rows, self.is_property)
+        self.depth = depth_over_compared_repeats(self.comp, self.rows, self.is_property, self.manifest)
+        self._marks = {}
         self.missing, self.plan_source = gate_mod.missing_planned(self.dir, self.manifest, self.rows)
         self.missing_set = set((k[0], k[1]) for k in self.missing)
         self.table, self.table_meta = self._load_table(by_design, reevaluated)
@@ -168,13 +189,16 @@ class Run(object):
         for key in self.lines:
             self.lines[key].sort(key=_repeat_key)
         # the physical line of every execution in the executions file, for the detail blocks' artifact lines
-        self.executions_file = sc.reevaluated_name("executions.jsonl", reevaluated)
         self.line_numbers = _index_lines(os.path.join(self.dir, self.executions_file))
         verdict, facts = report.verdict_text(self.run, self.comp, self.rows, reevaluated, (self.missing,
                                                                                             self.plan_source),
                                              self.manifest, self.cases)
         self.verdict = verdict
         self.verdict_facts = facts
+        # a run with a deploy gate's verdict (recorded, or judged offline for this document): the gate is the
+        # decision and the run verdict is labelled exploratory, as report.py labels it (verdict_headline)
+        self.gated = isinstance(self.gate, dict)
+        self.verdict_headline = report.verdict_headline(verdict, self.gated, "beside")
 
     # -- the by-design table and the declared file ------------------------------------------------------------
 
@@ -322,3 +346,48 @@ class Run(object):
 
     def session(self):
         return report.orchestrator_session(self.run)
+
+    # -- the v5 manifest's property-level marks and the table's explanations --------------------------------------
+
+    def check_marks(self, sid):
+        """{check name: {mark, reason | case}} of a scenario's property-level marks (suite_common.mcp_check_marks:
+        mcp.not_implemented_checks, mcp.by_design_checks; {} for a manifest without them)."""
+        if sid not in self._marks:
+            self._marks[sid] = sc.mcp_check_marks(self.scenario(sid)) if hasattr(sc, "mcp_check_marks") else {}
+        return self._marks[sid]
+
+    def marked_aside(self, sid, line):
+        """{(check, occurrence): mark} of the items of an execution's checks a property-level mark of the manifest
+        sets aside (suite_common.checks_marked_aside: on the MCP arm, a marked check read not_exposed, unless the
+        marks cover every property check of the execution); {} elsewhere."""
+        marks = self.check_marks(sid)
+        if not marks or not hasattr(sc, "checks_marked_aside"):
+            return {}
+        return sc.checks_marked_aside(self.scenario(sid), line.get("arm"), line.get("checks") or [], marks)
+
+    def explained_items(self, sid, repeat):
+        """(the indices of the MCP execution's check items the by-design table explains, the case) as compare
+        derived them from the table (mcp_agreement explained_items and by_design_notes, other_repeats included):
+        the gate reads an execution's explanation from here, never from the line's own claim; ([], None) when
+        none."""
+        ma = self.comp_entry(sid).get("mcp_agreement") or {}
+        others = ma.get("other_repeats")
+        for part in [ma] + (others if isinstance(others, list) else [others]):
+            if not isinstance(part, dict):
+                continue
+            items = (part.get("explained_items") or {}).get(str(repeat))
+            if items is None:
+                items = (part.get("explained_items") or {}).get(repeat)
+            if items is not None:
+                notes = part.get("by_design_notes") or {}
+                return list(items or []), notes.get(str(repeat)) if notes.get(str(repeat)) is not None else notes.get(repeat)
+        return [], None
+
+    def rerun_counts(self):
+        """{arm: the warm-ups run again for a resume on it} (run.json arms.<arm>.reruns_for_resume)."""
+        out = {}
+        for arm, info in (self.run.get("arms") or {}).items():
+            n = (info or {}).get("reruns_for_resume")
+            if isinstance(n, int) and n:
+                out[arm] = n
+        return out

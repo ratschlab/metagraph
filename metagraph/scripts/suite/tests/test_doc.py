@@ -26,9 +26,11 @@ from test_compare_report import CASES, build_run  # noqa: E402
 
 import blocks  # noqa: E402
 import cells  # noqa: E402
+import facts  # noqa: E402
 import latex  # noqa: E402
 import make_doc  # noqa: E402
 import reader  # noqa: E402
+import sections  # noqa: E402
 import units as units_mod  # noqa: E402
 
 V4_MANIFEST = os.path.join(SUITE, "manifest", "suite_v4.json")
@@ -64,18 +66,27 @@ def v4():
 # the maintenance tests on the real v4 data
 
 class MappingTest(unittest.TestCase):
-    def test_mapping_complete(self):
-        """Every v4 scenario in exactly one unit, units non-empty, types in the vocabulary, series of at most 8
-        distinct variants, groups consistent, every relation under exactly one unit holding a or b."""
-        manifest, mapping, units = v4()
+    def check_complete(self, manifest, mapping, units, version):
+        """Every scenario in exactly one unit, units non-empty, types in the vocabulary, series of at most 8
+        distinct variants, groups consistent, every relation under exactly one unit holding a or b, the mapping
+        keyed to the frozen manifest's content sha."""
         self.assertEqual(mapping["_manifest"]["content_sha256"], manifest["content_sha256"],
-                         "the mapping was built for another v4 manifest")
+                         "the mapping was built for another v%s manifest" % version)
+        self.assertEqual(mapping["_manifest"]["version"], manifest["manifest_version"])
         self.assertEqual(units_mod.validate(units, manifest), [])
         self.assertEqual(len(units.by_scenario), len(manifest["scenarios"]))
         self.assertEqual(units.chapters, ["R", "T", "P", "L", "X", "M", "Q", "C", "N", "D"])
-        self.assertEqual(len(units.chapter_scenarios("R")), 81)
         self.assertEqual(units.unit_of("R-pos-0027"), "R-pos-column-B")
         self.assertEqual(units.relation_unit["REL-prefix_equals-0001"], "R-budget")
+        self.assertEqual(units_mod.default_mapping_path(manifest), os.path.join(DOC, "units", "suite_v%s.json" % version))
+
+    def test_mapping_complete(self):
+        """The v4 mapping over the frozen v4 manifest (681 scenarios, 107 units)."""
+        manifest, mapping, units = v4()
+        self.check_complete(manifest, mapping, units, 4)
+        self.assertEqual(len(units.chapter_scenarios("R")), 81)
+        self.assertEqual(len(units.units), 107)
+        self.assertEqual(len([u for f in units.chapter_families("R") for u in units.families[f]["units"]]), 14)
 
     def test_validate_names_problems(self):
         manifest, mapping, units = v4()
@@ -103,7 +114,10 @@ class ProseTest(unittest.TestCase):
     def test_prose_complete(self):
         """The owner's rule: a suite test fails if a family or unit lacks prose (every chapter an intro, every family a
         title and prose, every unit a property line); the message names the missing keys."""
-        manifest, mapping, units = v4()
+        self.check_prose_complete(v4())
+
+    def check_prose_complete(self, loaded):
+        manifest, mapping, units = loaded
         missing = []
         for ch in units.chapters:
             path = os.path.join(PROSE_DIR, "%s.json" % ch)
@@ -2185,6 +2199,227 @@ class OwnerReviewTwoTest(unittest.TestCase):
 def facts_mod():
     import facts
     return facts
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the rebase onto the suite at 07dfa487 (F-gate, the frozen v5, the oracle): the verdict and the gate line by
+# report.py's code, the newer run fields read without breaking v4
+
+class RebasedFieldsTest(unittest.TestCase):
+    """The document states the report's verdict and gate line by the same code as report.py (verdict_text,
+    verdict_headline, gate_headline_parts): a run with a gate verdict labels the run verdict exploratory; a stale
+    recorded gate.json is named and the gate judged offline. The newer run fields of merge_run / compare / the v5
+    manifest are read: warm-ups run again for a resume (warm_up_reruns, reruns_for_resume), the comparison's
+    executions_sha256, the table's explained items, the property-level marks (a marked check reads as not
+    implemented via MCP for that property, never as untested) and the scenario-level mark. v4 runs unchanged."""
+
+    @classmethod
+    def setUpClass(cls):
+        import gate_policy
+        from test_compare_report import T0, line, scen, write_arm
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        manifest = build_run(cls.run_dir)
+        # v5-shaped additions: P-001 marks contains_source_context not implemented via MCP; a warm-up W-001 of
+        # P-001 whose re-run for a resume precedes P-001's direct-local execution; S-002 reads every property
+        # check not_exposed via MCP under the marks (a scenario-level mark)
+        scenarios = manifest["scenarios"]
+        p1 = next(s for s in scenarios if s["id"] == "P-001")
+        p1["expect"].append({"check": "source_label", "args": {}})
+        p1["mcp"]["not_implemented_checks"] = [{"check": "contains_source_context",
+                                                "reason": "the MCP's records carry no context offsets"}]
+        warm = scen("W-001", "P")
+        warm["warms"] = "R-001"
+        warm["tags"] = ["warm-up"]
+        whole = scen("S-002", "S")
+        whole["mcp"]["not_implemented_checks"] = [{"check": "contains_source_context", "reason": "no contexts"}]
+        scenarios.extend([warm, whole])
+        manifest["content_sha256"] = sc.scenarios_sha256(scenarios)
+        for arm in ("direct-local", "direct-remote", "mcp"):
+            sc.write_json_atomic(os.path.join(cls.run_dir, "arms", arm, "manifest.json"), manifest)
+        not_exposed = [{"check": "status", "outcome": "pass", "detail": "ok"},
+                       {"check": "contains_source_context", "outcome": "not_exposed", "detail": "no field"}]
+        t = T0 - 20
+        extra_local = [line("W-001", "direct-local", 0, t, 5.0),
+                       dict(line("W-001", "direct-local", 0, T0 + 4.5, 4.0), rerun_for_resume=True,
+                            rerun_target="R-001"),
+                       line("S-002", "direct-local", 0, T0 + 20, 5.0)]
+        extra_mcp = [line("W-001", "mcp", 0, t + 5, 50.0), line("W-001", "mcp", 1, t + 7, 40.0),
+                     line("S-002", "mcp", 0, T0 + 52, 60.0, checks=not_exposed),
+                     line("S-002", "mcp", 1, T0 + 54, 60.0, checks=not_exposed)]
+        # P-001's MCP lines read the marked check not_exposed beside a passing status and a passing second property
+        p1_checks = not_exposed + [{"check": "source_label", "outcome": "pass", "detail": "ok"}]
+        write_arm(cls.run_dir, "direct-local", extra_local)
+        write_arm(cls.run_dir, "mcp", extra_mcp + [line("P-001", "mcp", 0, T0 + 50, 900.0, checks=p1_checks),
+                                                   line("P-001", "mcp", 1, T0 + 52, 700.0, checks=p1_checks)])
+        merge_run.merge(cls.run_dir)
+        sc.write_json_atomic(os.path.join(cls.run_dir, "compare.json"), cmp.compare(cls.run_dir, (CASES, {"cases": 5})))
+        cls.manifest = manifest
+        mapping = json.loads(json.dumps(FAKE_MAPPING))
+        mapping["_units"]["S-one"]["members"].append("S-002")
+        mapping["_units"]["P-pos-reps"]["members"].append("W-001")
+        mapping["S-002"] = {"chapter": "S", "family": "S-one", "unit_id": "S-one", "unit_type": "list", "variant": "whole"}
+        mapping["W-001"] = {"chapter": "P", "family": "P-pos", "unit_id": "P-pos-reps", "unit_type": "replicates",
+                            "variant": "w", "group": "a"}
+        cls.mapping_path = os.path.join(cls.tmp, "units.json")
+        with open(cls.mapping_path, "w") as fh:
+            json.dump(mapping, fh)
+        cls.prose_dir = os.path.join(cls.tmp, "prose")
+        run = reader.Run(cls.run_dir)
+        make_doc.scaffold_prose(cls.prose_dir, units_mod.resolve(run.manifest, mapping), run)
+        cls.policy_path = os.path.join(cls.tmp, "policy.json")
+        with open(cls.policy_path, "w") as fh:
+            json.dump(gate_policy.build_policy(manifest, table=(CASES, {"cases": 5}), manifest_file="m.json",
+                                               arms=("direct-local", "mcp"), warm_every=0), fh)
+        cls.runobj = run
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def build(self, name, run_dir=None, extra=()):
+        out = os.path.join(self.tmp, name)
+        rc = make_doc.main([run_dir or self.run_dir, "--out", out, "--no-pdf", "--units", self.mapping_path,
+                            "--prose-dir", self.prose_dir] + list(extra))
+        self.assertEqual(rc, 0)
+        with open(os.path.join(out, "doc.tex"), encoding="utf-8") as fh:
+            main = fh.read()
+        chapters = {}
+        for ch in ("P", "R", "M", "S"):
+            with open(os.path.join(out, "chapter_%s.tex" % ch), encoding="utf-8") as fh:
+                chapters[ch] = fh.read()
+        return main, chapters
+
+    def test_verdict_and_gate_by_report_code(self):
+        import gate
+        run = self.runobj
+        # ungated: the headline is the verdict; the report's word is the document's
+        self.assertFalse(run.gated)
+        self.assertEqual(run.verdict_headline, run.verdict)
+        self.assertEqual(run.verdict, report.verdict_text(run.run, run.comp, run.rows, run.reevaluated,
+                                                          (run.missing, run.plan_source), run.manifest, run.cases)[0])
+        main, _ = self.build("ungated")
+        self.assertNotIn("Exploratory verdict", main)
+        self.assertIn("\\textbf{\\large Deploy gate: not evaluated}", main)
+        # a recorded gate.json: its words are report.gate_headline_parts', the run verdict labelled exploratory
+        gated = os.path.join(self.tmp, "gated-run")
+        shutil.copytree(self.run_dir, gated)
+        policy = gate.load_policy(self.policy_path)
+        verdict = gate.judge(gated, policy)
+        sc.write_json_atomic(os.path.join(gated, "gate.json"), verdict)
+        run2 = reader.Run(gated)
+        self.assertTrue(run2.gated)
+        self.assertFalse(run2.gate_offline)
+        self.assertEqual(run2.gate_stale, [])
+        self.assertEqual(run2.verdict_headline, report.verdict_headline(run2.verdict, True, "beside"))
+        self.assertTrue(run2.verdict_headline.startswith(report.exploratory_label("beside") + ": "))
+        word, how, summary = report.gate_headline_parts(verdict)
+        main, _ = self.build("gated", gated)
+        cover = main.split("\\coverbox{Run verdict}{", 1)[1].split("\n", 1)[0]
+        self.assertIn(latex.esc(report.exploratory_label("beside")), cover)
+        gate_box = main.split("\\coverbox{Deploy gate}{", 1)[1].split("\n", 1)[0]
+        self.assertIn("\\textbf{\\large %s}" % word, gate_box)
+        self.assertIn(latex.esc(how), gate_box)
+        self.assertIn("recorded in the run", gate_box)
+        # the report's headline uses the same parts
+        text = report.build_report(gated)
+        self.assertIn("**%s** (%s): %s." % (report.md(word), report.md(how), report.md(summary)), text)
+        self.assertIn(report.exploratory_label("above"), text)
+        # a stale recorded verdict (the run changed after it): named, and the gate judged offline
+        stale = os.path.join(self.tmp, "stale-run")
+        shutil.copytree(gated, stale)
+        rows, _ = sc.read_jsonl(os.path.join(stale, "executions.jsonl"))
+        os.remove(os.path.join(stale, "executions.jsonl"))
+        for r in rows[1:]:
+            sc.append_jsonl(os.path.join(stale, "executions.jsonl"), r)
+        run3 = reader.Run(stale, policy=self.policy_path)
+        self.assertEqual(run3.gate_stale, ["executions.jsonl"])
+        self.assertTrue(run3.gate_offline)
+        self.assertTrue(run3.gated)
+        main, _ = self.build("stale", stale, ["--policy", self.policy_path])
+        self.assertIn("a stale gate.json", main)
+        self.assertIn("judged other contents of executions.jsonl than the run has now", main)
+        self.assertIn("judged offline by gate.py for this document", main)
+
+    def test_reruns_and_the_comparison_lines(self):
+        run = self.runobj
+        rows, _ = sc.read_jsonl(os.path.join(self.run_dir, "executions.jsonl"))
+        self.assertFalse(any(sc.is_rerun(r) for r in rows), "a re-run is never a line of the merged set")
+        self.assertEqual(len(run.reruns), 1)
+        self.assertEqual(run.reruns[0]["target_execution"], ["R-001", "direct-local", 0])
+        self.assertEqual(run.rerun_counts(), {"direct-local": 1})
+        target = run.arm_lines("R-001", "direct-local")[0]
+        self.assertEqual([r["scenario"] for r in target["warm_up_reruns"]], ["W-001"])
+        self.assertEqual(run.compare_executions_sha256, run.executions_sha256)
+        main, chapters = self.build("fields")
+        self.assertIn("warm-ups run again", main)
+        self.assertIn("Warm-ups run again for a resume", main)
+        self.assertIn("the lines this document reads", main)
+        # the rerun is timing evidence in its target's block, never an execution of its own
+        index = main.split("Index of test ids", 1)[1].split("\\end{multicols}", 1)[0]
+        self.assertEqual(index.count(latex.tt("W-001")), 1)
+        self.assertIn("warm-up re-run (dl", chapters["R"])
+        self.assertIn("ran again for a resume", chapters["R"])
+        # a v4 run (no such fields) reads as before
+
+    def test_property_level_marks_read_as_the_mark(self):
+        run = self.runobj
+        # P-001: the marked check read not_exposed is set aside; the execution passes (suite_common.unmarked_checks)
+        mcp0 = run.arm_lines("P-001", "mcp")[0]
+        self.assertEqual(mcp0["outcome"], "pass")
+        aside = run.marked_aside("P-001", mcp0)
+        self.assertEqual(aside, {("contains_source_context", 0): {"mark": "not_implemented",
+                                                                 "reason": "the MCP's records carry no context offsets"}})
+        self.assertEqual(run.marked_aside("P-001", run.arm_lines("P-001", "direct-local")[0]), {})
+        self.assertEqual(cells.property_tested(mcp0, run.is_property, aside), ("yes", 1, 1))
+        self.assertEqual(cells.property_tested(mcp0, run.is_property), ("partly", 1, 2))
+        self.assertEqual(blocks._property_cell(mcp0, run.is_property, aside), "yes (1 of 1); 1 marked not shown via MCP")
+        groups = blocks._check_groups(mcp0, True, run.check_marks("P-001"))
+        self.assertEqual(groups, [(("marked:not_implemented", "the MCP's records carry no context offsets"),
+                                   ["contains_source_context"])])
+        self.assertIn("not implemented via MCP (the manifest's property-level mark)", blocks._group_text(*groups[0]))
+        st = cells.arm_state(run, "P-001", "mcp")
+        self.assertEqual(sections._arm_reason(mcp0 and [mcp0], st, "contains_source_context", run, "P-001"),
+                         "not implemented via MCP (the manifest's property-level mark: the MCP's records carry no "
+                         "context offsets)")
+        # the untested-properties lines never read the marked check as untested on the MCP arm: the direct arms
+        # passed it, so P-001 is not listed
+        main, _ = self.build("marks")
+        self.assertNotIn("P-pos-reps} \\texttt{contains", main)
+        # S-002: every property check marked and read not_exposed: a scenario-level mark, inconclusive, named
+        s0 = run.arm_lines("S-002", "mcp")[0]
+        self.assertEqual((s0["outcome"], s0.get("inconclusive_reason")), ("inconclusive", sc.SCENARIO_LEVEL_MARK))
+        self.assertTrue(blocks.scenario_level_mark(s0))
+        self.assertFalse(blocks._overridden(s0, True))
+        self.assertEqual(blocks.mcp_class([s0], run.scenario("S-002"), {}, run.cases)[0], "marked")
+        self.assertIn("scenario-level mark", blocks.adjudication(s0, run, "S-002", True))
+        self.assertIn("scenario-level mark", facts.exec_phrase(run, "S-002", s0, "mcp"))
+        self.assertEqual(sections._arm_reason([s0], cells.arm_state(run, "S-002", "mcp"), "contains_source_context",
+                                              run, "S-002"),
+                         "every property check marked as not shown via MCP (a scenario-level mark)")
+        self.assertEqual(run.marked_aside("S-002", s0), {})
+        self.assertEqual(blocks._check_groups(s0, True, run.check_marks("S-002")),
+                         [(("marked:not_implemented", "no contexts"), ["contains_source_context"])])
+        _, chapters = self.build("whole")
+        self.assertIn("scenario-level mark", chapters["S"])
+        self.assertIn("not implemented via MCP (the manifest's property-level mark): no contexts", chapters["S"])
+
+    def test_explained_items_from_the_table(self):
+        run = self.runobj
+        # P-003: answered by the service, the table's case.answered judged by the checks: compare's explained items
+        items, case = run.explained_items("P-003", 0)
+        ma = run.comp_entry("P-003").get("mcp_agreement") or {}
+        self.assertEqual(items, list((ma.get("explained_items") or {}).get("0") or []))
+        self.assertEqual(run.explained_items("P-001", 0), ([], None))
+
+    def test_mapping_by_manifest_sha(self):
+        manifest = sc.read_json(V4_MANIFEST)
+        self.assertEqual(units_mod.default_mapping_path(manifest), V4_MAPPING)
+        other = {"manifest_version": 9, "content_sha256": manifest["content_sha256"]}
+        self.assertEqual(units_mod.default_mapping_path(other), V4_MAPPING)
+        unknown = {"manifest_version": 7, "content_sha256": "0" * 64}
+        self.assertEqual(os.path.basename(units_mod.default_mapping_path(unknown)), "suite_v7.json")
 
 
 if __name__ == "__main__":

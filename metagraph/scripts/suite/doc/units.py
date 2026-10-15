@@ -21,7 +21,28 @@ class UnitsError(Exception):
     """Unit metadata the generator cannot use (exit 2)."""
 
 
+def mapping_files():
+    """The unit mapping files of doc/units/, sorted by name."""
+    folder = os.path.join(HERE, "units")
+    if not os.path.isdir(folder):
+        return []
+    return [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.endswith(".json")]
+
+
 def default_mapping_path(manifest):
+    """The mapping file of a manifest: the one of doc/units/ whose `_manifest.content_sha256` is the manifest's
+    (a frozen manifest is identified by its content sha, as the gate policies and the declared files identify it),
+    else doc/units/suite_v<version>.json by the manifest's version (which may not exist: the caller says so)."""
+    sha = (manifest or {}).get("content_sha256")
+    if sha:
+        for path in mapping_files():
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict) and (data.get("_manifest") or {}).get("content_sha256") == sha:
+                return path
     version = (manifest or {}).get("manifest_version")
     return os.path.join(HERE, "units", "suite_v%s.json" % version)
 

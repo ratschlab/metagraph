@@ -15,8 +15,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+if os.path.dirname(HERE) not in sys.path:
+    sys.path.insert(0, os.path.dirname(HERE))
+
 import cells  # noqa: E402
 import latex  # noqa: E402
+import suite_common as sc  # noqa: E402
 from latex import esc, tt, inline  # noqa: E402
 
 GENERIC_LAST = ("invariants", "budget_respected", "counts_consistent", "deterministic", "content_encoding",
@@ -151,7 +155,22 @@ MCP_CLASS_WORD = {"not_expressible": "not expressible through MCP",
                   "answered": "answered by the host through the service",
                   "refused_unexplained": "refused by the service (no by-design case explains it)",
                   "host_state": "ended by the service's own limit (a host state)",
+                  "marked": "every property check marked as not shown via MCP (a scenario-level mark)",
                   "none": "no MCP execution recorded"}
+
+# how a detail block names a check item a property-level mark of the manifest sets aside, or one the by-design
+# table explains (suite_common.MCP_CHECK_MARKS; compare's explained_items): (glyph, words)
+MARK_GROUP = {"not_implemented": ("\\gni", "not implemented via MCP (the manifest's property-level mark)"),
+              "by_design": ("\\gbd", "service-side by design (the manifest's property-level mark)"),
+              "explained": ("\\gbd", "explained by the by-design table's case (set aside by the comparison and "
+                                     "the gate)")}
+
+
+def scenario_level_mark(line):
+    """Whether an MCP execution is inconclusive by a scenario-level mark (suite_common.SCENARIO_LEVEL_MARK: the
+    manifest's property-level marks cover every property check of the execution; the checks decided, not a host
+    state)."""
+    return line.get("outcome") == "inconclusive" and line.get("inconclusive_reason") == sc.SCENARIO_LEVEL_MARK
 
 
 def host_expects_refusal(scenario):
@@ -194,6 +213,8 @@ def mcp_class(lines, scenario, agreement, cases):
     code = (first.get("error") or {}).get("code") if isinstance(first.get("error"), dict) else None
     reached = any(cells.host_cache_of(l) in ("cold", "warm", cells.WARM_AFTER_INTERRUPTED, "aged") for l in answered)
     status_text = "http %s%s" % (esc(http), (" " + tt(code)) if code else "")
+    if scenario_level_mark(first):
+        return "marked", "%s; %s" % (status_text, esc(first.get("verdict_detail") or sc.SCENARIO_LEVEL_MARK, 200))
     if first.get("inconclusive_reason") and first.get("inconclusive_reason") != "checks":
         return "host_state", "%s; the service's limit %s" % (status_text, tt(first["inconclusive_reason"]))
     failed = first.get("outcome") in ("fail", "error")
@@ -245,15 +266,19 @@ def _budget_text(run, sid):
     return ("{:,} ms".format(int(b)) if isinstance(b, (int, float)) else "none")
 
 
-def _property_cell(line, is_property):
-    word, passed, total = cells.property_tested(line, is_property)
+def _property_cell(line, is_property, aside=None):
+    """The 'property tested?' cell: what the execution tested of its property checks; the items a property-level
+    mark of the manifest sets aside (|aside|, suite_common.checks_marked_aside) are counted apart."""
+    word, passed, total = cells.property_tested(line, is_property, aside)
+    marked = len(aside or ())
+    suffix = ("; %d marked not shown via MCP" % marked) if marked else ""
     if word == "n/a":
-        return "n/a (status is the claim)" if total else "n/a"
+        return ("n/a (status is the claim)" if total else "n/a") + suffix
     if word == "yes":
-        return "yes (%d of %d)" % (passed, total)
+        return "yes (%d of %d)%s" % (passed, total, suffix)
     if word == "partly":
-        return "partly (%d of %d)" % (passed, total)
-    return "no"
+        return "partly (%d of %d)%s" % (passed, total, suffix)
+    return "no" + suffix
 
 
 def _finding_checks(line):
@@ -290,9 +315,10 @@ def _first_clause(text, limit=200):
 
 
 def _overridden(line, is_mcp):
-    """The MCP runner's host-state rule: the checks stay as they read, the outcome is overridden."""
+    """The MCP runner's host-state rule: the checks stay as they read, the outcome is overridden. A scenario-level
+    mark (scenario_level_mark) is no host state: the checks decided, every property check of them marked."""
     return bool(is_mcp and line.get("outcome") == "inconclusive" and line.get("inconclusive_reason")
-                and line.get("inconclusive_reason") != "checks")
+                and line.get("inconclusive_reason") != "checks" and not scenario_level_mark(line))
 
 
 def adjudication(line, run, sid, is_mcp, state=None):
@@ -317,6 +343,11 @@ def adjudication(line, run, sid, is_mcp, state=None):
             return ("inconclusive: the service's %s (http %s) classified as a host-state outcome by the runner's "
                     "rule (below), not as a failure; the property is untested on this repeat" % (
                         tt(line["inconclusive_reason"]), esc(http)))
+        if is_mcp and scenario_level_mark(line):
+            return ("inconclusive: every property check of this execution is marked in the manifest as not shown "
+                    "via MCP (%s), so nothing of the claim was tested through the tools: a scenario-level mark, "
+                    "never a pass on the generic checks alone" % esc(
+                        _first_clause(line.get("verdict_detail") or sc.SCENARIO_LEVEL_MARK, 200)))
         if http == 503 and code == "deadline":
             return ("inconclusive: an allowed 503 deadline at %s against a %s budget, within max(1 s, the budget) "
                     "of it; nothing in the body to judge, the property not tested" % (wall, esc(budget)))
@@ -351,7 +382,7 @@ def _arm_adjudication(st, run, sid, arm):
     phrases = []
     for l in st.lines:
         outcome = l.get("outcome")
-        if outcome in ("fail", "error") or _overridden(l, arm == "mcp"):
+        if outcome in ("fail", "error") or _overridden(l, arm == "mcp") or (arm == "mcp" and scenario_level_mark(l)):
             phrases.append((l.get("repeat"), adjudication(l, run, sid, arm == "mcp", st)))
     if not phrases:
         text = None
@@ -422,6 +453,8 @@ def _outcome_why(line, is_mcp):
     if outcome == "inconclusive":
         if _overridden(line, is_mcp):
             return "host state"
+        if is_mcp and scenario_level_mark(line):
+            return "scenario-level mark"
         if http == 503 and code == "deadline":
             return "allowed 503"
         if http is not None and http != 200:
@@ -453,7 +486,9 @@ def _execution_rows(st, run, sid, arm, is_property):
         wall = cells.fmt_t(l.get("wall_ms"))
         if arm != "mcp" or hc in ("cold", "warm", cells.WARM_AFTER_INTERRUPTED):
             wall += " (%s)" % esc(HC_SHORT.get(hc, hc))
-        tested = "–" if outcome in ("not_implemented_mcp", "service_by_design") else _property_cell(l, is_property)
+        aside = run.marked_aside(sid, l) if (arm == "mcp" and hasattr(run, "marked_aside")) else None
+        tested = "–" if outcome in ("not_implemented_mcp", "service_by_design") else _property_cell(
+            l, is_property, aside)
         rows.append(["%s%s" % (esc(arm), (" r%s" % esc(l.get("repeat"))) if several or arm == "mcp" else ""),
                      "%s\\ %s" % (glyph, word), _status_cell(l), wall, esc(_budget_text(run, sid)), tested])
     return rows
@@ -494,14 +529,28 @@ def finding_text(items, rule):
     return text
 
 
-def _check_groups(line, is_mcp):
+def _check_groups(line, is_mcp, marks=None, explained=None):
     """The checks of an execution that did not pass, grouped by (outcome, detail) so that a reason shared by
-    several checks is said once (never 'as above', never a list of checks all untestable for one reason)."""
+    several checks is said once (never 'as above', never a list of checks all untestable for one reason). An MCP
+    item read not_exposed that the manifest marks at property level (|marks|: suite_common.mcp_check_marks, the
+    check name's mark; set aside, or covering every property check: a scenario-level mark) is grouped under its
+    mark's words with the mark's reason or case, never under not_exposed; an item the by-design table explains
+    (|explained|: (indices, case), as compare derived them from the table: mcp_agreement explained_items) under
+    'explained' with the case."""
     groups = []
-    for c in (line.get("checks") or []):
+    items, case = explained or ([], None)
+    for i, c in enumerate(line.get("checks") or []):
         if not isinstance(c, dict) or c.get("outcome") == "pass":
             continue
-        key = (c.get("outcome"), c.get("detail") or "")
+        name = c.get("check")
+        mark = (marks or {}).get(name) if c.get("outcome") == "not_exposed" else None
+        if is_mcp and mark:
+            key = ("marked:" + str(mark.get("mark")), str(mark.get("reason") or (
+                ("case %s" % mark.get("case")) if mark.get("case") else "")))
+        elif is_mcp and i in items:
+            key = ("explained", ("case %s" % case) if case else "")
+        else:
+            key = (c.get("outcome"), c.get("detail") or "")
         for g in groups:
             if g[0] == key:
                 g[1].append(c.get("check"))
@@ -509,6 +558,23 @@ def _check_groups(line, is_mcp):
         else:
             groups.append((key, [c.get("check")]))
     return groups
+
+
+def _group_text(key, names):
+    """One group of a 'checks' line: the check names, the glyph and the reason; a marked or explained group
+    (MARK_GROUP) carries the mark's words before the reason; a check read not_exposed (the MCP answer carries
+    nothing the check reads: neither passed nor failed) the inconclusive glyph and the words."""
+    kind, detail = key
+    if kind.startswith("marked:") or kind == "explained":
+        glyph, words = MARK_GROUP.get(kind.split(":", 1)[-1] if kind.startswith("marked:") else kind,
+                                      ("\\gnone", kind))
+        return "%s %s{} — %s%s" % (", ".join(esc(n) for n in names), glyph, words,
+                                   (": " + esc(detail, 240)) if detail else "")
+    if kind == "not_exposed":
+        return "%s \\ginc{} — not exposed via MCP%s" % (", ".join(esc(n) for n in names),
+                                                       (": " + esc(detail, 240)) if detail else "")
+    return "%s %s{}%s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(kind, "\\gfail"),
+                          (" — " + esc(detail, 240)) if detail else "")
 
 
 def _texts_line(states):
@@ -534,6 +600,9 @@ def _artifacts_line(run, states):
         for l in states[arm].lines:
             if l.get("raw"):
                 parts.append(tt(l["raw"]))
+            for rr in l.get("warm_up_reruns") or []:
+                if isinstance(rr, dict) and rr.get("raw"):
+                    parts.append("%s (the warm-up's re-run)" % tt(rr["raw"]))
             n = run.line_no(l)
             if n:
                 numbers.append(str(n))
@@ -731,23 +800,33 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
         if not st.present or st.glyph_key in ("not_implemented_mcp", "service_by_design"):
             continue
         for l in st.lines:
+            label = "%s r%s" % (esc(cells.ARM_SHORT.get(arm, arm)), esc(l.get("repeat")))
+            for rr in l.get("warm_up_reruns") or []:
+                if isinstance(rr, dict):
+                    body.append(latex.bsub("warm-up re-run (%s)" % label, (
+                        "%s r%s ran again for a resume %s before this execution (wall %s, http %s, %s): timing "
+                        "evidence beside it, never an outcome (the warm-up's judged execution is its first)" % (
+                            latex.sid(str(rr.get("scenario"))), esc(rr.get("repeat")),
+                            cells.fmt_t(float(rr["before_s"]) * 1000.0) if isinstance(rr.get("before_s"), (int, float))
+                            else "–", cells.fmt_t(rr.get("wall_ms")), esc(rr.get("http")),
+                            esc(rr.get("outcome") or "–")))))
             if l.get("outcome") == "pass":
                 continue
-            label = "%s r%s" % (esc(cells.ARM_SHORT.get(arm, arm)), esc(l.get("repeat")))
             if _overridden(l, arm == "mcp"):
                 if l.get("verdict_detail"):
                     body.append(latex.bsub("host state (%s)" % label, esc(l["verdict_detail"])))
-                groups = _check_groups(l, True)
+                groups = _check_groups(l, True, run.check_marks(sid) if hasattr(run, "check_marks") else None)
                 if groups:
                     body.append(latex.bsub("intermediate (%s)" % label, "the evaluation before the host-state rule, kept as recorded: " + "; ".join(
-                        "%s %s{} — %s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(k[0], "\\gfail"),
-                                        esc(_first_clause(k[1], 160))) for k, names in groups)))
+                        _group_text((k[0], _first_clause(k[1], 160)), names) for k, names in groups)))
                 continue
-            groups = [g for g in _check_groups(l, arm == "mcp") if g[0][0] != "finding"]
-            if groups and (l.get("outcome") == "fail" or (l.get("outcome") == "inconclusive" and l.get("http") == 200)):
-                body.append(latex.bsub("checks (%s)" % label, "; ".join(
-                    "%s %s{}%s" % (", ".join(esc(n) for n in names), cells.GLYPH.get(k[0], "\\gfail"),
-                                 (" — " + esc(k[1], 240)) if k[1] else "") for k, names in groups)))
+            marks = run.check_marks(sid) if (arm == "mcp" and hasattr(run, "check_marks")) else {}
+            explained = run.explained_items(sid, l.get("repeat")) if (arm == "mcp" and hasattr(
+                run, "explained_items")) else None
+            groups = [g for g in _check_groups(l, arm == "mcp", marks, explained) if g[0][0] != "finding"]
+            if groups and (l.get("outcome") == "fail" or (l.get("outcome") == "inconclusive" and l.get("http") == 200)
+                           or l.get("outcome") == "service_by_design"):
+                body.append(latex.bsub("checks (%s)" % label, "; ".join(_group_text(k, names) for k, names in groups)))
             ph = _phases_text(l) if arm == "mcp" else None
             if ph:
                 body.append(latex.bsub("mcp phases (%s)" % label, esc(ph)))

@@ -427,14 +427,39 @@ def verdict_text(run, comp, rows, reevaluated=False, missing=None, manifest=None
                      "totals": totals, "no_pass_arms": no_pass_arms}
 
 
-EXPLORATORY_PREFIX = "Exploratory verdict (not the deploy decision, which is the gate's above): "
+EXPLORATORY_LABEL = "Exploratory verdict (not the deploy decision, which is the gate's %s)"
 
 
-def verdict_headline(verdict, gated=False):
+def exploratory_label(where="above"):
+    """The label of the ordinary verdict beside a deploy gate's: the gate is the decision (|where|: the report
+    prints the gate above the verdict, the results document's cover beside it)."""
+    return EXPLORATORY_LABEL % where
+
+
+def verdict_headline(verdict, gated=False, where="above"):
     """The verdict as the report's headline prints it: the verdict itself, or, for a run with a deploy gate's
     verdict (|gated|: the report leads with the gate), labelled exploratory. The results document prints the same
-    headline on its cover."""
-    return (EXPLORATORY_PREFIX + verdict) if gated else verdict
+    headline on its cover (where="beside")."""
+    return ("%s: %s" % (exploratory_label(where), verdict)) if gated else verdict
+
+
+def gate_headline_parts(verdict):
+    """(word, how, summary) of a deploy gate's verdict (gate.py's gate.json): 'GATE PASS' | 'GATE FAIL'; 'policy
+    <name> v<version>, sha256 <short>, judged <utc>'; 'every planned and required execution recorded, nothing
+    blocks' | '<n> problem(s): <kind> <n>, ...' in gate.KINDS order. The report's gate section and the results
+    document's cover print these."""
+    probs = verdict.get("problems") or []
+    pol = verdict.get("policy") or {}
+    by_kind = {}
+    for p in probs:
+        by_kind[p.get("kind")] = by_kind.get(p.get("kind"), 0) + 1
+    word = "GATE %s" % ("PASS" if verdict.get("passed") else "FAIL")
+    how = "policy %s v%s, sha256 %s, judged %s" % (pol.get("name"), pol.get("policy_version"), short(pol.get("sha256")),
+                                                   verdict.get("judged_utc"))
+    summary = ("every planned and required execution recorded, nothing blocks" if verdict.get("passed") else
+               "%d problem(s): %s" % (len(probs), ", ".join("%s %d" % (k, n) for k, n in sorted(
+                   by_kind.items(), key=lambda kv: gate_mod.KINDS.index(kv[0]) if kv[0] in gate_mod.KINDS else 99))))
+    return word, how, summary
 
 
 def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
@@ -552,17 +577,8 @@ def gate_section(run_dir, reevaluated=False, max_items=200):
                           "this run has now; run gate.py on the run again for a current verdict." % (
                               md(verdict.get("judged_utc")), md(pol.get("name")),
                               "PASS" if verdict.get("passed") else "FAIL", md(", ".join(stale))), ""])
-    by_kind = {}
-    for p in probs:
-        by_kind[p.get("kind")] = by_kind.get(p.get("kind"), 0) + 1
-    out = ["# Deploy gate", "",
-           "**GATE %s** (policy %s v%s, sha256 %s, judged %s): %s." % (
-               "PASS" if verdict.get("passed") else "FAIL", md(pol.get("name")), md(pol.get("policy_version")),
-               md(short(pol.get("sha256"))), md(verdict.get("judged_utc")),
-               "every planned and required execution recorded, nothing blocks" if verdict.get("passed") else
-               "%d problem(s): %s" % (len(probs), ", ".join("%s %d" % (md(k), n) for k, n in sorted(
-                   by_kind.items(), key=lambda kv: gate_mod.KINDS.index(kv[0]) if kv[0] in gate_mod.KINDS else 99)))),
-           ""]
+    word, how, summary = gate_headline_parts(verdict)
+    out = ["# Deploy gate", "", "**%s** (%s): %s." % (md(word), md(how), md(summary)), ""]
     rows = []
     for p in probs[:max_items]:
         rows.append([md(p.get("kind")), md(p.get("scenario") or "-"), md(p.get("arm") or "-"),

@@ -23,9 +23,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+if os.path.dirname(HERE) not in sys.path:
+    sys.path.insert(0, os.path.dirname(HERE))
 
 import blocks  # noqa: E402
 import cells  # noqa: E402
+import suite_common as sc  # noqa: E402
 import units as units_mod  # noqa: E402
 from cells import ARMS, ARM_SHORT, fmt_t  # noqa: E402
 
@@ -217,8 +220,9 @@ def _cut(text, limit):
 
 
 def _overridden(line, is_mcp):
-    return bool(is_mcp and line.get("outcome") == "inconclusive" and line.get("inconclusive_reason")
-                and line.get("inconclusive_reason") != "checks")
+    """The MCP runner's host-state rule overrode the checks (blocks._overridden): a scenario-level mark
+    (suite_common.SCENARIO_LEVEL_MARK) is no host state, the checks decided it."""
+    return blocks._overridden(line, is_mcp)
 
 
 def exec_phrase(run, sid, line, arm, wall=None):
@@ -242,6 +246,9 @@ def exec_phrase(run, sid, line, arm, wall=None):
     if outcome == "inconclusive":
         if _overridden(line, arm == "mcp"):
             return "the service's %s at %s (a host state: inconclusive)" % (line["inconclusive_reason"], wall)
+        if arm == "mcp" and line.get("inconclusive_reason") == sc.SCENARIO_LEVEL_MARK:
+            return ("inconclusive at %s: every property check of this execution is marked as not shown via MCP (a "
+                    "scenario-level mark), so nothing of the claim was tested through the tools" % wall)
         if late is not None:
             return "a 503 deadline %s past the %s budget (allowed: inconclusive)" % (fmt_t(late), fmt_budget(budget))
         if http == 503 and code == "deadline":

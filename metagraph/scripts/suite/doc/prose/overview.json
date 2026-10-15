@@ -82,7 +82,9 @@
   "by_design_sha_short": "that table's sha256, first 12 hex digits",
   "by_design_table_line": "that table in one line: version, cases, service commit, sha256, and whether it is the replayed one (else the warning)",
   "logan_caveat": "whether the Logan caveat applies (report.LOAD_CAVEAT_SRA_CPU_PCT / LOAD_CAVEAT_LOAD1 against the sampler's means): a flag for the prose's conditionals `[[logan_caveat ? ...]]`",
-  "gate_judged": "whether a deploy gate verdict exists (gate.json, or judged offline by gate.py for the document): a flag for the prose's conditionals"
+  "gate_judged": "whether a deploy gate verdict exists (gate.json, or judged offline by gate.py for the document): a flag for the prose's conditionals",
+  "verdict_headline": "the run verdict as the report's headline prints it (report.verdict_headline): the verdict, labelled exploratory beside a deploy gate's verdict",
+  "n_reruns_for_resume": "the warm-ups run again for a resume (run.json reruns_for_resume): timing evidence beside their targets, never an outcome"
  },
  "sections": {
   "decision": {
