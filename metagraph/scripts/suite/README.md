@@ -3590,3 +3590,46 @@ sizes and seeds 2-6 at twice the size (`runs/v4final_*`), over every route and a
   - 14-15 trace queries telling trace from presence;
   - 13-23 PRIMARY twins.
 - **No candidate engine defect.**
+
+#### Round 3 of the verification (2026-10-15, against 81c620ef)
+The verifier ruled that the oracle can merge and that "no candidate engine defect" stands
+(`verify/VERIFY-ORACLE.md`, "Round 3"). Closed since:
+- **The entry a merge keeps** (SPEC 6.5: the min (loss, branches) entry of a label on both parents).
+  - A run the merge closed must not be cheaper than its label's continuing run. Loss is constant along a
+    run, so the loss part is exact.
+  - Every run, not only a leaf's end labels, must have an own route that is a keep walk its label holds.
+  - This catches the verifier's G13 (a costlier loss-1 entry kept) and F3 on `T-canonical_k10-0076` (a label
+    claimed through a parent that carries it only after a switch, ending before a leaf).
+  - The mutation set gains `merge_costlier_entry`.
+- **Provenance.**
+  - `build_head` is the tree's HEAD now. The binary prints no commit (`--version` is the release number), so
+    a binary linked before the last commit touching `metagraph/src` is flagged `stale` ("STALE BINARY" in
+    the report). The main tree's binary that phases 1 and 2 used first is flagged this way; the eng-int
+    build is not.
+  - Every git call runs with `--no-optional-locks`, so the engine tree's index is never rewritten.
+- **End reasons after a merge.**
+  - `dead_end` only at a graph tip.
+  - `label_lost` only where no successor keeps the label. A successor holding it counts only if the label was
+    re-entered there by a switch.
+  - Both hold for every keep-oracle claim of the v4final requests.
+  - They catch the verifier's last E3b miss (`T-primary_k11-0023`, `label_lost` at 32 after the merge at 21,
+    reported as `dead_end`). The mutation set gains `merge_late_dead_end`.
+
+Validation: six runs on the code of `bafc074a` against the same build. The report records it as not stale,
+with 0 uncommitted `src` files. Seed 1 ran at the default sizes and seeds 2-6 at twice the size
+(`runs/v5final_*`), over every route and all twelve configurations.
+- 16,406 requests and 44,291 answers: 40,799 equal the oracle and 3,492 are inconclusive with every invariant
+  passing. **0 disagree.**
+- Every one of the 16,509 answer files (twins included) equals round 2's apart from timing.
+- 440,280 corruptions of the stated mutation set, every one caught. 125,030 are of `/traverse` answers, and 58
+  of those are merged-arm ones.
+- **No candidate engine defect.**
+
+Still open, stated:
+- L3 (the `lower` of a bounds count);
+- L4 (records holding an N);
+- the united history's other label states after a merge;
+- ties of the majority parent;
+- a server-side traverse memory budget, which the suite does not use, and which would make `first_parent`
+  misjudge;
+- `loss_budget` comes from one chain fixture.
