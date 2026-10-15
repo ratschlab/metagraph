@@ -171,12 +171,15 @@ def select_scenarios(manifest, areas=None, limit=None, ids=None):
 
     `areas` and `ids` filter (None: all); `limit` keeps the first N after filtering. The global index is the
     scenario's position in the whole manifest, so the "every tenth" warm repeat picks the same scenarios
-    whatever subset runs.
+    whatever subset runs. A warm-up (a scenario whose `warms` names another, lane V5) travels with its target: a
+    selection that takes the target takes its warm-up too (the manifest keeps it right before the target), so that
+    the target's first execution meets the rows it read, whatever subset runs.
     """
     area_set = set(a.strip() for a in areas) if areas else None
     id_set = set(ids) if ids else None
+    scenarios = manifest.get("scenarios", [])
     out = []
-    for index, scenario in enumerate(manifest.get("scenarios", [])):
+    for index, scenario in enumerate(scenarios):
         if area_set is not None and scenario.get("area") not in area_set:
             continue
         if id_set is not None and scenario.get("id") not in id_set:
@@ -184,6 +187,10 @@ def select_scenarios(manifest, areas=None, limit=None, ids=None):
         out.append((index, scenario))
         if limit is not None and limit > 0 and len(out) >= limit:
             break
+    chosen = set(s.get("id") for _, s in out)
+    pulled = [(i, s) for i, s in enumerate(scenarios) if s.get("warms") in chosen and s.get("id") not in chosen]
+    if pulled:
+        out = sorted(out + pulled, key=lambda x: x[0])
     return out
 
 

@@ -128,11 +128,12 @@ def warm_up(ctx: Ctx, sid: str, query: str, label: str, truth: dict, target: str
     (build_manifest.place_warm_ups), so that the target's first execution, the MCP arm's cold one, meets them warm:
     v4's cold first calls under the Logan load timed out where the warm repeats took a second (triage-v4 G24)."""
     assert len(query) <= RESOLVE_MAX_QUERY_BP, "a warm-up the MCP can send (at most %d bp)" % RESOLVE_MAX_QUERY_BP
-    t = dict(truth, warm_up_for=target, warm_up=why)
+    t = dict(truth, warm_up=why)
     return scenario(sid, "R", "warm-up of %s: %s bp resolved against %s, every k-mer supported" % (
                         target, format(len(query), ","), label), "POST /resolve",
                     resolve_request(query, labels=[label]), t,
-                    [OK, INV, ex("resolve_runs", label=label, full=True)], tags=("warm-up", "positive") + tuple(tags))
+                    [OK, INV, ex("resolve_runs", label=label, full=True)], tags=("warm-up", "positive") + tuple(tags),
+                    warms=target)
 
 
 def region_warm_up(ctx: Ctx, rec, t: dict, left: int, right: int, label: str, target: str, why: str) -> dict:
@@ -3081,8 +3082,8 @@ def gen_REL(ctx: Ctx, scenarios: List[dict], caps: Dict[str, dict]) -> List[dict
                                                                           format(RESOLVE_TIME_BUDGET_MS, ",")),
                      resolve_request(seq, labels=[lab]),
                      [OK, INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
-                     truth=dict(base, warm_up_for=sid),
-                     tags=["budget", "machine-dependent", "warm-up"], timing_class="slow")
+                     truth=dict(base), tags=["budget", "machine-dependent", "warm-up"], timing_class="slow")
+        full["warms"] = sid
         cont_from = len(seq) // 2
         cont = _twin(rb, "R-twin-%04d" % (3 + 2 * i), "the same %s bp from base %s: the continuation" % (
                          format(len(seq), ","), format(cont_from, ",")),

@@ -53,12 +53,11 @@ DEFAULT_CAPABILITIES = os.path.join(truth.TRUTH_DIR, "staging_capabilities")
 # the telomeric seed's re-entry, an all_or_count hard region never withheld, a peptide, a count in suffix scope
 # (properties the MCP may not expose), a 31-mer of a real repeat, and the max_mismatches 0 relation pair.
 SMOKE_TAG = "smoke-v%d" % MANIFEST_VERSION
-# v5 adds the warm-ups of the two smoke scenarios that have one (R-twin-0002 before R-budget-0001, R-warm-0006
-# before N-hard-0022), so that the smoke run meets them as the full run does, and a forced cap via MCP (T-caps-0002):
-# 14 scenarios, 32 direct requests of a paired smoke run (R-budget-0001 repeats twice) with the closing GETs
+# v5 adds a forced cap via MCP (T-caps-0002); the warm-ups of the smoke scenarios that have one (R-twin-0002 before
+# R-budget-0001, R-warm-0006 before N-hard-0022) travel with them (tag_scenarios: `warms`), so that a smoke run meets
+# them as the full run does: 14 scenarios, 28 direct requests of a paired smoke run with the closing GETs
 SMOKE_IDS = ("R-budget-0001", "R-junction-0001", "T-end-0001", "T-budget-0001", "N-hard-0022", "N-hard-0005",
-             "X-peptide10-0009", "P-exact-0001", "N-realrep-0007", "M-refusal-0012", "M-twin-0001",
-             "R-twin-0002", "R-warm-0006", "T-caps-0002")
+             "X-peptide10-0009", "P-exact-0001", "N-realrep-0007", "M-refusal-0012", "M-twin-0001", "T-caps-0002")
 CONVENTIONS = {
     "truth.start": "0-based position of the window's first base on the record's forward strand (whole-record coordinates)",
     "truth.window": "the record's bases on its forward strand (for a '-' source the reverse complement of the pattern)",
@@ -72,6 +71,9 @@ CONVENTIONS = {
     "mcp.by_design": "case ids of the async session's service-by-design table (service_by_design.json)",
     "mcp.requires_service": "the service increment the MCP mapping needs (I12: max_mismatches)",
     "timing_class": "fast (< ~5 s), slow, long (> 100 s: direct-local only)",
+    "warms": "a warm-up's target (lane V5): the id of the scenario whose annotation rows it reads right before it; "
+             "the builder keeps the pair adjacent (the warm-up first) and every selection that takes the target takes "
+             "its warm-up (suite_common.select_scenarios)",
     "run_unique": "top-level request fields the direct runner makes unique per run and arm (lane S5b, A-10; lane "
                   "S5c, A2-06): it appends '-', the run id (the run directory's name, which the arms of a run share), "
                   "'-' and the arm to each, cut to the id pattern's 128 characters, and records the request it sent; "
@@ -249,7 +251,7 @@ def not_applicable(caps: dict) -> list:
 
 
 def place_warm_ups(scenarios: list) -> list:
-    """|scenarios| with each warm-up (tag warm-up, truth.warm_up_for: a scenario id) moved to just before the
+    """|scenarios| with each warm-up (tag warm-up, `warms`: the id of the scenario it warms) moved to just before the
     scenario it warms, several in the order built. A runner runs an arm's scenarios in manifest order (the paired
     loop runs each scenario's executions, MCP cold first, before the next scenario's), so the warmed scenario's first
     execution, the MCP arm's cold one, meets the rows the warm-up read (triage-v4 G22 / G24: cold reads under the
@@ -258,7 +260,7 @@ def place_warm_ups(scenarios: list) -> list:
     warm = {}
     rest = []
     for s in scenarios:
-        target = (s.get("truth") or {}).get("warm_up_for") if "warm-up" in s.get("tags", []) else None
+        target = s.get("warms") if "warm-up" in s.get("tags", []) else None
         if target in ids:
             warm.setdefault(target, []).append(s)
         else:
@@ -308,7 +310,7 @@ def tag_scenarios(scenarios, recs) -> None:
         tags = set(sc["tags"])
         if last and "index-defect" not in tags:
             tags.add("last-record-verified")
-        if sc.get("id") in SMOKE_IDS:
+        if sc.get("id") in SMOKE_IDS or sc.get("warms") in SMOKE_IDS:   # a warm-up travels with its target
             tags.add(SMOKE_TAG)
         if not tags & {"smoke", SMOKE_TAG} and any(_exact_text(e) for e in sc["expect"]):
             tags.add("code-derived")

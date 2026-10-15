@@ -273,8 +273,8 @@ class ResolveDecisive(unittest.TestCase):
 
     def test_place_warm_ups(self):
         import build_manifest as bm
-        sc = lambda i, tags=(), warms=None: {"id": i, "tags": list(tags),  # noqa: E731
-                                              "truth": {"warm_up_for": warms} if warms else {}}
+        sc = lambda i, tags=(), warms=None: dict({"id": i, "tags": list(tags), "truth": {}},  # noqa: E731
+                                                 **({"warms": warms} if warms else {}))
         got = bm.place_warm_ups([sc("A"), sc("B"), sc("C"), sc("W1", ["warm-up"], "B"), sc("W2", ["warm-up"], "B"),
                                  sc("W3", ["warm-up"], "Z"), sc("X", (), "A")])
         self.assertEqual([s["id"] for s in got], ["A", "W1", "W2", "B", "C", "W3", "X"])
@@ -350,7 +350,7 @@ class WalksDecisive(unittest.TestCase):
             self.assertEqual(bounds(sid)["max_extension_bp"], 400, sid)
             w = s[order[order.index(sid) - 1]]
             self.assertIn("warm-up", w["tags"], sid)
-            self.assertEqual(w["truth"]["warm_up_for"], sid)
+            self.assertEqual(w["warms"], sid)
             self.assertIn(s[sid]["request"]["seeds"][0]["sequence"], w["request"]["sequence"])
             self.assertEqual(w["request"]["labels"], s[sid]["request"]["seeds"][0]["labels"])
         # VERIFY-V5A: a warm-up reads what its walk must reach (the seed and each arm's exact minimum plus the margin),
@@ -367,7 +367,7 @@ class WalksDecisive(unittest.TestCase):
                          ("R-warm-0007", ["10710"], 31 + 2 * 100))
         self.assertIn(s["T-walk-0009"]["request"]["seeds"][0]["sequence"], w9["request"]["sequence"])
         w = s[order[order.index("T-labels-0003") - 1]]
-        self.assertEqual((w["truth"]["warm_up_for"], w["request"]["labels"]), ("T-labels-0003", ["511145"]))
+        self.assertEqual((w["warms"], w["request"]["labels"]), ("T-labels-0003", ["511145"]))
         self.assertEqual(bounds("T-labels-0003")["max_extension_bp"], 50)
         self.assertEqual(bounds("T-labels-0005")["max_extension_bp"], 200)
         for n in range(1, 4):
@@ -763,6 +763,51 @@ class WarmRepeatGuard(unittest.TestCase):
         self.assertEqual(bm.warm_repeat_problems(m["scenarios"]), [])
         idx = [x["id"] for x in m["scenarios"]].index("T-attempts-0002")
         self.assertNotEqual(idx % bm.WARM_EVERY, 0)
+
+
+class WarmUpsTravel(unittest.TestCase):
+    """VERIFY-V5A should-fix (b): a warm-up names its target (`warms`), the builder keeps the pair adjacent, and every
+    selection (ids, areas, limit; a resume's ids) that takes the target takes its warm-up too."""
+
+    def man(self):
+        mk = lambda i, area, **kw: dict({"id": i, "area": area, "route": "POST /resolve", "repeat": 1,  # noqa: E731
+                                         "timing_class": "fast", "tags": [], "mcp": {"tool": "x"}}, **kw)
+        return {"scenarios": [mk("R-a", "R"), mk("R-warm-0001", "R", warms="T-b", tags=["warm-up"]),
+                              mk("T-b", "T"), mk("T-c", "T")]}
+
+    def test_selections(self):
+        import suite_common as sc_
+        m = self.man()
+        ids = lambda sel: [s["id"] for _, s in sel]  # noqa: E731
+        self.assertEqual(ids(sc_.select_scenarios(m, ids=["T-b"])), ["R-warm-0001", "T-b"])
+        self.assertEqual(ids(sc_.select_scenarios(m, areas=["T"])), ["R-warm-0001", "T-b", "T-c"])
+        self.assertEqual(ids(sc_.select_scenarios(m, areas=["T"], limit=1)), ["R-warm-0001", "T-b"])
+        self.assertEqual(ids(sc_.select_scenarios(m, ids=["T-c"])), ["T-c"])
+        self.assertEqual([i for i, _ in sc_.select_scenarios(m, ids=["T-b"])], [1, 2])   # global indices kept
+        import gate
+        self.assertEqual(sorted(set(s for s, _, _ in gate.planned_executions(m, ids=["T-b"], arms=["direct-local"]))),
+                         ["R-warm-0001", "T-b"])
+
+    def test_policy_counts_each_scenario_once(self):
+        import gate_policy
+        m = dict(self.man(), relations=[])
+        pol = gate_policy.build_policy(m, routes=("POST /resolve",), arms=("direct-local",), table=({}, None))
+        reps = dict((e["scenario"], e["repeats"]) for e in pol["required"])
+        self.assertEqual(reps["T-b"], [0])          # not its warm-up's repeats besides its own
+        self.assertEqual(reps["R-warm-0001"], [0])
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_built(self):
+        import build_manifest as bm
+        m = built()
+        order = [x["id"] for x in m["scenarios"]]
+        pairs = [(x["id"], x["warms"]) for x in m["scenarios"] if x.get("warms")]
+        self.assertEqual(len(pairs), 9)
+        for w, target in pairs:
+            self.assertEqual(order.index(target), order.index(w) + 1, w)
+        smoke = [x["id"] for x in bm.smoke_of(m)["scenarios"]]
+        for w, target in pairs:
+            self.assertEqual(w in smoke, target in smoke, w)
 
 
 if __name__ == "__main__":

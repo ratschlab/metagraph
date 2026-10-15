@@ -289,8 +289,8 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
             if any("repeats" not in e for e in mine):
                 continue
             off = set(r for e in mine for r in e.get("repeats") or [])
-            reps = [r for _, _, r in gate.planned_executions(manifest, None, None, [sid], warm_every, [arm])
-                    if r not in off]
+            reps = [r for s_, _, r in gate.planned_executions(manifest, None, None, [sid], warm_every, [arm])
+                    if s_ == sid and r not in off]   # a warm-up the selection pulls in is required as its own scenario
             if reps:
                 required.append({"scenario": sid, "arm": arm, "repeats": reps})
     excluded_on = {}
