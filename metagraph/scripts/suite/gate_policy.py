@@ -21,6 +21,9 @@ table, never from an answer a run received:
                             (the service answers in place of the host's answer, e.g. resolve.duplicate_labels where
                             the host refuses, capabilities.traverse_capabilities_document, the service's own view):
                             compare verifies such a pair only against a direct execution.
+On every arm, a scenario the manifest tags budget_stress (a property that depends on the host's load, which no
+budget makes decisive; truth.budget_stress.reason states why) is excluded by the rule budget_stress, derived from the
+tag, with that reason (lane V5: v5's long column walks, owner-approved on 2026-10-15; they run in the full suite).
 The deploy gate runs two arms, mcp and direct-local (paired): direct-local verifies the answered pairs and lets the
 gate catch an MCP vs direct disagreement. Owner-declared entries come from --declared FILE, a versioned JSON file
 beside the policy: {declared_version 1, manifest {content_sha256}, exclusions [{scenario, arms, repeats (optional:
@@ -165,6 +168,18 @@ def mcp_exclusion(scenario, cases, advanced_path=False, direct_arm=True):
             "reason": "; ".join(reasons)}
 
 
+def budget_stress_exclusion(scenario, arms):
+    """The exclusion of a scenario tagged budget_stress on every arm of the policy ({scenario, arms, rules, reason}),
+    or None: its property depends on the host's load, so the strict gate would block on an inconclusive that says
+    nothing about the deployment; the reason is the manifest's (truth.budget_stress.reason)."""
+    if "budget_stress" not in (scenario.get("tags") or []):
+        return None
+    t = scenario.get("truth") if isinstance(scenario.get("truth"), dict) else {}
+    why = ((t.get("budget_stress") or {}).get("reason") if isinstance(t.get("budget_stress"), dict) else None) \
+        or "the manifest tags it budget_stress: its property depends on the host's load"
+    return {"scenario": scenario.get("id"), "arms": list(arms), "rules": ["budget_stress"], "reason": why}
+
+
 DECLARED_VERSIONS = (1,)
 
 
@@ -234,6 +249,9 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
         ex = mcp_exclusion(scen, cases, advanced_path, direct_arm) if "mcp" in arms else None
         if ex:
             exclusions.append(ex)
+        stress = budget_stress_exclusion(scen, arms)
+        if stress:
+            exclusions.append(stress)
         for d in declared_ex.get(sid) or []:
             on = [a for a in arms if a in d["arms"] and not (a == "mcp" and ex)]
             if on:
@@ -342,7 +360,9 @@ def describe(policy):
     out.append("  excluded: %d (%s)" % (
         c["excluded"], ", ".join("%s %d" % kv for kv in sorted(c["exclusions_by_rule"].items())) or "none"))
     for ex in policy["exclusions"]:
-        if "declared" in ex["rules"]:
+        if "budget_stress" in ex["rules"]:
+            out.append("    budget_stress: %s excluded on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
+        elif "declared" in ex["rules"]:
             out.append("    declared: %s%s excluded on %s: %s" % (
                 ex["scenario"], "".join(" r%d" % r for r in ex.get("repeats") or []), ", ".join(ex["arms"]),
                 ex["reason"]))

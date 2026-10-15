@@ -624,5 +624,33 @@ class McpExposure(unittest.TestCase):
         self.assertEqual(m["mcp_exposure_baseline"]["source"]["run"], ["20261014T061053Z_refseq97-6f945db4"])
 
 
+class BudgetStressRule(unittest.TestCase):
+    """gate_policy derives the budget_stress exclusions from the scenario tag (the owner approved it for v5's long
+    walks on 2026-10-15), on every arm of the policy, with the manifest's reason; no declared entry is needed."""
+
+    def test_rule(self):
+        import gate_policy
+        import compare as cmp
+        sc = lambda sid, tags, truth=None: {"id": sid, "area": "T", "route": "POST /traverse",  # noqa: E731
+                                            "request": {"seeds": [{"sequence": "A" * 40}]}, "truth": truth or {},
+                                            "expect": [{"check": "status", "args": {"http": 200}}], "repeat": 1,
+                                            "timing_class": "slow", "tags": tags,
+                                            "mcp": {"tool": "traverse_fetch", "arguments": {"preset": "walk"}}}
+        man = {"scenarios": [sc("T-a", ["walk"]), sc("T-b", ["walk", "budget_stress"], {"budget_stress": {
+            "reason": "it depends on the load"}}), sc("T-c", ["budget_stress"])], "relations": [
+            {"id": "REL-x", "type": "same_answer", "a": "T-a", "b": "T-b", "title": "", "args": {}}]}
+        pol = gate_policy.build_policy(man, arms=("mcp", "direct-local"), table=({}, None))
+        ex = dict((e["scenario"], e) for e in pol["exclusions"])
+        self.assertEqual(sorted(ex), ["T-b", "T-c"])
+        self.assertEqual((ex["T-b"]["rules"], ex["T-b"]["arms"], ex["T-b"]["reason"]),
+                         (["budget_stress"], ["direct-local", "mcp"], "it depends on the load"))
+        self.assertIn("budget_stress", ex["T-c"]["reason"])
+        self.assertEqual(sorted(set(r["scenario"] for r in pol["required"])), ["T-a"])
+        self.assertEqual(pol["relations"], [])
+        self.assertEqual(pol["counts"]["exclusions_by_rule"], {"budget_stress": 2})
+        self.assertIn("budget_stress: T-b excluded on direct-local, mcp: it depends on the load",
+                      gate_policy.describe(pol))
+
+
 if __name__ == "__main__":
     unittest.main()
