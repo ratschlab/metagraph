@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Build the suite's frozen scenario manifests (DESIGN §8.1): the full catalogue and the smoke selection.
 
-    build_manifest.py --out manifest/suite_v4.json --smoke-out manifest/suite_smoke_v4.json [--seed N] [--no-fetch]
+    build_manifest.py --out manifest/suite_v5.json --smoke-out manifest/suite_smoke_v5.json [--seed N] [--no-fetch]
                       [--capabilities DIR]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
 same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
 `relations_sha256` (of `relations`, the comparisons across scenarios); `created_utc` is outside them.
 
-The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v4` in the full manifest): few enough for a
+The smoke manifest holds the scenarios of SMOKE_IDS (tagged `smoke-v5` in the full manifest): few enough for a
 paired three-arm smoke run within 60 host requests, the MCP arm's included. The `smoke` tag keeps marking the
 scenarios a smoke validation exercised (the earlier selections).
 
@@ -16,10 +16,10 @@ scenarios a smoke validation exercised (the earlier selections).
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
 documents and the scenarios a host capability decides (the protein substitution cap: manifest_lib.HOST_MISMATCH_MAX)
 are built from it, so the frozen manifest is built with a snapshot refreshed from the host it will run against.
-The frozen v3 manifests stay as they are (the builder of v3 is commit 6f945db4). Any suite_v*.json /
-suite_smoke_v*.json that exists in manifest/ or that git tracks is refused as an output, by whatever path, and
---areas (a partial build) needs outputs of its own; the manifest's index records the sha256 of each capabilities
-document beside the snapshot's directory.
+The frozen v1-v4 manifests stay as they are (v3 was built at commit 6f945db4; 1387455f rebuilds v4 byte for
+byte). Any suite_v*.json / suite_smoke_v*.json that exists in manifest/ or that git tracks is refused as an output, by
+whatever path, and --areas (a partial build) needs outputs of its own; the manifest's index records the sha256 of each
+capabilities document beside the snapshot's directory.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ import truth  # noqa: E402
 from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
-MANIFEST_VERSION = 4
+MANIFEST_VERSION = 5
 DEFAULT_CAPABILITIES = os.path.join(truth.TRUTH_DIR, "staging_capabilities")
 # The v3 smoke selection (lane S3): the checks lane S3 changed, live, within 60 host requests in a paired three-arm
 # run (each scenario MCP cold, direct-local, direct-remote, MCP warm; plus 9 capabilities GETs): the 503 past a
