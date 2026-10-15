@@ -43,6 +43,17 @@ class JudgeSamples(unittest.TestCase):
         self.assertEqual(lg.judge_samples(s, {"host_load1_max": 40.0})["verdict"], "clean")
         self.assertEqual(lg.judge_samples([], None)["verdict"], "unguarded")
 
+    def test_a_non_finite_reading_is_unread(self):
+        # D6: NaN compares False with every limit; it is no reading, never a clean one
+        for bad in (float("nan"), float("inf")):
+            s = samples(T0, T0 + 10)
+            s[2]["sra_all_cpu_pct"] = bad
+            res = lg.judge_samples(s, None)
+            self.assertEqual((res["verdict"], res["unread"]), ("unguarded", 1), bad)
+            s = samples(T0, T0 + 10)
+            s[1]["host_load1"] = bad
+            self.assertEqual(lg.judge_samples(s, None)["verdict"], "unguarded", bad)
+
     def test_missing_logan_reading(self):
         s = samples(T0, T0 + 10, sra=None)
         self.assertEqual(lg.judge_samples(s, None)["verdict"], "unguarded")

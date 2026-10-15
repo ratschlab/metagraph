@@ -12,8 +12,8 @@ of the run's schedule (block 0 the warm-up pass, blocks 1..6 the measured cycles
              samples cover the window without a gap longer than --max-gap-s (15 s);
   loaded     at least one sample in the window exceeds a threshold (its breaches are listed);
   unguarded  the load during the window is unknown: no samples, a gap, or a sample without a reading (docker did not
-             answer; the Logan container not reported, unless --allow-missing-sra declares it stopped on purpose,
-             which counts a sample whose staging container was read as 0 % for sra_all).
+             answer, a non-finite value; the Logan container not reported, unless --allow-missing-sra declares it
+             stopped on purpose, which counts a sample whose staging container was read as 0 % for sra_all).
 
 A block's window is the union of its executions' [start, end] intervals, each widened by --pad-s (30 s), so the load
 between a block's requests and just around them counts too; the samples must cover the window less that padding (the
@@ -27,6 +27,7 @@ listed under `loosened`, and analyze.py then emits no verdict). Stdlib only.
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -58,7 +59,8 @@ def sample_time(sample, offset_s=0.0):
 
 
 def _num(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    """A finite number, else None (NaN compares False with every limit: no reading, never a clean one)."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
 
 
 def reading(sample, limits):
