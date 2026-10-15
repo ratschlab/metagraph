@@ -1,44 +1,11 @@
 {
  "declared_version": 1,
- "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): what the MCP surface cannot show, carried over from declared_v4_rt.json section 1 (approved by the owner on 2026-10-14; the scenario ids are v5's, which keep v4's). Nothing else: the v4 suite errors of declared_v4_rt.json (T-labels-0004, T-budget-0003, T-attempts-0002 r1, REL-prefix_equals-0001/0002/0003) are fixed by v5, R-budget-0001/0002 stay required on direct-local (the owner, 2026-10-15), and the long walks' budget_stress exclusions derive from their tag in gate_policy.py (owner-approved 2026-10-15: T-longwalk-0001..0004). Decided by the owner, never inferred from an answer a run received; each entry names its evidence.",
+ "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): none. What the MCP surface cannot show is classed in the v5 manifest itself and derived by gate_policy.py (the owner, 2026-10-15): C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks; T-edge-0008's answer_fields mcp.by_design_checks (traverse.duplicate_seeds); the long walks' budget_stress tag (T-longwalk-0001..0004). declared_v4_rt.json stays v4's. The v4 suite errors it declared are fixed by v5, R-budget-0001/0002 are required on direct-local.",
  "manifest": {
   "file": "manifest/suite_v5.json",
-  "content_sha256": "75e26ae2459c49b08e2685be0b291f435d3c0054abd37d25fcd4a64139689448"
+  "content_sha256": "a14660a8205f4fb3e2c624a2546be18dc82ca124d09d83898ab72d86755929d4"
  },
- "exclusions": [
-  {
-   "scenario": "C-caps-0001",
-   "arms": [
-    "mcp"
-   ],
-   "reason": "the MCP's traverse_capabilities answers the service's view (gate, backends, service_maxima, presets), not the host's document (table case capabilities.traverse_capabilities_document: 'the raw document and its gate-block projection are not exposed'), so its one property check, capabilities_doc, is not exposed ('field not in the answer: release') and every MCP execution is inconclusive; nothing else is tested there. Tested on direct-local."
-  }
- ],
- "not_required": [
-  {
-   "scenario": "T-labels-0003",
-   "arms": [
-    "mcp"
-   ],
-   "check": "label_dict_contains",
-   "reason": "the MCP's traverse records carry no label dictionary ('field not in the answer: results[0].label_dict' on every MCP execution of v3 and v4, VERIFY-B); the walk itself (walk_in_record) stays required on the MCP arm, label_dict_contains on direct-local."
-  },
-  {
-   "scenario": "T-labels-0005",
-   "arms": [
-    "mcp"
-   ],
-   "check": "label_dict_contains",
-   "reason": "the MCP's traverse records carry no label dictionary ('field not in the answer: results[0].label_dict', VERIFY-B); walk_in_record stays required on the MCP arm, label_dict_contains on direct-local."
-  },
-  {
-   "scenario": "T-edge-0008",
-   "arms": [
-    "mcp"
-   ],
-   "check": "answer_fields",
-   "reason": "the service merges identical seeds before sending (table case traverse.duplicate_seeds), so the duplicate's result (results.1.duplicate) cannot exist in the MCP answer; the merge itself is the by-design pair direct-local verifies, answer_fields stays required on direct-local."
-  }
- ],
+ "exclusions": [],
+ "not_required": [],
  "relations_excluded": []
 }

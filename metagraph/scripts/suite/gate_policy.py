@@ -21,6 +21,10 @@ table, never from an answer a run received:
                             (the service answers in place of the host's answer, e.g. resolve.duplicate_labels where
                             the host refuses, capabilities.traverse_capabilities_document, the service's own view):
                             compare verifies such a pair only against a direct execution.
+On the MCP arm, a property check the manifest classes per scenario is not required there, derived from the manifest
+(the owner, 2026-10-15): mcp.not_implemented_checks [{check, reason}] (not implemented yet via MCP: the MCP cannot
+answer it; rule mcp_not_implemented_check) and mcp.by_design_checks [{check, case}] (service-side by design, a case
+of the table; rule mcp_by_design_check); both stay required on the direct arms.
 On every arm, a scenario the manifest tags budget_stress (a property that depends on the host's load, which no
 budget makes decisive; truth.budget_stress.reason states why) is excluded by the rule budget_stress, derived from the
 tag, with that reason (lane V5: v5's long column walks, owner-approved on 2026-10-15; they run in the full suite).
@@ -180,6 +184,24 @@ def budget_stress_exclusion(scenario, arms):
     return {"scenario": scenario.get("id"), "arms": list(arms), "rules": ["budget_stress"], "reason": why}
 
 
+def mcp_check_exemptions(scenario):
+    """The MCP arm's property exemptions a scenario's manifest states (module docstring), as not_required entries."""
+    mcp = scenario.get("mcp") or {}
+    out = []
+    for e in mcp.get("not_implemented_checks") or []:
+        if isinstance(e, dict) and e.get("check"):
+            out.append({"scenario": scenario.get("id"), "arms": ["mcp"], "check": e["check"],
+                        "rules": ["mcp_not_implemented_check"],
+                        "reason": e.get("reason") or "stated by the manifest"})
+    for e in mcp.get("by_design_checks") or []:
+        if isinstance(e, dict) and e.get("check"):
+            out.append({"scenario": scenario.get("id"), "arms": ["mcp"], "check": e["check"], "case": e.get("case"),
+                        "rules": ["mcp_by_design_check"],
+                        "reason": "the table's case %s: the MCP answer cannot carry it; required on the direct "
+                                  "arms" % e.get("case")})
+    return out
+
+
 DECLARED_VERSIONS = (1,)
 
 
@@ -241,6 +263,7 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
     for e in (declared or {}).get("exclusions") or []:
         declared_ex.setdefault(e["scenario"], []).append(e)
     selected, exclusions, required = [], [], []
+    derived_not_required = []
     for index, scen in enumerate(manifest.get("scenarios", [])):
         if scen.get("route") not in routes:
             continue
@@ -252,6 +275,8 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
         stress = budget_stress_exclusion(scen, arms)
         if stress:
             exclusions.append(stress)
+        if "mcp" in arms:
+            derived_not_required += mcp_check_exemptions(scen)
         for d in declared_ex.get(sid) or []:
             on = [a for a in arms if a in d["arms"] and not (a == "mcp" and ex)]
             if on:
@@ -317,7 +342,8 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
         "required": required,
         "relations": relations, "relations_excluded": rel_excluded,
         "properties": {"required": "every property check the scenario expects (checks.is_property)",
-                       "not_required": [dict(e, rules=["declared"]) for e in (declared or {}).get("not_required") or []]
+                       "not_required": derived_not_required
+                       + [dict(e, rules=["declared"]) for e in (declared or {}).get("not_required") or []]
                        + list(not_required or [])},
         "declared": None if declared is None else {"file": declared_file,
                                                    "declared_version": declared.get("declared_version"),
@@ -377,8 +403,10 @@ def describe(policy):
         out.append("    %s %s excluded on %s: %s" % ("declared:" if "declared" in (r.get("rules") or ()) else "",
                                                     r["relation"], ", ".join(r["arms"]), r["reason"]))
     out.append("  property checks not required: %d" % c["properties_not_required"])
+    labels = {"declared": "declared: ", "mcp_not_implemented_check": "not implemented yet via MCP: ",
+              "mcp_by_design_check": "service-side by design: "}
     for nr in policy["properties"]["not_required"]:
-        out.append("    %s%s %s not required on %s: %s" % ("declared: " if "declared" in (nr.get("rules") or ()) else "",
+        out.append("    %s%s %s not required on %s: %s" % (next((labels[r] for r in nr.get("rules") or () if r in labels), ""),
                                                        nr.get("scenario"), nr.get("check"),
                                                        ", ".join(nr.get("arms") or sc.ARMS), nr.get("reason")))
     return "\n".join(out) + "\n"

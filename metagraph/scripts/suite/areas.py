@@ -48,6 +48,24 @@ def empirical(t: dict, claim: str) -> dict:
     return dict(t, index_empirical={"index_fp": HOST_INDEX.get("index_fp"), "claim": claim})
 
 
+LABEL_DICT_NOT_VIA_MCP = "the MCP traverse answers carry no label dictionary"
+
+
+def mcp_not_implemented_check(sc: dict, check: str, reason: str) -> None:
+    """State in the manifest that the MCP arm cannot answer one property check of |sc| yet
+    (mcp.not_implemented_checks [{check, reason}]): the scenario's other checks stay tested via MCP, this one stays
+    required on the direct arms (gate_policy derives the MCP exemption, the report lists it as not implemented yet via
+    MCP, never as untested)."""
+    if "tool" in sc["mcp"]:
+        sc["mcp"].setdefault("not_implemented_checks", []).append({"check": check, "reason": reason})
+
+
+def mcp_by_design_check(sc: dict, check: str, case: str) -> None:
+    """State in the manifest that the service answers one property check of |sc| otherwise by design, the table's
+    |case| (mcp.by_design_checks [{check, case}]): required on the direct arms, service-side by design on MCP."""
+    sc["mcp"].setdefault("by_design_checks", []).append({"check": check, "case": case})
+
+
 def err400(text: Optional[str] = None, code: Optional[str] = None, prefix: Optional[str] = None,
            contains: Optional[List[str]] = None, http: int = 400) -> dict:
     a: Dict = {"http": http}
@@ -593,6 +611,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
                                 [OK, INV, ex("walk_in_record", label_scope="derived"),
                                  ex("label_dict_contains", name=name, kind=kind, only_kind=True)],
                                 tags=["labels", "derived-labels", "label-kind-pair"]))
+            # what the MCP cannot show, its class in the manifest (the owner, 2026-10-15): the walk stays tested via
+            # MCP, the label dictionary is not implemented there yet (v3 and v4: not_exposed on every MCP execution)
+            mcp_not_implemented_check(out[-1], "label_dict_contains", LABEL_DICT_NOT_VIA_MCP)
             if key == "eco" and kind == "column":
                 warm.append(region_warm_up(ctx, rec, tt, radius, radius, rec.column, sid,
                                            "the rows of a seed 868 columns carry"))
@@ -733,6 +754,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
     req = traverse_request([_tseed(t["window"], [eco.accession]), _tseed(t["window"], [eco.accession])], base_over)
     out.append(scenario(nid(), "T", "duplicate seeds: traversed again, marked duplicate", "POST /traverse", req, t,
                         [OK, INV, ex("answer_fields", equals={"results.1.duplicate": True})], tags=["edge"]))
+    # the service merges identical seeds before sending, so the duplicate's result cannot exist in the MCP answer:
+    # that check is service-side by design (the owner, 2026-10-15)
+    mcp_by_design_check(out[-1], "answer_fields", "traverse.duplicate_seeds")
     req = traverse_request([_tseed(t["window"], [eco.accession])], base_over, extra={"bogus": 1})
     out.append(scenario(nid(), "T", "an unknown strategy key: refused naming it", "POST /traverse", req, t,
                         [err400("strategy: unknown field 'bogus'")], tags=["edge", "refusal"]))
@@ -2351,7 +2375,12 @@ def gen_C(ctx: Ctx, caps: Dict[str, dict]) -> List[dict]:
                                 equals={"index_fp": tc["index_fp"], "k": 31, "regime": "basic",
                                         "pattern.pattern_contract_version": 1, "pattern.available": True,
                                         "pattern.details": "GET /pattern/capabilities"},
-                                max_bytes=32768)], tags=["capabilities", "smoke"]))
+                                max_bytes=32768)], tags=["capabilities", "smoke"],
+                        # the MCP's capabilities tool answers the service's view (gate, backends, service_maxima,
+                        # presets), not the host's document: not implemented via MCP (the owner, 2026-10-15)
+                        mcp={"not_implemented": "the host's /traverse/capabilities document (the MCP capabilities "
+                                                "tool answers the service's view, not the host's document)",
+                             "by_design": ["capabilities.traverse_capabilities_document"]}))
     out.append(scenario(nid(), "C", "GET /pattern/capabilities: the full block", "GET /pattern/capabilities", None, None,
                         [OK, ex("capabilities_doc", required=["caps", "mismatches", "predicate", "genetic_codes", "default_max_anchors"],
                                 equals={"pattern_contract_version": 1, "available": True, "graph_mode": "basic", "k": 31,

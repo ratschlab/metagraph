@@ -684,5 +684,63 @@ class BudgetStressRule(unittest.TestCase):
                       gate_policy.describe(pol))
 
 
+class McpClassesInTheManifest(unittest.TestCase):
+    """The owner's decision (2026-10-15): what the MCP cannot show is classed in the manifest, not declared at the
+    gate: C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks;
+    T-edge-0008's answer_fields mcp.by_design_checks; gate_policy derives the MCP exemptions; the builder validates."""
+
+    def sc(self, **mcp):
+        s = ml.scenario("T-x-0001", "T", "t", "POST /traverse", ml.traverse_request([{"sequence": "A" * 40}]), {},
+                        [{"check": "status", "args": {"http": 200}}, {"check": "answer_fields", "args": {}}])
+        s["mcp"].update(mcp)
+        return s
+
+    def test_validation(self):
+        import build_manifest as bm
+        ok = self.sc(not_implemented_checks=[{"check": "answer_fields", "reason": "r"}],
+                     by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        self.assertEqual([p for p in bm.validate([ok]) if "mcp." in p or "property-level" in p], [])
+        for bad in (self.sc(not_implemented_checks=[{"check": "label_dict_contains", "reason": "r"}]),  # not expected
+                    self.sc(not_implemented_checks=[{"check": "answer_fields"}]),                       # no reason
+                    self.sc(by_design_checks=[{"check": "answer_fields", "case": "no.such_case"}])):    # no case
+            self.assertTrue([p for p in bm.validate([bad]) if "mcp." in p], bad["mcp"])
+        ni = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        ni["mcp"] = dict(not_implemented="x", by_design_checks=ni["mcp"]["by_design_checks"])
+        self.assertTrue([p for p in bm.validate([ni]) if "property-level" in p])
+
+    def test_policy_derives(self):
+        import gate_policy
+        a = self.sc(not_implemented_checks=[{"check": "answer_fields", "reason": "no field"}])
+        a["id"] = "T-a"
+        b = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        b["id"] = "T-b"
+        pol = gate_policy.build_policy({"scenarios": [a, b], "relations": []}, arms=("mcp", "direct-local"),
+                                       table=({}, None))
+        nr = dict((e["scenario"], e) for e in pol["properties"]["not_required"])
+        self.assertEqual((nr["T-a"]["arms"], nr["T-a"]["check"], nr["T-a"]["rules"]),
+                         (["mcp"], "answer_fields", ["mcp_not_implemented_check"]))
+        self.assertEqual((nr["T-b"]["rules"], nr["T-b"]["case"]), (["mcp_by_design_check"], "traverse.duplicate_seeds"))
+        text = gate_policy.describe(pol)
+        self.assertIn("not implemented yet via MCP: T-a answer_fields not required on mcp: no field", text)
+        self.assertIn("service-side by design: T-b answer_fields", text)
+        # direct-local stays required for both
+        self.assertEqual(sorted(e["scenario"] for e in pol["required"] if e["arm"] == "direct-local"), ["T-a", "T-b"])
+        mcp_only = gate_policy.build_policy({"scenarios": [a], "relations": []}, arms=("direct-local",), table=({}, None))
+        self.assertEqual(mcp_only["properties"]["not_required"], [])
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_built(self):
+        s = by_id(built())
+        self.assertIn("not_implemented", s["C-caps-0001"]["mcp"])
+        for n in (3, 4, 5, 6):
+            self.assertEqual(s["T-labels-%04d" % n]["mcp"]["not_implemented_checks"],
+                             [{"check": "label_dict_contains", "reason": areas.LABEL_DICT_NOT_VIA_MCP}])
+        self.assertEqual(s["T-edge-0008"]["mcp"]["by_design_checks"],
+                         [{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        with open(os.path.join(SUITE, "gate", "declared_v5_rt.json")) as f:
+            d = json.load(f)
+        self.assertEqual((d["exclusions"], d["not_required"], d["relations_excluded"]), ([], [], []))
+
+
 if __name__ == "__main__":
     unittest.main()

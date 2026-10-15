@@ -368,10 +368,18 @@ def validate_relations(relations, scenarios) -> list:
     return problems
 
 
-def validate(scenarios) -> list:
-    """Unique ids, every check known to checks.py, the contract's fields present."""
+def _table_cases() -> set:
+    """The case ids of the service-by-design table beside this script."""
+    with open(os.path.join(HERE, "service_by_design.json")) as f:
+        return set(c.get("id") for c in json.load(f).get("cases") or [])
+
+
+def validate(scenarios, cases=None) -> list:
+    """Unique ids, every check known to checks.py, the contract's fields present; mcp.not_implemented_checks and
+    mcp.by_design_checks name checks the scenario expects (with a reason, a case of the table |cases|)."""
     problems = []
     seen = set()
+    cases = _table_cases() if cases is None else cases
     for s in scenarios:
         if s["id"] in seen:
             problems.append("duplicate id %s" % s["id"])
@@ -387,6 +395,16 @@ def validate(scenarios) -> list:
             problems.append("%s: an idempotency_key in mcp.arguments" % s["id"])
         if not any(e["check"] == "status" for e in s["expect"]):
             problems.append("%s: no status expectation" % s["id"])
+        expected = set(e["check"] for e in s["expect"])
+        for e in s["mcp"].get("not_implemented_checks") or []:
+            if not isinstance(e, dict) or e.get("check") not in expected or e.get("check") not in checks.CHECKS \
+                    or not str(e.get("reason") or "").strip():
+                problems.append("%s: mcp.not_implemented_checks %r: a check it expects, with a reason" % (s["id"], e))
+        for e in s["mcp"].get("by_design_checks") or []:
+            if not isinstance(e, dict) or e.get("check") not in expected or e.get("case") not in cases:
+                problems.append("%s: mcp.by_design_checks %r: a check it expects and a case of the table" % (s["id"], e))
+        if (s["mcp"].get("not_implemented_checks") or s["mcp"].get("by_design_checks")) and "tool" not in s["mcp"]:
+            problems.append("%s: property-level MCP classes on a scenario the MCP does not run" % s["id"])
         for e in s["expect"]:
             problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
         disc = s["request"].get("discover") if s["route"] == "POST /resolve" and isinstance(s["request"], dict) else None
