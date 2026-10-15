@@ -358,6 +358,52 @@ class PolicyTest(GateCase):
         self.assertEqual([r["relation"] for r in shipped["relations"]],
                          ["REL-same_answer-0003"] + ["REL-prefix_equals-%04d" % i for i in range(1, 5)])
 
+    def test_shipped_v6_policy_is_regenerated_exactly_and_is_v5s(self):
+        # v6 (the owner, 2026-10-15): v5 with every default-budget /pattern request at 120,000 ms; its policy is
+        # generated as v5's was (0 declared entries, 0 property exemptions, the same by-design table) and must equal
+        # v5's but for the pins (the manifest's file, content and version, the name, the declared file and its sha256,
+        # generated_utc), so that the v5 acceptance carries over: the same selection, required executions, relations,
+        # exclusions, properties and counts
+        shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
+        m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
+        self.assertEqual((m["manifest_version"], m["content_sha256"], m["relations_sha256"]),
+                         (6, "e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e",
+                          "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
+        smoke = sc.read_json(os.path.join(SUITE, "manifest", "suite_smoke_v6.json"))
+        self.assertEqual(smoke["content_sha256"], "183295a285c6da48aa44e3a47b580d574ab8678376a5242ff36eff7be085587e")
+        declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
+        self.assertEqual(declared["manifest"], {"file": "manifest/suite_v6.json", "content_sha256": m["content_sha256"]})
+        self.assertEqual((declared["exclusions"], declared["not_required"], declared["relations_excluded"]), ([], [], []))
+        fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v6.json",
+                                         name="v6-rt-mcp", declared_file="gate/declared_v6_rt.json",
+                                         declared=declared)
+        for p in (shipped, fresh):
+            p.pop("generated_utc")
+        self.assertEqual(shipped, fresh)
+        v5 = sc.read_json(os.path.join(SUITE, "gate", "policy_v5_rt_mcp.json"))
+        self.assertEqual(shipped["by_design_table"]["sha256"], v5["by_design_table"]["sha256"])
+        self.assertEqual(shipped["by_design_table"]["sha256"][:8], "d4b8636c")
+
+        def pinned(p):
+            q = json.loads(json.dumps(p))
+            q.pop("generated_utc", None)
+            q.pop("name")
+            q["manifest"] = dict((k, v) for k, v in q["manifest"].items()
+                                 if k not in ("file", "content_sha256", "manifest_version"))
+            q["declared"] = dict((k, v) for k, v in q["declared"].items() if k not in ("file", "sha256"))
+            return q
+        self.assertEqual(pinned(shipped), pinned(v5))
+        self.assertEqual((shipped["name"], shipped["manifest"]["file"], shipped["manifest"]["manifest_version"],
+                          shipped["declared"]["file"]),
+                         ("v6-rt-mcp", "manifest/suite_v6.json", 6, "gate/declared_v6_rt.json"))
+        self.assertEqual(shipped["manifest"]["index_fp"], v5["manifest"]["index_fp"])
+        c = shipped["counts"]
+        self.assertEqual((c["selected"], c["excluded"], c["relations_required"], c["properties_not_required"]),
+                         (241, 36, 5, 0))
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 205, "executions": 416},
+                                         "direct-local": {"scenarios": 237, "executions": 273}})
+        self.assertNotIn("POST /pattern", c["by_route"])
+
     def test_cli_writes_policy_and_ids(self):
         mpath, pol, ids = (os.path.join(self.tmp, n) for n in ("m.json", "p.json", "ids.txt"))
         sc.write_json_atomic(mpath, self.m)

@@ -1,0 +1,11 @@
+{
+ "declared_version": 1,
+ "about": "Owner-declared entries of the v6 resolve / traverse deploy gate (gate_policy.py --declared): none, as declared_v5_rt.json's. v6 (the owner, 2026-10-15) is v5 with every default-budget /pattern request at 120,000 ms instead of 60,000; no /pattern scenario is in this gate (its routes are POST /resolve, POST /traverse and GET /traverse/capabilities), and the scenarios it selects are byte-identical to v5's, so the v5 acceptance (the baseline run 20261015T161813Z_refseq97-81c620ef) carries over. What the MCP surface cannot show is classed in the manifest itself, as in v5: C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks; T-edge-0008 by design through traverse.duplicate_seeds; the long walks' budget_stress tag (T-longwalk-0001..0004). declared_v5_rt.json stays v5's.",
+ "manifest": {
+  "file": "manifest/suite_v6.json",
+  "content_sha256": "e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e"
+ },
+ "exclusions": [],
+ "not_required": [],
+ "relations_excluded": []
+}
