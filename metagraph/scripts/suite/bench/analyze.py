@@ -35,7 +35,8 @@ order's effect is shown as each arm's median wall relative to its query median b
 THE PERFORMANCE VERDICT is emitted only when the load guard finds every block clean (load_guard.py) with the
 thresholds the run recorded (an override may only tighten them: --sra-max / --load1-max above the run's, or
 --allow-missing-sra where the run did not allow it, refuse the verdict), every scheduled step is recorded, the
-host's release and server instance and the MCP service's capabilities did not change during the run, and every
+host's release, server instance and index fingerprint and the MCP service's capabilities are stated (every block's
+identity probe, direct-local's start, every MCP invocation) and did not change during the run, and every
 query has at least --min-success (5 of 6) successes on every arm. Otherwise it is refused with the reasons, and the
 numbers are descriptive of an uncontrolled run.
 
@@ -183,40 +184,66 @@ def observations(run):
 # ---------------------------------------------------------------------------------------------------------------
 # identity: the host's release / instance and the MCP service through the run
 
-def identity(run):
-    out = {"host": [], "mcp": [], "changed": [], "blocks_changed": []}
+HOST_IDENTITY = ("release", "server_instance", "index_fp")
+
+
+def identity(run, arms=bl.ARMS):
+    """The deployment through the run: the host's release, server instance and index fingerprint (the direct arms'
+    run.json sessions, the identity probe at each block's end in steps.jsonl) and the MCP service (mcp_runs.jsonl).
+    `changed`: a value that differs; `blocks_changed`: the blocks at whose end a value differs from the block before;
+    `unknown`: the evidence missing (a block whose probe states no release and server instance, no start identity of
+    direct-local, an MCP invocation stating no service capabilities): unknown is never read as unchanged."""
+    out = {"host": [], "mcp": [], "probes": [], "changed": [], "blocks_changed": [], "unknown": []}
+    starts = 0
     for arm in ("direct-local", "direct-remote"):
         doc = sc.read_json(os.path.join(run["dir"], "arms", arm, "run.json")) or {}
         for sess in doc.get("sessions") or []:
             for when in ("start", "end"):
-                rel, inst = sess.get("release_" + when), sess.get("server_instance_" + when)
-                if rel or inst:
-                    out["host"].append({"arm": arm, "at": sess.get("started_utc" if when == "start" else "ended_utc"),
-                                        "release": rel, "server_instance": inst})
+                vals = dict((k, sess.get("%s_%s" % (k, when))) for k in HOST_IDENTITY)
+                if vals["release"] or vals["server_instance"]:
+                    at = sess.get("started_utc" if when == "start" else "ended_utc")
+                    out["host"].append(dict(vals, arm=arm, at=at))
+                if arm == "direct-local" and when == "start" and vals["release"] and vals["server_instance"]:
+                    starts += 1
     rows, _ = sc.read_jsonl(os.path.join(run["dir"], "arms", "mcp", "mcp_runs.jsonl"))
     for r in rows:
         caps = r.get("service_capabilities") if isinstance(r.get("service_capabilities"), dict) else {}
         out["mcp"].append({"at": r.get("started_utc"), "service_capabilities_sha256": caps.get("sha256"),
                            "runner_git_head": r.get("git_head"), "checks_sha256": r.get("checks_sha256")})
-    for key in ("release", "server_instance"):
-        vals = sorted(set(x[key] for x in out["host"] if x.get(key)))
+    rows, _ = sc.read_jsonl(os.path.join(run["dir"], "steps.jsonl"))
+    out["probes"] = [dict((k, r.get(k)) for k in ("block", "rc") + HOST_IDENTITY) for r in rows
+                     if r.get("probe") == "identity"]
+    for key in HOST_IDENTITY:
+        vals = sorted(set(x[key] for x in out["host"] + out["probes"] if x.get(key)))
         if len(vals) > 1:
             out["changed"].append("%s: %s" % (key, ", ".join(vals)))
     for key in ("service_capabilities_sha256", "runner_git_head", "checks_sha256"):
         vals = sorted(set(x[key] for x in out["mcp"] if x.get(key)))
         if len(vals) > 1:
             out["changed"].append("mcp %s: %d values" % (key, len(vals)))
-    # the identity probes at the blocks' ends (steps.jsonl): the block whose end differs from the one before it
-    rows, _ = sc.read_jsonl(os.path.join(run["dir"], "steps.jsonl"))
-    prev = None
-    for r in rows:
-        if r.get("probe") != "identity":
+    # the probes at the blocks' ends: the block whose end differs from the end of the block before
+    prev = {}
+    for p in out["probes"]:
+        if not (p.get("release") and p.get("server_instance")):
             continue
-        cur = (r.get("release"), r.get("server_instance"))
-        if prev is not None and cur != prev and all(cur) and all(prev):
-            out["blocks_changed"].append(r.get("block"))
-        if all(cur):
-            prev = cur
+        if any(p.get(k) and prev.get(k) and p[k] != prev[k] for k in HOST_IDENTITY):
+            out["blocks_changed"].append(p["block"])
+        prev = dict((k, p.get(k) or prev.get(k)) for k in HOST_IDENTITY)
+    blocks = sorted(set(s["block"] for s in run["steps"]))
+    known = set(p["block"] for p in out["probes"] if p.get("release") and p.get("server_instance"))
+    blind = [b for b in blocks if b not in known]
+    if blind:
+        out["unknown"].append("no identity probe states the host's release and server instance at the end of "
+                              "blocks %s" % ", ".join(str(b) for b in blind))
+    if not starts:
+        out["unknown"].append("direct-local states no start identity (run.json)")
+    if "mcp" in arms:
+        if not out["mcp"]:
+            out["unknown"].append("the MCP runner recorded no service identity (mcp_runs.jsonl)")
+        else:
+            n = sum(1 for x in out["mcp"] if not x["service_capabilities_sha256"])
+            if n:
+                out["unknown"].append("%d MCP invocation(s) state no service capabilities sha256" % n)
     return out
 
 
@@ -367,7 +394,7 @@ def analyse(run_dir, boot=DEFAULT_BOOT, boot_seed=None, min_success=DEFAULT_MIN_
         classes.setdefault(o["arm"], {}).setdefault(o["class"], 0)
         classes[o["arm"]][o["class"]] += 1
     guard = lg.judge_run(run_dir, guard_overrides)
-    ident = identity(run)
+    ident = identity(run, arms)
     scheduled = len(run["steps"])
     recorded = sum(1 for s in run["steps"] if (s["bench_id"], s["arm"]) in run["lines"])
     short = sorted("%s %s (%d of %d)" % (q, arm, summaries[q]["arms"][arm]["n_success"], run["bench"].get("cycles"))
@@ -385,6 +412,8 @@ def analyse(run_dir, boot=DEFAULT_BOOT, boot_seed=None, min_success=DEFAULT_MIN_
         refused.append("incomplete: %d of %d scheduled steps recorded" % (recorded, scheduled))
     if ident["changed"]:
         refused.append("the deployment changed during the run: %s" % "; ".join(ident["changed"]))
+    if ident["unknown"]:
+        refused.append("the deployment's identity is unknown: %s" % "; ".join(ident["unknown"]))
     if short:
         refused.append("%d query/arm cells with fewer than %d successes: %s" % (
             len(short), min_success, ", ".join(short[:8])))
@@ -548,7 +577,8 @@ def report_md(res):
     out += ["", "## Identity", "", "Host: %s. MCP service: %s." % (
         ", ".join(sorted(set("%s/%s" % (x["release"], x["server_instance"]) for x in ident["host"]))) or "unknown",
         "%d invocation(s)" % len(ident["mcp"])) + (" Changed: %s." % "; ".join(ident["changed"])
-                                                   if ident["changed"] else " Unchanged."), ""]
+                                                   if ident["changed"] else " Unchanged.") +
+            (" Unknown: %s." % "; ".join(ident["unknown"]) if ident["unknown"] else ""), ""]
     out += ["## Executions by class (measured cycles)", "", "| arm | " + " | ".join(CLASSES) + " |",
             "|---|" + "---|" * len(CLASSES)]
     for arm in res["arms"]:

@@ -169,6 +169,43 @@ class AnalyseRuns(unittest.TestCase):
         self.assertEqual(cmp_["guard"]["candidate"]["sra_all_cpu_pct_max"], 10000.0)
         self.assertTrue(cmp_["guard"]["candidate_loosened"])
 
+    def test_an_unknown_identity_refuses_the_verdict(self):
+        # D4: no evidence that the deployment stayed the same is no evidence of it
+        blind = synthetic_run(self.d, "blind", self.panel, base_wall)
+        sc.write_json_atomic(os.path.join(blind, "arms", "direct-local", "run.json"),
+                             {"sessions": [{"started_utc": "x"}]})
+        os.replace(os.path.join(blind, "steps.jsonl"), os.path.join(blind, "steps.jsonl.bak"))
+        for blk in range(7):
+            sc.append_jsonl(os.path.join(blind, "steps.jsonl"), {"probe": "identity", "block": blk, "rc": 255,
+                                                                 "release": None, "server_instance": None})
+        res, _ = analyze.analyse(blind, boot=0)
+        self.assertFalse(res["verdict"]["emitted"])
+        why = " ".join(res["verdict"]["refused"])
+        self.assertIn("identity is unknown", why)
+        self.assertIn("blocks 0, 1, 2, 3, 4, 5, 6", why)
+        self.assertIn("direct-local states no start identity", why)
+        # the MCP service's identity unknown for one invocation
+        res, _ = analyze.analyse(synthetic_run(self.d, "mcp-blind", self.panel, base_wall, mcp_caps=None), boot=0)
+        self.assertIn("state no service capabilities", " ".join(res["verdict"]["refused"]))
+        # a block whose probe failed, the others fine
+        one = synthetic_run(self.d, "one", self.panel, base_wall)
+        rows = sc.read_jsonl(os.path.join(one, "steps.jsonl"))[0]
+        os.replace(os.path.join(one, "steps.jsonl"), os.path.join(one, "steps.jsonl.bak"))
+        for r in rows:
+            if r["block"] == 4:
+                r.update(release=None, server_instance=None, rc=255)
+            sc.append_jsonl(os.path.join(one, "steps.jsonl"), r)
+        res, _ = analyze.analyse(one, boot=0)
+        self.assertIn("end of blocks 4", " ".join(res["verdict"]["refused"]))
+
+    def test_a_changed_index_refuses_the_verdict(self):
+        # D4: the index fingerprint at a block's end is compared too
+        moved = synthetic_run(self.d, "fp", self.panel, base_wall, index_fps=("fp1", "fp1", "fp1", "fp2"))
+        res, _ = analyze.analyse(moved, boot=0)
+        self.assertFalse(res["verdict"]["emitted"])
+        self.assertIn("index_fp: fp1, fp2", " ".join(res["verdict"]["refused"]))
+        self.assertEqual(res["identity"]["blocks_changed"], [3, 4])  # fp1 fp1 fp1 fp2 fp1 fp1 fp1
+
     def test_heterogeneous_change_is_inconclusive(self):
         # half the queries 30 % slower, half 20 % faster: the panel's mean barely moves, its interval spans both
         a = synthetic_run(self.d, "a", self.panel, base_wall)

@@ -63,18 +63,22 @@ def tail_keys(obj):
 
 
 def synthetic_run(root, name, panel, wall_ms, seed=1, cycles=6, sra=1.0, release="r1", instances=("i1",),
-                  sizes_override=None):
+                  sizes_override=None, index_fps=("fp1",), mcp_caps="caps-1", bench_extra=None):
     """A recorded bench run without any runner: every scheduled step executed (wall_ms(query, arm, cycle)), raw
-    answers with the panel's sizes, samples covering the run, identity probes; server instance per block from
-    `instances` (cycled)."""
+    answers with the panel's sizes, samples covering the run, identity probes; server instance and index_fp per
+    block from `instances` and `index_fps` (cycled), the MCP service's capabilities sha per block (`mcp_caps`, None:
+    an invocation stating none); `bench_extra` is merged into bench.json."""
     d = os.path.join(root, name)
     os.makedirs(os.path.join(d, "samples"))
     steps = bl.schedule([q["id"] for q in panel["queries"]], seed, cycles)
     sc.write_json_atomic(os.path.join(d, "schedule.json"), {"seed": seed, "steps": steps})
     sc.write_json_atomic(os.path.join(d, "panel.json"), panel)
-    sc.write_json_atomic(os.path.join(d, "bench.json"), {
-        "run_id": name, "panel": {"panel_sha256": panel["panel_sha256"], "name": panel["name"]}, "seed": seed,
-        "cycles": cycles, "arms": list(bl.ARMS), "guard": {}, "sessions": [{"clock_offset_start_s": 0.0}]})
+    bench = {"run_id": name, "panel": {"panel_sha256": panel["panel_sha256"], "name": panel["name"]}, "seed": seed,
+             "cycles": cycles, "arms": list(bl.ARMS), "guard": {}, "sessions": [{"clock_offset_start_s": 0.0}],
+             "pause_s": 1.0, "warmup_arm": "direct-local", "mcp_cmd": "runner {ids} {out} {checks_dir}",
+             "local_base": "http://localhost:42010", "remote_base": "https://example/api", "checks": "auto"}
+    bench.update(bench_extra or {})
+    sc.write_json_atomic(os.path.join(d, "bench.json"), bench)
     queries = dict((q["id"], q) for q in panel["queries"])
     t = 1791960000.0
     for s in steps:
@@ -92,12 +96,16 @@ def synthetic_run(root, name, panel, wall_ms, seed=1, cycles=6, sra=1.0, release
             "mcp_phases": {"backend_ms": 1.0} if arm == "mcp" else None})
         t += w / 1000.0 + 1.0
     sessions = [{"started_utc": sc.iso_utc(1791960000.0), "release_start": release,
-                 "server_instance_start": instances[0]}]
+                 "server_instance_start": instances[0], "index_fp_start": index_fps[0]}]
     for b in range(cycles + 1):
+        inst, fp = instances[b % len(instances)], index_fps[b % len(index_fps)]
         sessions.append({"finish": True, "ended_utc": sc.iso_utc(t), "release_end": release,
-                         "server_instance_end": instances[b % len(instances)]})
+                         "server_instance_end": inst, "index_fp_end": fp})
         sc.append_jsonl(os.path.join(d, "steps.jsonl"), {
-            "probe": "identity", "block": b, "release": release, "server_instance": instances[b % len(instances)]})
+            "probe": "identity", "block": b, "release": release, "server_instance": inst, "index_fp": fp})
+        sc.append_jsonl(os.path.join(d, "arms", "mcp", "mcp_runs.jsonl"), {
+            "started_utc": sc.iso_utc(t), "git_head": "runner-1",
+            "service_capabilities": {"sha256": mcp_caps} if mcp_caps else {"error": "not read"}})
     sc.write_json_atomic(os.path.join(d, "arms", "direct-local", "run.json"), {"sessions": sessions})
     x = 1791960000.0 - 40
     while x < t + 40:
