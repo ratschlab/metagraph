@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUITE = os.path.dirname(HERE)
@@ -84,9 +85,9 @@ class SuiteCase(unittest.TestCase):
                     "SUITE_MEX": "local:" + self.mex, "SUITE_MEX_PY": sys.executable, "PYTHON": sys.executable,
                     "SUITE_SAMPLER": "0", "SUITE_WAIT_RUNNER_S": "4", "SUITE_POLL_S": "1",
                     "SUITE_TEST_SECRET": SECRET,
-                    # this test's runners only (they name its fake host), and a stand-in whose command line ends
-                    # in the script: a real run's step on this machine (another base) is not this test's runner
-                    "SUITE_RUNNER_PATTERN": r"[s]cripts/run_direct\.py( .*--base %s|$)" % re.escape(host.base)})
+                    # this test's runners only: they, and its stand-ins, name its fake host's --base; a real run's
+                    # step or another test's runner on this machine (another base) is not this test's runner
+                    "SUITE_RUNNER_PATTERN": r"[s]cripts/run_direct\.py .*--base %s" % re.escape(host.base)})
         env.update(extra)
         return env
 
@@ -573,16 +574,18 @@ class RunSuiteOffline(SuiteCase):
 
     def test_refuses_next_to_a_running_runner(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
-        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "scripts/run_direct.py"])
-        try:
-            with FakeHost() as host:
+        with FakeHost() as host:
+            # a stand-in naming this test's host: concurrent suites' tests never see it, nor this test theirs
+            other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "scripts/run_direct.py",
+                                      "--base", host.base])
+            try:
                 p = self.run_suite(host, "--manifest", self.mpath)
                 self.assertEqual(p.returncode, 2, p.stderr)
                 self.assertIn("run_direct.py runs under", p.stderr)
                 self.assertEqual(host.log, [])  # review N4: not even the release GET
-        finally:
-            other.kill()
-            other.wait()
+            finally:
+                other.kill()
+                other.wait()
         self.assertFalse(os.path.exists(self.lock_path()))
 
     def test_stub_refused_beyond_status(self):
@@ -812,10 +815,38 @@ class RunSuiteOverSsh(SuiteCase):
                                 stderr=subprocess.PIPE, universal_newlines=True, stdin=subprocess.DEVNULL)
 
     def wait_for(self, cond, timeout=60.0):
+        """Returns as soon as cond() is true; fails only when the deadline passed (no second look, which another
+        test's process could falsify)."""
         deadline = time.time() + timeout
-        while time.time() < deadline and not cond():
+        while True:
+            if cond():
+                return
+            if time.time() >= deadline:
+                self.fail("timed out")
             time.sleep(0.05)
-        self.assertTrue(cond(), "timed out")
+
+    def test_runner_checks_see_only_this_tests_runners(self):
+        # concurrent suites (other worktrees, other lanes) run their own run_direct.py stand-ins: a test's runner
+        # pattern names its fake host's --base, so neither a stand-in of another test nor its run id counts here, and
+        # wait_for returns on the first true condition (a second look could see another test's process)
+        with FakeHost() as host:
+            pattern = self.env(host)["SUITE_RUNNER_PATTERN"]
+            self.assertTrue(re.search(pattern, "python scripts/run_direct.py --arm direct-local --base %s --out x"
+                                      % host.base))
+            self.assertFalse(re.search(pattern, "python -c import time; time.sleep(60) scripts/run_direct.py"))
+            self.assertFalse(re.search(pattern, "python scripts/run_direct.py --base http://127.0.0.1:9/other"))
+            run_id = "test-foreign-%s" % uuid.uuid4().hex
+            foreign = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(20)", "scripts/run_direct.py",
+                                        "--base", "http://127.0.0.1:9/foreign", "--run-id", run_id])
+            try:
+                time.sleep(0.3)
+                self.assertTrue(self.runner_gone(run_id, host.base))
+            finally:
+                foreign.kill()
+                foreign.wait()
+        looks = []
+        self.wait_for(lambda: looks.append(1) or len(looks) == 1, timeout=1.0)
+        self.assertEqual(len(looks), 1)
 
     def test_a_refused_invocation_leaves_the_holders_connection(self):
         # review N1: the second invocation's cleanup closes its own ssh master only, never the one the
@@ -851,9 +882,11 @@ class RunSuiteOverSsh(SuiteCase):
         self.assertEqual(sess["loop"]["state"], "done")
         self.assertFalse(os.path.exists(self.lock_path()))
 
-    def runner_gone(self, run_id):
-        out = subprocess.run(["pgrep", "-f", "run_direct.py.*--run-id %s" % run_id], stdout=subprocess.PIPE,
-                             universal_newlines=True).stdout
+    def runner_gone(self, run_id, base):
+        """No run_direct.py of this user for this test's host (--base) and run: run ids are a UTC second and the
+        fake host's constant release, so another test's run in the same second can carry the same id."""
+        out = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", r"run_direct\.py .*--base %s.*--run-id %s" % (
+            re.escape(base), re.escape(run_id))], stdout=subprocess.PIPE, universal_newlines=True).stdout
         return not out.strip()
 
     def test_mex_silent_after_a_cut_step_stops_the_loop(self):
@@ -873,7 +906,7 @@ class RunSuiteOverSsh(SuiteCase):
             self.assertIn("no closing steps", err)
             run_dir = out.strip().splitlines()[-1]
             run_id = os.path.basename(run_dir)
-            self.wait_for(lambda: self.runner_gone(run_id))
+            self.wait_for(lambda: self.runner_gone(run_id, host.base))
             # the release GET, direct-local's three capabilities documents and its S-01 request: nothing else
             self.assertEqual(host.log, [("GET", "/capabilities"), ("GET", "/capabilities"),
                                         ("GET", "/pattern/capabilities"), ("GET", "/traverse/capabilities"),
@@ -910,7 +943,7 @@ class RunSuiteOverSsh(SuiteCase):
             self.assertIn("still runs on fake@mex", err)
             n = len(host.log)
             run_dir = out.strip().splitlines()[-1]
-            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir)))
+            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir), host.base))
         self.assertEqual(n, 5)                                      # no direct-remote request, no closing GET
         sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
         self.assertEqual((sess["loop"]["state"], sess["loop"]["reason"]), ("failed", "runner_still_running"))
@@ -933,7 +966,7 @@ class RunSuiteOverSsh(SuiteCase):
             out, err = proc.communicate(timeout=120)
             self.assertEqual(proc.returncode, 130, err)
             run_dir = [os.path.join(self.runs, x) for x in os.listdir(self.runs)][0]
-            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir)))
+            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir), host.base))
             arm = os.path.join(self.mex, "suite-dev", "runs", os.path.basename(run_dir), "arms", "direct-local")
             rj = sc.read_json(os.path.join(arm, "run.json"))
             self.assertEqual((rj["state"], rj["sessions"][-1]["state"]), ("interrupted", "interrupted"))
