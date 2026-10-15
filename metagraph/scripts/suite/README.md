@@ -2730,9 +2730,10 @@ and that load event read as a service failure. Both outcomes block the strict ga
   2. bound_s above B: not_plausible, "service deadline window b s above its exchange budget B s";
   3. the statement's `pre_exchange_ms` (from the deadline's start, before the acquire and the claim, to the
      exchange's start) and `acquire_ms` (the acquire's own time), which the service states on every resolve_timeout
-     from the async session's next round (each rounded to 1 ms, absent when unknown), are preferred: acquire_ms
-     above pre_exchange_ms is not_plausible ("the stated acquire a ms exceeds the p ms before the exchange it is
-     part of"); bound_s x 1000 + pre_exchange_ms must be B x 1000 within 2 ms (DEADLINE_TERMS_TOLERANCE_MS), else
+     from the async session's next round (each rounded to 0.1 ms by the service, absent when unknown), are
+     preferred: acquire_ms above pre_exchange_ms is not_plausible ("the stated acquire a ms exceeds the p ms before
+     the exchange it is part of"); bound_s x 1000 + pre_exchange_ms must be B x 1000 within 2 ms
+     (DEADLINE_TERMS_TOLERANCE_MS: bound_s is rounded to 1 ms, the origin terms to 0.1 ms; 2 ms covers both), else
      not_plausible ("service deadline window b s ended earlier than its terms allow: exchange budget B s - p ms
      before the exchange = w s", or "... is longer than its terms allow: ..."), at any bound;
   4. at or above the read floor t - 1 s: no objection, as before;

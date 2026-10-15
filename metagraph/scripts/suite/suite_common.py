@@ -654,10 +654,10 @@ RESOLVE_CONNECT_TIMEOUT_MS = 10000.0
 RESOLVE_POOL_TIMEOUT_MS = 5000.0
 RESOLVE_ACQUIRE_TIMEOUT_MS = 2000.0
 # what a deadline-phase resolve_timeout states of where its deadline began (agreed with the async session,
-# 2026-10-15; each rounded to 1 ms, absent when unknown): pre_exchange_ms, from the absolute deadline's start (before
+# 2026-10-15; each rounded to 0.1 ms, absent when unknown): pre_exchange_ms, from the absolute deadline's start (before
 # the token's acquire, on the job path before the claim) to the exchange's start; acquire_ms, the acquire's own time
 DEADLINE_ORIGIN_KEYS = ("pre_exchange_ms", "acquire_ms")
-# bound_s and pre_exchange_ms, each rounded to 1 ms, add up to the exchange budget within this
+# bound_s (rounded to 1 ms) and pre_exchange_ms (to 0.1 ms) add up to the exchange budget within this
 DEADLINE_TERMS_TOLERANCE_MS = 2.0
 # the runner's record of a deadline-phase resolve_timeout's failing attempt (beside timeout_terms; null when unknown)
 DEADLINE_EVIDENCE_KEYS = ("exchange_budget_s", "timeout_s", "acquire_timeout_s", "granted_at", "settled_at",
@@ -1446,9 +1446,10 @@ def deadline_window_verdict(scenario, stated, evidence=None, refs=None):
     2. bound_s above B: not_plausible, "service deadline window b s above its exchange budget B s";
     3. pre_exchange_ms stated (preferred: the service places the deadline's start): acquire_ms above it is
        not_plausible ("the stated acquire a ms exceeds the p ms before the exchange it is part of"); bound_s x 1000 +
-       pre_exchange_ms must be B x 1000 within DEADLINE_TERMS_TOLERANCE_MS (each rounded to 1 ms), else
-       not_plausible: shorter, "service deadline window b s ended earlier than its terms allow: exchange budget B s
-       - p ms before the exchange = w s"; longer, "service deadline window b s is longer than its terms allow: ...";
+       pre_exchange_ms must be B x 1000 within DEADLINE_TERMS_TOLERANCE_MS (bound_s rounded to 1 ms, pre_exchange_ms
+       to 0.1 ms), else not_plausible: shorter, "service deadline window b s ended earlier than its terms allow:
+       exchange budget B s - p ms before the exchange = w s"; longer, "service deadline window b s is longer than its
+       terms allow: ...";
     4. bound_s at or above the read floor t - 1 s: no objection;
     5. below it, the span places the deadline's start: the attempt was granted at most max(A, acquire_ms) after it
        and settled after the deadline, so a span below B - max(A, acquire_ms) - 1 s is not_plausible ("the deadline
