@@ -543,6 +543,40 @@ def _artifacts_line(run, states):
     return text
 
 
+DEPTH_WORD = {"full": "fully checked", "partial": "partially checked", "generic_only": "generic checks only",
+              "refusal": "a refusal on both arms", "partial_non_pass": "partially checked, not a pass on both arms",
+              "on_failure": "checked on a failure"}
+
+
+def _repeats_text(reps):
+    return facts_join(["r%s" % r for r in reps])
+
+
+def facts_join(items):
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def depth_text(depth):
+    """An agreement's depth in words over the MCP repeats compare compared, the excluded repeats named with their
+    reason (the owner's second review, point 2; reader.depth_over_compared_repeats): 'fully checked on r1; r0 was
+    an inconclusive host-state outcome', 'fully checked on r0 and r1', 'partially checked on r0 (not compared:
+    resolve_runs)'. Plain text."""
+    cls = str(depth.get("class") or "")
+    text = DEPTH_WORD.get(cls, cls.replace("_", " "))
+    reps = depth.get("repeats_compared") or []
+    if reps:
+        text += " on " + _repeats_text(reps)
+    if depth.get("not_compared"):
+        text += " (not compared: %s)" % latex.cut_text(", ".join(str(c) for c in depth["not_compared"]), 120)
+    for e in depth.get("repeats_excluded") or []:
+        if isinstance(e, dict):
+            text += "; r%s was %s" % (e.get("repeat"), e.get("reason") or "left out of the comparison")
+    return text
+
+
 def _classes_text(run, sid, states):
     """The agreement classes in one line: the direct class with its detail where the arms differ, the MCP class
     with its depth; the by-design verification note only when the pair is unverified (else appendix B)."""
@@ -577,9 +611,7 @@ def _classes_text(run, sid, states):
             text += "; %s check(s) compared" % esc(ma["checks_compared"])
         depth = (run.depth or {}).get(sid)
         if depth:
-            text += "; depth %s" % esc(depth.get("class", "").replace("_", " "))
-            if depth.get("not_compared"):
-                text += " (not compared: %s)" % esc(", ".join(depth["not_compared"]), 120)
+            text += "; " + esc(depth_text(depth))
         if ma.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 160)
         if mcls == "service_by_design" and ma.get("verified") is False:

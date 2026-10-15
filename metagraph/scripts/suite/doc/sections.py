@@ -230,6 +230,12 @@ class Context(object):
 
 # -- small helpers --------------------------------------------------------------------------------------------
 
+def _variant(meta, sid=None):
+    """A scenario's variant label as printed (units.variant_text: thousands separators), else its id."""
+    import units as units_mod
+    return units_mod.variant_text((meta or {}).get("variant") or sid or "")
+
+
 def _kv_table(rows, widths=(32, 142)):
     spec = latex.spec_p(widths)
     return latex.plain_table(spec, ["", "value"], [[k, v] for k, v in rows])
@@ -979,7 +985,7 @@ def annotated_matrix(ctx):
             used.append(key)
         return "\\amark{%d}" % (used.index(key) + 1)
 
-    columns = [esc(meta[sid].get("variant") or sid) for sid in members]
+    columns = [esc(_variant(meta[sid], sid)) for sid in members]
     columns[0] = columns[0] + mark("column")
     rows = []
     repeat_marked = server_marked = backend_marked = footnote_marked = mark_marked = False
@@ -1159,7 +1165,7 @@ def provenance_table(ctx):
     lf = run.load or {}
     caveat = ""
     if (lf.get("sra_mean") or 0) > LOAD_CAVEAT_SRA or (lf.get("load_mean") or 0) > LOAD_CAVEAT_LOAD1:
-        caveat = ": the Logan caveat applies (timings are upper bounds)"
+        caveat = ": the Logan caveat applies (timings observed under concurrent host load)"
     rows.append(("host load", "%d samples; sra\\_all CPU mean %s\\%%, load1 mean %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("load_mean"), 1), caveat)))
     return _kv_table(rows)
@@ -1234,6 +1240,7 @@ def _agreement_counts(ctx, sids):
     run = ctx.run
     direct, mcp = {}, {}
     full = 0
+    fewer = []  # per fully checked pair with a repeat left out of the comparison, the repeats compared
     verified, unverified = 0, 0
     for sid in sids:
         e = run.comp_entry(sid)
@@ -1251,14 +1258,28 @@ def _agreement_counts(ctx, sids):
         d = (run.depth or {}).get(sid)
         if d and d.get("class") == "full":
             full += 1
+            if d.get("repeats_excluded"):
+                fewer.append(len(d.get("repeats_compared") or []))
     dtext = ", ".join("%d %s" % (direct[k], k.replace("_", " ")) for k in
                       ("identical", "same_checks", "timing", "not_comparable", "disagree") if direct.get(k)) or "–"
-    mtext = "%d agree (fully checked %d), %d not implemented, %d by design (%d verified, %d unverified), %d not " \
+    mtext = "%d agree (fully checked %d%s), %d not implemented, %d by design (%d verified, %d unverified), %d not " \
             "comparable, %d disagree%s" % (
-                mcp.get("agree", 0), full, mcp.get("not_implemented_mcp", 0), mcp.get("service_by_design", 0),
-                verified, unverified, mcp.get("not_comparable", 0), mcp.get("disagree", 0),
-                (", %d missing" % mcp["missing"]) if mcp.get("missing") else "")
+                mcp.get("agree", 0), full, fewer_repeats_text(fewer), mcp.get("not_implemented_mcp", 0),
+                mcp.get("service_by_design", 0), verified, unverified, mcp.get("not_comparable", 0),
+                mcp.get("disagree", 0), (", %d missing" % mcp["missing"]) if mcp.get("missing") else "")
     return esc(dtext), esc(mtext)
+
+
+def fewer_repeats_text(fewer):
+    """The qualifier of a 'fully checked' count for the pairs whose comparison left a repeat out (an MCP execution
+    inconclusive by a host state; the owner's second review, point 2): `fewer` holds, per such pair, the number of
+    repeats compared. ', 1 of them on one repeat only, the other repeat an inconclusive host-state outcome'; empty
+    when every fully checked pair was compared on every repeat."""
+    if not fewer:
+        return ""
+    if all(n == 1 for n in fewer):
+        return ", %d of them on one repeat only, the other repeat an inconclusive host-state outcome" % len(fewer)
+    return ", %d of them with a repeat left out as an inconclusive host-state outcome" % len(fewer)
 
 
 def chapter_summary(ctx, chapter, sids, n_units, n_families):
@@ -1466,7 +1487,7 @@ def mcp_unit_note(ctx, chapter, uid, members):
     notes = ((ctx.prose.get(chapter) or {}).get("mcp_notes") or {}).get("units") or {}
     text = notes.get(uid)
     if text:
-        body = inline(ctx.fill(text))
+        body = inline(ctx.fill(text, facts.unit_facts(ctx, uid)))
     else:
         reasons = []
         for sid in members:
@@ -1497,7 +1518,7 @@ def unit_section(ctx, chapter, uid):
     if rk:
         legend = (legend + "; " + rk) if legend else rk
     if layout == "series":
-        columns = [esc(meta[sid].get("variant") or sid) for sid in members]
+        columns = [esc(_variant(meta[sid], sid)) for sid in members]
         rows = []
         for arm in ARMS:
             rows.append((esc(arm), [_cell_tex(ctx.state(sid)[arm], _cell_fn(ctx.state(sid)[arm], fns[sid]), "series")
@@ -1513,7 +1534,7 @@ def unit_section(ctx, chapter, uid):
                 if gm:
                     by_group[g] = gm
         else:
-            variants = [str(meta[sid].get("variant") or sid) for sid in members]
+            variants = [_variant(meta[sid], sid) for sid in members]
             by_group[esc(", ".join(variants), 90)] = members
         for g, gm in by_group.items():
             st = dict((sid, ctx.state(sid)) for sid in gm)
@@ -1549,7 +1570,7 @@ def unit_section(ctx, chapter, uid):
             cs = [st[arm].glyph_tex(_cell_fn(st[arm], fns[sid])) for arm in ("direct-local", "direct-remote")]
             mcp_cell, note = _mcp_edge_cell(ctx, sid, st["mcp"], fns[sid], with_times=False)
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
-                          esc_wrap(meta[sid].get("variant") or ""), expected] + cs + [mcp_cell], note))
+                          esc_wrap(_variant(meta[sid])), expected] + cs + [mcp_cell], note))
         out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + (("; " + rk) if rk else ""))
         states = [ctx.state(sid) for sid in members]
         out += "\\sumline{%s: %d test%s · %s · %s}\n" % (tt(uid), len(members), "" if len(members) == 1 else "s", " · ".join(
@@ -1561,7 +1582,7 @@ def unit_section(ctx, chapter, uid):
             cs = [_cell_tex(st[arm], _cell_fn(st[arm], fns[sid]), "list") for arm in ("direct-local", "direct-remote")]
             mcp_cell, note = _mcp_edge_cell(ctx, sid, st["mcp"], fns[sid], with_times=True)
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
-                          esc_wrap(meta[sid].get("variant") or ""),
+                          esc_wrap(_variant(meta[sid])),
                           blocks.expected_text(run.scenario(sid), run.is_property)] + cs + [mcp_cell], note))
         out += latex.list_table(rows, units_ids(ctx, members), cells.TIMING_LEGEND["list"] + "; " + EDGE_LEGEND
                                 + (("; " + rk) if rk else ""))
@@ -1583,7 +1604,7 @@ def unit_section(ctx, chapter, uid):
                         elif de is False:
                             text += " \\gne"
                 cs.append(text)
-            second = esc(meta[sid].get("variant") or "")
+            second = esc(_variant(meta[sid]))
             src = run.scenario(sid).get("derived_from")
             if src:
                 second = "%s · %s" % (latex.sid(src, units.unit_of(src)), second)
@@ -1832,6 +1853,7 @@ def closing_values(ctx):
     n_all = cells._num((((fo_.get("cold") or {}).get("mcp") or {}).get("wall_ms") or {}).get("n"))
     n_timed = cells._num((s.get("mcp_cold_wall_ms") or {}).get("n")) if isinstance(s.get("mcp_cold_wall_ms"), dict) else None
     v["cold_mcp_untimed_n"] = str(int(n_all) - int(n_timed)) if n_all is not None and n_timed is not None else None
+    v["cold_mcp_untimed_text"] = cold_mcp_untimed_text(run)
     # the phases' population: the warm execution of each paired scenario (summary.mcp_phases); paging is 0 ms
     # where the results came with the terminal status, and the log-scale box leaves those out
     phase_pop = phase_population(ctx)
@@ -1877,6 +1899,43 @@ def closing_values(ctx):
     v["n_scenarios"] = str(len(run.order))
     ctx._closing_values = v
     return v
+
+
+_CODE_WORDS = {"resolve_timeout": "the service's own deadline"}
+_OUTCOME_WORDS = {"service_by_design": "by design", "inconclusive": "inconclusive", "not_implemented_mcp": "not exercised",
+                  "finding": "a finding", "fail": "a failure", "error": "an error", "pass": "a pass"}
+
+
+def cold_mcp_untimed_split(run):
+    """The host-cold MCP executions without a backend timing (the calls C.4's cold column counts and C.3's cold
+    wall leaves out: cold_mcp_untimed_n), grouped by what ended them, as [(n, outcome word, words)] with the
+    largest group first: the words are the execution's recorded time limitation (checks.time_limited, e.g. 'the
+    host's /pattern 503 deadline relayed by the service'), else its error code in words (a resolve_timeout is the
+    service's own deadline), else 'no timing recorded' (re-verification of round 3, L-b: the split is computed
+    from the record, not asserted)."""
+    groups = {}
+    for sid in run.order:
+        for l in run.arm_lines(sid, "mcp"):
+            if cells.host_cache_of(l) != "cold" or cells.sc.backend_timed(l) or cells._num(l.get("wall_ms")) is None:
+                continue
+            code = (l.get("error") or {}).get("code") if isinstance(l.get("error"), dict) else None
+            tl = str(l.get("time_limited") or "")
+            if tl:
+                words = tl
+            elif code:
+                words = ("%s, `%s`" % (_CODE_WORDS[code], code)) if code in _CODE_WORDS else "`%s`" % code
+            else:
+                words = "no timing recorded"
+            key = (_OUTCOME_WORDS.get(l.get("outcome"), str(l.get("outcome"))), words)
+            groups[key] = groups.get(key, 0) + 1
+    return sorted(((n, o, w) for (o, w), n in groups.items()), key=lambda t: (-t[0], t[1], t[2]))
+
+
+def cold_mcp_untimed_text(run):
+    """'23 by design (the host's /pattern 503 deadline relayed by the service), 3 inconclusive (the host's /resolve
+    503 deadline relayed by the service) and 1 inconclusive (the service's own deadline, `resolve_timeout`)'."""
+    parts = ["%d %s (%s)" % (n, o, w) for n, o, w in cold_mcp_untimed_split(run)]
+    return facts._join(parts) if parts else "none"
 
 
 def fmt_ratio(x):
@@ -2025,7 +2084,8 @@ def closing(ctx):
     lf = ctx.run.load or {}
     out += closing_section_prose(ctx, "C6", (
         "%d samples; sra\\_all CPU mean %s\\%% (max %s\\%%), load1 mean %s (max %s). The Logan caveat: above "
-        "%d\\%% sra\\_all CPU or load1 %d the host was busy with other work and the timings are upper bounds.\n\n" % (
+        "%d\\%% sra\\_all CPU or load1 %d the host was busy with other work and the timings were "
+        "observed under concurrent host load.\n\n" % (
             lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("sra_max")), fmt_n(lf.get("load_mean"), 1),
             fmt_n(lf.get("load_max"), 1), LOAD_CAVEAT_SRA, LOAD_CAVEAT_LOAD1)))
     res = s.get("resources") or {}
@@ -2427,7 +2487,8 @@ def environment_table(ctx):
     caveat = ""
     if (lf.get("sra_mean") or 0) > LOAD_CAVEAT_SRA or (lf.get("load_mean") or 0) > LOAD_CAVEAT_LOAD1:
         caveat = (" — the Logan caveat applies: the host was busy with other work (sra\\_all above %d\\%% CPU or "
-                  "load1 above %d), so the timings are upper bounds" % (LOAD_CAVEAT_SRA, LOAD_CAVEAT_LOAD1))
+                  "load1 above %d), so the timings were observed under concurrent host load" % (
+                      LOAD_CAVEAT_SRA, LOAD_CAVEAT_LOAD1))
     rows.append(("samples", "%d; sra\\_all CPU mean %s\\%%, max %s\\%%; load1 mean %s, max %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("sra_max")), fmt_n(lf.get("load_mean"), 1),
         fmt_n(lf.get("load_max"), 1), caveat)))

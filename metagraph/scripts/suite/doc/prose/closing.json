@@ -36,7 +36,8 @@
   "scenarios_without_mcp_local_pair / _remote_pair": "the scenarios the MCP overhead pairing leaves out: every scenario less the pairs against direct-local (remote)",
   "cold_mcp_all_p50 / _p90 / _max / _n": "summary.front_overhead.cold[mcp].wall_ms: every host-cold MCP execution (C.4's host-cold table), a larger population than mcp_cold_wall_* (the cold calls of the scenarios with a backend-timed MCP pair)",
   "phase_paging_zero_n / phase_paging_nonzero_n": "of the phases' population, the executions whose paging took 0 ms (the results came with the terminal status) and the others; the log-scale box plot draws the others only",
-  "cold_mcp_untimed_n": "the host-cold MCP executions C.4 counts that C.3's cold-wall population leaves out: cold_mcp_all_n minus mcp_cold_wall_n (the calls without a backend timing: by-design answers, the calls the service's own deadline ended)"
+  "cold_mcp_untimed_n": "the host-cold MCP executions C.4 counts that C.3's cold-wall population leaves out: cold_mcp_all_n minus mcp_cold_wall_n (the calls without a backend timing)",
+  "cold_mcp_untimed_text": "the same calls split by what ended them, computed from the record (sections.cold_mcp_untimed_split: the outcome and the recorded time limitation, e.g. 'the host's /pattern 503 deadline relayed by the service', else the error code in words), largest group first: '23 by design (...), 3 inconclusive (the host's /resolve 503 deadline relayed by the service) and 1 inconclusive (the service's own deadline, `resolve_timeout`)'"
  },
  "title": "Cross-cutting timing",
  "intro": [
@@ -49,7 +50,7 @@
   },
   {
    "id": "backend-vs-direct",
-   "template": "The host call as the service timed it differs from direct-local's wall by {backend_over_local_p50} at the median (p90 {backend_over_local_p90}, n {backend_over_local_n}): the overhead is the service's own phases, not the host."
+   "template": "The host call as the service timed it differs from direct-local's wall by {backend_over_local_p50} at the median (p90 {backend_over_local_p90}, n {backend_over_local_n}): the overhead lies in the service's own phases rather than in the host call."
   },
   {
    "id": "phases",
@@ -57,7 +58,7 @@
   },
   {
    "id": "paired",
-   "template": "Per scenario the warm MCP wall is {paired_dl_mcp_ratio_p50} times direct-local's at the median (p10 {paired_dl_mcp_ratio_p10}, p90 {paired_dl_mcp_ratio_p90}; n {paired_dl_mcp_n}), a ratio driven by direct-local's milliseconds; in {paired_dl_mcp_under_1s} of the {paired_dl_mcp_n} pairs the two walls lie within 1 s of each other, and in {paired_dl_mcp_faster} the MCP call was the faster one."
+   "template": "Per scenario the warm MCP wall is {paired_dl_mcp_ratio_p50} times direct-local's at the median (p10 {paired_dl_mcp_ratio_p10}, p90 {paired_dl_mcp_ratio_p90}; n {paired_dl_mcp_n}), a ratio of seconds to milliseconds; in {paired_dl_mcp_under_1s} of the {paired_dl_mcp_n} pairs the two walls lie within 1 s of each other, and in {paired_dl_mcp_faster} the MCP call was the faster one."
   },
   {
    "id": "front",
@@ -73,7 +74,7 @@
   }
  ],
  "caveats": [
-  "{load_caveat_line} Every timing in this section is the shared host's under that load: an upper bound for this day, not a baseline for the release.",
+  "{load_caveat_line} Every timing in this section is the shared host's, observed under concurrent host load: not a baseline for the release.",
   "Cold and warm are the recorded heuristic (a scenario's first execution to reach the host, then any within {warm_window_s} s of another ending on the host), not a measurement of residency; a delta between them is the difference of two executions in the loop's order, and the loop's order is the only control."
  ],
  "plots": {
@@ -85,7 +86,7 @@
    "title": "MCP overhead decomposition",
    "paragraphs": [
     "*Method.* Pairs of host-warm executions only: the MCP warm execution (repeat 1 preferred) minus each direct arm's first host-warm execution of the same scenario, {mcp_over_local_n} pairs against direct-local and {mcp_over_remote_n} against direct-remote. The phases are the service's own measurements of one MCP execution per scenario, its host-warm execution with a backend timing (repeat 1 preferred; n {phase_backend_n}, zeros included; the box plot of C.2 draws the same population, its paging box without the {phase_paging_zero_n} zeros): submit (the tool's acknowledgement), queue (the job created to started), backend (the host call), terminal lag (the job finished to the client seeing it) and paging (fetching the results).",
-    "*Observation.* The MCP arm's wall time exceeds direct-local's by {mcp_over_local_p50} at the median and {mcp_over_local_p90} at the 90th percentile ({mcp_over_local_no_queue_p50} and {mcp_over_local_no_queue_p90} with the queue wait taken out), and direct-remote's by {mcp_over_remote_p50} at the median; the host call itself, as the service timed it, is {backend_over_local_p50} longer than the direct-local wall at the median and {backend_over_local_p90} at p90, the public URL and the front being in it. The phase with the largest median is {mcp_phase_largest} ({mcp_phase_largest_p50}). The phases' medians are medians of separate distributions: they are not summed, because their sum is not the median of the wall. A cold MCP call (the scenario's first on the host) took {mcp_cold_wall_p50} at the median and {mcp_cold_wall_p90} at p90 (n {mcp_cold_wall_n}: the backend-timed cold calls); every host-cold MCP execution, the {cold_mcp_untimed_n} without a backend timing among them (by-design answers and the calls the service's own deadline ended), is in C.4's host-cold table (n {cold_mcp_all_n}, p90 {cold_mcp_all_p90}).",
+    "*Observation.* The MCP arm's wall time exceeds direct-local's by {mcp_over_local_p50} at the median and {mcp_over_local_p90} at the 90th percentile ({mcp_over_local_no_queue_p50} and {mcp_over_local_no_queue_p90} with the queue wait taken out), and direct-remote's by {mcp_over_remote_p50} at the median; the host call itself, as the service timed it, is {backend_over_local_p50} longer than the direct-local wall at the median and {backend_over_local_p90} at p90, the public URL and the front being in it. The phase with the largest median is {mcp_phase_largest} ({mcp_phase_largest_p50}). The phases' medians are medians of separate distributions: they are not summed, because their sum is not the median of the wall. A cold MCP call (the scenario's first on the host) took {mcp_cold_wall_p50} at the median and {mcp_cold_wall_p90} at p90 (n {mcp_cold_wall_n}: the backend-timed cold calls); every host-cold MCP execution, the {cold_mcp_untimed_n} without a backend timing among them ({cold_mcp_untimed_text}), is in C.4's host-cold table (n {cold_mcp_all_n}, p90 {cold_mcp_all_p90}).",
     "*Limits.* The pairs leave out cold MCP executions, executions warm after an interrupted one and the {scenarios_without_mcp_local_pair} scenarios without a host-warm pair against direct-local ({scenarios_without_mcp_remote_pair} against direct-remote): those the tools could not express, those the service decided at submit and those without a host-warm execution on one side. The service ran on its own host and the MetaGraph host carried the Logan load (C.6), so the overhead is this run's, not the service's floor; the host-bound part of it is read on the backend row, the service-bound part on the others."
    ]
   },
@@ -93,8 +94,8 @@
    "title": "Front cost",
    "paragraphs": [
     "*Method.* direct-remote minus direct-local on host-warm pairs of the same scenario, net of the server time (the host's own elapsed time cancels, so the difference is the network, the front and the client), per chapter; a fresh connection's set-up (TCP, and TLS on the public URL) is recorded apart as the connect time.",
-    "*Observation.* The front and the network add {front_net_p50} at the median and {front_net_p90} at p90 over {front_net_n} pairs; a fresh connection costs {connect_dr_p50} at the median and {connect_dr_p90} at p90 on the public URL (n {connect_dr_n}) against {connect_dl_p50} on localhost. The host-cold table at the end counts every host-cold execution per arm; on mcp that is the arm's whole cold column (n {cold_mcp_all_n}), the {cold_mcp_untimed_n} calls without a backend timing included (by-design answers and the calls the service's own deadline ended), which is why its n and p90 exceed C.3's cold-wall figures.",
-    "*Limits.* {scenarios_without_warm_pair} scenarios have no host-warm pair of the two direct arms (the long scenarios not run on direct-remote among them) and {warm_pairs_left_out_after_interrupted} pairs warm after an interrupted execution are left out. A chapter whose net cost sits above the run's median is one with bigger answers (larger bodies through the front), not a slower host; the laptop's own load is in the remote wall and is not sampled."
+    "*Observation.* The front and the network add {front_net_p50} at the median and {front_net_p90} at p90 over {front_net_n} pairs; a fresh connection costs {connect_dr_p50} at the median and {connect_dr_p90} at p90 on the public URL (n {connect_dr_n}) against {connect_dl_p50} on localhost. The host-cold table at the end counts every host-cold execution per arm; on mcp that is the arm's whole cold column (n {cold_mcp_all_n}), the {cold_mcp_untimed_n} calls without a backend timing included ({cold_mcp_untimed_text}), which is why its n and p90 exceed C.3's cold-wall figures.",
+    "*Limits.* {scenarios_without_warm_pair} scenarios have no host-warm pair of the two direct arms (the long scenarios not run on direct-remote among them) and {warm_pairs_left_out_after_interrupted} pairs warm after an interrupted execution are left out. A chapter whose net cost sits above the run's median is read as one with bigger answers (larger bodies through the front) rather than a slower host, the server time being netted out; the laptop's own load is in the remote wall and is not sampled."
    ]
   },
   "C5": {
@@ -102,7 +103,7 @@
    "paragraphs": [
     "*Method.* Per scenario the warm execution minus the cold one on the same arm (the delta, signed: negative when warm was faster) and warm over cold (the ratio). Only an arm with both states has pairs: mcp, cold then warm by construction ({cold_warm_mcp_n} pairs), and direct-local where a direct execution was the first on the host ({cold_warm_dl_n} pairs). Cold and warm are the recorded recency heuristic of I.2 (the scenario's first execution to reach the host; another within {warm_window_s} s), not a measured cache state.",
     "*Observation.* On mcp the median delta is {cold_warm_mcp_delta_p50} and the p90 {cold_warm_mcp_delta_p90}, the median ratio {cold_warm_mcp_ratio_p50}; on direct-local the median delta is {cold_warm_dl_delta_p50}, the p90 {cold_warm_dl_delta_p90} and the median ratio {cold_warm_dl_ratio_p50} over {cold_warm_dl_n} pairs (a figure over fewer than about thirty pairs is anecdotal).",
-    "*Limits.* A negative median with a positive p90 says that most warm repeats were somewhat faster and some much slower; the slower ones are the service's queue and the host's load of that minute, not the cache. The heuristic cannot see what the host had cached before the run or whether another client warmed a row between the two calls, and the paired loop's order (direct after the cold MCP call) is the only control."
+    "*Limits.* A negative median with a positive p90 says that most warm repeats were somewhat faster and some much slower; the slower ones point to the service's queue and the host's load of that minute rather than to the cache. The heuristic cannot see what the host had cached before the run or whether another client warmed a row between the two calls, and the paired loop's order (direct after the cold MCP call) is the only control."
    ]
   },
   "C6": {
@@ -117,7 +118,7 @@
    "title": "Per-chapter timing",
    "paragraphs": [
     "*Method.* Wall and server time per chapter, arm and host-cache state, as p50, p90 and max with n; {warm_after_interrupted_n} execution(s) warm after an interrupted execution are in neither bucket.",
-    "*Reading.* Compare arms within one chapter and one host state only. The server p50 of the three arms of one chapter should agree, since it is the same host's time on the same requests; a direct-remote server time above direct-local's is the loop's order (direct-remote runs third, warmer), not the front. A chapter whose host-cold p90 is far above its host-warm p90 is one whose requests read rows the host had not yet touched; its cold figures are the ones a first client sees.",
+    "*Reading.* Compare arms within one chapter and one host state only. The server p50 of the three arms of one chapter should agree, since it is the same host's time on the same requests; a direct-remote server time above direct-local's reflects the loop's order (direct-remote runs third, warmer) rather than the front, which the server time does not contain. A chapter whose host-cold p90 is far above its host-warm p90 is read as one whose requests reached rows the host had not yet touched (the heuristic does not measure that); its cold figures are the ones a first client sees.",
     "*Limits.* The cold buckets of the direct arms are small by construction (a direct execution is cold only when the MCP call before it never reached the host), so their percentiles are those of a few scenarios; the mcp cold bucket is the whole arm. The Logan caveat of C.1 {load_caveat} to every figure here."
    ]
   }

@@ -26,12 +26,16 @@ if HERE not in sys.path:
 
 import blocks  # noqa: E402
 import cells  # noqa: E402
+import units as units_mod  # noqa: E402
 from cells import ARMS, ARM_SHORT, fmt_t  # noqa: E402
 
 ARM_KEY = {"direct-local": "dl", "direct-remote": "dr", "mcp": "mcp"}
 STANDING_WORD = {"pass": "pass", "fail": "fail", "error": "error", "finding": "finding", "inconclusive": "inconclusive",
                  "not_implemented_mcp": "not exercised", "service_by_design": "by design", "other": "other",
                  None: "no execution"}
+HOST_WORD = {"cold": "host-cold", "warm": "host-warm", "aged": "host-aged",
+             cells.WARM_AFTER_INTERRUPTED: "warm after an interrupted execution", "not_reached": "the host not reached",
+             "unknown": "host state not recorded"}
 WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
 _COND = re.compile(r"\[\[((?:(?!\[\[|\]\]).)*)\]\]", re.S)
 _NONE = ("", "0", "none", "–", "no", "False")
@@ -116,11 +120,11 @@ def _truthy(obj):
 
 def _splice(text, start, end, chosen):
     """`text` with [start, end) replaced by the chosen branch, the spaces around it as prose wants them: a branch
-    that starts with a word after a word gets a space, a punctuation branch none; an empty branch leaves no
-    double space and no space before a punctuation mark."""
+    that starts with a word after a word (or after a placeholder's closing brace) gets a space, a punctuation
+    branch none; an empty branch leaves no double space and no space before a punctuation mark."""
     before, after = text[:start], text[end:]
     if chosen:
-        if before and (before[-1].isalnum() or before[-1] in ")]'’`") and chosen[0] not in ",.;:)!?":
+        if before and (before[-1].isalnum() or before[-1] in ")]}'’`") and chosen[0] not in ",.;:)!?":
             chosen = " " + chosen
         if after and (after[0].isalnum() or after[0] == "(" or (after[0] == "[" and not after.startswith("[["))):
             chosen = chosen + " "
@@ -272,15 +276,16 @@ def _status_text(line):
 
 def arm_facts(ctx, sid, arm):
     """The facts of one arm of a scenario: {standing, pass, present, wall, walls, wall_cold, wall_warm, server,
-    backend, http, code, host, late, phrase, phrase_cold, phrase_warm, detail (the first property check's detail of
-    the first execution), evidence (its clause before the explanation), class, class_word, clean}."""
+    backend, http, code, host, host_word (the first execution's host-cache state in words: host-warm, host-cold,
+    warm after an interrupted execution), late, phrase, phrase_cold, phrase_warm, detail (the first property check's
+    detail of the first execution), evidence (its clause before the explanation), class, class_word, clean}."""
     run = ctx.run
     st = ctx.state(sid)[arm]
     f = {"standing": STANDING_WORD.get(st.glyph_key, str(st.glyph_key)) if st.present else "no execution",
          "pass": bool(st.present and st.glyph_key == "pass"), "present": bool(st.present),
          "wall": "–", "walls": "–", "wall_cold": "–", "wall_warm": "–", "server": "–", "backend": "–",
-         "http": "", "code": "", "host": "", "late": "", "phrase": "", "phrase_cold": "", "phrase_warm": "",
-         "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean)}
+         "http": "", "code": "", "host": "", "host_word": "", "late": "", "phrase": "", "phrase_cold": "",
+         "phrase_warm": "", "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean)}
     if not st.present:
         f["phrase"] = "no execution recorded although the run planned one" if st.missing_planned else "no execution"
         return f
@@ -303,6 +308,7 @@ def arm_facts(ctx, sid, arm):
         f["http"] = str(answered.get("http"))
         f["code"] = _err(answered)[0] or ""
     f["host"] = str(cells.host_cache_of(first) or "").replace("_", " ")
+    f["host_word"] = HOST_WORD.get(cells.host_cache_of(first), f["host"])
     lates = [_late_ms(run, sid, l) for l in lines]
     lates = [x for x in lates if x is not None]
     if lates:
@@ -366,7 +372,8 @@ def scenario_facts(ctx, sid):
     and mcp (arm_facts), and `phrase`, the arms' phrases joined."""
     meta = ctx.units.by_scenario.get(sid) or {}
     states = ctx.state(sid)
-    f = {"id": sid, "variant": str(meta.get("variant") or ""), "title": str(ctx.run.scenario(sid).get("title") or ""),
+    f = {"id": sid, "variant": units_mod.variant_text(meta.get("variant") or ""),
+         "title": str(ctx.run.scenario(sid).get("title") or ""),
          "unit": str(meta.get("unit_id") or ctx.units.unit_of(sid) or ""), "family": str(meta.get("family") or ""),
          "footnoted": not cells.is_clean(states)}
     for arm in ARMS:
@@ -376,7 +383,14 @@ def scenario_facts(ctx, sid):
 
 
 def _label(f):
-    return "%s (%s)" % (f["id"], f["variant"]) if f["variant"] else f["id"]
+    """'R-pos-0027 (2,000 bp, pfa)': the id with its variant; a variant's own parenthesis (the record key) joins the
+    label's with a comma, never nested."""
+    v = f["variant"]
+    if not v:
+        return f["id"]
+    if v.endswith(")") and " (" in v:
+        v = v[:-1].replace(" (", ", ", 1)
+    return "%s (%s)" % (f["id"], v)
 
 
 def _members_phrase(f, exercised_only=True):
@@ -582,10 +596,49 @@ def _cold_counts(ctx, sids):
     return v
 
 
+def _mcp_class_values(x, members):
+    """The MCP classes over the members as the cells derive them (blocks.mcp_class): `n_mcp_<class>`,
+    `mcp_<class>_ids`, `mcp_<class>_variants`, `mcp_<class>_codes` (the service's codes, as code spans);
+    `mcp_classes_text` ('6 refused before host execution, 1 answered'); `mcp_all_refused_before_host` and
+    `mcp_all_not_exercised` (every member), for a prose sentence that otherwise asserts the run."""
+    v = {}
+    by_class = {}
+    for sid in members:
+        by_class.setdefault(x[sid]["mcp"]["class"] or "none", []).append(sid)
+    parts = []
+    for cls in blocks.MCP_CLASS_WORD:
+        ids = by_class.get(cls) or []
+        v["n_mcp_%s" % cls] = len(ids)
+        v["mcp_%s_ids" % cls] = ", ".join(ids) or "none"
+        v["mcp_%s_variants" % cls] = ", ".join(x[s]["variant"] or s for s in ids) or "none"
+        codes = sorted(set(x[s]["mcp"]["code"] for s in ids if x[s]["mcp"]["code"]))
+        v["mcp_%s_codes" % cls] = ", ".join("`%s`" % c for c in codes) or "none"
+        if ids:
+            parts.append("%d %s" % (len(ids), blocks.MCP_CLASS_WORD.get(cls, cls)))
+    v["mcp_classes_text"] = ", ".join(parts) or "no MCP execution"
+    n = len(members)
+    v["mcp_all_refused_before_host"] = bool(n) and v.get("n_mcp_refused_before_host", 0) == n
+    v["mcp_all_not_exercised"] = bool(n) and all(x[s]["mcp"]["standing"] == "not exercised" for s in members)
+    return v
+
+
+def unit_facts(ctx, uid):
+    """A unit's values for the line under its table (`mcp_notes.units`): n_tests, the members' facts under `x`,
+    the counts by standing and the MCP classes over its members, as family_facts computes them for a family."""
+    u = ctx.units.units.get(uid) or {}
+    members = list(u.get("members") or [])
+    x = dict((sid, scenario_facts(ctx, sid)) for sid in members)
+    v = {"id": uid, "n_tests": len(members), "members": ", ".join(members), "x": x}
+    v.update(_mcp_class_values(x, members))
+    v.update(_standing_counts(ctx, members))
+    return v
+
+
 def family_facts(ctx, fid):
     """A family's values for its prose (the chapter's prose reads them under `fam[<fid>]`): the counts by standing,
-    the MCP classes as the cells derive them (`n_mcp_<class>`, `mcp_<class>_ids`, `mcp_<class>_variants`), the
-    clean and footnoted members with their phrases, every member's phrase, the findings, the 503 deadlines past
+    the MCP classes as the cells derive them (`n_mcp_<class>`, `mcp_<class>_ids`, `mcp_<class>_variants`,
+    `mcp_<class>_codes`, `mcp_classes_text`, `mcp_all_refused_before_host`), the clean and footnoted members with
+    their phrases (`clean_text`, `footnoted_text`), every member's phrase, the findings, the 503 deadlines past
     their budgets, the stated stops, the relations, the owner's declared exemptions, the expected runs, the gate's
     outcome problems among the members, and `x` (the members' scenario facts)."""
     f = ctx.units.families.get(fid) or {}
@@ -596,20 +649,16 @@ def family_facts(ctx, fid):
          "n_units": len(f.get("units") or []), "members": ", ".join(members)}
     x = dict((sid, scenario_facts(ctx, sid)) for sid in members)
     v["x"] = x
-    by_class = {}
-    for sid in members:
-        by_class.setdefault(x[sid]["mcp"]["class"] or "none", []).append(sid)
-    for cls in blocks.MCP_CLASS_WORD:
-        ids = by_class.get(cls) or []
-        v["n_mcp_%s" % cls] = len(ids)
-        v["mcp_%s_ids" % cls] = ", ".join(ids) or "none"
-        v["mcp_%s_variants" % cls] = ", ".join(x[s]["variant"] or s for s in ids) or "none"
+    v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
     footnoted = [sid for sid in members if x[sid]["footnoted"]]
-    v["n_clean"] = len(members) - len(footnoted)
+    clean = [sid for sid in members if not x[sid]["footnoted"]]
+    v["n_clean"] = len(clean)
     v["n_footnoted"] = len(footnoted)
     v["footnoted_ids"] = ", ".join(footnoted)
     v["footnoted_text"] = "; ".join(_members_phrase(x[sid]) for sid in footnoted)
+    v["clean_ids"] = ", ".join(clean)
+    v["clean_text"] = "; ".join(_members_phrase(x[sid]) for sid in clean)
     v["members_text"] = "; ".join(_members_phrase(x[sid]) for sid in members)
     v["n_direct_pass_both"] = sum(1 for sid in members if x[sid]["dl"]["pass"]
                                   and (x[sid]["dr"]["pass"] or not x[sid]["dr"]["present"]))
@@ -687,6 +736,7 @@ def chapter_facts(ctx, ch):
     # the agreement classes, as the chapter's summary block counts them
     direct, mcp = {}, {}
     full, verified, unverified = 0, 0, 0
+    fewer = []  # the fully checked pairs whose comparison left a repeat out (a host-state outcome)
     for sid in sids:
         e = run.comp_entry(sid)
         dc = (e.get("direct_agreement") or {}).get("class")
@@ -703,6 +753,8 @@ def chapter_facts(ctx, ch):
         d = (run.depth or {}).get(sid)
         if d and d.get("class") == "full":
             full += 1
+            if d.get("repeats_excluded"):
+                fewer.append(sid)
     for key in ("identical", "same_checks", "timing", "not_comparable", "disagree"):
         v["n_direct_%s" % key] = direct.get(key, 0)
     words = {"identical": "identical pair{s}", "timing": "differing by a time limitation alone",
@@ -717,6 +769,14 @@ def chapter_facts(ctx, ch):
     v["n_mcp_agree"] = mcp.get("agree", 0)
     v["n_mcp_full"] = full
     v["mcp_all_full"] = full == mcp.get("agree", 0)
+    # the fully checked pairs compared on fewer repeats than recorded, each with the repeats compared and the
+    # excluded one's reason (reader.depth_over_compared_repeats; the owner's second review, point 2)
+    v["n_mcp_full_fewer_repeats"] = len(fewer)
+    v["mcp_full_fewer_repeats_text"] = "; ".join(
+        "%s on %s, %s" % (sid, _join("r%s" % r for r in (run.depth[sid].get("repeats_compared") or [])),
+                          _join("r%s %s" % (e.get("repeat"), e.get("reason"))
+                                for e in run.depth[sid].get("repeats_excluded") or [] if isinstance(e, dict)))
+        for sid in fewer)
     v["n_mcp_disagree"] = mcp.get("disagree", 0)
     v["n_mcp_not_comparable"] = mcp.get("not_comparable", 0)
     v["n_mcp_not_implemented"] = mcp.get("not_implemented_mcp", 0)
@@ -759,6 +819,7 @@ def chapter_facts(ctx, ch):
             v["wall_p90_%s_%s" % (state, k)] = fmt_t(w.get("p90")) if w.get("n") else "–"
             v["n_%s_%s" % (state, k)] = w.get("n") or 0
             v["server_p50_%s_%s" % (state, k)] = fmt_t(s.get("p50")) if s.get("n") else "–"
+            v["n_server_%s_%s" % (state, k)] = s.get("n") or 0
     backends = [l.get("mcp_phases", {}).get("backend_ms") for sid in sids for l in run.arm_lines(sid, "mcp")
                 if isinstance(l.get("mcp_phases"), dict) and cells.host_cache_of(l) == "warm"
                 and cells._num(l.get("mcp_phases", {}).get("backend_ms")) is not None]

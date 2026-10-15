@@ -76,6 +76,35 @@ def git_commit_of(path, cwd):
     return text or None
 
 
+def excluded_repeats(entry):
+    """The MCP repeats compare left out of a scenario's agreement, each with its reason: [(repeat, reason)].
+    `mcp_agreement.host_state_repeats` names the executions inconclusive by a host state (a resolve_timeout, a
+    relayed deadline), which read neither for nor against the direct arm (compare.mcp_agreement); the owner's
+    second review, point 2: an agreement is stated over the repeats actually compared."""
+    ma = (entry or {}).get("mcp_agreement") if isinstance(entry, dict) else None
+    out = []
+    for r in (ma or {}).get("host_state_repeats") or []:
+        out.append((r, "an inconclusive host-state outcome"))
+    return out
+
+
+def depth_over_compared_repeats(comp, rows, is_property):
+    """report.agreement_depth judged over the MCP repeats compare compared: the executions of an excluded repeat
+    (excluded_repeats) are left out before the depth is read, and every entry names `repeats_compared` and
+    `repeats_excluded` ([{repeat, reason}]), so that 'fully checked' holds over the compared repeats and the
+    detail block, the chapter line and the prose can name the excluded one."""
+    scen = (comp or {}).get("scenarios") or {}
+    excl = dict((sid, excluded_repeats(e)) for sid, e in scen.items())
+    left_out = set((sid, r) for sid, items in excl.items() for r, _ in items)
+    kept = [r for r in rows if not (r.get("arm") == "mcp" and (r.get("scenario"), r.get("repeat")) in left_out)]
+    depth = report.agreement_depth(comp, kept, is_property)
+    for sid, d in depth.items():
+        reps = set(r.get("repeat") for r in kept if r.get("scenario") == sid and r.get("arm") == "mcp")
+        d["repeats_compared"] = sorted(reps, key=lambda k: (not isinstance(k, int), str(k)))
+        d["repeats_excluded"] = [{"repeat": r, "reason": why} for r, why in excl.get(sid) or []]
+    return depth
+
+
 class Run(object):
     def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None):
         self.dir = os.path.abspath(run_dir)
@@ -114,7 +143,7 @@ class Run(object):
         self.checks_dir = checks_dir or judged.get("dir") or SUITE_DIR
         self.checks = cmp.load_checks_module(self.checks_dir)
         self.is_property = gate_mod._is_property_fn(self.checks_dir)
-        self.depth = report.agreement_depth(self.comp, self.rows, self.is_property)
+        self.depth = depth_over_compared_repeats(self.comp, self.rows, self.is_property)
         self.missing, self.plan_source = gate_mod.missing_planned(self.dir, self.manifest, self.rows)
         self.missing_set = set((k[0], k[1]) for k in self.missing)
         self.table, self.table_meta = self._load_table(by_design, reevaluated)

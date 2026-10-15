@@ -203,6 +203,22 @@ def validate(units, manifest):
     return problems
 
 
+_THOUSANDS_RE = None
+
+
+def variant_text(text):
+    """A variant label as the document prints it: a run of four or more digits that is a quantity (a length, a
+    budget, a base, a step count) gets its thousands separators ('2000 bp (pfa)' -> '2,000 bp (pfa)', 'from base
+    5000' -> 'from base 5,000'), as the prose writes them; an id's zero-padded number, a number already separated,
+    a token such as 1492R or hiv1155 and a power such as A^100000 stay (the re-verification of round 3, low item
+    12)."""
+    global _THOUSANDS_RE
+    if _THOUSANDS_RE is None:
+        import re
+        _THOUSANDS_RE = re.compile(r"(?<![\d,.A-Za-z_^-])([1-9]\d{3,})(?![\d,.A-Za-z-])")
+    return _THOUSANDS_RE.sub(lambda m: "{:,}".format(int(m.group(1))), str(text or ""))
+
+
 def ids_text(members, groups=None, by_group=None):
     """The id line under a table: the common prefix once, then the numbers, ranges where consecutive; by group
     when `by_group` gives {group: [ids]} in group order."""

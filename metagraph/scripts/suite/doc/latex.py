@@ -139,8 +139,19 @@ def sid(scenario_id, unit_id=None, detail=False):
     return body
 
 
+_UNIT_RE = re.compile(r"(?<![A-Za-z\d.,])(\d[\d,]*(?:\.\d+)?) (ms|s|bp|kb|MiB|GiB|\\%)(?![A-Za-z])")
+
+
+def join_units(text):
+    """An escaped prose string with a non-breaking space between a number and its unit (`25 s`, `2,000 bp`,
+    `7762 \\%`), so that a filled figure never breaks from its unit at a line's end (re-verification of round 3,
+    low item 8)."""
+    return _UNIT_RE.sub(lambda m: "%s~%s" % (m.group(1), m.group(2)), text)
+
+
 def inline(text):
-    """Prose with the tiny inline markup of the prose files: `code` and *emphasis*; everything else escaped."""
+    """Prose with the tiny inline markup of the prose files: `code` and *emphasis*; everything else escaped, a
+    number joined to its unit by a non-breaking space (join_units)."""
     parts = re.split(r"(`[^`]*`|\*[^*]+\*)", str(text or ""))
     out = []
     for p in parts:
@@ -148,9 +159,9 @@ def inline(text):
             code = p[1:-1]
             out.append(tt(code) if (len(code) > 24 or "/" in code) else "\\texttt{%s}" % esc(code))
         elif len(p) >= 2 and p.startswith("*") and p.endswith("*"):
-            out.append("\\emph{%s}" % esc(p[1:-1]))
+            out.append("\\emph{%s}" % join_units(esc(p[1:-1])))
         else:
-            out.append(esc(p))
+            out.append(join_units(esc(p)))
     return "".join(out)
 
 
@@ -379,16 +390,23 @@ def tlegend(text):
     return "\\noindent{\\sffamily\\scriptsize\\color{black!60}%s}\\par\\smallskip\n" % text
 
 
+PAIRED_PLOT_WIDTH_MM = 62  # the plotting area of a paired scatter (the owner's second review, point 1: 60-70 mm)
+PAIRED_PLOT_HEIGHT_MM = 55
+
+
 def paired_plot(data_file, xcol, ycol, xlabel, ylabel, label):
     """A log-log scatter of paired walls (one point per scenario) with the diagonal y = x, from a data file the
-    generator wrote (deterministic; pgfplots reads the columns by name)."""
+    generator wrote (deterministic; pgfplots reads the columns by name). The plotting area itself is
+    PAIRED_PLOT_WIDTH_MM by PAIRED_PLOT_HEIGHT_MM (`scale only axis`: the labels and ticks sit outside it), so that
+    two plots side by side each show their distribution at about 62 mm, not a quarter of the text width."""
     return ("\\begin{tikzpicture}\n"
-            "\\begin{axis}[width=0.48\\textwidth,height=0.42\\textwidth,xmode=log,ymode=log,"
+            "\\begin{axis}[scale only axis,width=%dmm,height=%dmm,xmode=log,ymode=log,"
             "xlabel={%s},ylabel={%s},tick label style={font=\\footnotesize},label style={font=\\footnotesize},"
             "grid=major,grid style={black!10},log ticks with fixed point]\n"
             "\\addplot[only marks,mark=*,mark size=0.7pt,color=bdblue,opacity=0.55] table[x=%s,y=%s,col sep=comma]{%s};\n"
             "\\addplot[domain=1:100000,samples=2,color=black!50,dashed] {x};\n"
-            "\\end{axis}\\end{tikzpicture}\\label{%s}\n" % (xlabel, ylabel, xcol, ycol, data_file, label_key(label)))
+            "\\end{axis}\\end{tikzpicture}\\label{%s}\n" % (PAIRED_PLOT_WIDTH_MM, PAIRED_PLOT_HEIGHT_MM, xlabel, ylabel,
+                                                              xcol, ycol, data_file, label_key(label)))
 
 
 def figure_block(body, caption):

@@ -1416,9 +1416,9 @@ class VerifyRoundThreeTest(unittest.TestCase):
         for where, text in texts:
             for lit in V4_LITERALS:
                 self.assertNotIn(lit, text, "%s: the v4 literal %r survives" % (where, lit))
-            # a condition on a v4 scenario the fake run lacks stays visible; every other flag resolves
+            # a condition on a v4 scenario or relation the fake run lacks stays visible; every other flag resolves
             for name in re.findall(r"\(UNRESOLVED CONDITION ([^)]*)\)", text):
-                self.assertTrue(name.startswith(("x[", "fam[")), "%s: unresolved %s" % (where, name))
+                self.assertTrue(name.startswith(("x[", "fam[", "rel[")), "%s: unresolved %s" % (where, name))
         # the fake run's own facts are printed in their place
         chapter = whole
         self.assertIn("0 of the 1 tests pass on direct-local and 1 on direct-remote", chapter.replace("\\", ""))
@@ -1438,6 +1438,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
         ctx = self.ctx({"R": self.R})
         chapter_keys = set(facts.chapter_facts(ctx, "R"))
         family_keys = set(facts.family_facts(ctx, "R-one"))
+        unit_keys = set(facts.unit_facts(ctx, "R-one"))
         arm_keys = set(facts.arm_facts(ctx, "R-001", "mcp"))
         scenario_keys = set(facts.scenario_facts(ctx, "R-001"))
         r_sids = set(units.chapter_scenarios("R"))
@@ -1462,12 +1463,13 @@ class VerifyRoundThreeTest(unittest.TestCase):
                 elif len(idx) >= 3 and (idx[1] not in ("dl", "dr", "mcp") or idx[2] not in arm_keys):
                     problems.append("%s: no arm value %s" % (name, idx[1:3]))
             else:
-                keys = chapter_keys if scope == "chapter" else family_keys
+                keys = {"chapter": chapter_keys, "family": family_keys, "unit": unit_keys}[scope]
                 if root not in keys and root not in ctx.placeholders():
                     problems.append("%s: no %s value %s" % (name, scope, root))
 
         for path, text in prose_strings(self.R):
-            scope = "chapter" if path.startswith((".summary", ".coverage_gap", ".intro", ".units", ".mcp_notes")) else "family"
+            scope = "chapter" if path.startswith((".summary", ".coverage_gap", ".intro", ".units")) else (
+                "unit" if path.startswith(".mcp_notes") else "family")
             for name in re.findall(r"\{([^{}]+)\}", text):
                 check(name, scope)
             for head in strip_conditional_heads(text)[1]:
@@ -1605,6 +1607,437 @@ class VerifyRoundThreeTest(unittest.TestCase):
             ctx.run.table_meta = {}
             ctx.run.reeval = {}
         self.assertIn("found by its sha256 at this path (the re-evaluation recorded", text)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the owner's second review (OWNER-REVIEW-SAMPLE-2.md, round 5) and the low items of the re-verification of round 3
+
+def budget_fixture(run_dir, perturbed):
+    """The fake run of test_compare_report with its chapter R read as an R-budget-like family, in two versions whose
+    conclusions differ (the owner's second review, point 4): as built (R-001 fails on direct-local and the arms
+    disagree; no stop, no finding), or perturbed (R-001 passes on every arm, on direct-local with a stated stop, the
+    direct answers identical and the MCP pair fully checked; a second test R-002, not implemented via MCP, answers a
+    503 deadline 5.8 s past its 2,500 ms budget on direct-local, a finding, and an allowed 503 deadline 0.4 s past it
+    on direct-remote). Built from small data here, never from the v4 run directory."""
+    from test_compare_report import line, scen, T0
+    manifest = build_run(run_dir)
+    arms_dir = os.path.join(run_dir, "arms")
+    for s in manifest["scenarios"]:
+        if s["id"] == "R-001":
+            s["route"] = "POST /resolve"
+            s["request"] = {"bounds": {"time_budget_ms": 2500}}
+            s["expect"][1]["args"]["prefix_if_stopped"] = True
+    if perturbed:
+        s2 = scen("R-002", "R", not_implemented="max_query_bp")
+        s2["route"] = "POST /resolve"
+        s2["request"] = {"bounds": {"time_budget_ms": 2500}}
+        s2["expect"][1]["args"]["prefix_if_stopped"] = True
+        manifest["scenarios"].append(s2)
+    manifest["content_sha256"] = sc.scenarios_sha256(manifest["scenarios"])
+    sc.write_json_atomic(os.path.join(arms_dir, "direct-local", "manifest.json"), manifest)
+    if perturbed:
+        def rewrite(arm, edit):
+            path = os.path.join(arms_dir, arm, "executions.jsonl")
+            rows, _ = sc.read_jsonl(path)
+            rows = edit(rows)
+            os.remove(path)
+            for r in rows:
+                sc.append_jsonl(path, r)
+                raw = os.path.join(arms_dir, arm, r["raw"])
+                if not os.path.exists(raw):
+                    sc.write_gz_json(raw, {"answer": {"http": r["http"], "body": None, "error": r.get("error")}})
+
+        def local(rows):
+            out = []
+            for r in rows:
+                if r["scenario"] == "R-001":
+                    r = dict(r, outcome="pass", http=200, time_limited="resolve stopped by time",
+                             checks=[{"check": "status", "outcome": "pass", "detail": "ok"},
+                                     {"check": "contains_source_context", "outcome": "pass", "detail": "a prefix"}])
+                out.append(r)
+            late = line("R-002", "direct-local", 0, T0 + 20, 8300.0, outcome="finding", http=503, digest="r4",
+                        error={"code": "deadline", "text": "resolve: nothing partial is sent"},
+                        checks=[{"check": "status", "outcome": "inconclusive", "detail": "a 503 deadline"},
+                                {"check": "contains_source_context", "outcome": "inconclusive", "detail": "no answer"},
+                                {"check": "budget_respected", "outcome": "finding",
+                                 "detail": "503 deadline delivered 5800 ms after the 2500 ms budget (client wall "
+                                           "8300 ms): the deadline is read where the work polls it"}])
+            late["server"] = None
+            out.append(late)
+            return out
+
+        def remote(rows):
+            rows = [dict(r, digest="r1", answer_digest="r1") if r["scenario"] == "R-001" else r for r in rows]
+            allowed = line("R-002", "direct-remote", 0, T0 + 50, 2900.0, outcome="inconclusive", http=503, digest="r4",
+                           error={"code": "deadline", "text": "resolve: nothing partial is sent"},
+                           checks=[{"check": "status", "outcome": "inconclusive", "detail": "a 503 deadline"},
+                                   {"check": "contains_source_context", "outcome": "inconclusive", "detail": "no answer"},
+                                   {"check": "budget_respected", "outcome": "pass", "detail": "within max(1 s, the budget)"}])
+            allowed["server"] = None
+            return rows + [allowed]
+
+        def mcp(rows):
+            rows = [dict(r, checks=[{"check": "status", "outcome": "pass", "detail": "ok"},
+                                    {"check": "contains_source_context", "outcome": "pass", "detail": "found"}])
+                    if r["scenario"] == "R-001" else r for r in rows]
+            return rows + [line("R-002", "mcp", 0, T0 + 60, 1.0, outcome="not_implemented_mcp")]
+        rewrite("direct-local", local)
+        rewrite("direct-remote", remote)
+        rewrite("mcp", mcp)
+    merge_run.merge(run_dir)
+    sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": len(CASES)})))
+    mapping = json.loads(json.dumps(FAKE_MAPPING))
+    del mapping["_families"]["R-one"]
+    del mapping["_units"]["R-one"]
+    members = ["R-001", "R-002"] if perturbed else ["R-001"]
+    mapping["_families"]["R-budget"] = {"chapter": "R", "title": "the time budget", "units": ["R-budget"]}
+    mapping["_units"]["R-budget"] = {"family": "R-budget", "unit_type": "pairs", "unit_title": "the stop",
+                                     "property": "a stop answers the prefix", "members": members}
+    for sid, variant in (("R-001", "eco, 2500 ms stop"), ("R-002", "pae, 2500 ms stop")):
+        if sid in members:
+            mapping[sid] = {"chapter": "R", "family": "R-budget", "unit_id": "R-budget", "unit_type": "pairs",
+                            "variant": variant}
+    return mapping
+
+
+class OwnerReviewTwoTest(unittest.TestCase):
+    """The owner's second review (round 5): the plots' size, 'fully checked' over the repeats compared, the timing
+    wordings, the conclusions of two fixtures; and the re-verification's low items: the untimed cold split, the
+    number-unit space, the variant labels, the unit note's facts, the record key's wording."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.R = sc.read_json(os.path.join(PROSE_DIR, "R.json"))
+        cls.dirs, cls.mappings = {}, {}
+        for name, perturbed in (("plain", False), ("perturbed", True)):
+            d = os.path.join(cls.tmp, name)
+            os.makedirs(d)
+            cls.mappings[name] = budget_fixture(d, perturbed)
+            cls.dirs[name] = d
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def render(self, name):
+        """(ctx, the conclusion, the coverage gap, the R-budget family prose) of chapter R on a fixture, with
+        R.json's chapter prose and its R-budget family prose."""
+        import sections
+        runobj = reader.Run(self.dirs[name])
+        units = units_mod.resolve(runobj.manifest, self.mappings[name])
+        prose = {"R": dict(self.R)}
+        prose["R"]["families"] = {"R-budget": dict(self.R["families"]["R-budget"])}
+        ctx = sections.Context(runobj, units, prose, {}, {}, list(units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        text = sections.chapter(ctx, "R")
+        conclusion = text.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
+        gap = text.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        family = text.split("fam:R-budget", 1)[1].split("\\unithead", 1)[0]
+        return ctx, conclusion, gap, family
+
+    def test_two_fixtures_change_conclusions(self):
+        """The owner's second review, point 4: chapter R rendered on two fixtures that differ in their verdicts
+        changes its counts, its 'What held' branch, 'Shown' against 'Not shown', the stop sentence, 'no failure, no
+        error and no disagreement', 'the run's only findings' and the family's statements, not only its numbers;
+        no v4 figure and no unresolved placeholder other than the v4 scenarios the fixtures lack survive."""
+        ctx_a, conc_a, gap_a, fam_a = self.render("plain")
+        ctx_b, conc_b, gap_b, fam_b = self.render("perturbed")
+        # the counts
+        self.assertIn("0 of the 1 tests pass on direct-local and 1 on direct-remote", conc_a.replace("\\", ""))
+        self.assertIn("1 of the 2 tests pass on direct-local and 1 on direct-remote", conc_b.replace("\\", ""))
+        # the verdict branch of 'What held'
+        self.assertIn("a direct arm failed, errored or disagreed with the other", conc_a)
+        self.assertNotIn("no failure, no error and no disagreement", conc_a)
+        self.assertIn("no failure, no error and no disagreement", conc_b)
+        self.assertNotIn("a direct arm failed, errored or disagreed", conc_b)
+        # the claims: unsupported with a disagreement, shown (in part) without
+        self.assertIn("Not shown:", conc_a)
+        self.assertIn("with a failure or a disagreement", conc_a)
+        self.assertNotIn("Shown:", conc_a.replace("Not shown:", ""))
+        self.assertIn("Shown: a 10~kb resolve under a small budget answers a stated prefix that its twins agree "
+                      "with (R-budget, 1 of 2)", conc_b)
+        self.assertNotIn("Not shown:", conc_b)
+        # the stop sentence of the coverage gap
+        self.assertIn("was not exercised successfully in this run", gap_a)
+        self.assertNotIn("was answered in this run", gap_a)
+        self.assertIn("was answered in this run (R-001 on direct-local (resolve stopped by time, 20~ms))", gap_b)
+        self.assertNotIn("was not exercised successfully", gap_b)
+        # the late 503s and the findings
+        self.assertNotIn("past their budgets", gap_a)
+        self.assertNotIn("only findings", gap_a)
+        self.assertIn("0.4~s to 5.8~s past their budgets (R-002 5.8~s on direct-local (a finding) and 0.4~s on "
+                      "direct-remote)", gap_b)
+        self.assertIn("One of these 503s came more than max(1~s, the budget) after the budget and are findings, "
+                      "the chapter's and the run's only findings", gap_b)
+        # the footnoted tests of the family, singular
+        self.assertIn("The one test of R-budget that did not pass on every arm (R-001) has its detail block", gap_a)
+        self.assertIn("The one test of R-budget that did not pass on every arm (R-002) has its detail block", gap_b)
+        # the family prose: the stop, the clean members, the MCP classes from the classifier
+        self.assertIn("The stated stop has not been observed on this host", fam_a)
+        self.assertNotIn("A stated stop was answered", fam_a)
+        self.assertIn("A stated stop was answered (R-001 on direct-local (resolve stopped by time, 20~ms))", fam_b)
+        self.assertIn("one of the one tests did not pass on every arm (R-001)", fam_a)
+        self.assertIn("one of the two tests did not pass on every arm (R-002)", fam_b)
+        self.assertIn("the one other passed on every arm exercised: R-001 (eco, 2,500~ms stop): direct-local a "
+                      "pass in 20~ms; direct-remote a pass in 0.1~s; mcp a pass in 0.8~s", fam_b)
+        self.assertNotIn("passed on every arm exercised", fam_a)
+        for text in (fam_a, fam_b):
+            self.assertIn("Via MCP: ", text)
+            self.assertIn("1 answered by the host through the service", text)
+            self.assertNotIn("every call was refused at submit", text)
+        self.assertIn("; every test was exercised through the tools", conc_a)
+        self.assertIn("1 test could not be exercised through the tools (a known limit: the time budget 1; I.4 and "
+                      "appendix B)", conc_b)
+        self.assertIn("Via MCP 1 pair agrees (0 fully checked)", conc_a)
+        self.assertIn("Via MCP 1 pair agrees, all fully checked;", conc_b)
+        self.assertIn("(2 identical pairs)", conc_b)
+        # no v4 figure, nothing unresolved but the v4 scenarios the fixtures lack
+        for where, text in (("a", conc_a + gap_a + fam_a), ("b", conc_b + gap_b + fam_b)):
+            for lit in V4_LITERALS:
+                self.assertNotIn(lit, text, "%s: the v4 literal %r survives" % (where, lit))
+            for name in re.findall(r"\(UNRESOLVED CONDITION ([^)]*)\)", text):
+                self.assertTrue(name.startswith("x["), "%s: unresolved %s" % (where, name))
+        for ctx in (ctx_a, ctx_b):
+            roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
+            self.assertEqual(roots, {"x"}, sorted(set(ctx.unresolved)))
+        # the fixtures are what the test says
+        self.assertIn("fam", ctx_a.chapter_values("R"))
+        self.assertTrue(ctx_b.chapter_values("R")["fam"]["R-budget"]["stop_observed"])
+        self.assertFalse(ctx_a.chapter_values("R")["fam"]["R-budget"]["stop_observed"])
+        self.assertEqual(ctx_b.chapter_values("R")["n_finding_executions"], 1)
+        self.assertTrue(ctx_b.chapter_values("R")["run_findings_only_here"])
+
+    def test_depth_over_compared_repeats(self):
+        """The owner's second review, point 2: an agreement's depth is judged over the MCP repeats compare
+        compared (a repeat inconclusive by a host state left out) and stated so: the detail block's classes line,
+        the chapter line's 'fully checked' count and the chapter prose name the compared repeat and the excluded
+        one with its reason."""
+        import sections
+        d = os.path.join(self.tmp, "depth")
+        shutil.copytree(self.dirs["perturbed"], d)
+        comp = sc.read_json(os.path.join(d, "compare.json"))
+        self.assertEqual(comp["scenarios"]["P-001"]["mcp_agreement"]["class"], "agree")
+        comp["scenarios"]["P-001"]["mcp_agreement"]["host_state_repeats"] = [0]
+        sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+        run = reader.Run(d)
+        self.assertEqual(reader.excluded_repeats(comp["scenarios"]["P-001"]), [(0, "an inconclusive host-state outcome")])
+        self.assertEqual(reader.excluded_repeats(comp["scenarios"]["P-002"]), [])
+        depth = run.depth["P-001"]
+        self.assertEqual(depth["class"], "full")
+        self.assertEqual(depth["repeats_compared"], [1])
+        self.assertEqual(depth["repeats_excluded"], [{"repeat": 0, "reason": "an inconclusive host-state outcome"}])
+        self.assertEqual(blocks.depth_text(depth), "fully checked on r1; r0 was an inconclusive host-state outcome")
+        self.assertEqual(blocks.depth_text({"class": "full", "repeats_compared": [0, 1]}), "fully checked on r0 and r1")
+        self.assertEqual(blocks.depth_text({"class": "partial", "repeats_compared": [0], "not_compared": ["a"]}),
+                         "partially checked on r0 (not compared: a)")
+        states = cells.scenario_states(run, "P-001")
+        classes = " · ".join(blocks._classes_text(run, "P-001", states))
+        self.assertIn("mcp: agree; ", classes)
+        self.assertIn("fully checked on r1; r0 was an inconclusive host-state outcome", classes)
+        self.assertNotIn("depth full", classes)
+        units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+        ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        _, mtext = sections._agreement_counts(ctx, ["P-001", "P-002", "P-003"])
+        self.assertIn("fully checked 2, 1 of them on one repeat only, the other repeat an inconclusive host-state outcome)", mtext)
+        _, mtext = sections._agreement_counts(ctx, ["P-003"])
+        self.assertNotIn("one repeat only", mtext)
+        self.assertEqual(sections.fewer_repeats_text([]), "")
+        self.assertIn("with a repeat left out", sections.fewer_repeats_text([2]))
+        cv = facts_mod().chapter_facts(ctx, "P")
+        self.assertEqual(cv["n_mcp_full_fewer_repeats"], 1)
+        self.assertEqual(cv["mcp_full_fewer_repeats_text"], "P-001 on r1, r0 an inconclusive host-state outcome")
+        # the prose prints the qualifier only when a pair was checked over fewer repeats
+        summary = self.R["summary"][0]
+        self.assertIn("[[n_mcp_full_fewer_repeats ?", summary)
+        self.assertIn("{mcp_full_fewer_repeats_text}", summary)
+        # the reading guide and the glossary define the depth over the compared repeats
+        overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json"))
+        reading = json.dumps(overview["sections"])
+        self.assertIn("judged over the MCP repeats actually compared", reading)
+        self.assertIn("is left out, so fully checked then holds on the other repeat only", reading)
+        glossary = sc.read_json(os.path.join(PROSE_DIR, "glossary.json"))
+        entry = [e for e in glossary["entries"] if e["term"] == "agreement class, depth"][0]
+        self.assertIn("judged over the MCP repeats compared", entry["definition"])
+        # the unperturbed run: every repeat compared, nothing excluded
+        plain = reader.Run(self.dirs["plain"])
+        self.assertEqual(plain.depth["P-001"]["repeats_compared"], [0, 1])
+        self.assertEqual(plain.depth["P-001"]["repeats_excluded"], [])
+
+    def test_timing_wordings(self):
+        """The owner's second review, point 3: no 'upper bound', no record-versus-length cause; the owner's
+        sentence in the chapter summary, 'observed under concurrent host load' in the generator's three caveats
+        and the closing caveat."""
+        with open(os.path.join(DOC, "sections.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertNotIn("upper bound", src)
+        self.assertEqual(src.count("observed under concurrent host load"), 3)
+        for name in PROSE_FILES:
+            text = json.dumps(sc.read_json(os.path.join(PROSE_DIR, name)))
+            for bad in ("upper bound", "as much as the window", "record matters", "orders of magnitude",
+                        "driven by", "for that reason (in this run"):
+                self.assertNotIn(bad, text, "%s: %r" % (name, bad))
+        summary = " ".join(self.R["summary"])
+        self.assertIn("Latency varies substantially across records; these correctness controls do not isolate the "
+                      "effect of query length", summary)
+        self.assertIn("{x[R-pos-0027][dl][host_word]}", summary)
+        self.assertNotIn("host-warm on direct-local", summary)
+        self.assertIn("latency varies substantially across records", self.R["families"]["R-pos"]["prose"])
+        for uid in ("R-pos-column-A", "R-pos-header-A"):
+            self.assertIn("do not isolate the effect of query length", self.R["units"][uid]["note"])
+        closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
+        self.assertIn("observed under concurrent host load", closing["caveats"][0])
+        # n next to the medians it counts
+        self.assertIn("{wall_p50_warm_dl} at the median on direct-local (n {n_warm_dl})", summary)
+        self.assertIn("(n {n_server_warm_dl} · {n_server_warm_dr} · {n_server_warm_mcp})", summary)
+        # the sentences that asserted the run are conditionals on computed facts
+        self.assertIn("[[mcp_all_refused_before_host ?", self.R["families"]["R-budget"]["prose"])
+        self.assertIn("[[rel[REL-same_answer-0003][mcp] = pass ?", self.R["families"]["R-twin"]["prose"])
+        self.assertNotIn("regularly outranked", self.R["families"]["R-discover"]["prose"])
+        self.assertIn("[[mcp_all_refused_before_host ?", self.R["mcp_notes"]["units"]["R-budget"])
+        self.assertNotIn("{members_text}. ", self.R["families"]["R-budget"]["prose"])
+        self.assertIn("{clean_text}", self.R["families"]["R-budget"]["prose"])
+        self.assertIn("Outside R-budget, {n_footnoted_elsewhere:word} test", self.R["coverage_gap"][1])
+
+    def test_rendered_caveats_and_the_untimed_split(self):
+        """The generator's caveat lines say 'observed under concurrent host load'; the host-cold MCP calls without a
+        backend timing are split by what ended them from the record."""
+        import sections
+        run = reader.Run(self.dirs["perturbed"])
+        run.load = {"n": 3, "sra_mean": 7000.0, "load_mean": 200.0, "sra_max": 1.0, "load_max": 1.0}
+        units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+        ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters))
+        self.assertIn("timings observed under concurrent host load", sections.provenance_table(ctx))
+        self.assertIn("timings were observed under concurrent host load", sections.environment_table(ctx))
+        self.assertIn("observed under concurrent host load", sections.closing(ctx))
+
+        class R(object):
+            order = ["a", "b", "c", "d"]
+            lines = {
+                "a": [{"arm": "mcp", "host_cache": "cold", "wall_ms": 5.0, "outcome": "service_by_design",
+                       "error": {"code": "search_failed"}, "server": None, "mcp_phases": None,
+                       "time_limited": "the host's /pattern 503 deadline relayed by the service"}],
+                "b": [{"arm": "mcp", "host_cache": "cold", "wall_ms": 31000.0, "outcome": "inconclusive",
+                       "error": {"code": "resolve_timeout"}, "server": None, "mcp_phases": None}],
+                "c": [{"arm": "mcp", "host_cache": "cold", "wall_ms": 900.0, "outcome": "pass",
+                       "server": {"elapsed_ms": 3.0}, "mcp_phases": None}],
+                "d": [{"arm": "mcp", "host_cache": "warm", "wall_ms": 5.0, "outcome": "service_by_design",
+                       "error": {"code": "search_failed"}, "server": None, "mcp_phases": None}]}
+
+            def arm_lines(self, sid, arm):
+                return self.lines.get(sid) or []
+        self.assertEqual(sections.cold_mcp_untimed_split(R()), [
+            (1, "by design", "the host's /pattern 503 deadline relayed by the service"),
+            (1, "inconclusive", "the service's own deadline, `resolve_timeout`")])
+        self.assertEqual(sections.cold_mcp_untimed_text(R()),
+                         "1 by design (the host's /pattern 503 deadline relayed by the service) and 1 inconclusive "
+                         "(the service's own deadline, `resolve_timeout`)")
+        R.order = ["c", "d"]
+        self.assertEqual(sections.cold_mcp_untimed_text(R()), "none")
+        v = sections.closing_values(ctx)
+        self.assertIn("cold_mcp_untimed_text", v)
+        closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
+        self.assertEqual(json.dumps(closing["sections"]).count("{cold_mcp_untimed_text}"), 2)
+        self.assertNotIn("the calls the service's own deadline ended", json.dumps(closing))
+        self.assertIn("cold_mcp_untimed_text", closing["placeholders"])
+
+    def test_plots_at_the_owner_size(self):
+        """The owner's second review, point 1: each paired scatterplot's plotting area is 62 by 55 mm (scale only
+        axis), inside the half-width minipages; the phase plot keeps its two-line ticks."""
+        import sections
+        plot = latex.paired_plot("f.csv", "dl_ms", "mcp_ms", "x", "y", "fig:x")
+        self.assertIn("scale only axis,width=62mm,height=55mm", plot)
+        self.assertNotIn("0.48\\textwidth", plot)
+        self.assertTrue(60 <= latex.PAIRED_PLOT_WIDTH_MM <= 70)
+        run = reader.Run(self.dirs["perturbed"])
+        units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+        ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters))
+        closing = sections.closing(ctx)
+        self.assertEqual(closing.count("scale only axis,width=62mm,height=55mm"), 2)
+        self.assertIn("\\begin{minipage}[t]{0.49\\textwidth}", closing)
+        box = latex.phase_boxplot([("submit", 1, 2, 3, 4, 5, 10, 0), ("paging", 1, 2, 3, 4, 5, 8, 2)], "fig:p")
+        self.assertIn("xticklabel style={align=center", box)
+        self.assertIn("{paging\\\\(n 8 of 10)}", box)
+
+    def test_units_joined_and_variant_labels(self):
+        """Low items 8 and 12: a number and its unit never break apart in the prose; a variant label prints its
+        thousands separators and a scenario's label never nests parentheses."""
+        self.assertEqual(latex.join_units("25 s past the 20,000 ms budget, 2,000 bp; 7762 \\% and 5 samples"),
+                         "25~s past the 20,000~ms budget, 2,000~bp; 7762~\\% and 5 samples")
+        self.assertEqual(latex.join_units("r0 s; 3 seconds; in 2 steps"), "r0 s; 3 seconds; in 2 steps")
+        self.assertEqual(latex.inline("`max_query_bp` 2,000 bp in 0.6 s"), "\\texttt{max\\_query\\_bp} 2,000~bp in 0.6~s")
+        self.assertEqual(latex.inline("*in 4 ms*"), "\\emph{in 4~ms}")
+        for raw, printed in (("2000 bp (pfa)", "2,000 bp (pfa)"), ("eco, from base 5000", "eco, from base 5,000"),
+                             ("eco, 3000 ms stop", "eco, 3,000 ms stop"), ("R-pos-0027", "R-pos-0027"),
+                             ("10,001 bp", "10,001 bp"), ("1492R", "1492R"), ("hiv1155.e20", "hiv1155.e20"),
+                             ("A^100000 on a self-loop", "A^100000 on a self-loop"), ("L-paths-0001", "L-paths-0001"),
+                             ("cal.XP_720315.1 (t12)", "cal.XP_720315.1 (t12)"), ("max_work_units 300000", "max_work_units 300,000")):
+            self.assertEqual(units_mod.variant_text(raw), printed, raw)
+        f = facts_mod()
+        self.assertEqual(f._label({"id": "R-pos-0027", "variant": "2,000 bp (pfa)"}), "R-pos-0027 (2,000 bp, pfa)")
+        self.assertEqual(f._label({"id": "R-budget-0001", "variant": "eco, 3,000 ms stop"}), "R-budget-0001 (eco, 3,000 ms stop)")
+        self.assertEqual(f._label({"id": "R-edge-0001", "variant": ""}), "R-edge-0001")
+        # the table headers and the facts print the same label
+        import sections
+        run = reader.Run(self.dirs["perturbed"])
+        units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+        ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        self.assertIn("eco, 2,500 ms stop", sections.unit_section(ctx, "R", "R-budget"))
+        self.assertEqual(f.scenario_facts(ctx, "R-001")["variant"], "eco, 2,500 ms stop")
+        self.assertEqual(sections._variant({"variant": "2000 bp (pfa)"}), "2,000 bp (pfa)")
+        self.assertEqual(sections._variant({}, "R-001"), "R-001")
+
+    def test_unit_facts_and_record_key_wording(self):
+        """A unit's note under its table reads the unit's own facts (the MCP classes over its members); I.2 says
+        where the record key is; the README no longer places it in I.3."""
+        import sections
+        run = reader.Run(self.dirs["perturbed"])
+        mapping = json.loads(json.dumps(self.mappings["perturbed"]))
+        mapping["_units"]["R-budget"]["members"] = ["R-001"]
+        mapping["_units"]["R-two"] = {"family": "R-budget", "unit_type": "pairs", "unit_title": "two",
+                                      "property": "p", "members": ["R-002"]}
+        mapping["_families"]["R-budget"]["units"] = ["R-budget", "R-two"]
+        mapping["R-002"]["unit_id"] = "R-two"
+        units = units_mod.resolve(run.manifest, mapping)
+        f = facts_mod()
+        prose = {"R": {"mcp_notes": {"units": {"R-two": "{n_tests} test, {mcp_classes_text}"
+                                                        "[[mcp_all_refused_before_host ? (refused) | (not refused)]]"}}}}
+        ctx = sections.Context(run, units, prose, {}, {}, list(units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        uv = f.unit_facts(ctx, "R-two")
+        self.assertEqual(uv["n_tests"], 1)
+        self.assertTrue(uv["mcp_all_not_exercised"])
+        self.assertFalse(uv["mcp_all_refused_before_host"])
+        self.assertIn("R-002", uv["x"])
+        note = sections.mcp_unit_note(ctx, "R", "R-two", ["R-002"])
+        self.assertIn("1 test, 1 ", note)
+        self.assertIn("(not refused)", note)
+        self.assertEqual(sections.mcp_unit_note(ctx, "R", "R-budget", ["R-001"]), "")
+        fv = f.family_facts(ctx, "R-budget")
+        for key in ("mcp_classes_text", "mcp_all_refused_before_host", "mcp_all_not_exercised", "clean_ids",
+                    "clean_text", "mcp_refused_before_host_codes"):
+            self.assertIn(key, fv)
+        self.assertEqual(fv["clean_ids"], "R-001")
+        self.assertEqual(f.arm_facts(ctx, "R-001", "direct-local")["host_word"], "host-warm")
+        self.assertEqual(f.HOST_WORD[cells.WARM_AFTER_INTERRUPTED], "warm after an interrupted execution")
+        overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json"))
+        self.assertIn("keyed on each chapter page and in appendix D", json.dumps(overview["sections"]))
+        self.assertNotIn("keyed in the glossary", json.dumps(overview))
+        with open(os.path.join(SUITE, "README.md"), encoding="utf-8") as fh:
+            readme = fh.read()
+        self.assertNotIn("record key in I.3", readme)
+        self.assertIn("test_two_fixtures_change_conclusions", readme)
+
+
+def facts_mod():
+    import facts
+    return facts
 
 
 if __name__ == "__main__":
