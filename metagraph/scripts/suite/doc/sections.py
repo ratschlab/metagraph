@@ -595,10 +595,12 @@ def principal_findings(ctx):
             for l in run.arm_lines(sid, arm):
                 if l.get("outcome") == "finding":
                     findings.setdefault(sid, []).append("%s r%s: %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
-                                                                        esc(l.get("repeat")), esc(_finding_evidence(l))))
+                                                                        esc(l.get("repeat")),
+                                                                        latex.join_units(esc(_finding_evidence(l)))))
                 elif l.get("outcome") in ("fail", "error"):
                     failed = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
-                    what = ("%s: %s" % (esc(failed[0].get("check")), esc(failed[0].get("detail"), 120))) if failed \
+                    what = ("%s: %s" % (esc(failed[0].get("check")),
+                                        latex.join_units(esc(failed[0].get("detail"), 120)))) if failed \
                         else esc(cells.WORD.get(l.get("outcome"), l.get("outcome")))
                     failures.setdefault(sid, []).append("%s r%s %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
                                                                        esc(l.get("repeat")), what))
@@ -1346,7 +1348,7 @@ def family_summary(ctx, fid, sids, relations):
     states = [ctx.state(sid) for sid in sids]
     text = "%s: %d test%s · %s · %s" % (tt(fid), len(sids), "" if len(sids) == 1 else "s",
                                         " · ".join("%s %s" % (esc(arm), cells.glyph_counts(states, arm))
-                                                   for arm in ARMS), cells.timing_text(run, sids))
+                                                   for arm in ARMS), latex.join_units(cells.timing_text(run, sids)))
     if relations:
         comp_rel = run.comp_relations()
         parts = []
@@ -1574,7 +1576,8 @@ def unit_section(ctx, chapter, uid):
         out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + (("; " + rk) if rk else ""))
         states = [ctx.state(sid) for sid in members]
         out += "\\sumline{%s: %d test%s · %s · %s}\n" % (tt(uid), len(members), "" if len(members) == 1 else "s", " · ".join(
-            "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS), cells.max_wall_text(run, members))
+            "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS),
+            latex.join_units(cells.max_wall_text(run, members)))
     elif layout == "list":
         rows = []
         for sid in members:
@@ -1771,9 +1774,17 @@ def plot_data(ctx):
     return files
 
 
+# The conditions of C.1's interpretive clauses (VERIFY-R4, issue 2): the median backend overhead is small against the
+# median MCP overhead below this share of it; the MCP cold-warm median ratio is close to one within this margin.
+BACKEND_SHARE_SMALL = 0.5
+COLD_WARM_CLOSE = 0.25
+
+
 def closing_values(ctx):
     """The placeholders of the closing section's observation templates (closing.json `observations`), computed
-    from the run: every value a formatted string, None when the run has no data for it."""
+    from the run: every value a formatted string, None when the run has no data for it; the flags of the templates'
+    conditionals (`backend_share_small`, `paired_seconds_to_milliseconds`, `cold_warm_mcp_close`, ...) are bools,
+    False without data, so that an interpretive clause prints only when the run's figures make it true."""
     if ctx._closing_values is not None:
         return ctx._closing_values
     run = ctx.run
@@ -1829,6 +1840,24 @@ def closing_values(ctx):
     v["paired_dl_mcp_ratio_p50"] = fmt_ratio(cells.percentile(ratios, 50)) if ratios else None
     v["paired_dl_mcp_ratio_p10"] = fmt_ratio(cells.percentile(ratios, 10)) if ratios else None
     v["paired_dl_mcp_ratio_p90"] = fmt_ratio(cells.percentile(ratios, 90)) if ratios else None
+    # the two sides' medians of the paired population, and whether they print in seconds against milliseconds
+    dl_med = cells.percentile([p[2] for p in both], 50) if both else None
+    mcp_med = cells.percentile([p[4] for p in both], 50) if both else None
+    v["paired_dl_wall_p50"] = fmt_t(dl_med) if both else None
+    v["paired_mcp_wall_p50"] = fmt_t(mcp_med) if both else None
+    v["paired_seconds_to_milliseconds"] = bool(both) and cells._split_unit(fmt_t(mcp_med))[1] == "s" \
+        and cells._split_unit(fmt_t(dl_med))[1] == "ms"
+    # the backend overhead against the MCP overhead (both against direct-local, medians of separate distributions)
+    over = cells._num((mo.get("minus_local_ms") or {}).get("p50")) if isinstance(mo.get("minus_local_ms"), dict) \
+        and (mo.get("minus_local_ms") or {}).get("n") else None
+    be = cells._num((mo.get("backend_minus_local_ms") or {}).get("p50")) \
+        if isinstance(mo.get("backend_minus_local_ms"), dict) and (mo.get("backend_minus_local_ms") or {}).get("n") else None
+    v["mcp_over_local_positive"] = over is not None and over > 0
+    v["backend_share_small"] = over is not None and be is not None and over > 0 and be < BACKEND_SHARE_SMALL * over
+    # the MCP cold-warm median ratio close to one
+    cw_mcp = cw.get("mcp") or {}
+    cw_ratio = cells._num((cw_mcp.get("ratio") or {}).get("p50")) if cw_mcp.get("n") else None
+    v["cold_warm_mcp_close"] = cw_ratio is not None and abs(cw_ratio - 1.0) <= COLD_WARM_CLOSE
     largest = None  # (p50, phase name) of the phase with the largest median (backend_pattern left out)
     for k, name in PHASES:
         p50 = cells._num((ph.get(k) or {}).get("p50")) if isinstance(ph.get(k), dict) else None
@@ -1959,8 +1988,9 @@ def closing_section_prose(ctx, key, fallback):
 
 
 def observations(ctx):
-    """The observation sentences of closing.json filled from the run; a template whose values the run lacks is
-    replaced by a note naming them (never a sentence with a hole)."""
+    """The observation sentences of closing.json filled from the run (the placeholders and the conditionals of
+    facts.fill, the flags of closing_values); a template whose values the run lacks is replaced by a note naming
+    them (never a sentence with a hole)."""
     items = ctx.closing.get("observations") or []
     values = closing_values(ctx)
     out = []
@@ -1974,10 +2004,7 @@ def observations(ctx):
             out.append("{\\color{black!55}\\itshape (observation %s not computed for this run: no data for %s)}" % (
                 esc((it.get("id") if isinstance(it, dict) else None) or "?"), esc(", ".join(missing))))
             continue
-        text = str(template)
-        for n in names:
-            text = text.replace("{%s}" % n, values[n])
-        out.append(inline(text))
+        out.append(inline(ctx.fill(str(template), values)))
     return out
 
 
@@ -2235,7 +2262,7 @@ def by_design_table(ctx):
         if sa.get("code"):
             service.append(tt(sa["code"]))
         if sa.get("text_contains"):
-            service.append("“%s”" % esc_wrap(sa["text_contains"], 240))
+            service.append("“%s”" % latex.join_units(esc_wrap(sa["text_contains"], 240)))
         if sa.get("missing_argument"):
             service.append("missing argument %s" % tt(sa["missing_argument"]))
         if c.get("explains_checks"):
@@ -2244,9 +2271,9 @@ def by_design_table(ctx):
         if de.get("http") is not None:
             direct.append("http %s" % esc(de["http"]))
         if de.get("text"):
-            direct.append(tt(de["text"], 240))
+            direct.append(latex.join_units(tt(de["text"], 240)))
         elif de.get("text_prefix"):
-            direct.append("prefix %s" % tt(de["text_prefix"], 240))
+            direct.append("prefix %s" % latex.join_units(tt(de["text_prefix"], 240)))
         marks = {}
         unverified_detail = []
         for sid in naming.get(cid, []):
@@ -2279,13 +2306,13 @@ def by_design_table(ctx):
                 named.append("%s: %d (%s, …)" % (esc(mark), len(sids_),
                                                  ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_[:3])))
         first = [tt(cid) + "\\newline{\\scriptsize %s}" % esc(c.get("agreement") or "–")]
-        matches = esc_wrap(c.get("scenario_match"), 600)
+        matches = latex.join_units(esc_wrap(c.get("scenario_match"), 600))
         if short.get(cid):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
         rows.append(first + [matches, "; ".join(service) or "–", "; ".join(direct) or "–", "; ".join(named) or "–"])
         if unverified_detail:
-            rows[-1] = (rows[-1], "{\\footnotesize not verified on the direct side: %s}" % esc_wrap(
-                "; ".join(unverified_detail)))
+            rows[-1] = (rows[-1], "{\\footnotesize not verified on the direct side: %s}" % latex.join_units(esc_wrap(
+                "; ".join(unverified_detail))))
     out = ("One row per case of the service-by-design table that a scenario of the built chapters names, that an "
            "MCP answer matched, or that belongs to their areas: the case and its agreement class, what it matches "
            "(and the short reason the tables use), the service's answer, the direct expectation, and the scenarios "

@@ -3784,6 +3784,20 @@ prose names its footnoted members once and lets the coverage gap and the detail 
 copy with a stated stop, a late 503 and a clean direct side) and asserts that the counts, the verdict branch, the
 coverage statements and the explanatory prose all change.
 
+After the re-verification of round 5 (VERIFY-R4.md, the final patch, 2026-10-15) the closing section states no
+timing cause: each of its limits names what the run measures and what it does not isolate (the service's queue,
+the host's load, the cache, the loop's order, the answers' sizes; `doc/prose/closing.json`), and the
+interpretive clauses of C.1 are conditionals on flags computed from the run (`sections.closing_values`:
+`backend_share_small`, the median backend overhead below half of the median MCP overhead;
+`paired_seconds_to_milliseconds`, the paired medians as printed; `cold_warm_mcp_close`, the MCP cold-warm ratio
+within a quarter of one), so that a clause prints only when the figures make it true (`sections.observations`
+fills through `facts.fill`); the number of a count's verb and noun follows the count in R.json ("is a finding" /
+"are findings", "the only test" / "one of the two tests"); and `latex.join_units` also covers the findings list
+of I.1, the summary lines under the tables and appendix B's quoted texts. `test_closing_two_fixtures_change_conclusions`
+renders the closing section on the perturbed fixture and on a copy whose summary and walls flip each condition,
+and `test_timing_wordings` bans the removed wordings ("point to", "reflects the", "rather than a slower host",
+"at this load" and the others) in every prose file and in the generator.
+
 - Reads the run directory as report.py does (manifest.json, the re-evaluated executions and compare.json when the
   run has them, else the recorded ones, run.json, reevaluated.json, samples.jsonl, gate.json, arms/mcp/run.json),
   the by-design table compare judged with, the owner-declared file of `gate/` whose manifest sha matches, and the
@@ -3856,15 +3870,18 @@ coverage statements and the explanatory prose all change.
   appendix D's order, the box plot's labels, the untimed cold count and the uncut B note; and, for round 5, the
   plots' size, the depth over the compared repeats (the reader, the block line, the chapter line, the prose), the
   timing wordings (no "upper bound", no record-versus-length cause), the untimed cold split, the non-breaking
-  number-unit space, the variant labels, the unit note's facts, and the two fixtures whose conclusions differ.
+  number-unit space, the variant labels, the unit note's facts, and the two fixtures whose conclusions differ;
+  and, for the final patch, the closing section's conditionals on two fixtures, the banned timing wordings, the
+  count grammar and the joined units outside the prose.
 - The sample of 2026-10-15 (Part I, chapter R, the closing section, the appendices chapter R needs, the index)
   was built from the v4 run re-evaluated with c11db9dd: `doc/make_doc.py RUN_DIR --out DIR --sample`; its notes
   for the owner's review are `~/.cache/metagraph-traverse-plans/2026-10-15/doc/sample/SAMPLE-NOTES.md` (round 1)
   and `.../doc/sample-r2/SAMPLE-NOTES.md` (round 2, after the owner's review, point by point; round 3, after the
   verification of round 2, rebuilt in the same directory), `.../doc/sample-r3/SAMPLE-NOTES.md` (round 4, after
-  the re-verification of round 3) and `.../doc/sample-r4/SAMPLE-NOTES.md` (round 5, after the owner's second
-  review). The template is frozen (the 14-unit grouping of R stays; pagination may evolve); rounds 4 and 5
-  changed no table cell, only the prose's sources and wording, the record key's places, the plots' size and
+  the re-verification of round 3), `.../doc/sample-r4/SAMPLE-NOTES.md` (round 5, after the owner's second
+  review) and `.../doc/sample-final/SAMPLE-NOTES.md` (the final patch, after the re-verification of round 5,
+  `sample-r4/VERIFY-R4.md`). The template is final (the 14-unit grouping of R stays; pagination may evolve);
+  rounds 4 and 5 and the final patch changed no table cell, only the prose's sources and wording, the record key's places, the plots' size and
   labels, the depth line and the variant labels' separators.
 
 ## Glossary

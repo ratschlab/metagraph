@@ -43,6 +43,17 @@ PLACEHOLDER = "to be written"
 ROUND2_PENDING = ()
 
 
+# The causal or attributive timing wordings no prose file and no line of the generator may carry (the owner's
+# second review, point 3; VERIFY-R4, issue 1): each was removed once and is banned since.
+BANNED_TIMING_WORDINGS = ("upper bound", "as much as the window", "record matters", "orders of magnitude",
+                          "driven by", "for that reason (in this run", "point to", "points to", "reflects the",
+                          "reflect the", "rather than a slower host", "rather than to the cache",
+                          "rather than the front", "at this load", "is read as one", "should agree",
+                          "a first client sees", "host-bound part", "separates little",
+                          "ratio of seconds to milliseconds", "lies in the service's own phases rather than",
+                          "warmer)")
+
+
 def v4():
     manifest = sc.read_json(V4_MANIFEST)
     mapping = units_mod.load_mapping(V4_MAPPING)
@@ -844,6 +855,11 @@ class ReviewRoundTwoTest(unittest.TestCase):
                               + json.dumps(closing.get("intro")) + json.dumps(closing.get("caveats"))
                               + json.dumps(closing.get("sections"))))
         self.assertEqual(used - set(values), set(), "placeholders closing_values does not compute")
+        flags = set(n.lstrip("!").split("=")[0].strip()
+                    for n in re.findall(r"\[\[([^?\[\]]+)\?", json.dumps(closing.get("observations"))))
+        self.assertEqual(flags - set(values), set(), "flags closing_values does not compute")
+        for flag in flags:
+            self.assertIsInstance(values[flag], bool, flag)
         self.assertIn("mcp_phase_largest", values)
         self.assertIn("load_caveat_line", values)
         self.assertEqual(sections.fmt_ratio(275.04), "275")
@@ -1703,7 +1719,9 @@ def budget_fixture(run_dir, perturbed):
 class OwnerReviewTwoTest(unittest.TestCase):
     """The owner's second review (round 5): the plots' size, 'fully checked' over the repeats compared, the timing
     wordings, the conclusions of two fixtures; and the re-verification's low items: the untimed cold split, the
-    number-unit space, the variant labels, the unit note's facts, the record key's wording."""
+    number-unit space, the variant labels, the unit note's facts, the record key's wording. The final patch
+    (VERIFY-R4): the closing section's conditionals on two fixtures, the banned timing wordings, the count grammar
+    and the joined units outside the prose."""
 
     @classmethod
     def setUpClass(cls):
@@ -1769,8 +1787,9 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertNotIn("only findings", gap_a)
         self.assertIn("0.4~s to 5.8~s past their budgets (R-002 5.8~s on direct-local (a finding) and 0.4~s on "
                       "direct-remote)", gap_b)
-        self.assertIn("One of these 503s came more than max(1~s, the budget) after the budget and are findings, "
-                      "the chapter's and the run's only findings", gap_b)
+        self.assertIn("One of these 503s came more than max(1~s, the budget) after the budget and is a finding, "
+                      "the chapter's and the run's only finding;", gap_b)
+        self.assertNotIn("are findings", gap_b)
         # the footnoted tests of the family, singular
         self.assertIn("The one test of R-budget that did not pass on every arm (R-001) has its detail block", gap_a)
         self.assertIn("The one test of R-budget that did not pass on every arm (R-002) has its detail block", gap_b)
@@ -1778,8 +1797,11 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertIn("The stated stop has not been observed on this host", fam_a)
         self.assertNotIn("A stated stop was answered", fam_a)
         self.assertIn("A stated stop was answered (R-001 on direct-local (resolve stopped by time, 20~ms))", fam_b)
-        self.assertIn("one of the one tests did not pass on every arm (R-001)", fam_a)
-        self.assertIn("one of the two tests did not pass on every arm (R-002)", fam_b)
+        self.assertIn("the only test did not pass on every arm (R-001): the coverage gap on the chapter page reads "
+                      "its 503 deadlines past the budget and its detail block follows the table", fam_a)
+        self.assertNotIn("of the one tests", fam_a)
+        self.assertIn("one of the two tests did not pass on every arm (R-002): the coverage gap on the chapter page "
+                      "reads its 503 deadlines past the budget and its detail block follows the table", fam_b)
         self.assertIn("the one other passed on every arm exercised: R-001 (eco, 2,500~ms stop): direct-local a "
                       "pass in 20~ms; direct-remote a pass in 0.1~s; mcp a pass in 0.8~s", fam_b)
         self.assertNotIn("passed on every arm exercised", fam_a)
@@ -1808,6 +1830,117 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertFalse(ctx_a.chapter_values("R")["fam"]["R-budget"]["stop_observed"])
         self.assertEqual(ctx_b.chapter_values("R")["n_finding_executions"], 1)
         self.assertTrue(ctx_b.chapter_values("R")["run_findings_only_here"])
+
+    def test_closing_two_fixtures_change_conclusions(self):
+        """VERIFY-R4, issue 2: the closing section's interpretive clauses follow the computed values, shown on two
+        fixtures whose conditions differ. On the perturbed fixture as built the median backend overhead is below
+        half of the median MCP overhead, the paired medians print in seconds against milliseconds and the MCP arm
+        has no cold-warm pairs; on a copy whose summary and walls are edited each clause flips: the host call
+        carries half or more, both medians print in milliseconds, the cold-warm ratio is far from one and then
+        close to one, and a negative MCP overhead prints neither backend clause."""
+        import sections
+        closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
+        for key in ("mcp_over_local_positive", "backend_share_small", "paired_seconds_to_milliseconds",
+                    "cold_warm_mcp_close"):
+            self.assertIn("[[%s ?" % key, json.dumps(closing["observations"]))
+
+        def render(d):
+            run = reader.Run(d)
+            run.load = {"n": 3, "sra_mean": 7000.0, "load_mean": 200.0, "sra_max": 1.0, "load_max": 1.0}
+            units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+            ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters), closing=closing)
+            obs = " ".join(sections.observations(ctx))
+            self.assertNotIn("UNRESOLVED", obs)
+            self.assertEqual(ctx.unresolved, [])
+            return ctx, obs, sections.closing_values(ctx)
+
+        ctx_a, obs_a, v_a = render(self.dirs["perturbed"])
+        self.assertTrue(v_a["mcp_over_local_positive"])
+        self.assertTrue(v_a["backend_share_small"])
+        self.assertIn("carries less than half of the MCP overhead; the rest lies in the service's own phases (C.3)",
+                      obs_a)
+        self.assertNotIn("half or more", obs_a)
+        self.assertTrue(v_a["paired_seconds_to_milliseconds"])
+        self.assertIn("the two medians 0.9~s against 6~ms, seconds against milliseconds)", obs_a)
+        self.assertFalse(v_a["cold_warm_mcp_close"])
+        self.assertIn("observation cold-warm not computed for this run", obs_a)
+        self.assertNotIn("quarter", obs_a)
+        # the copy: the summary's backend overhead near the MCP overhead, an MCP cold-warm entry far from one,
+        # the paired MCP wall in milliseconds
+        d = os.path.join(self.tmp, "closing-flipped")
+        shutil.copytree(self.dirs["perturbed"], d)
+        comp = sc.read_json(os.path.join(d, "compare.json"))
+        mo = comp["summary"]["mcp_overhead"]
+        self.assertLess(mo["backend_minus_local_ms"]["p50"], 0.5 * mo["minus_local_ms"]["p50"])
+        mo["backend_minus_local_ms"]["p50"] = 0.9 * mo["minus_local_ms"]["p50"]
+        comp["summary"]["cold_warm"]["mcp"] = {"n": 3, "delta_ms": {"p50": 2000.0, "p90": 3000.0},
+                                               "ratio": {"p50": 2.5, "p90": 3.0}}
+        sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+        path = os.path.join(d, "executions.jsonl")
+        rows, _ = sc.read_jsonl(path)
+        os.remove(path)
+        for r in rows:
+            if r["arm"] == "mcp" and r["scenario"] == "P-001":
+                r["wall_ms"] = 50.0
+            sc.append_jsonl(path, r)
+        ctx_b, obs_b, v_b = render(d)
+        self.assertFalse(v_b["backend_share_small"])
+        self.assertIn("carries half or more of the MCP overhead", obs_b)
+        self.assertNotIn("less than half", obs_b)
+        self.assertFalse(v_b["paired_seconds_to_milliseconds"])
+        self.assertIn("the two medians 50~ms against 6~ms)", obs_b)
+        self.assertNotIn("seconds against milliseconds", obs_b)
+        self.assertFalse(v_b["cold_warm_mcp_close"])
+        self.assertIn("(ratio 2.50, n 3)", obs_b)
+        self.assertIn("more than a quarter off its cold one in this run", obs_b)
+        self.assertNotIn("separates the two little", obs_b)
+        # the ratio close to one
+        comp["summary"]["cold_warm"]["mcp"]["ratio"]["p50"] = 1.05
+        sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+        _, obs_c, v_c = render(d)
+        self.assertTrue(v_c["cold_warm_mcp_close"])
+        self.assertIn("within a quarter of its cold one, so the host-cache heuristic separates the two little in "
+                      "this run", obs_c)
+        self.assertNotIn("more than a quarter off", obs_c)
+        # a negative MCP overhead prints neither backend clause
+        mo["minus_local_ms"]["p50"] = -5.0
+        sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+        _, obs_d, v_d = render(d)
+        self.assertFalse(v_d["mcp_over_local_positive"])
+        self.assertFalse(v_d["backend_share_small"])
+        self.assertNotIn("of the MCP overhead", obs_d)
+        self.assertIn("took −5~ms longer", obs_d)
+        # the whole closing section renders on both without an unresolved placeholder or a banned wording
+        for ctx in (ctx_a, ctx_b):
+            text = sections.closing(ctx)
+            self.assertNotIn("UNRESOLVED", text)
+            for bad in BANNED_TIMING_WORDINGS:
+                self.assertNotIn(bad, text)
+
+    def test_units_joined_outside_the_prose(self):
+        """VERIFY-R4, issue 4: a number is joined to its unit in the findings list of I.1, in the summary lines
+        under the tables and in appendix B's quoted texts, not only in the prose paragraphs."""
+        import sections
+        run = reader.Run(self.dirs["perturbed"])
+        units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+        ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        groups = dict(sections.principal_findings(ctx))
+        items = " ".join(item for title in groups for item in groups[title])
+        self.assertIn("5800~ms after the 2500~ms budget", items)
+        self.assertNotRegex(items, r"\d (ms|s|bp)\b")
+        line = sections.family_summary(ctx, "R-budget", ["R-001", "R-002"], [])
+        self.assertRegex(line, r"\d~(ms|s)\b")
+        self.assertNotRegex(line, r"\d (ms|s)\b")
+        run.table["x-units"] = {"areas": ["R"], "agreement": "refused_before_host",
+                                "scenario_match": "a query of 10001 bp",
+                                "service_answer": {"text_contains": "longer than the server limit of 10000 bp"},
+                                "direct_expectation": {"http": 400, "text": "answered within 3000 ms"}}
+        table = sections.by_design_table(ctx)
+        for joined in ("10001~bp", "10000~bp", "3000~ms"):
+            self.assertIn(joined, table)
+        self.assertNotIn("10000 bp", table)
 
     def test_depth_over_compared_repeats(self):
         """The owner's second review, point 2: an agreement's depth is judged over the MCP repeats compare
@@ -1870,15 +2003,17 @@ class OwnerReviewTwoTest(unittest.TestCase):
     def test_timing_wordings(self):
         """The owner's second review, point 3: no 'upper bound', no record-versus-length cause; the owner's
         sentence in the chapter summary, 'observed under concurrent host load' in the generator's three caveats
-        and the closing caveat."""
+        and the closing caveat. VERIFY-R4, issue 1: no causal timing reading in the closing section either (the
+        banned wordings), its limits name what is measured and what is not isolated, and its interpretive
+        clauses are conditionals on computed flags (issue 2)."""
         with open(os.path.join(DOC, "sections.py"), encoding="utf-8") as fh:
             src = fh.read()
-        self.assertNotIn("upper bound", src)
+        for bad in BANNED_TIMING_WORDINGS:
+            self.assertNotIn(bad, src, "sections.py: %r" % bad)
         self.assertEqual(src.count("observed under concurrent host load"), 3)
         for name in PROSE_FILES:
             text = json.dumps(sc.read_json(os.path.join(PROSE_DIR, name)))
-            for bad in ("upper bound", "as much as the window", "record matters", "orders of magnitude",
-                        "driven by", "for that reason (in this run"):
+            for bad in BANNED_TIMING_WORDINGS:
                 self.assertNotIn(bad, text, "%s: %r" % (name, bad))
         summary = " ".join(self.R["summary"])
         self.assertIn("Latency varies substantially across records; these correctness controls do not isolate the "
@@ -1890,6 +2025,18 @@ class OwnerReviewTwoTest(unittest.TestCase):
             self.assertIn("do not isolate the effect of query length", self.R["units"][uid]["note"])
         closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
         self.assertIn("observed under concurrent host load", closing["caveats"][0])
+        obs = json.dumps(closing["observations"])
+        for key in ("mcp_over_local_positive", "backend_share_small", "paired_seconds_to_milliseconds",
+                    "cold_warm_mcp_close"):
+            self.assertIn("[[%s ?" % key, obs)
+        secs = json.dumps(closing["sections"])
+        self.assertIn("the record does not isolate the service's queue, the host's load of that minute and the cache "
+                      "from one another", secs)
+        self.assertIn("the run does not isolate the loop's order from the host's load", secs)
+        self.assertIn("records each answer's body size but does not isolate its effect", secs)
+        self.assertIn("the run does not isolate the host's load from the service's queue in either", secs)
+        self.assertIn("what the host had cached, the loop's order and the load are not isolated from one another", secs)
+        self.assertIn("Nothing here attributes a slow execution to the load", secs)
         # n next to the medians it counts
         self.assertIn("{wall_p50_warm_dl} at the median on direct-local (n {n_warm_dl})", summary)
         self.assertIn("(n {n_server_warm_dl} · {n_server_warm_dr} · {n_server_warm_mcp})", summary)
