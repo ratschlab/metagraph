@@ -3549,6 +3549,10 @@
     {
      "check": "invariants",
      "detail_matches": "([1-9][0-9]*) results for [0-9]+ seeds \\(\\1 distinct\\)"
+    },
+    {
+     "check": "answer_fields",
+     "detail_matches": "field not in the answer: results\\.1\\.duplicate"
     }
    ],
    "agreement": "by_design",

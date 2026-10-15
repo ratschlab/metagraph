@@ -7,7 +7,7 @@
  "by_design_table": {
   "cases": 133,
   "service_commit": "22d034ba5c3de328757f0095c9d48420315ae413",
-  "sha256": "39f87b83e0b0004ace6e062dddf1e95eafd6595f6bbdba6387c10719bec6b228",
+  "sha256": "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44",
   "version": 1
  },
  "counts": {
@@ -426,7 +426,7 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-15T08:03:46.093Z",
+ "generated_utc": "2026-10-15T10:35:39.939Z",
  "manifest": {
   "content_sha256": "3a7417d60e4eb5d0e54433c76139df7ed1221ae35bcccf814b7fca2cf913f113",
   "file": "manifest/suite_v4.json",

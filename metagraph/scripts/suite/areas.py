@@ -790,9 +790,10 @@ def gen_T(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "T", "duplicate seeds: traversed again, marked duplicate", "POST /traverse", req, t,
                         [OK, INV, ex("answer_fields", equals={"results.1.duplicate": True})], tags=["edge"]))
     # the service merges identical seeds before sending, so the duplicate's result cannot exist in the MCP answer:
-    # that check is service-side by design (the owner, 2026-10-15); it is the scenario's only property check, so the
-    # builder marks the whole scenario (build_manifest.scenario_level_marks: mcp.not_implemented)
-    mcp_by_design_check(out[-1], "answer_fields", "traverse.duplicate_seeds")
+    # service-side by design (the owner, 2026-10-15). The table's case traverse.duplicate_seeds (mcp.by_design, from
+    # the request) explains both readings the merge causes, the invariants' "1 results for 2 seeds (1 distinct)" and
+    # answer_fields' "field not in the answer: results.1.duplicate", so the MCP arm runs the scenario, reads
+    # service_by_design and is verified against direct-local; any other failure still fails
     req = traverse_request([_tseed(t["window"], [eco.accession])], base_over, extra={"bogus": 1})
     out.append(scenario(nid(), "T", "an unknown strategy key: refused naming it", "POST /traverse", req, t,
                         [err400("strategy: unknown field 'bogus'")], tags=["edge", "refusal"]))

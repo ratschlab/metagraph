@@ -835,6 +835,17 @@ def entry_explains(entry, check):
         return False
 
 
+def item_explained(entry, check):
+    """Whether one explains_checks entry explains a check item of an execution: an item of outcome fail it explains
+    (entry_explains), or one of outcome not_exposed whose detail an object entry {check, detail_matches} matches
+    completely: the service's path removed the field the check reads (traverse.duplicate_seeds: the merged seed's
+    result, "field not in the answer: results.1.duplicate"). A name entry never explains a not_exposed reading."""
+    outcome = str(check.get("outcome"))
+    if outcome == "fail":
+        return entry_explains(entry, check)
+    return outcome == "not_exposed" and isinstance(entry, dict) and entry_explains(entry, check)
+
+
 def union_of(cases):
     """The union of the matched cases' explains_checks entries (several named answered cases apply together)."""
     entries = [x for c in cases for x in explains(c)]
@@ -1945,16 +1956,16 @@ def named_case_of(cases, scenario, answer, tool_error=None):
 def explained_outcome(checks, explains_names, rule):
     """(the outcome, E) of an execution an answered / clamped case matched (triage-2 B-01; async's runner
     explained_outcome at e334715b, mirrored): F = the failing checks (outcome fail, or one outside the checks'
-    vocabulary), E = those of F with outcome fail that an entry of the case's explains_checks explains
-    (entry_explains: a name, or {check, detail_matches}), U = F - E. fail when
-    U is non-empty; else r = |rule| over the checks without E: finding when r is finding (a by-design mark never
-    erases one), service_by_design when E is non-empty, else r (a case explaining nothing leaves the checks' outcome).
-    E lists each explained check's name once, in check order."""
+    vocabulary), E = the items an entry of the case's explains_checks explains (item_explained: those of F with
+    outcome fail it explains, a name or {check, detail_matches}, and the not_exposed ones whose detail a
+    {check, detail_matches} entry matches), U = F - E. fail when U is non-empty; else r = |rule| over the checks
+    without E: finding when r is finding (a by-design mark never erases one), service_by_design when E is non-empty,
+    else r (a case explaining nothing leaves the checks' outcome). E lists each explained check's name once, in check
+    order."""
     failing = [c for c in checks if str(c.get("outcome")) == "fail" or str(c.get("outcome")) not in sc.CHECK_OUTCOMES]
-    e_items = [c for c in failing if str(c.get("outcome")) == "fail"
-               and any(entry_explains(entry, c) for entry in explains_names)]
+    e_items = [c for c in checks if any(item_explained(entry, c) for entry in explains_names)]
     explained = list(dict.fromkeys(str(c.get("check")) for c in e_items))
-    if len(e_items) < len(failing):
+    if any(all(c is not x for x in e_items) for c in failing):
         return "fail", explained
     rest = [dict(c) for c in checks if all(c is not x for x in e_items)]
     r = str(rule(rest))
@@ -1970,8 +1981,8 @@ def answered_verdict(matched, checks, rule):
     e334715b): explained_outcome against the union of their explains_checks; the case recorded is the first matched
     one that explains an item of E, else the first matched."""
     outcome, explained = explained_outcome(checks, union_of(matched), rule)
-    e_items = [c for c in checks if str(c.get("outcome")) == "fail" and str(c.get("check")) in explained]
-    noted = next((c for c in matched if any(entry_explains(entry, item) for entry in explains(c)
+    e_items = [c for c in checks if str(c.get("check")) in explained]
+    noted = next((c for c in matched if any(item_explained(entry, item) for entry in explains(c)
                                             for item in e_items)), matched[0])
     return outcome, explained, noted.get("id")
 
@@ -1979,10 +1990,10 @@ def answered_verdict(matched, checks, rule):
 def explained_items(checks, entries):
     """The indices of a line's check items an answered / clamped case's explains_checks entries explain (B5b-06:
     per ITEM, as async's runner's explained_outcome keys E and its explained_item_indices records them on the line
-    since f386a3c0: an item of outcome fail that an entry explains, entry_explains: a name every item of that check,
-    {check, detail_matches} an item whose detail it matches; in check order)."""
-    return [i for i, c in enumerate(checks or []) if str(c.get("outcome")) == "fail"
-            and any(entry_explains(entry, c) for entry in entries or [])]
+    since f386a3c0: item_explained, an item of outcome fail that an entry explains, entry_explains: a name every item
+    of that check, {check, detail_matches} an item whose detail it matches, and a not_exposed item whose detail a
+    {check, detail_matches} entry matches; in check order)."""
+    return [i for i, c in enumerate(checks or []) if any(item_explained(entry, c) for entry in entries or [])]
 
 
 def line_explained_items(line, matched, recorded=None):

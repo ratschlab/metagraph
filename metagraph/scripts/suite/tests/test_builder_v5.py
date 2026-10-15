@@ -731,8 +731,9 @@ class BudgetStressRule(unittest.TestCase):
 class McpClassesInTheManifest(unittest.TestCase):
     """The owner's decision (2026-10-15): what the MCP cannot show is classed in the manifest, not declared at the
     gate: C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks;
-    T-edge-0008's answer_fields mcp.by_design_checks, its only property check, so the builder marks the whole scenario
-    (VERIFY-G (c)); gate_policy derives the MCP exemptions; the builder validates."""
+    marks covering every property check become a scenario-level mark (VERIFY-G (c)); gate.py applies the marks, the
+    policy derives no exemption; the builder validates. T-edge-0008 (service-side by design) carries no mark: the
+    table's case traverse.duplicate_seeds explains both readings its merged seed causes on the MCP arm."""
 
     def sc(self, **mcp):
         s = ml.scenario("T-x-0001", "T", "t", "POST /traverse", ml.traverse_request([{"sequence": "A" * 40}]), {},
@@ -815,11 +816,10 @@ class McpClassesInTheManifest(unittest.TestCase):
         for n in (3, 4, 5, 6):
             self.assertEqual(s["T-labels-%04d" % n]["mcp"]["not_implemented_checks"],
                              [{"check": "label_dict_contains", "reason": areas.LABEL_DICT_NOT_VIA_MCP}])
-        # T-edge-0008's only property check is service-side by design: the whole scenario is marked
-        self.assertEqual(s["T-edge-0008"]["mcp"], {
-            "not_implemented": "service-side by design: the table's case traverse.duplicate_seeds; the MCP answer "
-                               "cannot carry answer_fields",
-            "by_design": ["traverse.duplicate_seeds"]})
+        # T-edge-0008 is service-side by design through the table, not a mark: the MCP arm runs it
+        t8 = s["T-edge-0008"]["mcp"]
+        self.assertEqual((t8.get("tool"), t8.get("by_design")), ("traverse_fetch", ["traverse.duplicate_seeds"]))
+        self.assertFalse([k for k in ("not_implemented", "not_implemented_checks", "by_design_checks") if k in t8])
         import build_manifest as bm
         self.assertFalse([x["id"] for x in s.values() if bm.covers_every_property(x)])
         cases = bm._table_cases()

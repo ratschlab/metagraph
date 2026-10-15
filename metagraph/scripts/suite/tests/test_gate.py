@@ -483,6 +483,79 @@ class TwoArmAndDeclaredTest(GateCase):
         self.assertEqual(gate.load_policy(pol)["declared"]["file"], dpath)
 
 
+# an answered case whose path removes a field: the duplicate's result (as traverse.duplicate_seeds explains on MCP)
+MERGED = {"id": "case.answered_merge", "agreement": "by_design",
+          "direct_expectation": {"http": 200, "code": None, "text": None},
+          "service_answer": {"outcome": "answered", "code": None},
+          "explains_checks": [{"check": "contains_source_context", "detail_matches": "1 results for 2 seeds"},
+                              {"check": "answer_fields",
+                               "detail_matches": r"field not in the answer: results\.1\.duplicate"}]}
+
+
+class ExplainedNotExposedTest(GateCase):
+    """An answered case that explains a field its path removes ({check, detail_matches} on a not_exposed reading,
+    compare.item_explained): the MCP execution reads service_by_design with the item in E, and the gate accepts the
+    verified pair as for any answered case (gate.judge's property loop skips an explained item, the pair is judged
+    in the agreement step); without the item in E the property blocks as not_exposed."""
+
+    def run_with(self, name, explained_items):
+        scen = [s for s in scenarios() if s["id"] in ("T-001", "R-002")]
+        scen.append(scenario("T-010", "POST /traverse", by_design=[MERGED["id"]]))
+        m = manifest_of(scen, [])
+        checks = [{"check": "status", "outcome": "pass", "detail": "ok"},
+                  {"check": "contains_source_context", "outcome": "fail", "detail": "1 results for 2 seeds"},
+                  {"check": "answer_fields", "outcome": "not_exposed",
+                   "detail": "field not in the answer: results.1.duplicate"}]
+        e = [checks[i]["check"] for i in explained_items]
+        change = dict((("T-010", r), {"outcome": "service_by_design", "checks": checks,
+                                      "service_by_design_case": MERGED["id"], "explained_checks": e,
+                                      "explained_items": list(explained_items)}) for r in (0, 1))
+        global TABLE
+        saved = TABLE
+        TABLE = (dict(list(saved[0].items()) + [(MERGED["id"], MERGED)]), dict(saved[1], cases=len(saved[0]) + 1))
+        try:
+            d = make_run(self.run_dir(name), m, mcp_lines(m, change=change), direct=("direct-local",))
+            pol = policy_of(m, arms=("mcp", "direct-local"))
+        finally:
+            TABLE = saved
+        return d, pol
+
+    def test_the_rule(self):
+        checks = [{"check": "status", "outcome": "pass", "detail": "ok"},
+                  {"check": "contains_source_context", "outcome": "fail", "detail": "1 results for 2 seeds"},
+                  {"check": "answer_fields", "outcome": "not_exposed",
+                   "detail": "field not in the answer: results.1.duplicate"}]
+        entries = cmp.explains(MERGED)
+        rule = sc.outcome_from_checks
+        self.assertEqual(cmp.explained_outcome(checks, entries, rule),
+                         ("service_by_design", ["contains_source_context", "answer_fields"]))
+        self.assertEqual(cmp.explained_items(checks, entries), [1, 2])
+        # another field missing, or the field present with another value: not explained
+        other = [checks[0], checks[1], dict(checks[2], detail="field not in the answer: results.0.walk")]
+        self.assertEqual(cmp.explained_items(other, entries), [1])
+        wrong = [checks[0], checks[1], dict(checks[2], outcome="fail", detail="results.1.duplicate = False, "
+                                                                              "expected True")]
+        self.assertEqual(cmp.explained_outcome(wrong, entries, rule), ("fail", ["contains_source_context"]))
+        # any unexplained failure still fails; a name entry never explains a not_exposed reading
+        more = checks + [{"check": "invariants", "outcome": "fail", "detail": "result 0 without outcome"}]
+        self.assertEqual(cmp.explained_outcome(more, entries, rule)[0], "fail")
+        self.assertFalse(cmp.item_explained("answer_fields", checks[2]))
+        self.assertTrue(cmp.item_explained("contains_source_context", checks[1]))
+
+    def test_the_gate_accepts_the_verified_pair(self):
+        d, pol = self.run_with("merged", (1, 2))
+        v = gate.judge(d, pol)
+        self.assertTrue(v["passed"], gate.render(v))
+        ma = sc.read_json(os.path.join(d, "compare.json"))["scenarios"]["T-010"]["mcp_agreement"]
+        self.assertEqual((ma["class"], ma["verified"], ma["explained_items"]),
+                         ("service_by_design", True, {"0": [1, 2], "1": [1, 2]}))
+        # a line that records only the failure in E: the removed field blocks as a required property
+        d, pol = self.run_with("failure-only", (1,))
+        v = gate.judge(d, pol)
+        self.assertEqual([(p["kind"], p["scenario"], p["detail"]) for p in v["problems"]],
+                         [("property", "T-010", "required property answer_fields not_exposed")] * 2)
+
+
 class PlanTest(GateCase):
     def test_plan_union_and_reconstruction(self):
         d = self.run_dir()

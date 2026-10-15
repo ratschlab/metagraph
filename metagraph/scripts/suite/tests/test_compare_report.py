@@ -489,11 +489,22 @@ class CompareTest(unittest.TestCase):
         # cases, their old ids kept as aliases: 133)
         self.assertEqual(info["cases"], 133)
         # lane S7v: the vocabulary's wall_rule entry states budget_minus_reserve's threshold (B - 1 s, the name kept);
-        # lane S8g: the discovery cap 1000 of async's fb66f1dd
-        self.assertEqual(info["sha256"], "39f87b83e0b0004ace6e062dddf1e95eafd6595f6bbdba6387c10719bec6b228")
+        # lane S8g: the discovery cap 1000 of async's fb66f1dd; integration stage 2: traverse.duplicate_seeds also
+        # explains the merged seed's missing result
+        self.assertEqual(info["sha256"], "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
-        # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
-        entry, = cases["traverse.duplicate_seeds"]["explains_checks"]
+        # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07),
+        # and the field the merge removes from the MCP answer, results.1.duplicate (T-edge-0008, by design)
+        entry, removed = cases["traverse.duplicate_seeds"]["explains_checks"]
+        self.assertEqual(removed, {"check": "answer_fields",
+                                   "detail_matches": r"field not in the answer: results\.1\.duplicate"})
+        for outcome, detail, explained in (("not_exposed", "field not in the answer: results.1.duplicate", True),
+                                           ("fail", "field not in the answer: results.1.duplicate", True),
+                                           ("not_exposed", "field not in the answer: results.0.duplicate", False),
+                                           ("not_exposed", "field not in the answer: results.1.duplicates", False),
+                                           ("fail", "results.1.duplicate = False, expected True", False)):
+            self.assertEqual(cmp.item_explained(removed, {"check": "answer_fields", "outcome": outcome,
+                                                          "detail": detail}), explained, detail)
         self.assertEqual(entry, {"check": "invariants",
                                  "detail_matches": r"([1-9][0-9]*) results for [0-9]+ seeds \(\1 distinct\)"})
         for detail, explained in (("1 results for 2 seeds (1 distinct)", True),

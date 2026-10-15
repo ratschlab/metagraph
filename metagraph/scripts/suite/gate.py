@@ -39,7 +39,10 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   service_by_design for a case the scenario does not name in the manifest, or a by-design pair not verified (the
   pair verified when a direct arm ran the scenario, the MCP side verified when none did);
 - property: on a passing execution every property check the scenario expects (checks.is_property) passed, unless the
-  policy lists it as not required for that scenario and arm, or (the MCP arm) the manifest marks it not shown via MCP
+  policy lists it as not required for that scenario and arm, or the named answered / clamped case of a by-design
+  execution explains the item (its explained_items: a failure, or a not_exposed reading whose detail an
+  {check, detail_matches} entry matches, compare.item_explained; the pair judged below), or (the MCP arm) the
+  manifest marks it not shown via MCP
   (suite_common.mcp_check_marks: mcp.not_implemented_checks / by_design_checks) and it read not_exposed
   (suite_common.checks_marked_aside; a marked check with no result is a missing result as any other); a passing MCP
   execution whose every property check is marked (suite_common.every_property_marked: a scenario-level mark) is a
@@ -645,9 +648,11 @@ def judge(run_dir, policy, reevaluated=False):
                     continue
                 if out == "pass":
                     continue
-                if out == "fail" and _explained_property(r, name, k) and \
+                if out in ("fail", "not_exposed") and _explained_property(r, name, k) and \
                         r.get("service_by_design_case") in cmp.case_ids(s):
-                    continue   # the named answered / clamped case explains it: judged with the pair below
+                    # the named answered / clamped case explains it (a failure, or a field its path removed:
+                    # compare.item_explained): judged with the pair below
+                    continue
                 if prop:
                     if not not_required(policy, sid, arm, name):
                         problems.append(_problem("property", "required property %s %s" % (label, out), sid, arm, rep))
