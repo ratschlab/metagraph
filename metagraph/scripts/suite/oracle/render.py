@@ -9,6 +9,29 @@ Node ids are fake but valid: the rank of the k-mer in BOSS order, plus one (row 
 from . import oracle as O
 
 
+def node_and_row(index, kmer):
+    """Fake but valid ids (SPEC 7.10): BASIC and CANONICAL nodes in BOSS order (rank + 1), the
+    row the node of the pair's smaller node minus 1 on CANONICAL; PRIMARY stores the
+    co-lexicographically smaller k-mer of each pair (ids 1..D in that order), its reverse
+    complement is virtual at + D, and the row is the stored k-mer's."""
+    rc = O.revcomp(kmer)
+    if index.mode == 'basic':
+        node = index.rank[kmer] + 1
+        return node, node - 1
+    if index.mode == 'canonical':
+        node = index.rank[kmer] + 1
+        return node, min(node, index.rank[rc] + 1) - 1
+    stored = getattr(index, '_stored', None)
+    if stored is None:
+        reps = sorted({min(x, O.revcomp(x), key=O.colex_key) for x in index.kmers},
+                      key=O.colex_key)
+        stored = {x: i + 1 for i, x in enumerate(reps)}
+        index._stored = stored
+    rep = min(kmer, rc, key=O.colex_key)
+    base = stored[rep]
+    return (base if kmer == rep else base + len(stored)), base - 1
+
+
 def _count(value, unit='graph_contexts', relation='exact'):
     return {'value': value if relation != 'unknown' else None, 'relation': relation, 'unit': unit}
 
@@ -111,11 +134,21 @@ def render_entry(index, config, request, position, max_contexts=10 ** 9, stop_af
         else:
             released, cut = ctxs[:max_contexts], {'reason': 'max_contexts'}
     sk = 'strand' if config.mode == 'basic' else 'orientation'
+    if config.mode == 'primary':
+        # PRIMARY answers in wrapper-id order (SPEC 7.9): the cut is the first by node
+        def pkey(c):
+            return (c.level, node_and_row(index, c.kmer)[0], c.offset,
+                    O.ORIENTATION_RANK[c.orientation])
+        ordered = sorted(found if stopped else ctxs, key=pkey)
+        if cut is not None or withheld is not None or stopped:
+            released = ordered[:len(released)] if not stopped else released
+        else:
+            released = ordered
     results = []
     for c in released:
-        node = index.rank[c.kmer] + 1
+        node, row = node_and_row(index, c.kmer)
         r = {'kmer': c.kmer, 'instance': c.kmer[c.offset:c.offset + pat.length],
-             'offset': c.offset, sk: c.orientation, 'node': node, 'row': node - 1}
+             'offset': c.offset, sk: c.orientation, 'node': node, 'row': row}
         if m:
             r['mismatches'] = c.level
             r['substitutions'] = _subs(pat, c.subs)

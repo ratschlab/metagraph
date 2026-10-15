@@ -305,3 +305,43 @@ class Probes(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RowsAndTwins(unittest.TestCase):
+    """Verification H4: rows on CANONICAL and PRIMARY (SPEC 7.10), and the PRIMARY partial cut
+    held to its ample twin (ORACLE-DESIGN 4.5, verification M5)."""
+
+    def test_g7_a_canonical_row_off_by_one_fails(self):
+        index, config = fixture_index('canonical'), CONFIGS['canonical']
+        req = {'mode': 'all_or_count', 'patterns': [{'iupac': 'GNNNA'}]}
+        answer = R.render_answer(index, config, req)
+        self.assertEqual(C.PASS, outcome(C.compare_pattern(index, config, req, answer)))
+        for r in answer['patterns'][0]['results']:
+            r['row'] += 1
+        failed = {x['check'] for x in C.compare_pattern(index, config, req, answer)[0][1].failed()}
+        self.assertIn('results.row', failed)
+
+    def test_a_primary_row_of_the_wrong_pair_fails(self):
+        index, config = fixture_index('primary'), CONFIGS['primary']
+        req = {'mode': 'all_or_count', 'patterns': [{'iupac': 'GNNNA'}]}
+        answer = R.render_answer(index, config, req)
+        self.assertEqual(C.PASS, outcome(C.compare_pattern(index, config, req, answer)))
+        rs = answer['patterns'][0]['results']
+        rs[0]['row'] = rs[-1]['row'] if rs[-1]['row'] != rs[0]['row'] else rs[0]['row'] + 7
+        failed = {x['check'] for x in C.compare_pattern(index, config, req, answer)[0][1].failed()}
+        self.assertIn('results.row', failed)
+
+    def test_g6_a_primary_cut_listing_a_later_kmer_fails_against_its_twin(self):
+        index, config = fixture_index('primary'), CONFIGS['primary']
+        req = {'mode': 'partial', 'max_contexts': 5, 'patterns': [{'iupac': 'GNNNA'}]}
+        answer = R.render_answer(index, config, req, 5)
+        twin = R.render_answer(index, config, dict(req, max_contexts=100000))
+        twins = {0: twin['patterns'][0]}
+        self.assertEqual(C.PASS, outcome(C.compare_pattern(index, config, req, answer, 5,
+                                                           twins)))
+        # the last listed context replaced by a context the complete list has later
+        later = twin['patterns'][0]['results'][7]
+        answer['patterns'][0]['results'][4] = later
+        failed = {x['check'] for x in C.compare_pattern(index, config, req, answer, 5,
+                                                        twins)[0][1].failed()}
+        self.assertIn('results.complete', failed)

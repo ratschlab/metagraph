@@ -151,7 +151,25 @@ def run_config(name, built, mg, out, fixture_sets, args, rep):
                 continue
             max_contexts = min(item['request'].get('max_contexts', SERVER_MAX_CONTEXTS),
                                SERVER_MAX_CONTEXTS)
-            compared = C.compare_pattern(index, cfg, item['request'], body, max_contexts)
+            twins = None
+            if cfg.mode == 'primary' and item['request'].get('mode') == 'partial' and any(
+                    (e.get('cut') or {}).get('reason') == 'max_contexts'
+                    for e in body.get('patterns') or [] if isinstance(e, dict)):
+                # the ample twin of a PRIMARY partial cut (ORACLE-DESIGN 4.5): the same request
+                # with max_contexts at the cap; each cut list must be its first contexts
+                req2 = dict(item['request'], max_contexts=SERVER_MAX_CONTEXTS)
+                st2, twin = server.post('pattern', req2)
+                with gzip.open(os.path.join(raw, item['id'] + '.twin.json.gz'), 'wt') as f:
+                    json.dump({'request': req2, 'status': st2, 'answer': twin}, f,
+                              sort_keys=True)
+                if st2 == 200 and isinstance(twin, dict):
+                    twins = {i: e for i, e in enumerate(twin.get('patterns') or [])}
+                    for pos2, ch2, _ in C.compare_pattern(index, cfg, req2, twin,
+                                                          SERVER_MAX_CONTEXTS):
+                        _record(rep, info, record, dict(item, id=item['id'] + ':twin',
+                                                        request=req2), pos2, ch2, None, None,
+                                None)
+            compared = C.compare_pattern(index, cfg, item['request'], body, max_contexts, twins)
             sticky = None
             for pos, checks, exp in compared:
                 entry = body['patterns'][pos] if pos is not None else None
@@ -164,7 +182,8 @@ def run_config(name, built, mg, out, fixture_sets, args, rep):
                     for mname, fam, mutated in M.mutations_for_entry(index, cfg, exp, entry,
                                                                       incomplete):
                         mc, _ = C.compare_entry(index, cfg, item['request'], pos, mutated,
-                                                sticky, max_contexts, exp)
+                                                sticky, max_contexts, exp,
+                                                twin=(twins or {}).get(pos))
                         _mutation(rep, item, pos, mname, fam, M.caught(mc, fam))
                 if sticky is None:
                     sticky = C.sticky_stop(entry.get('stop'), item['request'])

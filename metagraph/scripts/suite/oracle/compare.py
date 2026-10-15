@@ -165,7 +165,7 @@ def _subs_json(pattern, subs):
 
 
 def compare_entry(index, config, request, position, entry, previous_stop=None,
-                  max_contexts=None, exp=None):
+                  max_contexts=None, exp=None, twin=None):
     """Checks of the entry at |position| of |request|'s answer. |previous_stop|: the stop a later
     pattern must carry after an earlier pattern's budget stop (sticky, SPEC section 7.6), or
     None. |max_contexts|: the request's effective max_contexts (the server's cap applied).
@@ -225,7 +225,7 @@ def compare_entry(index, config, request, position, entry, previous_stop=None,
     _counts(checks, index, config, exp, entry, stopped, released)
     results = entry.get('results')
     if exp.mode != 'count' and isinstance(results, list):
-        _results(checks, config, exp, entry, results, released, stopped)
+        _results(checks, config, exp, entry, results, released, stopped, twin)
         if exp.labels == 'all':
             _labels(checks, index, config, exp, entry, results, released, stopped)
     elif exp.mode != 'count':
@@ -435,7 +435,7 @@ def _counts(checks, index, config, exp, entry, stopped, released):
                    c.get('by_mismatches'))
 
 
-def _results(checks, config, exp, entry, results, released, stopped):
+def _results(checks, config, exp, entry, results, released, stopped, twin=None):
     pat = exp.pattern
     L = pat.length
     seen, extra, dup, bad_fields = set(), [], [], []
@@ -480,6 +480,10 @@ def _results(checks, config, exp, entry, results, released, stopped):
     checks.add('results.node', not node_conflicts and not collisions,
                'one node per k-mer, one k-mer per node',
                {'conflicts': node_conflicts[:10], 'collisions': list(collisions.items())[:10]})
+    if config.mode != 'basic':
+        bad_rows = _row_problems(config, results, nodes)
+        checks.add('results.row', not bad_rows, 'the row of the canonical pair (SPEC 7.10)',
+                   bad_rows[:10])
     # the order (SPEC 7.9, 21.7)
     if config.mode in ('basic', 'canonical'):
         valid = [r for r in results if _result_identity(config, r) in exp.by_identity]
@@ -499,11 +503,21 @@ def _results(checks, config, exp, entry, results, released, stopped):
         return
     want = [c.identity for c in released]
     got = [_result_identity(config, r) for r in results]
+    if config.mode == 'primary' and len(released) < len(exp.ctxs) and twin is not None:
+        # a partial cut on PRIMARY, held to the ample twin request (ORACLE-DESIGN 4.5): the
+        # twin is the complete list (itself held to the oracle), the cut its first contexts
+        twin_ids = [_result_identity(config, r) for r in twin.get('results') or []]
+        ok = (twin.get('retrieval_complete') is True and set(twin_ids) == set(exp.by_identity)
+              and got == twin_ids[:len(want)])
+        checks.add('results.complete', ok, {'the twin\'s first': len(want)},
+                   {'first_difference': _first_diff(twin_ids[:len(want)], got),
+                    'twin_complete': twin.get('retrieval_complete')})
+        return
     if config.mode == 'primary' and len(released) < len(exp.ctxs):
-        # a partial cut on PRIMARY: the first max_contexts by the wrapper's node ids, which the
-        # oracle does not predict; but the k-mers the list holds have known ids, and every
-        # oracle context of those k-mers that precedes the last listed one in answer order
-        # (level, node, offset, orientation) must be listed too
+        # a partial cut on PRIMARY without a twin: the first max_contexts by the wrapper's node
+        # ids, which the oracle does not predict; but the k-mers the list holds have known ids,
+        # and every oracle context of those k-mers that precedes the last listed one in answer
+        # order (level, node, offset, orientation) must be listed too
         nodes_of = {r.get('kmer'): r.get('node') for r in results}
 
         def key(level, kmer, offset, orientation):
@@ -528,6 +542,51 @@ def _results(checks, config, exp, entry, results, released, stopped):
         ok = got == want
     checks.add('results.complete', ok, {'count': len(want), 'missing': missing[:20]},
                {'count': len(got), 'first_difference': _first_diff(want, got)})
+
+
+def _row_problems(config, results, nodes):
+    """SPEC 7.10: one row per pair (x, rc(x)). On CANONICAL the row is the canonical k-mer's
+    node - 1, the canonical k-mer the one with the smaller BOSS edge index, which the oracle
+    predicts from the co-lexicographic order; when both are listed, row + 1 is their smaller
+    node. On PRIMARY the row is the stored k-mer's: node - row - 1 is 0 for the stored
+    orientation and one wrapper offset D for a virtual reverse complement, one D per answer,
+    and of a listed pair exactly one is stored."""
+    out = []
+    pair_row, offsets = {}, set()
+    for r in results:
+        x, node, row = r.get('kmer'), r.get('node'), r.get('row')
+        if not (isinstance(x, str) and isinstance(node, int) and isinstance(row, int)):
+            out.append(('row or node missing', x, node, row))
+            continue
+        y = O.revcomp(x)
+        pair = min(x, y)
+        if pair_row.setdefault(pair, row) != row:
+            out.append(('two rows for one pair', pair, pair_row[pair], row))
+        if config.mode == 'canonical':
+            if x == y or O.colex_key(x) < O.colex_key(y):
+                if row != node - 1:
+                    out.append(('canonical k-mer row != node - 1', x, node, row))
+            else:
+                other = nodes.get(y)
+                if not row < node - 1 or (other is not None and row != other - 1):
+                    out.append(('row not its reverse complement\'s node - 1', x, node, row,
+                                other))
+        else:
+            d = node - row - 1
+            if d != 0:
+                offsets.add(d)
+            if d < 0:
+                out.append(('row above node - 1', x, node, row))
+    if config.mode == 'primary':
+        if len(offsets) > 1:
+            out.append(('more than one wrapper offset', sorted(offsets)))
+        for x, n in nodes.items():
+            y = O.revcomp(x)
+            if y != x and y in nodes and x < y:
+                stored = [z for z in (x, y) if nodes[z] - pair_row[min(x, y)] - 1 == 0]
+                if len(stored) != 1:
+                    out.append(('a listed pair with not exactly one stored k-mer', x, y))
+    return out
 
 
 def _order_key(exp, config, r):
@@ -678,7 +737,7 @@ def sticky_stop(stop, request):
     return out
 
 
-def compare_pattern(index, config, request, answer, max_contexts=None):
+def compare_pattern(index, config, request, answer, max_contexts=None, twins=None):
     """-> [(position, Checks, Expectation)] for every pattern of the request."""
     out = []
     patterns = answer.get('patterns') if isinstance(answer, dict) else None
@@ -690,7 +749,8 @@ def compare_pattern(index, config, request, answer, max_contexts=None):
     sticky = None
     steps = 0
     for i, entry in enumerate(patterns):
-        checks, exp = compare_entry(index, config, request, i, entry, sticky, max_contexts)
+        checks, exp = compare_entry(index, config, request, i, entry, sticky, max_contexts,
+                                    twin=(twins or {}).get(i))
         if i == 0:
             _index_block(checks, config, answer.get('index'))
         stop = entry.get('stop') if isinstance(entry, dict) else None
