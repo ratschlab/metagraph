@@ -28,9 +28,13 @@ alone (`n_warm_up_direct_pairs`, `n_warm_ups_after_target_direct`, `warm_ups_all
 `n_warm_up_reruns_without_target`; and per family `n_footnoted_late503` and `footnoted_all_late503`, so that
 R-budget's prose claims 503 deadlines only for footnoted members that answered one. After VERIFY-R5-2 the 503 facts
 add `late503_ids_text` ('a and b') and `late503_range_text` (one value when the earliest and the latest lateness
-print alike), the warm-ups' order `warm_ups_after_target_direct_arms` (the direct arm, or 'both direct arms'), and a
+print alike), the warm-ups' order `warm_ups_after_target_direct_arms` (the direct arm, or 'both direct arms'), and per
 family the stops that completed without a stop and without a 503 (`n_stops_complete`, `stops_complete_text`), so
-that the coverage gap names the tests that answered a 503 and those that completed. The run-wide placeholders
+that the coverage gap names the tests that answered a 503 and those that completed. After VERIFY-R5-3, per family
+`n_stops` and `stops_all_complete` (every stop completed within its budget without a stop), so that the coverage gap says 'the stops completed'
+only then and otherwise names those that did; and `n_late503_findings` (the 503 deadlines that are findings, beyond
+max(1 s, the budget)) with `late503_findings_only_in_run` (the run's findings are exactly those), so that 'of these
+503s' counts no other finding, such as a 200 past its budget. The run-wide placeholders
 (sections.Context.placeholders) read `resolve_stops`: the stated stops of /resolve over the whole run on every arm
 (`n_resolve_stops`, `resolve_stop_observed`, `resolve_stop_ids`), for the glossary's entry on the stated stop.
 
@@ -573,12 +577,14 @@ def _findings(ctx, sids):
 def _late503(ctx, sids):
     """The 503 deadlines past a budget over the scenarios: {n_late503 (the executions), n_late503_tests, late503_ids
     ('a, b'), late503_ids_text ('a, b and c'), late503_min, late503_max, late503_range_text ('1.2 s to 25 s', or the one
-    value when both print alike), late503_text, and per arm n_late503_tests_<arm> and late503_<arm>_ids}; `late503_id_list`
-    is the ids as a list for the Python readers (family_facts), not for the prose."""
+    value when both print alike), late503_text, n_late503_findings (the executions among them that are findings: more
+    than max(1 s, the budget) late, checks.budget_respected), and per arm n_late503_tests_<arm> and late503_<arm>_ids};
+    `late503_id_list` is the ids as a list for the Python readers (family_facts), not for the prose."""
     run = ctx.run
     lates = []
     ids = []
     per = []
+    n_findings = 0
     by_arm = dict((arm, []) for arm in ARMS)
     for sid in sids:
         items = []
@@ -588,6 +594,7 @@ def _late503(ctx, sids):
                 if late is None:
                     continue
                 lates.append(late)
+                n_findings += 1 if l.get("outcome") == "finding" else 0
                 items.append("%s on %s%s" % (fmt_t(late), arm, " (a finding)" if l.get("outcome") == "finding" else ""))
                 if sid not in by_arm[arm]:
                     by_arm[arm].append(sid)
@@ -597,7 +604,8 @@ def _late503(ctx, sids):
     lo, hi = (fmt_t(min(lates)), fmt_t(max(lates))) if lates else ("–", "–")
     out = {"n_late503": len(lates), "n_late503_tests": len(ids), "late503_ids": ", ".join(ids),
            "late503_ids_text": _join(ids), "late503_id_list": list(ids), "late503_min": lo, "late503_max": hi,
-           "late503_range_text": lo if lo == hi else "%s to %s" % (lo, hi), "late503_text": "; ".join(per)}
+           "late503_range_text": lo if lo == hi else "%s to %s" % (lo, hi), "late503_text": "; ".join(per),
+           "n_late503_findings": n_findings}
     # the tests with a 503 deadline per arm (VERIFY-PLXM M4: the counts per direct arm)
     for arm in ARMS:
         out["n_late503_tests_%s" % ARM_KEY[arm]] = len(by_arm[arm])
@@ -961,8 +969,10 @@ def family_facts(ctx, fid):
     `mcp_<class>_codes`, `mcp_classes_text`, `mcp_all_refused_before_host`), the clean and footnoted members with
     their phrases (`clean_text`, `footnoted_text`), every member's phrase, the findings, the 503 deadlines past
     their budgets (and whether every footnoted member answered one: `n_footnoted_late503`,
-    `footnoted_all_late503`), the stated stops, the stops that completed without a stop and without a 503
-    (`n_stops_complete`, `stops_complete_text`), the time limitations (_time_limitations), the relations, the owner's declared
+    `footnoted_all_late503`; whether the run's findings are exactly the 503 deadlines that are findings:
+    `late503_findings_only_in_run`), the stated stops, the stops (`n_stops`) and those that completed without a stop
+    and without a 503 (`n_stops_complete`, `stops_complete_text`, `stops_all_complete`), the time limitations
+    (_time_limitations), the relations, the owner's declared
     exemptions, the warm-ups' order against their targets (_warm_ups, manifest v5), the expected runs, the gate's
     outcome problems among the members, `direct_all_pass`, `manifest_version` and `x` (the members' scenario facts)."""
     f = ctx.units.families.get(fid) or {}
@@ -1013,8 +1023,16 @@ def family_facts(ctx, fid):
     # the stops that completed: every direct execution a complete 200 and no 503 deadline on any arm (VERIFY-R5-2
     # issue 1: the coverage gap says so of a stop even when another member answered a 503)
     complete = [sid for sid in stops if sid not in late_ids and _completed_without_stop(ctx.run, sid)]
+    v["n_stops"] = len(stops)
     v["n_stops_complete"] = len(complete)
     v["stops_complete_text"] = _join(complete)
+    v["stops_all_complete"] = bool(stops) and len(complete) == len(stops)
+    # whether the run's findings are exactly this family's 503 deadlines beyond max(1 s, the budget) (VERIFY-R5-3
+    # issue 1: the coverage gap's 'of these 503s ... the run's only findings' counts no other finding, such as a
+    # 200 past its budget, and claims the run's findings only when they are these)
+    totals = ctx.run.summary().get("totals") or {}
+    run_findings = sum((totals.get(a) or {}).get("outcomes", {}).get("finding", 0) for a in ARMS)
+    v["late503_findings_only_in_run"] = bool(v["n_late503_findings"]) and v["n_late503_findings"] == run_findings
     return v
 
 

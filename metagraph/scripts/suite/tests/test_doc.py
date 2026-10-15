@@ -2786,7 +2786,7 @@ class V5ScaffoldTest(unittest.TestCase):
         fb2 = facts.family_facts(ctx, "R-budget")
         self.assertEqual((fb2["n_warm_up_direct_pairs"], fb2["n_warm_ups_after_target_direct"]), (4, 2))
         self.assertEqual(fb2["warm_ups_after_target_direct_arms"], "both direct arms")
-        self.assertIn("In this run two executions of a complete twin did not start before its stop's on both direct arms "
+        self.assertIn("In this run two executions of the complete twins did not start before their stops' on both direct arms "
                       "(R-twin-0004 on direct-local (started 12 s after its target R-budget-0002); R-twin-0004 on direct-remote "
                       "(started 12 s after its target R-budget-0002)), against the design.", facts.fill(budget_prose, fb2))
         run.arm_lines = lambda sid, arm: ([late_twin(arm)] if (sid, arm) == ("R-twin-0004", "direct-local") else orig(sid, arm))
@@ -2814,10 +2814,15 @@ class V5ScaffoldTest(unittest.TestCase):
         `complete`, both stops complete within their budgets on the direct arms (resolve_runs inconclusive, no stop
         happened); `mixed`, R-budget-0001 completes and R-budget-0002 answers a 503 deadline 0.8 s past its budget on
         direct-local (inconclusive: under max(1 s, the budget)) and completes on direct-remote; `all_late`, both stops
-        answer a 503 deadline on both direct arms, R-budget-0001 1.3 s past its 480 ms budget (allowed) and
-        R-budget-0002 2.5 s past its 420 ms budget (a finding), while the complete twins keep the fake's passes
-        (VERIFY-R5-2 issue 1: v5's likely outcome, the stops late and the twins clean). Returns (chapter R's text with
-        ~ and allowbreak removed, the coverage gap's paragraph, R-budget's family facts)."""
+        answer a 503 deadline on both direct arms, R-budget-0001 0.9 s past its 480 ms budget (allowed: under max(1 s,
+        the budget), VERIFY-R5-3 issue 4) and R-budget-0002 2.5 s past its 420 ms budget (a finding), while the
+        complete twins keep the fake's passes (VERIFY-R5-2 issue 1: v5's likely outcome, the stops late and the twins
+        clean); `stop_error`, R-budget-0001 completes and R-budget-0002 answers an http 500 on both direct arms (an
+        error, no 503); `over_budget`, R-budget-0001 completes and R-budget-0002 answers a 200 past its budget on
+        both direct arms (budget_respected a finding, no 503); `late_and_over`, R-budget-0001 answers a 503 deadline
+        1.3 s past its budget on both direct arms (findings) and R-budget-0002 a 200 past its budget on both (findings
+        too; VERIFY-R5-3 issue 1). Returns (chapter R's text with ~ and allowbreak removed, the coverage gap's
+        paragraph, R-budget's family facts)."""
         p = os.path.join(self.tmp, name)
         shutil.copytree(self.run_dir, p)
         complete = [{"check": "status", "outcome": "pass", "detail": "ok"},
@@ -2837,15 +2842,34 @@ class V5ScaffoldTest(unittest.TestCase):
             return dict(r, outcome="finding" if finding else "inconclusive", http=503, error=err,
                         wall_ms=float(budget_ms + ms), checks=checks)
 
+        def errored(r):
+            return dict(r, outcome="error", http=500, error={"code": "internal", "text": "internal error"}, wall_ms=300.0,
+                        checks=[{"check": "status", "outcome": "fail", "detail": "http 500, expected 200", "property": False}])
+
+        def over_budget(r, budget_ms, ms):
+            return dict(r, outcome="finding", http=200, wall_ms=float(budget_ms + ms),
+                        checks=[c if c["check"] != "budget_respected" else
+                                {"check": "budget_respected", "outcome": "finding",
+                                 "detail": "a 200 at a client wall time of %d ms, %d ms past the %d ms budget" % (budget_ms + ms, ms, budget_ms)}
+                                for c in complete])
+
         for arm in ("direct-local", "direct-remote"):
             path = os.path.join(p, "arms", arm, "executions.jsonl")
             rows, _ = sc.read_jsonl(path)
             os.remove(path)
             for r in rows:
                 if r["scenario"] == "R-budget-0001" and mode == "all_late":
-                    r = late(r, 480, 1300, False)
+                    r = late(r, 480, 900, False)
                 elif r["scenario"] == "R-budget-0002" and mode == "all_late":
                     r = late(r, 420, 2500, True)
+                elif r["scenario"] == "R-budget-0002" and mode == "stop_error":
+                    r = errored(r)
+                elif r["scenario"] == "R-budget-0002" and mode == "over_budget":
+                    r = over_budget(r, 420, 900)
+                elif r["scenario"] == "R-budget-0001" and mode == "late_and_over":
+                    r = late(r, 480, 1300, True)
+                elif r["scenario"] == "R-budget-0002" and mode == "late_and_over":
+                    r = over_budget(r, 420, 900)
                 elif r["scenario"] == "R-budget-0002" and mode == "mixed" and arm == "direct-local":
                     r = late(r, 420, 800, False)
                 elif r["scenario"] in ("R-budget-0001", "R-budget-0002"):
@@ -2913,13 +2937,15 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertEqual((fb["n_footnoted"], fb["n_late503"], fb["n_late503_tests"], fb["n_footnoted_late503"]), (2, 4, 2, 2))
         self.assertTrue(fb["footnoted_all_late503"])
         self.assertEqual(fb["late503_id_list"], ["R-budget-0001", "R-budget-0002"])
-        self.assertEqual((fb["late503_ids_text"], fb["late503_range_text"]), ("R-budget-0001 and R-budget-0002", "1.3 s to 2.5 s"))
+        self.assertEqual((fb["late503_ids_text"], fb["late503_range_text"]), ("R-budget-0001 and R-budget-0002", "0.9 s to 2.5 s"))
         self.assertEqual((fb["n_stops_complete"], fb["stops_complete_text"], fb["n_finding_executions"]), (0, "", 2))
+        self.assertEqual((fb["n_stops"], fb["stops_all_complete"]), (2, False))
+        self.assertEqual((fb["n_late503_findings"], fb["late503_findings_only_in_run"]), (2, True))
         self.assertIn("nor the complete 60 s twins answered one. On this host", gap)
-        self.assertIn("R-budget-0001 and R-budget-0002 answered 503 deadline, 1.3 s to 2.5 s past their budgets (R-budget-0001 "
-                      "1.3 s on direct-local and 1.3 s on direct-remote; R-budget-0002 2.5 s on direct-local (a finding) and "
+        self.assertIn("R-budget-0001 and R-budget-0002 answered 503 deadline, 0.9 s to 2.5 s past their budgets (R-budget-0001 "
+                      "0.9 s on direct-local and 0.9 s on direct-remote; R-budget-0002 2.5 s on direct-local (a finding) and "
                       "2.5 s on direct-remote (a finding)). Two of these 503s came more than max(1 s, the budget) after the "
-                      "budget and are findings", gap)
+                      "budget and are findings, the chapter's and the run's only findings;", gap)
         # no twin is said to have answered a 503: the twins are named only where the gap says they answered no stop
         sentence_503 = gap.split("answered one.", 1)[1].split("So the prefix property", 1)[0]
         self.assertNotIn("twin", sentence_503)
@@ -2928,6 +2954,39 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertIn("two of the six tests did not pass on every arm (R-budget-0001, R-budget-0002): the coverage gap on the "
                       "chapter page reads their 503 deadlines past the budget and their detail blocks follow the table; the four "
                       "others passed on every arm exercised: R-twin-0002", tex)
+
+    def test_chapter_r_budget_no_503_other_outcomes(self):
+        """VERIFY-R5-3 issue 1: without a 503 the coverage gap says 'The stops completed within their budgets' only when
+        every stop did; a stop that errored or answered a 200 past its budget is neither, so the gap names the one that
+        completed. 'Of these 503s' counts the 503 deadlines that are findings, so a 200 past its budget (a finding
+        too) is not called a 503, and 'the run's only findings' is claimed only when the run's findings are exactly
+        the 503 ones."""
+        tex, gap, fb = self._budget_fixture("budget-stop-error", "stop_error")
+        self.assertEqual((fb["n_stops"], fb["n_stops_complete"], fb["stops_all_complete"], fb["n_late503"]), (2, 1, False, 0))
+        self.assertEqual((fb["n_finding_executions"], fb["n_late503_findings"], fb["late503_findings_only_in_run"]), (0, 0, False))
+        self.assertIn("nor the complete 60 s twins answered one. R-budget-0001 completed within its budget without a stop. "
+                      "So the prefix property is inconclusive wherever it was asked", gap)
+        for text in ("The stops completed within their budgets", "of these 503s", "answered 503 deadline"):
+            self.assertNotIn(text, gap, text)
+        tex, gap, fb = self._budget_fixture("budget-over-budget", "over_budget")
+        self.assertEqual((fb["n_stops"], fb["n_stops_complete"], fb["stops_all_complete"], fb["n_late503"]), (2, 1, False, 0))
+        self.assertEqual((fb["n_finding_executions"], fb["n_late503_findings"], fb["late503_findings_only_in_run"]), (2, 0, False))
+        self.assertIn("nor the complete 60 s twins answered one. R-budget-0001 completed within its budget without a stop. "
+                      "So the prefix property is inconclusive wherever it was asked", gap)
+        for text in ("The stops completed within their budgets", "of these 503s", "answered 503 deadline", "only finding"):
+            self.assertNotIn(text, gap, text)
+        tex, gap, fb = self._budget_fixture("budget-late-and-over", "late_and_over")
+        self.assertEqual((fb["n_stops"], fb["n_stops_complete"], fb["stops_all_complete"], fb["n_late503"]), (2, 0, False, 2))
+        self.assertEqual((fb["n_finding_executions"], fb["n_late503_findings"], fb["late503_findings_only_in_run"]), (4, 2, False))
+        self.assertIn("R-budget-0001 answered 503 deadline, 1.3 s past its budget (R-budget-0001 1.3 s on direct-local (a finding) "
+                      "and 1.3 s on direct-remote (a finding)). Two of these 503s came more than max(1 s, the budget) after the "
+                      "budget and are findings; SPEC section 4.5 names the pieces", gap)
+        for text in ("Four of these 503s", "only finding", "completed within"):
+            self.assertNotIn(text, gap, text)
+        # the complete fixture: every stop completed, the plural sentence (unchanged)
+        tex, gap, fb = self._budget_fixture("budget-complete-2", "complete")
+        self.assertEqual((fb["n_stops"], fb["n_stops_complete"], fb["stops_all_complete"]), (2, 2, True))
+        self.assertIn("The stops completed within their budgets without a stop, so the property was not exercised.", gap)
 
 
 # ---------------------------------------------------------------------------------------------------------------
