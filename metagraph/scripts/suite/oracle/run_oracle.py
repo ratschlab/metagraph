@@ -29,10 +29,15 @@ from oracle import compare as C  # noqa: E402
 from oracle import mutations as M  # noqa: E402
 from oracle import oracle as O  # noqa: E402
 from oracle import requests_gen  # noqa: E402
+from oracle import traverse_compare as TC  # noqa: E402
+from oracle import traverse_fixtures  # noqa: E402
+from oracle import traverse_gen  # noqa: E402
+from oracle import traverse_oracle as TO  # noqa: E402
 from oracle.server import Server, ServerError  # noqa: E402
 
 DEFAULT_CONFIGS = list(indexes.CONFIGS)
 SERVER_MAX_CONTEXTS = 100000
+traverse_cases = {}
 
 _running = []
 
@@ -53,19 +58,30 @@ def utc():
 
 
 def config_for(name):
-    mode, k, masked, anno = indexes.CONFIGS[name]
+    mode, k, masked, anno, _ = indexes.CONFIGS[name]
     return C.Config(name, mode, k, masked=masked,
                     annotation='budgeted' if anno == 'row_diff_brwt_coord' else 'unbudgeted')
 
 
-def run_config(name, built, mg, out, columns, args, rep):
+def run_config(name, built, mg, out, fixture_sets, args, rep):
     cfg = config_for(name)
-    index = O.Index(fixtures.all_records(columns), cfg.k, cfg.mode)
-    reqs = requests_gen.generate(index, name, args.seed, labels_ok=True,
-                                 resolve_ok=cfg.mode == 'basic',
-                                 header_labels=cfg.mode == 'basic',
-                                 n_pattern=args.requests, n_budget=args.budget,
-                                 n_resolve=args.resolve)
+    fset = indexes.CONFIGS[name][4]
+    columns = fixture_sets[fset]
+    index = O.Index([r for c in columns for r in columns[c]], cfg.k, cfg.mode)
+    routes = set(args.routes.split(','))
+    reqs = []
+    if fset == 'records' and routes & {'pattern', 'resolve'}:
+        reqs = requests_gen.generate(index, name, args.seed, labels_ok=True,
+                                     resolve_ok=cfg.mode == 'basic' and 'resolve' in routes,
+                                     header_labels=cfg.mode == 'basic',
+                                     n_pattern=args.requests if 'pattern' in routes else 0,
+                                     n_budget=args.budget if 'pattern' in routes else 0,
+                                     n_resolve=args.resolve)
+    walker = TO.Walker(index)
+    if 'traverse' in routes:
+        cases = traverse_cases.get(fset)
+        reqs += traverse_gen.generate(index, walker, name, args.seed, cases,
+                                      n_random=args.traverse, n_caps=args.traverse_caps)
     raw = os.path.join(out, 'raw', name)
     os.makedirs(raw, exist_ok=True)
     info = {'requests': len(reqs), 'entries': 0, 'outcomes': {}, 'server_log':
@@ -89,6 +105,32 @@ def run_config(name, built, mg, out, columns, args, rep):
             record = {'id': item['id'], 'config': name, 'route': item['route'],
                       'class': item['class'], 'status': status, 'entries': []}
             rep['requests'].append(record)
+            if item['route'] == 'traverse':
+                compared = TC.compare_traverse(walker, item['request'], status, body)
+                for pos, checks in compared:
+                    entry = (body['results'][pos] if isinstance(body, dict) and pos is not None
+                             else body)
+                    _record(rep, info, record, item, pos, checks, None, entry, None)
+                    if (not args.no_mutations and pos is not None
+                            and checks.outcome() in (C.PASS, C.INCONCLUSIVE)):
+                        for mname, fam, mutated in M.mutations_for_traverse(
+                                item['request'], body, pos, walker):
+                            mc = dict(TC.compare_traverse(walker, item['request'], 200, mutated))
+                            _mutation(rep, item, pos, mname, fam,
+                                      M.caught(mc.get(pos) or C.Checks(), fam))
+                if (status == 200 and item['class'] == 'ample'
+                        and (item['request']['strategy'].get('output') or {}).get('detail')
+                        == 'full' and int(item['id'].split('-')[-1]) % 4 == 0):
+                    other = {}
+                    for detail in ('tree', 'summary'):
+                        req2 = json.loads(json.dumps(item['request']))
+                        req2['strategy']['output']['detail'] = detail
+                        other[detail] = server.post('traverse', req2)[1]
+                    _record(rep, info, record, item, None,
+                            TC.compare_details(body, other['tree'], other['summary']), None,
+                            None, None)
+                record['outcome'] = _worst([e['outcome'] for e in record['entries']])
+                continue
             if item['route'] == 'resolve':
                 checks, want = C.compare_resolve(index, cfg, item['request'], body, status)
                 _record(rep, info, record, item, None, checks, want, body, None)
@@ -195,6 +237,9 @@ def main(argv=None):
     p.add_argument('--requests', type=int, default=60)
     p.add_argument('--budget', type=int, default=12)
     p.add_argument('--resolve', type=int, default=30)
+    p.add_argument('--traverse', type=int, default=40, help='random /traverse requests')
+    p.add_argument('--traverse-caps', type=int, default=12, help='/traverse cap probes')
+    p.add_argument('--routes', default='pattern,resolve,traverse')
     p.add_argument('--no-mutations', action='store_true')
     args = p.parse_args(argv)
 
@@ -221,12 +266,14 @@ def main(argv=None):
            'exploratory': [],
            'mutations': {'applied': 0, 'caught': 0, 'missed': [], 'by_mutation': {}},
            'scope': {'covered': report.COVERED, 'not_covered': report.NOT_COVERED}}
-    columns = fixtures.build_records()
+    trav_columns, trav_cases = traverse_fixtures.build()
+    fixture_sets = {'records': fixtures.build_records(), 'trav': trav_columns}
+    traverse_cases.update({'trav': trav_cases})
     code = 0
     try:
-        built = indexes.build_all(mg, out, columns, configs)
+        built = indexes.build_all(mg, out, fixture_sets, configs)
         for name in configs:
-            run_config(name, built[name], mg, out, columns, args, rep)
+            run_config(name, built[name], mg, out, fixture_sets, args, rep)
     except (indexes.BuildError, ServerError) as e:
         rep['setup_error'] = str(e)
         print(f'set-up error: {e}', file=sys.stderr)

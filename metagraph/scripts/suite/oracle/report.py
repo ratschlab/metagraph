@@ -18,9 +18,18 @@ COVERED = [
     'the source dummies holding the pattern, per level)',
     '/resolve with explicit column and header labels, support kmer and trace, on BASIC',
     'budget probes (max_steps, stop_at_threshold): invariants of legitimately incomplete answers',
+    '/traverse (phase 2): annotate\'s exhaustive trie and constrain\'s walks under keep as complete '
+    'sets (walks, leaves, label ends with reason, branches and loss, node label sets, blocked and '
+    'hairpin events, seed and dropped labels); forbid and constant costs, switch_on loss/any, the '
+    'branch allowance, the quorum, min_live_labels, the split limit, trace support, hairpins skip '
+    'and follow, edge_reuse(_rc), rejoined_seed; cap probes (max_steps, max_paths, '
+    'max_live_paths) judged up to complete_to_bp; merge judged on its invariants; tree and '
+    'summary against full',
 ]
 NOT_COVERED = [
-    '/traverse (phase 2)', 'patterns longer than k (anchors, long_search paths and supported '
+    '/traverse: table and hll costs, the graphlet\'s MGT body, output.coordinates, request '
+    'budgets and attempts, beam pruning, growth bins, which co-carrier carries a run under merge, '
+    'merge beyond its invariants', 'patterns longer than k (anchors, long_search paths and supported '
     'paths)', 'predicates and motif predicates', 'multi-graph servers and in_ram',
     'DNA5 graphs (refused by this build: alphabet_untested)', 'CANONICAL and PRIMARY graphs '
     'without their mask', 'the lower bound of a bounds count beyond lower <= truth, and the '

@@ -3389,3 +3389,37 @@ on rendered answers in the three graph modes, the review's probes, the generator
   of the orientation a `max_steps` stop left complete beside an `at_least` total.
 - The checker gaps the runs published and that are now closed: doubled `bounds` counts (before the U model);
   `retrieval_complete` on an `all_or_count` withheld on U; an offset moved within a PRIMARY `partial` cut.
+
+### Phase 2: `/traverse` (2026-10-15)
+
+`oracle/traverse_oracle.py` computes the walks of a seed from the records' text (SPEC-labeled-traversal-core
+6.9-6.10): the walk rule (edges as (k+1)-mers, canonical with their orientation on CANONICAL/PRIMARY;
+`rejoined_seed`, `edge_reuse_rc`, `edge_reuse`; hairpins), annotate's exhaustive trie with the labels at every
+node, and a reference walker of 6.3-6.4 under `on_reconverge: keep`. The walker models `forbid` and `constant`
+costs, `switch_on`, the branch allowance, the quorum, `min_live_labels`, the split limit and trace support. Its
+claims are the label ends. A second, simpler computation of E (single-label maximal walks) must equal them
+under exhaustive `forbid`. `oracle/traverse_fixtures.py` holds one record set per rule, each with a permitting
+and a forbidding setting, served as `trav_basic_k11`, `trav_canonical_k11` and `trav_primary_k11`. The
+phase-1 configurations get random seeds.
+
+`traverse_compare.py` compares three kinds of arm:
+- **Complete arm:** held to the oracle as complete sets (walks, leaves, claims with branches and loss, end
+  labels, label end events, node label sets, blocked and hairpin events, seed and dropped labels).
+- **Truncated arm** (cap probes): judged up to `complete_to_bp` only.
+- **Merge arm:** judged on its invariants: soundness, the `scope` limitation, and the label on every node of a
+  run's displayed support.
+
+`tree` and `summary` are compared against `full`. `run_oracle.py --routes traverse` runs this alone. Offline:
+`python3 -m unittest tests.test_oracle_traverse`, which includes the triplets on 53 recorded 81c620ef answers
+in `tests/data/`.
+
+Readings and notes:
+- **End reasons** (SPEC 13, implementation note I3-2): a run's `end_reason` is the served enum. `switched` and
+  `superseded` are `label_lost`; `minority`, `below_min_labels` and `split_limit` are `branch`; a skipped
+  hairpin is `dead_end`. The `label_end` event states 6.7's reason as its qualifier, and a switched source has
+  none. The oracle compares runs against the served enum and events against 6.7.
+- **A skipped hairpin before `rejoined_seed`.** 6.6 ranks `rejoined_seed > edge_reuse_rc > edge_reuse` and
+  does not rank `hairpin`. At even k on PRIMARY, a step into a seed node that is a palindromic k-mer is served
+  as a hairpin. The oracle follows that, and the SPEC could say so.
+- **Radius.** `bounds.max_extension_bp: 0` is refused (400, range [1, …]), which section 5 does not state.
+- **Trace with merging** is refused (400), as SPEC 13 item 9 states.

@@ -12,19 +12,23 @@ import subprocess
 
 from . import fixtures
 
-# config -> (graph mode, k, masked, annotation kind)
+# config -> (graph mode, k, masked, annotation kind, fixture set)
 CONFIGS = {
-    'basic_k11': ('basic', 11, True, 'row_diff_brwt_coord'),
-    'basic_k11_unmasked': ('basic', 11, False, 'row_diff_brwt_coord'),
-    'basic_k11_unchecked': ('basic', 11, False, 'row_diff_brwt_coord'),
-    'canonical_k11': ('canonical', 11, True, 'column'),
-    'primary_k11': ('primary', 11, True, 'column'),
-    'basic_k15': ('basic', 15, True, 'row_diff_brwt_coord'),
+    'basic_k11': ('basic', 11, True, 'row_diff_brwt_coord', 'records'),
+    'basic_k11_unmasked': ('basic', 11, False, 'row_diff_brwt_coord', 'records'),
+    'basic_k11_unchecked': ('basic', 11, False, 'row_diff_brwt_coord', 'records'),
+    'canonical_k11': ('canonical', 11, True, 'column', 'records'),
+    'primary_k11': ('primary', 11, True, 'column', 'records'),
+    'basic_k15': ('basic', 15, True, 'row_diff_brwt_coord', 'records'),
     # even k: k-mers equal to their reverse complement (one row on CANONICAL and PRIMARY; the
     # palindrome scans of an even-k wrapped PRIMARY graph, SPEC 7.4-7.6)
-    'basic_k10': ('basic', 10, True, 'row_diff_brwt_coord'),
-    'canonical_k10': ('canonical', 10, True, 'column'),
-    'primary_k10': ('primary', 10, True, 'column'),
+    'basic_k10': ('basic', 10, True, 'row_diff_brwt_coord', 'records'),
+    'canonical_k10': ('canonical', 10, True, 'column', 'records'),
+    'primary_k10': ('primary', 10, True, 'column', 'records'),
+    # phase 2: the traversal fixture (traverse_fixtures.py), for /traverse only
+    'trav_basic_k11': ('basic', 11, True, 'row_diff_brwt_coord', 'trav'),
+    'trav_canonical_k11': ('canonical', 11, True, 'column', 'trav'),
+    'trav_primary_k11': ('primary', 11, True, 'column', 'trav'),
 }
 # the server flags every config gets: the floor lowered (ORACLE-DESIGN.md section 2) and ample
 # caps, so that no generated request is cut by a server default unless it asks to be
@@ -85,17 +89,18 @@ def _rename(builder, d, annotation, graph, out_base, name):
                 name=name)
 
 
-def build_fasta(out_dir, columns):
-    d = os.path.join(out_dir, 'build', 'fasta')
+def build_fasta(out_dir, columns, name='fasta'):
+    d = os.path.join(out_dir, 'build', name)
     os.makedirs(d, exist_ok=True)
     return fixtures.write_fasta(columns, d)
 
 
-def build_basic(builder, fasta, k, mode='basic'):
-    """A BASIC (or CANONICAL with |mode|) masked graph with its annotation; -> paths."""
-    d = os.path.join(builder.root, f'{mode}_k{k}')
+def build_basic(builder, fasta, k, mode='basic', prefix='', order=None):
+    """A BASIC (or CANONICAL with |mode|) masked graph with its annotation; -> paths. |order|:
+    the columns in annotation order (their column ids)."""
+    d = os.path.join(builder.root, f'{prefix}{mode}_k{k}')
     os.makedirs(d, exist_ok=True)
-    files = [fasta[c] for c in fixtures.COLUMN_ORDER]
+    files = [fasta[c] for c in (order or fixtures.COLUMN_ORDER)]
     graph_base = os.path.join(d, 'graph')
     graph = graph_base + '.dbg'
     builder.run(['build', '-p', '1', '--mode', mode, '--graph', 'succinct', '-k', str(k),
@@ -133,10 +138,10 @@ def build_basic(builder, fasta, k, mode='basic'):
     return {'graph': graph, 'annotation': annotation, 'dir': d, 'columns': order}
 
 
-def build_primary(builder, fasta, k):
-    d = os.path.join(builder.root, f'primary_k{k}')
+def build_primary(builder, fasta, k, prefix='', order=None):
+    d = os.path.join(builder.root, f'{prefix}primary_k{k}')
     os.makedirs(d, exist_ok=True)
-    files = [fasta[c] for c in fixtures.COLUMN_ORDER]
+    files = [fasta[c] for c in (order or fixtures.COLUMN_ORDER)]
     canon = os.path.join(d, 'canonical')
     builder.run(['build', '-p', '1', '--mode', 'canonical', '--graph', 'succinct', '-k', str(k),
                  '-o', canon] + files, name=f'primary{k}_canonical')
@@ -172,20 +177,28 @@ def unmasked_view(builder, built, name):
     return {'graph': os.path.join(d, 'graph.dbg'), 'annotation': built['annotation'], 'dir': d}
 
 
-def build_all(metagraph, out_dir, columns, configs):
-    """Build what |configs| need; -> {config: {'graph', 'annotation', 'server_args'}}."""
+def build_all(metagraph, out_dir, fixture_sets, configs):
+    """Build what |configs| need from |fixture_sets| ({set: {column: [Record]}} in column order);
+    -> {config: {'graph', 'annotation', 'server_args'}}."""
     builder = Builder(metagraph, out_dir)
-    fasta = build_fasta(out_dir, columns)
+    fastas = {}
     built = {}
     cache = {}
     for name in configs:
-        mode, k, masked, _ = CONFIGS[name]
+        mode, k, masked, _, fset = CONFIGS[name]
+        columns = fixture_sets[fset]
+        if fset not in fastas:
+            fastas[fset] = build_fasta(out_dir, columns,
+                                       'fasta' if fset == 'records' else f'fasta_{fset}')
+        fasta = fastas[fset]
+        order = list(columns)
+        prefix = '' if fset == 'records' else f'{fset}_'
         if mode == 'primary':
-            b = build_primary(builder, fasta, k)
+            b = build_primary(builder, fasta, k, prefix, order)
         else:
-            key = (mode, k)
+            key = (fset, mode, k)
             if key not in cache:
-                cache[key] = build_basic(builder, fasta, k, mode)
+                cache[key] = build_basic(builder, fasta, k, mode, prefix, order)
             b = cache[key]
             if not masked:
                 b = unmasked_view(builder, b, name)
