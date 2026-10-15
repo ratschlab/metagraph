@@ -54,8 +54,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_run  # noqa: E402
 import suite_common as sc  # noqa: E402
 
+# the counted outcomes; `other` counts an outcome outside the vocabulary (sc.outcome_known), read as a failure
+OTHER_OUTCOME = "other"
 OUTCOME_KEYS = ("pass", "fail", "error", "finding", "inconclusive", "not_implemented_mcp", "service_by_design",
-                "mixed")
+                "mixed", OTHER_OUTCOME)
 SAMPLE_BEFORE_S = 1.0
 SAMPLE_AFTER_S = 2.0
 SAMPLE_NEAREST_S = 5.0
@@ -128,7 +130,8 @@ def entry_problem(entry):
 def table_problems(cases, blocks=None):
     """What the load validation refuses, each naming its case (async's ServiceByDesign.problems at 31a2e41f,
     mirrored): an answer_match without routes (a non-empty list of route strings), a key of it outside
-    ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, an MCP side whose
+    ANSWER_MATCH_TOP_KEYS, a side that is not an object or states a key outside ANSWER_MATCH_KEYS, a side whose code,
+    text_contains, field or slot_code is of another type than the side reads (answer_value_problems), an MCP side whose
     http is not one integer, that states slot_code (a direct-side key) or that states no code (peer review R5), a
     direct_mismatch outside DIRECT_MISMATCH_VALUES, a wall_rule outside WALL_RULE_VALUES, an mcp_outcome outside
     MCP_OUTCOME_VALUES, on an answered / clamped case, or stated as a case key instead of in answer_match; an
@@ -171,6 +174,7 @@ def table_problems(cases, blocks=None):
             unknown = sorted(set(want) - set(ANSWER_MATCH_KEYS))
             if unknown:
                 out.append("%s: unknown answer_match.%s key(s) %s" % (cid, side, unknown))
+            out.extend("%s: %s" % (cid, x) for x in answer_value_problems(side, want))
         mcp = am.get("mcp") if isinstance(am.get("mcp"), dict) else {}
         http = mcp.get("http")
         if http is not None and (isinstance(http, bool) or not isinstance(http, int)):
@@ -192,6 +196,31 @@ def table_problems(cases, blocks=None):
             if judged_by_checks(case):
                 out.append("%s: answer_match.mcp_outcome on a %s case (the checks decide an answered / clamped case)"
                            % (cid, (case.get("service_answer") or {}).get("outcome")))
+    return out
+
+
+# The text keys of an answer_match side and the values each side takes: a non-empty string, or (direct side) a
+# non-empty list of non-empty strings (code / slot_code: alternatives, text_contains: fragments within one text);
+# the MCP side reads each as one string (async's runner: str()), so a list there would never match.
+ANSWER_TEXT_KEYS = ("code", "text_contains", "field", "slot_code")
+
+
+def answer_value_problems(side, want):
+    """What is wrong with the value types of an answer_match side (|side| "direct" or "mcp"): ANSWER_TEXT_KEYS each a
+    non-empty string, on the direct side also a non-empty list of non-empty strings; a stated null is absent. The
+    MCP side's code is the "states no code" rule's."""
+    out = []
+    for key in ANSWER_TEXT_KEYS:
+        v = want.get(key)
+        if v is None or (side == "mcp" and key == "code"):
+            continue
+        ok_str = isinstance(v, str) and bool(v.strip())
+        ok_list = side == "direct" and isinstance(v, list) and bool(v) and all(
+            isinstance(x, str) and x.strip() for x in v)
+        if not (ok_str or ok_list):
+            out.append("answer_match.%s.%s must be %s, not %r" % (
+                side, key, "a non-empty string or a non-empty list of them" if side == "direct"
+                else "one non-empty string (the MCP runner reads it as one)", v))
     return out
 
 
@@ -544,18 +573,43 @@ def _flat_predicates(preds):
 # ---------------------------------------------------------------------------------------------------------------
 # the run's recorded configuration: the live documents the references read first
 
-# the MCP runner's run.json record of GET /traverse/capabilities at run start (async's runner: {document, sha256,
-# read_at, base}, on a failed read the error instead of the document)
+# the MCP runner's run.json record of GET /traverse/capabilities at run start (async's runner: {document,
+# host_document, sha256, read_at, base, database, mismatches}, on a failed read the error instead of the document;
+# each invocations[] the same); host_document has the shape of the host's /capabilities document as the service read
+# it: "pattern" the /pattern/capabilities/<db> capabilities.raw, "resolve" {"time_budget": the host's block as
+# received, document.backends.<db>.budgets.resolve_time_budget}
 SERVICE_CAPABILITIES_KEY = "service_capabilities"
+SERVICE_HOST_DOCUMENT_KEY = "host_document"
 # the host's /capabilities document as the direct runners record it (run.json capabilities)
 HOST_CAPABILITIES_PATH = "/capabilities"
 
 
+def direct_host_document(caps, run=None):
+    """The host namespace's document of a run with a direct arm: the host's recorded /capabilities, with the host's
+    identity (suite_common.HOST_IDENTITY_KEYS) it does not state at its top level taken from the identity the arm
+    recorded: its /traverse/capabilities (index_fp, index_meta_fp), else the run.json's own release / index_fp;
+    the same paths as the MCP runner's host_document."""
+    doc = dict(caps.get(HOST_CAPABILITIES_PATH) or {})
+    traverse = caps.get("/traverse/capabilities") if isinstance(caps.get("/traverse/capabilities"), dict) else {}
+    for key in sc.HOST_IDENTITY_KEYS:
+        if doc.get(key) is None:
+            value = traverse.get(key)
+            if value is None and isinstance(run, dict):
+                value = run.get(key)
+            if value is not None:
+                doc[key] = value
+    return doc
+
+
 def recorded_documents(run_dir):
     """{namespace: {document, origin, read_at, sha256} or None} of a run: "service" the MCP arm's run.json
-    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp), "host" the /capabilities
-    document a direct arm recorded (the merged run.json's capabilities, else arms/<direct>/run.json); None where the
-    run recorded none (a run before async's runner read it, or a failed read: then `error` says why)."""
+    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp; sha256 the recorded one,
+    else suite_common.service_document_sha256), "host" the /capabilities document a direct arm recorded (the merged
+    run.json's capabilities, else arms/<direct>/run.json; with the host's identity: direct_host_document), else the
+    host document the MCP runner recorded beside the
+    service's (service_capabilities.host_document: an MCP-only run reads the host's references live from it); None
+    where the run recorded none (a run before async's runner read it, or a failed read: then `error` says why). A
+    path the live document lacks reads the table's block, else unknown (suite_common.References)."""
     out = {"service": None, "host": None}
     merged = sc.read_json(os.path.join(run_dir, "run.json"), {}) or {}
     mcp_run = sc.read_json(os.path.join(run_dir, "arms", "mcp", "run.json"), None)
@@ -566,21 +620,26 @@ def recorded_documents(run_dir):
         doc = rec.get("document")
         out["service"] = {"document": doc if isinstance(doc, dict) else None,
                           "origin": "arms/mcp/run.json %s" % SERVICE_CAPABILITIES_KEY,
-                          "read_at": rec.get("read_at"), "sha256": rec.get("sha256"), "base": rec.get("base"),
+                          "read_at": rec.get("read_at"), "sha256": rec.get("sha256") or sc.service_document_sha256(rec),
+                          "base": rec.get("base"),
                           "error": rec.get("error") if not isinstance(doc, dict) else None}
     caps = merged.get("capabilities") if isinstance(merged.get("capabilities"), dict) else None
-    origin = "run.json capabilities"
+    origin, owner = "run.json capabilities", merged
     if not (caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict)):
         caps = None
         for name in sc.DIRECT_ARMS:
             arm_run = sc.read_json(os.path.join(run_dir, "arms", name, "run.json"), None)
             if isinstance(arm_run, dict) and isinstance((arm_run.get("capabilities") or {}).get(
                     HOST_CAPABILITIES_PATH), dict):
-                caps, origin = arm_run["capabilities"], "arms/%s/run.json capabilities" % name
+                caps, origin, owner = arm_run["capabilities"], "arms/%s/run.json capabilities" % name, arm_run
                 break
     if caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict):
-        out["host"] = {"document": caps[HOST_CAPABILITIES_PATH], "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH),
-                       "read_at": None, "sha256": None}
+        out["host"] = {"document": direct_host_document(caps, owner),
+                       "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH), "read_at": None, "sha256": None}
+    elif isinstance(rec, dict) and isinstance(rec.get(SERVICE_HOST_DOCUMENT_KEY), dict):
+        out["host"] = {"document": rec[SERVICE_HOST_DOCUMENT_KEY],
+                       "origin": "arms/mcp/run.json %s.%s" % (SERVICE_CAPABILITIES_KEY, SERVICE_HOST_DOCUMENT_KEY),
+                       "read_at": rec.get("read_at"), "sha256": None}
     return out
 
 
@@ -649,9 +708,10 @@ def reference_warnings(cases):
 def gate_configuration_problems(run_dir, cases=None, reevaluated=False):
     """For lane G3's gate: why a run's configuration evidence does not hold, [] when it does: the run recorded no
     live service_settings ("configuration evidence missing": run.json service_capabilities without a document
-    stating service_settings), a referenced path whose live value differs from the table's (reference_mismatches), an
-    MCP line whose request_evidence read a reference from the table or found it unknown. |cases| load_by_design's
-    (default: the table next to this script)."""
+    stating service_settings), a referenced path whose live value differs from the table's (reference_mismatches:
+    the host's references read from a direct arm's /capabilities, else the MCP runner's host_document:
+    recorded_documents), an MCP line whose request_evidence read a reference from the table or found it unknown.
+    |cases| load_by_design's (default: the table next to this script)."""
     out = []
     if cases is None:
         cases, _ = load_by_design(DEFAULT_BY_DESIGN)
@@ -992,9 +1052,10 @@ def match_service(service_answer, lines, run_dir):
 
 
 def _service_answered(line):
-    """Whether an MCP line records the service's answer: a 2xx status, or a backend call (sc.reached_host)."""
+    """Whether an MCP line records the service's answer: a 2xx status, or a backend call's timing (sc.backend_timed;
+    a relayed host deadline reached the host but records no answer of the service)."""
     http = line.get("http")
-    return (isinstance(http, int) and not isinstance(http, bool) and 200 <= http < 300) or sc.reached_host(line)
+    return (isinstance(http, int) and not isinstance(http, bool) and 200 <= http < 300) or sc.backend_timed(line)
 
 
 def _direct_side(case, direct_line, run_dir):
@@ -1116,13 +1177,17 @@ def by_design_class(case, direct_line, mcp_lines, run_dir, scenario=None, refs=N
 # per-scenario joins
 
 def aggregate_outcome(outcomes):
-    """The outcome of a scenario on one arm over its repeats: the common one, else error > fail > finding >
-    inconclusive > mixed (a repeat that could not test its property keeps the scenario from reading pass)."""
+    """The outcome of a scenario on one arm over its repeats: the common one, else an outcome outside the vocabulary
+    (sc.outcome_known; the first) > error > fail > finding > inconclusive > mixed (a repeat that could not test its
+    property keeps the scenario from reading pass)."""
     vals = [o for o in outcomes if o]
     if not vals:
         return None
     if len(set(vals)) == 1:
         return vals[0]
+    unknown = [o for o in vals if not sc.outcome_known(o)]
+    if unknown:
+        return unknown[0]
     for worst in ("error", "fail", "finding", "inconclusive"):
         if worst in vals:
             return worst
@@ -1210,12 +1275,26 @@ def wall_net(line):
     return wall - connect if connect is not None else wall
 
 
+# The timing label of a warm execution that followed one cut at the host's deadline (host_cache_after_interrupted):
+# warm by the recent-repeat heuristic, its row cache possibly only partly filled (a median server time 2.48x the
+# other warm executions' in v4), so the warm statistics leave it out and count it apart.
+WARM_AFTER_INTERRUPTED = "warm_after_interrupted"
+
+
+def timing_cache(line):
+    """The host-cache label the timing statistics key on: host_cache, except WARM_AFTER_INTERRUPTED for a warm
+    execution whose previous host execution of the scenario ended at the host's deadline."""
+    hc = host_cache(line)
+    return WARM_AFTER_INTERRUPTED if hc == "warm" and line.get("host_cache_after_interrupted") else hc
+
+
 def first_with(lines, label, prefer=None):
-    """The arm's first execution (by repeat) with host cache `label`; `prefer` a repeat to take when it has it."""
-    if prefer is not None and prefer in lines and host_cache(lines[prefer]) == label:
+    """The arm's first execution (by repeat) with timing label `label` (timing_cache); `prefer` a repeat to take when
+    it has it."""
+    if prefer is not None and prefer in lines and timing_cache(lines[prefer]) == label:
         return lines[prefer]
     for k in sorted(lines):
-        if host_cache(lines[k]) == label:
+        if timing_cache(lines[k]) == label:
             return lines[k]
     return None
 
@@ -1528,24 +1607,62 @@ def planned_duplicate(a, b, scenario):
         dup.get("arm"), scenario.get("run_unique"), dup.get("repeat") or 0, why)
 
 
+# The checks that judge an execution beyond its answer: the client's wall time (budget_respected, e.g. of an allowed
+# 503 deadline: the wall holds the network and any wait for a request thread) and the arm's earlier repeats
+# (deterministic). Two arms' executions with the same answer may differ there; each arm's own result counts in its
+# totals, the answers agree.
+EXECUTION_CHECKS = ("budget_respected", "deterministic")
+
+
+def execution_only_difference(a, b):
+    """For two direct executions of one repeat: [{check, local, remote}] of the execution checks (EXECUTION_CHECKS)
+    whose outcomes differ when their answers are the same (equal digests) and nothing else differs, [] when nothing
+    differs at all; None when the answers differ, another check differs, or the outcomes differ with no check
+    differing."""
+    if not a.get("answer_digest") or a.get("answer_digest") != b.get("answer_digest"):
+        return None
+    ca, cb = check_outcomes(a.get("checks")), check_outcomes(b.get("checks"))
+    diff = [n for n in sorted(set(ca) | set(cb), key=str) if ca.get(n) != cb.get(n)]
+    if any(n not in EXECUTION_CHECKS for n in diff):
+        return None
+    if not diff and a.get("outcome") != b.get("outcome"):
+        return None
+    return [{"check": n, "local": ca.get(n), "remote": cb.get(n)} for n in diff]
+
+
 def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, scenario=None):
-    """Agreement of the two direct arms on every repeat both ran: identical (equal digests), disagree (a check differs,
-    or the outcomes differ other than by timing or a planned 409 duplicate), timing (the outcomes differ only on
-    repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no check compared),
-    same_checks. A repeat whose outcomes differ by a planned 409 duplicate (planned_duplicate, A2-06) is listed
-    under planned_duplicates and reads neither way."""
+    """Agreement of the two direct arms on every repeat both ran, in this order: disagree (a check differs, the
+    outcomes differ other than by timing, a planned 409 duplicate or the execution checks of the same answer, or an
+    outcome is outside the vocabulary, sc.outcome_known), identical (equal digests), timing (the outcomes differ only
+    on repeats where timing_repeat holds: counted apart, VERIFY-2 item 5), not_comparable (no check compared),
+    same_checks. On a repeat whose answers are the same (equal digests), a difference only in the execution checks
+    (EXECUTION_CHECKS: execution_only_difference, e.g. one arm's client wall making budget_respected a finding or a
+    failure) is no disagreement of the answers: it is listed under execution_differs and counts in that arm's own
+    totals; any other difference with equal digests disagrees. A repeat whose outcomes differ by a planned 409
+    duplicate (planned_duplicate, A2-06) is listed under planned_duplicates and reads neither way."""
     common = sorted(set(local) & set(remote))
     if not common:
         return None
     digest_equal = all(local[r].get("answer_digest") == remote[r].get("answer_digest") for r in common)
     differing = []
     compared = 0
-    timing, untimed, planned = [], [], []
+    timing, untimed, planned, execution = [], [], [], []
     for r in common:
         d, _, n, _, _ = compare_checks(local[r].get("checks"), remote[r].get("checks"))
         compared += n
         for x in d:
             x["repeat"] = r
+        outside = [x for x in (local[r], remote[r]) if not sc.outcome_known(x.get("outcome"))]
+        if outside:
+            differing.extend(d)
+            untimed.append({"repeat": r, "detail": "; ".join("%s: outcome %r outside the vocabulary" % (
+                x.get("arm"), x.get("outcome")) for x in outside)})
+            continue
+        own = execution_only_difference(local[r], remote[r])
+        if own is not None:
+            if own:
+                execution.append({"repeat": r, "checks": own})
+            continue
         differing.extend(d)
         if local[r].get("outcome") != remote[r].get("outcome"):
             dup = planned_duplicate(local[r], remote[r], scenario)
@@ -1555,10 +1672,10 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
             ok, why = timing_repeat(local[r], remote[r], route, run_dir, checks_mod)
             (timing if ok else untimed).append({"repeat": r, "detail": why})
     outcome_equal = all(local[r].get("outcome") == remote[r].get("outcome") for r in common)
-    if digest_equal:
-        cls = "identical"
-    elif differing or untimed:
+    if differing or untimed:
         cls = "disagree"
+    elif digest_equal:
+        cls = "identical"
     elif timing:
         cls = "timing"
     elif not compared:
@@ -1571,6 +1688,8 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
         out["timing_repeats"] = timing
     if planned:
         out["planned_duplicates"] = planned
+    if execution:
+        out["execution_differs"] = execution
     if untimed and cls == "disagree":
         out["outcome_differs"] = untimed
     return out
@@ -1607,7 +1726,9 @@ def answer_side_matches(side, http, codes, texts, field=None, slot_codes=None, k
     a field the answer does not name does not match; slot_code the codes of body.patterns[].error; on the MCP side
     http is one status compared by equality, |http_list| False): True or False; None when the known keys hold but the
     side states a key outside |known| (default: the union of both sides' keys), which is never ignored silently. A
-    side that states nothing never matches."""
+    side that states nothing never matches. text_contains (answer_text_contains): on the direct side a string, or a
+    list whose fragments must all be within one text; on the MCP side (|http_list| False) one string, read as the
+    runner reads it (str())."""
     if not isinstance(side, dict):
         return False
     known = known or tuple(sorted(set(ANSWER_DIRECT_KEYS) | set(ANSWER_MCP_KEYS)))
@@ -1623,9 +1744,18 @@ def answer_side_matches(side, http, codes, texts, field=None, slot_codes=None, k
     if side.get("field") is not None and "field" in known and not _field_matches(field, side["field"]):
         return False
     tc = side.get("text_contains")
-    if tc and not any(tc in (t or "") for t in texts):
+    if tc and not answer_text_contains(tc, texts, mcp_side=not http_list):
         return False
     return None if unknown_keys(side, known) else True
+
+
+def answer_text_contains(want, texts, mcp_side=False):
+    """Whether an answer_match side's text_contains holds on an answer's texts: on the MCP side the value read as one
+    string (async's runner: str(text_contains) in the error's text); on the direct side a string, or a list whose
+    fragments must all be within one text (as a direct_expectation's text_contains)."""
+    if mcp_side or not isinstance(want, list):
+        want = [str(want)]
+    return any(all(str(f) in (t or "") for f in want) for t in texts)
 
 
 def answer_case_of(cases, route, http, error, skip=()):
@@ -1830,6 +1960,82 @@ def line_explained_items(line, matched, recorded=None):
     return items
 
 
+def mcp_exposes(scenario):
+    """The checks the manifest states the MCP arm exposes for a scenario (mcp.exposes, a list of check names built
+    from a baseline run by mcp_exposure), or []."""
+    v = ((scenario or {}).get("mcp") or {}).get("exposes")
+    return [x for x in v if isinstance(x, str) and x] if isinstance(v, list) else []
+
+
+def mcp_exposure(rows):
+    """{scenario: [check names]} the MCP arm decided (pass, fail, finding) on at least one execution of the scenario
+    in a run's lines |rows|: what a baseline run shows the MCP surface exposes, the content of a manifest's
+    mcp.exposes."""
+    out = {}
+    for r in rows:
+        if r.get("arm") != "mcp":
+            continue
+        for c in r.get("checks") or []:
+            if c.get("outcome") in ("pass", "fail", "finding"):
+                out.setdefault(r.get("scenario"), set()).add(c.get("check"))
+    return dict((k, sorted(v, key=str)) for k, v in out.items())
+
+
+def exposure_drops(scenario, lines):
+    """The class of the MCP executions compared check by check (|lines|) on which a check the scenario lists in
+    mcp.exposes reads not_exposed: a field the MCP surface exposed in the baseline and no longer does is a
+    disagreement (side mcp, by exposes), never an inconclusive that agrees; None when there is none."""
+    listed = set(mcp_exposes(scenario))
+    if not listed:
+        return None
+    hits = [(r.get("repeat"), c.get("check")) for r in lines for c in r.get("checks") or []
+            if c.get("check") in listed and c.get("outcome") == "not_exposed"]
+    if not hits:
+        return None
+    checks = sorted(set(h[1] for h in hits), key=str)
+    reps = sorted(set(h[0] for h in hits), key=lambda x: x if isinstance(x, int) else -1)
+    return {"class": "disagree", "side": "mcp", "by": "exposes", "repeats": reps, "checks": checks,
+            "mcp_verified": False,
+            "mcp_detail": "check(s) %s read not_exposed on repeat(s) %s; the manifest lists them as exposed via MCP "
+                          "(mcp.exposes): a field the MCP surface no longer exposes" % (checks, reps)}
+
+
+def outside_vocabulary_part(lines):
+    """The class of MCP executions whose outcome is outside the vocabulary (sc.outcome_known: a runner's mark not
+    agreed first): disagree, side mcp, by outcome, the repeats and outcomes named; never compared as a pass."""
+    reps = [r.get("repeat") for r in lines]
+    return {"class": "disagree", "side": "mcp", "by": "outcome", "repeats": reps, "mcp_verified": False,
+            "mcp_detail": "repeat(s) %s: outcome %s outside the vocabulary (%s)" % (
+                reps, sorted(set(repr(r.get("outcome")) for r in lines)), ", ".join(sc.OUTCOMES))}
+
+
+def mcp_mapped(scenario):
+    """Whether the manifest maps a scenario to the MCP arm, so the plan expects the MCP arm to send it: one tool
+    (mcp.tool) or a flow of calls (mcp.flow, the runner's area S flows), as the runner reads its plan."""
+    mcp = (scenario or {}).get("mcp")
+    return isinstance(mcp, dict) and bool(mcp.get("tool") or mcp.get("flow"))
+
+
+def unmatched_not_implemented_mark(lines):
+    """The class of MCP executions the runner marked not_implemented_mcp on a scenario the manifest maps (mcp_mapped),
+    where nothing in the plan states the mark (no mcp.not_implemented, no named case whose agreement is
+    not_implemented_mcp, no case with answer_match.mcp_outcome matched): disagree, side mcp, by the runner's mark."""
+    reps = [r.get("repeat") for r in lines]
+    return {"class": "disagree", "side": "mcp", "by": "mcp runner", "repeats": reps, "mcp_verified": False,
+            "mcp_detail": "the MCP runner marked repeat(s) %s not_implemented_mcp; the manifest maps the scenario "
+                          "and no case of the table reproduces the mark" % reps}
+
+
+def runner_rule_c_by_design(line):
+    """Whether an MCP execution records the runner's rule (c) on a by-design case: inconclusive, the case recorded
+    (service_by_design_case), inconclusive_reason an undecidable plausibility (suite_common.UNDECIDABLE: the case's
+    answer matched, its wall rule could not be decided). With no table to replay the case, the runner's decision
+    is kept as such: inconclusive in a re-evaluation, neither for nor against the direct arm in the comparison, as a
+    runner's service_by_design mark and a by-design finding are kept without a table."""
+    return line.get("arm", "mcp") == "mcp" and line.get("outcome") == "inconclusive" and \
+        bool(line.get("service_by_design_case")) and line.get("inconclusive_reason") in sc.UNDECIDABLE
+
+
 def case_ids(scenario):
     """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
     ids = ((scenario or {}).get("mcp") or {}).get("by_design")
@@ -1943,6 +2149,55 @@ def _direct_ref(direct_lines):
     return None, None
 
 
+def _other_direct(direct_lines, arm):
+    """(the other direct arm, its lines) beside the reference |arm| in |direct_lines|, or (None, None)."""
+    for other in ("direct-local", "direct-remote"):
+        if other != arm and (direct_lines or {}).get(other):
+            return other, direct_lines[other]
+    return None, None
+
+
+# a check item that tested nothing: never compared, and a reference item of this kind falls back to the other arm's
+UNDECIDED_CHECK_OUTCOMES = ("inconclusive", "not_exposed")
+
+
+def _decided(outcome):
+    return outcome is not None and outcome not in UNDECIDED_CHECK_OUTCOMES
+
+
+def reference_checks(mine, primary, alternative=None):
+    """(the reference check items an MCP execution's items |mine| are compared with, the fallbacks): the preferred
+    direct execution's items (|primary|), except an item it left undecided (inconclusive, not_exposed) where the MCP
+    item of the same check and occurrence is decided and the other direct arm's execution (|alternative|) decided it:
+    that one's item is taken instead, so a check one direct arm could not test (an allowed 503 under load) does not
+    hide an MCP result the other arm decided. fallbacks: [(check, occurrence)] taken from |alternative|."""
+    if not alternative:
+        return list(primary or []), []
+    occurrence = lambda checks: dict(((c.get("check"), k), c) for c, k in _with_occurrence(checks))  # noqa: E731
+    own, other = occurrence(mine), occurrence(alternative)
+    out, fallbacks = [], []
+    for c, k in _with_occurrence(primary):
+        key = (c.get("check"), k)
+        alt = other.get(key)
+        if not _decided(c.get("outcome")) and _decided((own.get(key) or {}).get("outcome")) and alt is not None \
+                and _decided(alt.get("outcome")):
+            out.append(alt)
+            fallbacks.append(key)
+        else:
+            out.append(c)
+    return out, fallbacks
+
+
+def _with_occurrence(checks):
+    """[(item, its occurrence among the items of its check name)] in list order."""
+    seen, out = {}, []
+    for c in checks or []:
+        name = c.get("check")
+        out.append((c, seen.get(name, 0)))
+        seen[name] = seen.get(name, 0) + 1
+    return out
+
+
 def _split_items(checks, indices):
     """(the items at |indices|, the others, the (name, occurrence) keys of the former) of a check list."""
     keys, seen, picked, rest = set(), {}, [], []
@@ -1969,20 +2224,42 @@ def _split_by_keys(checks, keys):
     return picked, rest
 
 
-def check_agreement(reps, ref, ref_arm, explained=None):
+def check_agreement(reps, ref, ref_arm, explained=None, alt=None, alt_arm=None):
     """The per-check agreement of MCP executions with the reference direct arm (DESIGN §1.3; ref: {repeat: line},
     each MCP repeat against the reference's same repeat, else its first): `explained` {repeat: item indices} the
     check ITEMS an answered / clamped case explains on that repeat (E of explained_outcome, B5b-06), compared apart
-    with the reference's items of the same check and occurrence: their differences do not count (B-01). The class:
-    disagree (a differing check outside E, or one side alone errored), service_by_design (only items of E differ),
+    with the reference's items of the same check and occurrence: their differences do not count (B-01). |alt|
+    ({repeat: line} of the other direct arm, |alt_arm|): per repeat and check item, a reference item left undecided
+    falls back to that arm's same repeat, else its first (reference_checks), unless that execution has no answer
+    (outcome error, or no HTTP status: a transport failure fails its items), recorded as `reference_fallbacks`; the
+    reference outcome is then that of the lines the comparison used (a reference execution every compared item of
+    which fell back is left out, the other arm's executions that gave an item are in). The class: disagree (a
+    differing check outside E, or one side alone errored), service_by_design (only items of E differ),
     not_comparable (no check compared), agree."""
     explained = explained or {}
     ref0 = ref[min(ref)]
+    alt0 = alt[min(alt)] if alt else None
     differing, by_design, unmatched = [], [], set()
     compared = not_exposed = inconclusive = 0
+    fallbacks, emptied, kept, alt_used = [], [], [], []
     for r in reps:
-        theirs = (ref.get(r.get("repeat"), ref0) or {}).get("checks") or []
+        primary = ref.get(r.get("repeat"), ref0) or {}
+        second = (alt.get(r.get("repeat"), alt0) or {}) if alt else None
+        if second is not None and (second.get("outcome") == "error" or _transport_line(second)):
+            second = None   # an execution without an answer (a transport failure, an error) is no reference
         mine = r.get("checks") or []
+        theirs, fb = reference_checks(mine, primary.get("checks") or [], (second or {}).get("checks"))
+        if fb:
+            fallbacks.extend({"repeat": r.get("repeat"), "check": name, "occurrence": k, "arm": alt_arm,
+                              "arm_repeat": second.get("repeat")} for name, k in fb)
+            alt_used.append(second)
+            # the preferred execution stays a reference line when an item was compared against it
+            own = dict(((c.get("check"), k), c.get("outcome")) for c, k in _with_occurrence(mine))
+            used = any(_decided(c.get("outcome")) and _decided(own.get((c.get("check"), k)))
+                       and (c.get("check"), k) not in fb for c, k in _with_occurrence(primary.get("checks")))
+            (kept if used else emptied).append(primary)
+        else:
+            kept.append(primary)
         e = set(explained.get(r.get("repeat")) or ())
         if e:
             mine_e, mine, keys = _split_items(mine, e)
@@ -2000,7 +2277,12 @@ def check_agreement(reps, ref, ref_arm, explained=None):
             x["repeat"] = r.get("repeat")
         differing.extend(d)
     mcp_out = aggregate_outcome([r.get("outcome") for r in reps])
-    ref_out = aggregate_outcome([x.get("outcome") for x in ref.values()])
+    # the reference arm's executions, less those every compared item of which fell back, and the other arm's that
+    # gave one
+    dropped = [x for x in emptied if not any(x is y for y in kept)]
+    ref_lines = [x for x in ref.values() if not any(x is y for y in dropped)]
+    ref_lines += [x for i, x in enumerate(alt_used) if not any(x is y for y in alt_used[:i])]
+    ref_out = aggregate_outcome([x.get("outcome") for x in ref_lines])
     # Agreement is on the checks both arms evaluated (DESIGN §1.3: a field the MCP does not expose is recorded,
     # not compared), so a direct failure of a check the MCP cannot see is no disagreement; an execution that
     # errored on one side only is. With no check compared at all there is nothing to agree on (review M2).
@@ -2018,6 +2300,8 @@ def check_agreement(reps, ref, ref_arm, explained=None):
            "checks_inconclusive": inconclusive, "checks_unmatched": sorted(unmatched)}
     if by_design:
         out["explained_differences"] = by_design
+    if fallbacks:
+        out.update(reference_alternative=alt_arm, reference_fallbacks=fallbacks)
     return out
 
 
@@ -2048,10 +2332,16 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     its direct side (answer_class, direct_mismatch, B-03), a refused / relayed / service-only named case its pair
     (by_design_class), against the direct executions no answer-triggered case explains; the executions an answered /
     clamped case matched, and those no case matched, are compared check by check with the reference direct execution
-    (check_agreement), the failing check items the matched answered cases explain apart (B-01, B5b-06:
+    (check_agreement: direct-local's, a check item it left undecided taken from direct-remote's where that one
+    decided it), the failing check items the matched answered cases explain apart (B-01, B5b-06:
     service_by_design only when nothing else differs; the case is a note); an unmatched execution the MCP runner
     marked service_by_design is, with no table, an unverified by-design part of its own beside the others' check
-    agreement, and with a table judged by its checks like any other (B5b-05, B-06). A case id the scenario names that
+    agreement, and with a table judged by its checks like any other (B5b-05, B-06); one it marked not_implemented_mcp
+    makes the rest not_implemented_mcp with no table, with a named not_implemented_mcp case, or on a scenario the
+    manifest does not map, and else is a disagreement on the MCP side (unmatched_not_implemented_mark); with no table a rule (c) inconclusive the runner decided on its case
+    (runner_rule_c_by_design) is undecidable; a check the scenario lists in mcp.exposes that reads not_exposed on an
+    execution compared check by check is a disagreement on the MCP side (exposure_drops). A case id the scenario
+    names that
     the table lacks, with no named case matched, is a disagreement (side table). A disagreement anywhere is the class
     (the first in execution order, the checks last); else a by-design class, verified only when every part held
     (B-04: other parts that do not agree make it unverified, shown as `other_repeats`); else the checks' class,
@@ -2077,7 +2367,12 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     # the runner's matcher, per execution
     groups, order, answered, explained, explained_names, plain = {}, [], {}, {}, {}, []
     undecided, recorded_items = [], {}
+    outside = [r for r in judged if not sc.outcome_known(r.get("outcome"))]
+    judged = [r for r in judged if not any(r is x for x in outside)]
     for r in judged:
+        if not cases and runner_rule_c_by_design(r):
+            undecided.append(r)   # the runner's rule (c) on its case, no table to replay it: neither for nor against
+            continue
         ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
         walls = []
         matched, how = case_matches(cases, scenario, ans, terr, r, doc, walls)
@@ -2112,7 +2407,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         note["explained_items_recorded"] = dict((str(k), v) for k, v in sorted(recorded_items.items(), key=str))
     if undecided:
         note["undecidable_repeats"] = [r.get("repeat") for r in undecided]
-        if not groups and not plain:
+        if not groups and not plain and not outside:
             return dict(note, **{"class": "not_comparable", "by": "undecidable plausibility",
                                  "detail": "every MCP execution's plausibility is undecidable (rule (c))"})
     # the direct answers an answer-triggered case explains (e.g. the host's own 503 deadline) are no reference for
@@ -2121,9 +2416,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     sides = [groups[k][0]["answer_match"].get("direct") for k in order if k[0] == "answer-triggered"]
     kept = _unexplained_direct(direct_lines, sides, run_dir)
     k_arm, k_ref = _direct_ref(kept)
-    k_ref0 = k_ref[min(k_ref)] if k_ref else None
-    _, ref = _direct_ref(direct_lines)
+    o_arm, o_ref = _other_direct(kept, k_arm)
     parts = []
+    if outside:
+        parts.append(outside_vocabulary_part(outside))
     missing = [i for i in case_ids(scenario) if i not in cases]
     if missing and not answered and not any(k[0] == "named" for k in order):
         parts.append({"class": "disagree", "case": missing[0], "side": "table",
@@ -2137,16 +2433,26 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         else:
             parts.append(by_design_class(case, kept, hit, run_dir, scenario, refs))
     rest = None
+    dropped = exposure_drops(scenario, plain)
+    if dropped:
+        parts.append(dropped)
     if plain:
         unmatched = [r for r in plain if r.get("repeat") not in answered]
         # B5b-05: the runner's marks no case reproduces: with no table each stays an unverified by-design part of
         # its own; with a table it is judged by its checks (B-06); every other execution is compared check by check
         marks = [r for r in unmatched if r.get("outcome") == "service_by_design"] if not cases else []
         compared_lines = [r for r in plain if not any(r is x for x in marks)]
-        if any(r.get("outcome") == "not_implemented_mcp" for r in unmatched):
+        nim_marks = [r for r in unmatched if r.get("outcome") == "not_implemented_mcp"]
+        if nim_marks and not (cases and mcp_mapped(scenario)
+                              and not any(c.get("agreement") == "not_implemented_mcp" for c in named)):
             rest = {"class": "not_implemented_mcp", "by": "mcp runner"}
             marks = []
         else:
+            if nim_marks:
+                # with a table, a runner's not_implemented_mcp mark on a scenario the manifest maps that neither the
+                # manifest (mcp.not_implemented, decided above) nor a case the scenario names states is no plan's
+                parts.append(unmatched_not_implemented_mark(nim_marks))
+                compared_lines = [r for r in compared_lines if not any(r is x for x in nim_marks)]
             if marks:
                 parts.append({"class": "service_by_design", "by": "mcp runner", "verified": False,
                               "repeats": [r.get("repeat") for r in marks]})
@@ -2154,7 +2460,7 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
                 rest = {"class": "no_direct_reference",
                         "mcp_outcome": aggregate_outcome([r.get("outcome") for r in compared_lines])}
             elif compared_lines:
-                rest = check_agreement(compared_lines, k_ref, k_arm, explained)
+                rest = check_agreement(compared_lines, k_ref, k_arm, explained, o_ref, o_arm)
     if rest is not None:
         if answered:
             rest["by_design_notes"] = dict((str(k), v) for k, v in sorted(answered.items()))
@@ -2225,7 +2531,8 @@ def front_overhead(local, remote):
     """direct-remote minus direct-local for one scenario, on a pair of host-warm executions only (review H1):
     the raw wall difference (connection set-up excluded), the client-side difference (wall minus the server's
     elapsed time on each side) and the server elapsed difference (near 0 when both are warm). None without a
-    warm execution on both arms (the scenario's cold execution is reported on its own)."""
+    warm execution on both arms (the scenario's cold execution is reported on its own). A warm execution that followed
+    one cut at the host's deadline (timing_cache WARM_AFTER_INTERRUPTED) is no warm execution here."""
     lw = first_with(local, "warm")
     rw = first_with(remote, "warm", prefer=lw.get("repeat") if lw else None)
     if lw is None or rw is None:
@@ -2236,13 +2543,17 @@ def front_overhead(local, remote):
             "server_ms": _diff(_server_elapsed(rw), _server_elapsed(lw))}
 
 
+def _warm_by_heuristic(lines):
+    return any(host_cache(x) == "warm" for x in (lines or {}).values())
+
+
 def mcp_overhead(mcp, local, remote):
     """MCP minus direct (DESIGN §5) on host-warm executions only: the MCP warm execution against each direct
     arm's first warm one, with and without the queue wait, and the service's backend time against both; the
     MCP cold execution's wall time apart."""
-    # Only executions that reached the host measure the MCP path; a refusal at submit or a request the MCP
-    # cannot express says nothing about it.
-    mcp = dict((k, v) for k, v in (mcp or {}).items() if sc.reached_host(v))
+    # Only executions with a backend call's timing measure the MCP path; a refusal at submit, a request the MCP
+    # cannot express or a relayed host deadline (its wall is the deadline's) says nothing about it.
+    mcp = dict((k, v) for k, v in (mcp or {}).items() if sc.backend_timed(v))
     if not mcp:
         return None
     m = first_with(mcp, "warm", prefer=1 if 1 in mcp else None)
@@ -2276,7 +2587,7 @@ def cold_warm(lines):
         return None
     warm = None
     for k in sorted(lines):
-        if k > (cold.get("repeat") or 0) and host_cache(lines[k]) == "warm":
+        if k > (cold.get("repeat") or 0) and timing_cache(lines[k]) == "warm":
             warm = lines[k]
             break
     if warm is None:
@@ -2629,6 +2940,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     front_area = {}
     front_area_net = {}
     front_unpaired = 0
+    front_after_cut = 0
     mcp_vals = {}
     mcp_cold_walls = []
     mcp_phase_vals = {}
@@ -2636,7 +2948,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     connect_vals = {}
     cold_vals = {}
     direct_summary = {"compared": 0, "identical": 0, "same_checks": 0, "not_comparable": 0, "disagree": 0,
-                      "timing": 0, "disagreeing": [], "timing_scenarios": [], "checks_compared": 0}
+                      "timing": 0, "disagreeing": [], "timing_scenarios": [], "checks_compared": 0,
+                      "execution_differs": []}
     mcp_summary = {"compared": 0, "checks_compared": 0, "checks_not_exposed": 0, "checks_inconclusive": 0,
                    "by_design_verified": 0, "by_design_unverified": 0}
     lines_by_area_arm = {}
@@ -2651,11 +2964,12 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             view["host_cache"] = [host_cache(lines[k]) for k in sorted(lines)]
             entry["arms"][arm] = view
             counts = per_area.setdefault(area, {}).setdefault(arm, dict((k, 0) for k in OUTCOME_KEYS + ("total",)))
-            counts[view["outcome"] if view["outcome"] in counts else "mixed"] += 1
+            agg = view["outcome"]
+            counts[agg if agg in counts else "mixed" if sc.outcome_known(agg) or agg is None else OTHER_OUTCOME] += 1
             counts["total"] += 1
             tv = timing_vals.setdefault(area, {}).setdefault(arm, {"all": [], "server": [], "by_host_cache": {}})
             for rep, line in lines.items():
-                hc = host_cache(line)
+                hc = timing_cache(line)
                 wall = wall_net(line)
                 tv["all"].append(wall)
                 tv["server"].append(_server_elapsed(line))
@@ -2688,10 +3002,16 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                 direct_summary["disagreeing"].append(sid)
             elif agree["class"] == "timing":
                 direct_summary["timing_scenarios"].append(sid)
+            if agree.get("execution_differs"):
+                direct_summary["execution_differs"].append(sid)
             fo = front_overhead(local, remote)
             entry["front_overhead"] = fo
             if fo is None:
-                front_unpaired += 1
+                # a pair whose warm executions followed a cut one is left out, counted apart from the unpaired
+                if _warm_by_heuristic(local) and _warm_by_heuristic(remote):
+                    front_after_cut += 1
+                else:
+                    front_unpaired += 1
             else:
                 for k in front_vals:
                     if fo.get(k) is not None:
@@ -2744,11 +3064,15 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         if why is not None:
             arm_counts = by_reason.setdefault(r.get("arm"), {})
             arm_counts[why] = arm_counts.get(why, 0) + 1
+    outside = [{"scenario": r.get("scenario"), "arm": r.get("arm"), "repeat": r.get("repeat"),
+                "outcome": r.get("outcome")} for r in rows if not sc.outcome_known(r.get("outcome"))]
     totals = {}
     for arm in arms_present:
         arm_lines = [r for r in rows if r.get("arm") == arm]
+        outcomes = dict((k, sum(1 for r in arm_lines if r.get("outcome") == k)) for k in OUTCOME_KEYS)
+        outcomes[OTHER_OUTCOME] = sum(1 for r in arm_lines if not sc.outcome_known(r.get("outcome")))
         totals[arm] = {"executions": len(arm_lines),
-                       "outcomes": dict((k, sum(1 for r in arm_lines if r.get("outcome") == k)) for k in OUTCOME_KEYS),
+                       "outcomes": outcomes,
                        "host_cache": dict((k, sum(1 for r in arm_lines if host_cache(r) == k))
                                           for k in sc.HOST_CACHE_VALUES),
                        "wall_ms": sc.summarise([wall_net(r) for r in arm_lines]),
@@ -2773,7 +3097,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         "order": order, "scenarios": scenarios, "relations": relations,
         "summary": {
             "relations": relations_summary,
-            "per_area": per_area, "totals": totals,
+            "per_area": per_area, "totals": totals, "outcomes_outside_vocabulary": outside,
             "direct_agreement": direct_summary, "mcp_agreement": mcp_summary,
             "inconclusive_by_reason": dict((a, dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))))
                                            for a, v in sorted(by_reason.items())),
@@ -2782,6 +3106,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                                "per_area_wall": dict((a, sc.summarise(v)) for a, v in front_area.items()),
                                "per_area_net": dict((a, sc.summarise(v)) for a, v in front_area_net.items()),
                                "scenarios_without_warm_pair": front_unpaired,
+                               "warm_pairs_left_out_after_interrupted": front_after_cut,
                                "connect_ms": dict((a, sc.summarise(v)) for a, v in connect_vals.items()),
                                "cold": dict((a, dict((k, sc.summarise(v)) for k, v in cv.items()))
                                             for a, cv in cold_vals.items())},

@@ -312,8 +312,10 @@ EVIDENCE_SOURCES = ("live", "table", "unknown")
 
 
 def _document_sha(rec):
-    doc = rec.get("document")
-    return rec.get("sha256") or (hashlib.sha256(sc.canonical_json(doc)).hexdigest() if isinstance(doc, dict) else None)
+    """A service_capabilities record's identity: the sha256 it records, else suite_common.service_document_sha256 (the
+    configuration parts and the host document only: probe times and counters differ between the invocations of one
+    deployment)."""
+    return rec.get("sha256") or sc.service_document_sha256(rec)
 
 
 def configuration_problems(run_dir, rows, policy, reevaluated=False):

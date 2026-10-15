@@ -232,14 +232,17 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   repeat 0 / later) stays as §8.3 has it; everything timed keys on `host_cache`.
 - `compare.py RUN_DIR [--by-design PATH]`: merges first when `arms/` exists, then writes compare.json:
   per scenario and arm the outcome over the repeats (the common one, else error > fail > mixed) and whether
-  the repeats' digests agree; direct-local vs direct-remote as `identical` (same digest), `same_checks`
+  the repeats' digests agree; direct-local vs direct-remote as `identical` (same digest, no check or outcome
+  differing other than by timing: lane S7v), `same_checks`
   (other answer, same check outcomes, at least one check compared), `not_comparable` (other answer, no check
   evaluated on both) or `disagree`, with `checks_compared`; the MCP class of DESIGN §1.3; overheads, cold vs
   warm, timing and resource summaries per area, arm and host cache.
 - MCP classes, in this order: the manifest's `mcp.not_implemented` -> `not_implemented_mcp`; per MCP execution as
   async's runner matches it (since lane S5b): the scenario's `mcp.by_design` case(s) in async's table (below), else
   an answer-triggered case of the table (below); the MCP runner's own `not_implemented_mcp` / `service_by_design`
-  outcome where no table is read (lane S5c, B5b-05: with a table such a mark is judged by its checks); else, on the checks both arms evaluated (a check `not_exposed` on either side
+  outcome where no table is read (lane S5c, B5b-05: with a table a service_by_design mark is judged by its checks,
+  and a not_implemented_mcp mark on a scenario the manifest maps to a tool, that neither mcp.not_implemented nor a
+  named not_implemented_mcp case states, is `disagree`, side mcp: lane S7v); else, on the checks both arms evaluated (a check `not_exposed` on either side
   is not compared; `checks_compared` / `checks_not_exposed` recorded): `disagree` when a check differs or one
   side alone errored, `not_comparable` when no check was compared (review M2: an `agree` can no longer be
   vacuous), `agree` otherwise. No MCP line: `missing`.
@@ -2000,3 +2003,223 @@ by lane S6c; everything below was open.
   flags and their negations, `tee -i`, the per-invocation sha256 keys); its re-evaluations of v3 / v4 and the gated
   v4 again move nothing.
 
+## Lane S7v: the verdict findings of the two-day review (2026-10-14)
+The verdict items of the two-day review (~/.cache/metagraph-traverse-reviews/2026-10-14-ultracode/REPORT.md) on
+compare.py, reevaluate.py, report.py and suite_common.py's verdict parts, against 14552938 (lanes G1-G3 merged). Each
+rule below changed because a recorded or probed input read wrong; tests/test_verdict.py holds one test per rule, each
+failing on 14552938.
+
+### The direct arms' class with equal digests
+- `identical` was decided from equal digests before the checks and outcomes were read, so two byte-identical answers
+  whose checks of the answer differed read identical and were left out of `direct_summary.disagreeing`. The order is
+  disagree, identical, timing, not_comparable, same_checks, with one exception on a repeat whose answers are the same:
+  a difference only in the execution checks (`compare.EXECUTION_CHECKS`: budget_respected, which reads the client's
+  wall, holding the network and any wait for a request thread; deterministic, which reads the arm's earlier
+  repeats) is no disagreement of the answers. It is recorded per repeat as `execution_differs` [{repeat, checks:
+  [{check, local, remote}]}] (`compare.execution_only_difference`), the class stays identical, and the arm's own
+  finding or failure counts in its totals (FINDINGS / FAIL through that execution; the strict gate blocks it there).
+  Any other difference with equal digests (a check of the answer, e.g. arms judged by different checks.py; an outcome
+  difference with no check differing; an outcome outside the vocabulary) disagrees. compare's direct summary lists
+  `execution_differs`; the report's direct section names each with its checks.
+- The verification of the lane (VERIFY-S-VERDICT (1)) refuted the first form of this rule, which made v4's
+  R-budget-0002 and R-twin-0002 (byte-identical 503 deadline bodies; direct-local's budget_respected inconclusive,
+  direct-remote's a finding: its client wall 9.5 s / 25.5 s past the budget) direct disagreements and v4's verdict
+  FAIL: with both arms late the same pair read identical, so a worse host read better. They are identical with
+  execution_differs budget_respected inconclusive / finding, and v4 reads FINDINGS as at 14552938.
+
+### The MCP arm's reference, per repeat and check item
+- check_agreement compared every MCP execution with one whole direct arm (direct-local whenever it had a line) and
+  skipped every item that arm left inconclusive or not_exposed, so a direct-local 503 under load hid an MCP failure
+  direct-remote had decided (class agree, or not_comparable when every item was skipped). Now the reference item of
+  each check and occurrence is direct-local's unless direct-local left it undecided while the MCP item and
+  direct-remote's item of the same repeat (else its first) are decided: then direct-remote's is taken
+  (`compare.reference_checks`). The scenario's entry records `reference_alternative` and `reference_fallbacks`
+  [{repeat, check, occurrence, arm, arm_repeat}] (only when an item fell back); `reference_outcome` is that of the
+  lines the comparison used (a direct-local execution every compared item of which fell back is left out, the
+  direct-remote executions that gave an item are in; without a fallback it is unchanged). No item falls back to an
+  execution without an answer (outcome error, or no HTTP status: a transport failure fails its items): the
+  verification of the lane (VERIFY-S-VERDICT (3)) found that an MCP pass beside a direct-local 503 and a
+  direct-remote transport failure read disagree, and an MCP runner error in the same place agree. The report's
+  agreement depth reads the same items. The by-design pairs were already judged on every repeat of both direct arms (lane G2).
+- Moves: v4 N-usecase-0008 and R-pos-0027 not_comparable -> agree (direct-local r0 a 503 deadline, direct-remote r0
+  decides 6 / 5 items), T-repeat-0004 one more item compared (walk_in_record from direct-remote); v3
+  M-planted-0017 not_comparable -> agree, T-walk-0004 one more item compared, and six v3 scenarios already
+  `disagree` by an MCP runner_error now list the error line's failing items against direct-remote's
+  (M-planted-0016, M-protein-0002 / -0007, N-nearmiss-0006 / -0007 / -0013). gate.py's uncompared_properties (require_agreement only; the shipped policy does
+  not set it) still reads the reference arm alone, so it is stricter than compare where an item fell back.
+
+### The host cache after a relayed deadline
+- suite_common.reached_host read an MCP execution as reaching the host only with a number in server.elapsed_ms or
+  mcp_phases.backend_ms; a relayed host deadline (502 search_failed "pattern_deadline: ...", 503
+  traversal_resolve_deadline, 504 resolve_timeout, uninterruptible_overrun_exceeds_allowance) states neither,
+  although the host worked 30-60 s, so it read not_reached and the next direct-local execution was labelled cold with
+  since_prev_s null (its server time a median 2.48x the warm remote's, against 24.9x for a truly cold one). Such an
+  answer (`relayed_host_deadline`: those codes, the relayed /pattern deadline's text, or a time_limited naming a relay)
+  reaches the host now, except a resolve_timeout in the write phase (the line's timeout_terms, else its error's
+  timeout_phase: the service may never have delivered the request; the recorded ones are all read timeouts). `backend_timed` keeps the old test where a backend timing is what matters: the MCP overheads
+  (a relayed deadline's wall is the deadline's) and whether a line records the service's answer.
+- assign_host_cache adds `host_cache_after_interrupted: true` (present only then) to an execution whose previous host
+  execution of the scenario ended at the host's deadline without its answer (`interrupted_on_host`: a direct 503
+  deadline or a relayed one). The timing statistics key on `compare.timing_cache`: such a warm execution reads
+  `warm_after_interrupted` ("warm after a cut" in the timing table), counted apart from the warm ones, so the front
+  overhead's warm pairs, the MCP overheads and the cold vs warm pairs leave it out (v4: the 10 direct-local ones
+  have a median server time 2.48x the other warm ones'); compare's summary counts
+  `warm_pairs_left_out_after_interrupted` (scenarios whose warm pair it would have been) apart from the unpaired, and
+  the report's Overheads section states the count (VERIFY-S-VERDICT (4)).
+- Moves (timing only; no outcome, check, class or verdict): v4 39 MCP lines not_reached -> cold (27) / warm (12), the
+  27 direct-local r0 after them cold -> warm with since_prev_s; 70 lines gain host_cache_after_interrupted; warm
+  pairs 527 -> 537 (32 after an interrupted execution). v3: 10 MCP lines, 8 direct-local r0 cold -> warm.
+
+### The text_contains grammar of an answer_match side (for async: the runner's load validation)
+- A list-valued text_contains on an answer_match side raised TypeError in compare and reevaluate, and the load
+  validation did not refuse it. The matcher (`compare.answer_text_contains`): on the direct side a string, or a list
+  whose fragments must all be within one text (as a direct_expectation's text_contains); on the MCP side one string
+  read as the runner reads it, str(text_contains) within the error's text (a list never matches there).
+- The load validation (`compare.answer_value_problems`, in table_problems) refuses a side's code, text_contains,
+  field or slot_code of another type: a non-empty string, on the direct side also a non-empty list of non-empty
+  strings; on the MCP side one string (the MCP side's code stays the "states no code" rule). The shipped table
+  passes, so nothing recorded moves. The runner reads the MCP side with str() and validates no type: it should
+  refuse the same values (MIRROR, to agree with async).
+
+### A runner's rule (c) without a table (for async: the no-table handling)
+- With `--by-design ''` (no table), a runner's rule (c) inconclusive on a by-design case (inconclusive, its
+  service_by_design_case, inconclusive_reason an undecidable plausibility) was not kept: reevaluate judged it by its
+  checks (fail) and compare compared it check by check (disagree), while a runner's service_by_design mark and a
+  by-design finding are kept in the same situation. `compare.runner_rule_c_by_design` names such a line; without a
+  table reevaluate keeps it inconclusive ("decided by the runner's by-design case X by rule (c) (...); no table to
+  replay it", the case, the runner's record and its inconclusive_reason kept) and compare sets it aside as
+  undecidable (not_comparable when nothing else is judged; another repeat still decides). With a table nothing
+  changes (the case is replayed); the recorded runs are re-evaluated with the table, so nothing moves.
+
+### The runner's not_implemented_mcp mark (for async: how a new mark is announced)
+- An MCP execution the runner marked not_implemented_mcp that no case reproduced made the scenario's class
+  not_implemented_mcp ("by mcp runner") whatever the table said, while the comparator section above said a table
+  judges such a mark. With a table, a mark on a scenario the manifest maps to a tool or a flow (`compare.mcp_mapped`:
+  mcp.tool, or mcp.flow, the runner's area S flows) that
+  neither mcp.not_implemented nor a named case of agreement not_implemented_mcp states, and that no case with
+  answer_match.mcp_outcome matched, is `disagree`, side mcp, by mcp runner, the repeats named
+  (`compare.unmatched_not_implemented_mark`; the other repeats are compared as usual). With no table, with such a
+  named case, or on a scenario without an MCP tool, the mark stays the runner's class. The recorded runs have no such
+  mark (their not_implemented_mcp lines are the manifest's or traverse.advanced_path_disabled's), so nothing moves. A
+  new runner mark reaches the comparator through the table (answer_match.mcp_outcome) or the manifest.
+
+### Outcomes outside the vocabulary (for async: the shared vocabulary)
+- compare's totals counted only its known outcome keys, merge's stricter rule skips an unknown value and nothing
+  checked a line's outcome against suite_common.OUTCOMES, so six MCP lines with `skipped_by_runner` (or an MCP-only
+  run whose lines read so beside failing checks) gave PASS, against this README's "any other outcome reads as a
+  failure". `suite_common.outcome_known` is the shared test (OUTCOMES: pass, fail, finding, inconclusive,
+  not_implemented_mcp, service_by_design, error). compare: totals and per-area counts gain `other`, the summary lists
+  `outcomes_outside_vocabulary` [{scenario, arm, repeat, outcome}], an MCP execution with such an outcome is a
+  disagreement of its own (side mcp, by outcome; never compared check by check), a direct pair with one disagrees,
+  and aggregate_outcome ranks it worst. reevaluate keeps such an outcome (the checks never replace it) with a
+  warning. report: any `other` makes the verdict FAIL ("N with an outcome outside the vocabulary"), the arm's line
+  and a list name them. gate.py already failed such a line ("outcome '...'"). merge_run (lane S-runner) and the
+  paired loop's mcp_after (run_suite.sh) still read the value as recorded; their side is lane S-runner's.
+- Recorded runs: every outcome is in the vocabulary; the totals gain `other: 0` and the summary an empty list.
+
+### The load caveat without a measurement
+- load_caveat read a missing sra_all figure as 0 and printed "mex was not under the Logan load" when every sample
+  had failed (docker stats: a missing or renamed container, the daemon down; the sampler's `error`, its figures
+  null), with load1 moderate or null. load_figures counts the samples stating each figure and the failed ones (the
+  first error); with no sra_all figure, or more than 10 % failed samples (LOAD_SAMPLE_ERROR_SHARE), the verdict
+  section says "**Load not measured:** ..." with the figures and the failures, never the positive sentence; a busy
+  host keeps the Load caveat (with the failures named); the resource section names the failed samples. The recorded
+  runs have no failed sample (v3 12,756, v4 8,693, all with sra_all): their sentence is unchanged.
+
+### A field the MCP drops, and a part of the run that tested nothing
+- A field the MCP answer lacks makes its check `not_exposed`; an execution whose property checks all read so is
+  inconclusive, the pair agrees on the checks both arms evaluated, and the verdict was INCOMPLETE only when nothing
+  passed at all: a service regression dropping `counts` or `results` read PASS with a footnote (the review's case:
+  every MCP property check not exposed -> 6 inconclusive, class agree, PASS). Three layers judge it now:
+  - **The strict deploy gate (lane G3)** already fails such a run: every inconclusive execution blocks, and a
+    property check the scenario expects that is not passed on a passing execution (not exposed included) is a
+    "property" problem unless the policy's declared file says it is not required on that arm (v4: label_dict_contains
+    on T-labels-0003 / -0005 and answer_fields on T-edge-0008 via MCP). The declared list is the gate's record of what
+    the MCP surface does not expose; anything else not exposed blocks.
+  - **The report (exploratory runs)**: `report.untested_groups` names every area and route x arm whose executions
+    include an inconclusive one and none passed (executions only not implemented via MCP or by design are marks,
+    counted elsewhere). Such a group keeps the verdict from PASS: "INCONCLUSIVE (no execution passed in N area / route
+    x arm group(s): ...)" after FAIL and FINDINGS; under another verdict a line names them. The agreement split of
+    lane G3 (Agreement: generic checks only, partial) still names the scenarios whose properties were not compared.
+    An MCP execution that is inconclusive only because checks read not_exposed that the scenario's NAMED by-design
+    case explains (`report.stated_mcp_limit`: the case it matched, among the cases the scenario names, whose
+    explains_checks name every check of the line that did not pass, each not_exposed; with the table compare judged
+    the run with) is a limit the table states: it does not make a group untested, and the verdict section lists it
+    ("Inconclusive via MCP by a limit the by-design table states for the scenario (not counted as untested): ...").
+    v3 and v4: C-caps-0001 (capabilities.traverse_capabilities_document) and C-caps-0003
+    (capabilities.server_capabilities_document), both explaining capabilities_doc, which the MCP answer never
+    carries; so no untested group remains and a clean exploratory run with the MCP arm can read PASS. A field the MCP
+    drops elsewhere (no named case explaining it) still reads untested. The verification of the lane (VERIFY-S-VERDICT
+    (2)) found the first form of the rule counting these by-design limits as untested; the gate is unchanged (its
+    declared file excludes C-caps-0001 on the MCP arm).
+  - **The comparator, with a baseline**: a scenario may state `mcp.exposes` (check names the MCP arm decided in a
+    baseline run: `compare.mcp_exposure(rows)` builds it from a run's lines, for the v5 builder); a listed check that
+    reads not_exposed on an MCP execution compared check by check is `disagree` (side mcp, by exposes, the checks and
+    repeats named; `compare.exposure_drops`), so a dropped field fails the report and the gate's disagreement rule.
+    No frozen manifest states it, so nothing recorded moves.
+
+### A planned MCP arm that recorded nothing (the report side of a missing MCP execution)
+- Lane G3's plan reconciliation already makes the verdict INCOMPLETE for a planned MCP execution no arm recorded, in
+  both modes: run_suite.sh writes plan.json before any arm, and a run without it is reconstructed from
+  orchestrator.json (proved here for the sequential mode with the real run_suite.sh and fake_mcp's exit3: "12
+  planned execution(s) not recorded (mcp 12; plan of plan.json)"; the exit status and the loop record are lane
+  S-runner's). Left: the Agreement section of such a run said "No MCP arm in this run."; it says "No MCP execution
+  was recorded although the run planned N (see the Verdict: INCOMPLETE)" whenever the plan holds MCP executions.
+
+### Validation on the recorded runs (offline)
+- Fresh copies of v3 (lane-s5e/reeval-S5e) and v4 (v4-run-copies/20261014T061053Z_refseq97-6f945db4) re-evaluated
+  with 14552938 and with this lane (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`): 0 changes
+  of outcome, checks, case, explained checks / items, verdict_detail, inconclusive_reason, time_limited or
+  outcome_runner over 2,900 and 2,913 lines; the line changes are the host-cache labels (v3 18 / v4 66 host_cache,
+  8 / 27 since_prev_s and host_cache_after, 54 / 70 lines gaining host_cache_after_interrupted).
+- Class moves, each the point of its rule: v4 R-budget-0002, R-twin-0002 direct identical -> disagree; v4
+  N-usecase-0008, R-pos-0027 and v3 M-planted-0017 MCP not_comparable -> agree; v4 T-repeat-0004 and v3
+  T-walk-0004 one more item compared; six v3 scenarios already disagreeing by an MCP runner_error list their
+  differing items. Summary: v4 MCP 534 agree / 4 not comparable -> 536 / 2, direct disagree 0 -> 2; v3 MCP 542 / 5
+  -> 543 / 4. No relation moves.
+- Verdicts: v4 FINDINGS -> FAIL (the 2 direct disagreements above); v3 FAIL unchanged. Both gain the line naming area
+  C and the two capabilities routes on mcp where nothing passed. The deploy gate on the v4 copy
+  (`--gate gate/policy_v4_rt_mcp.json`, two arms mcp + direct-local): 45 problems before and after, the same list.
+
+### The host's references in an MCP-only run, a service document's identity, the wall rule's name (agreed with async)
+Agreed with the async session on 2026-10-14 (the coordinator's item). The runner records, in run.json
+service_capabilities and in each invocations[].service_capabilities, {document (GET /traverse/capabilities), host_document,
+sha256, read_at, base, database, mismatches, error}; host_document has the shape of the host's /capabilities document:
+"pattern" the /pattern/capabilities/<db> capabilities.raw, "resolve" {"time_budget": document.backends.<db>.budgets.
+resolve_time_budget} (the host's block as received, not backends.<db>.resolve.time_budget, the service's terms).
+- `compare.recorded_documents` (and so bind_run, the references every rule reads, reevaluate's replay and
+  gate_configuration_problems): host = a direct arm's recorded /capabilities when the run has one, else the MCP
+  runner's service_capabilities.host_document, read as live with origin "arms/mcp/run.json
+  service_capabilities.host_document", else the table's host_capabilities block, else unknown; a path the live document
+  lacks reads the table's block, else unknown (suite_common.References). An MCP-only run's host references, and the
+  gate's live / table mismatch check on them, read the service's view of the host instead of the table.
+- A service document's identity, ONE definition both sides compute (agreed with async on 2026-10-15: the runner
+  calls the vendored `suite_common.service_document_sha256` and keeps no view of its own): sha256 of
+  canonical_json(`service_document_view`(document, host_document, database)) = {service_settings, service_maxima,
+  presets, each where the document states it; backends: {<the record's database>: {budgets, resolve,
+  effective_maxima, limits}, each where stated}; host_document where recorded}. A key the document lacks is absent,
+  never null; another database's entry is no part of it; a record without its database keeps no backend entry; a
+  read of the host document alone (the traverse read failed) has that document's identity; an empty view (nothing
+  read) has none. Probe times, cached flags, messages and counters elsewhere in the document change between the
+  invocations of one deployment and would trip the gate's "spans more than one deployment". gate.py's
+  `_document_sha` (edited for this function only) prefers the recorded sha256, else this; compare's
+  recorded_documents states the same. On every shape the verification listed (no service_settings, a second
+  database, a backend entry lacking a key, a failed pattern or traverse read) it equals async's 26fd3e7c view over
+  the same host_document.
+- The host's identity (`suite_common.HOST_IDENTITY_KEYS`: release, index_fp, index_meta_fp, agreed with async on
+  2026-10-15): host_document = {pattern: the /pattern/capabilities/<db> capabilities.raw, resolve: {time_budget:
+  backends.<db>.budgets.resolve_time_budget}, release, index_fp, index_meta_fp: from the traverse document's
+  backends.<db>.identity}, each where a read states it (`suite_common.host_document_of`, for the runner too); so a
+  host redeploy with unchanged limits is another deployment by the identity. A paired run's host namespace reads the
+  same paths: the direct arm's /capabilities (release at its top level) with index_fp and index_meta_fp from the
+  identity the arms record (their /traverse/capabilities, else the run.json's index_fp: `compare.direct_host_document`).
+  A host_document without these keys (a runner before them) still resolves: the paths it states read live, the
+  identity falls back to the table's block, else unknown.
+- service_by_design.json, the vocabulary's answer_match.wall_rule entry only: the name budget_minus_reserve is kept,
+  its threshold is B - 1 s (B the request's time_budget_ms) on the failing attempt's own wall, no finalisation
+  reserve subtracted. The table's sha256 is d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61 (was
+  ab4100c9...); gate/policy_v4_rt_mcp.json pins the old one and is regenerated at integration
+  (test_gate's test_shipped_v4_policy_is_regenerated_exactly fails until then, on that sha only).
+- Agreed, no change: request_evidence_mismatches as the field name; the legacy no-budget term.
+- Recorded runs: v3 and v4 record no service_capabilities, so nothing they read moves; their comparison and report
+  name the table's new sha256.

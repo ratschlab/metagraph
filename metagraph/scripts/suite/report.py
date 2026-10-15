@@ -122,8 +122,9 @@ def short_commit(commit):
     return text.replace("+dirty", "")[:12] + ("+dirty" if dirty else "")
 
 
-HOST_CACHE_ORDER = {"cold": 0, "warm": 1, "aged": 2, "not_reached": 3, "unknown": 4}
-HOST_CACHE_LABEL = {"cold": "cold", "warm": "warm", "aged": "aged", "not_reached": "not reached",
+HOST_CACHE_ORDER = {"cold": 0, "warm": 1, cmp.WARM_AFTER_INTERRUPTED: 1.5, "aged": 2, "not_reached": 3, "unknown": 4}
+HOST_CACHE_LABEL = {"cold": "cold", "warm": "warm", cmp.WARM_AFTER_INTERRUPTED: "warm after a cut", "aged": "aged",
+                    "not_reached": "not reached",
                     "unknown": "unknown"}
 
 
@@ -159,21 +160,104 @@ def area_sort_key(area):
 # ---------------------------------------------------------------------------------------------------------------
 # sections
 
+# the share of failed samples (the sampler's `error`: docker stats failed, e.g. a missing container or daemon) above
+# which the load figures do not stand for the run
+LOAD_SAMPLE_ERROR_SHARE = 0.10
+
+
 def load_figures(samples):
+    """The sampler's figures over the run: sra_all CPU and host load1 (mean, max, how many samples state each), the
+    samples, and those that failed (`error`: their figures are null) with the first error."""
     sra = [s.get("sra_all_cpu_pct") for s in samples if cmp._num(s.get("sra_all_cpu_pct")) is not None]
     load = [s.get("host_load1") for s in samples if cmp._num(s.get("host_load1")) is not None]
+    errors = [s.get("error") for s in samples if s.get("error")]
     return {"sra_mean": (sum(sra) / len(sra)) if sra else None, "sra_max": max(sra) if sra else None,
             "load_mean": (sum(load) / len(load)) if load else None, "load_max": max(load) if load else None,
-            "n": len(samples)}
+            "n": len(samples), "n_sra": len(sra), "n_load": len(load), "n_error": len(errors),
+            "first_error": str(errors[0]) if errors else None}
 
 
-def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None):
+def stated_mcp_limit(line, scenario, cases, comp=None):
+    """The id of the by-design case that states why an MCP execution is inconclusive, else None: the case the scenario
+    names (compare.named_cases) that matched the execution (its service_by_design_case, else compare's
+    by_design_notes for the repeat) and whose explains_checks name every check of the line that did not pass, each of
+    which reads not_exposed (a part of the answer the MCP surface does not expose by design, e.g. capabilities_doc of
+    capabilities.traverse_capabilities_document)."""
+    if line.get("arm") != "mcp" or line.get("outcome") != "inconclusive" or not cases:
+        return None
+    cid = line.get("service_by_design_case")
+    if not cid and comp:
+        ma = (((comp.get("scenarios") or {}).get(line.get("scenario")) or {}).get("mcp_agreement") or {})
+        cid = (ma.get("by_design_notes") or {}).get(str(line.get("repeat")))
+    named = dict((c.get("id"), c) for c in cmp.named_cases(cases, scenario))
+    case = named.get(cid) if cid else None
+    if not case:
+        return None
+    names = set(e if isinstance(e, str) else (e or {}).get("check") for e in case.get("explains_checks") or [])
+    rest = [c for c in line.get("checks") or [] if c.get("outcome") != "pass"]
+    if rest and all(c.get("outcome") == "not_exposed" and c.get("check") in names for c in rest):
+        return cid
+    return None
+
+
+def report_cases(comp):
+    """The by-design table compare judged the run with (compare.json by_design_table), loaded; {} without one."""
+    info = (comp or {}).get("by_design_table")
+    path = (info or {}).get("path") if isinstance(info, dict) else None
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        return cmp.load_by_design(path)[0]
+    except cmp.TableError:
+        return {}
+
+
+def untested_groups(rows, manifest, cases=None, comp=None):
+    """[(kind "area" | "route", name, arm, {outcome: executions})] of every area and route x arm whose executions
+    include an inconclusive one and none passed: what that part of the run tested is nothing (a field the MCP no
+    longer exposes leaves every execution inconclusive). Executions not implemented via MCP or by design alone are
+    explicit marks, counted elsewhere, and an MCP execution inconclusive by a limit the table states for the scenario
+    (stated_mcp_limit, with |cases|) is stated apart; neither makes a group untested."""
+    scen = dict((s.get("id"), s) for s in (manifest or {}).get("scenarios", []) if isinstance(s, dict))
+    route_of = dict((sid, s.get("route")) for sid, s in scen.items())
+    groups = {}
+    for r in rows:
+        arm = r.get("arm")
+        if stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp):
+            continue   # a limit the table states for the scenario: stated in the verdict section, not untested
+        for kind, name in (("area", r.get("area") or str(r.get("scenario") or "").split("-", 1)[0]),
+                           ("route", route_of.get(r.get("scenario")) or r.get("route"))):
+            if name:
+                c = groups.setdefault((kind, name, arm), {})
+                c[r.get("outcome")] = c.get(r.get("outcome"), 0) + 1
+    out = []
+    for (kind, name, arm), c in groups.items():
+        if c.get("inconclusive") and not c.get("pass"):
+            out.append((kind, name, arm, c))
+    arm_pos = dict((a, i) for i, a in enumerate(sc.ARMS))
+    out.sort(key=lambda g: (g[0], area_sort_key(g[1]) if g[0] == "area" else (0, str(g[1])), arm_pos.get(g[2], 9)))
+    return out
+
+
+def untested_text(groups, limit=12):
+    return "; ".join("%s %s on %s (%s)" % (kind, name, arm, ", ".join(
+        "%d %s" % (n, o) for o, n in sorted(c.items(), key=lambda kv: (-kv[1], str(kv[0]))))) for kind, name, arm, c
+        in groups[:limit]) + ("; ..." if len(groups) > limit else "")
+
+
+def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
+                    cases=None):
     """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
-    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement."""
+    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
+    x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
+    from PASS; an MCP execution inconclusive by a limit |cases| (the table) states for its scenario is listed apart
+    (stated_mcp_limit)."""
     s = comp["summary"]
     lines = ["# Verdict", ""]
     totals = s.get("totals", {})
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
+    # an outcome outside the vocabulary (a runner's mark not agreed first) is read as a failure, never as a pass
+    other = sum(t["outcomes"].get(cmp.OTHER_OUTCOME, 0) for t in totals.values())
     findings = sum(t["outcomes"].get("finding", 0) for t in totals.values())
     inconclusive = sum(t["outcomes"].get("inconclusive", 0) for t in totals.values())
     passed = sum(t["outcomes"].get("pass", 0) for t in totals.values())
@@ -199,11 +283,19 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     modules = sorted(set(checks_name(info) for info in (run.get("arms") or {}).values() if checks_name(info)))
     # a re-evaluated set is judged by checks.py whatever the runners ran
     stub = "stub" in modules and not reevaluated
+    untested = untested_groups(rows, manifest, cases, comp)
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    stated = {}
+    for r in rows:
+        cid = stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp)
+        if cid:
+            stated.setdefault((r.get("scenario"), cid), []).append(r.get("repeat"))
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
-    elif failing or dis_direct or dis_mcp or rel_failed:
-        verdict = "FAIL (%d failed or errored execution(s), %d direct and %d MCP disagreement(s)%s)" % (
-            failing, dis_direct, dis_mcp, (", %d failed relation(s)" % rel_failed) if rel_failed else "")
+    elif failing or other or dis_direct or dis_mcp or rel_failed:
+        verdict = "FAIL (%d failed or errored execution(s)%s, %d direct and %d MCP disagreement(s)%s)" % (
+            failing, (", %d with an outcome outside the vocabulary" % other) if other else "", dis_direct, dis_mcp,
+            (", %d failed relation(s)" % rel_failed) if rel_failed else "")
     elif findings:
         verdict = ("FINDINGS (%d execution(s) where the host broke a stated bound without failing the request; no "
                    "failure, no disagreement)" % findings)
@@ -211,6 +303,10 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         # Nothing was shown to hold: never PASS (review N5).
         verdict = ("INCONCLUSIVE (no execution passed: %d inconclusive execution(s), where no check could test its "
                    "property; no failure, no disagreement)" % inconclusive)
+    elif untested:
+        # a part of the run tested nothing (e.g. a field the MCP stopped exposing): never PASS
+        verdict = ("INCONCLUSIVE (no execution passed in %d area / route x arm group(s): %s; no failure, no "
+                   "disagreement)" % (len(untested), untested_text(untested)))
     elif not executions:
         verdict = "EMPTY (no execution recorded)"
     elif stub:
@@ -230,6 +326,22 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
                          md(arm), t.get("executions", 0), o.get("pass", 0), o.get("fail", 0), o.get("error", 0),
                          o.get("finding", 0), o.get("inconclusive", 0), o.get("not_implemented_mcp", 0),
                          o.get("service_by_design", 0)))
+        if o.get(cmp.OTHER_OUTCOME):
+            lines[-1] = lines[-1][:-1] + "; %d with an outcome outside the vocabulary (read as failures)." % (
+                o[cmp.OTHER_OUTCOME])
+    outside = s.get("outcomes_outside_vocabulary") or []
+    if outside:
+        lines.append("- Outcomes outside the vocabulary (%s), read as failures: %s%s." % (
+            md(", ".join(sc.OUTCOMES)), md("; ".join("%s %s r%s %r" % (x.get("arm"), x.get("scenario"), x.get("repeat"),
+                                                                      x.get("outcome")) for x in outside[:20])),
+            " ..." if len(outside) > 20 else ""))
+    if untested and not verdict.startswith("INCONCLUSIVE (no execution passed in"):
+        lines.append("- No execution passed in %d area / route x arm group(s) (only inconclusive ones, beside marks): "
+                     "%s." % (len(untested), md(untested_text(untested))))
+    if stated:
+        lines.append("- Inconclusive via MCP by a limit the by-design table states for the scenario (not counted as "
+                     "untested): %s." % md("; ".join("%s mcp r%s (%s)" % (sid, ",".join(str(x) for x in reps), cid)
+                                                     for (sid, cid), reps in sorted(stated.items()))))
     ibr = s.get("inconclusive_by_reason") or {}
     if any(ibr.values()):
         # an inconclusive execution tested nothing: by its class (undecidable plausibility, a host state, the
@@ -305,6 +417,13 @@ def gate_section(run_dir, reevaluated=False, max_items=200):
     return "\n".join(out)
 
 
+def load_errors_text(lf):
+    """'' or how many samples failed, with the first error."""
+    if not lf.get("n_error"):
+        return ""
+    return "%d of %d samples failed (first: %s)" % (lf["n_error"], lf["n"], str(lf.get("first_error"))[:160])
+
+
 def load_caveat(lf):
     if lf["n"] == 0:
         return ("Load: no resource samples in this run (the sampler did not run), so the host load during the "
@@ -314,10 +433,20 @@ def load_caveat(lf):
     figures = "contextual telemetry: sra_all CPU mean %s %% (max %s %%), host load1 mean %s (max %s) over %d samples" % (
         fmt_num(lf["sra_mean"], 0), fmt_num(lf["sra_max"], 0), fmt_num(lf["load_mean"], 1),
         fmt_num(lf["load_max"], 1), lf["n"])
+    errors = load_errors_text(lf)
+    if errors:
+        figures += "; " + errors
     if busy:
         return ("**Load caveat:** the timings were taken while mex carried the Logan load (%s). They are "
                 "labelled as such and are not the timing baseline; the rerun after the Logan backlog drains is."
                 % md(figures))
+    if lf["sra_mean"] is None or lf.get("n_error", 0) > LOAD_SAMPLE_ERROR_SHARE * lf["n"]:
+        # no figure of the sra_all container (or too many failed samples) says nothing about the Logan load: never
+        # the positive sentence
+        return ("**Load not measured:** %s, so whether mex carried the Logan load during the timings is unknown; "
+                "read the timings with that caveat (%s)." % (
+                    "no sample states the sra_all container's CPU" if lf["sra_mean"] is None
+                    else "more than %d %% of the samples failed" % round(100 * LOAD_SAMPLE_ERROR_SHARE), md(figures)))
     return "Load: mex was not under the Logan load during this run (%s)." % md(figures)
 
 
@@ -517,7 +646,8 @@ def agreement_depth(comp, rows, is_property):
     """How much an MCP `agree` establishes, per scenario (VERIFY-B): compare's agree means the checks both arms
     evaluated agree, not that the answers are equal or right. Each agreeing scenario's property checks
     (checks.is_property; the generic ones, e.g. budget_respected which the MCP never sees, do not count) on each MCP
-    repeat against the reference arm's same repeat (else its first): {scenario: {class (DEPTH_CLASSES), not_compared
+    repeat against the reference arm's same repeat (else its first; an item compare took from the other direct arm,
+    reference_fallbacks, from that arm's: compare.reference_checks): {scenario: {class (DEPTH_CLASSES), not_compared
     (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
     where the MCP does not expose them)}}."""
     by = {}
@@ -533,10 +663,14 @@ def agreement_depth(comp, rows, is_property):
         if not ref or not mcp:
             continue
         ref0 = ref[min(ref)]
+        # the other direct arm's items where compare took a reference item from it (reference_fallbacks)
+        alt = ((by.get(sid) or {}).get(ma.get("reference_alternative")) or {}) if ma.get("reference_fallbacks") else {}
+        alt0 = alt[min(alt)] if alt else None
         has_prop, compared, skipped, hidden = False, set(), set(), set()
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
-            theirs = (ref.get(rep) or ref0).get("checks") or []
             mine = mcp[rep].get("checks") or []
+            theirs, _ = cmp.reference_checks(mine, (ref.get(rep) or ref0).get("checks") or [],
+                                             (alt.get(rep) or alt0 or {}).get("checks") if alt else None)
             has_prop = has_prop or any(is_property(c.get("check")) for c in mine + theirs)
             ca, cb = {}, {}
             for c in mine:
@@ -577,7 +711,14 @@ def depth_counts(depth):
     return counts
 
 
-def agreement_section(comp, depth=None):
+def outcomes_text(value):
+    """A check's outcomes on one execution (compare.check_outcomes: a list, one per occurrence) as text."""
+    if isinstance(value, list):
+        return "/".join(str(x) for x in value) or "none"
+    return "none" if value is None else str(value)
+
+
+def agreement_section(comp, depth=None, mcp_planned_missing=0):
     s = comp["summary"]
     da = s["direct_agreement"]
     out = ["# Agreement between the arms", "", "## direct-local vs direct-remote", ""]
@@ -598,6 +739,17 @@ def agreement_section(comp, depth=None):
                        "a time-limited earlier repeat. A systematic speed gap between the arms shows here: %s." % (
                            ", ".join(md(x) for x in da.get("timing_scenarios", [])[:100])))
             out.append("")
+        ed = da.get("execution_differs") or []
+        if ed:
+            out.append("Identical answers whose execution checks differ by arm (budget_respected reads the client's "
+                       "wall, deterministic the arm's earlier repeats; each arm's own finding or failure counts in its "
+                       "totals, not as a disagreement of the answers): %s.\n" % "; ".join(
+                           "%s %s" % (md(sid), "; ".join("r%s %s" % (x.get("repeat"), ", ".join(
+                               "%s local %s remote %s" % (md(c["check"]), md(outcomes_text(c["local"])),
+                                                          md(outcomes_text(c["remote"])))
+                               for c in x.get("checks") or []))
+                               for x in (comp["scenarios"][sid].get("direct_agreement") or {}).get(
+                                   "execution_differs") or [])) for sid in ed[:100]))
         rows = []
         for sid in da.get("disagreeing", [])[:100]:
             a = comp["scenarios"][sid].get("direct_agreement") or {}
@@ -609,7 +761,12 @@ def agreement_section(comp, depth=None):
     out.append("")
     ma = s["mcp_agreement"]
     if not ma.get("compared"):
-        out.append("No MCP arm in this run.\n")
+        if mcp_planned_missing:
+            # the run planned the MCP arm and it recorded nothing (a refusal at start, a crash): never "no arm"
+            out.append("No MCP execution was recorded although the run planned %d (see the Verdict: INCOMPLETE).\n"
+                       % mcp_planned_missing)
+        else:
+            out.append("No MCP arm in this run.\n")
         return "\n".join(out)
     classes = [k for k in ("agree", "not_comparable", "disagree", "not_implemented_mcp", "service_by_design",
                            "missing", "no_direct_reference") if ma.get(k)]
@@ -713,7 +870,10 @@ def timing_section(comp):
            "not included) and the server's own elapsed time (ms; `timing.elapsed_ms`, or the sum over patterns), "
            "per area, arm and the host's cache state: cold = the scenario's first execution on the host in this "
            "run (whichever arm ran it), warm = another execution of it within 60 s, aged = older (cache state "
-           "unknown), not reached = an MCP execution the host never saw (refused at submit, not expressible).", ""]
+           "unknown), not reached = an MCP execution the host never saw (refused at submit, not expressible); warm "
+           "after a cut = warm, but the scenario's previous execution ended at the host's deadline "
+           "(`host_cache_after_interrupted`): counted apart from the warm ones, which the overheads and the cold vs "
+           "warm pairs use.", ""]
     rows = []
     for area in sorted(s["timing"], key=area_sort_key):
         for arm in comp["arms"]:
@@ -762,6 +922,12 @@ def overhead_section(comp):
         if v.get("n"):
             rows.append([md(labels[k]), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])])
     out.append(table(["difference (ms)", "n", "p50", "p90", "max"], rows))
+    if fo.get("warm_pairs_left_out_after_interrupted"):
+        out.append("%d scenario(s) left out of the warm pairs, counted apart: on an arm every warm execution followed "
+                   "one cut at the host's deadline (a direct 503 deadline or a deadline the service relayed: "
+                   "`host_cache_after_interrupted`); the host had worked on the request, but its row cache may hold "
+                   "only part of a complete execution's (the timing table shows them as warm after a cut).\n"
+                   % fo["warm_pairs_left_out_after_interrupted"])
     if fo.get("scenarios_without_warm_pair"):
         out.append("%d scenario(s) ran on both direct arms without a host-warm execution on each (the first arm "
                    "had only the cold one); they are not in the front cost.\n" % fo["scenarios_without_warm_pair"])
@@ -815,7 +981,7 @@ def overhead_section(comp):
     return "\n".join(out)
 
 
-def resources_section(comp):
+def resources_section(comp, lf=None):
     s = comp["summary"]
     out = ["# Resource telemetry per area (contextual)", "",
            "Contextual telemetry, not a measurement of the suite's requests and not a benchmark: samples of "
@@ -837,6 +1003,10 @@ def resources_section(comp):
                          fmt_mib(r["peak_server_memory_bytes"])])
     out.append(table(["area", "arm", "sampled", "peak CPU %", "peak mem GiB", "sra_all CPU %", "load1",
                       "server mem MiB"], rows))
+    errors = load_errors_text(lf or {})
+    if errors:
+        out.append("Failed samples (docker stats did not answer; their figures are null and not in the columns): "
+                   "%s.\n" % md(errors))
     return "\n".join(out)
 
 
@@ -994,8 +1164,8 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
              "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
     is_property = gate_mod._is_property_fn(cmp.reevaluation_checks_dir(run_dir) if reevaluated else None)
     depth = agreement_depth(comp, rows, is_property)
-    parts.append(verdict_section(run, comp, rows, samples, reevaluated,
-                                 gate_mod.missing_planned(run_dir, manifest, rows), depth))
+    missing = gate_mod.missing_planned(run_dir, manifest, rows)
+    parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest, report_cases(comp)))
     parts.append(gate_section(run_dir, reevaluated, max_failures))
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures, run))
@@ -1003,11 +1173,11 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(outcomes_section(comp))
     parts.append(failures_section(rows, manifest, max_failures))
     parts.append(findings_section(rows, manifest, max_failures))
-    parts.append(agreement_section(comp, depth))
+    parts.append(agreement_section(comp, depth, sum(1 for k in missing[0] if k[1] == "mcp")))
     parts.append(relations_section(comp))
     parts.append(timing_section(comp))
     parts.append(overhead_section(comp))
-    parts.append(resources_section(comp))
+    parts.append(resources_section(comp, load_figures(samples)))
     if compare_dir:
         # like with like: the earlier run's re-evaluated set where it has one
         old_re = reevaluated and os.path.exists(os.path.join(compare_dir, "reevaluated.json"))

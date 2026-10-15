@@ -438,7 +438,8 @@ class CompareTest(unittest.TestCase):
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         self.assertEqual(info["cases"], 131)   # async's vendored table at 31a2e41f (e427d503's edit, case 131)
-        self.assertEqual(info["sha256"], "ab4100c98abcef873ed09c4eddcc5e31b448a5c84114a2ae2439afb59498c6b3")
+        # lane S7v: the vocabulary's wall_rule entry states budget_minus_reserve's threshold (B - 1 s, the name kept)
+        self.assertEqual(info["sha256"], "d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07)
         entry, = cases["traverse.duplicate_seeds"]["explains_checks"]

@@ -343,18 +343,65 @@ HOST_CACHE_WARM_S = 60.0
 HOST_CACHE_VALUES = ("cold", "warm", "aged", "not_reached", "unknown")
 
 
+# The MCP answers that relay a host deadline: the host worked on the request until its deadline (it reached the host
+# and its row cache) although the service states neither the host's timing nor a backend phase. The host-state codes
+# (the relayed /resolve deadline, the service's resolve client giving up before the host's overrun answer, an
+# attempt's overrun) and the relayed /pattern deadline (search_failed, the text pattern_deadline: ...); the checks'
+# time_limited names such a relay.
+RELAYED_DEADLINE_CODES = MCP_HOST_STATE_CODES
+RELAYED_PATTERN_DEADLINE = ("search_failed", "pattern_deadline")
+RELAYED_TIME_LIMITED = "relayed by the service"
+
+
+def backend_timed(line):
+    """Whether an MCP execution records a backend call's timing: the host's own (`server.elapsed_ms`) or the
+    service's backend phase (`mcp_phases.backend_ms`) is a number."""
+    server = line.get("server") if isinstance(line.get("server"), dict) else {}
+    phases = line.get("mcp_phases") if isinstance(line.get("mcp_phases"), dict) else {}
+    return _is_number(server.get("elapsed_ms")) or _is_number(phases.get("backend_ms"))
+
+
+def relayed_host_deadline(line):
+    """Whether an MCP execution's answer relays a host deadline (RELAYED_DEADLINE_CODES, the relayed /pattern
+    deadline, or a time_limited naming a relay): the host worked on it, without a timing on record. A resolve_timeout
+    in the write phase (the line's timeout_terms, else its error's timeout_phase) is none: the service may never have
+    delivered the request."""
+    err = line.get("error") if isinstance(line.get("error"), dict) else {}
+    code = str(err.get("code") or "")
+    if code == "resolve_timeout":
+        terms = line.get("timeout_terms") if isinstance(line.get("timeout_terms"), dict) else {}
+        if (terms.get("timeout_phase") or err.get("timeout_phase")) == "write":
+            return False
+    if code in RELAYED_DEADLINE_CODES:
+        return True
+    if code == RELAYED_PATTERN_DEADLINE[0] and str(err.get("text") or "").startswith(RELAYED_PATTERN_DEADLINE[1]):
+        return True
+    tl = line.get("time_limited")
+    return isinstance(tl, str) and RELAYED_TIME_LIMITED in tl
+
+
 def reached_host(line):
     """Whether an execution reached the host, and so touched its row cache: a direct request that got an
-    answer or timed out (not a refused connection); an MCP execution only on evidence of a backend call, i.e.
-    the host's own timing (`server.elapsed_ms`) or the service's backend phase (`mcp_phases.backend_ms`) is a
-    number. Never from the MCP outcome (review N2): a refusal at submit can read `fail` without reaching the
-    host, and an `error` or a service_by_design mark can follow a backend call (a relayed refusal does)."""
+    answer or timed out (not a refused connection); an MCP execution only on evidence of a backend call: a
+    backend timing (backend_timed) or an answer relaying a host deadline (relayed_host_deadline: the host worked
+    until its deadline, 30-60 s). Never from the MCP outcome (review N2): a refusal at submit can read `fail`
+    without reaching the host, and an `error` or a service_by_design mark can follow a backend call (a relayed
+    refusal does)."""
     if line.get("arm") == "mcp":
-        server = line.get("server") if isinstance(line.get("server"), dict) else {}
-        phases = line.get("mcp_phases") if isinstance(line.get("mcp_phases"), dict) else {}
-        return _is_number(server.get("elapsed_ms")) or _is_number(phases.get("backend_ms"))
+        return backend_timed(line) or relayed_host_deadline(line)
     err = line.get("error") or {}
     return not (not line.get("http") and err.get("code") == "transport")
+
+
+def interrupted_on_host(line):
+    """Whether an execution ended at the host's deadline without its answer: a direct 503 deadline, or an MCP answer
+    relaying a host deadline (relayed_host_deadline). The next execution's host cache is warm by the recent-repeat
+    heuristic, but the host's work was cut short, so its row cache may hold only part of what a complete execution
+    leaves there."""
+    if line.get("arm") == "mcp":
+        return relayed_host_deadline(line)
+    err = line.get("error") if isinstance(line.get("error"), dict) else {}
+    return line.get("http") == 503 and err.get("code") == "deadline"
 
 
 def line_times(line, offset_s=0.0):
@@ -378,7 +425,10 @@ def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
     cold = the first execution of the scenario on the host in this run; warm = another execution of it ended
     at most warm_s seconds before this one started; aged = longer ago (the cache state is unknown);
     not_reached = the execution never reached the host; unknown = no start time. since_prev_s is the time from
-    the end of the scenario's previous host execution to this start, host_cache_after that execution's arm.
+    the end of the scenario's previous host execution to this start, host_cache_after that execution's arm, and
+    `host_cache_after_interrupted` true (only then present) when that execution ended at a host deadline without
+    its answer (interrupted_on_host: a relayed deadline), so a timing can tell a warm cache after a complete
+    execution from one after a cut one.
     clock_offsets {arm: seconds} puts the arms on one clock (direct-local is stamped on mex)."""
     offsets = clock_offsets or {}
     arm_rank = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
@@ -407,9 +457,12 @@ def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
         r["host_cache"] = label
         r["since_prev_s"] = since
         r["host_cache_after"] = prev[1] if prev else None
+        r.pop("host_cache_after_interrupted", None)
+        if prev and prev[2]:
+            r["host_cache_after_interrupted"] = True
         if reached and start is not None:
             stop = end if end is not None else start
-            last[sid] = (max(stop, prev[0]) if prev else stop, r.get("arm"))
+            last[sid] = (max(stop, prev[0]) if prev else stop, r.get("arm"), interrupted_on_host(r))
     return rows
 
 
@@ -570,6 +623,72 @@ def json_equal(a, b):
 def same_value(a, b):
     """Whether two configuration values are the same (json_equal)."""
     return json_equal(a, b)
+
+
+# The host's identity, a part of the host namespace and of a service document's identity (agreed with async's runner
+# on 2026-10-15): the MCP runner's host_document states it beside its pattern and resolve parts (from the traverse
+# document's backends.<db>.identity: {index_ns, index_fp, index_meta_fp, release}); a paired run's direct arms record
+# release in the host's /capabilities and index_fp, index_meta_fp in its /traverse/capabilities. A host redeploy with
+# unchanged limits is another deployment.
+HOST_IDENTITY_KEYS = ("release", "index_fp", "index_meta_fp")
+# The identity of a service configuration record (the MCP runner's run.json service_capabilities and each
+# invocations[].service_capabilities: {document (GET /traverse/capabilities), host_document, sha256, read_at, base,
+# database, mismatches, error}): the sha256 of the canonical JSON of its configuration view, ONE definition both the
+# suite and async's runner (which vendors this module) compute (service_document_sha256). The rest of the document
+# (probe times, cached flags, messages, counters) changes between the invocations of one deployment.
+SERVICE_DOCUMENT_VIEW_KEYS = ("service_settings", "service_maxima", "presets")
+SERVICE_BACKEND_VIEW_KEYS = ("budgets", "resolve", "effective_maxima", "limits")
+
+
+def host_document_of(traverse_doc, pattern_doc, database):
+    """The host's configuration as the service states it, in the shape of the host's /capabilities document (the
+    {"host": path} namespace): {pattern: GET /pattern/capabilities/<db>'s capabilities.raw, resolve: {time_budget: GET
+    /traverse/capabilities' backends.<db>.budgets.resolve_time_budget}, release, index_fp, index_meta_fp: from
+    backends.<db>.identity (HOST_IDENTITY_KEYS)}, each part where a read states it (an identity value that is null is
+    absent); None when none does."""
+    out = {}
+    caps = pattern_doc.get("capabilities") if isinstance(pattern_doc, dict) else None
+    raw = caps.get("raw") if isinstance(caps, dict) else None
+    if isinstance(raw, dict):
+        out["pattern"] = raw
+    backends = traverse_doc.get("backends") if isinstance(traverse_doc, dict) else None
+    backend = backends.get(database) if isinstance(backends, dict) and database else None
+    budgets = backend.get("budgets") if isinstance(backend, dict) else None
+    terms = budgets.get("resolve_time_budget") if isinstance(budgets, dict) else None
+    if isinstance(terms, dict):
+        out["resolve"] = {"time_budget": terms}
+    identity = backend.get("identity") if isinstance(backend, dict) else None
+    for key in HOST_IDENTITY_KEYS:
+        if isinstance(identity, dict) and identity.get(key) is not None:
+            out[key] = identity[key]
+    return out or None
+
+
+def service_document_view(document, host_document=None, database=None):
+    """What a service configuration record's identity covers: {service_settings, service_maxima, presets (each where
+    the document states it), backends: {<database>: {budgets, resolve, effective_maxima, limits} (where stated)} of
+    the record's database only, host_document (where recorded: its pattern and resolve parts and the host's identity,
+    HOST_IDENTITY_KEYS)}. A key the document lacks is absent from the view, never null; another database's entry is
+    no part of it."""
+    doc = document if isinstance(document, dict) else {}
+    view = dict((k, doc[k]) for k in SERVICE_DOCUMENT_VIEW_KEYS if k in doc)
+    backends = doc.get("backends")
+    backend = backends.get(database) if isinstance(backends, dict) and database else None
+    if isinstance(backend, dict):
+        view["backends"] = {database: dict((k, backend[k]) for k in SERVICE_BACKEND_VIEW_KEYS if k in backend)}
+    if isinstance(host_document, dict):
+        view["host_document"] = host_document
+    return view
+
+
+def service_document_sha256(record):
+    """The identity of a service_capabilities record: sha256 of canonical_json(service_document_view(its document,
+    its host_document, its database)); None when the view is empty (nothing was read). A read of the host document
+    alone (the traverse read failed) has the identity of that document."""
+    if not isinstance(record, dict):
+        return None
+    view = service_document_view(record.get("document"), record.get("host_document"), record.get("database"))
+    return hashlib.sha256(canonical_json(view)).hexdigest() if view else None
 
 
 class References(object):

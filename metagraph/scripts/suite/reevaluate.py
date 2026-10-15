@@ -11,7 +11,8 @@ judged again with checks.evaluate of DIR/checks.py (default: this directory), wi
 from their raw answers with the same checks (the recorded digest and time_limited where a raw answer is missing),
 and `client` = {"wall_ms"}: a direct arm's recorded wall time (run_direct.py), the MCP arm's service-measured
 backend time (mcp_phases.backend_ms, as async's runner passes it since its 0d127f4a). The outcome is
-checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: `error`
+checks.scenario_outcome of the new checks, except where the runner decided it without them, which is kept: an
+outcome outside the vocabulary (suite_common.outcome_known; a warning, read as a failure downstream), `error`
 (no answer, a transport or decode failure, a busy deployment; unless the recorded checks are the checks module's
 own exception, which a re-evaluation repeats) and `not_implemented_mcp`. On the MCP arm the runner's verdict is
 replayed with the current table (--by-design PATH, default compare.py's; '' none; async's runner at 31a2e41f,
@@ -31,7 +32,8 @@ when a failing check item is not one the matched cases explain, else finding, se
 item is explained, else the checks' outcome); the line records the case (`service_by_design_case`), the explained
 checks (`explained_checks`, names) and items (`explained_items`, indices into checks: B5b-06) whenever a case
 matched. A runner's service_by_design mark the current table does not reproduce is judged by the checks (B-06), and
-says so; with no table a runner's mark, and a by-design finding (B5b-10), are kept. Then the host-state rule (an
+says so; with no table a runner's mark, a by-design finding (B5b-10) and a rule (c) inconclusive on its case
+(compare.runner_rule_c_by_design) are kept. Then the host-state rule (an
 unexpected compare.MCP_HOST_STATE_CODES answer whose service-side wall the plausibility rule of
 suite_common.host_state_verdict admits is inconclusive; one it rejects is judged by the checks, and so is a relayed
 /resolve deadline on a discovery that sent no budget (rule 1) and an answer the client's own wall proves premature
@@ -231,6 +233,12 @@ def _recorded_mark(line, info):
 
 def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cases, tool_err, info, doc):
     recorded = line.get("outcome")
+    if not sc.outcome_known(recorded):
+        # a runner's outcome outside the shared vocabulary is no verdict the checks may replace: kept, and read as
+        # a failure by compare and the report
+        info.setdefault("warnings", []).append("outcome %r outside the vocabulary (%s): kept" % (
+            recorded, ", ".join(sc.OUTCOMES)))
+        return recorded, "an outcome outside the vocabulary (%r): kept, read as a failure" % (recorded,)
     kept = recorded in KEPT_OUTCOMES and not (recorded == "error" and evaluate_raised(line.get("checks")))
     # a mark of a matched table case is replayed with the table: service_by_design, and (async's 901893b7) a
     # not_implemented_mcp that names its case (answer_match.mcp_outcome); the manifest's mcp.not_implemented names none
@@ -244,6 +252,13 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         _recorded_mark(line, info)
         return recorded, "decided by the runner's by-design case %s (a finding the mark never erases); no table " \
                          "to replay it" % line.get("service_by_design_case")
+    if arm == "mcp" and not cases and compare.runner_rule_c_by_design(dict(line, arm=arm)):
+        # with no table the runner's rule (c) on its case (the wall rule undecidable) is its decision, kept as its
+        # service_by_design mark is: inconclusive, the case and the class recorded
+        _recorded_mark(line, info)
+        info["inconclusive_reason"] = line.get("inconclusive_reason")
+        return recorded, "decided by the runner's by-design case %s by rule (c) (%s); no table to replay it" % (
+            line.get("service_by_design_case"), line.get("inconclusive_reason"))
     rule = getattr(checks_mod, "scenario_outcome", None) or sc.outcome_from_checks
     notes = []
     warnings = info.setdefault("warnings", [])
