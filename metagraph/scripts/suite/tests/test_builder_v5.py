@@ -201,5 +201,25 @@ class FlankCut(unittest.TestCase):
         self.assertEqual(t["start"] - t["flank_start"], 4898)
 
 
+class DerivedLabelKinds(unittest.TestCase):
+    """triage-v4 V02 (VERIFY-V4's amendment): the header-kind override only where the v4 answers counted more carriers
+    than the default 1,000 (eco 6,181; cal 1), with the memory the 6,181 labels need; cal's pair walks via MCP."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_pairs(self):
+        import compare as cmp
+        import gate_policy
+        s = by_id(built({"R", "T"}))
+        eco_h, cal_h = s["T-labels-0004"], s["T-labels-0006"]
+        self.assertEqual(eco_h["request"]["strategy"]["labels"]["max_seed_labels"], ml.SERVER_MAX_SEED_LABELS)
+        self.assertEqual(eco_h["request"]["strategy"]["bounds"]["max_memory_mb"], 4096)
+        self.assertEqual(eco_h["truth"]["derived_labels_v4"], 6181)
+        self.assertNotIn("max_seed_labels", cal_h["request"]["strategy"]["labels"])
+        self.assertEqual(cal_h["request"]["strategy"]["bounds"]["max_memory_mb"], 512)
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        self.assertIsNone(gate_policy.mcp_exclusion(cal_h, cases))                    # basic path: the MCP walks it
+        self.assertIn("advanced_path", gate_policy.mcp_exclusion(eco_h, cases)["rules"])   # stays not implemented
+
+
 if __name__ == "__main__":
     unittest.main()

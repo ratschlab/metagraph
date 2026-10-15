@@ -389,23 +389,34 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # seed_label_kind header vs column on one seed of a multi-record column (the verification's A3: on a
     # single-record column both kinds carry the same k-mers): the derived set holds the record's own label of the
     # kind asked, and only labels of that kind
-    # A derived set keeps the first labels.max_seed_labels carriers in (column, seq_id) order (SPEC §6.1): an eco
-    # window's header set held 6,181 headers (every E. coli assembly), so NC_000913.3 fell past the default 1,000
-    # (G14). The offline truth cannot count a window's header carriers (it knows the genomes' own records, not which
-    # RefSeq records hold a window), so the header kind asks for the server's maximum (10,000, the service's too).
+    # A derived set keeps the first labels.max_seed_labels carriers in (column, seq_id) order (SPEC §6.1). The offline
+    # truth cannot count a window's header carriers (it knows the genomes' own records, not which RefSeq records hold
+    # a window), so the counts come from the v4 answers (triage-v4 V02): the eco window's header set held 6,181
+    # headers (every E. coli assembly; NC_000913.3 falls past the default 1,000, G14), the cal window's 1. Only eco's
+    # header kind asks for more labels (the server's maximum, 10,000, the service's too), and with its 6,181 live
+    # labels the modelled memory of detail full outgrows the walk preset's 512 MB (a stop at 58 bp in v4), so it asks
+    # 4,096 MB (the host states no memory cap: max_memory_mb 0). Both knobs are on the MCP's advanced path or above
+    # its preset row: that MCP arm stays not implemented (traverse.advanced_path_disabled); cal's pair walks via MCP.
+    seed_label_counts = {("eco", "header"): 6181, ("cal", "header"): 1}
     for key in ("eco", "cal"):
         rec = ctx.rec(key)
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
         for kind in ("column", "header"):
             labels = {"seed_label_kind": kind}
-            if kind == "header":
+            bounds: Dict[str, Any] = {"max_extension_bp": 200}
+            many = seed_label_counts.get((key, kind), 0) > 1000
+            tt = t
+            if (key, kind) in seed_label_counts:
+                tt = dict(t, derived_labels_v4=seed_label_counts[(key, kind)])
+            if many:
                 labels["max_seed_labels"] = SERVER_MAX_SEED_LABELS
-            req = traverse_request([_tseed(t["window"])], {"bounds": {"max_extension_bp": 200}, "labels": labels})
+                bounds["max_memory_mb"] = 4096
+            req = traverse_request([_tseed(t["window"])], {"bounds": bounds, "labels": labels})
             name = rec.column if kind == "column" else rec.accession
             out.append(scenario(nid(), "T", "derived %s labels on %s (%d records in its column%s): %s among them" % (
                                     kind, rec.key, rec.records_in_column,
-                                    "; max_seed_labels %d" % SERVER_MAX_SEED_LABELS if kind == "header" else "", name),
-                                "POST /traverse", req, t,
+                                    "; max_seed_labels %d, 4,096 MB" % SERVER_MAX_SEED_LABELS if many else "", name),
+                                "POST /traverse", req, tt,
                                 [OK, INV, ex("walk_in_record", label_scope="derived"),
                                  ex("label_dict_contains", name=name, kind=kind, only_kind=True)],
                                 tags=["labels", "derived-labels", "label-kind-pair"]))
