@@ -430,8 +430,8 @@ def gen_T(ctx: Ctx) -> List[dict]:
         if i + 1 not in SHORT:
             req = traverse_request([_tseed(t["window"], [lab])],
                                    {"direction": direction, "bounds": {"max_extension_bp": ext}})
-            out.append(scenario(sid, "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label" % (
-                                    L, rec.key, direction, format(ext, ","), kind),
+            out.append(scenario(sid, "T", "%d bp seed of %s, %s arm(s), %d bp, constrained to its %s label" % (
+                                    L, rec.key, direction, ext, kind),
                                 "POST /traverse", req, t, exp, timing_class="slow" if drawn >= 10000 else "fast",
                                 tags=["walk", kind + "-label"] + (["smoke"] if i == 1 else [])))
             continue
