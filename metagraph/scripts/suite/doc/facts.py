@@ -319,7 +319,9 @@ def _status_text(line):
 
 def arm_facts(ctx, sid, arm):
     """The facts of one arm of a scenario: {standing, pass, present, wall, walls, wall_cold, wall_warm, server,
-    backend, http, code, host, host_word (the first execution's host-cache state in words: host-warm, host-cold,
+    backend, http, code (the first answered execution's status and error code; on an MCP arm the service decided,
+    the first answered of the case's executions, the same the class is read from: blocks.class_lines), host,
+    host_word (the first execution's host-cache state in words: host-warm, host-cold,
     warm after an interrupted execution), late, phrase, phrase_cold, phrase_warm, detail (the first property check's
     detail of the first execution), evidence (its clause before the explanation), class, class_word, clean,
     time_limited (the first execution's time limitation as the runner recorded it, '' when none), checks (the first
@@ -349,7 +351,10 @@ def arm_facts(ctx, sid, arm):
             f["server"] = fmt_t(srv)
             be = (l.get("mcp_phases") or {}).get("backend_ms") if isinstance(l.get("mcp_phases"), dict) else None
             f["backend"] = fmt_t(be)
-    answered = next((l for l in lines if l.get("http") is not None), None)
+    # on an MCP arm the status and the code come from the executions the class is read from (blocks.class_lines:
+    # the case's executions on an arm the service decided), so that [mcp][class_word], [mcp][http] and [mcp][code]
+    # describe one execution where the case covers one repeat only (VERIFY-FINAL R1, VERIFY-FIX2 L3)
+    answered = next((l for l in (blocks.class_lines(st) if arm == "mcp" else lines) if l.get("http") is not None), None)
     if answered:
         f["http"] = str(answered.get("http"))
         f["code"] = _err(answered)[0] or ""

@@ -1115,13 +1115,15 @@ def record_key(ctx, full=False):
 
 
 def record_key_label(chapter=None):
-    """The label of the compact record key: one per chapter (a full build prints the key on every chapter page)."""
-    return "rk:%s" % chapter if chapter else "rk:compact"
+    """The label of the compact record key: one per chapter (a full build prints the key on every chapter page),
+    rk:ch-<chapter>, never rk:<chapter>: chapter D's would be appendix D's rk:D, the full key's label, and LaTeX
+    would take the last of the two for every reference (VERIFY-FIX2 L5)."""
+    return "rk:ch-%s" % chapter if chapter else "rk:compact"
 
 
 def record_key_paragraph(ctx, chapter=None):
     """The compact record key, one paragraph (abbreviation and organism, in the manifest's order), printed on the
-    chapter page before its first family, where the matrices need it, and labelled rk:<chapter> so that every
+    chapter page before its first family, where the matrices need it, and labelled rk:ch-<chapter> so that every
     matrix's legend links to it (the owner's review, point 3: the abbreviations are needed in the matrices and
     deserve easier access than the implementation terms; re-verification N-1; in I.3 it cost Part I a fifth page,
     against point 2). The full key (accession, taxid, kingdom, length) is appendix D's."""

@@ -1671,8 +1671,9 @@ class VerifyRoundThreeTest(unittest.TestCase):
 
     def test_record_key_on_the_chapter_page_and_in_legends(self):
         """N-1: the chapter page carries the compact record key before its first family (one paragraph, labelled
-        rk:<chapter>), every unit table whose variants name a record links to it and to appendix D's full key in
-        its legend, and appendix D's key is labelled rk:D before the glossary."""
+        rk:ch-<chapter>), every unit table whose variants name a record links to it and to appendix D's full key in
+        its legend, and appendix D's key is labelled rk:D before the glossary. The chapter label is rk:ch-D for
+        chapter D, not appendix D's rk:D (VERIFY-FIX2 L5: a label defined twice)."""
         import sections
 
         class R(object):
@@ -1684,7 +1685,9 @@ class VerifyRoundThreeTest(unittest.TestCase):
             run = R()
         text = sections.record_key_paragraph(C())
         self.assertIn("\\label{rk:compact}", text)
-        self.assertIn("\\label{rk:P}", sections.record_key_paragraph(C(), "P"))
+        self.assertIn("\\label{rk:ch-P}", sections.record_key_paragraph(C(), "P"))
+        self.assertEqual(sections.record_key_label("D"), "rk:ch-D")
+        self.assertNotIn("\\label{rk:D}", sections.record_key_paragraph(C(), "D"))
         self.assertIn("\\texttt{eco} Escherichia coli K-12 MG1655 · \\texttt{pfa} Plasmodium falciparum 3D7 chr 5", text)
         self.assertIn("\\hyperref[rk:D]{appendix D}", text)
         ctx = self.ctx()
@@ -1693,12 +1696,12 @@ class VerifyRoundThreeTest(unittest.TestCase):
         self.assertEqual(sections.record_key_link(ctx, ["P-001"]), "")
         ctx.run.manifest["ground_truth"] = {"records": [{"key": "bp", "label": "x", "accession": "a", "taxid": "1"}]}
         try:
-            self.assertIn("record keys: \\hyperref[rk:P]{p.\\,\\pageref{rk:P}}", sections.record_key_link(ctx, ["P-001"], "P"))  # variant "10 bp"
+            self.assertIn("record keys: \\hyperref[rk:ch-P]{p.\\,\\pageref{rk:ch-P}}", sections.record_key_link(ctx, ["P-001"], "P"))  # variant "10 bp"
             self.assertEqual(sections.record_key_link(ctx, ["R-001"], "R"), "")  # variant "the one"
             self.assertNotIn("Record key", sections.reading_guide(ctx))  # Part I stays four pages
             chapter = sections.chapter(ctx, "P")
-            self.assertLess(chapter.find("\\parhead{Background}"), chapter.find("\\label{rk:P}"))
-            self.assertLess(chapter.find("\\label{rk:P}"), chapter.find("\\unithead"))
+            self.assertLess(chapter.find("\\parhead{Background}"), chapter.find("\\label{rk:ch-P}"))
+            self.assertLess(chapter.find("\\label{rk:ch-P}"), chapter.find("\\unithead"))
             unit = sections.unit_section(ctx, "P", "P-pos-series")
             self.assertIn("in full \\hyperref[rk:D]{appendix D}", unit)
         finally:
@@ -2971,6 +2974,8 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         # the arm facts (the class word the prose may print) read the same execution
         f = facts.arm_facts(_Stub(run=run, state=lambda sid: {"mcp": st}), "N-1", "mcp")
         self.assertEqual((f["class"], f["class_word"]), ("relayed", "host refusal relayed through the service"))
+        # and so do its status and code: r1's 502, not r0's 200 (VERIFY-FIX2 L3)
+        self.assertEqual((f["http"], f["code"]), ("502", "search_failed"))
         self.assertTrue(f["phrase"].startswith("by design (http 502 search_failed), the pair unverified"), f["phrase"])
         self.assertIn("r0 outside the case inconclusive", f["phrase"])
         # the case on r0 (the 19 other blocks of the v4 run) reads as before
@@ -2981,6 +2986,18 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         plain = cells.ArmState("mcp")
         plain.present, plain.glyph_key, plain.lines = True, "pass", [{"repeat": 0, "http": 200}, {"repeat": 1, "http": 200}]
         self.assertEqual(len(blocks.class_lines(plain)), 2)
+
+    def test_short_reasons_are_short_sentences(self):
+        """VERIFY-FIX2 L1: every short local reason of cases.json is one short sentence (the owner's review, point 4:
+        a short local reason, the long form in appendix B): at most 50 words and at most two clauses (one ';', the
+        second where the host refuses too, with its own text), never the 77 words R2 removed. The reasons the
+        owner's chapter R reviews passed run to about 45 words."""
+        short = (sc.read_json(os.path.join(PROSE_DIR, "cases.json")) or {}).get("short") or {}
+        self.assertGreater(len(short), 50)
+        for case, text in sorted(short.items()):
+            self.assertLessEqual(len(text.split()), 50, "%s: %d words" % (case, len(text.split())))
+            self.assertLessEqual(text.count(";"), 1, case)
+            self.assertFalse(text.rstrip().endswith("."), case)
 
     def test_short_reason_one_clause_and_the_verification_rule_in_b(self):
         """VERIFY-FINAL R2: the deadline case's short reason is one clause (the owner's rule for cases.json), and
