@@ -58,14 +58,17 @@ def fmt_t(ms):
 
 
 def fmt_delta(ms):
-    """A signed difference of two durations, rounded as fmt_t rounds: `−7 ms`, `+0.2 s`, `0 ms` within half a
-    millisecond of zero; `–` for none. Used wherever a difference is printed (a delta, an overhead, a net cost)."""
+    """A signed difference of two durations, rounded as fmt_t rounds: `−7 ms`, `+0.2 s`; below half a millisecond
+    the sign and one decimal (`+0.2 ms`), so that a difference never loses its sign (I.3's rule); `0 ms` for an
+    exact zero; `–` for none. Used wherever a difference is printed (a delta, an overhead, a net cost)."""
     v = _num(ms)
     if v is None:
         return "–"
-    if abs(v) < 0.5:
+    if v == 0:
         return "0 ms"
     sign = "−" if v < 0 else "+"
+    if abs(v) < 0.5:
+        return "%s%.1f ms" % (sign, abs(v))
     return sign + fmt_t(abs(v))
 
 

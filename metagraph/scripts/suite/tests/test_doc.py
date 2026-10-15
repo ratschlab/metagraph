@@ -495,8 +495,10 @@ class CellGrammarTest(unittest.TestCase):
         self.assertEqual(cells.fmt_delta(-6.914), "−7 ms")
         self.assertEqual(cells.fmt_delta(-146.15), "−0.1 s")
         self.assertEqual(cells.fmt_delta(183.6), "+0.2 s")
-        self.assertEqual(cells.fmt_delta(0.18), "0 ms")
-        self.assertEqual(cells.fmt_delta(-0.3), "0 ms")
+        # below half a millisecond the sign and one decimal (VERIFY-R2 L1: never an unsigned "0 ms" for +0.18)
+        self.assertEqual(cells.fmt_delta(0.18), "+0.2 ms")
+        self.assertEqual(cells.fmt_delta(-0.3), "−0.3 ms")
+        self.assertEqual(cells.fmt_delta(0), "0 ms")
         self.assertEqual(cells.fmt_delta(-31377), "−31 s")
         self.assertEqual(cells.fmt_delta(None), "–")
 
@@ -745,15 +747,19 @@ class ReviewRoundTwoTest(unittest.TestCase):
         self.assertEqual(groups[1][1], ["resolve_runs"])
 
     def test_detail_block_shape(self):
-        """R-001 (a failure on direct-local, a disagreement): the block leads with the adjudication, holds one row
-        per arm and repeat, names its artifacts (the raw files and the executions file's lines) and never says
-        'as above'; a FINDING line is set apart from the rows."""
+        """R-001 (a failure on direct-local, a disagreement): the block leads with the adjudication of what the
+        rows do not say (the failure, the disagreement; a pass has none), holds one row per arm and repeat with
+        the outcome's qualifier, names its artifacts (the raw files and the executions file's lines) and never
+        says 'as above'; a FINDING line is set apart from the rows."""
         chapter = self.tex("chapter_R.tex")
         block = chapter.split("\\label{detail:R-001}", 1)[1].split("\\end{detail", 1)[0]
         self.assertIn("\\bline{adjudication}{\\textbf{direct-local}: \\textbf{FAIL}:", block)
-        self.assertIn("\\bcont{\\textbf{direct-remote}: pass", block)
+        self.assertIn("\\bcont{\\textbf{direct-remote}: DISAGREES with the reference arm}", block)
+        self.assertNotIn("direct-remote}: pass", block)  # the row says it (VERIFY-R2 M2)
         self.assertIn("arm / repeat & final outcome & http · code & wall & requested budget & property tested?", block)
         self.assertIn("direct-local & \\gfail\\ \\textbf{FAIL} & 200 & 20 ms (warm)", block)
+        self.assertIn("direct-remote & \\gpass\\ pass & 200 & 0.1 s (warm) & none & yes (1 of 1)", block)
+        self.assertIn("mcp r0 & \\ginc\\ inconclusive (by the checks) & 200", block)
         self.assertIn("\\bline{artifacts}{\\texttt{arms/", block)
         self.assertIn("R-\\allowbreak{}001.\\allowbreak{}direct-\\allowbreak{}local.\\allowbreak{}0.\\allowbreak{}json.\\allowbreak{}gz}", block)
         self.assertIn("\\texttt{executions.\\allowbreak{}jsonl} lines", block)
@@ -789,7 +795,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
         self.assertTrue(latex.section("X", "sec:x", level="subsection", needspace=10).startswith("\\Needspace{10\\baselineskip}"))
         self.assertEqual(blocks.estimate_lines(["a" * 10, "b" * 300]), 1 + 3)
         self.assertEqual(blocks.estimate_lines(["\\bline{k}{%s}" % ("x" * 140)]), 1)
-        self.assertLessEqual(blocks.SHORT_BLOCK_LINES, 24)
+        self.assertLessEqual(blocks.SHORT_BLOCK_LINES, 30)  # a block under about 30 lines moves whole (VERIFY-R2 L8)
         self.assertIn("\\Needspace{9\\baselineskip}", latex.plain_table("@{}l@{}", ["a"], [["b"]], needspace=9))
         with open(os.path.join(DOC, "templates", "doc.sty"), encoding="utf-8") as fh:
             sty = fh.read()
@@ -815,7 +821,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
         self.assertEqual(lines, sorted(lines[:1]) + sorted(lines[1:], key=lambda l: self.runobj.order.index(l.split(",")[0])))
         with open(os.path.join(self.out, "plot_phases.csv"), encoding="utf-8") as fh:
             phases = fh.read().splitlines()
-        self.assertEqual(phases[0], "phase,n,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms")
+        self.assertEqual(phases[0], "phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms")
         main = self.tex()
         self.assertIn("table[x=dl_ms,y=mcp_ms,col sep=comma]{plot_paired_dl_mcp.csv}", main)
         self.assertNotIn("stacked", main)
@@ -988,6 +994,285 @@ class ReviewRoundTwoTest(unittest.TestCase):
         ctx = sections.Context(self.runobj, self.units, {}, {}, {}, ["P"])
         self.assertIn("Chapter P only; whole-run summary shown for context", sections.sample_note(ctx))
         self.assertIn("chapters built", sections.front_matter(ctx))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# the verification of round 2 (VERIFY-R2): the gate's own counts, the replayed by-design table, the closing
+# figures, the shorter detail blocks, the family counts from the classifier, the repeats in appendix F
+
+class VerifyRoundTwoTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        build_run(cls.run_dir)
+        merge_run.merge(cls.run_dir)
+        sc.write_json_atomic(os.path.join(cls.run_dir, "compare.json"), cmp.compare(cls.run_dir, (CASES, {"cases": 5})))
+        cls.runobj = reader.Run(cls.run_dir)
+        cls.units = units_mod.resolve(cls.runobj.manifest, FAKE_MAPPING)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def ctx(self, **kw):
+        import sections
+        ctx = sections.Context(self.runobj, self.units, {}, {}, {}, list(self.units.chapters), **kw)
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        return ctx
+
+    def test_gate_outcome_counts(self):
+        """H1: what blocks the gate is the gate's outcome problems (a gated arm, the policy's selection, no
+        exemption), never the run's inconclusive count; the clause says so, and says when no gate was judged."""
+        import sections
+
+        class R(object):
+            gate = {"problems": [
+                {"kind": "outcome", "scenario": "A-1", "arm": "mcp", "repeat": 0, "detail": "inconclusive (checks)"},
+                {"kind": "outcome", "scenario": "A-1", "arm": "mcp", "repeat": 1, "detail": "inconclusive (checks)"},
+                {"kind": "outcome", "scenario": "B-1", "arm": "direct-local", "repeat": 0, "detail": "finding"},
+                {"kind": "relation", "scenario": None, "arm": "direct-local", "detail": "REL-x: inconclusive"},
+                {"kind": "configuration", "arm": "mcp", "detail": "no live document"}]}
+        gp = sections.gate_outcome_counts(R())
+        self.assertEqual(gp, {"judged": True, "outcome": 3, "inconclusive": 2, "finding": 1, "pairs": 2})
+        clause = sections.gate_inconclusive_clause(R())
+        self.assertTrue(clause.startswith("2 of them block the deploy gate: those on a gated arm, in the policy's selection"), clause)
+        self.assertIn("the others are on an ungated arm, outside the selection or exempt", clause)
+
+        class N(object):
+            gate = None
+        self.assertEqual(sections.gate_outcome_counts(N())["judged"], False)
+        self.assertIn("was not judged", sections.gate_inconclusive_clause(N()))
+        # the fake run has no gate: I.4's row and I.1's clause say so, never "every one blocks the gate"
+        ctx = self.ctx()
+        text = sections.limitations_table(ctx)
+        self.assertIn("1; the gate was not judged; each footnoted in Part II", text)
+        self.assertNotIn("every one blocks the gate", text)
+        values = ctx.placeholders()
+        self.assertEqual(values["n_gate_outcome_problems"], 0)
+        self.assertEqual(values["untested_scope"], "in this run")
+        self.assertEqual(sections.untested_scope_text(sections.Context(self.runobj, self.units, {}, {}, {}, ["P"])),
+                         "in the built chapter P")
+        self.assertEqual(sections.untested_scope_text(sections.Context(self.runobj, self.units, {}, {}, {}, ["P", "R"])),
+                         "in the built chapters P, R")
+
+    def test_by_design_table_is_the_replayed_one(self):
+        """H2: with a re-evaluated run the document prints the table the re-evaluation replayed, found by its
+        sha256 among the replayed path, the suite's copy and the snapshot; another table is read only with the
+        warning kept, and I.4 / F print the sha and the warning."""
+        import sections
+        table_a = os.path.join(self.tmp, "a.json")
+        with open(table_a, "w") as fh:
+            json.dump({"version": 7, "service_commit": "abc", "cases": [{"id": "x.%d" % i} for i in range(5)]}, fh)
+        run = reader.Run(self.run_dir)
+        run.reeval = {"by_design": {"path": table_a, "sha256": reader.sha256_of(table_a), "cases": 5}}
+        cases, meta = run._load_table(None, True)
+        self.assertEqual(meta["path"], table_a)
+        self.assertEqual(meta["cases"], 5)
+        self.assertTrue(meta["replayed"])
+        self.assertEqual(meta["warnings"], [])
+        self.assertEqual(sorted(cases), ["x.0", "x.1", "x.2", "x.3", "x.4"])
+        run.table_meta = meta
+        self.assertIn("(the table the re-evaluation replayed)", sections.by_design_table_text(run))
+        self.assertIn("5 cases", sections.by_design_table_text(run))
+        # a replayed sha no file has: the comparator's table is read, the warning kept and printed
+        run.reeval = {"by_design": {"path": table_a, "sha256": "0" * 64, "cases": 9}}
+        cases, meta = run._load_table(None, True)
+        self.assertFalse(meta["replayed"])
+        self.assertEqual(meta["replayed_sha256"], "0" * 64)
+        self.assertTrue(meta["warnings"], meta)
+        run.table_meta = meta
+        text = sections.by_design_table_text(run)
+        self.assertIn("WARNING: not the table the re-evaluation replayed, sha256 000000000000…, 9 cases", text)
+        self.assertTrue(len(meta["sha256"]) == 64)
+        ctx = self.ctx()
+        ctx.run = run
+        self.assertIn("\\textbf{not} the table the re-evaluation replayed", sections.provenance_table(ctx))
+        self.assertIn("\\textbf{WARNING}: not the table the re-evaluation replayed", sections.environment_table(ctx))
+        self.assertIn("by\\_design", sections.environment_table(self.ctx()) + "by\\_design")
+        self.assertIsNone(reader.sha256_of(os.path.join(self.tmp, "missing.json")))
+
+    def test_closing_figures(self):
+        """H3: the pairs within 1 s count |difference|; H4: the scenarios the MCP pairing leaves out are the
+        scenarios less the MCP pairs (the direct pairing's count is another value); M4: the phase population is
+        the summary's (one warm execution per paired scenario) with the zeros counted apart."""
+        import sections
+        ctx = self.ctx()
+        v = sections.closing_values(ctx)
+        pairs = [p for p in sections.paired_walls(ctx) if p[2] is not None and p[4] is not None]
+        diffs = [p[4] - p[2] for p in pairs]
+        self.assertEqual(v["paired_dl_mcp_under_1s"], str(sum(1 for d in diffs if abs(d) < 1000)))
+        self.assertEqual(v["paired_dl_mcp_faster"], str(sum(1 for d in diffs if d < 0)))
+        s = self.runobj.summary()
+        n_local = (s.get("mcp_overhead") or {}).get("minus_local_ms", {}).get("n")
+        if n_local:
+            self.assertEqual(v["scenarios_without_mcp_local_pair"], str(len(self.runobj.order) - n_local))
+        self.assertIn("cold_mcp_all_n", v)
+        pop = sections.phase_population(ctx)
+        ph = s.get("mcp_phases") or {}
+        for key in ("submit_ms", "backend_ms", "paging_ms"):
+            if key in ph:
+                self.assertEqual(len(pop[key]), ph[key]["n"], key)
+        for name, p10, p25, p50, p75, p90, n, n_zero in sections.phase_quantiles(ctx):
+            key = dict((v_, k) for k, v_ in sections.PHASES)[name]
+            self.assertEqual(n + n_zero, len(pop[key]))
+            self.assertTrue(p10 > 0)
+        self.assertEqual(v["phase_paging_zero_n"], str(sum(1 for x in pop["paging_ms"] if x == 0)) if pop["paging_ms"] else None)
+        self.assertIn("zeros left out", latex.phase_boxplot([("paging", 1, 2, 3, 4, 5, 10, 3)], "fig:x"))
+        self.assertNotIn("zeros left out", latex.phase_boxplot([("submit", 1, 2, 3, 4, 5, 10, 0)], "fig:x"))
+
+    def test_first_clause_balanced(self):
+        """L2: the evidence clause splits at the first ': ' outside a parenthesis, and a cut never leaves a
+        parenthesis open."""
+        text = "http 504, expected 200 (error resolve_timeout: the backend did not answer within 30.25 s)"
+        self.assertEqual(blocks._split_clause(text), (text, ""))
+        self.assertEqual(blocks._split_clause("no answer to check: http 504 (x: y)"), ("no answer to check", "http 504 (x: y)"))
+        self.assertEqual(blocks._first_clause(text, 160), text)
+        cut = blocks._first_clause(text, 50)
+        self.assertEqual(cut.count("("), cut.count(")"))
+        self.assertTrue(cut.endswith("…)"), cut)
+        self.assertEqual(blocks._balanced("a (b"), "a (b)")
+        self.assertEqual(blocks._balanced("a (b)"), "a (b)")
+
+    def test_finding_text_once(self):
+        """M2: the FINDING line gives the evidence per execution, the mechanism once when shared, the rule once."""
+        items = [("direct-local", 0, "budget_respected", "503 delivered 6130 ms after the 3000 ms budget", "the deadline is read where polled"),
+                 ("direct-remote", 0, "budget_respected", "503 delivered 7452 ms after the 3000 ms budget", "the deadline is read where polled")]
+        text = blocks.finding_text(items, "SPEC 4.5: a 503 long past the budget is a finding")
+        self.assertEqual(text.count("the deadline is read where polled"), 1)
+        self.assertEqual(text.count("rule:"), 1)
+        self.assertIn("direct-local r0, budget\\_respected: 503 delivered 6130 ms", text)
+        self.assertIn("direct-remote r0, budget\\_respected: 503 delivered 7452 ms", text)
+        items[1] = items[1][:4] + ("another mechanism",)
+        text = blocks.finding_text(items, None)
+        self.assertIn("— the deadline is read where polled;", text)
+        self.assertIn("— another mechanism", text)
+        self.assertNotIn("rule:", text)
+
+    def test_rows_carry_the_adjudication(self):
+        """M2: an ordinary allowed 503 is one row (the qualifier in the outcome cell) and no adjudication line;
+        a late 503 reads FINDING (late 503); a host state keeps its adjudication; a not-exercised MCP arm is one
+        phrase, pointing at the unit's note when the table carries it."""
+        is_prop = lambda n: n not in ("status", "invariants", "budget_respected")
+
+        class R(object):
+            cases = {}
+            is_property = staticmethod(is_prop)
+
+            def budget_ms(self, sid):
+                return 20000
+
+            def scenario(self, sid):
+                return {"mcp": {}}
+
+        def st(lines, arm, key=None, agreement=None):
+            s_ = cells.ArmState(arm)
+            s_.lines = lines
+            s_.present = True
+            s_.glyph_key = key or lines[0].get("outcome")
+            s_.worst = s_.glyph_key
+            s_.agreement = agreement or {}
+            return s_
+        allowed = {"http": 503, "error": {"code": "deadline", "text": "t"}, "outcome": "inconclusive", "wall_ms": 24281,
+                   "repeat": 0, "host_cache": "warm", "checks": [{"check": "resolve_runs", "outcome": "inconclusive", "property": True}]}
+        rows = blocks._execution_rows(st([allowed], "direct-local"), R(), "x", "direct-local", is_prop)
+        self.assertEqual(rows[0][1], "\\ginc\\ inconclusive (allowed 503)")
+        self.assertEqual(rows[0][5], "no")
+        self.assertIsNone(blocks._arm_adjudication(st([allowed], "direct-local"), R(), "x", "direct-local"))
+        late = dict(allowed, outcome="finding", checks=[{"check": "budget_respected", "outcome": "finding", "detail": "503 late: why"}])
+        rows = blocks._execution_rows(st([late], "direct-remote"), R(), "x", "direct-remote", is_prop)
+        self.assertEqual(rows[0][1], "\\gfind\\ \\textbf{FINDING} (late 503)")
+        self.assertIsNone(blocks._arm_adjudication(st([late], "direct-remote"), R(), "x", "direct-remote"))
+        passed = {"http": 200, "outcome": "pass", "wall_ms": 5, "repeat": 0, "host_cache": "warm",
+                  "checks": [{"check": "resolve_runs", "outcome": "pass", "property": True}]}
+        self.assertIsNone(blocks._arm_adjudication(st([passed], "direct-local"), R(), "x", "direct-local"))
+        host = {"http": 504, "error": {"code": "resolve_timeout", "text": "t"}, "outcome": "inconclusive", "repeat": 0,
+                "inconclusive_reason": "resolve_timeout", "wall_ms": 31000, "host_cache": "cold", "checks": []}
+        s_ = st([host, dict(passed, repeat=1)], "mcp", "inconclusive")
+        rows = blocks._execution_rows(s_, R(), "x", "mcp", is_prop)
+        self.assertEqual(rows[0][1], "\\ginc\\ inconclusive (host state)")
+        self.assertEqual(rows[1][0], "mcp r1")
+        adj = blocks._arm_adjudication(s_, R(), "x", "mcp")
+        self.assertTrue(adj.startswith("r0 inconclusive: the service's \\texttt{resolve"), adj)
+        self.assertNotIn("r1 pass", adj)
+        # the not-exercised MCP arm: one phrase; with the unit's note, no short reason repeated
+        # as the record has it: the service's refusal at submit is a service_by_design execution whose case has
+        # the agreement not_implemented_mcp, so the arm stands not exercised (○) with the class refused before host
+        refused = {"http": 400, "error": {"code": "resolve_query_too_long"}, "outcome": "service_by_design",
+                   "host_cache": "not_reached", "wall_ms": 58, "repeat": 0, "service_by_design_case": "c.ne"}
+        R.cases = {"c.ne": {"service_answer": {"outcome": "not_expressible", "missing_argument": "bounds.max_query_bp"},
+                            "agreement": "not_implemented_mcp"}}
+        s_ = st([refused, dict(refused, repeat=1, wall_ms=53)], "mcp", "not_implemented_mcp",
+                {"class": "not_implemented_mcp", "case": "c.ne"})
+        short = {"c.ne": "the tool always sends its own bound"}
+        text = blocks._not_exercised_text(s_, R(), "x", short, unit_note=True)
+        self.assertEqual(text, "\\gni\\ not exercised via MCP: refused before host execution (http 400 \\texttt{resolve\\_\\allowbreak{}query\\_\\allowbreak{}too\\_\\allowbreak{}long}); the note under the table and case \\texttt{c.\\allowbreak{}ne} in B")
+        text = blocks._not_exercised_text(s_, R(), "x", short, unit_note=False)
+        self.assertTrue(text.startswith("\\gni\\ not exercised via MCP: the tool always sends its own bound; refused before host execution"), text)
+        self.assertTrue(text.endswith("case \\texttt{c.\\allowbreak{}ne} in B"), text)
+        rows = blocks._execution_rows(s_, R(), "x", "mcp", is_prop)
+        self.assertEqual(rows[0][1], "\\gni\\ not exercised")
+        self.assertEqual(rows[0][5], "–")
+        self.assertEqual(rows[0][3], "58 ms")
+
+    def test_family_values_from_the_classifier(self):
+        """M1: a family's prose placeholders count the MCP classes as the cells derive them."""
+        ctx = self.ctx()
+        v = ctx.family_values("P-pos")
+        self.assertEqual(v["n_tests"], 4)
+        self.assertEqual(v["n_units"], 2)
+        self.assertEqual(v["n_mcp_normalised"], 1)
+        self.assertEqual(v["mcp_normalised_ids"], "P-003")
+        self.assertEqual(v["n_mcp_refused_before_host"], 1)
+        self.assertEqual(v["n_mcp_not_expressible"], 1)
+        self.assertEqual(v["n_mcp_answered"], 1)
+        self.assertEqual(v["mcp_relayed_ids"], "none")
+        prose = {"P": {"families": {"P-pos": {"title": "t", "prose": "{n_mcp_normalised} normalised, {n_tests} tests"}},
+                       "units": {}}}
+        ctx.prose = prose
+        import sections
+        text = sections.family_section(ctx, "P", "P-pos")
+        self.assertIn("1 normalised, 4 tests", text)
+        # the refusals unit's summary line names its unit (L5)
+        self.assertIn("\\sumline{%s: 1 test ·" % latex.tt("P-edge-refused"), sections.family_section(ctx, "P", "P-edge"))
+
+    def test_gate_problems_list_repeats(self):
+        """L3: appendix F's outcome row lists every scenario-arm pair with its repeats, and says how many
+        executions the pairs hold when they differ."""
+        import sections
+        ctx = self.ctx()
+        ctx.run.gate = {"passed": False, "policy": {"name": "p", "policy_version": 1, "sha256": "ab"}, "counts": {},
+                        "problems": [
+                            {"kind": "outcome", "scenario": "P-001", "arm": "mcp", "repeat": 0, "detail": "inconclusive (checks)"},
+                            {"kind": "outcome", "scenario": "P-001", "arm": "mcp", "repeat": 1, "detail": "inconclusive (checks)"},
+                            {"kind": "outcome", "scenario": "R-001", "arm": "direct-local", "repeat": 0, "detail": "fail"}],
+                        "notes": []}
+        ctx.run.gate_offline = True
+        try:
+            text = sections.gate_problems(ctx)
+        finally:
+            ctx.run.gate = None
+            ctx.run.gate_offline = False
+        self.assertIn("mcp (r0, r1)", text)
+        self.assertIn("3 executions in 2 scenario-arm pairs", text)
+
+    def test_appendix_rules(self):
+        """M3: the judging, verdict and gate rules print in appendix F from `appendix_F.rules`; the real
+        overview's methods hold the arms, the order, the ground truth and the times only."""
+        import sections
+        ctx = self.ctx()
+        self.assertEqual(sections.appendix_rules(ctx), "")
+        ctx.overview = {"appendix_F": {"rules_title": "The rules", "rules": ["JUDGING {n_scenarios}"]}}
+        text = sections.appendix_rules(ctx)
+        self.assertTrue(text.startswith("\\parhead{The rules}\n"), text)
+        self.assertIn("JUDGING %d" % len(self.runobj.order), text)
+        overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json")) or {}
+        heads = [p.split("*")[1] for p in overview["sections"]["methods"]["paragraphs"]]
+        self.assertEqual(heads, ["The three arms.", "Execution order.", "Ground truth.", "Times and load."])
+        self.assertEqual(len(overview["appendix_F"]["rules"]), 2)
+        self.assertNotIn("*Coverage.*", json.dumps(overview["sections"]["provenance"]))
 
 
 if __name__ == "__main__":

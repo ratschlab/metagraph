@@ -1,5 +1,5 @@
 {
- "_about": "Part I of the suite results document in the four sections of the owner's review (2026-10-15), in `order`: decision (I.1 Decision summary), methods (I.2 Methods), reading (I.3 Reading guide), provenance (I.4 Provenance and coverage); each entry has its id, title and `paragraphs` (the lead-in). A section may hold further slots the generator prints between its computed parts: I.1 `verdict` (after the two verdict lines), `findings` (under 'Principal findings', before the computed lists), `untested` (under 'Properties still untested', before the computed list) and `closing` (the last paragraph); I.4 `coverage` (before the per-arm outcome table) and `exemptions` (before the limitation counts). The reading section also holds the wording of the glyph legend (`legend`), of the small marks (`marks`) and the texts of the numbered markers on the annotated matrix (`annotations`, keyed column / glyph / repeats / server / backend / footnote / mark / ids / summary); the generator supplies the symbols from its own macros so that the legend and the tables cannot drift apart. `appendix_F` and `appendix_G` are the lead-ins of those appendices. Placeholders in braces are filled from the run (sections.Context.placeholders); every placeholder used is declared under `placeholders` with its source, and the text holds no other braces. Inline markup: `code` and *emphasis*. The cover's lines and every table and computed list are the generator's. Audience: MetaGraph developers who know the engine but not the suite. Every rule stated follows checks.py, compare.py, report.py and gate.py as of c11db9dd and SPEC-labeled-traversal-core section 4.",
+ "_about": "Part I of the suite results document in the four sections of the owner's review (2026-10-15), in `order`: decision (I.1 Decision summary), methods (I.2 Methods), reading (I.3 Reading guide), provenance (I.4 Provenance and coverage); each entry has its id, title and `paragraphs` (the lead-in). A section may hold further slots the generator prints between its computed parts: I.1 `verdict` (after the two verdict lines), `findings` (under 'Principal findings', before the computed lists), `untested` (under 'Properties still untested', before the computed list) and `closing` (the last paragraph); I.4 `coverage` (before the per-arm outcome table) and `exemptions` (before the limitation counts). The reading section also holds the wording of the glyph legend (`legend`), of the small marks (`marks`) and the texts of the numbered markers on the annotated matrix (`annotations`, keyed column / glyph / repeats / server / backend / footnote / mark / ids / summary); the generator supplies the symbols from its own macros so that the legend and the tables cannot drift apart. `appendix_F` and `appendix_G` are the lead-ins of those appendices; `appendix_F.rules` (with `rules_title`) holds the judging, verdict and gate rules printed in F after the environment (round 3: moved out of I.2 so that Part I is four pages, as the owner's Methods list has the arms, the order, the ground truth and the timing definitions only). Placeholders in braces are filled from the run (sections.Context.placeholders); every placeholder used is declared under `placeholders` with its source, and the text holds no other braces. Inline markup: `code` and *emphasis*. The cover's lines and every table and computed list are the generator's. Audience: MetaGraph developers who know the engine but not the suite. Every rule stated follows checks.py, compare.py, report.py and gate.py as of c11db9dd and SPEC-labeled-traversal-core section 4.",
  "order": [
   "decision",
   "methods",
@@ -52,7 +52,16 @@
   "n_failures": "failed or errored executions over the arms (the generator's)",
   "built_chapters": "the chapters built (the generator's; a partial build)",
   "n_chapters": "the number of chapters of the run (the generator's)",
-  "scenarios": "the same as n_scenarios (the generator's)"
+  "scenarios": "the same as n_scenarios (the generator's)",
+  "n_gate_outcome_problems": "the gate's outcome problems (gate.json, else the offline verdict): executions on a gated arm, in the policy's selection and not declared exempt, that did not pass (31 in v4: 30 inconclusive, 1 finding); 0 when no gate was judged",
+  "n_gate_inconclusive_executions": "the inconclusive executions among the gate's outcome problems (30 in v4)",
+  "n_gate_finding_executions": "the findings among the gate's outcome problems (1 in v4)",
+  "n_gate_outcome_pairs": "the distinct scenario-arm pairs of the gate's outcome problems (27 in v4: four MCP arms have both repeats)",
+  "gate_inconclusive_clause": "one clause for I.1: 'N of them block the deploy gate: those on a gated arm, in the policy's selection and not declared exempt (the gate's outcome problems, appendix F); the others are on an ungated arm, outside the selection or exempt', or 'whether any of them blocks the deploy gate was not judged (no gate verdict for this run)'",
+  "untested_scope": "'in this run' for a full build, 'in the built chapter R' for a partial one (the properties-untested list covers the built chapters only)",
+  "by_design_cases": "the number of cases of the by-design table the document prints: the table the re-evaluation replayed (reevaluated.json by_design, found by its sha256), else the comparator's choice with a warning (131 in v4)",
+  "by_design_sha_short": "that table's sha256, first 12 hex digits",
+  "by_design_table_line": "that table in one line: version, cases, service commit, sha256, and whether it is the replayed one (else the warning)"
  },
  "sections": {
   "decision": {
@@ -62,13 +71,13 @@
     "*Scope.* Run {run_id}: the {n_scenarios} scenarios of manifest version {manifest_version} (content hash {manifest_sha_short}), each executed on the three arms direct-local, direct-remote and mcp (I.2) against the engine release {release}, server instance {server_instance}, serving {database} (k = {k}, index fingerprint {index_fp}), and judged by the checks of commit {checks_commit}. {scope_note}"
    ],
    "verdict": [
-    "The two lines answer different questions. The verdict says whether the host and the service answered as the SPECs and the by-design table say, counting what could not be tested apart; the gate asks whether every required property was shown on the gated arms and reads not shown as not passed (I.2), so a run with findings or inconclusive executions on a gated arm fails it."
+    "The two lines answer different questions. The verdict says whether the host and the service answered as the SPECs and the by-design table say, counting what could not be tested apart; the gate asks whether every required property was shown on the gated arms and reads not shown as not passed (the rules in appendix F), so a finding or an inconclusive execution on a gated arm, in the policy's selection and not declared exempt, fails it."
    ],
    "findings": [
     "{n_findings} execution(s) broke a stated bound or SPEC promise without failing the request; the whole run's findings, failures, errors, disagreements between arms and failed relations are listed below, each linked to its unit where its chapter is built. A finding is counted apart from a failure, since the request was answered, and its detail block quotes the rule it broke and the observed overrun."
    ],
    "untested": [
-    "{n_inconclusive} executions were inconclusive ({inconclusive_by_reason}): the test could not test its property on that answer, which is neither a pass nor a failure, and each one on a gated arm blocks the gate. The properties no arm showed in this run are listed below per unit, with the reason per arm, and the run-wide count follows. On the MCP arm {n_not_implemented_mcp} executions were not exercised because the tools cannot express the request, a known limit (I.4), and {n_service_by_design} were answered or refused by the service in the host's place as its table documents ({n_by_design_verified} pairs verified, {n_by_design_unverified} unverified)."
+    "{n_inconclusive} executions were inconclusive ({inconclusive_by_reason}): the test could not test its property on that answer, which is neither a pass nor a failure; {gate_inconclusive_clause}. The properties no arm showed {untested_scope} are listed below per unit, with the reason per arm, and the run-wide count follows. The MCP arm's not-exercised and by-design executions are counted in I.4 ({n_not_implemented_mcp} and {n_service_by_design}, a known limit and the service's documented answers, not failures)."
    ],
    "closing": [
     "*Where to look.* Part II has one chapter per area, each led by what held and which claim remains unsupported, then the tests in units, one table each; a test that is not clean carries a footnote to its detail block right after its table. The closing section reads the timing across chapters. Appendix E finds any test id; the glossary (appendix D) keys the records' abbreviations."
@@ -78,11 +87,9 @@
    "id": "I.2",
    "title": "Methods",
    "paragraphs": [
-    "*The three arms.* direct-local sends the request from mex to the container's port (`{local_base}`): no proxy, no network, the reference measure of the server and the reference arm of the MCP comparison. direct-remote sends the same request from a laptop through the public URL and the nginx front (`{remote_base}`): the network and the front are in its wall time, the server time is the same host's. mcp sends it through the search service's MCP tools (`traverse_resolve`, `traverse_fetch` and `graphlet_export`, `pattern_search`, the capabilities tools) on `{mcp_base}`; the service validates and reshapes the request in its own terms, runs it as a job in its queue and calls the host over the public URL. The service's answer is normalised to the host's shape for the fields it exposes; a check that needs a field it does not expose reads not exposed there and is not compared.",
+    "*The three arms.* direct-local sends the request from mex to the container's port (`{local_base}`): no proxy, no network, the reference measure of the server and the reference arm of the MCP comparison. direct-remote sends the same request from a laptop through the public URL and the nginx front (`{remote_base}`): the network and the front are in its wall time, the server time is the same host's. mcp sends it through the search service's MCP tools (`traverse_resolve`, `traverse_fetch` and `graphlet_export`, `pattern_search`, the capabilities tools) on `{mcp_base}`; the service validates and reshapes the request in its own terms, runs it as a job in its queue and calls the host over the public URL. The service's answer is normalised to the host's shape for the fields it exposes; a check that needs a field it does not expose reads not exposed there and is not compared. How an answer is judged, how the verdict and the deploy gate follow, is stated in appendix F; the reading guide (I.3) names the outcomes and classes.",
     "*Execution order.* Per scenario the paired loop runs MCP cold, then direct-local, then direct-remote, then MCP warm, one request in flight against the host at a time; every tenth scenario and every chapter-D scenario gets a direct repeat as well, and a request the MCP cannot express gets a single MCP execution that records the mark. The host-cache state of an execution is a recency heuristic over all arms, recorded, not measured: cold, the scenario's first execution to reach the host in this run; warm, one that started within {warm_window_s} s of another execution of the scenario ending on the host; aged, later than that (state unknown); not reached, an execution the host never saw (a refusal at submit, a request the MCP cannot express). So the direct executions of a scenario whose MCP cold call reached the host are host-warm by construction and the MCP pair is cold then warm; a direct execution that was itself the first on the host is marked cold. A warm execution that follows one the host's deadline cut without an answer is counted apart, its server time being typically higher. The host's cache is not controlled beyond that order.",
     "*Ground truth.* Every scenario has a known right answer. Positive controls are windows cut at seeded positions from {n_records} genomes of the search service's validation set (bacteria, archaea, fungi, protists, animals, organelles and phages; the genetic codes 1 to 6, 11 and 12), fetched from NCBI at the accession.version the index holds (immutable, so the fetched sequence is the indexed one; its sha256 is recorded), with each record's taxid column and its position in it decoded from the annotation itself. A window is A, C, G and T only, has a DUST score below 2, occurs once on either strand of its record and lies 50 bp from any other; variants carry known edits, negatives are random or shuffled sequences long enough to be absent, peptides come from the set's verified proteins with their coding DNA. A refusal expects the exact text the deployed code answers (tagged code-derived where no smoke run had confirmed it, so that a first failure there is read as a possible suite error). A record that is the last of a multi-record taxid column, where the index defect of 2026-10-09 can strike, is tagged last-record-verified with its scan's result. The records' abbreviations (eco, mtb, pfa ...) are keyed in the glossary.",
-    "*Judging.* An expectation names a check and its arguments; checks are pure functions of a scenario and a normalised answer, shared by every arm, so that a difference between arms is never a difference of checking code. Four generic checks hold on any answer of their route, status (HTTP status, error code and text), invariants (the route's consistency rules), `counts_consistent` (/pattern) and `budget_respected` (the time budget); every other check is a property check, the claim the scenario was built to test (appendix A). A check answers pass, fail, inconclusive (it could not test its property on this answer), finding (the host broke a stated bound without failing the request) or not exposed; an execution's outcome follows by precedence fail, finding, inconclusive, pass, and is inconclusive too when no property check could test anything. Three outcomes are decided without the checks: error (no HTTP answer, an undecodable body, a check that raised), not implemented via MCP, and service-side by design (the service answered or refused in the host's place as its table documents, the answer matching the case). A statement an answer makes to excuse itself (a stop, a cut, a withheld list, a time limitation) is accepted only once the answer shows it can have happened. Relations compare two scenarios' answers on the same arm (appendix C). The two direct arms are compared per scenario (identical, same checks, timing, not comparable, disagree) and the MCP arm against the reference direct arm check by check and repeat by repeat (agree with a depth, not comparable, disagree; not implemented and by design are classes of their own); any disagreement fails the run.",
-    "*The verdict and the gate.* The verdict is INCOMPLETE when an arm did not finish or a planned execution was not recorded; else FAIL on any failed or errored execution, disagreement or failed relation; else FINDINGS on any finding; else INCONCLUSIVE when nothing passed, when a whole area or route-and-arm group tested nothing, or when the run spans two deployments; else PASS. Inconclusive executions are counted after the word, never as passes. The deploy gate is stricter: a policy pins the manifest, the relations, the index fingerprint and the by-design table, selects the scenarios by route, names the gated arms (mcp and direct-local) and derives what an arm cannot express from the manifest and the table, never from an answer a run received; the owner's declared file adds exemptions with reasons (I.4). The gate fails on anything missing, on any fail, error, finding or inconclusive on a gated arm (an inconclusive execution shows nothing), on any mark the policy does not explain or by-design pair not verified, on any expected property check not passed, on any disagreement, on any required relation not passed and on configuration evidence not recorded live.",
     "*Times and load.* The wall time of a direct execution runs from sending the request to the last byte of the body on an established connection; the set-up of a fresh connection (TCP, and TLS on the public URL) is recorded apart as the connect time. The server time is the host's own `timing.elapsed_ms`; a refusal and a 503 carry none. On the MCP arm the wall time is the whole tool interaction from the first submit to the answer, and the backend time is the host call as the service measured it; the service's phases (submit, queue, backend, terminal lag, paging) are read in the closing section. Client time-outs are 120 s for the fast class, 600 s for slow and 1,800 s for long; the front cuts at about 120 s, so the long class is not run on direct-remote. A sampler on mex reads docker stats of the staging container and of the `sra_all` container (the Logan indexing load) and the host load average every 2 s, and each execution is joined to the samples of its window: contextual telemetry of the shared host, not a measure of the request's own cost. When the `sra_all` CPU mean exceeds {load_caveat_sra_cpu_pct} % or the load average {load_caveat_load1} (half of mex's cores) the run carries the Logan caveat and its timings are labelled as taken under that load, not as the baseline."
    ]
   },
@@ -92,11 +99,11 @@
    "paragraphs": [
     "*Units.* Part II prints the tests in units, one builder template, one property, varied over one dimension, one table: a series puts the arms in rows and the varied values in columns; a replicates table aggregates the same test over many records per arm; a refusals table lists edge inputs with the host's expectation and one glyph per arm, with the service's status and code in the MCP cell; a list table is the refusals shape with time cells; a pairs table holds twins and their relations, one row each. The property line above a table is the claim every member tests, the ids under it name the members in order, and the family prose before its units says what is checked, why and on what ground truth. The matrix below is annotated once; every other table reads the same way.",
     "*Cells, repeats and the slash.* A cell holds one glyph and the wall time of each execution in repeat order, the server time in brackets on the next line and, on mcp, the backend time after be on a third. The slash has one meaning per table kind, printed under every table as its timing legend: in a series or list cell it separates repeats (on mcp the cold call, then the warm one; on a direct arm repeat 0, then repeat 1); in a replicates cell the median and the maximum over the members; in a summary line the p50 and the p90. Times are rounded half up to whole milliseconds below 100 ms, to one decimal in seconds below 10 s and to whole seconds above, so 150 to 249 ms print as 0.2 s; a difference (a delta, an overhead, a net cost) carries its sign. A dash is a time the answer does not carry (a refusal, a 503) or an execution the plan had none of.",
-    "*Standing, clean and footnoted.* The MCP cell shows the agreement class where that class states the arm's standing (not exercised via MCP, service-side by design), else the execution's outcome; the words pass and ok are reserved for properties actually tested, and a cell the tools could not exercise says so rather than counting as covered. A test is clean when every arm is a pass, not exercised via MCP, a verified by-design pair, or had no execution because the plan had none; it costs one cell or one line and claims nothing beyond those states. Everything else carries a footnote digit on each offending cell and one detail block right after the table: the expected line, each arm that is not clean with its outcome, status, code, times, requested budget and the checks that did not pass, the classes, the relations involved and, for a finding, the rule it broke with the observed overrun. An ordinary allowed 503 takes one or two lines per arm; a finding keeps its evidence; repeats that differ are shown apart. Where an MCP execution was adjudicated a host state, the block states the adjudication first and labels the raw check lines as the intermediate evaluation. The family and chapter counts are by standing, that is by glyph; the chapter page adds the recorded outcomes as the report counts them.",
+    "*Standing, clean and footnoted.* The MCP cell shows the agreement class where that class states the arm's standing (not exercised via MCP, service-side by design), else the execution's outcome; the words pass and ok are reserved for properties actually tested, and a cell the tools could not exercise says so rather than counting as covered. A test is clean when every arm is a pass, not exercised via MCP, a verified by-design pair, or had no execution because the plan had none. Everything else carries a footnote digit on each offending cell and one detail block right after the table: the expected line, each arm that is not clean with its outcome, status, code, times, requested budget and the checks that did not pass, the classes, the relations involved and, for a finding, the rule it broke with the observed overrun. An ordinary allowed 503 takes one or two lines per arm; a finding keeps its evidence; repeats that differ are shown apart. Where an MCP execution was adjudicated a host state, the block states the adjudication first and labels the raw check lines as the intermediate evaluation. The family and chapter counts are by standing, that is by glyph; the chapter page adds the recorded outcomes as the report counts them.",
     "*Agreement depth.* An agreeing MCP pair carries a depth: fully checked (every property check the scenario expects was evaluated on both arms and agreed), partial (the MCP answer exposed only some of them), generic checks only (none of them), or a refusal (both arms refused alike); the chapter line counts the fully checked pairs and the detail block of a test that is not clean names the checks compared. A disagreement with the reference arm is marked with a not-equal sign and is always footnoted."
    ],
    "annotations": {
-    "column": "a column is one varied value of the unit's dimension (here the window length); the key in brackets names the source record (the record key below and in appendix D)",
+    "column": "a column is one varied value of the unit's dimension (here the window length); the key in brackets names the source record (the record key in appendix D)",
     "glyph": "the glyph is the arm's standing on the test: pass, fail, error, finding, inconclusive, not exercised via MCP, service-side by design (the legend below); the words pass and ok are reserved for a property actually tested",
     "repeats": "two times with a slash are the repeats in order, the unit once: on mcp the cold call, then the warm one; on a direct arm repeat 0, then repeat 1",
     "server": "the bracketed line is the host's own server time per execution; a dash when the answer carries none (a refusal, a 503)",
@@ -117,7 +124,7 @@
     },
     {
      "key": "error",
-     "meaning": "error: no HTTP answer (a transport failure, a client time-out, an undecodable body, a check that raised); counted with the failures"
+     "meaning": "error: no HTTP answer (a transport failure, a client time-out, an undecodable body, a check that raised)"
     },
     {
      "key": "finding",
@@ -125,26 +132,26 @@
     },
     {
      "key": "inconclusive",
-     "meaning": "inconclusive: the test could not test its property (an allowed 503 deadline, a withheld list, a stated stop, a host state); with the mark m the repeats differ and the worst is shown"
+     "meaning": "inconclusive: the property could not be tested (an allowed 503, a withheld list, a stated stop, a host state)"
     },
     {
      "key": "not_implemented",
-     "meaning": "not exercised via MCP: the tools cannot express the request (the manifest's mark, or a table case naming the missing argument); a known limit, not a failure"
+     "meaning": "not exercised via MCP: the tools cannot express the request (manifest mark or table case): a known limit, not a failure"
     },
     {
      "key": "by_design",
-     "meaning": "service-side by design: the service answered or refused in the host's place as its table documents, the pair verified against the direct answer; with the mark u the pair is unverified"
+     "meaning": "service-side by design: the service answered or refused in the host's place, as its table documents; u: pair unverified"
     },
     {
      "key": "none",
-     "meaning": "no execution: a long scenario not run on direct-remote, or a planned MCP execution not recorded (then missing in the detail block)"
+     "meaning": "no execution: a long scenario not run on direct-remote, or a planned execution not recorded (footnoted)"
     }
    ],
    "marks": [
     {
      "mark": "superscript digit",
      "on": "any cell",
-     "meaning": "a footnote: the detail block of that number follows the table (numbering restarts in every chapter)"
+     "meaning": "the detail block of that number follows the table (numbering restarts per chapter)"
     },
     {
      "mark": "not-equal sign",
@@ -154,7 +161,7 @@
     {
      "mark": "t",
      "on": "direct-remote",
-     "meaning": "direct class timing: one arm's answer was time-limited, the outcomes differ by that alone"
+     "meaning": "direct class timing: one arm's answer time-limited, the outcomes differ by that alone"
     },
     {
      "mark": "s",
@@ -163,13 +170,8 @@
     },
     {
      "mark": "n",
-     "on": "direct-remote",
-     "meaning": "direct class not comparable: no check evaluated on both arms"
-    },
-    {
-     "mark": "n",
-     "on": "mcp",
-     "meaning": "MCP class not comparable: no check both arms evaluated"
+     "on": "direct-remote or mcp",
+     "meaning": "class not comparable: no check evaluated on both arms"
     },
     {
      "mark": "u",
@@ -189,7 +191,7 @@
     {
      "mark": "i",
      "on": "a direct time",
-     "meaning": "this execution ran host-warm after an interrupted execution (one the host's deadline cut without an answer); the aggregates and the summary lines leave it out"
+     "meaning": "warm after an interrupted execution (a deadline cut without an answer); not aggregated"
     },
     {
      "mark": "m",
@@ -202,20 +204,25 @@
    "id": "I.4",
    "title": "Provenance and coverage",
    "paragraphs": [
-    "*What answered and what judged*, in the table below: the engine release and server instance, the index fingerprint and feature level, the manifest with its content and relations hashes, the checks that judged (the re-evaluation's commit when the recorded run was judged again offline, which replaces nothing a runner decided without the checks), the by-design table's version and service commit, the runners with their scripts commits and hosts, the orchestrator's sessions and the clock offset the comparison applied, the dates per arm and the sampler's figures. The service's deployed version is not recorded by a run of this manifest version; the MCP runner's git head and the table's service commit stand in for it. The full hashes, paths and session records are in appendix F."
+    "*What answered and what judged*, in the table below: the engine release, server instance and index, the manifest, the checks that judged, the by-design table (the one the re-evaluation replayed, or a warning when another was read), the runners, the sessions with the clock offset the comparison applied, and the sampler's figures. The service's deployed version is not recorded by a run of this manifest version; the MCP runner's git head and the table's service commit stand in for it. Appendix F has the full hashes, paths and session records, appendix G the MCP limits and the declared exemptions."
    ],
    "coverage": [
-    "*Coverage.* {n_executions} executions over {n_scenarios} scenarios and {n_relations} relations; the table below counts, per arm, the recorded outcomes and the host-cache states. On the MCP arm {n_not_expressible_scenarios} scenarios name a not-expressible case of the by-design table ({n_not_expressible_cases} cases, each naming the missing argument) and {n_manifest_not_implemented} carry the manifest's own mark: these are known limits of the tools, not failures, stated here so that a not-exercised cell reads as such; appendix G lists the cases and reasons with their counts and appendix B every by-design case with the service's code and text. {load_caveat_line}"
+    "{n_executions} executions over {n_scenarios} scenarios and {n_relations} relations; the table below counts, per arm, the recorded outcomes and the host-cache states. On the MCP arm {n_not_expressible_scenarios} scenarios name a not-expressible case of the by-design table ({n_not_expressible_cases} cases, each naming the missing argument) and {n_manifest_not_implemented} carry the manifest's own mark: known limits of the tools, not failures (the cases and reasons in appendix G, every by-design case with the service's code and text in B)."
    ],
    "exemptions": [
-    "*Exemptions.* The owner's declared file {declared_file} (version {declared_version}) exempts {n_declared_exclusions} scenario-arm pairs, marks {n_declared_not_required} property checks not required and excludes {n_declared_relations} relations, each with a reason; the gate's problems are counted by kind in I.1. The declared file is printed in full in appendix G and the gate's problem list in appendix F, with every scenario linked to its unit."
+    "*Exemptions.* The owner's declared file {declared_file} (version {declared_version}) exempts {n_declared_exclusions} scenario-arm pairs, marks {n_declared_not_required} property checks not required and excludes {n_declared_relations} relations, each with a reason; the gate's problems are counted by kind in I.1."
    ]
   }
  },
  "appendix_F": {
   "title": "Environment, vocabulary and the gate in full",
   "paragraphs": [
-   "The long form of I.4's first table and of I.1's gate line: the environment with its full hashes and paths, the orchestrator's sessions with the clock offsets measured and applied, the execution counts per arm with their host-cache states, the three vocabularies (execution outcomes, direct agreement classes, MCP agreement classes) with one line each, and the deploy gate's problems by kind with every scenario and arm."
+   "The long form of I.4's first table and of I.1's gate line: the environment with its full hashes and paths, the orchestrator's sessions with the clock offsets measured and applied, the execution counts per arm with their host-cache states, the rules of judging, the verdict and the deploy gate (the long form the methods of I.2 leave out), the three vocabularies (execution outcomes, direct agreement classes, MCP agreement classes) with one line each, and the deploy gate's problems by kind with every scenario and arm."
+  ],
+  "rules_title": "Judging, the verdict and the gate",
+  "rules": [
+   "*Judging.* An expectation names a check and its arguments; checks are pure functions of a scenario and a normalised answer, shared by every arm, so that a difference between arms is never a difference of checking code. Four generic checks hold on any answer of their route, status (HTTP status, error code and text), invariants (the route's consistency rules), `counts_consistent` (/pattern) and `budget_respected` (the time budget); every other check is a property check, the claim the scenario was built to test (the catalogue above). A check answers pass, fail, inconclusive (it could not test its property on this answer), finding (the host broke a stated bound without failing the request) or not exposed; an execution's outcome follows by precedence fail, finding, inconclusive, pass, and is inconclusive too when no property check could test anything. Three outcomes are decided without the checks: error (no HTTP answer, an undecodable body, a check that raised), not implemented via MCP, and service-side by design (the service answered or refused in the host's place as its table documents, the answer matching the case). A statement an answer makes to excuse itself (a stop, a cut, a withheld list, a time limitation) is accepted only once the answer shows it can have happened. Relations compare two scenarios' answers on the same arm (appendix C). The two direct arms are compared per scenario (identical, same checks, timing, not comparable, disagree) and the MCP arm against the reference direct arm check by check and repeat by repeat (agree with a depth, not comparable, disagree; not implemented and by design are classes of their own); any disagreement fails the run.",
+   "*The verdict and the gate.* The verdict is INCOMPLETE when an arm did not finish or a planned execution was not recorded; else FAIL on any failed or errored execution, disagreement or failed relation; else FINDINGS on any finding; else INCONCLUSIVE when nothing passed, when a whole area or route-and-arm group tested nothing, or when the run spans two deployments; else PASS. Inconclusive executions are counted after the word, never as passes. The deploy gate is stricter: a policy pins the manifest, the relations, the index fingerprint and the by-design table, selects the scenarios by route, names the gated arms (mcp and direct-local) and derives what an arm cannot express from the manifest and the table, never from an answer a run received; the owner's declared file adds exemptions with reasons (I.4, appendix G). The gate fails on anything missing, on any fail, error, finding or inconclusive on a gated arm (an inconclusive execution shows nothing), on any mark the policy does not explain or by-design pair not verified, on any expected property check not passed, on any disagreement, on any required relation not passed and on configuration evidence not recorded live."
   ]
  },
  "appendix_G": {

@@ -15,6 +15,7 @@ if HERE not in sys.path:
 
 import blocks  # noqa: E402
 import cells  # noqa: E402
+import compare as cmp  # noqa: E402
 import gate as gate_mod  # noqa: E402
 import latex  # noqa: E402
 import reader  # noqa: E402
@@ -96,8 +97,10 @@ class Context(object):
         ma = summary.get("mcp_agreement") or {}
         gate = run.gate if isinstance(run.gate, dict) else {}
         gate_word, gate_how, gate_counts, gate_problems_text = gate_summary(self)
+        gp = gate_outcome_counts(run)
         limits = mcp_limit_counts(run)
         declared = declared_counts(run)
+        table = run.table_meta or {}
         return {"release": run.run.get("release") or "–", "run_id": run.run_id(),
                 "database": index.get("database") or "–", "k": index.get("k") or "–",
                 "scenarios": len(run.order), "n_scenarios": len(run.order),
@@ -137,6 +140,13 @@ class Context(object):
                 "n_declared_relations": declared["relations_excluded"],
                 "gate_word": gate_word if gate else "not evaluated",
                 "gate_text": gate_text(gate_word, gate_how, gate_counts, gate_problems_text),
+                "n_gate_outcome_problems": gp["outcome"], "n_gate_inconclusive_executions": gp["inconclusive"],
+                "n_gate_finding_executions": gp["finding"], "n_gate_outcome_pairs": gp["pairs"],
+                "gate_inconclusive_clause": gate_inconclusive_clause(run),
+                "untested_scope": untested_scope_text(self),
+                "by_design_cases": table.get("cases") if table.get("cases") is not None else "–",
+                "by_design_sha_short": (table.get("sha256") or "–")[:12],
+                "by_design_table_line": by_design_table_text(run),
                 "n_chapters": len(self.units.chapters), "built_chapters": ", ".join(self.chapters),
                 "readme_path": README_PATH, "readme_commit": self.readme_commit() or "not determined"}
 
@@ -207,10 +217,29 @@ class Context(object):
             self._untested = untested_properties(self)
         return self._untested
 
+    def family_values(self, fid):
+        """A family's own placeholders for its prose: {n_tests, n_units} and the MCP arm's outcome classes over
+        its members as the tables derive them (blocks.mcp_class; the owner's review, point 5), so that the prose's
+        counts cannot drift from the cells (VERIFY-R2 M1): `n_mcp_<class>` per class (not_expressible,
+        refused_before_host, relayed, normalised, answered, host_state, refused_unexplained, none) and
+        `mcp_<class>_ids` (the member ids of that class, comma-separated)."""
+        f = self.units.families.get(fid) or {}
+        members = [sid for uid in f.get("units") or [] for sid in self.units.units[uid]["members"]]
+        by_class = {}
+        for sid in members:
+            st = self.state(sid)["mcp"]
+            cls, _ = blocks.mcp_class(st.lines, self.run.scenario(sid), st.agreement, self.run.cases)
+            by_class.setdefault(cls, []).append(sid)
+        values = {"n_tests": len(members), "n_units": len(f.get("units") or [])}
+        for cls in blocks.MCP_CLASS_WORD:
+            values["n_mcp_%s" % cls] = len(by_class.get(cls) or [])
+            values["mcp_%s_ids" % cls] = ", ".join(by_class.get(cls) or []) or "none"
+        return values
+
 
 # -- small helpers --------------------------------------------------------------------------------------------
 
-def _kv_table(rows, widths=(40, 134)):
+def _kv_table(rows, widths=(32, 142)):
     spec = latex.spec_p(widths)
     return latex.plain_table(spec, ["", "value"], [[k, v] for k, v in rows])
 
@@ -407,6 +436,67 @@ def gate_text(word, how, counts_text, problems_text):
     return "%s: %s; %s; %s" % (word, problems_text, counts_text, how)
 
 
+def gate_outcome_counts(run):
+    """The gate's outcome problems (gate.json, else the offline verdict): {judged, outcome: all of them,
+    inconclusive: the inconclusive executions among them, finding: the findings, pairs: distinct (scenario, arm)}.
+    These, not the run's inconclusive count, are what blocks the gate: an execution on a gated arm, in the
+    policy's selection and not declared exempt (VERIFY-R2 H1). Zeros with judged False when no gate was judged."""
+    gate = run.gate if isinstance(run.gate, dict) else None
+    out = {"judged": gate is not None, "outcome": 0, "inconclusive": 0, "finding": 0, "pairs": 0}
+    if not gate:
+        return out
+    pairs = set()
+    for p in gate.get("problems") or []:
+        if not isinstance(p, dict) or p.get("kind") != "outcome":
+            continue
+        out["outcome"] += 1
+        detail = str(p.get("detail") or "")
+        if detail.startswith("inconclusive"):
+            out["inconclusive"] += 1
+        elif detail.startswith("finding"):
+            out["finding"] += 1
+        pairs.add((p.get("scenario"), p.get("arm")))
+    out["pairs"] = len(pairs)
+    return out
+
+
+def gate_inconclusive_clause(run):
+    """Plain text for I.1: how many of the run's inconclusive executions block the gate, and why those."""
+    gp = gate_outcome_counts(run)
+    if not gp["judged"]:
+        return "whether any of them blocks the deploy gate was not judged (no gate verdict for this run)"
+    n = gp["inconclusive"]
+    return ("%d of them block%s the deploy gate: %s on a gated arm, in the policy's selection and not declared "
+            "exempt (the gate's outcome problems, appendix F); the others are on an ungated arm, outside the "
+            "selection or exempt" % (n, "s" if n == 1 else "", "the one" if n == 1 else "those"))
+
+
+def untested_scope_text(ctx):
+    """`in this run` for a full build, `in the built chapter R` (chapters R, T) for a partial one (VERIFY-R2 L7)."""
+    if set(ctx.chapters) == set(ctx.units.chapters):
+        return "in this run"
+    return "in the built chapter%s %s" % ("s" if len(ctx.chapters) > 1 else "", ", ".join(ctx.chapters))
+
+
+def by_design_table_text(run):
+    """The by-design table the document prints, in plain words: version, cases, service commit, sha; whether it
+    is the table the re-evaluation replayed, else the comparator's warning."""
+    t = run.table_meta or {}
+    if not t.get("path"):
+        return "no by-design table" + ((": " + "; ".join(t["warnings"])) if t.get("warnings") else "")
+    text = "version %s, %s cases, service commit %s…, sha256 %s…" % (
+        t.get("version"), t.get("cases"), str(t.get("service_commit") or "–")[:12], str(t.get("sha256") or "–")[:12])
+    if t.get("replayed"):
+        text += " (the table the re-evaluation replayed)"
+    elif t.get("replayed_sha256"):
+        text += " (WARNING: not the table the re-evaluation replayed, sha256 %s…, %s cases; %s)" % (
+            str(t["replayed_sha256"])[:12], t.get("replayed_cases", "–"),
+            "; ".join(t.get("warnings") or []) or "the replayed table was not found")
+    elif t.get("warnings"):
+        text += " (%s)" % "; ".join(t["warnings"])
+    return text
+
+
 # -- the cover ---------------------------------------------------------------------------------------------------
 
 def front_matter(ctx):
@@ -492,8 +582,10 @@ def sample_note(ctx):
 # -- Part I: decision summary -------------------------------------------------------------------------------------
 
 def _finding_evidence(line):
+    """The evidence clause of an execution's finding, without its bracketed aside (the detail block has it all)."""
     fc = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "finding"]
-    return blocks._first_clause(fc[0].get("detail"), 140) if fc else "a stated bound broken"
+    text = blocks._first_clause(fc[0].get("detail"), 140) if fc else "a stated bound broken"
+    return text.split(" (", 1)[0] if " (" in text else text
 
 
 def principal_findings(ctx):
@@ -528,7 +620,7 @@ def principal_findings(ctx):
             failed_rel.append("%s on %s" % (latex.breakable_id(rid), esc(", ".join(bad))))
     out = []
     if findings:
-        items = ["%s (%s): %s" % (_link_sid(ctx, sid), esc(run.scenario(sid).get("title"), 70), "; ".join(v))
+        items = ["%s (%s): %s" % (_link_sid(ctx, sid), esc(run.scenario(sid).get("title"), 44), "; ".join(v))
                  for sid, v in findings.items()]
         out.append(("findings (%d execution%s, %d test%s)" % (
             sum(len(v) for v in findings.values()), "" if sum(len(v) for v in findings.values()) == 1 else "s",
@@ -754,7 +846,7 @@ MARK_EXAMPLE = {"superscript digit": "\\ginc\\fn{1}", "not-equal sign": "\\gpass
                 "a": "9.1 s\\tmark{a}", "i": "9.1 s\\tmark{i}", "m": "\\ginc\\tmark{m}"}
 ANNOTATION_DEFAULT = {
     "column": "a column is one varied value of the unit's dimension; the record key in brackets names the source "
-              "record (the key below and in appendix D)",
+              "record (the key in appendix D)",
     "glyph": "the glyph is the arm's standing on the test: pass, fail, error, finding, inconclusive, not "
              "implemented via MCP, service-side by design (the legend below)",
     "repeats": "two numbers separated by a slash are the repeats in order (on mcp the cold call, then the warm "
@@ -801,6 +893,7 @@ def _legend_tables(glyph_rows, mark_rows):
     spec = latex.spec_p([8, 36, 128], aligns=["centering", "raggedright", "raggedright"])
     glyphs = latex.plain_table(spec, ["", "glyph", "meaning"], glyph_rows)
     spec2 = latex.spec_p([30, 34, 108])
+    # a longtable: it may continue on the next page under its repeated header (no heading is orphaned)
     marks_t = latex.plain_table(spec2, ["mark", "on", "meaning"], mark_rows)
     return glyphs + marks_t
 
@@ -840,14 +933,12 @@ def grammar_lines(ctx):
     the legend line under every table)."""
     out = ("\\begingroup\\sffamily\\footnotesize\n"
            "\\bline{aggregates}{a replicates cell is ok n/n · wall median / maximum over each member's first "
-           "host-warm execution (else its only one) and [server median]; when those executions are not all "
-           "host-warm the wall carries the mark of their state, alone when all share it (7.0 / 7.8 s\\tmark{c}) and "
-           "with its share otherwise (\\tmark{c 2/6}); members the arm never exercised read not exercised: n, never "
-           "ok 0/0, and the coverage line under the table says per arm how many were exercised and passed}\n"
+           "host-warm execution (else its only one) and [server median]; a wall not all host-warm carries the state's "
+           "mark, alone when shared (7.0 / 7.8 s\\tmark{c}), else with its share (\\tmark{c 2/6}); members never "
+           "exercised read not exercised: n, never ok 0/0; the coverage line under the table counts per arm}\n"
            "\\bline{edge tables}{the mcp cell of a refusals or list table shows the recorded status, the service's "
-           "code and the class of the outcome in words: refused before host execution, not expressible through "
-           "MCP, answered after service normalization, host refusal relayed through the service; the class follows "
-           "from whether the host was reached, the error's source and the by-design case, never from prose}"
+           "code and the class in words (refused before host execution, not expressible through MCP, answered after "
+           "service normalization, host refusal relayed through the service), derived from the evidence, never from prose}"
            "\n\\par\\endgroup\n\n")
     return out
 
@@ -934,7 +1025,7 @@ def annotated_matrix(ctx):
     out = "\\noindent{\\small The matrix of unit \\hyperref[unit:%s]{\\texttt{%s}} (%s), annotated:}\\par\\nopagebreak\\smallskip\n" % (
         latex.label_key(uid), esc(uid), esc(u.get("unit_title") or ""))
     out += latex.series_table(columns, rows, ids, cells.TIMING_LEGEND["series"] + mark("summary"))
-    out += "\\begingroup\\small\n"
+    out += "\\begingroup\\footnotesize\n"
     for i, key in enumerate(used):
         out += "\\annline{%d}{%s}\n" % (i + 1, inline(ctx.fill(texts.get(key, key))))
     out += "\\par\\endgroup\\medskip\n\n"
@@ -976,12 +1067,11 @@ def record_key(ctx, full=False):
 
 
 def reading_guide(ctx):
-    """I.3: the prose, the annotated matrix with its marker texts, the compact record key the first marker cites,
-    then the legend, the marks and the two grammar rules (longtables that break across a page without an orphaned
-    heading)."""
+    """I.3: the prose, the annotated matrix with its marker texts, then the legend, the marks and the two grammar
+    rules (longtables that break across a page without an orphaned heading). The record key is appendix D's (the
+    owner's review, point 3 puts it with the glossary; point 2 holds Part I to about four pages: VERIFY-R2 M3)."""
     out = ctx.prose_paragraphs("reading")
     out += annotated_matrix(ctx)
-    out += record_key(ctx)
     out += legend_table(ctx)
     out += grammar_lines(ctx)
     return out
@@ -997,10 +1087,10 @@ def provenance_table(ctx):
     checks = reeval.get("checks") or {}
     table = run.table_meta or {}
     index = manifest.get("index") or {}
-    rows = [("run", "%s; release %s…; server instance %s" % (tt(run.run_id()), tt(_short(r.get("release"), 20)),
-                                                            tt(r.get("server_instance") or "–"))),
-            ("index", "%s, k = %s, fingerprint %s…" % (tt(index.get("database") or "–"), esc(index.get("k") or "–"),
-                                                        tt(_short(r.get("index_fp"), 12)))),
+    rows = [("run", "%s; release %s…" % (tt(run.run_id()), tt(_short(r.get("release"), 16)))),
+            ("server", "instance %s; index %s, k = %s, fingerprint %s…" % (
+                tt(r.get("server_instance") or "–"), tt(index.get("database") or "–"), esc(index.get("k") or "–"),
+                tt(_short(r.get("index_fp"), 12)))),
             ("manifest", "version %s, %d scenarios, %d relations; content sha256 %s…" % (
                 esc(manifest.get("manifest_version")), len(run.order), len(run.relations),
                 tt(_short(manifest.get("content_sha256"), 12))))]
@@ -1010,9 +1100,17 @@ def provenance_table(ctx):
             _date(reeval.get("reevaluated_utc")))))
     else:
         rows.append(("checks", "the recorded set, judged by the runners' checks"))
-    if table:
-        rows.append(("by-design table", "version %s, %s cases, service commit %s…" % (
-            esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)))))
+    if table.get("path"):
+        text = "version %s, %s cases, service commit %s…, sha256 %s…" % (
+            esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)),
+            tt(_short(table.get("sha256"), 12)))
+        if table.get("replayed"):
+            text += ", the re-evaluation's"
+        elif table.get("replayed_sha256"):
+            text += " (\\textbf{not} the table the re-evaluation replayed: appendix F)"
+        rows.append(("by-design table", text))
+    elif table.get("warnings"):
+        rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 300)))
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
         rows.append(("arm %s" % esc(arm), "%s executions, %s to %s, runner %s" % (
@@ -1023,22 +1121,16 @@ def provenance_table(ctx):
         first = sessions[0]
         loop = first.get("loop") or {}
         applied = _applied_offset(run)
-        rows.append(("sessions", "%d (%s mode); the first ran the loop: %s of %s scenarios%s; mex clock offset %s" % (
+        rows.append(("sessions", "%d (%s); the loop %s of %s scenarios%s; mex clock offset %s" % (
             len(sessions), esc(first.get("mode") or "–"), esc(loop.get("completed", "–")), esc(loop.get("scenarios", "–")),
-            (", state %s" % esc(loop.get("state"))) if loop.get("state") else "",
+            (", %s" % esc(loop.get("state"))) if loop.get("state") else "",
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
     lf = run.load or {}
     caveat = ""
     if (lf.get("sra_mean") or 0) > LOAD_CAVEAT_SRA or (lf.get("load_mean") or 0) > LOAD_CAVEAT_LOAD1:
-        caveat = "; the Logan caveat applies (the host was busy with other work: the timings are upper bounds)"
+        caveat = ": the Logan caveat applies (timings are upper bounds)"
     rows.append(("host load", "%d samples; sra\\_all CPU mean %s\\%%, load1 mean %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("load_mean"), 1), caveat)))
-    hc = run.comp.get("host_cache") or {}
-    rows.append(("host cache", "a recency heuristic, not a measurement: cold = the scenario's first execution to reach "
-                               "the host in this run; warm = within %s s of another; aged = older" % esc(
-                                   fmt_n(hc.get("warm_window_s", 60), 0))))
-    rows.append(("in full", "appendix F (hashes, scripts, sessions, the gate's problems); appendix G (the MCP "
-                            "limits and the declared exemptions)"))
     return _kv_table(rows)
 
 
@@ -1049,14 +1141,14 @@ def limitations_table(ctx):
     ma = run.summary().get("mcp_agreement") or {}
     rows = [["not implemented via MCP by the manifest", "%d scenarios, %d distinct reasons" % (
         limits["manifest_not_implemented"], len(limits["reasons"])), "\\hyperref[app:G]{G}"],
-            ["table cases not expressible through MCP that scenarios name", "%d cases, %d scenarios" % (
+            ["not-expressible table cases scenarios name", "%d cases, %d scenarios" % (
                 len(limits["named"]), limits["not_expressible_scenarios"]), "\\hyperref[app:G]{G}"],
             ["by-design cases an MCP answer matched", "%d cases; pairs verified %s, unverified %s" % (
                 len(limits["matched"]), esc(ma.get("by_design_verified", "–")), esc(ma.get("by_design_unverified", "–"))),
              "\\hyperref[app:B]{B}"]]
     dec = declared_counts(run)
     if isinstance(run.declared, dict):
-        rows.append(["owner-declared exemptions (%s)" % tt(dec["file"]),
+        rows.append(["owner-declared exemptions",
                      "%d exclusions, %d checks not required, %d relations excluded" % (
                          dec["exclusions"], dec["not_required"], dec["relations_excluded"]),
                      "\\hyperref[app:G]{G}"])
@@ -1070,9 +1162,15 @@ def limitations_table(ctx):
             if any(p.get("kind") == k for p in problems)) or "none"), "\\hyperref[app:F]{F}"])
     ibr = run.summary().get("inconclusive_by_reason") or {}
     n_inc = sum(sum((ibr.get(a) or {}).values()) for a in ARMS)
-    rows.append(["inconclusive executions", "%d (every one blocks the gate; each is footnoted in Part II)" % n_inc,
+    gp = gate_outcome_counts(run)
+    if gp["judged"]:
+        blocking = "%d block the gate (a gated arm, in the policy's selection, not declared exempt)" % gp["inconclusive"]
+    else:
+        blocking = "the gate was not judged"
+    rows.append(["inconclusive executions", "%d; %s; each footnoted in Part II" % (n_inc, esc(blocking)),
                  "\\hyperref[sec:I1]{I.1}"])
-    return latex.plain_table(latex.spec_p([70, 84, 10]), ["limitation", "count", "full entries"], rows)
+    return latex.plain_table(latex.spec_p([62, 94, 10]), ["limitation", "count", "in full"], rows,
+                             needspace=len(rows) + 3)
 
 
 def provenance_section(ctx):
@@ -1278,13 +1376,13 @@ EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the clas
                "relayed through the service")
 
 
-def _unit_blocks(ctx, chapter, uid, members):
+def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
     out = ""
     for sid in members:
         n = ctx.footnotes[chapter].get(sid)
         if n is None:
             continue
-        out += blocks.detail_block(ctx.run, sid, ctx.state(sid), n, ctx.units, ctx.short_reasons())
+        out += blocks.detail_block(ctx.run, sid, ctx.state(sid), n, ctx.units, ctx.short_reasons(), unit_note)
         ctx.blocks_by_chapter.setdefault(chapter, []).append(sid)
     return out
 
@@ -1420,7 +1518,7 @@ def unit_section(ctx, chapter, uid):
                           esc_wrap(meta[sid].get("variant") or ""), expected] + cs + [mcp_cell], note))
         out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND)
         states = [ctx.state(sid) for sid in members]
-        out += "\\sumline{%d tests · %s · %s}\n" % (len(members), " · ".join(
+        out += "\\sumline{%s: %d test%s · %s · %s}\n" % (tt(uid), len(members), "" if len(members) == 1 else "s", " · ".join(
             "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS), cells.max_wall_text(run, members))
     elif layout == "list":
         rows = []
@@ -1457,8 +1555,9 @@ def unit_section(ctx, chapter, uid):
             rows.append([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid), second] + cs)
         rows += _relation_rows(ctx, u.get("relations") or [])
         out += latex.pairs_table(rows, units_ids(ctx, members), "test", legend)
-    out += mcp_unit_note(ctx, chapter, uid, members)
-    out += _unit_blocks(ctx, chapter, uid, members)
+    note = mcp_unit_note(ctx, chapter, uid, members)
+    out += note
+    out += _unit_blocks(ctx, chapter, uid, members, unit_note=bool(note))
     return out
 
 
@@ -1475,7 +1574,7 @@ def family_section(ctx, chapter, fid):
     title = fp.get("title") or f.get("title") or fid
     out = latex.section("%s\\qd %s" % (latex.title_tt(fid), esc(title)), "fam:%s" % fid, level="subsection",
                         needspace=10)
-    out += inline(ctx.fill(fp["prose"])) + "\n\n" if fp.get("prose") else latex.placeholder(
+    out += inline(ctx.fill(fp["prose"], ctx.family_values(fid))) + "\n\n" if fp.get("prose") else latex.placeholder(
         "(family prose: to be written)") + "\n\n"
     sids, relations = [], []
     for uid in f["units"]:
@@ -1559,26 +1658,40 @@ def paired_walls(ctx):
     return out
 
 
-def phase_quantiles(ctx):
-    """[(phase, p10, p25, p50, p75, p90, n)] over the host-warm MCP executions whose backend was reached."""
+def phase_population(ctx):
+    """{phase key: [ms]} over the population of compare's summary.mcp_phases: per scenario the host-warm MCP
+    execution with a backend timing (repeat 1 preferred), as compare.mcp_overhead picks it, so that the plot and
+    C.3's table read one population (VERIFY-R2 M4). Zeros are kept here; the log-scale box leaves them out."""
     run = ctx.run
     values = dict((k, []) for k, _ in PHASES)
     for sid in run.order:
-        for l in run.arm_lines(sid, "mcp"):
-            ph = l.get("mcp_phases") if isinstance(l.get("mcp_phases"), dict) else None
-            if not ph or ph.get("backend_ms") is None or cells.host_cache_of(l) != "warm":
-                continue
-            for k, _ in PHASES:
-                v = ph.get(k)
-                if cells._num(v) is not None and v > 0:
-                    values[k].append(v)
+        lines = dict((l.get("repeat"), l) for l in run.arm_lines(sid, "mcp") if isinstance(l.get("repeat"), int))
+        timed = dict((k, l) for k, l in lines.items() if cells.sc.backend_timed(l))
+        if not timed:
+            continue
+        m = cmp.first_with(timed, "warm", prefer=1 if 1 in timed else None)
+        ph = (m or {}).get("mcp_phases") if isinstance((m or {}).get("mcp_phases"), dict) else None
+        if not ph:
+            continue
+        for k, _ in PHASES:
+            v = ph.get(k)
+            if cells._num(v) is not None:
+                values[k].append(v)
+    return values
+
+
+def phase_quantiles(ctx):
+    """[(phase, p10, p25, p50, p75, p90, n, n_zero)] over phase_population: the quantiles of the positive values
+    (a log scale cannot hold a zero), n the positive ones, n_zero the zeros left out."""
+    values = phase_population(ctx)
     out = []
     for k, name in PHASES:
-        vals = values[k]
+        vals = [x for x in values[k] if x > 0]
+        zeros = sum(1 for x in values[k] if x == 0)
         if len(vals) < 2:
             continue
         out.append((name, cells.percentile(vals, 10), cells.percentile(vals, 25), cells.percentile(vals, 50),
-                    cells.percentile(vals, 75), cells.percentile(vals, 90), len(vals)))
+                    cells.percentile(vals, 75), cells.percentile(vals, 90), len(vals), zeros))
     return out
 
 
@@ -1593,9 +1706,9 @@ def plot_data(ctx):
     rows = ["scenario,chapter,dl_ms,dr_ms"] + ["%s,%s,%.3f,%.3f" % (sid, ch, dl, dr) for sid, ch, dl, dr, mc in pairs
                                               if dl is not None and dr is not None]
     files[PLOT_FILES["paired_dl_dr"]] = "\n".join(rows) + "\n"
-    rows = ["phase,n,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms"] + [
-        "%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f" % (name.replace(" ", "_"), n, p10, p25, p50, p75, p90)
-        for name, p10, p25, p50, p75, p90, n in phase_quantiles(ctx)]
+    rows = ["phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms"] + [
+        "%s,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f" % (name.replace(" ", "_"), n, n_zero, p10, p25, p50, p75, p90)
+        for name, p10, p25, p50, p75, p90, n, n_zero in phase_quantiles(ctx)]
     files[PLOT_FILES["phases"]] = "\n".join(rows) + "\n"
     return files
 
@@ -1670,11 +1783,29 @@ def closing_values(ctx):
         if cells._num(fo_.get("scenarios_without_warm_pair")) is not None else None
     v["warm_pairs_left_out_after_interrupted"] = str(fo_["warm_pairs_left_out_after_interrupted"]) \
         if cells._num(fo_.get("warm_pairs_left_out_after_interrupted")) is not None else None
+    # the scenarios the MCP pairings leave out: every scenario less the pairs (VERIFY-R2 H4: the direct pairing's
+    # count is C.4's, not C.3's)
+    n_local = cells._num((mo.get("minus_local_ms") or {}).get("n")) if isinstance(mo.get("minus_local_ms"), dict) else None
+    n_remote = cells._num((mo.get("minus_remote_ms") or {}).get("n")) if isinstance(mo.get("minus_remote_ms"), dict) else None
+    v["scenarios_without_mcp_local_pair"] = str(len(run.order) - int(n_local)) if n_local is not None else None
+    v["scenarios_without_mcp_remote_pair"] = str(len(run.order) - int(n_remote)) if n_remote is not None else None
+    # every host-cold MCP execution (C.4's host-cold table), against the cold calls of the paired scenarios
+    # (summary.mcp_cold_wall_ms, C.3); the two populations differ and the prose says so (VERIFY-R2 M4)
+    stats("cold_mcp_all", ((fo_.get("cold") or {}).get("mcp") or {}).get("wall_ms"))
+    # the phases' population: the warm execution of each paired scenario (summary.mcp_phases); paging is 0 ms
+    # where the results came with the terminal status, and the log-scale box leaves those out
+    phase_pop = phase_population(ctx)
+    paging = phase_pop.get("paging_ms") or []
+    v["phase_paging_zero_n"] = str(sum(1 for x in paging if x == 0)) if paging else None
+    v["phase_paging_nonzero_n"] = str(sum(1 for x in paging if x > 0)) if paging else None
     v["load_caveat_line"] = load_caveat_line(run)
     diffs = [p[4] - p[2] for p in both]
     v["paired_dl_mcp_delta_p50"] = fmt_delta(cells.percentile(diffs, 50)) if diffs else None
     v["paired_dl_mcp_delta_p90"] = fmt_delta(cells.percentile(diffs, 90)) if diffs else None
-    v["paired_dl_mcp_under_1s"] = str(sum(1 for d in diffs if d < 1000)) if diffs else None
+    # the pairs whose two walls lie within 1 s of each other, in either direction (VERIFY-R2 H3: not d < 1000,
+    # which counted the pairs where MCP was faster by any margin)
+    v["paired_dl_mcp_under_1s"] = str(sum(1 for d in diffs if abs(d) < 1000)) if diffs else None
+    v["paired_dl_mcp_faster"] = str(sum(1 for d in diffs if d < 0)) if diffs else None
     both_dr = [p for p in pairs if p[2] is not None and p[3] is not None]
     v["paired_dl_dr_n"] = str(len(both_dr)) if both_dr else None
     ddiffs = [p[3] - p[2] for p in both_dr]
@@ -2004,7 +2135,7 @@ def by_design_table(ctx):
         if sa.get("code"):
             service.append(tt(sa["code"]))
         if sa.get("text_contains"):
-            service.append("“%s”" % esc_wrap(sa["text_contains"], 100))
+            service.append("“%s”" % esc_wrap(sa["text_contains"], 240))
         if sa.get("missing_argument"):
             service.append("missing argument %s" % tt(sa["missing_argument"]))
         if c.get("explains_checks"):
@@ -2013,9 +2144,9 @@ def by_design_table(ctx):
         if de.get("http") is not None:
             direct.append("http %s" % esc(de["http"]))
         if de.get("text"):
-            direct.append(tt(de["text"], 80))
+            direct.append(tt(de["text"], 240))
         elif de.get("text_prefix"):
-            direct.append("prefix %s" % tt(de["text_prefix"], 80))
+            direct.append("prefix %s" % tt(de["text_prefix"], 240))
         marks = {}
         unverified_detail = []
         for sid in naming.get(cid, []):
@@ -2048,7 +2179,7 @@ def by_design_table(ctx):
                 named.append("%s: %d (%s, …)" % (esc(mark), len(sids_),
                                                  ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_[:3])))
         first = [tt(cid) + "\\newline{\\scriptsize %s}" % esc(c.get("agreement") or "–")]
-        matches = esc_wrap(c.get("scenario_match"), 220)
+        matches = esc_wrap(c.get("scenario_match"), 600)
         if short.get(cid):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
         rows.append(first + [matches, "; ".join(service) or "–", "; ".join(direct) or "–", "; ".join(named) or "–"])
@@ -2060,7 +2191,7 @@ def by_design_table(ctx):
            "(and the short reason the tables use), the service's answer, the direct expectation, and the scenarios "
            "naming it with their verification; where the direct side did not match the case, the comparison's "
            "detail is under the row.\n\n")
-    out += latex.plain_table(latex.spec_p([34, 40, 44, 26, 30]),
+    out += latex.plain_table(latex.spec_p([30, 38, 40, 36, 30]),
                              ["case", "matches", "service", "direct", "scenarios"], rows)
     return out
 
@@ -2200,17 +2331,30 @@ def environment_table(ctx):
                 esc(manifest.get("manifest_version")), tt(manifest.get("content_sha256") or "–"),
                 tt(manifest.get("relations_sha256") or "–"), len(run.order), len(run.relations)))]
     if run.reevaluated:
-        rows.append(("checks (re-evaluation)", "commit %s%s; checks.py sha256 %s; suite\\_common sha256 %s; %s" % (
+        rows.append(("checks (re-evaluation)", "commit %s%s; checks.py sha256 %s; suite\\_common sha256 %s; %s (the "
+                                               "re-evaluation judges the recorded answers again and replaces nothing a "
+                                               "runner decided without the checks)" % (
             tt(_short(checks.get("commit"), 12)), " (dirty)" if checks.get("dirty") else "",
             tt(_short(checks.get("checks_sha256"), 16)), tt(_short(checks.get("suite_common_sha256"), 16)),
             _date(reeval.get("reevaluated_utc")))))
     else:
         rows.append(("checks", "the recorded set: judged by the runners' checks (%s)" % esc(
             (run.judged or {}).get("source") or "–")))
-    if table:
-        rows.append(("by-design table", "version %s, %s cases, service commit %s, generated %s" % (
+    if table.get("path"):
+        text = "version %s, %s cases, service commit %s, generated %s; sha256 %s; %s" % (
             esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)),
-            _date(table.get("generated_utc")))))
+            _date(table.get("generated_utc")), tt(table.get("sha256") or "–"), tt(table.get("path")))
+        if table.get("replayed"):
+            text += "; the table the re-evaluation replayed (reevaluated.json by\\_design)"
+        elif table.get("replayed_sha256"):
+            text += "; \\textbf{WARNING}: not the table the re-evaluation replayed (sha256 %s, %s cases): %s" % (
+                tt(table["replayed_sha256"]), esc(table.get("replayed_cases", "–")),
+                esc("; ".join(table.get("warnings") or []) or "the replayed table was not found", 400))
+        elif table.get("warnings"):
+            text += "; " + esc("; ".join(table["warnings"]), 400)
+        rows.append(("by-design table", text))
+    elif table.get("warnings"):
+        rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 400)))
     mcp_run = run.mcp_run or {}
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
@@ -2271,11 +2415,14 @@ def gate_problems(ctx):
         for k in kinds:
             v = by_kind[k]
             names, details = [], []
+            repeats = {}
             for p in v:
                 if p.get("scenario"):
                     where = "%s %s" % (p["scenario"], p.get("arm") or "")
                     if where not in names:
                         names.append(where)
+                    if p.get("repeat") is not None:
+                        repeats.setdefault(where, []).append(p["repeat"])
                     continue
                 text = str(p.get("detail") or "?")
                 for d in details:
@@ -2288,9 +2435,22 @@ def gate_problems(ctx):
                     details.append([text, 1, [p["arm"]] if p.get("arm") else []])
             parts = []
             if names:
-                parts.append(", ".join(_link_sid(ctx, n.split(" ")[0]) + (
-                    " " + esc(n.split(" ", 1)[1].strip()) if n.split(" ", 1)[1].strip() else "")
-                    for n in names[:40]) + (" … (%d in all)" % len(names) if len(names) > 40 else ""))
+                # every scenario-arm pair once, its repeats listed when the arm has more than one problem there
+                # (r0, r1), so that the row's count (one per execution) is readable from the list
+                def _name(n):
+                    text = _link_sid(ctx, n.split(" ")[0])
+                    arm = n.split(" ", 1)[1].strip()
+                    if arm:
+                        text += " " + esc(arm)
+                    reps = repeats.get(n) or []
+                    if len(reps) > 1:
+                        text += " (%s)" % ", ".join("r%s" % esc(r) for r in sorted(reps, key=str))
+                    return text
+                parts.append(", ".join(_name(n) for n in names[:40]) + (
+                    " … (%d in all)" % len(names) if len(names) > 40 else ""))
+                n_exec = sum(1 for p in v if p.get("scenario"))
+                if n_exec != len(names):
+                    parts[-1] += " — %d executions in %d scenario-arm pairs" % (n_exec, len(names))
             for text, n, arms_ in details[:6]:
                 parts.append("%s%s: %s" % (esc(", ".join(arms_)) + " " if arms_ else "",
                                            ("%d times" % n) if n > 1 else "once", esc_wrap(text, 240)))
@@ -2366,6 +2526,7 @@ def appendices(ctx):
     out += latex.section("F\\qd %s" % titles["F"], "app:F")
     out += appendix_lead(ctx, "appendix_F")
     out += "\\parhead{Environment}\n" + environment_table(ctx)
+    out += appendix_rules(ctx)
     out += "\\parhead{Vocabulary}\n" + classes_tables()
     out += "\\parhead{The deploy gate}\n" + gate_problems(ctx)
     out += latex.section("G\\qd %s" % titles["G"], "app:G")
@@ -2381,3 +2542,17 @@ def appendix_lead(ctx, key):
     if isinstance(items, str):
         items = [items]
     return paragraphs([ctx.fill(p) for p in items]) if items else ""
+
+
+def appendix_rules(ctx):
+    """The rules of judging, the verdict and the gate (overview.json `appendix_F.rules`, with its `rules_title`):
+    the long form the owner's Part I leaves to an appendix (methods: the arms, the order, the ground truth and
+    the timing definitions), printed before the vocabulary; nothing when the prose has none."""
+    entry = ctx.overview.get("appendix_F") if isinstance(ctx.overview.get("appendix_F"), dict) else {}
+    items = entry.get("rules") or []
+    if isinstance(items, str):
+        items = [items]
+    if not items:
+        return ""
+    return "\\parhead{%s}\n" % esc(entry.get("rules_title") or "Judging, the verdict and the gate") + paragraphs(
+        [ctx.fill(p) for p in items])

@@ -3710,18 +3710,37 @@ expressible through MCP, answered after service normalization, host refusal rela
 explanation line under a normalised row); a replicates cell reads `not exercised: n` instead of `ok 0/0` and a
 coverage line in words replaces "exceptions: none"; a unit whose MCP column is wholly not exercised carries one line
 under its table with the short reason and the pointer to appendix B (`mcp_notes.units` of the chapter prose, else the
-cases' short reasons); a detail block leads with the adjudication per arm (the
-classification first: a host-state outcome, an allowed 503, a FINDING), then one row per arm and repeat (final outcome,
-HTTP and code, wall, requested budget, property tested?), a finding's evidence and rule in a line set apart, the
-overridden checks of a host-state execution labelled "intermediate", every error text once, the classes, the relations
-and the supporting artifacts (the raw files and the executions file's line numbers); short blocks are unbreakable boxes,
-long ones repeat the test id on continuation, headings ask for space below them; the closing section opens with
+cases' short reasons); a detail block holds the expected line, an adjudication line only for what the rows do not say
+(a failure, an error, a host-state override, a disagreement, a planned execution not recorded, and one phrase for an MCP
+arm the service decided: its class and status, the short reason unless the unit's note under the table has it, the
+case in B), then one row per arm and repeat (final outcome with its qualifier: allowed 503, late 503, host state, by the
+checks; HTTP and code, wall, requested budget, property tested?; an arm standing ○ or ◆ reads so in its rows), a
+finding's evidence per execution with the mechanism and the rule once in a line set apart, the overridden checks of a
+host-state execution labelled "intermediate", every error text once, the classes, the relations and the supporting
+artifacts (the raw files and the executions file's line numbers); blocks under about 28 estimated lines are unbreakable
+boxes, longer ones repeat the test id on continuation, headings ask for space below them; the closing section opens with
 observations filled from `closing.json` templates (sample sizes included), the caveats, a paired-latency plot per arm
 pair and the per-phase box plots (pgfplots, from `plot_*.csv` the generator writes; nothing stacked), then the tables,
 each section led by its method, observation and limits paragraphs (`closing.json` `sections`, the figures as
 placeholders); appendix D holds the short glossary with the version-pinned README reference and the full record key,
-F the environment in full, the vocabulary and the gate's problems, G the MCP limits and the declared exemptions (F and
-G with their lead-ins from `overview.json`).
+F the environment in full, the rules of judging, the verdict and the gate (`overview.json` `appendix_F.rules`), the
+vocabulary and the gate's problems (every scenario-arm pair with its repeats), G the MCP limits and the declared
+exemptions (F and G with their lead-ins from `overview.json`).
+
+After the verification of round 2 (VERIFY-R2, 2026-10-15; round 3) the facts the document states about the gate and
+the by-design table come from the records that decide them, never from a count that looks alike: what blocks the gate
+is the gate's own outcome problems (`sections.gate_outcome_counts`: the executions on a gated arm, in the policy's
+selection and not declared exempt; I.1 and I.4 say how many of the inconclusive executions those are, or that no gate
+was judged), and the by-design table the document prints is the one the re-evaluation replayed (`reader.Run._load_table`
+finds it by the sha256 of `reevaluated.json by_design` among the replayed path, the suite's copy and the run's snapshot;
+another table is read only with the comparator's warning kept and printed in I.4 and F with both shas). The closing
+section's figures follow one population each and say which (the pairs within 1 s count |difference|; the scenarios a
+pairing leaves out are counted for that pairing; the phase box plot reads the same per-scenario population as C.3's
+table and states the zero paging times it leaves out; C.3's cold-wall population against C.4's whole cold column); a
+family's prose may count the MCP classes of its members through placeholders the generator fills from the same
+classifier as the cells (`Context.family_values`: `{n_mcp_refused_before_host}` ...), so that prose and tables cannot
+drift. Part I is four pages: the methods hold the arms, the order, the ground truth and the timing definitions (the
+owner's list) and the rules of judging, the verdict and the gate moved to appendix F; the record key is appendix D's.
 
 - Reads the run directory as report.py does (manifest.json, the re-evaluated executions and compare.json when the
   run has them, else the recorded ones, run.json, reevaluated.json, samples.jsonl, gate.json, arms/mcp/run.json),
@@ -3781,12 +3800,17 @@ G with their lead-ins from `overview.json`).
   detail block's shape (adjudication first, one row per arm and repeat, the artifacts' line numbers), the coverage
   wording, the pagination helpers (short and long boxes, the headings' space), the plots' data files (deterministic
   across two builds), the closing templates' placeholders, the untested-properties computation, the timing legends,
-  the record key, the glossary pin, the gate line on the cover and the sample note.
+  the record key, the glossary pin, the gate line on the cover and the sample note; and, for round 3, the gate's
+  outcome counts and clause, the replayed by-design table found by its sha (and the warning when another is read),
+  the closing figures' populations, the evidence clause's parenthesis balance, the finding line's single mechanism,
+  the rows' qualifiers and the one-phrase MCP arm, the family values from the classifier, the repeats in appendix F
+  and the rules in appendix F.
 - The sample of 2026-10-15 (Part I, chapter R, the closing section, the appendices chapter R needs, the index)
   was built from the v4 run re-evaluated with c11db9dd: `doc/make_doc.py RUN_DIR --out DIR --sample`; its notes
   for the owner's review are `~/.cache/metagraph-traverse-plans/2026-10-15/doc/sample/SAMPLE-NOTES.md` (round 1)
-  and `.../doc/sample-r2/SAMPLE-NOTES.md` (round 2, after the owner's review, point by point). The template is
-  frozen after round 2 (the 14-unit grouping of R stays; pagination may evolve).
+  and `.../doc/sample-r2/SAMPLE-NOTES.md` (round 2, after the owner's review, point by point; round 3, after the
+  verification of round 2, rebuilt in the same directory). The template is frozen after round 3 (the 14-unit
+  grouping of R stays; pagination may evolve).
 
 ## Glossary
 

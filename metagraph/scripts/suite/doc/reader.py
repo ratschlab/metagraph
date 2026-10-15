@@ -6,6 +6,7 @@ by-design table, the owner-declared file and the checks module whose docstrings 
 Everything is read from the run directory and the suite directory; nothing is written into the run.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -52,6 +53,15 @@ def _index_lines(path):
     except OSError:
         pass
     return out
+
+
+def sha256_of(path):
+    """The sha256 of a file, or None when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
 
 
 def git_commit_of(path, cwd):
@@ -140,19 +150,43 @@ class Run(object):
     # -- the by-design table and the declared file ------------------------------------------------------------
 
     def _load_table(self, by_design, reevaluated):
+        """(cases by id, meta) of the by-design table the document prints: the table the re-evaluation replayed
+        (reevaluated.json by_design: path and sha256), found by its sha among the replayed path, the suite
+        directory's copy and the run's snapshot, so that a live table edited after the run never changes the
+        document (VERIFY-R2 H2); else the comparator's choice with the sha-mismatch warning kept in the meta
+        (`warnings`, printed in I.4 and appendix F)."""
         try:
-            path, _ = cmp.table_for(self.dir, by_design, reevaluated)
-        except Exception:  # a table the comparator cannot place: the document shows none
-            path = None
+            path, warnings = cmp.table_for(self.dir, by_design, reevaluated)
+        except Exception as e:  # a table the comparator cannot place: the document shows none
+            path, warnings = None, ["no by-design table could be placed: %s" % e]
+        used = ((self.reeval or {}).get("by_design") if isinstance((self.reeval or {}).get("by_design"), dict)
+                else None) if reevaluated else None
+        replayed_sha = (used or {}).get("sha256")
+        if by_design is None and replayed_sha:
+            candidates = [path, (used or {}).get("path"), os.path.join(SUITE_DIR, "service_by_design.json")]
+            try:
+                candidates.append(cmp.snapshot_table(self.dir))
+            except Exception:
+                pass
+            for cand in candidates:
+                if cand and os.path.exists(cand) and sha256_of(cand) == replayed_sha:
+                    if cand != path:
+                        warnings = []  # the replayed table itself: nothing to warn about
+                        path = cand
+                    break
         if not path or not os.path.exists(path):
-            return {}, {}
+            return {}, {"warnings": warnings, "replayed_sha256": replayed_sha,
+                        "replayed_cases": (used or {}).get("cases")}
         data = sc.read_json(path) or {}
         cases = {}
         for c in data.get("cases") or []:
             if isinstance(c, dict) and c.get("id"):
                 cases[c["id"]] = c
+        sha = sha256_of(path)
         meta = {"path": path, "version": data.get("version"), "service_commit": data.get("service_commit"),
-                "generated_utc": data.get("generated_utc"), "cases": len(cases)}
+                "generated_utc": data.get("generated_utc"), "cases": len(cases), "sha256": sha,
+                "replayed_sha256": replayed_sha, "replayed_cases": (used or {}).get("cases"),
+                "replayed": bool(replayed_sha) and sha == replayed_sha, "warnings": list(warnings or [])}
         return cases, meta
 
     def _load_declared(self, declared):
