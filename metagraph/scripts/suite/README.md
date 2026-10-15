@@ -2225,8 +2225,8 @@ resolve_time_budget} (the host's block as received, not backends.<db>.resolve.ti
 - service_by_design.json, the vocabulary's answer_match.wall_rule entry only: the name budget_minus_reserve is kept,
   its threshold is B - 1 s (B the request's time_budget_ms) on the failing attempt's own wall, no finalisation
   reserve subtracted. The table's sha256 is d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61 (was
-  ab4100c9...); gate/policy_v4_rt_mcp.json pins the old one and is regenerated at integration
-  (test_gate's test_shipped_v4_policy_is_regenerated_exactly fails until then, on that sha only).
+  ab4100c9...); gate/policy_v4_rt_mcp.json pinned the old one and is regenerated at the integration (section
+  "Suite integration S7i").
 - Agreed, no change: request_evidence_mismatches as the field name; the legacy no-budget term.
 - Recorded runs: v3 and v4 record no service_capabilities, so nothing they read moves; their comparison and report
   name the table's new sha256.
@@ -2453,3 +2453,12 @@ one lane's verification left to another lane's file.
     1dccc344, taking the reference code from the suite_common beside --checks-dir, the run's snapshot): merge_run's
     checks_identity, an error for --strict-identity and the gate where the run has a snapshot;
   - `mcp_auth` per invocation (rule 2 of the plausibility rules) and the lines' `request_evidence` above.
+
+### The v4 gate policy pins the table of lane S7v
+- gate/policy_v4_rt_mcp.json is regenerated (`gate_policy.py manifest/suite_v4.json --arms mcp,direct-local
+  --declared gate/declared_v4_rt.json --name v4-rt-mcp --out gate/policy_v4_rt_mcp.json`) for the table's sha256
+  d1e040aac81007713e2250a3dd765244e44026c8bcb03834fd484f143ccebc61 (lane S7v's wall_rule entry; was ab4100c9...).
+  Only by_design_table.sha256 and generated_utc differ: selection, exclusions, required executions, properties,
+  relations, relations_excluded, counts, declared and manifest are equal (222 selected, 35 excluded, required
+  direct-local 220 scenarios / 253 executions and mcp 189 / 384, relations 2 required and 24 excluded).
+  test_gate's test_shipped_v4_policy_is_regenerated_exactly, failing since the merge of lane S7v, passes.
