@@ -3377,3 +3377,15 @@ on rendered answers in the three graph modes, the review's probes, the generator
   or before the skipped leading N run (P's trailing run for `reverse`; a window of N only keeps its last
   position; none for a peptide). With substitutions the check of few unchecked candidates makes levels exact
   one by one (21.6), so a partition's `upper` is its truth plus the dummies of the levels still in `bounds`.
+
+### Validation against the 81c620ef build (2026-10-15)
+- Seed 1 at the default sizes (`runs/final2_seed1` in the lane directory) and seeds 2-6 at twice the size
+  (`runs/final2_breadth_seed2` … `6`): 8,528 requests, 32,988 answers over the nine configurations; 30,116
+  answers equal the oracle (complete sets, exact counts, order, labels and placements, `/resolve` runs and
+  candidates), 2,872 budget-probe answers are inconclusive on completeness with every invariant passing, 0
+  disagree. 314,662 corruptions of the passing answers (34 kinds), every one caught.
+- No candidate engine defect in phase 1's scope. The disagreements of the development runs were all the oracle's
+  and are fixed with regressions: the two readings above (`seq_id`, trace); U per level with substitutions; U
+  of the orientation a `max_steps` stop left complete beside an `at_least` total.
+- The checker gaps the runs published and that are now closed: doubled `bounds` counts (before the U model);
+  `retrieval_complete` on an `all_or_count` withheld on U; an offset moved within a PRIMARY `partial` cut.
