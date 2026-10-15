@@ -430,14 +430,16 @@ def validate(scenarios, cases=None) -> list:
             problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
         disc = s["request"].get("discover") if s["route"] == "POST /resolve" and isinstance(s["request"], dict) else None
         if isinstance(disc, dict) and _status_ok(s):
-            # one question on both arms: the MCP sends its limit and kind as they are (20 when none, refused above 100),
-            # the host's default is 1,000 (the async session's constraint for v5)
+            # one question on both arms: the MCP sends its limit and kind as they are (50 when none, refused above
+            # 1,000), the host's default is 1,000 (the async session's constraint for v5)
             ml = disc.get("max_labels")
             by = (s.get("mcp") or {}).get("by_design") or []
+            cap = manifest_lib.SERVICE_DISCOVER_MAX_LABELS
             if "max_labels" not in disc or "kind" not in disc:
                 problems.append("%s: a discovery that does not name max_labels and kind" % s["id"])
-            elif isinstance(ml, int) and ml > 100 and "resolve.discover_limit_above_100_host_answers" not in by:
-                problems.append("%s: discover.max_labels %d above the MCP's 100 outside its by-design case" % (s["id"], ml))
+            elif isinstance(ml, int) and ml > cap and "resolve.discover_limit_above_cap_host_answers" not in by:
+                problems.append("%s: discover.max_labels %d above the MCP's %d outside its by-design case" % (
+                    s["id"], ml, cap))
             elif "tool" in s["mcp"] and (s["mcp"]["arguments"].get("limit") != ml
                                          or s["mcp"]["arguments"].get("kind") != disc.get("kind")):
                 problems.append("%s: the MCP arguments do not state the discovery's limit and kind" % s["id"])

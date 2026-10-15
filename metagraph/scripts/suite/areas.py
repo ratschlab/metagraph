@@ -16,7 +16,8 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import seqtools as st
-from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, Ctx, DB, K,
+from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS,
+                          SERVICE_DISCOVER_MAX_LABELS, Ctx, DB, K,
                           PATTERN_MAX_CONTEXTS, RESOLVE_MAX_QUERY_BP, acgt_flank, trie_heads, trie_index,
                           PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS, WALK_PRESET, pattern_request, relation,
                           _pattern_kinds, resolve_request, scenario, source_contexts, traverse_request,
@@ -377,13 +378,23 @@ def gen_R(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "R", "discover.max_labels 0: refused naming the field", "POST /resolve",
                         resolve_request(t["window"][:60], discover={"max_labels": 0, "kind": "column"}), t,
                         [err400(prefix="request.discover.max_labels: out of range [1, ")], tags=["edge", "refusal"]))
-    # the split cases of async's table without a scenario (A-12 b): the host answers what the service refuses
-    out.append(scenario(nid(), "R", "discover.max_labels 150 (above the service's 100): the host answers",
-                        "POST /resolve", resolve_request(t["window"][:60], discover={"max_labels": 150, "kind": "column"}),
-                        t, [OK, INV], tags=["edge", "split-case", "machine-dependent"]))
+    # the service's discovery cap is 1,000 since the v5 start (it was 100): 150 is answered on every arm; the source,
+    # eco's column, is listed or ties the kept labels at full support (v4: 1,443 of 2,753 columns at 30 of 30 k-mers)
+    out.append(scenario(nid(), "R", "discover.max_labels 150: answered on every arm, the source listed or in a tie at "
+                        "full support", "POST /resolve",
+                        resolve_request(t["window"][:60], discover={"max_labels": 150, "kind": "column"}),
+                        t, [OK, INV, ex("resolve_discover_contains", label=eco.column)],
+                        tags=["edge", "discover", "machine-dependent"]))
     out.append(scenario(nid(), "R", "time_budget_ms 400 (above the reserve, below the service's 500): the host answers",
                         "POST /resolve", resolve_request(t["window"], labels=[eco.column], time_budget_ms=400), t,
                         [OK, INV, ex("budget_respected")], tags=["edge", "split-case", "budget", "machine-dependent"]))
+    # above the service's cap: the MCP refuses it (invalid_arguments), the host, which has no cap, answers (the table's
+    # resolve.discover_limit_above_cap and resolve.discover_limit_above_cap_host_answers)
+    out.append(scenario(nid(), "R", "discover.max_labels 1,001 (above the service's cap of 1,000): the host answers, "
+                        "the MCP refuses", "POST /resolve",
+                        resolve_request(t["window"][:60], discover={"max_labels": SERVICE_DISCOVER_MAX_LABELS + 1,
+                                                                     "kind": "column"}),
+                        t, [OK, INV], tags=["edge", "split-case", "discover", "machine-dependent"]))
     # the reverse complement of a window none of whose reverse k-mers its record holds (Ctx.rc_negative_window: the
     # whole record, k-mer by k-mer): the record's header supports none of the query's k-mers (on this basic graph a
     # k-mer and its reverse complement are different nodes). The check discriminates only where the reverse k-mers are

@@ -236,8 +236,10 @@ class V4Builder(unittest.TestCase):
         both = r(labels=["562"], time_budget_ms=500)
         self.assertFalse({"resolve.time_budget_below_minimum", "resolve.time_budget_above_reserve_below_minimum"} & set(both))
         self.assertIn("resolve.discover_limit_above_100", r(discover={"max_labels": 0}))
-        self.assertIn("resolve.discover_limit_above_100_host_answers", r(discover={"max_labels": 101}))
-        self.assertFalse([i for i in r(discover={"max_labels": 100}) if i.startswith("resolve.discover_limit")])
+        # the service's discovery cap is 1,000 since the v5 start (it was 100): above it the pair of the table
+        self.assertIn("resolve.discover_limit_above_cap_host_answers", r(discover={"max_labels": 1001}))
+        self.assertIn("resolve.discover_limit_above_cap", r(discover={"max_labels": 1001}))
+        self.assertFalse([i for i in r(discover={"max_labels": 1000}) if i.startswith("resolve.discover_limit")])
         # G19: an empty seed list
         req = {"seeds": [], "strategy": ml.traverse_request([])["strategy"]}
         self.assertEqual(ml.mcp_traverse(req)["by_design"], ["traverse.empty_seeds"])
@@ -474,7 +476,7 @@ class V4Builder(unittest.TestCase):
                           if e["check"] == "budget_respected"], [60000])
         # A-12 b: the three split cases of async's table each have a scenario
         named = [c for s in rq.values() for c in (s.get("mcp") or {}).get("by_design") or []]
-        for case in ("resolve.discover_limit_above_100_host_answers", "resolve.time_budget_above_reserve_below_minimum",
+        for case in ("resolve.discover_limit_above_cap_host_answers", "resolve.time_budget_above_reserve_below_minimum",
                      "pattern.predicate_options_noop_without_predicate"):
             self.assertIn(case, named)
         body = rq["R-edge-0019"]["body_raw"]

@@ -58,6 +58,9 @@ TRIE_PRESET = {
 TRAVERSE_OVERRIDABLE = {"bounds", "direction", "exhaustive", "labels.max_labels_per_node", "labels.seed_label_kind",
                         "labels.max_seed_labels"}
 SERVER_MAX_SEED_LABELS = 10000
+# the service's discovery cap (the MCP tool's limit and the route's discover.max_labels: 1..1,000, 50 when absent);
+# the host has none (its default is 1,000), so every discovery names its max_labels on both arms
+SERVICE_DISCOVER_MAX_LABELS = 1000
 # a label no annotation holds: the builders' unknown label (resolve.unknown_label names it, G10)
 ABSENT_LABEL = "NOPE_0000.1"
 # The host's substitution caps per pattern kind (/pattern/capabilities mismatches.max), from the capabilities snapshot
@@ -763,12 +766,14 @@ def resolve_by_design(req: Any) -> List[str]:
             ids.append("resolve.blank_label")
     # split by value in async's table (789fb5f0, G11): the old ids keep the value suite_v3 sends (max_labels 0, a
     # budget of 250 ms, both host refusals); above 100 labels and 251..499 ms the host answers
+    # the service's discovery cap is 1,000 (50 when none is given) since the v5 start; above it the MCP refuses
+    # (invalid_arguments) while the host, which has no cap, answers: the two sides of the table's pair
     ml = disc.get("max_labels") if isinstance(disc, dict) else None
     if isinstance(ml, int) and not isinstance(ml, bool):
         if ml < 1:
             ids.append("resolve.discover_limit_above_100")
-        elif ml > 100:
-            ids.append("resolve.discover_limit_above_100_host_answers")
+        elif ml > SERVICE_DISCOVER_MAX_LABELS:
+            ids += ["resolve.discover_limit_above_cap", "resolve.discover_limit_above_cap_host_answers"]
     tb = (req.get("bounds") or {}).get("time_budget_ms")
     if isinstance(tb, (int, float)) and not isinstance(tb, bool):
         if tb > HOST_BUDGET_CAP_MS.get("POST /resolve", 60000):
