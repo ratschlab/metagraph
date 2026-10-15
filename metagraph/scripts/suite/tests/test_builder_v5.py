@@ -791,7 +791,10 @@ class McpClassesInTheManifest(unittest.TestCase):
         bm.scenario_level_marks([nim])
         self.assertEqual(nim["mcp"]["not_implemented"], "not implemented yet via MCP: no field (answer_fields)")
 
-    def test_policy_derives(self):
+    def test_policy_derives_no_property_exemption(self):
+        # the property-level marks live in the manifest and gate.py applies them (suite_common.checks_marked_aside:
+        # only a not_exposed reading is set aside); a policy exemption of the same check would hide its missing
+        # result, failure or inconclusive on MCP, so the policy derives none and both scenarios stay required
         import gate_policy
         a = self.sc(not_implemented_checks=[{"check": "answer_fields", "reason": "no field"}])
         a["id"] = "T-a"
@@ -799,17 +802,11 @@ class McpClassesInTheManifest(unittest.TestCase):
         b["id"] = "T-b"
         pol = gate_policy.build_policy({"scenarios": [a, b], "relations": []}, arms=("mcp", "direct-local"),
                                        table=({}, None))
-        nr = dict((e["scenario"], e) for e in pol["properties"]["not_required"])
-        self.assertEqual((nr["T-a"]["arms"], nr["T-a"]["check"], nr["T-a"]["rules"]),
-                         (["mcp"], "answer_fields", ["mcp_not_implemented_check"]))
-        self.assertEqual((nr["T-b"]["rules"], nr["T-b"]["case"]), (["mcp_by_design_check"], "traverse.duplicate_seeds"))
-        text = gate_policy.describe(pol)
-        self.assertIn("not implemented yet via MCP: T-a answer_fields not required on mcp: no field", text)
-        self.assertIn("service-side by design: T-b answer_fields", text)
-        # direct-local stays required for both
-        self.assertEqual(sorted(e["scenario"] for e in pol["required"] if e["arm"] == "direct-local"), ["T-a", "T-b"])
-        mcp_only = gate_policy.build_policy({"scenarios": [a], "relations": []}, arms=("direct-local",), table=({}, None))
-        self.assertEqual(mcp_only["properties"]["not_required"], [])
+        self.assertEqual(pol["properties"]["not_required"], [])
+        self.assertEqual(pol["counts"]["properties_not_required"], 0)
+        self.assertIn("property checks not required: 0", gate_policy.describe(pol))
+        for arm in ("mcp", "direct-local"):
+            self.assertEqual(sorted(e["scenario"] for e in pol["required"] if e["arm"] == arm), ["T-a", "T-b"])
 
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_built(self):
