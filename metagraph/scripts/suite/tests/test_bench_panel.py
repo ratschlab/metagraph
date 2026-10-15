@@ -101,10 +101,10 @@ def build_mixed(root, n=10):
     b = Baseline(root)
     for i in range(n):
         wall = 2.0 ** i
-        b.add(scenario("R-pos-%04d" % i, "resolve"), resolve_body(labels=6 if i in (2, 7) else 1,
-                                                                 kmers=970 if i == 5 else 70), wall=wall)
-        b.add(scenario("T-walk-%04d" % i, "traverse"), traverse_body(bp=1500 if i % 3 == 0 else 100,
-                                                                    labels=8 if i == 4 else 1), wall=wall)
+        b.add(scenario("R-pos-%04d" % i, "resolve"),
+              resolve_body(labels=6 if i in (2, 7) else 1, kmers=970 if i == 5 else 70), wall=wall)
+        b.add(scenario("T-walk-%04d" % i, "traverse"),
+              traverse_body(bp=1500 if i % 3 == 0 else 100, labels=8 if i == 4 else 1), wall=wall)
         b.add(scenario("P-exact-%04d" % i, "pattern", area="P" if i % 2 else "M"),
               pattern_body(returned=0 if i == 1 else 3, contexts=0 if i == 1 else 3,
                            scope="long" if i in (3, 6) else "any_offset"), wall=wall)

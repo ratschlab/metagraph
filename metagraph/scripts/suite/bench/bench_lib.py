@@ -81,8 +81,9 @@ def result_sizes(route, body):
         labels = body.get("labels") if isinstance(body.get("labels"), list) else None
         return {"labels": len(labels) if labels is not None else None,
                 "num_kmers": _num(body.get("num_kmers")),
-                "runs": sum(len(l.get("runs") or []) for l in labels if isinstance(l, dict)) if labels is not None else None,
-                "supported_kmers": _sum(_num(l.get("kmers_supported")) for l in labels if isinstance(l, dict))
+                "runs": sum(len(x.get("runs") or []) for x in labels if isinstance(x, dict))
+                if labels is not None else None,
+                "supported_kmers": _sum(_num(x.get("kmers_supported")) for x in labels if isinstance(x, dict))
                 if labels is not None else None,
                 "candidates": len(body["candidates"]) if isinstance(body.get("candidates"), list) else None}
     if mode == "traverse":
@@ -154,8 +155,8 @@ def answer_incomplete(route, body):
                                                         if isinstance(p["withheld"], dict) else p["withheld"]))
             for key in ("stop", "cut"):
                 if p.get(key):
-                    why.append("pattern %s: %s %s" % (pid, key, (p[key] or {}).get("reason")
-                                                       if isinstance(p[key], dict) else p[key]))
+                    what = p[key].get("reason") if isinstance(p[key], dict) else p[key]
+                    why.append("pattern %s: %s %s" % (pid, key, what))
     elif mode == "traverse":
         for i, r in enumerate(body.get("results") or []):
             if not isinstance(r, dict):
@@ -277,7 +278,8 @@ def request_key(scenario):
 def panel_identity(queries):
     """The sha256 of the canonical JSON of the panel's [(id, scenario sha256, weight)]: two runs measure the same
     panel only when this agrees."""
-    return hashlib.sha256(sc.canonical_json([[q["id"], q["scenario_sha256"], q["weight"]] for q in queries])).hexdigest()
+    rows = [[q["id"], q["scenario_sha256"], q["weight"]] for q in queries]
+    return hashlib.sha256(sc.canonical_json(rows)).hexdigest()
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -434,8 +436,8 @@ def read_panel(path):
         raise ValueError("%s is not a bench panel" % path)
     computed = panel_identity(panel["queries"])
     if panel.get("panel_sha256") != computed:
-        raise ValueError("%s: panel_sha256 %s does not match its queries (%s)" % (path, panel.get("panel_sha256"),
-                                                                                computed))
+        raise ValueError("%s: panel_sha256 %s does not match its queries (%s)" % (
+            path, panel.get("panel_sha256"), computed))
     for q in panel["queries"]:
         if scenario_sha256(q.get("scenario")) != q.get("scenario_sha256"):
             raise ValueError("%s: query %s: its scenario does not match scenario_sha256" % (path, q.get("id")))

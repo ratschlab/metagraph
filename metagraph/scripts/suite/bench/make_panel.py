@@ -47,7 +47,6 @@ allowance of 1.5-2 host-hours per release. Stdlib only.
 
 import argparse
 import datetime
-import json
 import math
 import os
 import sys
@@ -215,7 +214,8 @@ def candidate(run_dir, scenario, arms):
     cost = min(walls) if walls else None
     recorded = {}
     for arm in bl.ARMS:
-        rec = {"wall_ms": [r.get("wall_ms") for r in arms[arm]], "server_elapsed_ms": [_server_ms(r) for r in arms[arm]]}
+        rec = {"wall_ms": [r.get("wall_ms") for r in arms[arm]],
+               "server_elapsed_ms": [_server_ms(r) for r in arms[arm]]}
         if arm == "mcp":
             phases = {}
             for r in arms[arm]:
