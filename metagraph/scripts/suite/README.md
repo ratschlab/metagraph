@@ -2833,3 +2833,20 @@ cases; the note is the lane's TABLE-DIFF.md):
   as a configuration mismatch 100 live / 1000 in the table).
 - gate/policy_v4_rt_mcp.json is regenerated for the table's sha256 (only by_design_table and generated_utc differ).
   The builder manifest_lib.py still names the old ids (lane V5's).
+
+### Validation of lane S8g (offline)
+- 464 tests (1 skipped; 446 at c11db9dd, 3 skipped there in an export without the C++ source). Every rule change has
+  a test failing at c11db9dd: test_gate IdentityEvidenceTest, GatedHeadlineTest and PropertyMarksTest,
+  test_run_snapshot's per-invocation sha256 test, test_reevaluate test_resolve_timeout_deadline_window,
+  test_compare_report test_discovery_cap_cases; the tests that encoded the old rules are updated (a checks
+  directory as the MCP arm's evidence, a recorded sha256 winning, the 15 s deadline window without a span failing,
+  the table's 131 cases). Two orchestrator tests that count run_direct.py processes on the machine failed once while
+  another lane's tests ran beside them and pass alone.
+- Copies of v3 (lane-s5e/reeval-S5e) and v4 (doc/v4-c11db9dd) re-evaluated at c11db9dd and at this lane's head
+  (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`, v4 with `--gate gate/policy_v4_rt_mcp.json`,
+  the regenerated policy at the head): 0 changes of outcome, outcome_runner, inconclusive_reason, case, explained
+  items, verdict_detail or check outcome over 2,900 / 2,913 executions, 0 changes of a direct or MCP class, a
+  by-design verification or a relation; v3 FAIL and v4 FINDINGS as before (v4's report leads with its gate now,
+  the FINDINGS line labelled exploratory). The gate on the v4 copy: 46 problems, c11db9dd's 45 and "arms/mcp
+  states no observed index_fp; the policy pins 907ec986e19ecb04 (service_capabilities.host_document)". The recorded
+  v4 set (not re-evaluated) is blocked as unpinned as well.
