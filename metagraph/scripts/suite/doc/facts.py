@@ -22,7 +22,11 @@ ones (`n_time_limited_200`, `n_time_limited_200_tests`, `time_limited_200_ids`, 
 The v5 prose round (chapter R, 2026-10-15) adds, per family and per unit, the warm-ups' order against their targets
 (_warm_ups: manifest v5's `warms`): `n_warm_ups`, `warm_up_targets_text`, `n_warm_up_arm_pairs`,
 `n_warm_ups_after_target`, `warm_ups_all_before_target`, `warm_ups_after_target_text`, `n_warm_up_reruns` and
-`warm_up_reruns_text`, read by R-warm's and R-budget's prose. The run-wide placeholders (sections.Context
+`warm_up_reruns_text`, read by R-warm's and R-budget's prose; after VERIFY-R5 the same order over the direct arms
+alone (`n_warm_up_direct_pairs`, `n_warm_ups_after_target_direct`, `warm_ups_all_before_target_direct`,
+`warm_ups_after_target_direct_text`) for R-budget, whose MCP calls the service refuses at submit;
+`n_warm_up_reruns_without_target`; and per family `n_footnoted_late503` and `footnoted_all_late503`, so that
+R-budget's prose claims 503 deadlines only for footnoted members that answered one. The run-wide placeholders (sections.Context
 .placeholders) read `resolve_stops`: the stated stops of /resolve over the whole run on every arm
 (`n_resolve_stops`, `resolve_stop_observed`, `resolve_stop_ids`), for the glossary's entry on the stated stop.
 
@@ -849,30 +853,52 @@ def _warm_ups(ctx, sids):
     started before the target's first. {n_warm_ups; warm_up_targets_text ('R-warm-0001 (T-repeat-0001); ...');
     n_warm_up_arm_pairs (the (warm-up, arm) pairs compared); n_warm_ups_after_target (the pairs where the warm-up
     did not start before its target); warm_ups_all_before_target (every compared pair in order, at least one
-    compared); warm_ups_after_target_text ('sid on arm (started 12 s after its target)'); n_warm_up_reruns (the
-    warm-ups among the scenarios run again for a resume, run.json reruns_for_resume: timing evidence, never an
-    outcome); warm_up_reruns_text ('sid on arm before T-repeat-0001')}."""
+    compared); warm_ups_after_target_text ('sid on arm (started 12 s after its target T-...)', a tie 'started with
+    its target'); the same four over the direct arms alone (n_warm_up_direct_pairs, n_warm_ups_after_target_direct,
+    warm_ups_all_before_target_direct, warm_ups_after_target_direct_text), for a target whose MCP call the service
+    refuses at submit, where the order on that arm warms nothing (VERIFY-R5 L4); n_warm_up_reruns (the warm-ups
+    among the scenarios run again for a resume, run.json reruns_for_resume: timing evidence, never an outcome);
+    n_warm_up_reruns_without_target (those no execution of the target followed on that arm, target_execution
+    null); warm_up_reruns_text ('sid on arm before T-repeat-0001', or 'sid on arm (no execution of its target T-...
+    followed)')}."""
     run = ctx.run
     warm = [(sid, run.scenario(sid).get("warms")) for sid in sids if run.scenario(sid).get("warms")]
     pairs, after, per = 0, [], []
+    direct_pairs, direct_after, direct_per = 0, [], []
     for sid, target in warm:
         for arm in ARMS:
             a = [t for t in (_started_s(l) for l in run.arm_lines(sid, arm)) if t is not None]
             b = [t for t in (_started_s(l) for l in run.arm_lines(target, arm)) if t is not None]
             if not a or not b:
                 continue
+            direct = arm != "mcp"
             pairs += 1
+            direct_pairs += 1 if direct else 0
             if min(a) >= min(b):
+                when = "started with" if min(a) == min(b) else "started %s after" % fmt_t((min(a) - min(b)) * 1000.0)
+                item = "%s on %s (%s its target %s)" % (sid, arm, when, target)
                 after.append(sid)
-                per.append("%s on %s (started %s after its target %s)" % (sid, arm, fmt_t((min(a) - min(b)) * 1000.0), target))
+                per.append(item)
+                if direct:
+                    direct_after.append(sid)
+                    direct_per.append(item)
     reruns = [r for r in run.reruns if r.get("scenario") in [sid for sid, _ in warm]]
+
+    def rerun_text(r):
+        if r.get("target_execution"):
+            return "%s on %s before %s" % (r.get("scenario"), r.get("arm"), r.get("rerun_target"))
+        return "%s on %s (no execution of its target %s followed)" % (r.get("scenario"), r.get("arm"), r.get("rerun_target"))
+
     return {"n_warm_ups": len(warm), "warm_up_targets_text": "; ".join("%s (%s)" % (sid, t) for sid, t in warm),
             "n_warm_up_arm_pairs": pairs, "n_warm_ups_after_target": len(after),
             "warm_ups_all_before_target": bool(pairs) and not after,
-            "warm_ups_after_target_text": "; ".join(per), "n_warm_up_reruns": len(reruns),
-            "warm_up_reruns_text": "; ".join("%s on %s before %s" % (r.get("scenario"), r.get("arm"), r.get("rerun_target"))
-                                             for r in reruns)}
-
+            "warm_ups_after_target_text": "; ".join(per),
+            "n_warm_up_direct_pairs": direct_pairs, "n_warm_ups_after_target_direct": len(direct_after),
+            "warm_ups_all_before_target_direct": bool(direct_pairs) and not direct_after,
+            "warm_ups_after_target_direct_text": "; ".join(direct_per),
+            "n_warm_up_reruns": len(reruns),
+            "n_warm_up_reruns_without_target": sum(1 for r in reruns if not r.get("target_execution")),
+            "warm_up_reruns_text": "; ".join(rerun_text(r) for r in reruns)}
 
 def unit_facts(ctx, uid, x=None):
     """A unit's values for the line under its table (`mcp_notes.units`) and for the chapter prose's `unit[<id>]`:
@@ -907,7 +933,8 @@ def family_facts(ctx, fid):
     the MCP classes as the cells derive them (`n_mcp_<class>`, `mcp_<class>_ids`, `mcp_<class>_variants`,
     `mcp_<class>_codes`, `mcp_classes_text`, `mcp_all_refused_before_host`), the clean and footnoted members with
     their phrases (`clean_text`, `footnoted_text`), every member's phrase, the findings, the 503 deadlines past
-    their budgets, the stated stops, the time limitations (_time_limitations), the relations, the owner's declared
+    their budgets (and whether every footnoted member answered one: `n_footnoted_late503`,
+    `footnoted_all_late503`), the stated stops, the time limitations (_time_limitations), the relations, the owner's declared
     exemptions, the warm-ups' order against their targets (_warm_ups, manifest v5), the expected runs, the gate's
     outcome problems among the members, `direct_all_pass`, `manifest_version` and `x` (the members' scenario facts)."""
     f = ctx.units.families.get(fid) or {}
@@ -937,6 +964,11 @@ def family_facts(ctx, fid):
     n_exec, n_tests, text = _findings(ctx, members)
     v["n_finding_executions"], v["n_finding_tests"], v["findings_text"] = n_exec, n_tests, text
     v.update(_late503(ctx, members))
+    # whether every footnoted member answered a 503 deadline past its budget (VERIFY-R5 M1: R-budget's prose claims
+    # the coverage gap's 503 sentence only then; a stop that completed within its budget is footnoted without one)
+    late_ids = [sid for sid in v["late503_ids"].split(", ") if sid]
+    v["n_footnoted_late503"] = sum(1 for sid in footnoted if sid in late_ids)
+    v["footnoted_all_late503"] = bool(footnoted) and v["n_footnoted_late503"] == len(footnoted)
     v.update(_stops(ctx, members))
     v.update(_time_limitations(ctx, members))
     v.update(_cold_counts(ctx, members))

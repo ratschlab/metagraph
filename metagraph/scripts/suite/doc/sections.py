@@ -1251,11 +1251,14 @@ def comparison_lines_text(run, short=False):
 
 
 def reruns_text(run):
-    """The warm-ups run again for a resume in one line: how many, per arm, what they are (timing evidence)."""
+    """The warm-ups run again for a resume in one line: how many, per arm, what they are (timing evidence); the
+    re-runs no execution of the target followed on that arm (target_execution null) are counted apart."""
     per_arm = run.rerun_counts()
+    orphans = sum(1 for r in run.reruns if not r.get("target_execution"))
     return ("%d (%s): after an interruption between a warm-up and its target the warm-up ran again right before "
-            "the target; timing evidence beside the target's execution, never an outcome (appendix F)" % (
-                len(run.reruns), ", ".join("%s %d" % (esc(a), n) for a, n in sorted(per_arm.items())) or "per arm not stated"))
+            "the target%s; timing evidence beside the target's execution, never an outcome (appendix F)" % (
+                len(run.reruns), ", ".join("%s %d" % (esc(a), n) for a, n in sorted(per_arm.items())) or "per arm not stated",
+                ", except %d that no execution of the target followed" % orphans if orphans else ""))
 
 
 def reruns_table(ctx):
