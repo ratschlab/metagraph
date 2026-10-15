@@ -67,6 +67,7 @@ class Context(object):
         self._closing_values = None
         self._untested = None
         self._facts = {}  # chapter -> facts.chapter_facts, "fam:" + family -> facts.family_facts
+        self._resolve_stops = None  # facts.resolve_stops, computed once (placeholders() is built on every fill)
 
     def state(self, sid):
         if sid not in self.states:
@@ -110,6 +111,9 @@ class Context(object):
         gp = gate_outcome_counts(run)
         limits = mcp_limit_counts(run)
         declared = declared_counts(run)
+        if getattr(self, "_resolve_stops", None) is None:
+            self._resolve_stops = facts.resolve_stops(run)
+        stops = self._resolve_stops
         table = run.table_meta or {}
         return {"release": run.run.get("release") or "–", "run_id": run.run_id(),
                 "database": index.get("database") or "–", "k": index.get("k") or "–",
@@ -133,6 +137,8 @@ class Context(object):
                 "verdict_text": run.verdict or "–",
                 "verdict_headline": run.verdict_headline or "–",
                 "n_reruns_for_resume": len(run.reruns),
+                "n_resolve_stops": stops["n_resolve_stops"], "resolve_stop_observed": stops["resolve_stop_observed"],
+                "resolve_stop_ids": stops["resolve_stop_ids"],
                 "n_findings": sum((totals.get(a) or {}).get("outcomes", {}).get("finding", 0) for a in ARMS),
                 "n_inconclusive": sum((totals.get(a) or {}).get("outcomes", {}).get("inconclusive", 0) for a in ARMS),
                 "n_failures": sum((totals.get(a) or {}).get("outcomes", {}).get(k, 0) for a in ARMS

@@ -45,10 +45,9 @@ PROSE_DIR = os.path.join(DOC, "prose")
 WRITTEN_CHAPTERS = ("R", "T", "P", "L", "X", "M", "Q", "C", "N", "D")
 PLACEHOLDER = "to be written"
 # Keys whose prose is still pending may carry a placeholder (the generator ships one); empty since the prose of
-# the owner's review (round 2, 2026-10-15) landed. Name a file or "<chapter>.json: <key>" here while prose is awaited.
-# The v5 prose round: the family R-warm and its unit exist in manifest v5 only (the warm-ups); their entries are the
-# mapping's drafts until the prose writers cover them.
-ROUND2_PENDING = ("R.json: families.R-warm", "R.json: units.R-warm")
+# the owner's review (round 2, 2026-10-15) landed, and again since the v5 prose round wrote R-warm (the warm-ups,
+# manifest v5 only). Name a file or "<chapter>.json: <key>" here while prose is awaited.
+ROUND2_PENDING = ()
 
 
 # The causal or attributive timing wordings no prose file and no line of the generator may carry (the owner's
@@ -2301,6 +2300,94 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertNotIn("record key in I.3", readme)
         self.assertIn("test_two_fixtures_change_conclusions", readme)
 
+    def test_glossary_stated_stop_is_conditional(self):
+        """The v5 merge (2026-10-15): appendix D's entry 'stated stop, prefix' states from the record whether the run
+        answered one (facts.resolve_stops over every /resolve scenario on every arm, the run-wide placeholders
+        n_resolve_stops, resolve_stop_observed and resolve_stop_ids), never as a fixed sentence: the plain fixture
+        has none, the perturbed one R-001's stop on direct-local; a /traverse seed stopped by its time budget and a
+        503 deadline are no stated stop of /resolve."""
+        import sections
+        glossary = sc.read_json(os.path.join(PROSE_DIR, "glossary.json"))
+        entry = [e for e in glossary["entries"] if e["term"] == "stated stop, prefix"][0]
+        self.assertIn("[[resolve_stop_observed ? Observed in this run ({resolve_stop_ids}). | Not observed in this run.]]",
+                      entry["definition"])
+        self.assertNotIn("met it. Not observed in this run.", json.dumps(glossary))
+        rendered = {}
+        for name in ("plain", "perturbed"):
+            run = reader.Run(self.dirs[name])
+            units = units_mod.resolve(run.manifest, self.mappings[name])
+            ctx = sections.Context(run, units, {}, {}, glossary, list(units.chapters))
+            values = ctx.placeholders()
+            text = sections.glossary(ctx)
+            self.assertNotIn("UNRESOLVED", text)
+            self.assertEqual(ctx.unresolved, [])
+            rendered[name] = (values, text)
+        values, text = rendered["plain"]
+        self.assertEqual((values["n_resolve_stops"], values["resolve_stop_observed"], values["resolve_stop_ids"]),
+                         (0, False, "none"))
+        self.assertIn("fails the checks that met it. Not observed in this run.", text)
+        self.assertNotIn("Observed in this run (", text)
+        values, text = rendered["perturbed"]
+        self.assertEqual((values["n_resolve_stops"], values["resolve_stop_observed"], values["resolve_stop_ids"]),
+                         (1, True, "R-001"))
+        self.assertIn("fails the checks that met it. Observed in this run (R-001).", text)
+        self.assertNotIn("Not observed in this run", text)
+        # the fact itself: /resolve only, every arm, the executions counted and the scenarios named once
+        lines = {("t", "direct-local"): [{"http": 200, "time_limited": "seed 0 stopped by its time budget"}],
+                 ("r", "direct-local"): [{"http": 200, "time_limited": "resolve stopped by time"}],
+                 ("r", "mcp"): [{"http": 200, "time_limited": "resolve stopped by time"}],
+                 ("s", "direct-local"): [{"http": 503, "time_limited": "a 503 deadline: nothing written within the time budget"}],
+                 ("u", "direct-local"): [{"http": 200, "time_limited": "resolve stopped by time"}, {"http": 200, "time_limited": ""}]}
+        routes = {"t": "POST /traverse", "r": "POST /resolve", "s": "POST /resolve", "u": "POST /resolve"}
+        stub = _Stub(order=["t", "r", "s", "u"], scenario=lambda sid: {"route": routes[sid]},
+                     arm_lines=lambda sid, arm: lines.get((sid, arm), []))
+        self.assertEqual(facts_mod().resolve_stops(stub),
+                         {"n_resolve_stops": 3, "resolve_stop_observed": True, "resolve_stop_ids": "r, u"})
+        stub.order = ["t", "s"]
+        self.assertEqual(facts_mod().resolve_stops(stub),
+                         {"n_resolve_stops": 0, "resolve_stop_observed": False, "resolve_stop_ids": "none"})
+
+    def test_closing_load_clauses_are_conditional(self):
+        """The v5 merge (2026-10-15): C.1's caveat 'observed under concurrent host load' and C.3's 'the MetaGraph
+        host carried the Logan load' print only when the sampler's means make the Logan caveat true (logan_caveat),
+        as the closing section's other interpretive clauses do; with the caveat false the sentences still read."""
+        import sections
+        closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
+        self.assertIn("is the shared host's[[logan_caveat ?, observed under concurrent host load]]: not a baseline",
+                      closing["caveats"][0])
+        self.assertIn("[[logan_caveat ? The service ran on its own host and the MetaGraph host carried the Logan load "
+                      "(C.6), so the overhead is this run's, not the service's floor. | The service ran on its own host "
+                      "and the MetaGraph host under the load C.6 records, so", closing["sections"]["C3"]["paragraphs"][2])
+
+        def render(load):
+            run = reader.Run(self.dirs["perturbed"])
+            run.load = load
+            units = units_mod.resolve(run.manifest, self.mappings["perturbed"])
+            ctx = sections.Context(run, units, {}, {}, {}, list(units.chapters), closing=closing)
+            values = sections.closing_values(ctx)
+            caveat = ctx.fill(closing["caveats"][0], values)
+            c3 = sections.closing_section_prose(ctx, "C3", "")
+            self.assertNotIn("UNRESOLVED", caveat + c3)
+            self.assertEqual(ctx.unresolved, [])
+            return ctx.placeholders()["logan_caveat"], caveat, c3
+
+        busy, caveat, c3 = render({"n": 3, "sra_mean": 7000.0, "load_mean": 200.0, "sra_max": 1.0, "load_max": 1.0})
+        self.assertTrue(busy)
+        self.assertIn("This run carries the Logan caveat", caveat)
+        self.assertIn("Every timing in this section is the shared host's, observed under concurrent host load: not a "
+                      "baseline for the release.", caveat)
+        self.assertIn("The service ran on its own host and the MetaGraph host carried the Logan load (C.6), so the "
+                      "overhead is this run", c3)
+        self.assertNotIn("under the load C.6 records", c3)
+        idle, caveat, c3 = render({"n": 3, "sra_mean": 10.0, "load_mean": 2.0, "sra_max": 1.0, "load_max": 1.0})
+        self.assertFalse(idle)
+        self.assertIn("The Logan caveat does not apply to this run", caveat)
+        self.assertIn("Every timing in this section is the shared host's: not a baseline for the release.", caveat)
+        self.assertNotIn("concurrent host load", caveat)
+        self.assertIn("The service ran on its own host and the MetaGraph host under the load C.6 records, so the "
+                      "overhead is this run", c3)
+        self.assertNotIn("carried the Logan load", c3)
+
 
 def facts_mod():
     import facts
@@ -2579,6 +2666,64 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertEqual(len(run.reruns), 1)
         self.assertIn("Warm-ups run again for a resume", main)
         self.assertEqual(index.count(latex.tt("R-warm-0001")), 1)
+
+    def test_chapter_r_v5_prose(self):
+        """The v5 prose round of chapter R: the warm-ups' family and unit are written (no placeholder), the v5
+        branches print (R-budget's budgets and twins, the service's 60,000 ms, the discovery cap, the junctions'
+        headers, eco's reverse complement) and nothing of the v4 wording for the same facts; the warm-ups' order
+        facts (facts._warm_ups) read the fake run: eight warm-ups before their targets on every arm, the two complete
+        twins before their stops, one warm-up run again for a resume."""
+        import sections
+        run = reader.Run(self.run_dir)
+        units = units_mod.resolve(run.manifest, units_mod.load_mapping(units_mod.default_mapping_path(run.manifest)))
+        chapter_r = self.read("chapter_R.tex")
+        self.assertNotIn(PLACEHOLDER, chapter_r)
+        self.assertNotIn("UNRESOLVED CONDITION", chapter_r)
+        for text in ("5,000~bp of E. coli under 480~ms and 10,000~bp of P. aeruginosa under 420~ms",
+                     "the complete resolve under 60,000~ms (R-twin-0002 and -0004, full unless stopped, run before the stop)",
+                     "Each complete twin's first execution in this run started before its stop's on every arm that ran both (6 pairs of twin and arm compared)",
+                     "neither stop (R-budget-0001 under 480~ms, R-budget-0002 under 420~ms, each run right after its complete twin) nor the complete 60~s twins answered one",
+                     "Each request names the 60,000~ms budget", "(70.25~s here)", "a discovery limit outside 1 to 1,000",
+                     "with \\texttt{max\\_labels} 9, 3, 20 or 100",
+                     "resolved under both records' headers and both taxid columns",
+                     "the three discovery edges, R-edge-0022, -0023 and -0025, take its first 60~bp",
+                     "(S. aureus, E. coli; eco takes the place of v4's M. jannaschii",
+                     "In this run every warm-up's first execution started before its target's on each arm that ran both (24 pairs of warm-up and arm compared)",
+                     "A resume after an interruption ran one warm-up again right before the target (R-warm-0001 on direct-local before T-repeat-0001)"):
+            self.assertIn(text, chapter_r, text)
+        for text in ("10~kb of a record (E. coli under 3,000~ms", "the same 10~kb under 20,000~ms", "neither 10~kb stop",
+                     "Each request names the 20,000~ms budget", "(30.25~s here)", "M. jannaschii), resolved",
+                     "the two discovery edges, R-edge-0022 and -0023, take"):
+            self.assertNotIn(text, chapter_r, text)
+        prose = dict((ch, sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))) for ch in ("R",))
+        ctx = sections.Context(run, units, prose, {}, {}, ["R"])
+        ctx.footnotes["R"] = cells.Footnotes()
+        fw = facts.family_facts(ctx, "R-warm")
+        self.assertEqual((fw["n_warm_ups"], fw["n_warm_up_arm_pairs"], fw["n_warm_ups_after_target"]), (8, 24, 0))
+        self.assertTrue(fw["warm_ups_all_before_target"])
+        self.assertEqual(fw["warm_ups_after_target_text"], "")
+        self.assertEqual(fw["n_warm_up_reruns"], 1)
+        self.assertEqual(fw["warm_up_reruns_text"], "R-warm-0001 on direct-local before T-repeat-0001")
+        self.assertIn("R-warm-0007 (T-walk-0009); R-warm-0001 (T-repeat-0001)", fw["warm_up_targets_text"])
+        fb = facts.family_facts(ctx, "R-budget")
+        self.assertEqual((fb["n_warm_ups"], fb["n_warm_up_arm_pairs"], fb["n_warm_ups_after_target"]), (2, 6, 0))
+        self.assertEqual(fb["warm_up_targets_text"], "R-twin-0002 (R-budget-0001); R-twin-0004 (R-budget-0002)")
+        fp = facts.family_facts(ctx, "R-pos")
+        self.assertEqual((fp["n_warm_ups"], fp["n_warm_up_arm_pairs"]), (0, 0))
+        self.assertFalse(fp["warm_ups_all_before_target"])
+        self.assertEqual(facts.unit_facts(ctx, "R-warm")["n_warm_ups"], 8)
+        # a run whose warm-up started after its target: the fact says so, with the arm and the delay
+        rows, _ = sc.read_jsonl(os.path.join(self.run_dir, "arms", "direct-remote", "executions.jsonl"))
+        late = dict((r["scenario"], r) for r in rows)["R-warm-0003"]
+        target = dict((r["scenario"], r) for r in rows)["T-repeat-0003"]
+        moved = dict(late, started_utc=sc.iso_utc(sc.parse_utc(target["started_utc"]) + 12.0))
+        orig = run.arm_lines
+        run.arm_lines = lambda sid, arm: ([moved] if (sid, arm) == ("R-warm-0003", "direct-remote") else orig(sid, arm))
+        fw2 = facts.family_facts(ctx, "R-warm")
+        self.assertEqual((fw2["n_warm_up_arm_pairs"], fw2["n_warm_ups_after_target"]), (24, 1))
+        self.assertFalse(fw2["warm_ups_all_before_target"])
+        self.assertEqual(fw2["warm_ups_after_target_text"],
+                         "R-warm-0003 on direct-remote (started 12~s after its target T-repeat-0003)".replace("~", " "))
 
 
 # ---------------------------------------------------------------------------------------------------------------

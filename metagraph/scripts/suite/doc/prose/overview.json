@@ -84,7 +84,10 @@
   "logan_caveat": "whether the Logan caveat applies (report.LOAD_CAVEAT_SRA_CPU_PCT / LOAD_CAVEAT_LOAD1 against the sampler's means): a flag for the prose's conditionals `[[logan_caveat ? ...]]`",
   "gate_judged": "whether a deploy gate verdict exists (gate.json, or judged offline by gate.py for the document): a flag for the prose's conditionals",
   "verdict_headline": "the run verdict as the report's headline prints it (report.verdict_headline): the verdict, labelled exploratory beside a deploy gate's verdict",
-  "n_reruns_for_resume": "the warm-ups run again for a resume (run.json reruns_for_resume): timing evidence beside their targets, never an outcome"
+  "n_reruns_for_resume": "the warm-ups run again for a resume (run.json reruns_for_resume): timing evidence beside their targets, never an outcome",
+  "n_resolve_stops": "the stated stops of /resolve over the whole run, every arm: a 200 whose recorded time limitation names a stop (checks.time_limited, 'resolve stopped by time'; facts.resolve_stops); 0 in v4",
+  "resolve_stop_observed": "whether the run answered a stated stop of /resolve: a flag for the glossary's conditional `[[resolve_stop_observed ? ...]]` (appendix D, the entry stated stop, prefix)",
+  "resolve_stop_ids": "the scenarios that answered a stated stop of /resolve, in run order ('none' when none)"
  },
  "sections": {
   "decision": {

@@ -19,6 +19,13 @@ every such 200 (`n_time_limited`, `n_time_limited_tests`, `time_limited_ids`, `t
 ones (`n_time_limited_200`, `n_time_limited_200_tests`, `time_limited_200_ids`, `time_limited_200_text`);
 `direct_all_pass`; and at the chapter level `unit` (every unit's unit_facts, read as `unit[<unit id>][...]`).
 
+The v5 prose round (chapter R, 2026-10-15) adds, per family and per unit, the warm-ups' order against their targets
+(_warm_ups: manifest v5's `warms`): `n_warm_ups`, `warm_up_targets_text`, `n_warm_up_arm_pairs`,
+`n_warm_ups_after_target`, `warm_ups_all_before_target`, `warm_ups_after_target_text`, `n_warm_up_reruns` and
+`warm_up_reruns_text`, read by R-warm's and R-budget's prose. The run-wide placeholders (sections.Context
+.placeholders) read `resolve_stops`: the stated stops of /resolve over the whole run on every arm
+(`n_resolve_stops`, `resolve_stop_observed`, `resolve_stop_ids`), for the glossary's entry on the stated stop.
+
 Every value is plain text (the prose is escaped afterwards; the inline markup `code` and *emphasis* is allowed),
 a number or a bool; the ids are scenario ids as recorded.
 """
@@ -600,6 +607,26 @@ def _stops(ctx, sids):
     return {"n_stopped": len(per), "stop_observed": bool(per), "stop_observed_text": "; ".join(per)}
 
 
+def resolve_stops(run):
+    """The stated stops of /resolve over the whole run, every scenario of the run's order whose route is /resolve on
+    every arm (the glossary's 'stated stop, prefix', appendix D: a 200 whose recorded time limitation names a
+    stop, checks.time_limited's 'resolve stopped by time'; a /traverse seed stopped by its time budget is not one):
+    {n_resolve_stops (the executions), resolve_stop_observed, resolve_stop_ids (the scenarios in run order, 'none'
+    when none)}. Read by the run-wide placeholders (sections.Context.placeholders), so that the glossary states
+    from the record whether the run answered one, never as a fixed sentence."""
+    n, ids = 0, []
+    for sid in run.order:
+        if "/resolve" not in str((run.scenario(sid) or {}).get("route") or ""):
+            continue
+        for arm in ARMS:
+            for l in run.arm_lines(sid, arm):
+                if l.get("http") == 200 and "stop" in str(l.get("time_limited") or ""):
+                    n += 1
+                    if sid not in ids:
+                        ids.append(sid)
+    return {"n_resolve_stops": n, "resolve_stop_observed": bool(n), "resolve_stop_ids": ", ".join(ids) or "none"}
+
+
 _TIME_CUT_WORDS = ("time budget", "time_budget", "attempt")
 
 
@@ -807,11 +834,51 @@ def _mcp_class_values(x, members):
     return v
 
 
+def _started_s(line):
+    """An execution's start in seconds since the epoch, or None (the merged lines carry started_utc)."""
+    try:
+        return sc.parse_utc(line.get("started_utc"))
+    except Exception:
+        return None
+
+
+def _warm_ups(ctx, sids):
+    """The warm-ups among the scenarios (manifest v5: `warms` names the scenario a warm-up precedes, which the build
+    places right after it, build_manifest.place_warm_ups, so that the target's first execution meets rows the host
+    has just read) against the run's own order: on each arm that ran both, whether the warm-up's first execution
+    started before the target's first. {n_warm_ups; warm_up_targets_text ('R-warm-0001 (T-repeat-0001); ...');
+    n_warm_up_arm_pairs (the (warm-up, arm) pairs compared); n_warm_ups_after_target (the pairs where the warm-up
+    did not start before its target); warm_ups_all_before_target (every compared pair in order, at least one
+    compared); warm_ups_after_target_text ('sid on arm (started 12 s after its target)'); n_warm_up_reruns (the
+    warm-ups among the scenarios run again for a resume, run.json reruns_for_resume: timing evidence, never an
+    outcome); warm_up_reruns_text ('sid on arm before T-repeat-0001')}."""
+    run = ctx.run
+    warm = [(sid, run.scenario(sid).get("warms")) for sid in sids if run.scenario(sid).get("warms")]
+    pairs, after, per = 0, [], []
+    for sid, target in warm:
+        for arm in ARMS:
+            a = [t for t in (_started_s(l) for l in run.arm_lines(sid, arm)) if t is not None]
+            b = [t for t in (_started_s(l) for l in run.arm_lines(target, arm)) if t is not None]
+            if not a or not b:
+                continue
+            pairs += 1
+            if min(a) >= min(b):
+                after.append(sid)
+                per.append("%s on %s (started %s after its target %s)" % (sid, arm, fmt_t((min(a) - min(b)) * 1000.0), target))
+    reruns = [r for r in run.reruns if r.get("scenario") in [sid for sid, _ in warm]]
+    return {"n_warm_ups": len(warm), "warm_up_targets_text": "; ".join("%s (%s)" % (sid, t) for sid, t in warm),
+            "n_warm_up_arm_pairs": pairs, "n_warm_ups_after_target": len(after),
+            "warm_ups_all_before_target": bool(pairs) and not after,
+            "warm_ups_after_target_text": "; ".join(per), "n_warm_up_reruns": len(reruns),
+            "warm_up_reruns_text": "; ".join("%s on %s before %s" % (r.get("scenario"), r.get("arm"), r.get("rerun_target"))
+                                             for r in reruns)}
+
+
 def unit_facts(ctx, uid, x=None):
     """A unit's values for the line under its table (`mcp_notes.units`) and for the chapter prose's `unit[<id>]`:
     n_tests, the members' facts under `x` (the scenario facts already computed may be passed), the counts by
-    standing, the MCP classes and the time limitations over its members, as family_facts computes them for a
-    family, `direct_all_pass` and `manifest_version`."""
+    standing, the MCP classes, the time limitations and the warm-ups' order (_warm_ups) over its members, as
+    family_facts computes them for a family, `direct_all_pass` and `manifest_version`."""
     u = ctx.units.units.get(uid) or {}
     members = list(u.get("members") or [])
     x = dict((sid, (x or {}).get(sid) or scenario_facts(ctx, sid)) for sid in members)
@@ -819,6 +886,7 @@ def unit_facts(ctx, uid, x=None):
     v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
     v.update(_time_limitations(ctx, members))
+    v.update(_warm_ups(ctx, members))
     v["n_direct_pass_both"] = _direct_pass_both(x, members)
     v["direct_all_pass"] = bool(members) and v["n_direct_pass_both"] == len(members)
     v["manifest_version"] = _manifest_version(ctx)
@@ -840,8 +908,8 @@ def family_facts(ctx, fid):
     `mcp_<class>_codes`, `mcp_classes_text`, `mcp_all_refused_before_host`), the clean and footnoted members with
     their phrases (`clean_text`, `footnoted_text`), every member's phrase, the findings, the 503 deadlines past
     their budgets, the stated stops, the time limitations (_time_limitations), the relations, the owner's declared
-    exemptions, the expected runs, the gate's outcome problems among the members, `direct_all_pass`,
-    `manifest_version` and `x` (the members' scenario facts)."""
+    exemptions, the warm-ups' order against their targets (_warm_ups, manifest v5), the expected runs, the gate's
+    outcome problems among the members, `direct_all_pass`, `manifest_version` and `x` (the members' scenario facts)."""
     f = ctx.units.families.get(fid) or {}
     members = [sid for uid in f.get("units") or [] for sid in ctx.units.units[uid]["members"]]
     rids = [rid for uid in f.get("units") or [] for rid in (ctx.units.units[uid].get("relations") or [])]
@@ -874,6 +942,7 @@ def family_facts(ctx, fid):
     v.update(_cold_counts(ctx, members))
     v.update(_relations(ctx, rids))
     v.update(_declared(ctx, members, rids))
+    v.update(_warm_ups(ctx, members))
     v["expected_runs_text"] = _expected_runs(ctx, members)
     blocking = _gate_blocking(ctx, members)
     v["n_gate_blocking"] = len(blocking)
