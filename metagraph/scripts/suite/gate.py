@@ -25,10 +25,13 @@ explicitly not required (none by default) and whether the MCP arm must agree wit
 
 GATE PASS only when every one of these holds (each failure is listed, grouped by kind):
 - identity: the run manifest's content_sha256 and relations_sha256 are the policy's, its stated hashes verify, every
-  arm ran it (merge_run.manifest_identity), every plan of the run names it, an index_fp the run states is the
-  policy's, the host's release and index_fp did not change during the run (merge_run.release_identity), every arm
-  of a recorded set was judged with the run's snapshot of its checks (merge_run.checks_identity), and the
-  comparison read the by-design table the policy's exclusions were derived from;
+  arm ran it (merge_run.manifest_identity), every plan of the run names it, every policy arm observed the index_fp
+  the policy pins (and release / index_meta_fp where it pins them) and no arm observed another
+  (host_identity_problems: the MCP arm's from service_capabilities.host_document), the host's release and index_fp
+  did not change during the run (merge_run.release_identity), every arm of a recorded set was judged with the run's
+  snapshot of its checks, every MCP invocation stating both checks_sha256 and suite_common_sha256, and a recorded
+  set without a snapshot blocks (merge_run.checks_identity), and the comparison read the by-design table the
+  policy's exclusions were derived from;
 - missing: every planned execution and every execution the policy requires is recorded;
 - outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
   the owner's strict gate), not_implemented_mcp (what the MCP cannot express is excluded in the policy), or
@@ -42,8 +45,9 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
 - relation: every relation the policy requires passed on each of its arms;
 - configuration (the MCP arm a policy arm): configuration_problems, i.e. compare.gate_configuration_problems
   (a live document with service_settings, no live / table mismatch, no reference read from the table or unknown)
-  plus a read by every invocation, one document per run, the runner's recorded mismatches, the advanced_path
-  premise checked live and well-formed request_evidence; the per-line evidence is one problem per reference path;
+  plus a read by every invocation, one document per run (each record's identity recomputed, a recorded sha256 its
+  record does not reproduce a problem), the runner's recorded mismatches, the advanced_path premise checked live and
+  well-formed request_evidence; the per-line evidence is one problem per reference path;
 - something passed.
 """
 
@@ -311,18 +315,47 @@ def _explained_property(line, name, k):
 EVIDENCE_SOURCES = ("live", "table", "unknown")
 
 
+def host_identity_problems(policy, arm_runs):
+    """The host's identity against the policy's pins (each of suite_common.HOST_IDENTITY_KEYS its manifest block
+    states: index_fp; release, index_meta_fp where pinned): every policy arm observed the key
+    (merge_run.observed_host_identity: a direct arm's run.json and sessions, the MCP arm's service_capabilities
+    host_document, top level and every invocation), and every value any arm observed is the pin. A policy arm that
+    observed none is a problem as a conflicting value is: the pin is never taken as met unseen."""
+    out = []
+    want = policy.get("manifest") or {}
+    arms = list(policy.get("arms") or [])
+    every = sorted(set(arms) | set(arm_runs), key=lambda a: (sc.ARMS.index(a) if a in sc.ARMS else 9, a))
+    for key in sc.HOST_IDENTITY_KEYS:
+        pin = want.get(key)
+        if not pin:
+            continue
+        for arm in every:
+            seen = merge_run.observed_host_identity(arm, arm_runs.get(arm), key)
+            if not seen:
+                if arm in arms:
+                    out.append(_problem("identity", "arms/%s states no observed %s; the policy pins %s (%s)" % (
+                        arm, key, str(pin)[:16], "service_capabilities.host_document" if arm == "mcp"
+                        else "run.json and its sessions"), arm=arm))
+            elif seen != {pin}:
+                out.append(_problem("identity", "arms/%s observed %s %s; the policy pins %s" % (
+                    arm, key, ", ".join(sorted(x[:16] for x in seen)), str(pin)[:16]), arm=arm))
+    return out
+
+
 def _document_sha(rec):
-    """A service_capabilities record's identity: the sha256 it records, else suite_common.service_document_sha256 (the
-    configuration parts and the host document only: probe times and counters differ between the invocations of one
-    deployment)."""
-    return rec.get("sha256") or sc.service_document_sha256(rec)
+    """A service_capabilities record's identity, recomputed: suite_common.service_document_sha256 (the configuration
+    parts and the host document only: probe times and counters differ between the invocations of one deployment).
+    The sha256 a record states is checked against it (configuration_problems), never read in its place."""
+    return sc.service_document_sha256(rec)
 
 
-def configuration_problems(run_dir, rows, policy, reevaluated=False):
+def configuration_problems(run_dir, rows, policy, reevaluated=False, notes=None):
     """The MCP service's configuration evidence (agreed with async's runner on 2026-10-14), with the MCP arm gated:
     compare.gate_configuration_problems (lane G2's definition: a recorded live document stating service_settings,
     each referenced path live and equal to the table's block, no request_evidence read from the table or unknown),
-    and besides it: every invocation of the MCP runner recorded a successful read and all reads are one document; the
+    and besides it: every invocation of the MCP runner recorded a successful read and all reads are one document (the
+    identity recomputed, _document_sha; a recorded sha256 the record does not reproduce is a problem when the run's
+    snapshot's suite_common is this one, else a note in |notes|); the
     runner's own recorded mismatches (run.json, a line's request_evidence_mismatches); the live
     service_settings.advanced_enabled equals the policy's advanced_path where its exclusions assume it; a
     request_evidence that is not {case: {path: live | table | unknown}}. The per-line evidence not read live is one
@@ -361,6 +394,21 @@ def configuration_problems(run_dir, rows, policy, reevaluated=False):
                                              "capabilities document (%s%s)" % (
                                                  len(unread), len(invocations), "; ".join(unread[:5]),
                                                  "; ..." if len(unread) > 5 else ""), arm="mcp"))
+    # a recorded sha256 its record does not reproduce: a problem where the runner computed it with this definition
+    # (the run's snapshot's suite_common is the pipeline's), else a note (a run recorded with another definition,
+    # re-judged with this one)
+    snap = sc.snapshot_state(run_dir)[0]
+    snap_common = ((snap or {}).get("files") or {}).get("suite_common.py")
+    one_definition = bool(snap_common) and snap_common == sc.file_sha256(sc.__file__)
+    for where, rec in reads:
+        got = _document_sha(rec)
+        if rec.get("sha256") and got and rec["sha256"] != got:
+            text = "%s: the recorded capabilities sha256 %s is not its record's %s (suite_common.service_document_" \
+                   "sha256)" % (where, str(rec["sha256"])[:12], got[:12])
+            if one_definition:
+                out.append(_problem("configuration", text, arm="mcp"))
+            elif notes is not None:
+                notes.append(text + "; recorded with another suite_common than this one: compared recomputed")
     shas = sorted(set(_document_sha(rec) for _, rec in reads if isinstance(rec.get("document"), dict)))
     if len(shas) > 1:
         out.append(_problem("configuration", "%d different capabilities documents in one run (sha256 %s): the run "
@@ -467,17 +515,10 @@ def judge(run_dir, policy, reevaluated=False):
                                  "relations_sha256": want.get("relations_sha256")}:
             problems.append(_problem("identity", "plan %d of plan.json names another manifest (%s)" % (
                 i, json.dumps(p.get("manifest"), sort_keys=True))))
-    index_fp = want.get("index_fp")
-    stated = sorted(set(r.get("index_fp") for r in arm_runs.values() if r.get("index_fp")))
-    if index_fp and stated and stated != [index_fp]:
-        problems.append(_problem("identity", "the host states index_fp %s, the policy pins %s" % (
-            ", ".join(s[:16] for s in stated), index_fp[:16])))
-    elif index_fp and not stated:
-        notes.append("no arm states the host's index_fp (not compared with the policy's)")
-
     arms = list(policy.get("arms") or [])
+    problems.extend(host_identity_problems(policy, arm_runs))
     selected = set(policy["selection"].get("scenarios") or [])
-    problems.extend(configuration_problems(run_dir, rows, policy, reevaluated))
+    problems.extend(configuration_problems(run_dir, rows, policy, reevaluated, notes))
 
     # completeness
     recorded = dict((sc.execution_key(r), r) for r in rows)

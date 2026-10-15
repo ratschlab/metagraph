@@ -116,9 +116,11 @@ class MergeChecksIdentityTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
 
-    def make(self, snapshot=True, direct_sha="snapshot", mcp_dir="snapshot", started=sc.iso_utc(T0 + 3600)):
+    def make(self, snapshot=True, direct_sha="snapshot", mcp_dir="snapshot", started=sc.iso_utc(T0 + 3600),
+             mcp_sha="snapshot"):
         """A run whose direct-local sessions state |direct_sha| ('snapshot': the snapshot's) and whose MCP arm
-        records |mcp_dir| ('snapshot': the run's)."""
+        records |mcp_dir| ('snapshot': the run's) and the checks_sha256 and suite_common_sha256 |mcp_sha|
+        ('snapshot': the snapshot's; None: neither)."""
         doc = sc.take_snapshot(SUITE, self.run_dir, "c", 0, now=T0) if snapshot else {"files": {}}
         files = doc["files"]
         sha = files.get("checks.py") if direct_sha == "snapshot" else direct_sha
@@ -127,8 +129,12 @@ class MergeChecksIdentityTest(unittest.TestCase):
         write_arm(self.run_dir, "direct-local", [line("P-1", "direct-local", 0, T0 + 10, 5.0)],
                   run_extra={"sessions": sessions})
         mdir = os.path.join(self.run_dir, "scripts") if mcp_dir == "snapshot" else mcp_dir
-        write_arm(self.run_dir, "mcp", [line("P-1", "mcp", 0, T0 + 20, 5.0)],
-                  run_extra={"checks_dir": mdir} if mdir else {})
+        extra = {"checks_dir": mdir} if mdir else {}
+        if mcp_sha == "snapshot":
+            extra.update(checks_sha256=files.get("checks.py"), suite_common_sha256=files.get("suite_common.py"))
+        elif mcp_sha:
+            extra.update(checks_sha256=mcp_sha, suite_common_sha256=mcp_sha)
+        write_arm(self.run_dir, "mcp", [line("P-1", "mcp", 0, T0 + 20, 5.0)], run_extra=extra)
         return self.run_dir
 
     def strict(self, d):
@@ -147,7 +153,8 @@ class MergeChecksIdentityTest(unittest.TestCase):
 
     def test_an_arm_judged_with_other_checks_is_an_error(self):
         # direct-local imported another checks.py; the MCP runner judged with the live tree, not the snapshot
-        merged = merge_run.merge(self.make(direct_sha="0" * 64, mcp_dir="/somewhere/metagraph/scripts/suite"))
+        merged = merge_run.merge(self.make(direct_sha="0" * 64, mcp_dir="/somewhere/metagraph/scripts/suite",
+                                           mcp_sha=None))
         errors = merged["checks_identity"]["errors"]
         self.assertTrue([e for e in errors if e.startswith("arms/direct-local: 1 of 1 session(s) judged with checks "
                                                            "sha256 000000000000 (sessions 0), the run's snapshot's")])
@@ -158,22 +165,55 @@ class MergeChecksIdentityTest(unittest.TestCase):
         self.assertIn("checks identity: arms/mcp", err)
 
     def test_an_arm_that_states_nothing_is_unverified(self):
-        # a session before the field, an MCP runner that records no checks directory: unverified, an error where
-        # the run has a snapshot, nothing without one (a run of before the snapshot)
-        merged = merge_run.merge(self.make(direct_sha=None, mcp_dir=None, started=sc.iso_utc(T0 - 3600)))
+        # a session before the field, an MCP runner that records no checks: unverified, an error where the run has
+        # a snapshot; without one (a run of before the snapshot) the unverified arms are named as before and the
+        # run itself is unpinned, an error for the strict reading
+        merged = merge_run.merge(self.make(direct_sha=None, mcp_dir=None, started=sc.iso_utc(T0 - 3600),
+                                           mcp_sha=None))
         ident = merged["checks_identity"]
         self.assertEqual(ident["unverified"], [
             "arms/direct-local: 1 of 1 session(s) state no checks sha256 (1 ran before the run's snapshot was taken)",
-            "arms/mcp: 1 of 1 invocation(s) state no checks directory or sha256"])
+            "arms/mcp: 1 of 1 invocation(s) do not state both checks_sha256 and suite_common_sha256 (checks_sha256 "
+            "missing on 1, suite_common_sha256 missing on 1; a checks directory does not stand in for them)"])
         self.assertEqual(ident["errors"], ident["unverified"])
         rc, err = self.strict(self.run_dir)
         self.assertEqual(rc, 3)
-        self.assertIn("checks identity: arms/mcp: 1 of 1 invocation(s) state no checks directory", err)
+        self.assertIn("checks identity: arms/mcp: 1 of 1 invocation(s) do not state both", err)
         other = os.path.join(self.d, "old")
         self.run_dir = other
-        merged = merge_run.merge(self.make(snapshot=False, direct_sha=None, mcp_dir=None))
-        self.assertEqual((merged["checks_identity"]["snapshot"], merged["checks_identity"]["errors"]), (None, []))
-        self.assertNotIn("checks identity", self.strict(other)[1])
+        merged = merge_run.merge(self.make(snapshot=False, direct_sha=None, mcp_dir=None, mcp_sha=None))
+        ident = merged["checks_identity"]
+        self.assertEqual((ident["snapshot"], ident["unverified"][1:], ident["errors"]), (
+            None, ["arms/mcp: 1 of 1 invocation(s) state no checks directory or sha256"], [merge_run.UNPINNED]))
+        self.assertFalse([w for w in merged["warnings"] if "snapshot" in w])   # readable as before: no warning
+        rc, err = self.strict(other)
+        self.assertEqual(rc, 3)
+        self.assertIn("checks identity: the run has no snapshot (scripts/SNAPSHOT.json)", err)
+
+    def test_with_a_snapshot_every_mcp_invocation_states_both_sha256(self):
+        # the checks directory (the run's snapshot) never stands in for a sha256: an invocation missing either one is
+        # unverified, an error; a stated one other than the snapshot's differs; the stub's for a stub-judged arm
+        files = sc.read_json(os.path.join(self.make(), "scripts", "SNAPSHOT.json"))["files"]
+        snap = os.path.join(self.run_dir, "scripts")
+        full = {"checks_dir": snap, "checks_sha256": files["checks.py"],
+                "suite_common_sha256": files["suite_common.py"]}
+        path = os.path.join(self.run_dir, "arms", "mcp", "run.json")
+        run = sc.read_json(path)
+
+        def errors(invocations, **top):
+            sc.write_json_atomic(path, dict(run, invocations=invocations, **top))
+            return merge_run.merge(self.run_dir)["checks_identity"]["errors"]
+        self.assertEqual(errors([full, full]), [])
+        for drop in (["suite_common_sha256"], ["checks_sha256"], ["checks_sha256", "suite_common_sha256"]):
+            got = errors([full, dict((k, v) for k, v in full.items() if k not in drop)])
+            self.assertEqual(len(got), 1, drop)
+            self.assertTrue(got[0].startswith("arms/mcp: 1 of 2 invocation(s) do not state both checks_sha256 and "
+                                              "suite_common_sha256 (%s missing on 1" % drop[0]), got)
+        got = errors([full, dict(full, suite_common_sha256="e" * 64)])
+        self.assertTrue(got[0].startswith("arms/mcp: 1 of 2 invocation(s) judged with other checks"), got)
+        stub = dict(full, checks_sha256=files["checks_stub.py"])
+        self.assertTrue(errors([stub])[0].startswith("arms/mcp: 1 of 1 invocation(s) judged with other checks"))
+        self.assertEqual(errors([stub], checks_module={"file": "checks_stub.py", "stub": True}), [])
 
     def test_without_a_snapshot_arms_stating_different_checks_are_named(self):
         merged = merge_run.merge(self.make(snapshot=False, direct_sha="a" * 64, mcp_dir=None))

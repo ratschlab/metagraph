@@ -896,7 +896,8 @@ class HostDocumentTest(unittest.TestCase):
         self.assertNotEqual(sc.service_document_sha256(a), sc.service_document_sha256(changed))
         self.assertEqual(set(sc.service_document_view(a["document"], a["host_document"], self.DB)),
                          {"service_settings", "service_maxima", "presets", "backends", "host_document"})
-        # gate.py: two invocations whose documents differ only there are one deployment; the recorded sha256 wins
+        # gate.py: two invocations whose documents differ only there are one deployment; the identity is recomputed,
+        # a recorded sha256 never stands in for it
         import gate
         os.makedirs(os.path.join(self.d, "arms", "mcp"), exist_ok=True)
 
@@ -910,7 +911,7 @@ class HostDocumentTest(unittest.TestCase):
                     if "spans more than one deployment" in p["detail"]]
         self.assertEqual(spans(a, b), [])
         self.assertEqual(len(spans(a, changed)), 1)
-        self.assertEqual(gate._document_sha(dict(a, sha256="recorded")), "recorded")
+        self.assertEqual(gate._document_sha(dict(a, sha256="recorded")), sc.service_document_sha256(a))
 
     def test_a_host_redeploy_with_unchanged_limits_is_another_deployment(self):
         self.assertNotEqual(sc.service_document_sha256(self.record()),

@@ -102,6 +102,8 @@ def write_arm(run_dir, arm, rows, run_extra=None, samples=None, raw_bodies=None,
            "sessions": [{"server_instance_start": "inst1", "server_instance_end": "inst1"}],
            "host_load_start": [200.0, 190.0, 100.0], "host_load_end": [210.0, 195.0, 110.0],
            "capabilities": {"/capabilities": {"release": "refseq97-b7214d29"}}}
+    if arm == "mcp":
+        run.pop("index_fp")   # async's runner states the host's index_fp in service_capabilities.host_document only
     run.update(run_extra or {})
     sc.write_json_atomic(os.path.join(d, "run.json"), run)
 

@@ -34,8 +34,18 @@ TABLE = (dict(list(CASES.items()) + [(ANSWERED["id"], ANSWERED)]),
          {"sha256": "table-sha", "cases": len(CASES) + 1, "version": 1, "service_commit": "x"})
 REFUSED = {"code": "pattern_invalid", "text": "more than 64 per search (PATTERN_MAX_PATTERNS_PER_SEARCH)",
            "field": "patterns"}
-CAPS = {"document": {"service_settings": {"advanced_enabled": False}}, "sha256": "c", "read_at": "t", "base": "b",
-        "mismatches": []}
+# a read of the service's configuration as async's runner records it: the host's identity in host_document (the
+# service's backends.<db>.identity), the record's sha256 suite_common.service_document_sha256
+CAPS = {"document": {"service_settings": {"advanced_enabled": False}}, "host_document": {"index_fp": "fp"},
+        "database": "test", "read_at": "t", "base": "b", "mismatches": []}
+CAPS["sha256"] = sc.service_document_sha256(CAPS)
+
+
+def rehashed(caps, **fields):
+    """|caps| with |fields| replaced and its sha256 recomputed (another document, recorded correctly)."""
+    out = dict(caps, **fields)
+    out["sha256"] = sc.service_document_sha256(out)
+    return out
 
 
 def scenario(sid, route, repeat=1, by_design=None, not_implemented=None, arguments=None, tool="traverse_fetch",
@@ -135,11 +145,16 @@ def bodies(rows):
     return dict(((r["scenario"], r["repeat"]), {"x": 1}) for r in rows if r.get("http") == 200)
 
 
-def make_run(d, m, mcp_rows, direct=False, caps=CAPS, plan=True, arm_manifest=None, direct_change=None):
+def make_run(d, m, mcp_rows, direct=False, caps=CAPS, plan=True, arm_manifest=None, direct_change=None,
+             snapshot=True):
     """A gated run directory as run_suite.sh leaves it: the manifest, the orchestrator's session, plan.json, the
-    arms (the MCP arm with its manifest copy and service_capabilities; |direct| True both direct arms, or a tuple of
-    them), merged and compared with TABLE."""
+    run's snapshot of its checks (|snapshot|), the arms (the MCP arm with its manifest copy, service_capabilities and
+    the checks it judged with, stated as a runner without invocations does at run.json's top; each direct session
+    with the sha256 of its checks; |direct| True both direct arms, or a tuple of them), merged and compared with
+    TABLE."""
     os.makedirs(d, exist_ok=True)
+    files = sc.take_snapshot(SUITE, d, "test", 0, now=T0 - 60)["files"] if snapshot else {}
+    judged = {"checks_sha256": files.get("checks.py"), "suite_common_sha256": files.get("suite_common.py")}
     sc.write_json_atomic(os.path.join(d, "manifest.json"), m)
     direct = ("direct-local", "direct-remote") if direct is True else tuple(direct or ())
     sc.write_json_atomic(os.path.join(d, "orchestrator.json"), {"sessions": [{
@@ -151,6 +166,8 @@ def make_run(d, m, mcp_rows, direct=False, caps=CAPS, plan=True, arm_manifest=No
     if plan:
         gate.write_plan(d, gate.plan_entry(m, None, None, None, 0, arms, "paired", 0))
     run_extra = {"manifest": {"computed_sha256": m["content_sha256"]}}
+    if snapshot:
+        run_extra.update(judged, checks_dir=os.path.join(d, "scripts"))
     if caps is not None:
         run_extra["service_capabilities"] = caps
     write_arm(d, "mcp", mcp_rows, run_extra=run_extra, raw_bodies=bodies(mcp_rows))
@@ -158,7 +175,9 @@ def make_run(d, m, mcp_rows, direct=False, caps=CAPS, plan=True, arm_manifest=No
     if direct:
         for arm in direct:
             rows = direct_lines(m, arm, direct_change)
-            write_arm(d, arm, rows, raw_bodies=bodies(rows))
+            sessions = [{"server_instance_start": "inst1", "server_instance_end": "inst1",
+                         "started_utc": sc.iso_utc(T0), **(judged if snapshot else {})}]
+            write_arm(d, arm, rows, raw_bodies=bodies(rows), run_extra={"sessions": sessions})
             sc.write_json_atomic(os.path.join(d, "arms", arm, "manifest.json"), m)
     merge_run.merge(d)
     sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
@@ -794,6 +813,156 @@ class ConfigurationTest(GateCase):
         v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, change={("R-003", 0): {
             "request_evidence_mismatches": [{"namespace": "service", "ref": "x", "live": 1, "table": 2}]}})))
         self.assertIn("R-003 r0 recorded a live / table mismatch", " ".join(self.conf(v)))
+
+
+class IdentityEvidenceTest(GateCase):
+    """The identity a GATE PASS asserts needs its evidence (GPT review 2's B4, verified by VERIFY-G): with a snapshot
+    every MCP invocation states both checks_sha256 and suite_common_sha256 (a checks directory stands in for
+    neither); every policy arm observed the index_fp the policy pins, the MCP arm in its service_capabilities'
+    host_document (the real runner writes no top-level index_fp); each capabilities record's identity is recomputed
+    and a recorded sha256 its record does not reproduce blocks; a recorded set without a snapshot blocks."""
+
+    def real_run(self, name="run", arms=("direct-local", "mcp"), invocations=2):
+        """A snapshot-backed run in the real runner's shape: the MCP arm states its checks and its configuration per
+        invocation (run.json invocations[], the latest at the top), no top-level index_fp."""
+        direct = tuple(a for a in arms if a != "mcp")
+        d = make_run(self.run_dir(name), self.m, mcp_lines(self.m), direct=direct)
+        files = sc.read_json(os.path.join(d, "scripts", "SNAPSHOT.json"))["files"]
+        path = os.path.join(d, "arms", "mcp", "run.json")
+        run = sc.read_json(path)
+        for k in ("checks_sha256", "suite_common_sha256", "checks_dir"):
+            run.pop(k, None)
+        run["invocations"] = [{"started_utc": sc.iso_utc(T0 + i), "checks_dir": os.path.join(d, "scripts"),
+                               "checks_sha256": files["checks.py"], "suite_common_sha256": files["suite_common.py"],
+                               "service_capabilities": dict(CAPS, read_at="t%d" % i)} for i in range(invocations)]
+        sc.write_json_atomic(path, run)
+        self.assertNotIn("index_fp", run)
+        return d
+
+    def edit(self, d, arm, fn):
+        path = os.path.join(d, "arms", arm, "run.json")
+        run = sc.read_json(path)
+        fn(run)
+        sc.write_json_atomic(path, run)
+        merge_run.merge(d)
+        sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
+        return d
+
+    def judge(self, d, arms=("direct-local", "mcp")):
+        return gate.judge(d, policy_of(self.m, arms=arms))
+
+    def blocked(self, v, kind, text):
+        self.assertFalse(v["passed"])
+        details = [p["detail"] for p in v["problems"] if p["kind"] == kind]
+        self.assertTrue([x for x in details if text in x], (text, gate.render(v)))
+
+    def test_the_real_shape_passes(self):
+        for arms in (("direct-local", "mcp"), ("mcp",)):
+            v = self.judge(self.real_run("-".join(arms), arms), arms)
+            self.assertTrue(v["passed"], gate.render(v))
+
+    def test_every_mcp_invocation_states_both_sha256(self):
+        for i, drop in enumerate((("suite_common_sha256",), ("checks_sha256",),
+                                  ("checks_sha256", "suite_common_sha256"))):
+            d = self.edit(self.real_run(str(i)), "mcp",
+                          lambda r: [r["invocations"][1].pop(k) for k in drop])
+            self.blocked(self.judge(d), "identity", "arms/mcp: 1 of 2 invocation(s) do not state both checks_sha256 "
+                                                    "and suite_common_sha256 (%s missing on 1" % drop[0])
+
+    def test_every_policy_arm_observes_the_pinned_index(self):
+        def no_host_index(r):
+            for rec in [r["service_capabilities"]] + [x["service_capabilities"] for x in r["invocations"]]:
+                rec["host_document"] = {}
+                rec["sha256"] = sc.service_document_sha256(rec)
+        for arms in (("direct-local", "mcp"), ("mcp",)):
+            d = self.edit(self.real_run("mcp-" + "-".join(arms), arms), "mcp", no_host_index)
+            self.blocked(self.judge(d, arms), "identity", "arms/mcp states no observed index_fp; the policy pins fp "
+                                                          "(service_capabilities.host_document)")
+        d = self.edit(self.real_run("direct"), "direct-local", lambda r: r.pop("index_fp"))
+        self.blocked(self.judge(d), "identity", "arms/direct-local states no observed index_fp")
+        # a direct arm outside the policy need not observe it, but one it observed must be the pin
+        d = self.edit(self.real_run("other", ("direct-local", "mcp")), "direct-local", lambda r: r.pop("index_fp"))
+        self.assertTrue(self.judge(d, ("mcp",))["passed"])
+        d = self.edit(self.real_run("other2", ("direct-local", "mcp")), "direct-local",
+                      lambda r: r["sessions"][0].update(index_fp_end="other"))
+        self.blocked(self.judge(d, ("mcp",)), "identity", "arms/direct-local observed index_fp fp, other; the policy "
+                                                          "pins fp")
+
+    def test_a_conflicting_mcp_host_index_blocks(self):
+        def other(r):
+            for rec in [r["service_capabilities"]] + [x["service_capabilities"] for x in r["invocations"]]:
+                rec["host_document"] = {"index_fp": "other"}
+                rec["sha256"] = sc.service_document_sha256(rec)
+        for arms in (("direct-local", "mcp"), ("mcp",)):
+            d = self.edit(self.real_run("-".join(arms), arms), "mcp", other)
+            self.blocked(self.judge(d, arms), "identity", "arms/mcp observed index_fp other; the policy pins fp")
+
+    def test_a_stale_recorded_document_hash_blocks(self):
+        def stale_invocation(r):
+            rec = r["invocations"][1]["service_capabilities"]
+            rec["document"] = {"service_settings": {"advanced_enabled": True}}   # its sha256 kept
+        v = self.judge(self.edit(self.real_run("a"), "mcp", stale_invocation))
+        self.blocked(v, "configuration", "invocation 1: the recorded capabilities sha256 %s is not its record's"
+                     % CAPS["sha256"][:12])
+        self.blocked(v, "configuration", "2 different capabilities documents in one run")
+
+        def stale_top(r):
+            r["service_capabilities"]["host_document"] = {"index_fp": "other"}   # its sha256 kept
+        v = self.judge(self.edit(self.real_run("b"), "mcp", stale_top))
+        self.blocked(v, "configuration", "run.json: the recorded capabilities sha256")
+        self.blocked(v, "identity", "arms/mcp observed index_fp fp, other")
+        # rehashed, the changed document is another deployment's
+        v = self.judge(self.edit(self.real_run("c"), "mcp", lambda r: r["invocations"][1].update(
+            service_capabilities=rehashed(CAPS, document={"service_settings": {"advanced_enabled": True}}))))
+        self.blocked(v, "configuration", "2 different capabilities documents in one run")
+        self.assertFalse([p for p in v["problems"] if "is not its record's" in p["detail"]])
+
+    def test_a_stale_hash_recorded_with_another_definition_is_a_note(self):
+        # the run's snapshot's suite_common is not this one: the record's own sha256 may follow another definition
+        d = self.real_run()
+        with open(os.path.join(d, "scripts", "suite_common.py"), "a") as fh:
+            fh.write("\n")
+        snap = sc.read_json(os.path.join(d, "scripts", "SNAPSHOT.json"))
+        snap["files"]["suite_common.py"] = sc.file_sha256(os.path.join(d, "scripts", "suite_common.py"))
+        sc.write_json_atomic(os.path.join(d, "scripts", "SNAPSHOT.json"), snap)
+
+        def restate(r):
+            for x in r.get("invocations") or r.get("sessions"):
+                x["suite_common_sha256"] = snap["files"]["suite_common.py"]
+            if "service_capabilities" in r:
+                r["service_capabilities"]["sha256"] = "0" * 64
+        self.edit(d, "direct-local", restate)
+        v = self.judge(self.edit(d, "mcp", restate))
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertIn("run.json: the recorded capabilities sha256 000000000000 is not its record's %s "
+                      "(suite_common.service_document_sha256); recorded with another suite_common than this one: "
+                      "compared recomputed" % CAPS["sha256"][:12], v["notes"])
+
+    def test_invocations_of_one_deployment_differ_in_read_times_only(self):
+        def probes(r):
+            for i, x in enumerate(r["invocations"]):
+                rec = x["service_capabilities"]
+                rec["document"] = dict(rec["document"], probed_at="2026-10-15T0%d:00:00Z" % i, cached=bool(i))
+                rec["sha256"] = sc.service_document_sha256(rec)
+        v = self.judge(self.edit(self.real_run(), "mcp", probes))
+        self.assertTrue(v["passed"], gate.render(v))
+
+    def test_a_recorded_set_without_a_snapshot_blocks(self):
+        d = make_run(self.run_dir(), self.m, mcp_lines(self.m), snapshot=False)
+        v = gate.judge(d, policy_of(self.m))
+        self.assertEqual([p["detail"] for p in v["problems"]], [merge_run.UNPINNED])
+        # its re-evaluated set is judged with the re-evaluation's checks (reevaluated.json), not on that ground
+        for arm in ("mcp",):
+            shutil.copy(os.path.join(d, "arms", arm, "executions.jsonl"),
+                        os.path.join(d, "arms", arm, "executions.reevaluated.jsonl"))
+        sc.write_json_atomic(os.path.join(d, "reevaluated.json"), {"checks": {
+            "dir": SUITE, "checks_sha256": sc.file_sha256(os.path.join(SUITE, "checks.py")),
+            "suite_common_sha256": sc.file_sha256(os.path.join(SUITE, "suite_common.py"))}})
+        merge_run.merge(d, reevaluated=True)
+        sc.write_json_atomic(os.path.join(d, "compare.reevaluated.json"), cmp.compare(d, TABLE, reevaluated=True))
+        v = gate.judge(d, policy_of(self.m), reevaluated=True)
+        self.assertNotIn(merge_run.UNPINNED, [p["detail"] for p in v["problems"]])
+        self.assertEqual([p for p in v["problems"] if p["kind"] == "identity"], [])
 
 
 class StaleGateTest(GateCase):

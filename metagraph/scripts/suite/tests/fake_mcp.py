@@ -16,9 +16,9 @@ calls.log whether that print worked (exit 130) or met a closed pipe (exit 1).
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
 identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
-out, `failed` records a failed read, `mismatch` a live / table mismatch) and the checks it judges with: `checks_dir`
-(--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}), `checks_sha256` and `suite_common_sha256` of
-its files, and `checks_module` {file, stub}."""
+out, `failed` records a failed read, `mismatch` a live / table mismatch; its sha256 service_document_sha256's) and the
+checks it judges with: `checks_dir` (--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}),
+`checks_sha256` and `suite_common_sha256` of its files, and `checks_module` {file, stub}."""
 
 import argparse
 import json
@@ -62,12 +62,14 @@ def main(argv=None):
     caps = os.environ.get("FAKE_MCP_CAPS", "")
     if caps != "missing":
         doc = {"service_settings": {"advanced_enabled": False}}
-        run["service_capabilities"] = {"document": None if caps == "failed" else doc, "sha256": "fake",
+        run["service_capabilities"] = {"document": None if caps == "failed" else doc,
                                        "read_at": sc.iso_utc(time.time()), "base": "fake",
                                        "mismatches": [{"path": "service_settings.advanced_enabled", "live": True,
                                                        "table": False}] if caps == "mismatch" else []}
         if caps == "failed":
             run["service_capabilities"]["error"] = "fake: connection refused"
+        # the record's identity as async's runner states it (one definition: suite_common.service_document_sha256)
+        run["service_capabilities"]["sha256"] = sc.service_document_sha256(run["service_capabilities"])
     sc.write_json_atomic(os.path.join(args.out, "run.json"), run)
     path = os.path.join(args.out, "executions.jsonl")
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])

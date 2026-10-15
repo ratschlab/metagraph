@@ -69,6 +69,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import suite_common as sc  # noqa: E402
 
 ARM_ORDER = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
+# checks_identity's error for a recorded set without a snapshot (--strict-identity and the gate)
+UNPINNED = ("the run has no snapshot (scripts/SNAPSHOT.json): the checks that judged its arms are not pinned "
+            "(re-evaluate it to gate its answers)")
 # the outcomes a check-derived outcome may replace, by strictness
 _STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
 
@@ -302,14 +305,36 @@ def release_identity(arm_runs):
     return out
 
 
+def observed_host_identity(arm, run, key="index_fp"):
+    """The values of the host's |key| (suite_common.HOST_IDENTITY_KEYS: release, index_fp, index_meta_fp) an arm
+    observed, as a set: its run.json's top-level |key| and its sessions' <key>_start / <key>_end (run_direct.py),
+    and the host document of every service_capabilities record, run.json's and each invocation's (async's runner:
+    host_document[key], the service's backends.<db>.identity); empty when the arm states none (the MCP runner
+    writes no top-level index_fp)."""
+    run = run if isinstance(run, dict) else {}
+    values = [run.get(key)]
+    for sess in run.get("sessions") or []:
+        if isinstance(sess, dict):
+            values.extend(sess.get("%s_%s" % (key, where)) for where in ("start", "end"))
+    if arm not in sc.DIRECT_ARMS:
+        recs = [run.get("service_capabilities")] + [inv.get("service_capabilities")
+                                                    for inv in run.get("invocations") or [] if isinstance(inv, dict)]
+        values.extend(rec["host_document"].get(key) for rec in recs
+                      if isinstance(rec, dict) and isinstance(rec.get("host_document"), dict))
+    # a value that is no string (a malformed record) is kept as its JSON, so it differs from any pin
+    return set(v if isinstance(v, str) else json.dumps(v, sort_keys=True) for v in values if v)
+
+
 def checks_identity(run_dir, arm_runs):
     """Which checks judged the recorded executions of each arm, against the run's snapshot (suite_common.SNAPSHOT_FILE
     under RUN_DIR/scripts): {snapshot: {created_utc, files} or None, arms: {arm: what each session or invocation
     states}, differs: sentences (an arm judged with other checks than the snapshot's, the snapshot's own files changed;
-    without a snapshot: arms that state different checks), unverified: sentences (an arm or session that states
-    neither a sha256 nor, for the MCP runner, a checks directory), errors: what --strict-identity and the gate fail on
-    (differs, and unverified where the run has a snapshot)}; one sentence per arm and kind (a paired run has a session
-    per step)."""
+    without a snapshot: arms that state different checks), unverified: sentences (a direct session that states no
+    checks sha256; with a snapshot an MCP invocation that does not state both checks_sha256 and suite_common_sha256,
+    its checks directory standing in for neither; without one an MCP invocation that states neither a sha256 nor a
+    checks directory), unpinned: [UNPINNED] for a run with arms and no snapshot, errors: what --strict-identity and
+    the gate fail on (differs, and unverified where the run has a snapshot, unpinned where it has none)}; one
+    sentence per arm and kind (a paired run has a session per step)."""
     snap, changed, _ = sc.snapshot_state(run_dir)
     files = (snap or {}).get("files") or {}
     created = sc.parse_utc((snap or {}).get("created_utc"))
@@ -357,17 +382,30 @@ def checks_identity(run_dir, arm_runs):
             for key, name in (("checks_dir", "checks_dirs"), ("checks_sha256", "checks_sha256"),
                               ("suite_common_sha256", "suite_common_sha256")):
                 arms[arm][name] = sorted(set(str(e[key]) for e in entries if e[key]))
-            none = [e for e in entries if not e["checks_dir"] and not e["checks_sha256"]]
-            if none:
-                unverified.append("arms/%s: %d of %d invocation(s) state no checks directory or sha256" % (
-                    arm, len(none), len(entries)))
+            if snap is None:
+                none = [e for e in entries if not e["checks_dir"] and not e["checks_sha256"]]
+                if none:
+                    unverified.append("arms/%s: %d of %d invocation(s) state no checks directory or sha256" % (
+                        arm, len(none), len(entries)))
+            else:
+                # with a snapshot every invocation states both sha256, as a direct session does: the checks_dir it
+                # names is where it loaded from, no evidence of which checks.py and suite_common.py it imported
+                lacking = dict((key, sum(1 for e in entries if not e[key]))
+                               for key in ("checks_sha256", "suite_common_sha256"))
+                n_lacking = sum(1 for e in entries if not e["checks_sha256"] or not e["suite_common_sha256"])
+                if n_lacking:
+                    unverified.append("arms/%s: %d of %d invocation(s) do not state both checks_sha256 and "
+                                      "suite_common_sha256 (%s; a checks directory does not stand in for them)" % (
+                                          arm, n_lacking, len(entries), ", ".join(
+                                              "%s missing on %d" % kv for kv in sorted(lacking.items()) if kv[1])))
             for e in entries:
                 if e["checks_sha256"]:
                     stated.setdefault((e["checks_sha256"], e["suite_common_sha256"]), []).append("arms/%s" % arm)
             if snap is not None:
+                want = {"checks_sha256": files.get("checks_stub.py" if judged_by_stub(run) else "checks.py"),
+                        "suite_common_sha256": files.get("suite_common.py")}
                 other = [e for e in entries
-                         if (e["checks_sha256"] and e["checks_sha256"] != files.get("checks.py")) or
-                         (e["suite_common_sha256"] and e["suite_common_sha256"] != files.get("suite_common.py")) or
+                         if any(e[k] and e[k] != want[k] for k in want) or
                          (not e["checks_sha256"] and e["checks_dir"]
                           and not sc.snapshot_pins(e["checks_dir"], run_dir))]
                 if other:
@@ -379,9 +417,12 @@ def checks_identity(run_dir, arm_runs):
         differs.append("the arms were judged with different checks: %s" % "; ".join(
             "%s: %s" % (str(k[0])[:12], ", ".join(v[:3]) + (" ..." if len(v) > 3 else ""))
             for k, v in sorted(stated.items())))
+    # a recorded set without a snapshot (a run before lane S7r): nothing pins what judged its arms, so a strict reading
+    # of it blocks; its re-evaluated set is judged with one recorded checks module and gates on its own
+    unpinned = [UNPINNED] if snap is None and arm_runs else []
     return {"snapshot": {"created_utc": snap.get("created_utc"), "files": files} if snap is not None else None,
-            "arms": arms, "differs": differs, "unverified": unverified,
-            "errors": differs + (unverified if snap is not None else [])}
+            "arms": arms, "differs": differs, "unverified": unverified, "unpinned": unpinned,
+            "errors": differs + (unverified if snap is not None else unpinned)}
 
 
 # renormalised.json keys a re-evaluation states (the renormaliser's revision where it records one)

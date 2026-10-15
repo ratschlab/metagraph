@@ -2667,3 +2667,47 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   175 pattern fixtures: unchanged, all /traverse documents pass. The verification's T-labels-0001 probe (the recorded
   answer cut short by path_reason edge_reuse): with the leaf's events absent or empty it fails its whole scenario on
   both arms; with its blocked event, and the recorded answer itself, it passes.
+
+## Lane S8g: the gate's evidence, the deadline window and the gated headline (2026-10-15)
+GPT's second review of the suite (~/.cache/metagraph-traverse-reviews/2026-10-15-gpt-suite-2/REVIEW.md) findings B4,
+B7 and B8, as their Opus verification (verify/VERIFY-G.md) corrected and widened them, against c11db9dd.
+
+### What a GATE PASS needs as evidence of identity (B4)
+A GATE PASS asserts which checks judged the run and which index answered it. It accepted missing evidence for both,
+and a recorded hash it never recomputed:
+- **Both sha256 on every MCP invocation.** merge_run.checks_identity read an MCP invocation as verified when it
+  named a checks directory that is the run's snapshot, or stated only checks_sha256: a runner that loaded checks.py
+  from the snapshot and imported another suite_common (the case suite_common_sha256 exists for) passed. With a
+  snapshot every invocation now states both checks_sha256 and suite_common_sha256, each the snapshot's (checks_stub.py's
+  for an arm whose checks_module names the stub, as for the direct arms); one missing either is `unverified` ("do not
+  state both checks_sha256 and suite_common_sha256 (... missing on N; a checks directory does not stand in for
+  them)"), an error for --strict-identity and the gate. The checks directory is informational; one naming another
+  directory without a checks sha256 still `differs`. async's runner records both since its 1dccc344.
+- **A recorded set without a snapshot blocks.** A run before lane S7r (v3, v4) has no RUN_DIR/scripts/SNAPSHOT.json,
+  so nothing pins the checks its arms were judged with; checks_identity's `unpinned` names it ("the run has no
+  snapshot (scripts/SNAPSHOT.json): the checks that judged its arms are not pinned (re-evaluate it to gate its
+  answers)"), an error of the recorded set for --strict-identity and the gate (no merge warning: such a run stays
+  readable as before). Its re-evaluated set is judged with the re-evaluation's checks (reevaluated.json) and is not
+  blocked on that ground.
+- **Every policy arm observed the pinned index.** The gate compared only a top-level `index_fp` of an arm's run.json,
+  which async's runner never writes, and noted "not compared" when no arm stated one: the MCP arm's observed index
+  (service_capabilities.host_document.index_fp, the service's backends.<db>.identity) was never compared, and a
+  conflicting one passed. gate.host_identity_problems now reads merge_run.observed_host_identity per arm (a direct
+  arm's run.json and its sessions' `<key>_start` / `<key>_end`; the MCP arm's host_document of run.json's record and
+  every invocation's) for each of suite_common.HOST_IDENTITY_KEYS the policy pins (index_fp; release and
+  index_meta_fp where a policy pins them): a policy arm that observed none ("arms/mcp states no observed index_fp;
+  the policy pins ... (service_capabilities.host_document)") and any arm that observed another value ("arms/X
+  observed index_fp A, B; the policy pins P") are identity problems. A direct arm outside the policy need not
+  observe it. The tests' fixtures give the MCP arm no top-level index_fp (test_compare_report.write_arm), as the
+  runner does.
+- **Recomputed document identities.** The gate's one-document test and compare.recorded_documents read a record's
+  stated sha256 in place of its identity: a changed document under a stale hash was one document, and the
+  advanced_path premise, read from the first record only, never saw the change. Each record's identity is
+  recomputed (suite_common.service_document_sha256) and only recomputed values are compared; a recorded sha256 the
+  record does not reproduce is a configuration problem ("<where>: the recorded capabilities sha256 X is not its
+  record's Y") when the run's snapshot's suite_common is the pipeline's (one definition computed both), else a note
+  (a run recorded with another definition, re-judged with this one). compare.recorded_documents states the recorded
+  one as `sha256_recorded`. tests/fake_mcp.py records the real sha256.
+- On the v4 copy re-evaluated (the shipped policy): 46 problems, the 45 of c11db9dd plus one identity problem, "mcp:
+  arms/mcp states no observed index_fp; the policy pins 907ec986e19ecb04 (service_capabilities.host_document)" (v4's
+  MCP runner recorded no service_capabilities). The recorded v4 set gains the unpinned problem as well.

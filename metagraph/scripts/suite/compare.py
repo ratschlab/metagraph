@@ -604,11 +604,11 @@ def direct_host_document(caps, run=None):
 
 def recorded_documents(run_dir):
     """{namespace: {document, origin, read_at, sha256} or None} of a run: "service" the MCP arm's run.json
-    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp; sha256 the recorded one,
-    else suite_common.service_document_sha256), "host" the /capabilities document a direct arm recorded (the merged
-    run.json's capabilities, else arms/<direct>/run.json; with the host's identity: direct_host_document), else the
-    host document the MCP runner recorded beside the
-    service's (service_capabilities.host_document: an MCP-only run reads the host's references live from it); None
+    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp; sha256 recomputed,
+    suite_common.service_document_sha256, the record's own as sha256_recorded), "host" the /capabilities document a
+    direct arm recorded (the merged run.json's capabilities, else arms/<direct>/run.json; with the host's identity:
+    direct_host_document), else the host document the MCP runner recorded beside the service's
+    (service_capabilities.host_document: an MCP-only run reads the host's references live from it); None
     where the run recorded none (a run before async's runner read it, or a failed read: then `error` says why). A
     path the live document lacks reads the table's block, else unknown (suite_common.References)."""
     out = {"service": None, "host": None}
@@ -621,7 +621,8 @@ def recorded_documents(run_dir):
         doc = rec.get("document")
         out["service"] = {"document": doc if isinstance(doc, dict) else None,
                           "origin": "arms/mcp/run.json %s" % SERVICE_CAPABILITIES_KEY,
-                          "read_at": rec.get("read_at"), "sha256": rec.get("sha256") or sc.service_document_sha256(rec),
+                          "read_at": rec.get("read_at"), "sha256": sc.service_document_sha256(rec),
+                          "sha256_recorded": rec.get("sha256"),
                           "base": rec.get("base"),
                           "error": rec.get("error") if not isinstance(doc, dict) else None}
     caps = merged.get("capabilities") if isinstance(merged.get("capabilities"), dict) else None
