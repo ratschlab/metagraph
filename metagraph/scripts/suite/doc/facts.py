@@ -26,8 +26,12 @@ The v5 prose round (chapter R, 2026-10-15) adds, per family and per unit, the wa
 alone (`n_warm_up_direct_pairs`, `n_warm_ups_after_target_direct`, `warm_ups_all_before_target_direct`,
 `warm_ups_after_target_direct_text`) for R-budget, whose MCP calls the service refuses at submit;
 `n_warm_up_reruns_without_target`; and per family `n_footnoted_late503` and `footnoted_all_late503`, so that
-R-budget's prose claims 503 deadlines only for footnoted members that answered one. The run-wide placeholders (sections.Context
-.placeholders) read `resolve_stops`: the stated stops of /resolve over the whole run on every arm
+R-budget's prose claims 503 deadlines only for footnoted members that answered one. After VERIFY-R5-2 the 503 facts
+add `late503_ids_text` ('a and b') and `late503_range_text` (one value when the earliest and the latest lateness
+print alike), the warm-ups' order `warm_ups_after_target_direct_arms` (the direct arm, or 'both direct arms'), and a
+family the stops that completed without a stop and without a 503 (`n_stops_complete`, `stops_complete_text`), so
+that the coverage gap names the tests that answered a 503 and those that completed. The run-wide placeholders
+(sections.Context.placeholders) read `resolve_stops`: the stated stops of /resolve over the whole run on every arm
 (`n_resolve_stops`, `resolve_stop_observed`, `resolve_stop_ids`), for the glossary's entry on the stated stop.
 
 Every value is plain text (the prose is escaped afterwards; the inline markup `code` and *emphasis* is allowed),
@@ -567,7 +571,10 @@ def _findings(ctx, sids):
 
 
 def _late503(ctx, sids):
-    """The 503 deadlines past a budget over the scenarios: {n, n_tests, ids, min, max, text}."""
+    """The 503 deadlines past a budget over the scenarios: {n_late503 (the executions), n_late503_tests, late503_ids
+    ('a, b'), late503_ids_text ('a, b and c'), late503_min, late503_max, late503_range_text ('1.2 s to 25 s', or the one
+    value when both print alike), late503_text, and per arm n_late503_tests_<arm> and late503_<arm>_ids}; `late503_id_list`
+    is the ids as a list for the Python readers (family_facts), not for the prose."""
     run = ctx.run
     lates = []
     ids = []
@@ -587,9 +594,10 @@ def _late503(ctx, sids):
         if items:
             ids.append(sid)
             per.append("%s %s" % (sid, _join(items)))
+    lo, hi = (fmt_t(min(lates)), fmt_t(max(lates))) if lates else ("–", "–")
     out = {"n_late503": len(lates), "n_late503_tests": len(ids), "late503_ids": ", ".join(ids),
-           "late503_min": fmt_t(min(lates)) if lates else "–", "late503_max": fmt_t(max(lates)) if lates else "–",
-           "late503_text": "; ".join(per)}
+           "late503_ids_text": _join(ids), "late503_id_list": list(ids), "late503_min": lo, "late503_max": hi,
+           "late503_range_text": lo if lo == hi else "%s to %s" % (lo, hi), "late503_text": "; ".join(per)}
     # the tests with a 503 deadline per arm (VERIFY-PLXM M4: the counts per direct arm)
     for arm in ARMS:
         out["n_late503_tests_%s" % ARM_KEY[arm]] = len(by_arm[arm])
@@ -856,7 +864,8 @@ def _warm_ups(ctx, sids):
     compared); warm_ups_after_target_text ('sid on arm (started 12 s after its target T-...)', a tie 'started with
     its target'); the same four over the direct arms alone (n_warm_up_direct_pairs, n_warm_ups_after_target_direct,
     warm_ups_all_before_target_direct, warm_ups_after_target_direct_text), for a target whose MCP call the service
-    refuses at submit, where the order on that arm warms nothing (VERIFY-R5 L4); n_warm_up_reruns (the warm-ups
+    refuses at submit, where the order on that arm warms nothing (VERIFY-R5 L4), and warm_ups_after_target_direct_arms
+    (the one direct arm those pairs are on, or 'both direct arms'; VERIFY-R5-2 issue 4); n_warm_up_reruns (the warm-ups
     among the scenarios run again for a resume, run.json reruns_for_resume: timing evidence, never an outcome);
     n_warm_up_reruns_without_target (those no execution of the target followed on that arm, target_execution
     null); warm_up_reruns_text ('sid on arm before T-repeat-0001', or 'sid on arm (no execution of its target T-...
@@ -864,7 +873,7 @@ def _warm_ups(ctx, sids):
     run = ctx.run
     warm = [(sid, run.scenario(sid).get("warms")) for sid in sids if run.scenario(sid).get("warms")]
     pairs, after, per = 0, [], []
-    direct_pairs, direct_after, direct_per = 0, [], []
+    direct_pairs, direct_after, direct_per, direct_arms = 0, [], [], []
     for sid, target in warm:
         for arm in ARMS:
             a = [t for t in (_started_s(l) for l in run.arm_lines(sid, arm)) if t is not None]
@@ -882,6 +891,8 @@ def _warm_ups(ctx, sids):
                 if direct:
                     direct_after.append(sid)
                     direct_per.append(item)
+                    if arm not in direct_arms:
+                        direct_arms.append(arm)
     reruns = [r for r in run.reruns if r.get("scenario") in [sid for sid, _ in warm]]
 
     def rerun_text(r):
@@ -896,9 +907,25 @@ def _warm_ups(ctx, sids):
             "n_warm_up_direct_pairs": direct_pairs, "n_warm_ups_after_target_direct": len(direct_after),
             "warm_ups_all_before_target_direct": bool(direct_pairs) and not direct_after,
             "warm_ups_after_target_direct_text": "; ".join(direct_per),
+            "warm_ups_after_target_direct_arms": "both direct arms" if len(direct_arms) > 1 else "".join(direct_arms),
             "n_warm_up_reruns": len(reruns),
             "n_warm_up_reruns_without_target": sum(1 for r in reruns if not r.get("target_execution")),
             "warm_up_reruns_text": "; ".join(rerun_text(r) for r in reruns)}
+
+
+def _expects_prefix(scenario):
+    """Whether the scenario is a stop: its resolve_runs expects `prefix_if_stopped`."""
+    return any(isinstance(e, dict) and (e.get("args") or {}).get("prefix_if_stopped")
+               for e in (scenario or {}).get("expect") or [])
+
+
+def _completed_without_stop(run, sid):
+    """Whether every direct execution of the scenario (at least one) answered a complete 200: a pass or an inconclusive
+    outcome, no stop in its time limitation."""
+    lines = [l for arm in ARMS if arm != "mcp" for l in run.arm_lines(sid, arm)]
+    return bool(lines) and all(l.get("http") == 200 and l.get("outcome") in ("pass", "inconclusive")
+                               and "stop" not in str(l.get("time_limited") or "") for l in lines)
+
 
 def unit_facts(ctx, uid, x=None):
     """A unit's values for the line under its table (`mcp_notes.units`) and for the chapter prose's `unit[<id>]`:
@@ -934,7 +961,8 @@ def family_facts(ctx, fid):
     `mcp_<class>_codes`, `mcp_classes_text`, `mcp_all_refused_before_host`), the clean and footnoted members with
     their phrases (`clean_text`, `footnoted_text`), every member's phrase, the findings, the 503 deadlines past
     their budgets (and whether every footnoted member answered one: `n_footnoted_late503`,
-    `footnoted_all_late503`), the stated stops, the time limitations (_time_limitations), the relations, the owner's declared
+    `footnoted_all_late503`), the stated stops, the stops that completed without a stop and without a 503
+    (`n_stops_complete`, `stops_complete_text`), the time limitations (_time_limitations), the relations, the owner's declared
     exemptions, the warm-ups' order against their targets (_warm_ups, manifest v5), the expected runs, the gate's
     outcome problems among the members, `direct_all_pass`, `manifest_version` and `x` (the members' scenario facts)."""
     f = ctx.units.families.get(fid) or {}
@@ -966,7 +994,7 @@ def family_facts(ctx, fid):
     v.update(_late503(ctx, members))
     # whether every footnoted member answered a 503 deadline past its budget (VERIFY-R5 M1: R-budget's prose claims
     # the coverage gap's 503 sentence only then; a stop that completed within its budget is footnoted without one)
-    late_ids = [sid for sid in v["late503_ids"].split(", ") if sid]
+    late_ids = v["late503_id_list"]
     v["n_footnoted_late503"] = sum(1 for sid in footnoted if sid in late_ids)
     v["footnoted_all_late503"] = bool(footnoted) and v["n_footnoted_late503"] == len(footnoted)
     v.update(_stops(ctx, members))
@@ -979,9 +1007,14 @@ def family_facts(ctx, fid):
     blocking = _gate_blocking(ctx, members)
     v["n_gate_blocking"] = len(blocking)
     v["gate_blocking_ids"] = ", ".join(blocking)
-    v["stop_ids_text"] = ", ".join("%s under %s" % (sid, fmt_budget(ctx.run.budget_ms(sid))) for sid in members
-                                   if ctx.run.budget_ms(sid) and any(isinstance(e, dict) and (e.get("args") or {}).get(
-                                       "prefix_if_stopped") for e in ctx.run.scenario(sid).get("expect") or []))
+    stops = [sid for sid in members if _expects_prefix(ctx.run.scenario(sid))]
+    v["stop_ids_text"] = ", ".join("%s under %s" % (sid, fmt_budget(ctx.run.budget_ms(sid))) for sid in stops
+                                   if ctx.run.budget_ms(sid))
+    # the stops that completed: every direct execution a complete 200 and no 503 deadline on any arm (VERIFY-R5-2
+    # issue 1: the coverage gap says so of a stop even when another member answered a 503)
+    complete = [sid for sid in stops if sid not in late_ids and _completed_without_stop(ctx.run, sid)]
+    v["n_stops_complete"] = len(complete)
+    v["stops_complete_text"] = _join(complete)
     return v
 
 

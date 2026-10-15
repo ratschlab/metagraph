@@ -1874,6 +1874,29 @@ class OwnerReviewTwoTest(unittest.TestCase):
         family = text.split("fam:R-budget", 1)[1].split("\\unithead", 1)[0]
         return ctx, conclusion, gap, family
 
+    def test_v4_prefix_relations_wording(self):
+        """VERIFY-R5-2 issue 2 (the v4 wording error): the v4 branch of R-budget's prose, unit line and claim states the
+        prefix_equals relations as the v4 manifest has them: REL-prefix_equals-0001 and -0003 compare the stop with its
+        full twin (R-twin-0002 and -0004), -0002 and -0004 the continuation from base 5,000 (R-twin-0003 and -0005) with
+        the full twin over the k-mers from that base; no sentence compares the stop against both twins."""
+        ctx, conclusion, gap, family = self.render("perturbed")
+        plain = family.replace("\\_", "_").replace("~", " ")
+        self.assertIn("The full twin of each stop, the same 10 kb under 20,000 ms (R-twin-0002 and -0004, full unless stopped), "
+                      "is what the \\texttt{prefix_equals} relations compare the stop against (REL-prefix_equals-0001 and -0003), "
+                      "and the query's second half from base 5,000 (R-twin-0003 and -0005) is compared with the full twin over "
+                      "the k-mers from that base (REL-prefix_equals-0002 and -0004): on their common k-mers", plain)
+        for text in ("are what the", "its twins", "The two twins"):
+            self.assertNotIn(text, plain, text)
+        self.assertIn("its full twin agrees with", conclusion)
+        self.assertNotIn("its twins agree with", conclusion)
+        # the unit line and the claim of the real v4 prose, filled as the generator fills them (manifest_version 4)
+        unit = facts.fill(self.R["units"]["R-budget"], {"manifest_version": 4})
+        self.assertIn("its full 20 s twin agrees with it on their common k-mers, and the continuation from base 5,000 agrees "
+                      "with the full twin on theirs (relations `prefix_equals`)", unit)
+        self.assertNotIn("its twins", unit)
+        self.assertEqual(facts.fill(self.R["families"]["R-budget"]["claim"], {"manifest_version": 4}),
+                         "a 10 kb resolve under a small budget answers a stated prefix that its full twin agrees with")
+
     def test_two_fixtures_change_conclusions(self):
         """The owner's second review, point 4: chapter R rendered on two fixtures that differ in their verdicts
         changes its counts, its 'What held' branch, 'Shown' against 'Not shown', the stop sentence, 'no failure, no
@@ -1893,7 +1916,7 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertIn("Not shown:", conc_a)
         self.assertIn("with a failure or a disagreement", conc_a)
         self.assertNotIn("Shown:", conc_a.replace("Not shown:", ""))
-        self.assertIn("Shown: a 10~kb resolve under a small budget answers a stated prefix that its twins agree "
+        self.assertIn("Shown: a 10~kb resolve under a small budget answers a stated prefix that its full twin agrees "
                       "with (R-budget, 1 of 2)", conc_b)
         self.assertNotIn("Not shown:", conc_b)
         # the stop sentence of the coverage gap
@@ -2696,7 +2719,8 @@ class V5ScaffoldTest(unittest.TestCase):
                      "(S. aureus, E. coli; eco takes the place of v4's M. jannaschii",
                      "In this run every warm-up's first execution started before its target's on each arm that ran both (24 pairs of warm-up and arm compared)",
                      "A resume after an interruption ran one warm-up again (R-warm-0001 on direct-local before T-repeat-0001)",
-                     "under the label its target walks under (a record's header for the five repeat warm-ups, a taxid column for the three others)",
+                     "under a label its target walks under (a record's header for the five repeat warm-ups, a taxid column for the three others)",
+                     "a warm-up's query resolves fully within the budget under a label its target walks under",
                      "A warm-up of a traverse scenario of chapters T and N",
                      "within the service's discovery cap of 1,000 (100 at the v4 run)",
                      "that none is the other genome's is the index's answer"):
@@ -2708,7 +2732,9 @@ class V5ScaffoldTest(unittest.TestCase):
                      # (no 503 on the fake) and the v4 wordings
                      "its twins agree with", "its twins, the complete resolve", "503 deadlines past the budget",
                      "since manifest v5", "never the other genome's", "or search scenario", "within its radius, plus a margin",
-                     "then doubling to at most", "again right before the target ("):
+                     "then doubling to at most", "again right before the target (",
+                     # VERIFY-R5-2 issue 5: T-labels-0003 walks under derived column labels, 511145 among them
+                     "the label its target walks under", "the label the target walks under", "its target's label"):
             self.assertNotIn(text, chapter_r, text)
         prose = dict((ch, sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))) for ch in ("R",))
         ctx = sections.Context(run, units, prose, {}, {}, ["R"])
@@ -2749,6 +2775,27 @@ class V5ScaffoldTest(unittest.TestCase):
                          "R-warm-0003 on direct-remote (started 12~s after its target T-repeat-0003)".replace("~", " "))
         self.assertEqual((fw2["n_warm_up_direct_pairs"], fw2["n_warm_ups_after_target_direct"]), (16, 1))
         self.assertEqual(fw2["warm_ups_after_target_direct_text"], fw2["warm_ups_after_target_text"])
+        self.assertEqual(fw2["warm_ups_after_target_direct_arms"], "direct-remote")
+        # the complete twin after its stop on both direct arms, or on one (VERIFY-R5-2 issue 4): the sentence names them
+        budget_prose = prose["R"]["families"]["R-budget"]["prose"]
+
+        def late_twin(arm):
+            stop = orig("R-budget-0002", arm)[0]
+            return dict(orig("R-twin-0004", arm)[0], started_utc=sc.iso_utc(sc.parse_utc(stop["started_utc"]) + 12.0))
+        run.arm_lines = lambda sid, arm: ([late_twin(arm)] if sid == "R-twin-0004" and arm != "mcp" else orig(sid, arm))
+        fb2 = facts.family_facts(ctx, "R-budget")
+        self.assertEqual((fb2["n_warm_up_direct_pairs"], fb2["n_warm_ups_after_target_direct"]), (4, 2))
+        self.assertEqual(fb2["warm_ups_after_target_direct_arms"], "both direct arms")
+        self.assertIn("In this run two executions of a complete twin did not start before its stop's on both direct arms "
+                      "(R-twin-0004 on direct-local (started 12 s after its target R-budget-0002); R-twin-0004 on direct-remote "
+                      "(started 12 s after its target R-budget-0002)), against the design.", facts.fill(budget_prose, fb2))
+        run.arm_lines = lambda sid, arm: ([late_twin(arm)] if (sid, arm) == ("R-twin-0004", "direct-local") else orig(sid, arm))
+        fb3 = facts.family_facts(ctx, "R-budget")
+        self.assertEqual((fb3["n_warm_ups_after_target_direct"], fb3["warm_ups_after_target_direct_arms"]), (1, "direct-local"))
+        self.assertIn("In this run one execution of a complete twin did not start before its stop's on a direct arm (R-twin-0004 "
+                      "on direct-local (started 12 s after its target R-budget-0002)), against the design.",
+                      facts.fill(budget_prose, fb3))
+        run.arm_lines = orig
         # a tie is "started with its target", not "<1 ms after" (VERIFY-R5 L10)
         tied = dict(late, started_utc=target["started_utc"])
         run.arm_lines = lambda sid, arm: ([tied] if (sid, arm) == ("R-warm-0003", "direct-remote") else orig(sid, arm))
@@ -2762,10 +2809,15 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertEqual(fw4["warm_up_reruns_text"], "R-warm-0001 on direct-local (no execution of its target T-repeat-0001 followed)")
         self.assertIn(", except 1 that no execution of the target followed", sections.reruns_text(run))
 
-    def _budget_fixture(self, name, late503_on_dl):
-        """The fake v5 run with both stops complete within their budgets on the direct arms (resolve_runs inconclusive,
-        no stop happened), or, with |late503_on_dl|, R-budget-0002 answering a 503 deadline 0.8 s past its budget on
-        direct-local (inconclusive: under max(1 s, the budget)); re-merged, compared, chapter R rendered."""
+    def _budget_fixture(self, name, mode):
+        """The fake v5 run with the stops' direct executions rewritten (re-merged, compared, chapter R rendered):
+        `complete`, both stops complete within their budgets on the direct arms (resolve_runs inconclusive, no stop
+        happened); `mixed`, R-budget-0001 completes and R-budget-0002 answers a 503 deadline 0.8 s past its budget on
+        direct-local (inconclusive: under max(1 s, the budget)) and completes on direct-remote; `all_late`, both stops
+        answer a 503 deadline on both direct arms, R-budget-0001 1.3 s past its 480 ms budget (allowed) and
+        R-budget-0002 2.5 s past its 420 ms budget (a finding), while the complete twins keep the fake's passes
+        (VERIFY-R5-2 issue 1: v5's likely outcome, the stops late and the twins clean). Returns (chapter R's text with
+        ~ and allowbreak removed, the coverage gap's paragraph, R-budget's family facts)."""
         p = os.path.join(self.tmp, name)
         shutil.copytree(self.run_dir, p)
         complete = [{"check": "status", "outcome": "pass", "detail": "ok"},
@@ -2773,19 +2825,29 @@ class V5ScaffoldTest(unittest.TestCase):
                     {"check": "resolve_runs", "outcome": "inconclusive",
                      "detail": "no stop happened: the prefix property was not tested (label 511145: 4970 of 4970 k-mers, 1 run(s))"},
                     {"check": "budget_respected", "outcome": "pass", "detail": "ok"}]
-        err = {"code": "deadline", "text": "resolve: the answer could not be built and written within bounds.time_budget_ms "
-                                           "(420 ms, the finalisation reserve of 250 ms included): nothing partial is sent"}
-        late = [{"check": "status", "outcome": "inconclusive", "detail": "http 503 deadline in place of 200: allowed", "property": False},
-                {"check": "invariants", "outcome": "inconclusive", "detail": "not testable: http 503", "property": False},
-                {"check": "resolve_runs", "outcome": "inconclusive", "detail": "not testable: http 503", "property": False},
-                {"check": "budget_respected", "outcome": "pass", "detail": "503 deadline 800 ms past the budget: within max(1 s, the budget)"}]
+
+        def late(r, budget_ms, ms, finding):
+            err = {"code": "deadline", "text": "resolve: the answer could not be built and written within bounds.time_budget_ms "
+                                               "(%d ms, the finalisation reserve of 250 ms included): nothing partial is sent" % budget_ms}
+            checks = [{"check": "status", "outcome": "inconclusive", "detail": "http 503 deadline in place of 200: allowed", "property": False},
+                      {"check": "invariants", "outcome": "inconclusive", "detail": "not testable: http 503", "property": False},
+                      {"check": "resolve_runs", "outcome": "inconclusive", "detail": "not testable: http 503", "property": False},
+                      {"check": "budget_respected", "outcome": "finding" if finding else "pass",
+                       "detail": "503 deadline %d ms past the budget%s" % (ms, "" if finding else ": within max(1 s, the budget)")}]
+            return dict(r, outcome="finding" if finding else "inconclusive", http=503, error=err,
+                        wall_ms=float(budget_ms + ms), checks=checks)
+
         for arm in ("direct-local", "direct-remote"):
             path = os.path.join(p, "arms", arm, "executions.jsonl")
             rows, _ = sc.read_jsonl(path)
             os.remove(path)
             for r in rows:
-                if r["scenario"] == "R-budget-0002" and arm == "direct-local" and late503_on_dl:
-                    r = dict(r, outcome="inconclusive", http=503, error=err, wall_ms=1220.0, checks=late)
+                if r["scenario"] == "R-budget-0001" and mode == "all_late":
+                    r = late(r, 480, 1300, False)
+                elif r["scenario"] == "R-budget-0002" and mode == "all_late":
+                    r = late(r, 420, 2500, True)
+                elif r["scenario"] == "R-budget-0002" and mode == "mixed" and arm == "direct-local":
+                    r = late(r, 420, 800, False)
                 elif r["scenario"] in ("R-budget-0001", "R-budget-0002"):
                     r = dict(r, outcome="inconclusive", checks=complete)
                 sc.append_jsonl(path, r)
@@ -2797,36 +2859,75 @@ class V5ScaffoldTest(unittest.TestCase):
             tex = fh.read().replace("\\allowbreak{}", "").replace("~", " ")
         self.assertNotIn(PLACEHOLDER, tex)
         self.assertNotIn("UNRESOLVED CONDITION", tex)
+        gap = tex.split("What remains unsupported.", 1)[1].split("\n", 1)[0]
         import sections
         run = reader.Run(p)
         units = units_mod.resolve(run.manifest, units_mod.load_mapping(units_mod.default_mapping_path(run.manifest)))
         prose = dict((ch, sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))) for ch in ("R",))
         ctx = sections.Context(run, units, prose, {}, {}, ["R"])
         ctx.footnotes["R"] = cells.Footnotes()
-        return tex, facts.family_facts(ctx, "R-budget")
+        return tex, gap, facts.family_facts(ctx, "R-budget")
 
     def test_chapter_r_budget_without_503(self):
         """VERIFY-R5 M1: a v5 stop that completes within its budget is footnoted (inconclusive) without a 503 deadline,
         so R-budget's run sentence must not say the coverage gap reads 503 deadlines; the coverage gap says the
-        stops completed. With one footnoted member answering a 503 and the other not, the sentence names it."""
-        tex, fb = self._budget_fixture("budget-complete", False)
+        stops completed. With one footnoted member answering a 503 and the other not, the run sentence names it (the
+        noun by the count of 503s, a comma before 'and their detail blocks'; VERIFY-R5-2 issue 3) and the coverage
+        gap names the test that answered the 503, prints one value when the earliest and the latest lateness print
+        alike, and says that the other stop completed (VERIFY-R5-2 issue 1)."""
+        tex, gap, fb = self._budget_fixture("budget-complete", "complete")
         self.assertEqual((fb["n_footnoted"], fb["n_late503"], fb["n_footnoted_late503"]), (2, 0, 0))
         self.assertFalse(fb["footnoted_all_late503"])
-        self.assertIn("The stops completed within their budgets without a stop, so the property was not exercised.", tex)
+        self.assertEqual((fb["late503_id_list"], fb["late503_ids_text"], fb["late503_range_text"]), ([], "", "–"))
+        self.assertEqual((fb["n_stops_complete"], fb["stops_complete_text"]), (2, "R-budget-0001 and R-budget-0002"))
+        self.assertIn("The stops completed within their budgets without a stop, so the property was not exercised.", gap)
         self.assertIn("two of the six tests did not pass on every arm (R-budget-0001, R-budget-0002); their detail blocks "
                       "follow the table; the four others passed on every arm exercised", tex)
         self.assertNotIn("503 deadlines past the budget", tex)
-        self.assertNotIn("they answered 503 deadline", tex)
-        tex, fb = self._budget_fixture("budget-mixed", True)
+        self.assertNotIn("answered 503 deadline", tex)
+        tex, gap, fb = self._budget_fixture("budget-mixed", "mixed")
         self.assertEqual((fb["n_footnoted"], fb["n_late503"], fb["n_footnoted_late503"]), (2, 1, 1))
         self.assertFalse(fb["footnoted_all_late503"])
-        self.assertEqual(fb["late503_ids"], "R-budget-0002")
+        self.assertEqual((fb["late503_ids"], fb["late503_id_list"], fb["late503_ids_text"]),
+                         ("R-budget-0002", ["R-budget-0002"], "R-budget-0002"))
+        self.assertEqual((fb["late503_min"], fb["late503_max"], fb["late503_range_text"]), ("0.8 s", "0.8 s", "0.8 s"))
+        self.assertEqual((fb["n_stops_complete"], fb["stops_complete_text"]), (1, "R-budget-0001"))
         self.assertIn("two of the six tests did not pass on every arm (R-budget-0001, R-budget-0002): the coverage gap on the "
-                      "chapter page reads the 503 deadlines past the budget of R-budget-0002 and their detail blocks follow "
+                      "chapter page reads the 503 deadline past the budget of R-budget-0002, and their detail blocks follow "
                       "the table", tex)
-        self.assertIn("they answered 503 deadline", tex)
-        self.assertNotIn("their 503 deadlines past the budget", tex)
-        self.assertNotIn("The stops completed within their budgets", tex)
+        self.assertIn("nor the complete 60 s twins answered one. On this host", gap)
+        self.assertIn("R-budget-0002 answered 503 deadline, 0.8 s past its budget (R-budget-0002 0.8 s on direct-local). "
+                      "R-budget-0001 completed within its budget without a stop. So the prefix property is inconclusive "
+                      "wherever it was asked", gap)
+        for text in ("they answered 503 deadline", "0.8 s to 0.8 s", "their 503 deadlines past the budget",
+                     "503 deadlines past the budget of", "The stops completed within their budgets",
+                     "R-budget-0002 and their detail blocks"):
+            self.assertNotIn(text, tex, text)
+
+    def test_chapter_r_budget_all_late_twins_clean(self):
+        """VERIFY-R5-2 issue 1: both stops answer 503 deadlines past their budgets on both direct arms while the complete
+        twins pass everywhere (v5's likely outcome). The coverage gap names the two stops as the tests that answered
+        503, with the range of their lateness, and claims no 503 of a twin; the run sentence reads 'their 503
+        deadlines' for the two footnoted stops."""
+        tex, gap, fb = self._budget_fixture("budget-all-late", "all_late")
+        self.assertEqual((fb["n_footnoted"], fb["n_late503"], fb["n_late503_tests"], fb["n_footnoted_late503"]), (2, 4, 2, 2))
+        self.assertTrue(fb["footnoted_all_late503"])
+        self.assertEqual(fb["late503_id_list"], ["R-budget-0001", "R-budget-0002"])
+        self.assertEqual((fb["late503_ids_text"], fb["late503_range_text"]), ("R-budget-0001 and R-budget-0002", "1.3 s to 2.5 s"))
+        self.assertEqual((fb["n_stops_complete"], fb["stops_complete_text"], fb["n_finding_executions"]), (0, "", 2))
+        self.assertIn("nor the complete 60 s twins answered one. On this host", gap)
+        self.assertIn("R-budget-0001 and R-budget-0002 answered 503 deadline, 1.3 s to 2.5 s past their budgets (R-budget-0001 "
+                      "1.3 s on direct-local and 1.3 s on direct-remote; R-budget-0002 2.5 s on direct-local (a finding) and "
+                      "2.5 s on direct-remote (a finding)). Two of these 503s came more than max(1 s, the budget) after the "
+                      "budget and are findings", gap)
+        # no twin is said to have answered a 503: the twins are named only where the gap says they answered no stop
+        sentence_503 = gap.split("answered one.", 1)[1].split("So the prefix property", 1)[0]
+        self.assertNotIn("twin", sentence_503)
+        self.assertNotIn("they answered", gap)
+        self.assertNotIn("completed within", gap)
+        self.assertIn("two of the six tests did not pass on every arm (R-budget-0001, R-budget-0002): the coverage gap on the "
+                      "chapter page reads their 503 deadlines past the budget and their detail blocks follow the table; the four "
+                      "others passed on every arm exercised: R-twin-0002", tex)
 
 
 # ---------------------------------------------------------------------------------------------------------------
