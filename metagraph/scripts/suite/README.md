@@ -3423,3 +3423,20 @@ Readings and notes:
   as a hairpin. The oracle follows that, and the SPEC could say so.
 - **Radius.** `bounds.max_extension_bp: 0` is refused (400, range [1, …]), which section 5 does not state.
 - **Trace with merging** is refused (400), as SPEC 13 item 9 states.
+
+#### Validation of phase 2 against the 81c620ef build (2026-10-15)
+- Six runs on the code of `2618936f`: seed 1 at the default sizes (`runs/p2final3_seed1` in the lane directory)
+  and seeds 2-6 at twice the size (`runs/p2final3_breadth_seed2` … `6`), every route, all twelve configurations.
+  - 16,058 requests: 7,128 `/pattern`, 1,400 `/resolve`, 7,530 `/traverse`.
+  - 39,441 answers equal the oracle; 4,172 are inconclusive (budget and cap probes, `merge` runs) with every
+    invariant passing; 0 disagree.
+  - `/traverse` alone: 9,305 seed results and 1,320 tree/summary comparisons.
+  - 405,728 corruptions, 91,066 of them of `/traverse` answers, every one caught.
+- **No candidate engine defect in phase 2's scope.** The disagreements of the development and first final runs
+  were all the oracle's, each fixed with a regression test:
+  - followed hairpin steps were not recorded as events;
+  - "would carry" under trace must follow the coordinate chain;
+  - the `merge` invariant now checks displayed support (§7.1);
+  - a followed hairpin step never counts toward ambiguity (SPEC 13, note 11), but an ambiguous label counts the
+    branch on that step too.
+- The suite's offline tests: 512, all passing (`python3 -m unittest discover -s tests`, about 6 minutes).
