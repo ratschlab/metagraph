@@ -391,40 +391,71 @@ def gen_T(ctx: Ctx) -> List[dict]:
     rng = ctx.rng("T")
     recs = [r for r in ctx.positives]
     # The radii are the class's (100, 1,000 or 10,000 bp) except where the Logan load showed the walk cannot finish
-    # within its budget (triage-v4 V06, G24; item 5 of lane V5). The windows are drawn with the class's margin, so
-    # that every window stays as built. The 1,000 bp header walks walk 300 bp: the MCP's walk preset holds the budget
-    # at 15,000 ms and the cold first call (the MCP arm's) read the header's coordinates at 36-58 bp/s (T-walk-0004,
-    # -0014, -0022 in v3 and v4), so 300 bp take at most 9 s with the seed phase. Four of the 10,000 bp column walks
-    # never completed in 15 s in v3 or v4: they ask for the host's cap, 60,000 ms (the MCP refuses above its preset's
-    # 15,000 ms, by design: these are direct-arm walks), and walk what the slowest cold direct rate observed covers in
-    # 30 s (v3 and v4: T-walk-0006 83 bp/s, -0012 31, -0018 316, -0036 84 per arm); -0024 and -0030 end at stated
-    # branches within their first 4 kb and passed on every arm in 15 s.
-    LONG = {6: 2500, 12: 1000, 18: 10000, 36: 2500}
+    # within its budget (triage-v4 V06, G24; item 5 of lane V5, as the owner amended it on 2026-10-15). The windows
+    # are drawn with the class's margin, so that every window stays as built.
+    # - The three 1,000 bp header walks that a cold first call left inconclusive in v4 (T-walk-0004, -0014, -0022:
+    #   the header's coordinates read at 36-58 bp/s, and the MCP's walk preset holds the budget at 15,000 ms) walk
+    #   300 bp, at most 9 s with the seed phase; the other nine keep 1,000 bp (the owner accepts that one may go
+    #   inconclusive under load).
+    # - The four 10,000 bp column walks that never completed in 15 s in v3 or v4 are split. The gate's scenario keeps
+    #   the id, asks for the host's cap, 60,000 ms (the MCP refuses above its preset's 15,000 ms, by design: a direct-
+    #   arm walk), and walks what the slowest cold direct rate observed covers in 30 s (v3 and v4: T-walk-0006 83 bp/s,
+    #   -0012 31, -0036 84 per arm; -0018 316 bp/s, 5,000 bp, so that it stays shorter than its twin). Its long twin
+    #   (T-longwalk-nnnn, right after it) walks 10,000 bp, or 4,000 bp where triage-v4 V06 proposed that (-0012,
+    #   -0036), under 60,000 ms: whether it completes depends on the load, so it is budget_stress, left out of the
+    #   deploy gate (gate_policy's rule) and kept in the full suite. -0024 and -0030 end at stated branches within
+    #   their first 4 kb and passed on every arm in 15 s.
+    SHORT = {6: 2500, 12: 1000, 18: 5000, 36: 2500}
+    LONG_TWIN = {6: 10000, 12: 4000, 18: 10000, 36: 4000}
+    SLOWEST_COLD_BP_S = {6: 83, 12: 31, 18: 316, 36: 84}
+    HEADER_300 = (4, 14, 22)
     nid = _ids("T-walk")
+    nid_long = _ids("T-longwalk")
     for i in range(36):
         L = [31, 50, 100, 200][i % 4]
         direction = ["right", "left", "both"][i % 3]
         drawn = 10000 if i % 6 == 5 else [100, 1000][i % 2]
-        ext = LONG.get(i + 1, 300 if drawn == 1000 else drawn)
+        ext = SHORT.get(i + 1, 300 if i + 1 in HEADER_300 else drawn)
         kind = "column" if i % 3 == 2 else "header"
         rec = recs[(i * 7 + 2) % len(recs)]
         margin = drawn + 200
         if len(rec.seq) < 2 * margin + L:
             rec = ctx.rec("eco")
-        t = ctx.window(rng, rec, L, margin=margin)
-        t = ctx.flank_for(rec, t, ext + 50)
+        tw = ctx.window(rng, rec, L, margin=margin)
+        t = ctx.flank_for(rec, tw, ext + 50)
         lab = rec.accession if kind == "header" else rec.column
-        bounds: Dict[str, Any] = {"max_extension_bp": ext}
-        if i + 1 in LONG:
-            bounds["time_budget_ms"] = 60000
-        req = traverse_request([_tseed(t["window"], [lab])], {"direction": direction, "bounds": bounds})
         exp = [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
                ex("walk_in_record", label_scope="record" if kind == "header" else "column")]
-        out.append(scenario(nid(), "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label%s" % (
-                                L, rec.key, direction, format(ext, ","), kind,
-                                ", under 60,000 ms" if i + 1 in LONG else ""),
-                            "POST /traverse", req, t, exp, timing_class="slow" if drawn >= 10000 else "fast",
-                            tags=["walk", kind + "-label"] + (["smoke"] if i == 1 else [])))
+        sid = nid()
+        if i + 1 not in SHORT:
+            req = traverse_request([_tseed(t["window"], [lab])],
+                                   {"direction": direction, "bounds": {"max_extension_bp": ext}})
+            out.append(scenario(sid, "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label" % (
+                                    L, rec.key, direction, format(ext, ","), kind),
+                                "POST /traverse", req, t, exp, timing_class="slow" if drawn >= 10000 else "fast",
+                                tags=["walk", kind + "-label"] + (["smoke"] if i == 1 else [])))
+            continue
+        long_id = nid_long()
+        req = traverse_request([_tseed(t["window"], [lab])],
+                               {"direction": direction, "bounds": {"max_extension_bp": ext, "time_budget_ms": 60000}})
+        out.append(scenario(sid, "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label, under 60,000 "
+                            "ms (the gate's walk; %s walks %s bp)" % (
+                                L, rec.key, direction, format(ext, ","), kind, long_id, format(LONG_TWIN[i + 1], ",")),
+                            "POST /traverse", req, t, exp, timing_class="slow", tags=["walk", kind + "-label"]))
+        big = LONG_TWIN[i + 1]
+        tl = dict(ctx.flank_for(rec, tw, big + 50), budget_stress={
+            "reason": "a %s bp column-label walk under the load reads thousands of annotation rows at %d bp/s per arm "
+                      "at the slowest cold rate observed (v3 / v4), so whether it completes within the host's 60,000 "
+                      "ms depends on the load: no budget makes it decisive; %s, its window walked %s bp, is the gate's"
+                      % (format(big, ","), SLOWEST_COLD_BP_S[i + 1], sid, format(ext, ",")),
+            "short_twin": sid, "slowest_cold_bp_s": SLOWEST_COLD_BP_S[i + 1]})
+        req = traverse_request([_tseed(t["window"], [lab])],
+                               {"direction": direction, "bounds": {"max_extension_bp": big, "time_budget_ms": 60000}})
+        out.append(scenario(long_id, "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label, under "
+                            "60,000 ms (the long twin of %s; budget_stress)" % (
+                                L, rec.key, direction, format(big, ","), kind, sid),
+                            "POST /traverse", req, tl, exp, timing_class="slow",
+                            tags=["walk", kind + "-label", "budget_stress"]))
     nid = _ids("T-derived")
     for i, key in enumerate(LOW_CARRIER[:6]):
         rec = ctx.rec(key)

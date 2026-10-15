@@ -304,9 +304,10 @@ class ResolveDecisive(unittest.TestCase):
 
 
 class WalksDecisive(unittest.TestCase):
-    """triage-v4 V06 and item 5 on the traverse route: less work where the cold first call under the load could not
-    finish within the MCP's 15 s preset budget, the host's cap for the long column walks, warm-ups before the walks
-    whose cold seed or row reads dominated; every window drawn as in v4."""
+    """triage-v4 V06 and item 5 on the traverse route, as the owner amended them (2026-10-15): the three header walks a
+    cold first call left inconclusive walk 300 bp, the other nine 1 kb; each long column walk is split into the gate's
+    walk (the host's cap, a radius the slowest cold rate covers in half of it) and a long budget_stress twin right
+    after it; warm-ups before the walks whose cold seed or row reads dominated; every window drawn as in v4."""
 
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_walks(self):
@@ -316,14 +317,27 @@ class WalksDecisive(unittest.TestCase):
             v4 = by_id(json.load(f))
         order = [x["id"] for x in m["scenarios"]]
         bounds = lambda sid: s[sid]["request"]["strategy"]["bounds"]  # noqa: E731
+        short = {6: 2500, 12: 1000, 18: 5000, 36: 2500}
+        long_twin = {6: 10000, 12: 4000, 18: 10000, 36: 4000}
         for n in range(1, 37):
             sid = "T-walk-%04d" % n
             self.assertEqual(s[sid]["truth"]["start"], v4[sid]["truth"]["start"], sid)    # the same windows
             old = v4[sid]["request"]["strategy"]["bounds"]["max_extension_bp"]
-            want = {6: 2500, 12: 1000, 18: 10000, 36: 2500}.get(n, 300 if old == 1000 else old)
+            want = short.get(n, 300 if n in (4, 14, 22) else old)
             self.assertEqual(bounds(sid)["max_extension_bp"], want, sid)
-            self.assertEqual(bounds(sid)["time_budget_ms"], 60000 if n in (6, 12, 18, 36) else 15000, sid)
+            self.assertEqual(bounds(sid)["time_budget_ms"], 60000 if n in short else 15000, sid)
             self.assertEqual(s[sid]["timing_class"], v4[sid]["timing_class"], sid)
+            self.assertNotIn("budget_stress", s[sid]["tags"], sid)
+            if n in short:
+                tw = s[order[order.index(sid) + 1]]
+                self.assertTrue(tw["id"].startswith("T-longwalk-"), sid)
+                self.assertEqual(tw["request"]["seeds"], s[sid]["request"]["seeds"])
+                self.assertEqual(tw["request"]["strategy"]["bounds"]["max_extension_bp"], long_twin[n])
+                self.assertIn("budget_stress", tw["tags"])
+                self.assertEqual(tw["truth"]["budget_stress"]["short_twin"], sid)
+                self.assertIn(tw["id"], s[sid]["title"])
+        self.assertEqual(sorted(x["id"] for x in m["scenarios"] if "budget_stress" in x["tags"]),
+                         ["T-longwalk-%04d" % n for n in range(1, 5)])
         # the MCP refuses above its walk preset's budget row, by design (the long walks are the direct arms')
         self.assertIn("traverse.bounds_budget_above_preset_row", s["T-walk-0006"]["mcp"]["by_design"])
         for n in range(1, 5):
