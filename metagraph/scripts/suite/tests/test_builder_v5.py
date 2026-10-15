@@ -303,5 +303,53 @@ class ResolveDecisive(unittest.TestCase):
         self.assertEqual(rels["REL-prefix_equals-0002"]["args"]["a_from_kmer"], 2500)
 
 
+class WalksDecisive(unittest.TestCase):
+    """triage-v4 V06 and item 5 on the traverse route: less work where the cold first call under the load could not
+    finish within the MCP's 15 s preset budget, the host's cap for the long column walks, warm-ups before the walks
+    whose cold seed or row reads dominated; every window drawn as in v4."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_walks(self):
+        m = built()
+        s = by_id(m)
+        with open(os.path.join(SUITE, "manifest", "suite_v4.json")) as f:
+            v4 = by_id(json.load(f))
+        order = [x["id"] for x in m["scenarios"]]
+        bounds = lambda sid: s[sid]["request"]["strategy"]["bounds"]  # noqa: E731
+        for n in range(1, 37):
+            sid = "T-walk-%04d" % n
+            self.assertEqual(s[sid]["truth"]["start"], v4[sid]["truth"]["start"], sid)    # the same windows
+            old = v4[sid]["request"]["strategy"]["bounds"]["max_extension_bp"]
+            want = {6: 2500, 12: 1000, 18: 10000, 36: 2500}.get(n, 300 if old == 1000 else old)
+            self.assertEqual(bounds(sid)["max_extension_bp"], want, sid)
+            self.assertEqual(bounds(sid)["time_budget_ms"], 60000 if n in (6, 12, 18, 36) else 15000, sid)
+            self.assertEqual(s[sid]["timing_class"], v4[sid]["timing_class"], sid)
+        # the MCP refuses above its walk preset's budget row, by design (the long walks are the direct arms')
+        self.assertIn("traverse.bounds_budget_above_preset_row", s["T-walk-0006"]["mcp"]["by_design"])
+        for n in range(1, 5):
+            sid = "T-repeat-%04d" % n
+            self.assertEqual(bounds(sid)["max_extension_bp"], 400, sid)
+            w = s[order[order.index(sid) - 1]]
+            self.assertIn("warm-up", w["tags"], sid)
+            self.assertEqual(w["truth"]["warm_up_for"], sid)
+            self.assertIn(s[sid]["request"]["seeds"][0]["sequence"], w["request"]["sequence"])
+            self.assertEqual(w["request"]["labels"], s[sid]["request"]["seeds"][0]["labels"])
+        w = s[order[order.index("T-labels-0003") - 1]]
+        self.assertEqual((w["truth"]["warm_up_for"], w["request"]["labels"]), ("T-labels-0003", ["511145"]))
+        self.assertEqual(bounds("T-labels-0003")["max_extension_bp"], 50)
+        self.assertEqual(bounds("T-labels-0005")["max_extension_bp"], 200)
+        for n in range(1, 4):
+            self.assertEqual(bounds("T-coords-%04d" % n)["max_extension_bp"], 250)
+        w = s[order[order.index("N-hard-0022") - 1]]
+        self.assertEqual(w["request"]["sequence"], "TTAGGG" * 10)
+        self.assertEqual(w["request"]["labels"], s["N-hard-0022"]["request"]["seeds"][0]["labels"])
+        for x in m["scenarios"]:
+            if x["id"].startswith("R-warm"):     # the R-twin warm-ups are 5-10 kb, the direct arms' (by design)
+                self.assertIn("warm-up", x["tags"])
+                self.assertLessEqual(len(x["request"]["sequence"]), ml.RESOLVE_MAX_QUERY_BP, x["id"])
+                self.assertIn("tool", x["mcp"], x["id"])
+            self.assertFalse(x["id"].startswith("D-R-warm"), x["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

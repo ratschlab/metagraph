@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import seqtools as st
 from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, Ctx, DB, K,
-                          PATTERN_MAX_CONTEXTS,
+                          PATTERN_MAX_CONTEXTS, RESOLVE_MAX_QUERY_BP, acgt_flank,
                           PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS, WALK_PRESET, pattern_request, relation,
                           _pattern_kinds, resolve_request, scenario, source_contexts, traverse_request,
                           walk_expectations)
@@ -79,6 +79,38 @@ def _distant(ctx: Ctx, rec, i: int):
 def _columns_sample() -> List[str]:
     with open(os.path.join(TRUTH_DIR, "index", "columns_first1200.txt")) as f:
         return [l.strip() for l in f if l.strip() and not l.startswith("#")]
+
+
+def _warm_id(ctx: Ctx) -> str:
+    """The next warm-up id, R-warm-nnnn, numbered across the areas in the order they are built."""
+    n = ctx.__dict__.setdefault("_warm_ids", [0])
+    n[0] += 1
+    return "R-warm-%04d" % n[0]
+
+
+def warm_up(ctx: Ctx, sid: str, query: str, label: str, truth: dict, target: str, why: str,
+            tags: Tuple[str, ...] = ()) -> dict:
+    """A warm-up of scenario |target|: |query| resolved against |label| (the record's own label: every k-mer
+    supported, a positive check of its own under the default 60,000 ms budget), which reads the annotation rows the
+    target reads (a header label the coordinate tuples, a column its rows), placed right before the target
+    (build_manifest.place_warm_ups), so that the target's first execution, the MCP arm's cold one, meets them warm:
+    v4's cold first calls under the Logan load timed out where the warm repeats took a second (triage-v4 G24)."""
+    assert len(query) <= RESOLVE_MAX_QUERY_BP, "a warm-up the MCP can send (at most %d bp)" % RESOLVE_MAX_QUERY_BP
+    t = dict(truth, warm_up_for=target, warm_up=why)
+    return scenario(sid, "R", "warm-up of %s: %s bp resolved against %s, every k-mer supported" % (
+                        target, format(len(query), ","), label), "POST /resolve",
+                    resolve_request(query, labels=[label]), t,
+                    [OK, INV, ex("resolve_runs", label=label, full=True)], tags=("warm-up", "positive") + tuple(tags))
+
+
+def region_warm_up(ctx: Ctx, rec, t: dict, radius: int, label: str, target: str, why: str) -> dict:
+    """warm_up of the record region a walk from the seed |t| reads: the seed and |radius| bases each side (cut at a
+    base outside ACGT, acgt_flank), against the walk's label."""
+    a, b, _ = acgt_flank(rec, t["start"] - rec.offset, t["length"], radius)
+    region = ctx.truth_at(rec, a, b - a, flank=0)
+    region["flank"] = ""
+    return warm_up(ctx, _warm_id(ctx), region["window"], label, region, target, why,
+                   tags=("header-label",) if label == rec.accession else ("column-label",))
 
 
 # ================================================================================================= R: /resolve
@@ -321,25 +353,40 @@ def gen_T(ctx: Ctx) -> List[dict]:
     out: List[dict] = []
     rng = ctx.rng("T")
     recs = [r for r in ctx.positives]
+    # The radii are the class's (100, 1,000 or 10,000 bp) except where the Logan load showed the walk cannot finish
+    # within its budget (triage-v4 V06, G24; item 5 of lane V5). The windows are drawn with the class's margin, so
+    # that every window stays as built. The 1,000 bp header walks walk 300 bp: the MCP's walk preset holds the budget
+    # at 15,000 ms and the cold first call (the MCP arm's) read the header's coordinates at 36-58 bp/s (T-walk-0004,
+    # -0014, -0022 in v3 and v4), so 300 bp take at most 9 s with the seed phase. Four of the 10,000 bp column walks
+    # never completed in 15 s in v3 or v4: they ask for the host's cap, 60,000 ms (the MCP refuses above its preset's
+    # 15,000 ms, by design: these are direct-arm walks), and walk what the slowest cold direct rate observed covers in
+    # 30 s (v3 and v4: T-walk-0006 83 bp/s, -0012 31, -0018 316, -0036 84 per arm); -0024 and -0030 end at stated
+    # branches within their first 4 kb and passed on every arm in 15 s.
+    LONG = {6: 2500, 12: 1000, 18: 10000, 36: 2500}
     nid = _ids("T-walk")
     for i in range(36):
         L = [31, 50, 100, 200][i % 4]
         direction = ["right", "left", "both"][i % 3]
-        ext = 10000 if i % 6 == 5 else [100, 1000][i % 2]
+        drawn = 10000 if i % 6 == 5 else [100, 1000][i % 2]
+        ext = LONG.get(i + 1, 300 if drawn == 1000 else drawn)
         kind = "column" if i % 3 == 2 else "header"
         rec = recs[(i * 7 + 2) % len(recs)]
-        margin = ext + 200
+        margin = drawn + 200
         if len(rec.seq) < 2 * margin + L:
             rec = ctx.rec("eco")
         t = ctx.window(rng, rec, L, margin=margin)
         t = ctx.flank_for(rec, t, ext + 50)
         lab = rec.accession if kind == "header" else rec.column
-        req = traverse_request([_tseed(t["window"], [lab])],
-                               {"direction": direction, "bounds": {"max_extension_bp": ext}})
+        bounds: Dict[str, Any] = {"max_extension_bp": ext}
+        if i + 1 in LONG:
+            bounds["time_budget_ms"] = 60000
+        req = traverse_request([_tseed(t["window"], [lab])], {"direction": direction, "bounds": bounds})
         exp = [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
                ex("walk_in_record", label_scope="record" if kind == "header" else "column")]
-        out.append(scenario(nid(), "T", "%d bp seed of %s, %s arm(s), %d bp, constrained to its %s label" % (L, rec.key, direction, ext, kind),
-                            "POST /traverse", req, t, exp, timing_class="slow" if ext >= 10000 else "fast",
+        out.append(scenario(nid(), "T", "%d bp seed of %s, %s arm(s), %s bp, constrained to its %s label%s" % (
+                                L, rec.key, direction, format(ext, ","), kind,
+                                ", under 60,000 ms" if i + 1 in LONG else ""),
+                            "POST /traverse", req, t, exp, timing_class="slow" if drawn >= 10000 else "fast",
                             tags=["walk", kind + "-label"] + (["smoke"] if i == 1 else [])))
     nid = _ids("T-derived")
     for i, key in enumerate(LOW_CARRIER[:6]):
@@ -376,19 +423,30 @@ def gen_T(ctx: Ctx) -> List[dict]:
                ex("walk_in_record", label_scope="record")]
         out.append(scenario(nid(), "T", "31 bp seed near the %s end of %s: the walk stops at the record's end" % (side, key),
                             "POST /traverse", req, t, exp, tags=["walk", "record-end"] + (["smoke"] if i == 0 else [])))
+    # A repeat's seed and walk read the rows of multi-copy k-mers (rRNA operons, IS elements), which cold under the
+    # load took up to 22 s for the seed phase alone (T-repeat-0002's MCP r0 met its attempt's bound, T-repeat-0004's
+    # walks ran at 20-53 bp/s; triage-v4 G24): each walk follows a warm-up resolve of its record region under its
+    # header, and walks 400 bp, past every branch the record states for these seeds (by 198 bp at the latest); the
+    # windows are chosen as before (copies diverging within 950 bp)
+    T_REPEAT_RADIUS = 400
+    warm: List[Tuple[int, dict]] = []
     nid = _ids("T-repeat")
     for i, (key, t, copies) in enumerate(_repeat_windows(ctx, rng, n=4, ext=1000)):
         rec = ctx.rec(key)
-        t = ctx.flank_for(rec, t, 1050)
-        t["copies"] = [{"start": c, "flank": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), 1050)["flank"],
-                        "flank_start": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), 1050)["flank_start"]}
+        R = T_REPEAT_RADIUS
+        t = ctx.flank_for(rec, t, R + 50)
+        t["copies"] = [{"start": c, "flank": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), R + 50)["flank"],
+                        "flank_start": ctx.flank_for(rec, ctx.truth_at(rec, c - rec.offset, t["length"]), R + 50)["flank_start"]}
                        for c in copies if c != t["start"]]
-        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 1000}})
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": R}})
         exp = [OK, INV, ex("walk_in_record", label_scope="record", any_copy=True, expect_branching=True)]
-        out.append(scenario(nid(), "T", "seed in a %d-copy repeat of %s: a branch stated where the record branches "
+        sid = nid()
+        out.append(scenario(sid, "T", "seed in a %d-copy repeat of %s: a branch stated where the record branches "
                             "(copies diverge at %s bp), a path follows a copy" % (
                                 len(copies), key, "/".join(str(t["copy_divergence_bp"][x]) for x in ("left", "right"))),
                             "POST /traverse", req, t, exp, tags=["walk", "repeat"]))
+        warm.append((len(out), region_warm_up(ctx, rec, t, R, rec.accession, sid,
+                                              "the seed's and the walk's coordinate tuples of a multi-copy repeat")))
     nid = _ids("T-labels")
     eco = ctx.rec("eco")
     for i in range(2):
@@ -410,13 +468,17 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # labels the modelled memory of detail full outgrows the walk preset's 512 MB (a stop at 58 bp in v4), so it asks
     # 4,096 MB (the host states no memory cap: max_memory_mb 0). Both knobs are on the MCP's advanced path or above
     # its preset row: that MCP arm stays not implemented (traverse.advanced_path_disabled); cal's pair walks via MCP.
+    # eco's derived sets are large (868 columns, 6,181 headers): its column-kind walk ran at 6-12 bp/s cold under the
+    # load (T-labels-0003, v4), so eco's pair walks 50 bp and the column kind follows a warm-up resolve of its region
+    # under eco's column (the rows its walk reads); cal's pair walks 200 bp as before
     seed_label_counts = {("eco", "header"): 6181, ("cal", "header"): 1}
     for key in ("eco", "cal"):
         rec = ctx.rec(key)
         t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
+        radius = 50 if key == "eco" else 200
         for kind in ("column", "header"):
             labels = {"seed_label_kind": kind}
-            bounds: Dict[str, Any] = {"max_extension_bp": 200}
+            bounds: Dict[str, Any] = {"max_extension_bp": radius}
             many = seed_label_counts.get((key, kind), 0) > 1000
             tt = t
             if (key, kind) in seed_label_counts:
@@ -426,13 +488,17 @@ def gen_T(ctx: Ctx) -> List[dict]:
                 bounds["max_memory_mb"] = 4096
             req = traverse_request([_tseed(t["window"])], {"bounds": bounds, "labels": labels})
             name = rec.column if kind == "column" else rec.accession
-            out.append(scenario(nid(), "T", "derived %s labels on %s (%d records in its column%s): %s among them" % (
+            sid = nid()
+            out.append(scenario(sid, "T", "derived %s labels on %s (%d records in its column%s): %s among them" % (
                                     kind, rec.key, rec.records_in_column,
                                     "; max_seed_labels %d, 4,096 MB" % SERVER_MAX_SEED_LABELS if many else "", name),
                                 "POST /traverse", req, tt,
                                 [OK, INV, ex("walk_in_record", label_scope="derived"),
                                  ex("label_dict_contains", name=name, kind=kind, only_kind=True)],
                                 tags=["labels", "derived-labels", "label-kind-pair"]))
+            if key == "eco" and kind == "column":
+                warm.append((len(out), region_warm_up(ctx, rec, tt, radius, rec.column, sid,
+                                                      "the rows of a seed 868 columns carry")))
     rec = ctx.rec(LOW_CARRIER[4])
     t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
     req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 200},
@@ -450,12 +516,14 @@ def gen_T(ctx: Ctx) -> List[dict]:
                             "POST /traverse", req, t,
                             [OK, INV, ex("walk_in_record", label_scope="record")], tags=["exhaustive"]
                            ))
+    # 250 bp (500 before): the trace walk read the header's coordinates at 34 bp/s cold under the load (T-coords-0003,
+    # 475 of 500 bp in 15 s; T-coords-0001 took 14.6 s), within the trace preset's 15,000 ms
     nid = _ids("T-coords")
     for i, key in enumerate(["eco", "bsu", "lam"]):
         rec = ctx.rec(key)
-        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=700), 550)
+        t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=700), 300)
         # the trace preset (on_reconverge keep: trace support with merging is refused, SPEC §13 item 9, G15)
-        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 500}},
+        req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 250}},
                                preset="trace", extra={"output": {"coordinates": True}})
         out.append(scenario(nid(), "T", "trace + coordinates on %s: positions equal the record's" % key, "POST /traverse",
                             req, t, [OK, INV, ex("trace_coordinates"), ex("walk_in_record", label_scope="record")],
@@ -596,6 +664,9 @@ def gen_T(ctx: Ctx) -> List[dict]:
                         [err400("request.seeds: expected a non-empty array")], tags=["edge", "refusal"]))
     out += _t_coverage(ctx)
     _annotate_walks(ctx, out)
+    # the warm-ups, after the area's own scenarios (their ids and draws unchanged); the build places each right
+    # before the walk it warms
+    out += [w for _, w in warm]
     return out
 
 
@@ -2425,15 +2496,26 @@ def _gen_N(ctx: Ctx) -> List[dict]:
     q = "TTAGGG" * 10
     # the seed's period closes a cycle inside the seed (its 30 k-mers use the cycle's 6 edges), so each arm's first
     # step into the next copy is a step into a seed node: a blocked successor `rejoined_seed` at 0 bp on both arms
-    # (SPEC-labeled-traversal-core §6.6), whatever else the human column holds around telomeric repeats
-    out.append(scenario(nid(), "N", "a telomeric seed (TTAGGG)^10 traversed: each arm re-enters the seed at 0 bp "
+    # (SPEC-labeled-traversal-core §6.6), whatever else the human column holds around telomeric repeats. Its 6
+    # distinct k-mers are in nearly every vertebrate record: their rows took the cold MCP call past its attempt's
+    # bound in the seed phase (17.5 s, triage-v4 G24), so a warm-up resolve of the seed under the human column (the
+    # rows the seed phase reads) runs right before it
+    hard_id = nid()
+    hsa_col = ctx.rec("hsa").column
+    out.append(scenario(hard_id, "N", "a telomeric seed (TTAGGG)^10 traversed: each arm re-enters the seed at 0 bp "
                         "(rejoined_seed), with its stated outcome (or the seed's 400 if the human column lacks it)",
                         "POST /traverse",
-                        traverse_request([_tseed(q, [ctx.rec("hsa").column])], {"bounds": {"max_extension_bp": 200, "time_budget_ms": 5000}}),
+                        traverse_request([_tseed(q, [hsa_col])], {"bounds": {"max_extension_bp": 200, "time_budget_ms": 5000}}),
                         {"low_complexity": "telomeric", "period": 6, "copies_in_seed": 10},
                         [ex("status", http=[200, 400]), INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
                          ex("blocked_event", reason="rejoined_seed", max_at_bp=0)],
                         tags=["hard-region", "telomeric", "traverse"]))
+    hard_warm = warm_up(ctx, _warm_id(ctx), q, hsa_col,
+                        empirical({"low_complexity": "telomeric", "period": 6},
+                                  "the human column carries every k-mer of (TTAGGG)^10 (v3 and v4: the seed walked on "
+                                  "every arm)"),
+                        hard_id, "the rows of the telomeric repeat's k-mers in the human column",
+                        tags=("index-empirical", "telomeric"))
     out += _real_repeats(ctx)
     # every normal use case of an agent, with its failure modes
     nid = _ids("N-usecase")
@@ -2513,6 +2595,7 @@ def _gen_N(ctx: Ctx) -> List[dict]:
                         tags=["index-defect", "documented"]))
     out += _near_miss_more(ctx)
     _annotate_walks(ctx, out)
+    out.append(hard_warm)   # placed right before its walk by the build (build_manifest.place_warm_ups)
     return out
 
 
