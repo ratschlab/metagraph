@@ -742,5 +742,28 @@ class McpClassesInTheManifest(unittest.TestCase):
         self.assertEqual((d["exclusions"], d["not_required"], d["relations_excluded"]), ([], [], []))
 
 
+class WarmRepeatGuard(unittest.TestCase):
+    """VERIFY-V5A should-fix (a): the builder refuses a manifest whose run-unique scenario lands on the paired plan's
+    warm repeat (every tenth scenario), which would resend its attempt id and meet the 409."""
+
+    def test_guard(self):
+        import build_manifest as bm
+        import suite_common as sc_
+        scs = [{"id": "X-%d" % i} for i in range(25)]
+        scs[13]["run_unique"] = ["attempt_id"]
+        self.assertEqual(bm.warm_repeat_problems(scs), [])
+        scs[20]["run_unique"] = ["attempt_id"]
+        self.assertEqual(len(bm.warm_repeat_problems(scs)), 1)
+        self.assertEqual(sc_.repeat_count(20, {"repeat": 1}, bm.WARM_EVERY), 2)   # the rule the guard mirrors
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_built(self):
+        import build_manifest as bm
+        m = built()
+        self.assertEqual(bm.warm_repeat_problems(m["scenarios"]), [])
+        idx = [x["id"] for x in m["scenarios"]].index("T-attempts-0002")
+        self.assertNotEqual(idx % bm.WARM_EVERY, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

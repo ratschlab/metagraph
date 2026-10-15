@@ -144,7 +144,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         apply_exposure(scenarios, exposure)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
-    problems = validate(scenarios) + validate_relations(relations, scenarios)
+    problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios)
     if problems:
         raise SystemExit("manifest invalid:\n  " + "\n  ".join(problems[:30]))
     tc = caps["traverse_capabilities"]
@@ -366,6 +366,20 @@ def validate_relations(relations, scenarios) -> list:
             if sa[lo - fa:][:100] != sb[lo - fb:][:100]:
                 problems.append("%s: the two queries are not pieces of one sequence" % r["id"])
     return problems
+
+
+# The paired plan adds a warm repeat to every WARM_EVERY-th scenario of the manifest (suite_common.repeat_count, by
+# the scenario's index; run_suite.sh's and gate_policy.py's default --warm-every, the async runner's too)
+WARM_EVERY = 10
+
+
+def warm_repeat_problems(scenarios, warm_every: int = WARM_EVERY) -> list:
+    """A run-unique scenario (run_unique: its id is the run's and the arm's) must not get the warm repeat: the repeat
+    would resend the id and meet the retained attempt's 409 (T-attempts-0002 expects the 200; VERIFY-V5A). Checked on
+    every build, the frozen one included."""
+    return ["%s: run-unique at manifest index %d, which the warm repeat (every %dth scenario) would repeat" % (
+                s["id"], i, warm_every)
+            for i, s in enumerate(scenarios) if s.get("run_unique") and warm_every and i % warm_every == 0]
 
 
 def _table_cases() -> set:
