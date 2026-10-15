@@ -1138,16 +1138,22 @@ class StatedReasons(unittest.TestCase):
              "withheld": {"reason": withheld} if withheld else None, "cut": {"reason": cut} if cut else None,
              "stop": {"phase": stop[0], "reason": stop[1]} if stop else None, "determinism": det, "results": [],
              "returned": 0, "work": {"steps": steps}}
+        sticky = extra.pop("sticky", 0)
         e.update(extra)
         lim = dict(self.LIMITS)
         lim.update(limits or {})
-        body = {"patterns": [e], "limits": lim, "timing": {"elapsed_ms": elapsed}}
+        # sticky: earlier patterns, the first of which spent the request's max_predicate_work (its units the limit)
+        earlier = [{"id": "e%d" % j, "mode": e["mode"], "counts": {"contexts": self.c("exact", 1)}, "stop": {
+            "phase": "selection", "reason": "max_predicate_work"}, "withheld": None, "cut": None, "results": [],
+            "returned": 0, "work": {"steps": 0, "predicate_units": lim.get("max_predicate_work", 1) if j == 0 else 0}}
+            for j in range(sticky)]
+        body = {"patterns": earlier + [e], "limits": lim, "timing": {"elapsed_ms": elapsed}}
         if index is not None:
             body["index"] = index
         if predicate_echo is not None:
             body["predicate"] = predicate_echo
         sc = {"route": "POST /pattern", "request": req or {"patterns": [{"dna": "A" * 25, "id": "w"}]}, "truth": {}}
-        return checks._pattern_reason_problems(sc, body, 0, e)
+        return checks._pattern_reason_problems(sc, body, len(body["patterns"]) - 1, e)
 
     def ok(self, *a, **k):
         p = self.problems(*a, **k)
@@ -1162,6 +1168,59 @@ class StatedReasons(unittest.TestCase):
         d = {"relation": rel, "value": value}
         d.update(kw)
         return d
+
+    def test_a_cut_after_an_earlier_stop(self):
+        # SPEC-pattern-search §7.6 / §19.8: `stop` names the first stop in time, the cut the first that applies in
+        # §19.8's order (the engine's stop, the pass's, the raw release's, the list's; the output's replaces them),
+        # so a later pass, a selection budget an earlier pattern spent (sticky) or a list's memory cut shows in the
+        # cut only (pattern.cpp put_selection, put_plain_cut; pattern_retrieval.cpp apply_labels). The selection work
+        # the answer shows (work.predicate_units over the patterns so far: one budget per request, §19.9) decides
+        pred = {"patterns": [{"dna": "A" * 25, "id": "w"}], "predicate": {"any": ["562"]}}
+        thr = {"stop_at_threshold": True, "max_predicate_work": 1}
+        raw = {"contexts": self.c("at_least", 147), "tested": self.c("exact", 1), "selected": self.c("at_least", 0)}
+        units = lambda u: {"steps": 1000, "predicate_units": u}  # noqa: E731
+        # the raw threshold stopped discovery (stop_at_threshold), then the pass spent the work: the review's case
+        self.ok(raw, cut="max_predicate_work", stop=("discovery", "max_predicate_contexts"), limits=thr, req=pred,
+                work=units(485))
+        self.ok(raw, cut="max_predicate_work", stop=("selection", "max_predicate_work"), limits=thr, req=pred,
+                work=units(485))                                            # the single stop
+        # a later pattern finds the work spent (sticky) after its own raw-threshold stop; all_or_count withholds
+        # predicate_budget beside its own max_steps stop
+        self.ok(raw, cut="max_predicate_work", stop=("discovery", "max_predicate_contexts"), limits=thr, req=pred,
+                work=units(0), sticky=1)
+        self.ok({"contexts": self.c("at_least", 9)}, withheld="predicate_budget", stop=("discovery", "max_steps"),
+                req=pred, limits=thr, work=units(0), sticky=1)
+        # a list's memory cut after an earlier stop (labels all: the descriptors; label-free paths: a path's object)
+        labels = {"patterns": [{"dna": "A" * 25, "id": "w"}], "output": {"labels": "all"}}
+        self.ok({"contexts": self.c("at_least", 2000)}, cut="max_memory", stop=("discovery", "max_steps"), req=labels)
+        paths = {"patterns": [{"dna": "A" * 40, "id": "w"}], "long_search": "paths"}
+        self.ok({"anchors": self.c("exact", 2), "paths": self.c("at_least", 30)}, cut="max_memory",
+                stop=("extension", "max_steps"), req=paths)
+        # impossible: the work shown unspent (beside the raw stop, or as the stop itself), the engine's stop before
+        # the pattern's own pass (its cut comes first), no predicate, no stop at all, a memory cut with no stop, a
+        # predicate_budget withheld with the work unspent
+        self.bad("below max_predicate_work", raw, cut="max_predicate_work",
+                 stop=("discovery", "max_predicate_contexts"), limits=dict(thr, max_predicate_work=100000), req=pred,
+                 work=units(485))
+        self.bad("selection work 485 below 100000", raw, cut="max_predicate_work",
+                 stop=("selection", "max_predicate_work"), limits=dict(thr, max_predicate_work=100000), req=pred,
+                 work=units(485))
+        self.bad("whose cut comes first", raw, cut="max_predicate_work", stop=("discovery", "max_steps"),
+                 limits=thr, req=pred, work=units(485))
+        self.bad("without a predicate", raw, cut="max_predicate_work", stop=("discovery", "max_steps"), limits=thr,
+                 work=units(485))
+        self.bad("without that stop or an earlier one", raw, cut="max_predicate_work", limits=thr, req=pred,
+                 work=units(485))
+        self.bad("without a memory stop", {"contexts": self.c("exact", 2000)}, cut="max_memory", req=labels)
+        self.bad("max_predicate_work spent", {"contexts": self.c("at_least", 9)}, withheld="predicate_budget",
+                 stop=("discovery", "max_steps"), req=pred, limits=dict(thr, max_predicate_work=100), work=units(1))
+        # the §19.8 corner, pending the engine owner's decision: a spent selection budget beside the pattern's own
+        # engine stop; §19.8's order (cut max_steps) and its sticky sentence (cut max_predicate_work) both pass
+        for cut in ("max_predicate_work", "max_steps"):
+            self.ok(raw, cut=cut, stop=("discovery", "max_steps"), limits=thr, req=pred, work=units(0), sticky=1)
+        # the work not shown: not judged
+        self.ok(raw, cut="max_predicate_work", stop=("discovery", "max_predicate_contexts"),
+                limits=dict(thr, max_predicate_work=100000), req=pred)
 
     def test_withheld_reasons(self):
         ctx = lambda rel, v=None, **kw: {"contexts": self.c(rel, v, **kw)}  # noqa: E731

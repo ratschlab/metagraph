@@ -2556,3 +2556,25 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   rules; the upper bound of budget_respected on a /resolve 200 stays on elapsed_ms (lenient by the gap, never a false
   fail). A same-origin engine field (the deadline's elapsed time) would let the rule judge without the transport in
   the wall; that is an engine change, proposed by the verification, not made here.
+- /pattern, a cut after an earlier stop (B5). `stop` names the first stop in time (SPEC-pattern-search §7.6: every
+  stop is assigned only while `stop` is null), the cut the first that applies in §19.8's order (the engine's stop,
+  the pass's, the raw release's max_predicate_contexts, the list's max_contexts; the output's cut replaces them:
+  pattern.cpp put_selection). The checks required cut max_predicate_work to equal the stop, so a partial predicate
+  search whose raw discovery stopped at max_predicate_contexts (stop_at_threshold) and whose pass then spent its work
+  failed, and four more legitimate compositions with it (a later pattern finding the request's selection work spent,
+  sticky, §19.8, in partial and in all_or_count; a list's memory cut after an earlier extension or discovery stop:
+  put_plain_cut, apply_labels). The evidence is the selection work the answer shows: work.predicate_units, per
+  pattern, summed over the patterns so far (one budget per request, §19.9: the pass stops once the units reach
+  max_predicate_work). cut max_predicate_work now needs a predicate and a stop; beside another stop it fails where the
+  work is shown below the budget, or where this pattern's own pass ran after an engine stop of an engine phase
+  (max_steps, time in discovery, mask_scan, extraction: the engine's cut comes first). A max_predicate_work stop with
+  the work shown below the budget fails too (it passed). withheld predicate_budget is also the sticky budget's. A
+  memory cut stands beside any stated stop: it replaces every other cut and states its own stop only when none is
+  stated; it stays lenient there, since the cut states no phase of its own (no cut.phase), so a memory cut that never
+  happened beside an earlier stop is not told apart (the verification proposes cut.phase as an additive engine field).
+  Pending the engine owner's decision: a selection budget an earlier pattern spent beside this pattern's own engine
+  stop (max_steps, time). §19.8's order puts the engine's cut first (cut max_steps / time); its sticky sentence and the
+  route (a fresh extraction without the engine's cut in the pass's `before` branch) give cut max_predicate_work in
+  partial and withheld predicate_budget in all_or_count. Both are accepted until §19.8 or the route states one.
+  Measured: the 3,751 answered pattern entries of the 175 stored fixtures and v3 / v4 (all arms) give the same
+  problems as before (none); the verification's legitimate compositions pass, its impossible neighbours fail.

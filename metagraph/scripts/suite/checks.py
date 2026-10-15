@@ -615,6 +615,14 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
                  "§7.6)" % (labels, mode)
     if e.get("rows_refused") and not reads_annotation:
         probs.append("%s: rows_refused on %s" % (where, nothing_read))
+    # the request's selection work as the answer shows it, through this pattern (§19.9: one budget per request,
+    # the pass stops once the units reached max_predicate_work; a later pattern finds it spent, sticky: §19.8,
+    # §20.9); None where the answer does not show it
+    pmax = _number(_limit(sc, body, "max_predicate_work"))
+    punits = [_number((x.get("work") or {}).get("predicate_units")) for x in (body.get("patterns") or [])[:i + 1]
+              if isinstance(x, dict) and "counts" in x and "error" not in x]
+    pwork_spent = None if pmax is None or not punits or any(u is None for u in punits) else sum(punits) >= pmax
+    own_units = _number((e.get("work") or {}).get("predicate_units"))
 
     w = e.get("withheld")
     wr = w.get("reason") if isinstance(w, dict) else (w if isinstance(w, str) else None)
@@ -698,8 +706,12 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     elif wr == "predicate_budget":
         if not predicate:
             probs.append("%s: withheld predicate_budget without a predicate" % where)
-        elif sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused"):
-            probs.append("%s: withheld predicate_budget without a predicate stop or a refused row" % where)
+        elif sr not in ("max_predicate_work", "max_memory") and not e.get("rows_refused") and not pwork_spent:
+            # the selection work spent by an earlier pattern (sticky, §19.8) withholds whatever stopped this
+            # pattern's discovery first (beside an engine stop of its own: the §19.8 corner pending the engine
+            # owner's decision, see the cut max_predicate_work rule)
+            probs.append("%s: withheld predicate_budget without a predicate stop, a refused row or the request's "
+                         "max_predicate_work spent" % where)
     elif wr is not None:
         probs.append("%s: withheld %r, a reason SPEC-pattern-search §7.5 does not list" % (where, wr))
 
@@ -721,8 +733,13 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     elif cr == "max_memory":
         if not memory_account:
             probs.append("%s: cut max_memory on %s" % (where, no_account))
-        elif sr != "max_memory" and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
-            probs.append("%s: cut max_memory without a memory stop or a refused row" % where)
+        elif sr is None and not e.get("rows_refused") and e.get("labels_status") != "output_budget":
+            # a memory cut of the list (the descriptors, the result objects, a label-free path's object) replaces
+            # any other cut and states stop {output, max_memory} unless an earlier stop is stated (§7.5, §12.1,
+            # §14.4, §19.8, §20.5: first stop wins), so only a cut without any stop or refused row is impossible.
+            # Lenient beside an earlier stop: the cut states no phase of its own (no cut.phase), so a memory cut
+            # that never happened cannot be told from one after that stop
+            probs.append("%s: cut max_memory without a memory stop, an earlier stop or a refused row" % where)
     elif cr == "max_paths":
         cap = _number(_limit(sc, body, "max_paths"))
         c = cnt("selected") if predicate and cnt("selected") else main
@@ -744,8 +761,29 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
         elif cap is not None and sr != "max_predicate_contexts" and _count_above(raw, cap) is False:
             probs.append("%s: cut max_predicate_contexts with %s, within %s" % (where, _count_text(raw), int(cap)))
     elif cr == "max_predicate_work":
-        if sr != "max_predicate_work":
-            probs.append("%s: cut max_predicate_work without that stop (stop %r)" % (where, sr))
+        # §19.8: the cut is the first that applies in the order engine stop (max_steps, time), the pass's stop, the
+        # raw release's cut, the selected list's cut, while stop names the first stop in time: a stop_at_threshold
+        # stop of the raw discovery (max_predicate_contexts) keeps the stop and lets the pass's cut through, and a
+        # selection work spent by an earlier pattern cuts whatever stopped this pattern's discovery (sticky, §19.8,
+        # §20.9: pattern.cpp put_selection, put_supported; pattern_selection.cpp select)
+        if not predicate:
+            probs.append("%s: cut max_predicate_work without a predicate" % where)
+        elif sr is None:
+            probs.append("%s: cut max_predicate_work without that stop or an earlier one" % where)
+        elif sr != "max_predicate_work" and pwork_spent is False:
+            probs.append("%s: cut max_predicate_work with the request's selection work %d below max_predicate_work "
+                         "%d (stop %r)" % (where, sum(punits), int(pmax), sr))
+        elif sr in ("max_steps", "time") and stop.get("phase") in ("discovery", "mask_scan", "extraction") and \
+                not long_ and (own_units or 0) > 0:
+            # this pattern's own pass ran after an engine stop: the engine's cut comes first (§19.8)
+            probs.append("%s: cut max_predicate_work after the engine's stop %s/%s, whose cut comes first (§19.8)" % (
+                where, stop.get("phase"), sr))
+        # Pending the engine owner's decision (§19.8 corner): a selection budget an earlier pattern spent, beside this
+        # pattern's own engine stop (max_steps, time; no pass of its own, own_units 0). §19.8's order puts the
+        # engine's cut first (cut max_steps / time, the rule of those cuts above); its sticky sentence, and the
+        # route (a fresh extraction without the engine's cut: pattern_selection.cpp select's `before` branch), give
+        # cut max_predicate_work in partial, withheld predicate_budget in all_or_count. Both are accepted until §19.8
+        # or the route states one.
     elif cr == "max_anchors":
         if sr != "max_anchors":
             probs.append("%s: cut max_anchors without that stop (stop %r)" % (where, sr))
@@ -784,6 +822,9 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     elif sr == "max_predicate_work":
         if not predicate:
             probs.append("%s: a max_predicate_work stop without a predicate" % where)
+        elif pwork_spent is False:
+            probs.append("%s: a max_predicate_work stop with the request's selection work %d below %d (§19.9: the "
+                         "pass stops once the units reached it)" % (where, sum(punits), int(pmax)))
     elif sr not in (None, "time", "max_memory"):
         probs.append("%s: stop reason %r, one SPEC-pattern-search §7.6 does not list" % (where, sr))
     if time_limited:
