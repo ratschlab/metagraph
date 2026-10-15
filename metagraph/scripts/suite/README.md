@@ -3318,3 +3318,56 @@ integration S8i stage 2 and verified (VERIFY-V5A "Stage 2", VERIFY-G "Stage 2" a
   for R-edge-0022 / -0023 / -0025); async's runner re-vendored (suite_common, the table d4b8636c...) and calling the
   shared rules of the runner list above (the explanation, the warm-ups, the snapshot refusal); R-budget-0001 / -0002
   block whenever no stop happens (their windows rest on eco's 230 ms lookup).
+
+## Small synthetic-graph oracle (lane O, phase 1, 2026-10-15)
+
+The staging suite checks that known examples are found; `oracle/` checks that **every** answer is found,
+none is duplicated and every count is exact (GPT's review of 2026-10-14, "What is missing" items 2-3 and the
+P1 row "independent small-graph oracle"). Design: `ORACLE-DESIGN.md` in the lane directory
+(`~/.cache/metagraph-traverse-plans/2026-10-15/lane-oracle/`).
+
+### Files
+- `oracle/fixtures.py`: a few tiny records with their features built in (a SNP bubble, a shared element and
+  its branches, a reverse-complemented block, a period-7 repeat and a homopolymer, even palindromes, planted
+  neighbours at one to three substitutions, a record split by an N, records shorter than k first and last in
+  their columns, columns of several records), the same bytes on every run.
+- `oracle/oracle.py`: the brute-force enumerator: every k-mer, offset and orientation tested position by
+  position (own IUPAC table, reverse complement, NCBI codes 1, 2, 4, 6, 11, 27, 31). It imports `math` only
+  (`tests/test_oracle_core.py` asserts it): nothing of the engine, `checks.py`, `seqtools.py` or `truth.py`.
+- `oracle/compare.py`: the checks (families `shape`, `notes`, `counts`, `results`, `release`, `labels`,
+  `stop`, `resolve`; outcomes pass / fail / inconclusive).
+- `oracle/mutations.py`, `oracle/render.py`: one-property corruptions with the family that must catch each,
+  and answers rendered from the oracle for the offline triplets.
+- `oracle/requests_gen.py`: the deterministic requests (`--seed`).
+- `oracle/indexes.py`, `oracle/server.py`, `oracle/report.py`, `oracle/run_oracle.py`: the build, the
+  localhost server, the report and the command.
+
+### Run
+
+    python3 metagraph/scripts/suite/oracle/run_oracle.py --metagraph metagraph/build/metagraph --out DIR
+
+It builds six configurations under `DIR/build/` with the engine's CLI (`basic_k11` with the mask and a
+`row_diff_brwt_coord` annotation with coordinates and `.seqs`; the same graph without its mask at
+`--pattern-max-checked-entries` 50 and 0; `canonical_k11` and `primary_k11` with column annotations;
+`basic_k15`). For each it starts `server_query` on a free 127.0.0.1 port (floor 0 bits, ample caps), sends about
+100 requests (60 pattern requests of up to 9 patterns, 12 budget probes, 30 `/resolve` on BASIC), compares
+every answer, applies every applicable corruption to every answer that passed, and stops the server. Output:
+`DIR/oracle_report.json`, `DIR/oracle_report.md` (scope, per-config outcomes, every disagreement with the
+request, the oracle's set and the engine's answer, the corruptions the comparison missed),
+`DIR/raw/<config>/<id>.json.gz` (each request and answer), `DIR/logs/`. `DIR` must be new or empty; nothing is
+deleted. Exit 0 when every check passed, 1 when one failed, 2 on a set-up error. About four minutes.
+
+Offline (no server): `python3 -m unittest tests.test_oracle_core tests.test_oracle_compare tests.test_oracle_run`
+(about 10 s): the oracle's definitions on hand-checked cases (several are the SPEC's own examples), the triplets
+on rendered answers in the three graph modes, the review's probes, the generator and the report.
+
+### Readings the oracle takes where the SPEC leaves a choice
+- `seq_id` (SPEC 14.3 "the record's index in its column (the `.seqs`: ... FASTA order)"): the index among the
+  column's records of at least k bases. The `.seqs` builder skips a shorter record
+  (`records_shorter_than_k: "not_indexed"`), so a record shorter than k shifts the `seq_id` of every later
+  record of its column against its FASTA index, and its header is no `/resolve` label (400).
+- Label order "(contexts desc, column asc)": the column's name. The fixture's column ids are not in name order,
+  so an order by id would show as a disagreement.
+- `/resolve` trace support: a set of live coordinates, each continued by +1; a k-mer that continues none
+  starts a new run. A column label's coordinates concatenate the column's indexed records, so a chain can cross
+  a record boundary (`trace_record_boundaries`).

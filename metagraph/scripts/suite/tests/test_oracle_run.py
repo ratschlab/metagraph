@@ -1,0 +1,105 @@
+"""Offline tests of the lane O run's plumbing: the request generator, the report and the command's
+refusals. No server, no engine."""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from oracle import fixtures, report, requests_gen  # noqa: E402
+from oracle import oracle as O  # noqa: E402
+from oracle import run_oracle  # noqa: E402
+
+
+def fixture_index(mode='basic', k=11):
+    return O.Index(fixtures.all_records(fixtures.build_records()), k, mode)
+
+
+class Generator(unittest.TestCase):
+    def test_deterministic_from_the_seed(self):
+        idx = fixture_index()
+        a = requests_gen.generate(idx, 'basic_k11', 1, True, True, True, 10, 4, 5)
+        b = requests_gen.generate(idx, 'basic_k11', 1, True, True, True, 10, 4, 5)
+        c = requests_gen.generate(idx, 'basic_k11', 2, True, True, True, 10, 4, 5)
+        self.assertEqual(json.dumps(a, sort_keys=True), json.dumps(b, sort_keys=True))
+        self.assertNotEqual(json.dumps(a, sort_keys=True), json.dumps(c, sort_keys=True))
+
+    def test_requests_stay_within_phase_one(self):
+        for k in (11, 15):
+            idx = fixture_index(k=k)
+            for item in requests_gen.generate(idx, f'basic_k{k}', 5, True, True, True, 40, 8, 10):
+                req = item['request']
+                if item['route'] == 'resolve':
+                    self.assertGreaterEqual(len(req['sequence']), 1)
+                    continue
+                self.assertLessEqual(len(req['patterns']), 16)
+                m = req.get('max_mismatches', 0)
+                self.assertIn(m, (0, 1, 2, 3))
+                if m:
+                    # substitutions with labels are a later increment (SPEC 21.16)
+                    self.assertNotEqual('all', (req.get('output') or {}).get('labels'))
+                for p in req['patterns']:
+                    kind = next(x for x in ('dna', 'iupac', 'protein') if x in p)
+                    pat = O.Pattern(kind, p[kind], req.get('genetic_code', 1))
+                    if not pat.slot:
+                        self.assertLessEqual(pat.length, k, p)
+
+    def test_resolve_requests_name_their_sources(self):
+        idx = fixture_index()
+        reqs = requests_gen.generate(idx, 'basic_k11', 1, True, True, True, 0, 0, 30)
+        supported = 0
+        for item in reqs:
+            try:
+                out = O.resolve(idx, item['request']['sequence'], item['request']['labels'])
+            except ValueError:
+                continue
+            supported += sum(1 for l in out['labels'] if l['kmers_supported'])
+        self.assertGreater(supported, 15)
+
+
+class Report(unittest.TestCase):
+    def test_markdown_states_scope_disagreements_and_missed_mutations(self):
+        rep = {'engine': {'path': '/x/metagraph', 'version': 'v'}, 'seed': 1,
+               'started_utc': 'a', 'ended_utc': 'b',
+               'summary': {'verdict': 'FAIL', 'entries': 2, 'requests': 1, 'pass': 1, 'fail': 1,
+                           'inconclusive': 0, 'exploratory': 0},
+               'configs': {'basic_k11': {'graph_mode': 'basic', 'k': 11, 'counting': 'exact',
+                                         'requests': 1, 'entries': 2,
+                                         'outcomes': {'pass': 1, 'fail': 1}}},
+               'disagreements': [{'config': 'basic_k11', 'request_id': 'P-1', 'position': 0,
+                                  'request': {'patterns': [{'dna': 'ACGT'}]},
+                                  'failed': [{'check': 'counts.total', 'expected': 3, 'got': 4}],
+                                  'oracle': {'total': 3}}],
+               'exploratory': [],
+               'mutations': {'applied': 2, 'caught': 1, 'by_mutation': {'drop_result':
+                                                                        {'applied': 2,
+                                                                         'caught': 1}},
+                             'missed': [{'request_id': 'P-1', 'position': 0,
+                                         'mutation': 'drop_result',
+                                         'families': ['results.complete']}]}}
+        md = report.markdown(rep)
+        for words in ('**Verdict: FAIL.**', '## Scope', 'Not covered', '/traverse (phase 2)',
+                      '### basic_k11: counts.total', '`P-1` pattern 0', 'drop_result'):
+            self.assertIn(words, md)
+
+
+class Command(unittest.TestCase):
+    def test_a_non_empty_out_dir_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, 'keep'), 'w').close()
+            self.assertEqual(2, run_oracle.main(['--metagraph', '/nonexistent', '--out', d]))
+            self.assertEqual(['keep'], os.listdir(d))
+
+    def test_an_unknown_config_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, 'run')
+            self.assertEqual(2, run_oracle.main(['--metagraph', '/nonexistent', '--out', out,
+                                                 '--configs', 'basic_k11,nope']))
+            self.assertFalse(os.path.exists(out))
+
+
+if __name__ == '__main__':
+    unittest.main()
