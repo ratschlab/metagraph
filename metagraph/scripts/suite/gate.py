@@ -40,9 +40,10 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
 - property: on a passing execution every property check the scenario expects (checks.is_property) passed, unless the
   policy lists it as not required for that scenario and arm, or (the MCP arm) the manifest marks it not shown via MCP
   (suite_common.mcp_check_marks: mcp.not_implemented_checks / by_design_checks) and it read not_exposed
-  (suite_common.checks_marked_aside; a marked check with no result is a missing result as any other); with
-  require_agreement every required property was compared with the direct reference (a marked one read not_exposed is
-  neither compared nor missing);
+  (suite_common.checks_marked_aside; a marked check with no result is a missing result as any other); a passing MCP
+  execution whose every property check is marked (suite_common.every_property_marked: a scenario-level mark) is a
+  problem; with require_agreement every required property was compared with the direct reference (a marked one read
+  not_exposed is neither compared nor missing);
 - disagreement: no MCP disagreement (MCP a policy arm) and no direct disagreement (both direct arms policy arms) in the
   selection; with require_agreement the MCP class is agree or a verified by-design pair;
 - relation: every relation the policy requires passed on each of its arms;
@@ -75,7 +76,7 @@ POLICY_VERSIONS = (1,)
 KINDS = ("identity", "configuration", "missing", "outcome", "property", "disagreement", "agreement", "relation",
          "nothing_passed")
 # The check names of checks.GENERIC_CHECKS, for a checks.py that does not load: every other check is a property.
-GENERIC_CHECKS = frozenset({"status", "invariants", "counts_consistent", "budget_respected"})
+GENERIC_CHECKS = sc.GENERIC_CHECKS
 # request_evidence sources that are no evidence of the deployment under the gate.
 NOT_LIVE_EVIDENCE = ("table", "unknown")
 # the outcomes a by-design or excluded execution may have besides pass
@@ -591,6 +592,11 @@ def judge(run_dir, policy, reevaluated=False):
             # not on the first repeat), the status passed, no generic check failed or could not test, and every
             # property passed unless the policy does not require it or the named answered case explains it
             aside = sc.checks_marked_aside(s, arm, r.get("checks"))
+            whole = sc.every_property_marked(s, arm, r.get("checks"))
+            if whole:
+                # the marks leave nothing of the scenario's claim tested via MCP: no pass, whatever the line says
+                problems.append(_problem("property", "%s on a passing execution" % sc.scenario_level_mark_detail(
+                    whole), sid, arm, rep))
             for name, k, out in property_results(s, r, is_property, generic=True):
                 prop = is_property(name)
                 label = "%s%s" % (name, (" #%d" % (k + 1)) if k else "")

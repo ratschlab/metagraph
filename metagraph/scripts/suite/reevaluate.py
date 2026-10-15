@@ -189,9 +189,11 @@ def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, case
     the checks), if it was; |info| (a dict) receives what the line records as async's runner records it:
     service_by_design_case and explained_checks (whenever a case matched), verdict_detail (why a wall rule or a host
     state held or not, or rule (c)'s text), inconclusive_reason (an inconclusive outcome's class: rule (c)'s text, the
-    host-state code, or "checks"); and for the re-evaluation's record by_design_cases, host_state and `note` (a mark
-    the table does not reproduce, a matched case the checks decided) and `warnings` (a recorded client wall or
-    timeout statement the raw record does not reproduce). |doc| is the execution's raw record (the service-side
+    host-state code, suite_common.SCENARIO_LEVEL_MARK where the checks decided and the property-level marks cover
+    every property check, with suite_common.scenario_level_mark_detail in verdict_detail, or "checks"); and for the
+    re-evaluation's record by_design_cases, host_state and `note` (a mark the table does not reproduce, a matched case
+    the checks decided) and `warnings` (a recorded client wall or timeout statement the raw record does not
+    reproduce). |doc| is the execution's raw record (the service-side
     walls: suite_common.service_wall; rule 2's client wall: suite_common.client_wall_ms, its auth
     suite_common.mcp_auth_of, which reads |line|'s reevaluation.mcp_auth_assumed where the record states none). An
     undecidable host state is inconclusive whatever the checks say, as in the runner (B5b-03: lane S5b's
@@ -201,6 +203,13 @@ def outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, case
                                 doc)
     if not info.get("warnings"):
         info.pop("warnings", None)
+    if outcome == "inconclusive" and kept is None and "inconclusive_reason" not in info:
+        whole = sc.every_property_marked(scenario, arm, new_checks)
+        if whole:
+            # the checks decided, and the marks cover every property check: a scenario-level mark, named as such
+            info["inconclusive_reason"] = sc.SCENARIO_LEVEL_MARK
+            info["verdict_detail"] = "; ".join(x for x in (info.get("verdict_detail"),
+                                                           sc.scenario_level_mark_detail(whole)) if x)
     if outcome == "inconclusive":
         info.setdefault("inconclusive_reason", "checks")
     else:

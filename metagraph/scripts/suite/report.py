@@ -462,8 +462,8 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
             marked.setdefault(m.get("mark"), []).append((sid, name))
     if marked:
         # what the MCP cannot show at property level: set aside by the manifest's marks, listed under Agreement
-        lines.append("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed; listed "
-                     "under Agreement): %s." % "; ".join(
+        lines.append("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed, unless "
+                     "they cover every property check of the execution; listed under Agreement): %s." % "; ".join(
                          "%d check(s) of %d scenario(s) %s" % (len(marked[mark]), len(set(x[0] for x in marked[mark])),
                                                                MARK_WORDS.get(mark, mark))
                          for mark, _ in sc.MCP_CHECK_MARK_LABELS if marked.get(mark)))
@@ -872,15 +872,21 @@ def outcomes_text(value):
 
 def marked_checks_lines(comp, manifest, rows):
     """The report's lines of the property-level marks (suite_common.mcp_check_marks) of the scenarios the run has, per
-    mark (MCP_CHECK_MARK_LABELS) and scenario: each marked check with its reason or case, the MCP executions it read
-    not_exposed on (set aside) and any other reading (judged as usual: the mark may be stale); [] for a manifest
-    without marks."""
+    mark (MCP_CHECK_MARK_LABELS) and scenario: each marked check with its reason or case, the MCP executions it was
+    set aside on (suite_common.checks_marked_aside), those it read not_exposed on without being set aside because the
+    marks cover every property check there (suite_common.every_property_marked: a scenario-level mark) and any other
+    reading (judged as usual: the mark may be stale); [] for a manifest without marks."""
     scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     reads = {}
     for r in rows or []:
         if r.get("arm") == "mcp":
-            for c in r.get("checks") or []:
-                reads.setdefault((r.get("scenario"), c.get("check")), []).append((r.get("repeat"), c.get("outcome")))
+            checks = r.get("checks") or []
+            aside = sc.checks_marked_aside(scen.get(r.get("scenario")), "mcp", checks)
+            whole = bool(sc.every_property_marked(scen.get(r.get("scenario")), "mcp", checks))
+            for c, key in zip(checks, sc.check_keys(checks)):
+                how = "aside" if key in aside else "whole" if whole and c.get("outcome") == "not_exposed" else None
+                reads.setdefault((r.get("scenario"), c.get("check")), []).append(
+                    (r.get("repeat"), c.get("outcome"), how))
     out = []
     for mark, label in sc.MCP_CHECK_MARK_LABELS:
         items = []
@@ -889,11 +895,13 @@ def marked_checks_lines(comp, manifest, rows):
                 if m.get("mark") != mark:
                     continue
                 seen = sorted(reads.get((sid, name)) or [], key=lambda x: (str(x[0]), str(x[1])))
-                aside = ["r%s" % rep for rep, o in seen if o == "not_exposed"]
-                other = ["r%s %s" % (rep, o) for rep, o in seen if o != "not_exposed"]
+                aside = ["r%s" % rep for rep, _, how in seen if how == "aside"]
+                whole = ["r%s" % rep for rep, _, how in seen if how == "whole"]
+                other = ["r%s %s" % (rep, o) for rep, o, how in seen if how is None]
                 why = m.get("reason") if mark == "not_implemented" else "case %s" % m.get("case")
-                items.append("%s %s (%s; set aside on %s%s)" % (
+                items.append("%s %s (%s; set aside on %s%s%s)" % (
                     md(sid), md(name), md(why or "-", 200), ", ".join(aside) or "no MCP execution",
+                    ("; not set aside, %s: %s" % (md(sc.SCENARIO_LEVEL_MARK), ", ".join(whole))) if whole else "",
                     ("; judged as usual: %s" % ", ".join(other)) if other else ""))
         if items:
             out.append("%s: %s.\n" % (label, "; ".join(items)))

@@ -6,6 +6,7 @@ failed relation, a manifest identity mismatch and missing configuration evidence
 
 import contextlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -1146,23 +1147,92 @@ class PropertyMarksTest(GateCase):
         failing = checks_for("T-001", 0, prop="fail")
         self.assertIs(sc.unmarked_checks(s, "mcp", failing), failing)   # a mark hides no result
         self.assertEqual(sc.mcp_check_marks({"mcp": {"not_implemented_checks": "x", "by_design_checks": [{}]}}), {})
+        # marks covering every property check of the execution: nothing set aside, the marked items read
+        # inconclusive (a scenario-level mark); the item's own `property` decides what a property check is
+        whole = [dict(c, outcome="not_exposed") if c["check"] != "status" else c for c in checks]
+        detail = sc.scenario_level_mark_detail(["answer_fields", "contains_source_context"])
+        self.assertEqual(detail, "every property check is marked; this is a scenario-level mark (answer_fields, "
+                                 "contains_source_context read not_exposed via MCP)")
+        self.assertEqual(sc.every_property_marked(s, "mcp", whole), ["answer_fields", "contains_source_context"])
+        self.assertEqual(sc.checks_marked_aside(s, "mcp", whole), {})
+        self.assertEqual(sc.unmarked_checks(s, "mcp", whole), [whole[0]] + [
+            dict(c, outcome="inconclusive", detail=detail) for c in whole[1:]])
+        self.assertEqual([c["outcome"] for c in whole], ["pass", "not_exposed", "not_exposed"])   # not changed
+        self.assertEqual(sc.every_property_marked(s, "direct-local", whole), [])
+        self.assertEqual(sc.every_property_marked(self.manifest()["scenarios"][0], "mcp", whole), [])   # one marked
+        flagged = [dict(whole[0], property=False), dict(whole[1], property=True), dict(whole[2], property=False)]
+        self.assertEqual(sc.every_property_marked(s, "mcp", flagged), ["contains_source_context"])
+        self.assertEqual(sc.every_property_marked(s, "mcp", whole[:1]), [])   # no property check: a refusal
+        self.assertEqual(sc.GENERIC_CHECKS, cmp.load_checks_module(SUITE).GENERIC_CHECKS)
 
     def test_a_marked_check_makes_no_execution_inconclusive(self):
-        # T-001's only property checks both read not_exposed via MCP: inconclusive (the merge's scenario_outcome)
-        # without the marks, pass with them; the re-evaluation's outcome likewise
+        # T-001's answer_fields reads not_exposed via MCP beside a passing contains_source_context: set aside, the
+        # execution passes in the merge and the re-evaluation as it does without the mark
+        mod = cmp.load_checks_module(SUITE)
+        for marked in (False, True):
+            m = self.manifest(marked)
+            line = self.rows(self.marked_run(m, "one%s" % marked))[("T-001", "mcp", 0)]
+            self.assertEqual(line["outcome"], "pass")
+            self.assertEqual(reevaluate.outcome_of(mod, "mcp", m["scenarios"][0], {"http": 200, "body": {}}, line,
+                                                   line["checks"], False)[0], "pass")
+
+    def test_marks_covering_every_property_check_are_a_scenario_level_mark(self):
+        # T-001's only property checks both read not_exposed via MCP and both are marked: nothing of its claim is
+        # tested via MCP, which a scenario-level mark states; inconclusive with that reason in the merge (the runner
+        # recorded pass), the re-evaluation and the comparison's fallback, and gate-blocking, never a pass on the
+        # generic checks alone. Without the marks: inconclusive by the checks, as before.
         change = dict((("T-001", r), {"checks": [dict(c, outcome="not_exposed") if c["check"] != "status" else c
                                                  for c in checks_for("T-001", r)]}) for r in (0, 1))
-        plain = self.rows(self.marked_run(self.manifest(False), "plain", change=change))
-        marked = self.rows(self.marked_run(self.manifest(both=True), "marked", change=change))
+        detail = sc.scenario_level_mark_detail(["answer_fields", "contains_source_context"])
+        plain_dir = self.marked_run(self.manifest(False), "plain", change=change, direct=False)
+        marked_dir = self.marked_run(self.manifest(both=True), "marked", change=change, direct=False)
+        plain, marked = self.rows(plain_dir), self.rows(marked_dir)
         self.assertEqual(plain[("T-001", "mcp", 0)]["outcome"], "inconclusive")
-        self.assertEqual(marked[("T-001", "mcp", 0)]["outcome"], "pass")
+        self.assertNotIn("inconclusive_reason", plain[("T-001", "mcp", 0)])
+        for r in (0, 1):
+            row = marked[("T-001", "mcp", r)]
+            self.assertEqual((row["outcome"], row["outcome_runner"], row["inconclusive_reason"], row["verdict_detail"]),
+                             ("inconclusive", "pass", sc.SCENARIO_LEVEL_MARK, detail))
         s = self.manifest(both=True)["scenarios"][0]
         line = dict(marked[("T-001", "mcp", 0)], outcome="pass")
+        for k in ("outcome_runner", "inconclusive_reason", "verdict_detail"):
+            line.pop(k)
         mod = cmp.load_checks_module(SUITE)
+        info = {}
         self.assertEqual(reevaluate.outcome_of(mod, "mcp", s, {"http": 200, "body": {}}, line, line["checks"],
-                                               False)[0], "pass")
+                                               False, info=info)[0], "inconclusive")
+        self.assertEqual((info["inconclusive_reason"], info["verdict_detail"]), (sc.SCENARIO_LEVEL_MARK, detail))
+        info = {}
         self.assertEqual(reevaluate.outcome_of(mod, "mcp", scenarios()[0], {"http": 200, "body": {}}, line,
-                                               line["checks"], False)[0], "inconclusive")
+                                               line["checks"], False, info=info)[0], "inconclusive")
+        self.assertEqual(info["inconclusive_reason"], "checks")
+        fallback = dict(line, outcome="inconclusive", arm="mcp")
+        self.assertEqual(cmp.inconclusive_reason(fallback, s, marked_dir), sc.SCENARIO_LEVEL_MARK)
+        self.assertEqual(cmp.inconclusive_reason(fallback, scenarios()[0], plain_dir), "checks")
+        # the gate: an outcome problem naming the reason; the report counts it by reason and says it was not set aside
+        m = self.manifest(both=True)
+        v = gate.judge(marked_dir, policy_of(m))
+        self.assertEqual([(p["kind"], p["scenario"], p["repeat"], p["detail"]) for p in v["problems"]],
+                         [("outcome", "T-001", r, "inconclusive (%s)" % sc.SCENARIO_LEVEL_MARK) for r in (0, 1)])
+        text = self.report(marked_dir)
+        self.assertIn("2 %s" % report.md(sc.SCENARIO_LEVEL_MARK), text)
+        self.assertIn("T-001 answer\\_fields (the MCP's records carry no such field; set aside on no MCP execution; "
+                      "not set aside, %s: r0, r1)" % report.md(sc.SCENARIO_LEVEL_MARK), text)
+        # a line that reads pass all the same (a merge without the checks' rule) is a property problem at the gate
+        path = os.path.join(marked_dir, "executions.jsonl")
+        rows = sc.read_jsonl(path)[0]
+        for row in rows:
+            if row["scenario"] == "T-001" and row["arm"] == "mcp":
+                row["outcome"] = "pass"
+                for k in ("outcome_runner", "inconclusive_reason", "verdict_detail"):
+                    row.pop(k, None)
+        with open(path, "w") as fh:
+            fh.write("".join(json.dumps(row) + "\n" for row in rows))
+        v = gate.judge(marked_dir, policy_of(m))
+        self.assertFalse(v["passed"])
+        self.assertEqual([(p["scenario"], p["repeat"], p["detail"]) for p in self.problems(v, "property")
+                          if sc.SCENARIO_LEVEL_MARK in p["detail"]],
+                         [("T-001", r, detail + " on a passing execution") for r in (0, 1)])
 
     def test_the_gate_reads_a_mark_as_no_required_property(self):
         for marked in (False, True):
@@ -1238,9 +1308,10 @@ class PropertyMarksTest(GateCase):
                       "such field; set aside on r0, r1).", texts[True])
         self.assertIn("Service-side by design (property): R-002 answer\\_fields (case case.answered\\_explains; set "
                       "aside on r0, r1).", texts[True])
-        self.assertIn("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed; "
-                      "listed under Agreement): 1 check(s) of 1 scenario(s) not implemented yet via MCP; 1 check(s) "
-                      "of 1 scenario(s) service-side by design.", texts[True])
+        self.assertIn("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed, "
+                      "unless they cover every property check of the execution; listed under Agreement): 1 check(s) "
+                      "of 1 scenario(s) not implemented yet via MCP; 1 check(s) of 1 scenario(s) service-side by "
+                      "design.", texts[True])
         self.assertIn("4 set aside by a property-level mark of the manifest", texts[True])
         for x in ("(property)", "Property-level marks", "set aside by a property-level mark"):
             self.assertNotIn(x, texts[False])

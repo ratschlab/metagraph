@@ -164,11 +164,17 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
         if isinstance(items, list) and items:
             # B5b-06: the explained check items (the runner's since f386a3c0, or the re-evaluation's), not every
             # item of an explained name
-            checks = [c for i, c in enumerate(checks) if not (i in items and c.get("outcome") == "fail")]
+            drop = set(id(c) for i, c in enumerate(checks) if i in items and c.get("outcome") == "fail")
         elif explained:
-            checks = [c for c in checks if not (c.get("check") in explained and c.get("outcome") == "fail")]
-        # the MCP checks a property-level mark of the manifest sets aside (suite_common.unmarked_checks) decide nothing
-        checks = sc.unmarked_checks((scenarios or {}).get(row.get("scenario")), row.get("arm"), checks)
+            drop = set(id(c) for c in checks if c.get("check") in explained and c.get("outcome") == "fail")
+        else:
+            drop = set()
+        # the MCP checks a property-level mark of the manifest sets aside decide nothing (suite_common.unmarked_checks,
+        # which reads the whole execution, as the runner and the re-evaluation do before taking the explained items
+        # out); where the marks cover every property check, its marked items read inconclusive
+        scenario = (scenarios or {}).get(row.get("scenario"))
+        whole = sc.every_property_marked(scenario, row.get("arm"), checks)
+        checks = [c for c in sc.unmarked_checks(scenario, row.get("arm"), checks) if id(c) not in drop]
         if not checks:
             continue
         try:
@@ -179,6 +185,11 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
             row.setdefault("outcome_runner", old)
             row["outcome"] = new
             changed[row.get("arm")] = changed.get(row.get("arm"), 0) + 1
+            if new == "inconclusive" and whole and not row.get("inconclusive_reason"):
+                # a scenario-level mark, named as the re-evaluation and the runner name it
+                row["inconclusive_reason"] = sc.SCENARIO_LEVEL_MARK
+                row["verdict_detail"] = "; ".join(x for x in (row.get("verdict_detail"),
+                                                              sc.scenario_level_mark_detail(whole)) if x)
     return changed
 
 

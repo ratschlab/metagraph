@@ -2918,15 +2918,17 @@ def resources(lines, index):
 def inconclusive_reason(line, scenario, run_dir, cases=None):
     """An inconclusive execution's class (async's runner at 31a2e41f, the line's inconclusive_reason): rule (c)'s
     text (no service-side timing / no threshold known: plausibility undecidable, without rule 2's API-key note:
-    suite_common.undecidable_class), the host-state code, or "checks"
-    (the checks decided); for a line recorded without the field the same, read from the raw record: the runner's
-    order, an answer-triggered case of |cases| whose wall rule is undecidable (B5b-09), else the host-state rule;
-    None for any other outcome."""
+    suite_common.undecidable_class), the host-state code, suite_common.SCENARIO_LEVEL_MARK (the checks decided, the
+    property-level marks covering every property check of the MCP execution) or "checks" (the checks decided); for a
+    line recorded without the field the same, read from the raw record: the runner's order, an answer-triggered case
+    of |cases| whose wall rule is undecidable (B5b-09), else the host-state rule; None for any other outcome."""
     if line.get("outcome") != "inconclusive":
         return None
     if line.get("inconclusive_reason"):
         return str(line["inconclusive_reason"])
     if line.get("arm") == "mcp":
+        by_checks = sc.SCENARIO_LEVEL_MARK if sc.every_property_marked(scenario, "mcp", line.get("checks")) \
+            else "checks"
         ans, terr, doc = mcp_view(line, run_dir, with_doc=True)
         if cases:
             walls = []
@@ -2934,13 +2936,14 @@ def inconclusive_reason(line, scenario, run_dir, cases=None):
             if matched and walls and walls[-1][0] == "undecidable":
                 return sc.undecidable_class(walls[-1][1])
             if matched:
-                return "checks"
+                return by_checks
         code, state, detail = sc.host_state_verdict(scenario or {}, line, doc, ans.get("error"), terr,
                                                     refs=refs_of(cases))
         if state == "host_state":
             return code
         if state == "undecidable":
             return sc.undecidable_class(detail)
+        return by_checks
     return "checks"
 
 

@@ -1797,6 +1797,13 @@ MCP_CHECK_MARKS = (("not_implemented_checks", "not_implemented", "reason"), ("by
 # how the report lists each mark
 MCP_CHECK_MARK_LABELS = (("not_implemented", "Not implemented yet via MCP (property)"),
                          ("by_design", "Service-side by design (property)"))
+# The checks that hold on any answer of the route (checks.GENERIC_CHECKS, for a check result that does not state its
+# own `property`): every other check is a PROPERTY check, the claim the scenario was built to test
+GENERIC_CHECKS = frozenset({"status", "invariants", "counts_consistent", "budget_respected"})
+# An MCP execution whose every property check a property-level mark covers tests nothing of its scenario's claim via
+# MCP: that is a scenario-level mark (mcp.not_implemented / mcp.by_design), and the execution is inconclusive with
+# this inconclusive_reason, never a pass on its generic checks alone (every_property_marked)
+SCENARIO_LEVEL_MARK = "every property check is marked; this is a scenario-level mark"
 
 
 def mcp_check_marks(scenario):
@@ -1835,15 +1842,44 @@ def check_keys(checks):
     return out
 
 
+def _property_item(item):
+    """Whether a check result is a property check's: its own `property` (checks.evaluate records it), else its name
+    outside GENERIC_CHECKS."""
+    flag = item.get("property")
+    return flag if isinstance(flag, bool) else item.get("check") not in GENERIC_CHECKS
+
+
+def every_property_marked(scenario, arm, checks, marks=None):
+    """The sorted names of an MCP execution's property checks when the scenario's property-level marks cover every one
+    of them (at least one, each recorded reading not_exposed: marked_aside), else []. Such an execution tests nothing
+    of the scenario's claim via MCP (SCENARIO_LEVEL_MARK): checks_marked_aside sets nothing aside for it and
+    unmarked_checks reads its marked items inconclusive. |marks|: mcp_check_marks(scenario) when the caller has it."""
+    if arm != "mcp" or not isinstance(checks, list):
+        return []
+    marks = mcp_check_marks(scenario) if marks is None else marks
+    props = [c for c in checks if isinstance(c, dict) and _property_item(c)]
+    if not marks or not props or any(marked_aside(None, arm, c, marks) is None for c in props):
+        return []
+    return sorted(set(str(c.get("check")) for c in props))
+
+
+def scenario_level_mark_detail(names):
+    """The detail of an execution every_property_marked names |names| of: its verdict_detail, and the detail its
+    marked items read inconclusive with."""
+    return "%s (%s read not_exposed via MCP)" % (SCENARIO_LEVEL_MARK, ", ".join(names))
+
+
 def checks_marked_aside(scenario, arm, checks, marks=None):
     """{(check name, occurrence) (check_keys): mark} of the items of an execution's |checks| the scenario's
     property-level marks set aside: the one rule the outcome (unmarked_checks), the comparison, the gate and the
     report apply. An item is set aside only as it is recorded reading not_exposed (marked_aside); a marked check read
     otherwise, or with no result on the execution, is judged as any check (a mark hides no result, and a missing
-    result stays a missing one: the runner drops nothing, it judges on unmarked_checks). {} on every arm but MCP and
-    for a scenario without marks. |marks|: mcp_check_marks(scenario) when the caller has it."""
+    result stays a missing one: the runner drops nothing, it judges on unmarked_checks). Nothing is set aside when
+    the marks cover every property check of the execution (every_property_marked): a scenario-level mark is no
+    property-level one. {} on every arm but MCP and for a scenario without marks. |marks|: mcp_check_marks(scenario)
+    when the caller has it."""
     marks = (mcp_check_marks(scenario) if marks is None else marks) if arm == "mcp" else {}
-    if not marks or not isinstance(checks, list):
+    if not marks or not isinstance(checks, list) or every_property_marked(None, arm, checks, marks):
         return {}
     out = {}
     for c, key in zip(checks, check_keys(checks)):
@@ -1856,8 +1892,17 @@ def checks_marked_aside(scenario, arm, checks, marks=None):
 def unmarked_checks(scenario, arm, checks):
     """|checks| without the items checks_marked_aside sets aside: what the outcome rule (outcome_from_checks,
     checks.scenario_outcome) judges an MCP execution on, so a marked check never makes it inconclusive (not exposed)
-    or untested; |checks| itself when nothing is set aside (every arm but MCP, every scenario without marks)."""
-    aside = checks_marked_aside(scenario, arm, checks)
+    or untested; |checks| itself when nothing is set aside (every arm but MCP, every scenario without marks). When
+    the marks cover every property check of the execution (every_property_marked) its marked items stay, each read
+    inconclusive with scenario_level_mark_detail: either rule then gives inconclusive (fail or finding where another
+    check says so), never a pass on the generic checks alone."""
+    marks = mcp_check_marks(scenario) if arm == "mcp" else {}
+    names = every_property_marked(None, arm, checks, marks)
+    if names:
+        detail = scenario_level_mark_detail(names)
+        return [dict(c, outcome="inconclusive", detail=detail) if marked_aside(None, arm, c, marks) is not None
+                else c for c in checks]
+    aside = checks_marked_aside(None, arm, checks, marks)
     if not aside:
         return checks
     return [c for c, key in zip(checks, check_keys(checks)) if key not in aside]

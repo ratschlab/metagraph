@@ -2792,8 +2792,26 @@ read in one place, suite_common.MCP_CHECK_MARKS.
   any check: a mark hides no result. A marked check with no result on the execution is a missing result as before
   the marks (the runner drops nothing: it judges on unmarked_checks).
 - **Outcome.** reevaluate.py's outcome rule (and an answered case's verdict) and merge_run.stricter_outcomes judge an
-  MCP execution on its checks less the set-aside items, so a marked check never makes it inconclusive ("every
-  property not exposed") and so never untested in the report.
+  MCP execution on its checks less the set-aside items (read on the whole execution, before an answered case's
+  explained items are taken out), so a marked check never makes it inconclusive ("every property not exposed") and
+  so never untested in the report.
+- **Every property check marked: a scenario-level mark.** When the marks cover every property check of an MCP
+  execution (suite_common.every_property_marked: at least one property check, each marked and read not_exposed; a
+  check result's own `property`, else its name outside suite_common.GENERIC_CHECKS), nothing of the scenario's claim
+  is tested via MCP: that is what mcp.not_implemented / mcp.by_design state for the whole scenario, and the generic
+  checks alone (status, invariants) are no pass. Nothing is set aside then (checks_marked_aside is {}); unmarked_checks
+  returns the marked items read inconclusive, so either outcome rule gives inconclusive (fail or finding where another
+  check says so). The execution's inconclusive_reason is suite_common.SCENARIO_LEVEL_MARK ("every property check is
+  marked; this is a scenario-level mark") with suite_common.scenario_level_mark_detail(names) as verdict_detail: in
+  the re-evaluation, in merge_run.stricter_outcomes where it makes a recorded pass inconclusive, and in compare's
+  reading of a line recorded without a reason. The gate blocks it as any inconclusive (the problem names the reason),
+  and a passing MCP line that has it all the same is a property problem. The comparison and the report treat the
+  marked items as unmarked not_exposed ones (skipped, partial depth); the report's mark listing names those
+  executions "not set aside, every property check is marked; this is a scenario-level mark". A wrong
+  all-properties mark is so visible and gate-blocking; lane V5 turns such a mark into a scenario-level one in the
+  manifest (v5's only case, T-edge-0008's answer_fields, by design). The rule is per execution, as
+  checks.scenario_outcome's "no property passed" rule: a later repeat whose determinism check passed has a passing
+  property.
 - **Gate.** A marked check the MCP read not_exposed is no required-property problem, and with require_agreement
   no property "not compared with the reference" (gate.uncompared_properties leaves it out). One the MCP did not read
   on a passing execution is "the expected check ... has no result" (a property problem), and uncompared.
@@ -2802,16 +2820,22 @@ read in one place, suite_common.MCP_CHECK_MARKS.
   mcp_agreement lists it as `marked_checks` [{repeat, check, mark}] with `checks_marked`, summed in the summary;
   report.agreement_depth neither compares nor skips it (a reference failure of it is still named as hidden).
 - **Report.** The Agreement section lists the marks per scenario under "Not implemented yet via MCP (property)" and
-  "Service-side by design (property)" (reason or case, the MCP executions it was set aside on, any other reading
-  "judged as usual"), the agreement paragraph counts the set-aside items, and the verdict section has one line
-  counting the marked checks by class.
+  "Service-side by design (property)" (reason or case, the MCP executions it was set aside on, those where every
+  property check is marked, any other reading "judged as usual"), the agreement paragraph counts the set-aside
+  items, and the verdict section has one line counting the marked checks by class.
 - A manifest without the fields (v1-v4) is judged exactly as before: none of these keys or lines appears, and a
   not_exposed check that is not marked keeps its handling (skipped, partial depth, the gate's property problem
   unless the policy lists it as not required).
-- **async's runner mirrors** the outcome part: its outcome rule judges an MCP execution on
-  shared_rule("unmarked_checks")(scenario, "mcp", checks); until then a recorded line it made inconclusive by a
-  marked check stays so in the recorded set (merge_run only makes outcomes stricter) and is corrected by a
-  re-evaluation.
+- **async's runner mirrors** the outcome part (the runner contract): its outcome rule judges an MCP execution on
+  shared_rule("unmarked_checks")(scenario, "mcp", checks), the whole execution's checks, before an answered case's
+  explained items are taken out, and drops no item; the marks covering every property check need no other code
+  there, unmarked_checks returning the marked items read inconclusive. An execution that ends inconclusive by the
+  checks (no rule (c), no host-state class) while shared_rule("every_property_marked")(scenario, "mcp", checks)
+  names checks records inconclusive_reason shared_rule("SCENARIO_LEVEL_MARK") and verdict_detail
+  shared_rule("scenario_level_mark_detail")(those names) (joined with "; " after a wall rule's notes). Until the
+  runner mirrors it, a recorded line it made inconclusive by a marked check stays so in the recorded set (merge_run
+  only makes outcomes stricter) and is corrected by a re-evaluation, and a recorded pass whose every property check
+  is marked is made inconclusive with that reason by merge_run.
 
 ### The by-design table: the discovery cap 1000 (async fb66f1dd, 2026-10-15)
 The service's discovery cap goes from 100 to 1000 and its default from 20 to 50 with async's bundle
