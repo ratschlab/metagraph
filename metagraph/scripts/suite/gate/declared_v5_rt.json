@@ -1,9 +1,9 @@
 {
  "declared_version": 1,
- "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): none. What the MCP surface cannot show is classed in the v5 manifest itself and derived by gate_policy.py (the owner, 2026-10-15): C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks; T-edge-0008's answer_fields mcp.by_design_checks (traverse.duplicate_seeds); the long walks' budget_stress tag (T-longwalk-0001..0004). declared_v4_rt.json stays v4's. The v4 suite errors it declared are fixed by v5, R-budget-0001/0002 are required on direct-local.",
+ "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): none. What the MCP surface cannot show is classed in the v5 manifest itself (the owner, 2026-10-15): C-caps-0001 mcp.not_implemented (gate_policy excludes it on MCP); label_dict_contains of the T-labels pairs mcp.not_implemented_checks (gate.py sets their not_exposed reading aside; the policy derives no exemption); T-edge-0008 service-side by design through the table's case traverse.duplicate_seeds (run via MCP); the long walks' budget_stress tag (T-longwalk-0001..0004). declared_v4_rt.json stays v4's. The v4 suite errors it declared are fixed by v5, R-budget-0001/0002 are required on direct-local.",
  "manifest": {
   "file": "manifest/suite_v5.json",
-  "content_sha256": "ff7afbd72da54352d2c28b3df27a7867a3ec123dfde65d2a57c853b898125180"
+  "content_sha256": "72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875"
  },
  "exclusions": [],
  "not_required": [],
