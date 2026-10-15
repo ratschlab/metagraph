@@ -33,7 +33,8 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   set without a snapshot blocks (merge_run.checks_identity), the checks that judged the set are the ones their
   snapshot's SNAPSHOT.json records where they have one (suite_common.snapshot_refusal: a changed file is never
   executed), the set's comparison was judged with the checks recorded for the set (SNAPSHOT.json, a re-evaluated
-  set's reevaluated.json: compared_with_checks_problems), and the
+  set's reevaluated.json: compared_with_checks_problems) and read the very lines the gate judges (its
+  executions_sha256), and the
   comparison read the by-design table the policy's exclusions were derived from;
 - missing: every planned execution and every execution the policy requires is recorded;
 - outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
@@ -541,6 +542,7 @@ def judge(run_dir, policy, reevaluated=False):
     problems, notes = [], []
     name_of = lambda n: sc.reevaluated_name(n, reevaluated)  # noqa: E731
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
+    executions_sha256 = sc.file_sha256(os.path.join(run_dir, name_of("executions.jsonl")))
     rows, bad = sc.read_jsonl(os.path.join(run_dir, name_of("executions.jsonl")))
     if not isinstance(manifest, dict):
         problems.append(_problem("identity", "the run has no manifest.json"))
@@ -612,6 +614,15 @@ def judge(run_dir, policy, reevaluated=False):
                                              "that table)" % (str(used)[:16], pinned[:16])))
     if comp is not None:
         problems.extend(_problem("identity", x) for x in compared_with_checks_problems(run_dir, comp, reevaluated))
+        if comp.get("executions_sha256") != executions_sha256:
+            # the lines the gate judges are not the ones the comparison read (edited after it): the comparison's
+            # classes and explanations describe other lines
+            problems.append(_problem("identity", "%s read %s with sha256 %s; the gate judges it with sha256 %s: "
+                                                 "recompute the comparison" % (
+                                                     name_of("compare.json"), name_of("executions.jsonl"),
+                                                     str(comp.get("executions_sha256"))[:12]
+                                                     if comp.get("executions_sha256") else "not stated",
+                                                     str(executions_sha256)[:12])))
     # the property reading with the checks that judged the set: a recorded run's snapshot, a re-evaluation's checks;
     # a snapshot file that is not SNAPSHOT.json's is never executed (the reading falls back to GENERIC_CHECKS)
     judging = cmp.judging_checks(run_dir, reevaluated)

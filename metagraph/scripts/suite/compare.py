@@ -2957,11 +2957,14 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     relation_evaluator as evaluate_relations takes it ("auto": the checks.py of judging_checks when present: the
     run's snapshot for a recorded set, the re-evaluation's for the re-evaluated set, else the one next to this
     script), whose module also reads /traverse answers for the direct arms' timing rule; |warnings| (table_for's) are
-    kept in the result, and `judged_with` states the checks and the table's origin. A snapshot whose checks.py or
+    kept in the result, `judged_with` states the checks and the table's origin, and `executions_sha256` the sha256 of
+    the merged lines it read (the gate judges only those lines with it). A snapshot whose checks.py or
     suite_common.py is not the one its SNAPSHOT.json records is not executed (suite_common.snapshot_refusal): the
     built-in relations and no content rule, with a warning."""
     run = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated)), {}) or {}
-    rows, bad = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
+    executions = os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated))
+    executions_sha256 = sc.file_sha256(executions)   # the lines this comparison read (the gate checks them)
+    rows, bad = sc.read_jsonl(executions)
     judged_with = judging_checks(run_dir, reevaluated)
     checks_mod = load_checks_module(judged_with["dir"])
     if relation_evaluator == "auto":
@@ -3162,7 +3165,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
         "manifest_sha256": (run.get("manifest") or {}).get("computed_sha256")
         or (run.get("manifest") or {}).get("content_sha256"),
         # the snapshot's table and checks relative to RUN_DIR (run_relative): a moved run still names them
-        "arms": arms_present, "unparsable_lines": bad,
+        "arms": arms_present, "unparsable_lines": bad, "executions_sha256": executions_sha256,
         "by_design_table": dict(table_info, path=run_relative(table_info.get("path"), run_dir))
         if isinstance(table_info, dict) else table_info, "references": references,
         "judged_with": dict(judged_with, dir=run_relative(judged_with["dir"], run_dir),

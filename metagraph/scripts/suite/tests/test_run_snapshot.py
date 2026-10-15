@@ -29,7 +29,7 @@ import run_direct  # noqa: E402
 import suite_common as sc  # noqa: E402
 from fake_host import FakeHost  # noqa: E402
 from test_compare_report import T0, line, write_arm  # noqa: E402
-from test_gate import TABLE, make_run, manifest_of, mcp_lines, policy_of  # noqa: E402
+from test_gate import TABLE, checks_for, make_run, manifest_of, mcp_lines, policy_of  # noqa: E402
 from test_orchestrator import SuiteCase, mcp_scenarios  # noqa: E402
 from test_runner import basic_scenarios, make_manifest, scenario  # noqa: E402
 
@@ -440,6 +440,43 @@ class MergeChecksIdentityTest(unittest.TestCase):
             "checks.py (sha256 %s) of the re-evaluation's checks directory (%s) is not the %s the re-evaluation "
             "records (reevaluated.json): re-evaluate the set"
             % (sc.file_sha256(os.path.join(checks_dir, "checks.py"))[:12], checks_dir, recorded[:12])])
+
+    def test_lines_edited_after_their_comparison_block_the_gate(self):
+        # the comparison states the sha256 of the merged lines it read (executions_sha256); lines edited after it (a
+        # failing property rewritten to pass, in the recorded or the re-evaluated set) are not what it compared, so
+        # the gate blocks on identity instead of judging them; compared again, the edit is judged as any line
+        m = manifest_of()
+        failing = {("T-001", 0): {"checks": checks_for("T-001", 0, prop="fail"), "outcome": "fail"}}
+        for reevaluated in (False, True):
+            d = make_run(os.path.join(self.d, "runs", "edited_%s" % reevaluated), m, mcp_lines(m, change=failing))
+            lines = os.path.join(d, sc.reevaluated_name("executions.jsonl", reevaluated))
+            if reevaluated:
+                shutil.copy(os.path.join(d, "arms", "mcp", "executions.jsonl"),
+                            os.path.join(d, "arms", "mcp", "executions.reevaluated.jsonl"))
+                sc.write_json_atomic(os.path.join(d, "reevaluated.json"), {"checks": {
+                    "dir": SUITE, "checks_sha256": sc.file_sha256(os.path.join(SUITE, "checks.py")),
+                    "suite_common_sha256": sc.file_sha256(os.path.join(SUITE, "suite_common.py"))}})
+                merge_run.merge(d, reevaluated=True)
+                sc.write_json_atomic(os.path.join(d, "compare.reevaluated.json"),
+                                     cmp.compare(d, TABLE, reevaluated=True))
+            comp_path = os.path.join(d, sc.reevaluated_name("compare.json", reevaluated))
+            self.assertEqual(sc.read_json(comp_path)["executions_sha256"], sc.file_sha256(lines))
+            v = gate.judge(d, policy_of(m), reevaluated=reevaluated)
+            self.assertIn(("T-001", 0), [(p["scenario"], p["repeat"]) for p in v["problems"]])
+            rows = sc.read_jsonl(lines)[0]
+            for row in rows:
+                if (row["scenario"], row["arm"], row["repeat"]) == ("T-001", "mcp", 0):
+                    row.update(outcome="pass", checks=checks_for("T-001", 0))
+            with open(lines, "w") as fh:
+                fh.write("".join(json.dumps(row) + "\n" for row in rows))
+            v = gate.judge(d, policy_of(m), reevaluated=reevaluated)
+            self.assertFalse(v["passed"])
+            self.assertEqual([(p["kind"], p["detail"]) for p in v["problems"]], [(
+                "identity", "%s read %s with sha256 %s; the gate judges it with sha256 %s: recompute the comparison"
+                % (os.path.basename(comp_path), os.path.basename(lines),
+                   sc.read_json(comp_path)["executions_sha256"][:12], sc.file_sha256(lines)[:12]))])
+            sc.write_json_atomic(comp_path, cmp.compare(d, TABLE, reevaluated=reevaluated))
+            self.assertTrue(gate.judge(d, policy_of(m), reevaluated=reevaluated)["passed"])
 
     def test_a_broken_snapshot_record_or_a_missing_executed_file_is_refused_never_a_crash(self):
         # SNAPSHOT.json empty, torn, no object, unreadable, or a file it records deleted (its suite_common.py): the
