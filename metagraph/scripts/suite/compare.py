@@ -2989,7 +2989,9 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     relation_evaluator as evaluate_relations takes it ("auto": the checks.py of judging_checks when present: the
     run's snapshot for a recorded set, the re-evaluation's for the re-evaluated set, else the one next to this
     script), whose module also reads /traverse answers for the direct arms' timing rule; |warnings| (table_for's) are
-    kept in the result, and `judged_with` states the checks and the table's origin."""
+    kept in the result, and `judged_with` states the checks and the table's origin. A snapshot whose checks.py or
+    suite_common.py is not the one its SNAPSHOT.json records is not executed (suite_common.snapshot_refusal): the
+    built-in relations and no content rule, with a warning."""
     run = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated)), {}) or {}
     rows, bad = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
     judged_with = judging_checks(run_dir, reevaluated)
@@ -3000,6 +3002,8 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
     cases, table_info = by_design if by_design else ({}, None)
     warnings = list(warnings or [])
+    warnings.extend("the comparison does not execute the checks that judged the set: %s" % x
+                    for x in sc.snapshot_refusal(judged_with["dir"]))
     references = None
     if table_info is not None:
         # the configuration the references read: the run's live documents, else the table's blocks (named in the

@@ -118,7 +118,10 @@ def load_checks(directory):
     copy (the digest and normaliser of the same checks), this script's own suite_common left in place."""
     if not os.path.exists(os.path.join(directory, "checks.py")):
         raise SystemExit("reevaluate: no checks.py in %s" % directory)
-    return sc.load_checks_bound(directory, "suite_checks_reevaluation")
+    try:
+        return sc.load_checks_bound(directory, "suite_checks_reevaluation")
+    except sc.SnapshotChanged as e:
+        raise SystemExit("reevaluate: %s" % e)
 
 
 def checks_identity(directory):

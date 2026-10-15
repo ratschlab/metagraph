@@ -23,6 +23,7 @@ sys.path.insert(0, HERE)
 import compare as cmp  # noqa: E402
 import gate  # noqa: E402
 import merge_run  # noqa: E402
+import reevaluate  # noqa: E402
 import report  # noqa: E402
 import run_direct  # noqa: E402
 import suite_common as sc  # noqa: E402
@@ -248,15 +249,60 @@ class MergeChecksIdentityTest(unittest.TestCase):
         self.assertEqual(merge_run.merge(d)["checks_identity"]["errors"], [])
 
     def test_the_merge_judges_with_the_snapshot(self):
-        # checks.scenario_outcome makes outcomes stricter: the run's snapshot's, not the live tree's
+        # checks.scenario_outcome makes outcomes stricter: the run's snapshot's (the checks.py its SNAPSHOT.json
+        # records), not the live tree's
         d = self.make()
-        with open(os.path.join(d, "scripts", "checks.py"), "a") as fh:
+        path = os.path.join(d, "scripts", "checks.py")
+        with open(path, "a") as fh:
             fh.write(FAILING_CHECKS)
-        merged = merge_run.merge(d)
+        snap = sc.read_json(os.path.join(d, "scripts", "SNAPSHOT.json"))
+        snap["files"]["checks.py"] = sc.file_sha256(path)
+        sc.write_json_atomic(os.path.join(d, "scripts", "SNAPSHOT.json"), snap)
+        merge_run.merge(d)
         rows, _ = sc.read_jsonl(os.path.join(d, "executions.jsonl"))
         self.assertEqual(set(r["outcome"] for r in rows), {"fail"})
-        self.assertEqual(merged["checks_identity"]["differs"],
-                         ["the run's snapshot changed after it was taken: scripts/checks.py"])
+
+    def test_a_snapshot_file_changed_after_it_was_taken_is_never_executed(self):
+        # a checks.py or suite_common.py of the snapshot that is not the one SNAPSHOT.json records: the merge, the
+        # comparison, the gate's property reading and the re-evaluation refuse to load it (the marker its execution
+        # would write stays absent); the merge keeps the runners' outcomes and says why, the gate blocks on it
+        m = manifest_of()
+        for name in sc.EXECUTED_FILES:
+            d = make_run(os.path.join(self.d, "runs", name.replace(".", "_")), m, mcp_lines(m))
+            snap = os.path.join(d, "scripts")
+            self.assertEqual(sc.snapshot_refusal(snap), [])
+            marker = os.path.join(self.d, "executed-%s" % name)
+            with open(os.path.join(snap, name), "a") as fh:
+                fh.write("\n\nopen(%r, 'w').write('executed')\n" % marker)
+            refused = sc.snapshot_refusal(snap)
+            self.assertEqual(len(refused), 1)
+            self.assertIn("%s has sha256 %s, not the %s SNAPSHOT.json records: not executed" % (
+                os.path.join(snap, name), sc.file_sha256(os.path.join(snap, name))[:12],
+                sc.file_sha256(os.path.join(SUITE, name))[:12]), refused[0])
+            with self.assertRaises(sc.SnapshotChanged):
+                sc.load_checks_bound(snap, "suite_checks_probe")
+            self.assertIsNone(cmp.load_checks_module(snap))
+            self.assertIsNone(cmp.load_relation_evaluator(snap))
+            with self.assertRaises(SystemExit):
+                reevaluate.load_checks(snap)
+            merged = merge_run.merge(d)
+            self.assertIn("checks.scenario_outcome not applied, the runners' outcomes stand: %s" % refused[0],
+                          merged["warnings"])
+            self.assertIn("the run's snapshot changed after it was taken: scripts/%s" % name,
+                          merged["checks_identity"]["errors"])
+            comp = cmp.compare(d, cmp.load_by_design(cmp.table_for(d)[0]))
+            self.assertIn("the comparison does not execute the checks that judged the set: %s" % refused[0],
+                          comp["warnings"])
+            v = gate.judge(d, policy_of(m))
+            self.assertFalse(v["passed"])
+            self.assertIn("the property reading refuses the checks that judged the set (snapshot): %s" % refused[0],
+                          [p["detail"] for p in v["problems"] if p["kind"] == "identity"])
+            with contextlib.redirect_stdout(io.StringIO()):
+                report.build_report(d)
+            self.assertFalse(os.path.exists(marker), name)
+        # a snapshot of the live files and a directory without SNAPSHOT.json load as before
+        self.assertIsNotNone(cmp.load_checks_module(SUITE))
+        self.assertEqual(sc.snapshot_refusal(SUITE), [])
 
 
 class ComparisonSnapshotTest(unittest.TestCase):

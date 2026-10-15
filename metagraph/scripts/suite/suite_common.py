@@ -2059,12 +2059,45 @@ SNAPSHOT_FILES = ("run_direct.py", "sampler.py", "suite_common.py", "checks.py",
                   "service_by_design.json")
 
 
+class SnapshotChanged(Exception):
+    """A snapshot's file that is not the one its SNAPSHOT.json records: it is never executed (snapshot_refusal)."""
+
+
+# the files of a checks directory load_checks_bound executes
+EXECUTED_FILES = ("checks.py", "suite_common.py")
+
+
+def snapshot_refusal(directory, names=EXECUTED_FILES):
+    """Why files |names| of |directory| may not be executed: one sentence per file it holds whose sha256 is not the
+    one its SNAPSHOT.json records (changed or added after the snapshot was taken), or one when SNAPSHOT.json states no
+    files; [] for a directory without SNAPSHOT.json (a tree, a re-evaluation's checks) and for one whose files are
+    the recorded ones."""
+    path = os.path.join(directory, SNAPSHOT_FILE)
+    if not os.path.isfile(path):
+        return []
+    doc = read_json(path)
+    files = doc.get("files") if isinstance(doc, dict) else None
+    if not isinstance(files, dict):
+        return ["%s states no files: %s not executed" % (path, ", ".join(names))]
+    out = []
+    for name in names:
+        got = file_sha256(os.path.join(directory, name))
+        if got is not None and got != files.get(name):
+            out.append("%s has sha256 %s, not the %s SNAPSHOT.json records: not executed" % (
+                os.path.join(directory, name), got[:12], str(files.get(name))[:12] if files.get(name) else "none"))
+    return out
+
+
 def load_checks_bound(directory, name):
     """checks.py of |directory| as module |name|, its `import suite_common` resolved to |directory|'s copy when it
     has one (a run's snapshot: the digest and normaliser its arms judged with; a re-evaluation's checks directory),
-    never to the caller's: the caller's suite_common module and sys.path are restored afterwards. Raises what
-    loading raises."""
+    never to the caller's: the caller's suite_common module and sys.path are restored afterwards. A snapshot whose
+    checks.py or suite_common.py is not the one its SNAPSHOT.json records is not executed: SnapshotChanged
+    (snapshot_refusal). Raises what loading raises."""
     import importlib.util
+    refused = snapshot_refusal(directory)
+    if refused:
+        raise SnapshotChanged("; ".join(refused))
     own = sys.modules.get("suite_common")
     saved_path = list(sys.path)
     sys.modules.pop("suite_common", None)

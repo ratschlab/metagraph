@@ -30,8 +30,9 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   (host_identity_problems: the MCP arm's from service_capabilities.host_document), the host's release and index_fp
   did not change during the run (merge_run.release_identity), every arm of a recorded set was judged with the run's
   snapshot of its checks, every MCP invocation stating both checks_sha256 and suite_common_sha256, and a recorded
-  set without a snapshot blocks (merge_run.checks_identity), and the comparison read the by-design table the
-  policy's exclusions were derived from;
+  set without a snapshot blocks (merge_run.checks_identity), the checks that judged the set are the ones their
+  snapshot's SNAPSHOT.json records where they have one (suite_common.snapshot_refusal: a changed file is never
+  executed), and the comparison read the by-design table the policy's exclusions were derived from;
 - missing: every planned execution and every execution the policy requires is recorded;
 - outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
   the owner's strict gate), not_implemented_mcp (what the MCP cannot express is excluded in the policy), or
@@ -583,8 +584,13 @@ def judge(run_dir, policy, reevaluated=False):
         problems.append(_problem("identity", "the comparison read the by-design table sha256 %s, the policy was derived "
                                              "from %s (regenerate the policy with gate_policy.py, or compare with "
                                              "that table)" % (str(used)[:16], pinned[:16])))
-    # the property reading with the checks that judged the set: a recorded run's snapshot, a re-evaluation's checks
-    is_property = _is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
+    # the property reading with the checks that judged the set: a recorded run's snapshot, a re-evaluation's checks;
+    # a snapshot file that is not SNAPSHOT.json's is never executed (the reading falls back to GENERIC_CHECKS)
+    judging = cmp.judging_checks(run_dir, reevaluated)
+    for refused in sc.snapshot_refusal(judging["dir"]):
+        problems.append(_problem("identity", "the property reading refuses the checks that judged the set (%s): %s"
+                                 % (judging["source"], refused)))
+    is_property = _is_property_fn(judging["dir"])
     passed = judged = 0
     passed_by_arm = {}
     by_design_mcp_only = 0

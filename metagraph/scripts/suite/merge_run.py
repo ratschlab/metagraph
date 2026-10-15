@@ -76,14 +76,20 @@ UNPINNED = ("the run has no snapshot (scripts/SNAPSHOT.json): the checks that ju
 _STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
 
 
-def load_scenario_outcome(checks_dir=None):
-    """checks.scenario_outcome of checks.py in |checks_dir| (default: next to this script), or None."""
+def load_scenario_outcome(checks_dir=None, warnings=None):
+    """checks.scenario_outcome of checks.py in |checks_dir| (default: next to this script), or None. A snapshot whose
+    checks.py or suite_common.py is not the one its SNAPSHOT.json records is not executed (suite_common.
+    snapshot_refusal): None, and |warnings| (a list) says so."""
     directory = checks_dir or os.path.dirname(os.path.abspath(__file__))
     if not os.path.exists(os.path.join(directory, "checks.py")):
         return None
     try:
         # bound to that directory's suite_common (a run's snapshot judges with its own)
         mod = sc.load_checks_bound(directory, "suite_checks_for_outcomes")
+    except sc.SnapshotChanged as e:
+        if warnings is not None:
+            warnings.append("checks.scenario_outcome not applied, the runners' outcomes stand: %s" % e)
+        return None
     except Exception:  # a checks.py that does not load leaves the runners' outcomes
         return None
     return getattr(mod, "scenario_outcome", None)
@@ -577,7 +583,8 @@ def merge(run_dir, reevaluated=False):
         warnings.append("arms/%s: %d line(s) with an outcome outside the shared vocabulary (%s) read as error "
                         "(outcome_runner keeps the recorded one)" % (arm, sum(counts.values()), ", ".join(
                             "%s %d" % kv for kv in sorted(counts.items()))))
-    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir), scenarios, run_dir)
+    rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir, warnings), scenarios,
+                                  run_dir)
     for arm, n in sorted(rederived.items()):
         warnings.append("arms/%s: %d outcome(s) made stricter by checks.scenario_outcome (outcome_runner keeps the "
                         "runner's)" % (arm, n))
