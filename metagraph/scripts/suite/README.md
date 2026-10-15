@@ -2402,8 +2402,16 @@ one lane's verification left to another lane's file.
   null}; the report's Environment table states it ("comparison judged with": the run's snapshot, the
   re-evaluation's checks, or this tree's checks.py with the remark that a change of the tree since the run reaches
   the comparison) and the table's origin beside its sha256. merge_run's stricter outcomes already used the snapshot.
-- Not pinned: a snapshot's checks.py imports `suite_common` by name, and in the comparison (as in merge_run) that
-  resolves to this directory's suite_common.py, already loaded; the arms import the snapshot's own.
+- The snapshot's checks.py imports the snapshot's suite_common.py in the verdict pipeline too
+  (`suite_common.load_checks_bound`, reevaluate.load_checks' technique: the caller's suite_common module set aside
+  and the checks directory first on sys.path while checks.py loads, both restored after), in
+  compare.load_checks_module (the content rule, the relations, the gate's and the report's property reading),
+  compare.load_relation_evaluator and merge_run.load_scenario_outcome: a change of a suite_common helper the checks
+  call (answer_digest, normalise_direct) landing in the tree after the run cannot move its verdict (VERIFY-SUITE-INT
+  follow-up 1). The pipeline itself (merge_run, compare, gate, report) keeps this directory's suite_common, as it
+  keeps its own code: compare.json judged_with records `suite_common_sha256` (the checks'), `pipeline_suite_common_
+  sha256` and `live_suite_common_differs`; when they differ the report's "comparison judged with" row adds a note
+  and the gate a note, never a problem (re-judging an old run with a newer pipeline is intended).
 - tests/test_run_snapshot.py: ComparisonSnapshotTest (judging_checks / table_for; the gate's and the report's
   property reading and the report's statement) and RunSuiteSnapshotTest.test_a_checks_change_during_the_run_does_
   not_reach_the_comparison (a copy of the suite, one same_answer relation, an evaluate_relation failing every

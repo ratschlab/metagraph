@@ -250,6 +250,17 @@ TABLE_ORIGIN = {"snapshot": "; the run's snapshot (scripts/service_by_design.jso
                 "live": "; this tree's", "other": "; a table given to compare"}
 
 
+def pipeline_note(judged):
+    """A note, not a failure: the verdict pipeline (merge_run, compare, gate, report) runs with this tree's
+    suite_common.py, and it differs from the one the checks judged with (compare.judging_checks)."""
+    if not judged.get("live_suite_common_differs"):
+        return ""
+    return "; note: suite_common.py of this tree differs from the run's snapshot (sha256 %s, the snapshot's %s): " \
+        "the checks judged with the snapshot's, the verdict pipeline (merge_run, compare, gate, report) with this " \
+        "tree's" % (md(short(judged.get("pipeline_suite_common_sha256"), 12)),
+                    md(short(judged.get("suite_common_sha256"), 12)))
+
+
 def judged_with_text(judged):
     """Which checks.py judged the comparison's relations and content rule and the property reading
     (compare.judging_checks, compare.json judged_with): the run's snapshot, a re-evaluation's checks or this tree's."""
@@ -258,10 +269,12 @@ def judged_with_text(judged):
     sha = md(short(judged.get("checks_sha256"), 12))
     if judged.get("source") == "snapshot":
         changed = judged.get("snapshot_changed") or []
-        return "checks.py of the run's snapshot (scripts/, sha256 %s)%s" % (
-            sha, ("; its %s changed after it was taken (SNAPSHOT.json)" % md(", ".join(changed))) if changed else "")
+        return "checks.py of the run's snapshot (scripts/, sha256 %s, with the snapshot's suite_common.py)%s%s" % (
+            sha, ("; its %s changed after it was taken (SNAPSHOT.json)" % md(", ".join(changed))) if changed else "",
+            pipeline_note(judged))
     if judged.get("source") == "reevaluation":
-        return "checks.py of the re-evaluation (%s, sha256 %s)" % (md(judged.get("dir") or "-"), sha)
+        return "checks.py of the re-evaluation (%s, sha256 %s)%s" % (md(judged.get("dir") or "-"), sha,
+                                                                     pipeline_note(judged))
     return "checks.py of this tree (%s, sha256 %s): the set has no snapshot (or re-evaluation checks) of its own, so " \
         "a change of the tree since the run reaches this comparison" % (md(judged.get("dir") or "-"), sha)
 

@@ -1722,19 +1722,16 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
 
 
 def load_checks_module(checks_dir=None):
-    """checks.py of |checks_dir| (default: next to this script) as a module, or None (direct_agreement's content
-    rule reads a /traverse result through it)."""
-    path = os.path.join(checks_dir or os.path.dirname(os.path.abspath(__file__)), "checks.py")
-    if not os.path.exists(path):
+    """checks.py of |checks_dir| (default: next to this script) as a module bound to that directory's suite_common
+    (sc.load_checks_bound: a run's snapshot judges with its own), or None (direct_agreement's content rule reads a
+    /traverse result through it)."""
+    directory = checks_dir or os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(directory, "checks.py")):
         return None
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("suite_checks_for_compare", path)
-    mod = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(mod)
+        return sc.load_checks_bound(directory, "suite_checks_for_compare")
     except Exception:  # a checks.py that does not load: no /traverse content rule
         return None
-    return mod
 
 
 def answer_cases(cases):
@@ -2756,14 +2753,11 @@ RELATION_OUTCOMES = ("pass", "fail", "inconclusive", "not_exposed", "not_evaluat
 def load_relation_evaluator(checks_dir=None):
     """checks.evaluate_relation of checks.py in |checks_dir| (default: next to this script; lane S1's reference),
     or None."""
-    path = os.path.join(checks_dir or os.path.dirname(os.path.abspath(__file__)), "checks.py")
-    if not os.path.exists(path):
+    directory = checks_dir or os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(directory, "checks.py")):
         return None
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("suite_checks_for_relations", path)
-    mod = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(mod)
+        mod = sc.load_checks_bound(directory, "suite_checks_for_relations")
     except Exception:  # a checks.py that does not load leaves the built-in evaluation
         return None
     return getattr(mod, "evaluate_relation", None)
@@ -2942,6 +2936,13 @@ def judging_checks(run_dir, reevaluated=False):
     out = {"source": source, "dir": d, "checks_sha256": sc.file_sha256(os.path.join(d, "checks.py"))}
     if source == "snapshot":
         out["snapshot_changed"] = sc.snapshot_state(run_dir)[1]
+    # the checks import the suite_common beside them (sc.load_checks_bound); the verdict pipeline (merge_run,
+    # compare, gate, report) imports this directory's: whether the two differ is stated, not pinned (re-judging an
+    # old run with a newer pipeline is intended)
+    own = sc.file_sha256(os.path.join(d, "suite_common.py"))
+    pipeline = sc.file_sha256(os.path.join(os.path.dirname(os.path.abspath(__file__)), "suite_common.py"))
+    out.update(suite_common_sha256=own, pipeline_suite_common_sha256=pipeline,
+               live_suite_common_differs=bool(own and pipeline and own != pipeline))
     return out
 
 

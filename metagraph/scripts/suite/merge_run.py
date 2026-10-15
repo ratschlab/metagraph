@@ -75,14 +75,12 @@ _STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
 
 def load_scenario_outcome(checks_dir=None):
     """checks.scenario_outcome of checks.py in |checks_dir| (default: next to this script), or None."""
-    path = os.path.join(checks_dir or os.path.dirname(os.path.abspath(__file__)), "checks.py")
-    if not os.path.exists(path):
+    directory = checks_dir or os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(directory, "checks.py")):
         return None
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("suite_checks_for_outcomes", path)
-    mod = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(mod)
+        # bound to that directory's suite_common (a run's snapshot judges with its own)
+        mod = sc.load_checks_bound(directory, "suite_checks_for_outcomes")
     except Exception:  # a checks.py that does not load leaves the runners' outcomes
         return None
     return getattr(mod, "scenario_outcome", None)

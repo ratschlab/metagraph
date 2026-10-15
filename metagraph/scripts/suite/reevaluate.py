@@ -69,7 +69,6 @@ compare.reevaluated.json and report.reevaluated.md / .pdf beside the recorded on
 
 import argparse
 import hashlib
-import importlib.util
 import inspect
 import json
 import os
@@ -117,24 +116,9 @@ def git_commit(directory):
 def load_checks(directory):
     """checks.py of |directory| as a module of its own, whose `import suite_common` resolves to that directory's
     copy (the digest and normaliser of the same checks), this script's own suite_common left in place."""
-    path = os.path.join(directory, "checks.py")
-    if not os.path.exists(path):
+    if not os.path.exists(os.path.join(directory, "checks.py")):
         raise SystemExit("reevaluate: no checks.py in %s" % directory)
-    own = sys.modules.get("suite_common")
-    saved_path = list(sys.path)
-    sys.modules.pop("suite_common", None)
-    sys.path.insert(0, directory)
-    try:
-        spec = importlib.util.spec_from_file_location("suite_checks_reevaluation", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    finally:
-        sys.path[:] = saved_path
-        if own is not None:
-            sys.modules["suite_common"] = own
-        else:
-            sys.modules.pop("suite_common", None)
-    return mod
+    return sc.load_checks_bound(directory, "suite_checks_reevaluation")
 
 
 def checks_identity(directory):

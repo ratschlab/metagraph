@@ -1686,6 +1686,29 @@ SNAPSHOT_FILES = ("run_direct.py", "sampler.py", "suite_common.py", "checks.py",
                   "service_by_design.json")
 
 
+def load_checks_bound(directory, name):
+    """checks.py of |directory| as module |name|, its `import suite_common` resolved to |directory|'s copy when it
+    has one (a run's snapshot: the digest and normaliser its arms judged with; a re-evaluation's checks directory),
+    never to the caller's: the caller's suite_common module and sys.path are restored afterwards. Raises what
+    loading raises."""
+    import importlib.util
+    own = sys.modules.get("suite_common")
+    saved_path = list(sys.path)
+    sys.modules.pop("suite_common", None)
+    sys.path.insert(0, directory)
+    try:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(directory, "checks.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path[:] = saved_path
+        if own is not None:
+            sys.modules["suite_common"] = own
+        else:
+            sys.modules.pop("suite_common", None)
+    return mod
+
+
 def file_sha256(path):
     """The sha256 of a file's bytes, None when it cannot be read."""
     try:

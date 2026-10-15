@@ -607,6 +607,12 @@ def judge(run_dir, policy, reevaluated=False):
     if by_design_mcp_only:
         notes.append("%d by-design scenario(s) verified on the MCP side only (no direct arm ran them)"
                      % by_design_mcp_only)
+    judged_with = (comp or {}).get("judged_with") or {}
+    if judged_with.get("live_suite_common_differs"):
+        # a note, not a problem: the checks judged with the run's own suite_common, the pipeline is this tree's
+        notes.append("suite_common.py of this tree (sha256 %s) differs from the one the checks judged with (%s, "
+                     "sha256 %s)" % (str(judged_with.get("pipeline_suite_common_sha256"))[:12],
+                                     judged_with.get("source"), str(judged_with.get("suite_common_sha256"))[:12]))
 
     # relations
     rels = dict((x.get("id"), x) for x in (comp or {}).get("relations") or [])

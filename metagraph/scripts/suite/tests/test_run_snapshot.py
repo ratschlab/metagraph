@@ -237,9 +237,11 @@ class ComparisonSnapshotTest(unittest.TestCase):
         self.assertEqual(cmp.table_for(self.run_dir)[0], cmp.DEFAULT_BY_DESIGN)
         sc.take_snapshot(SUITE, self.run_dir, "c", 0)
         snap = os.path.join(self.run_dir, "scripts")
+        sc_sha = sc.file_sha256(os.path.join(SUITE, "suite_common.py"))
         self.assertEqual(cmp.judging_checks(self.run_dir), {
             "source": "snapshot", "dir": snap, "checks_sha256": sc.file_sha256(os.path.join(SUITE, "checks.py")),
-            "snapshot_changed": []})
+            "snapshot_changed": [], "suite_common_sha256": sc_sha, "pipeline_suite_common_sha256": sc_sha,
+            "live_suite_common_differs": False})
         self.assertEqual(cmp.table_for(self.run_dir)[0], os.path.join(snap, "service_by_design.json"))
         self.assertEqual(cmp.table_for(self.run_dir, "")[0], "")             # a table given (none) still wins
         # a re-evaluated set is judged with the re-evaluation's checks and table, never the snapshot's
@@ -267,8 +269,8 @@ class ComparisonSnapshotTest(unittest.TestCase):
         finally:
             gate._is_property_fn = real
         self.assertEqual(seen, [os.path.join(d, "scripts")] * 2)
-        self.assertIn("checks.py of the run's snapshot (scripts/, sha256 %s)" % sc.file_sha256(
-            os.path.join(SUITE, "checks.py"))[:12], text)
+        self.assertIn("checks.py of the run's snapshot (scripts/, sha256 %s, with the snapshot's suite_common.py) |"
+                      % sc.file_sha256(os.path.join(SUITE, "checks.py"))[:12], text)
         self.assertIn("the run's snapshot (scripts/service_by_design.json)", text)
         comp = sc.read_json(os.path.join(d, "compare.json"))
         self.assertEqual((comp["judged_with"]["source"], comp["judged_with"]["by_design"]), ("snapshot", "snapshot"))
@@ -276,6 +278,127 @@ class ComparisonSnapshotTest(unittest.TestCase):
         shutil.rmtree(os.path.join(d, "scripts"))
         os.remove(os.path.join(d, "compare.json"))
         self.assertIn("checks.py of this tree (%s" % SUITE.replace("_", "\\_"), report.build_report(d))
+
+
+# a checks.py whose relation reads a suite_common helper (answer_digest): a relation rule a later checks.py may have
+DIGEST_RELATION = '''
+
+def evaluate_relation(rel, a_scenario, a_answer, b_scenario, b_answer, arm):
+    a, b = answer_digest(a_answer), answer_digest(b_answer)
+    return {"relation": rel.get("id"), "type": rel.get("type"), "a": rel.get("a"), "b": rel.get("b"),
+            "outcome": "pass" if a == b else "fail", "detail": "digests %s / %s" % (a[:24], b[:24])}
+'''
+# suite_common.py as a change landing in the tree after the snapshot would leave it: every digest a new sentinel
+SENTINEL_DIGEST = '''
+
+_SENTINELS = []
+
+
+def answer_digest(answer, route=None):
+    _SENTINELS.append(1)
+    return "SENTINEL-LIVE-SUITE-COMMON-%d" % len(_SENTINELS)
+'''
+# the verdict pipeline of the live tree LIVE judging the recorded run RUN_DIR (a fresh interpreter): the module the
+# snapshot's checks.py bound, the relations, compare.json's judged_with and the report's verdict and note
+JUDGE = r'''
+import json, os, sys
+live, run_dir = sys.argv[1], sys.argv[2]
+sys.path.insert(0, live)
+import compare as cmp, report, suite_common as sc
+j = cmp.judging_checks(run_dir)
+mod = cmp.load_checks_module(j["dir"])
+table, _ = cmp.table_for(run_dir)
+comp = cmp.compare(run_dir, cmp.load_by_design(table))
+sc.write_json_atomic(os.path.join(run_dir, "compare.json"), comp)
+text = report.build_report(run_dir)
+print(json.dumps({
+    "bound": os.path.relpath(mod._suite_common.__file__, run_dir),
+    "pipeline": os.path.relpath(sys.modules["suite_common"].__file__, live),
+    "relations": dict((r["id"], r["arms"]["mcp"]["outcome"]) for r in comp["relations"]),
+    "verdict": text.split("# Verdict", 1)[1].strip().splitlines()[0],
+    "judged_with": comp["judged_with"],
+    "note": [x for x in text.splitlines() if "suite_common.py of this tree" in x]}))
+'''
+
+
+class SnapshotSuiteCommonTest(unittest.TestCase):
+    """The snapshot's checks.py imports the snapshot's suite_common in the verdict pipeline (compare, the gate's and
+    the report's property reading, merge_run's stricter outcomes), never this tree's: a change of a suite_common helper
+    the checks call, landing in the tree after the run, cannot move the recorded run's verdict; that the pipeline's
+    own suite_common differs from the snapshot's is recorded and noted."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def judge(self, live, run_dir):
+        p = subprocess.run([sys.executable, "-I", "-B", "-c", JUDGE, live, run_dir], stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return json.loads(p.stdout.strip().splitlines()[-1])
+
+    def test_a_live_suite_common_change_cannot_move_the_verdict(self):
+        live = os.path.join(self.d, "live")
+        os.makedirs(live)
+        for name in os.listdir(SUITE):
+            if name.endswith((".py", ".json")):
+                shutil.copy2(os.path.join(SUITE, name), live)
+        with open(os.path.join(live, "checks.py"), "a") as fh:
+            fh.write(DIGEST_RELATION)
+        m = manifest_of()
+        run_dir = make_run(os.path.join(self.d, "runs", "RUN1"), m, mcp_lines(m))
+        sc.take_snapshot(live, run_dir, "c", 0)
+        before = self.judge(live, run_dir)
+        self.assertEqual(before["relations"], {"REL-1": "pass", "REL-2": "pass"})
+        with open(os.path.join(live, "suite_common.py"), "a") as fh:
+            fh.write(SENTINEL_DIGEST)
+        after = self.judge(live, run_dir)
+        self.assertEqual((after["relations"], after["verdict"]), (before["relations"], before["verdict"]))
+        # the snapshot's checks bound the snapshot's suite_common; the pipeline keeps its own
+        self.assertEqual(before["bound"], os.path.join("scripts", "suite_common.py"))
+        self.assertEqual((after["bound"], after["pipeline"]), (os.path.join("scripts", "suite_common.py"),
+                                                               "suite_common.py"))
+        self.assertFalse(before["judged_with"]["live_suite_common_differs"])
+        self.assertEqual(before["note"], [])
+        jw = after["judged_with"]
+        self.assertTrue(jw["live_suite_common_differs"])
+        self.assertEqual(jw["suite_common_sha256"], sc.file_sha256(os.path.join(run_dir, "scripts", "suite_common.py")))
+        self.assertEqual(jw["pipeline_suite_common_sha256"], sc.file_sha256(os.path.join(live, "suite_common.py")))
+        self.assertEqual(len(after["note"]), 1, after["note"])
+        self.assertIn("suite_common.py of this tree differs from the run's snapshot", after["note"][0])
+
+    def test_the_gate_notes_a_differing_pipeline_suite_common(self):
+        # a note of the gate, never a problem: the checks judged with the snapshot's suite_common
+        m = manifest_of()
+        d = make_run(os.path.join(self.d, "runs", "RUN1"), m, mcp_lines(m))
+        sc.take_snapshot(SUITE, d, "c", 0)
+        comp = cmp.compare(d, cmp.load_by_design(cmp.table_for(d)[0]))
+        comp["judged_with"].update(live_suite_common_differs=True, pipeline_suite_common_sha256="a" * 64)
+        sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+        v = gate.judge(d, policy_of(m))
+        self.assertIn("suite_common.py of this tree (sha256 aaaaaaaaaaaa) differs from the one the checks judged with "
+                      "(snapshot, sha256 %s)" % sc.file_sha256(os.path.join(SUITE, "suite_common.py"))[:12], v["notes"])
+        self.assertFalse([p for p in v["problems"] if "suite_common" in p["detail"]])
+
+    def test_the_bound_loader_leaves_the_callers_suite_common(self):
+        snap = os.path.join(self.d, "snap")
+        os.makedirs(snap)
+        for name in ("checks.py", "suite_common.py"):
+            shutil.copy2(os.path.join(SUITE, name), snap)
+        with open(os.path.join(snap, "suite_common.py"), "a") as fh:
+            fh.write(SENTINEL_DIGEST)
+        path = list(sys.path)
+        mod = sc.load_checks_bound(snap, "suite_checks_probe")
+        self.assertTrue(mod.answer_digest({"http": 200, "body": {}}).startswith("SENTINEL-LIVE-SUITE-COMMON"))
+        self.assertIs(sys.modules["suite_common"], sc)
+        self.assertEqual(sys.path, path)
+        for fn in (cmp.load_checks_module(snap), merge_run.load_scenario_outcome(snap),
+                   cmp.load_relation_evaluator(snap)):
+            self.assertIsNotNone(fn)
+        self.assertTrue(cmp.load_checks_module(snap).answer_digest({"http": 200}).startswith("SENTINEL"))
+        self.assertIs(sys.modules["suite_common"], sc)
 
 
 class RunSuiteSnapshotTest(SuiteCase):
