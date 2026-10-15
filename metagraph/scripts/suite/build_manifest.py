@@ -104,6 +104,10 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     # the host's substitution caps per kind decide the M-protein scenarios and their by-design naming (G04, G05); the
     # routes' time-budget caps the effective budget budget_respected states above them (A2-03)
     manifest_lib.set_host_capabilities(caps["pattern_capabilities"], caps["traverse_capabilities"])
+    cap = manifest_lib.HOST_BUDGET_CAP_MS.get("POST /resolve")
+    if cap is not None and cap < manifest_lib.RESOLVE_TIME_BUDGET_MS:
+        raise SystemExit("the snapshot's /resolve time-budget cap %d ms is below the builder's explicit-label budget "
+                         "%d ms: the host would lower every resolve's budget" % (cap, manifest_lib.RESOLVE_TIME_BUDGET_MS))
     gens = [("R", areas.gen_R), ("T", areas.gen_T), ("P", areas.gen_P), ("L", areas.gen_L), ("X", areas.gen_X),
             ("M", areas.gen_M), ("Q", areas.gen_Q), ("N", areas.gen_N)]
     scenarios = []
@@ -118,6 +122,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
     areas.state_chance_bounds(scenarios)
+    scenarios = place_warm_ups(scenarios)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios)
@@ -170,6 +175,28 @@ def not_applicable(caps: dict) -> list:
                     "reason": "the staging host is masked (capabilities counting %r, mask %r): counts are exact, "
                               "no upper_bound or estimate to test; build these on an unmasked host" % (
                                   pc.get("counting"), pc.get("mask"))})
+    return out
+
+
+def place_warm_ups(scenarios: list) -> list:
+    """|scenarios| with each warm-up (tag warm-up, truth.warm_up_for: a scenario id) moved to just before the
+    scenario it warms, several in the order built. A runner runs an arm's scenarios in manifest order (the paired
+    loop runs each scenario's executions, MCP cold first, before the next scenario's), so the warmed scenario's first
+    execution, the MCP arm's cold one, meets the rows the warm-up read (triage-v4 G22 / G24: cold reads under the
+    load decided the budget). A warm-up whose target is not in the manifest stays where it is."""
+    ids = set(s["id"] for s in scenarios)
+    warm = {}
+    rest = []
+    for s in scenarios:
+        target = (s.get("truth") or {}).get("warm_up_for") if "warm-up" in s.get("tags", []) else None
+        if target in ids:
+            warm.setdefault(target, []).append(s)
+        else:
+            rest.append(s)
+    out = []
+    for s in rest:
+        out += warm.get(s["id"], [])
+        out.append(s)
     return out
 
 

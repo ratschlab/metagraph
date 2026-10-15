@@ -41,7 +41,8 @@ class Builders(unittest.TestCase):
 
     def test_resolve_request_mirrors_the_service(self):
         r = ml.resolve_request("A" * 100, labels=["562"])
-        self.assertEqual(r["bounds"], {"max_query_bp": 2000, "time_budget_ms": 20000})
+        # the deadline: the host's cap on staging (60,000 ms; v4 named 20,000, below the cold first calls under load)
+        self.assertEqual(r["bounds"], {"max_query_bp": 2000, "time_budget_ms": 60000})
         r = ml.resolve_request("A" * 100, discover={"max_labels": 5})
         self.assertEqual(r["bounds"], {"max_query_bp": 500})
         r = ml.resolve_request("A" * 3000, labels=["562"])

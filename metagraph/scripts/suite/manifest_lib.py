@@ -29,9 +29,12 @@ PATTERN_MAX_PREDICATE_CONTEXTS = 10000   # the MCP's default and the staging hos
 # (async's table), named in every body where they act (pattern_request)
 PATTERN_DEFAULTS = {"scope": "any_offset", "strands": "both", "labels": "none", "occurrences": True,
                     "predicate_strands": "either"}
-# Explicit-label resolves name the deadline and the query bound the service sends (its max_time_ms 20,000 on
-# staging and its own max_query_bp 2,000 / 500 for a discovery), so that both arms send the same body
-RESOLVE_TIME_BUDGET_MS = 20000
+# Explicit-label resolves name the deadline and the query bound the service sends (its own max_query_bp 2,000 / 500
+# for a discovery), so that both arms send the same body. The deadline is the host's cap, 60,000 ms on staging (the
+# snapshot's resolve.time_budget.max_time_ms; the service's own default, TRAVERSAL_RESOLVE_TIME_BUDGET_MS, held to
+# it): v4's 20,000 ms met cold first calls of 21-37 s under the Logan load (a relayed 503 or the service's timeout,
+# triage-v4 G22, G23), which 60,000 ms holds with margin; a scenario that tests a budget names its own
+RESOLVE_TIME_BUDGET_MS = 60000
 RESOLVE_MAX_QUERY_BP = 2000
 DISCOVER_MAX_QUERY_BP = 500
 # The MCP's walk and trie presets (async's table, traverse.unnamed_strategy_fields; the budgets as the live
@@ -728,7 +731,7 @@ def resolve_by_design(req: Any) -> List[str]:
             ids.append("resolve.discover_limit_above_100_host_answers")
     tb = (req.get("bounds") or {}).get("time_budget_ms")
     if isinstance(tb, (int, float)) and not isinstance(tb, bool):
-        if tb > 20000:
+        if tb > HOST_BUDGET_CAP_MS.get("POST /resolve", 60000):
             ids.append("resolve.time_budget_above_host_max")
         elif tb <= 250:
             ids.append("resolve.time_budget_below_minimum")

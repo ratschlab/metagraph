@@ -243,5 +243,65 @@ class WorkBudget(unittest.TestCase):
         self.assertEqual(ids, ["T-budget-0001", "T-budget-0002", "T-budget-0003", "T-budget-0004"])
 
 
+class ResolveDecisive(unittest.TestCase):
+    """Item 5 (resolve) and triage-v4 V05: the explicit-label budget is the host's cap; the budget stop follows its
+    complete twin, a warm-up, and is a budget_stress scenario; eco's reference is a query this host completes."""
+
+    def tearDown(self):
+        ml.set_host_capabilities(None)
+
+    def test_budget_and_naming(self):
+        self.assertEqual(ml.RESOLVE_TIME_BUDGET_MS, 60000)
+        ml.set_host_capabilities({}, {"resolve": {"time_budget": {"max_time_ms": 60000}}})
+        r = lambda tb: ml.resolve_by_design(ml.resolve_request("A" * 100, labels=["1"], time_budget_ms=tb))  # noqa
+        self.assertNotIn("resolve.time_budget_above_host_max", r(60000))
+        self.assertIn("resolve.time_budget_above_host_max", r(70000))
+
+    def test_builder_refuses_a_lower_cap(self):
+        import build_manifest as bm
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            for name in bm.CAPABILITY_DOCUMENTS:
+                with open(os.path.join(SUITE, "truth", "staging_capabilities", name + ".json")) as f:
+                    doc = json.load(f)
+                if name == "traverse_capabilities":
+                    doc["resolve"]["time_budget"]["max_time_ms"] = 20000
+                with open(os.path.join(d, name + ".json"), "w") as f:
+                    json.dump(doc, f)
+            with self.assertRaises(SystemExit):
+                bm.build(1, fetch=False, only_areas={"C"}, capabilities_dir=d)
+
+    def test_place_warm_ups(self):
+        import build_manifest as bm
+        sc = lambda i, tags=(), warms=None: {"id": i, "tags": list(tags),  # noqa: E731
+                                              "truth": {"warm_up_for": warms} if warms else {}}
+        got = bm.place_warm_ups([sc("A"), sc("B"), sc("C"), sc("W1", ["warm-up"], "B"), sc("W2", ["warm-up"], "B"),
+                                 sc("W3", ["warm-up"], "Z"), sc("X", (), "A")])
+        self.assertEqual([s["id"] for s in got], ["A", "W1", "W2", "B", "C", "W3", "X"])
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_built(self):
+        m = built()
+        s = by_id(m)
+        order = [x["id"] for x in m["scenarios"]]
+        for twin, sid in (("R-twin-0002", "R-budget-0001"), ("R-twin-0004", "R-budget-0002")):
+            self.assertEqual(order.index(twin) + 1, order.index(sid))                    # the warm-up right before
+            self.assertIn("warm-up", s[twin]["tags"])
+            self.assertEqual(s[twin]["request"]["sequence"], s[sid]["request"]["sequence"])
+            self.assertEqual(s[twin]["request"]["bounds"]["time_budget_ms"], 60000)
+            b = s[sid]
+            self.assertIn("budget_stress", b["tags"])
+            budget = b["request"]["bounds"]["time_budget_ms"]
+            self.assertLess(budget - 250, b["truth"]["budget_stress"]["warm_work_ms"])  # the work deadline in the warm work
+            self.assertEqual(b["repeat"], 2)
+        self.assertEqual(len(s["R-budget-0001"]["request"]["sequence"]), 5000)          # eco's second half
+        for x in m["scenarios"]:
+            if x["route"] == "POST /resolve" and isinstance(x["request"], dict) and x["request"].get("labels") \
+                    and "budget" not in x["tags"] and "edge" not in x["tags"]:
+                self.assertEqual(x["request"]["bounds"]["time_budget_ms"], 60000, x["id"])
+        rels = dict((r["id"], r) for r in m["relations"])
+        self.assertEqual(rels["REL-prefix_equals-0002"]["args"]["a_from_kmer"], 2500)
+
+
 if __name__ == "__main__":
     unittest.main()

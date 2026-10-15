@@ -157,21 +157,34 @@ def gen_R(ctx: Ctx) -> List[dict]:
         exp = [OK, INV, ex("resolve_runs", label=rec.accession, full=True)]
         out.append(scenario(nid(), "R", "trace support of %s's header on its own 200 bp: one contiguous run" % key,
                             "POST /resolve", req, t, exp, tags=["trace", "header-label"]))
+    # A stated stop (SPEC-labeled-traversal-core §4.5) is a 200 only when the row batch in flight at the work deadline
+    # (budget - 250 ms, the fixed reserve) ends, and the answer is built, before the budget; past it the answer is the
+    # 503. Cold or loaded rows make every batch long: no answer of v3 or v4 stated a stop (triage-v4 V05). So each
+    # budget scenario follows its complete twin in manifest order (R-twin-0002 / -0004 under the 60,000 ms budget,
+    # its warm-up) and its budget puts the work deadline inside the warm work, after the first batches (64 rows, then
+    # doubling up to 4,096): pae's 10 kb took 343 ms warm (v4 R-twin-0004 direct-remote), so 420 ms (the deadline at
+    # 170 ms falls in the 4,096-row batch, which ends at about 276 ms at that rate); eco's 10 kb never completed on
+    # this host (v3 and v4: 21-45 s), its second half took 1.37 s warm (R-twin-0003), so the query is that half under
+    # 700 ms (the deadline at 450 ms falls in the 1,024-row batch, which ends at about 546 ms). Whether a stop happens
+    # still depends on the batch times, i.e. on the load and on what is warm: the property is time-dependent
+    # (budget_stress, left out of the deploy gate); a complete answer reads inconclusive (no stop, nothing tested).
     nid = _ids("R-budget")
-    for i, key in enumerate(["eco", "pae"]):
+    for i, (key, budget, half, warm_ms) in enumerate((("eco", 700, True, 1370), ("pae", 420, False, 343))):
         rec = ctx.rec(key)
         t = ctx.window(rng, rec, 10000, unique=False, max_dust=5.0)
-        # the smoke validation of lane S1b: at 750 ms the 10 kb answered 503 after 9.7 s (the query's k-mer mapping
-        # and a row batch are not polled, SPEC §4.5), so the budgets leave that room: a stop inside the 10 kb on a
-        # cold or loaded host, the whole profile on a warm one
-        budget = (3000, 8000)[i]
+        if half:
+            t = ctx.truth_at(rec, t["start"] - rec.offset + 5000, 5000)
+        L = t["length"]
         req = resolve_request(t["window"], labels=[rec.column], time_budget_ms=budget)
-        t2 = dict(t)
-        t2["flank"] = ""
+        t2 = dict(t, flank="", budget_stress={
+            "reason": "a stated stop needs the batch in flight at the work deadline to end before the budget: it "
+                      "depends on the batch times (the load, what is warm), so no budget makes it certain",
+            "warm_work_ms": warm_ms, "work_deadline_ms": budget - 250})
         exp = [OK, INV, ex("resolve_runs", label=rec.column, full=True, prefix_if_stopped=True)]
-        out.append(scenario(nid(), "R", "10 kb of %s under a %d ms budget: a stated stop answers the prefix, the record's "
-                            "own label supporting every k-mer of it" % (key, budget),
-                            "POST /resolve", req, t2, exp, timing_class="slow", tags=["budget", "machine-dependent"]))
+        out.append(scenario(nid(), "R", "%s bp of %s under a %d ms budget after its complete twin: a stated stop answers "
+                            "the prefix, the record's own label supporting every k-mer of it" % (format(L, ","), key, budget),
+                            "POST /resolve", req, t2, exp, timing_class="slow",
+                            tags=["budget", "machine-dependent", "budget_stress"], repeat=2))
     # R-edge
     nid = _ids("R-edge")
     eco = ctx.rec("eco")
@@ -2102,7 +2115,7 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     for area, n in want.items():
         cands = [s for s in pool if s["area"] == area and s["timing_class"] == "fast" and "refusal" not in s["tags"]
                  and "machine-dependent" not in s["tags"] and "needs-unique-id" not in s["tags"]
-                 and "relation" not in s["tags"] and "split-case" not in s["tags"]
+                 and "relation" not in s["tags"] and "split-case" not in s["tags"] and "warm-up" not in s["tags"]
                  and not s.get("body_raw") and not s.get("headers")]
         step = max(1, len(cands) // n)
         picks += cands[::step][:n]
@@ -2679,19 +2692,26 @@ def gen_REL(ctx: Ctx, scenarios: List[dict], caps: Dict[str, dict]) -> List[dict
                [OK, INV, ex("resolve_runs", label=lab, full=True)])
     out.append(tw)
     relation(ctx, "same_answer", lc["id"], tw["id"], "a lower-case resolve answers as its upper case")
-    # prefix_equals: a budget stop answers the resolve of a prefix; the continuation from a k-mer completes it
+    # prefix_equals: a budget stop answers the resolve of a prefix; the continuation from a k-mer completes it. The
+    # complete twin runs right before its budget scenario (a warm-up: build_manifest.place_warm_ups) under the default
+    # 60,000 ms, which the cold query met within (v4: 15.6 s for eco's second half, 21.9 s for pae's 10 kb)
     for i, sid in enumerate(("R-budget-0001", "R-budget-0002")):
         rb = _by_id(scenarios, sid)
         seq = rb["request"]["sequence"]
         lab = rb["request"]["labels"][0]
-        full = _twin(rb, "R-twin-%04d" % (2 + 2 * i), "the same 10 kb under the 20,000 ms budget: the profile the stop "
-                     "must be a prefix of", resolve_request(seq, labels=[lab]),
+        base = {k: v for k, v in rb["truth"].items() if k != "budget_stress"}
+        full = _twin(rb, "R-twin-%04d" % (2 + 2 * i), "the same %s bp under the %s ms budget, run first (it warms the "
+                     "rows): the profile the stop must be a prefix of" % (format(len(seq), ","),
+                                                                          format(RESOLVE_TIME_BUDGET_MS, ",")),
+                     resolve_request(seq, labels=[lab]),
                      [OK, INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
-                     tags=["budget", "machine-dependent"], timing_class="slow")
-        cont_from = 5000
-        cont = _twin(rb, "R-twin-%04d" % (3 + 2 * i), "the same 10 kb from base %d: the continuation" % cont_from,
+                     truth=dict(base, warm_up_for=sid),
+                     tags=["budget", "machine-dependent", "warm-up"], timing_class="slow")
+        cont_from = len(seq) // 2
+        cont = _twin(rb, "R-twin-%04d" % (3 + 2 * i), "the same %s bp from base %s: the continuation" % (
+                         format(len(seq), ","), format(cont_from, ",")),
                      resolve_request(seq[cont_from:], labels=[lab]),
-                     [OK, INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)],
+                     [OK, INV, ex("resolve_runs", label=lab, full=True, unless_stopped=True)], truth=base,
                      tags=["budget", "machine-dependent"], timing_class="slow")
         out += [full, cont]
         relation(ctx, "prefix_equals", rb["id"], full["id"], "the stopped resolve equals the full resolve on its prefix",
