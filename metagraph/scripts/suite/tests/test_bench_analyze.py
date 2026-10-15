@@ -230,6 +230,29 @@ class AnalyseRuns(unittest.TestCase):
         res, _ = analyze.analyse(synthetic_run(self.d, "capped2", self.panel, base_wall, sizes_override=bodies), boot=0)
         self.assertEqual(res["queries"]["T-q-0000"]["arms"]["direct-local"]["classes"], {"incomplete": 6})
 
+    def test_comparison_needs_one_harness(self):
+        # D8: the same harness on both sides: a pause, warm-up arm, MCP template, base URL or runner change moves
+        # the walls by itself
+        a = synthetic_run(self.d, "a", self.panel, base_wall)
+        for i, extra in enumerate(({"pause_s": 0.5}, {"warmup_arm": "mcp"}, {"mcp_cmd": "other {ids} {out}"},
+                                   {"remote_base": "https://elsewhere/api"}, {"local_base": "http://localhost:1"},
+                                   {"checks": "stub"})):
+            b = synthetic_run(self.d, "b%d" % i, self.panel, base_wall, seed=2, bench_extra=extra)
+            cmp_ = analyze.compare(b, a, boot=20, boot_seed=1)
+            self.assertEqual(cmp_["verdict"], "refused", extra)
+            key = sorted(extra)[0]
+            self.assertTrue(any(r.startswith("the runs' harness differs") and key in r for r in cmp_["refused"]),
+                            (extra, cmp_["refused"]))
+        # the snapshot's runner and sampler: their sha256 in scripts/SNAPSHOT.json
+        b = synthetic_run(self.d, "snap", self.panel, base_wall, seed=3)
+        for run, sha in ((a, "aaa"), (b, "bbb")):
+            os.makedirs(os.path.join(run, "scripts"), exist_ok=True)
+            sc.write_json_atomic(os.path.join(run, "scripts", "SNAPSHOT.json"),
+                                 {"files": {"run_direct.py": sha, "suite_common.py": "s", "sampler.py": "p"}})
+        cmp_ = analyze.compare(b, a, boot=20, boot_seed=1)
+        self.assertTrue(any("run_direct.py" in r for r in cmp_["refused"]), cmp_["refused"])
+        self.assertEqual(cmp_["harness"]["differs"], ["snapshot run_direct.py"])
+
     def test_heterogeneous_change_is_inconclusive(self):
         # half the queries 30 % slower, half 20 % faster: the panel's mean barely moves, its interval spans both
         a = synthetic_run(self.d, "a", self.panel, base_wall)

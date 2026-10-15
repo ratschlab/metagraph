@@ -41,8 +41,10 @@ query has at least --min-success (5 of 6) successes on every arm. Otherwise it i
 numbers are descriptive of an uncontrolled run.
 
 WITH --baseline (release A vs B): both runs must emit a verdict, measure the same panel (panel_sha256), cycles and
-arms; per arm and query the ratio of the medians (candidate / baseline), aggregated with the panel's weights, with a
-bootstrap interval resampling queries within modes and each run's cycles independently. Per arm: `regression` when
+arms with the same harness (pause, warm-up arm, MCP template, base URLs, checks mode, and the snapshot's
+run_direct.py, suite_common.py and sampler.py), and state the same result sizes for every query and arm; per arm
+and query the ratio of the medians (candidate / baseline), aggregated with the panel's weights, with a bootstrap
+interval resampling queries within modes and each run's cycles independently. Per arm: `regression` when
 the interval's lower end exceeds 1 + tolerance, `improvement` when its upper end is below 1 - tolerance,
 `no_regression` when its upper end is at most 1 + tolerance, else `inconclusive`; the comparison passes when no arm
 regresses and none is inconclusive.
@@ -450,6 +452,20 @@ def analyse(run_dir, boot=DEFAULT_BOOT, boot_seed=None, min_success=DEFAULT_MIN_
 # ---------------------------------------------------------------------------------------------------------------
 # two runs
 
+# What a comparison needs alike on both sides besides the panel: the harness that produced the walls.
+HARNESS_KEYS = ("pause_s", "warmup_arm", "mcp_cmd", "local_base", "remote_base", "checks", "allow_stub")
+HARNESS_SCRIPTS = ("run_direct.py", "suite_common.py", "sampler.py")
+
+
+def harness(run_dir):
+    """The run's harness: bench.json's settings and the sha256 of the snapshot's runner, shared module and sampler."""
+    bench = sc.read_json(os.path.join(run_dir, "bench.json")) or {}
+    snap = (sc.read_json(os.path.join(run_dir, "scripts", sc.SNAPSHOT_FILE)) or {}).get("files") or {}
+    out = dict((k, bench.get(k)) for k in HARNESS_KEYS)
+    out.update(("snapshot %s" % name, snap.get(name)) for name in HARNESS_SCRIPTS)
+    return out
+
+
 def compare(cand_dir, base_dir, boot=DEFAULT_BOOT, boot_seed=None, tolerance=DEFAULT_TOLERANCE,
             min_success=DEFAULT_MIN_SUCCESS, guard_overrides=None):
     cand, cper = analyse(cand_dir, 0, boot_seed, min_success, guard_overrides)
@@ -474,6 +490,11 @@ def compare(cand_dir, base_dir, boot=DEFAULT_BOOT, boot_seed=None, tolerance=DEF
     if differ:
         refused.append("result sizes differ between the runs: %d query/arm cell(s): %s" % (
             len(differ), "; ".join(differ[:6])))
+    hc, hb = harness(cand_dir), harness(base_dir)
+    hdiff = [k for k in hc if hc[k] != hb.get(k)]
+    if hdiff:
+        refused.append("the runs' harness differs: %s" % "; ".join(
+            "%s %s vs %s" % (k, json.dumps(hc[k]), json.dumps(hb.get(k))) for k in hdiff))
     panel = sc.read_json(os.path.join(cand_dir, "panel.json")) or {}
     weights = dict((q["id"], q["weight"]) for q in panel.get("queries") or [])
     arms = [a for a in cand["arms"] if a in base["arms"]]
@@ -531,6 +552,7 @@ def compare(cand_dir, base_dir, boot=DEFAULT_BOOT, boot_seed=None, tolerance=DEF
         overall = "pass"
     return {"candidate": cand["run_id"], "baseline": base["run_id"], "candidate_dir": cand["run_dir"],
             "baseline_dir": base["run_dir"], "tolerance": tolerance, "boot": boot, "boot_seed": boot_seed,
+            "harness": {"candidate": hc, "baseline": hb, "differs": hdiff},
             "guard": {"overrides": dict((k, v) for k, v in (guard_overrides or {}).items() if v is not None),
                       "candidate": cand["load_guard"]["limits"], "baseline": base["load_guard"]["limits"],
                       "candidate_loosened": cand["load_guard"]["loosened"],
