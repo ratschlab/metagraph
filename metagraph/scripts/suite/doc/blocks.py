@@ -379,7 +379,7 @@ def adjudication(line, run, sid, is_mcp, state=None):
     outcome = line.get("outcome")
     http = line.get("http")
     code, text = _err(line)
-    wall = cells.fmt_t(line.get("wall_ms"))
+    wall = cells.fmt_exec(line.get("wall_ms"))
     budget = _budget_text(run, sid)
     if outcome == "pass":
         return "pass: every check passed"
@@ -629,7 +629,7 @@ def _execution_rows(st, run, sid, arm, is_property):
         if why:
             word += " (%s)" % why
         hc = cells.host_cache_of(l)
-        wall = cells.fmt_t(l.get("wall_ms"))
+        wall = cells.fmt_exec(l.get("wall_ms"))
         if arm != "mcp" or hc in ("cold", "warm", cells.WARM_AFTER_INTERRUPTED):
             wall += " (%s)" % esc(HC_SHORT.get(hc, hc))
         aside = run.marked_aside(sid, l) if (arm == "mcp" and hasattr(run, "marked_aside")) else None
@@ -883,11 +883,15 @@ def _relations_text(run, sid, units):
     return out
 
 
+_TINT_RE = re.compile(r"\\t(?:yellow|red)\{([^}]*)\}")
+
+
 def estimate_lines(body_lines, chars_per_line=150):
-    """A rough height of a block in text lines, for the short / long decision of the box (pagination)."""
+    """A rough height of a block in text lines, for the short / long decision of the box (pagination). A tinted
+    time counts as its figure (the tint adds no width), so that a tint never moves a block between the two boxes."""
     total = 0
     for text in body_lines:
-        plain = re.sub(r"\\[A-Za-z]+\{[^}]*\}|\\[A-Za-z]+|[{}]", "", text)
+        plain = re.sub(r"\\[A-Za-z]+\{[^}]*\}|\\[A-Za-z]+|[{}]", "", _TINT_RE.sub(r"\1", text))
         total += max(1, int(len(plain) / float(chars_per_line)) + 1)
     return total
 
@@ -964,7 +968,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
                         "evidence beside it, never an outcome (the warm-up's judged execution is its first)" % (
                             latex.sid(str(rr.get("scenario"))), esc(rr.get("repeat")),
                             cells.fmt_t(float(rr["before_s"]) * 1000.0) if isinstance(rr.get("before_s"), (int, float))
-                            else "–", cells.fmt_t(rr.get("wall_ms")), esc(rr.get("http")),
+                            else "–", cells.fmt_exec(rr.get("wall_ms")), esc(rr.get("http")),
                             esc(rr.get("outcome") or "–")))))
             if l.get("outcome") == "pass":
                 continue
@@ -985,7 +989,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
                 body.append(latex.bsub("checks (%s)" % label, "; ".join(_group_text(k, names) for k, names in groups)))
             ph = _phases_text(l) if arm == "mcp" else None
             if ph:
-                body.append(latex.bsub("mcp phases (%s)" % label, esc(ph)))
+                body.append(latex.bsub("mcp phases (%s)" % label, ph))
     texts = _texts_line(states)
     if texts:
         body.append(latex.bline("texts", texts))
@@ -1001,10 +1005,12 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
 
 
 def _phases_text(line):
+    """The MCP phases of an execution as LaTeX (`submit 0.3 s, queue 12 ms, backend \\tyellow{14 s}, ...`): each
+    phase is a part of the execution's time and sits on its tint when it has one; the labels are this list's."""
     ph = line.get("mcp_phases") if isinstance(line.get("mcp_phases"), dict) else None
     if not ph or ph.get("backend_ms") is None:
         return None
     keys = [("submit_ms", "submit"), ("queue_ms", "queue"), ("backend_ms", "backend"),
             ("backend_pattern_ms", "pattern"), ("terminal_lag_ms", "terminal lag"), ("paging_ms", "paging")]
-    parts = ["%s %s" % (label, cells.fmt_t(ph[k])) for k, label in keys if ph.get(k) is not None]
+    parts = ["%s %s" % (label, cells.fmt_exec(ph[k])) for k, label in keys if ph.get(k) is not None]
     return ", ".join(parts)

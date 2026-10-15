@@ -807,7 +807,9 @@ class ReviewRoundTwoTest(unittest.TestCase):
                 return {}
 
         text = blocks.adjudication(deadline, R(), "x", False)
-        self.assertTrue(text.startswith("inconclusive: an allowed 503 deadline at 24 s against a 20,000 ms budget"), text)
+        # the wall is a printed execution time above 10 s: on its tint (the budget plain)
+        self.assertTrue(text.startswith("inconclusive: an allowed 503 deadline at \\tyellow{24 s} against a 20,000 ms "
+                                        "budget"), text)
         self.assertIn("the property not tested", text)
         host_state = {"http": 504, "error": {"code": "resolve_timeout", "text": "t"}, "outcome": "inconclusive",
                       "inconclusive_reason": "resolve_timeout", "wall_ms": 31000,
@@ -3523,6 +3525,232 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         self.assertEqual(facts.claim_items({}), [])
         self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 4}), "a")
         self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 5}), "a, and b")
+
+
+def tint_fixture(run_dir):
+    """The fake run of test_compare_report with slow executions (the owner's decision of 2026-10-15, the tints):
+    P-001 r0 on direct-local at 61 s with a 12 s server time (a series cell), P-004 at 30 s on direct-local (a
+    replicates member), P-001's warm MCP call at 14 s with a 12 s backend and a 56 s terminal lag (a cell's be
+    line), P-002's failing MCP call with a 12 s backend phase (a detail block's phases line) and R-001's failing
+    direct-local execution at 61 s (a detail block's row). Built from small data here, never from a run directory."""
+    build_run(run_dir)
+    arms_dir = os.path.join(run_dir, "arms")
+
+    def rewrite(arm, edit):
+        path = os.path.join(arms_dir, arm, "executions.jsonl")
+        rows, _ = sc.read_jsonl(path)
+        os.remove(path)
+        for r in rows:
+            sc.append_jsonl(path, edit(r))
+
+    def local(r):
+        if r["scenario"] == "P-001" and r["repeat"] == 0:
+            r = dict(r, wall_ms=61000.0, server=dict(r["server"], elapsed_ms=12000.0))
+        elif r["scenario"] == "P-004":
+            r = dict(r, wall_ms=30000.0, server=dict(r["server"], elapsed_ms=200.0))
+        elif r["scenario"] == "R-001":
+            r = dict(r, wall_ms=61000.0, server=dict(r["server"], elapsed_ms=30500.0))
+        return r
+
+    def mcp(r):
+        if r["scenario"] == "P-001" and r["repeat"] == 1:
+            r = dict(r, wall_ms=14000.0, mcp_phases=dict(r["mcp_phases"], backend_ms=12000.0, terminal_lag_ms=56000.0))
+        elif r["scenario"] == "P-002":
+            r = dict(r, mcp_phases={"submit_ms": 50.0, "queue_ms": 200.0, "backend_ms": 12000.0,
+                                    "terminal_lag_ms": 100.0, "paging_ms": 30.0})
+        return r
+    rewrite("direct-local", local)
+    rewrite("mcp", mcp)
+    merge_run.merge(run_dir)
+    sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": len(CASES)})))
+
+
+class TimeTintTest(unittest.TestCase):
+    """The tints of a printed execution time (the owner's decision of 2026-10-15): above 10 s yellow, above 55 s
+    red, strictly, by cells' two constants and nothing else; on the cells' walls, server and backend times, the
+    detail blocks' rows and phases, the replicates aggregates and the timing tables; never on a difference, a
+    bound, a connection set-up or a figure quoted in the prose; the colour tokens in doc.sty; one legend sentence
+    added to the cell grammar's lines; a tinted time as wide as an untinted one (the pagination does not move)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        tint_fixture(cls.run_dir)
+        cls.mapping_path = os.path.join(cls.tmp, "units.json")
+        with open(cls.mapping_path, "w") as fh:
+            json.dump(FAKE_MAPPING, fh)
+        cls.prose_dir = os.path.join(cls.tmp, "prose")
+        cls.runobj = reader.Run(cls.run_dir)
+        cls.units = units_mod.resolve(cls.runobj.manifest, FAKE_MAPPING)
+        make_doc.scaffold_prose(cls.prose_dir, cls.units, cls.runobj)
+        cls.out = os.path.join(cls.tmp, "out")
+        cls.rc = make_doc.main([cls.run_dir, "--out", cls.out, "--no-pdf", "--units", cls.mapping_path,
+                                "--prose-dir", cls.prose_dir])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def tex(self, name="doc.tex"):
+        with open(os.path.join(self.out, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_thresholds_and_formatters(self):
+        """Strictly above 10 s yellow, strictly above 55 s red; fmt_exec is fmt_t on the tint; fmt_times tints each
+        figure alone with the mark outside; a difference (fmt_delta) and the plain fmt_t never carry a tint."""
+        self.assertEqual((cells.TIME_TINT_YELLOW_MS, cells.TIME_TINT_RED_MS), (10000.0, 55000.0))
+        self.assertIsNone(cells.time_tint(None))
+        self.assertIsNone(cells.time_tint(10000))
+        self.assertEqual(cells.time_tint(10000.5), "yellow")
+        self.assertEqual(cells.time_tint(55000), "yellow")
+        self.assertEqual(cells.time_tint(55000.5), "red")
+        self.assertEqual(cells.fmt_exec(61000), "\\tred{61 s}")
+        self.assertEqual(cells.fmt_exec(12000), "\\tyellow{12 s}")
+        self.assertEqual(cells.fmt_exec(3140), "3.1 s")
+        self.assertEqual(cells.fmt_exec(None), "–")
+        self.assertEqual(cells.fmt_t(61000), "61 s")
+        self.assertEqual(cells.fmt_delta(61000), "+61 s")
+        self.assertEqual(cells.fmt_delta(-61000), "−61 s")
+        self.assertEqual(cells.fmt_times([61000, 900]), "\\tred{61} / 0.9 s")
+        self.assertEqual(cells.fmt_times([12000, 30], ["c", None]), "\\tyellow{12 s}\\tmark{c} / 30 ms")
+        self.assertEqual(cells.fmt_times([900, 61000], [None, "a"]), "0.9 / \\tred{61 s}\\tmark{a}")
+        self.assertEqual(cells.fmt_times([61000, 900], tint=False), "61 / 0.9 s")
+        self.assertEqual(cells.fmt_pair(12000, 61000), "\\tyellow{12} / \\tred{61 s}")
+        # the closing tables: a signed difference and a connection set-up stay plain, an execution time is tinted
+        import sections
+        d = {"p50": 12000.0, "p90": 61000.0, "max": 61000.0, "n": 3}
+        self.assertEqual(sections._stats_cells(d), ["\\tyellow{12 s}", "\\tred{61 s}", "\\tred{61 s}", "3"])
+        self.assertEqual(sections._stats_cells(d, signed=True), ["+12 s", "+61 s", "+61 s", "3"])
+        self.assertEqual(sections._stats_cells(d, tint=False), ["12 s", "61 s", "61 s", "3"])
+        # the constants are the document's own: no other module of the suite defines them
+        for name in ("suite_common.py", "report.py", "compare.py", "checks.py"):
+            path = os.path.join(SUITE, name)
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    self.assertNotIn("TIME_TINT_", fh.read(), name)
+
+    def test_cells_and_aggregates(self):
+        """A cell's wall, server and backend lines and a replicates aggregate on synthetic arm states."""
+        st = cells.ArmState("direct-local")
+        st.present, st.worst, st.glyph_key = True, "pass", "pass"
+        st.lines = [{"wall_ms": 61000.0, "host_cache": "cold", "server": {"elapsed_ms": 12000.0}},
+                    {"wall_ms": 900.0, "host_cache": "warm", "server": {"elapsed_ms": 400.0}}]
+        l1, l2, l3 = cells.cell_parts(st)
+        # the unit once: the first figure bare on its tint, the last with the unit inside the tint
+        self.assertEqual(l1, "\\gpass\\ \\tred{61}\\tmark{c} / 0.9 s")
+        self.assertEqual(l2, "[\\tyellow{12} / 0.4 s]")
+        self.assertIsNone(l3)
+        st.lines[1]["wall_ms"] = 14000.0
+        self.assertEqual(cells.cell_parts(st)[0], "\\gpass\\ \\tred{61}\\tmark{c} / \\tyellow{14 s}")
+        mcp = cells.ArmState("mcp")
+        mcp.present, mcp.worst, mcp.glyph_key = True, "pass", "pass"
+        mcp.lines = [{"wall_ms": 14000.0, "host_cache": "warm", "server": {"elapsed_ms": 11000.0},
+                      "mcp_phases": {"backend_ms": 12000.0}}]
+        l1, l2, l3 = cells.cell_parts(mcp)
+        self.assertEqual((l1, l2, l3), ("\\gpass\\ \\tyellow{14 s}", "[\\tyellow{11 s}]", "be \\tyellow{12 s}"))
+        warm = cells.ArmState("direct-local")
+        warm.present, warm.worst, warm.glyph_key = True, "pass", "pass"
+        warm.lines = [{"wall_ms": 30000.0, "host_cache": "warm", "server": {"elapsed_ms": 12000.0}}]
+        cold = cells.ArmState("direct-local")
+        cold.present, cold.worst, cold.glyph_key = True, "pass", "pass"
+        cold.lines = [{"wall_ms": 30000.0, "host_cache": "cold", "server": {"elapsed_ms": 12000.0}}]
+        text, line2 = cells.aggregate({"a": {"direct-local": warm}, "b": {"direct-local": cold}}, "direct-local")
+        self.assertEqual(text, "ok 2/2 · \\tyellow{30} / \\tyellow{30 s}\\tmark{c 1/2}")
+        self.assertEqual(line2, "[\\tyellow{12 s}]")
+        self.assertEqual(cells.fmt_times([3100, 900]), "3.1 / 0.9 s")
+
+    def test_rendered_document(self):
+        """On the fixture: the series cell (wall and server), the mcp cell's be line, the replicates aggregate,
+        the family summary's p50 / p90, the detail blocks' rows and phases line, the closing tables; the legend
+        sentence once in the reading guide with the thresholds from the constants; a block's size estimate counts
+        a tinted figure as itself."""
+        self.assertEqual(self.rc, 0)
+        p = self.tex("chapter_P.tex")
+        self.assertIn("\\gpass\\ \\tred{61 s}\\tmark{c} / 6 ms", p)  # P-001 on direct-local (the units differ)
+        self.assertIn("[\\tyellow{12 s} / 3 ms]", p)  # its server times
+        self.assertIn("be 0.3 / \\tyellow{12 s}", p)  # P-001's mcp cell: the backend line, r0 then r1
+        self.assertIn("\\gpass\\ 0.9 / \\tyellow{14 s}", p)  # its walls
+        self.assertIn("ok 1/1 · \\tyellow{30} / \\tyellow{30 s}\\tmark{c}", p)  # the replicates aggregate (P-004)
+        self.assertIn("backend \\tyellow{12 s}, terminal lag 0.1 s", p)  # P-002's block: the phases line
+        self.assertIn("host-cold wall p50 / p90: direct-local 5 ms / \\tyellow{49 s}", p)  # the chapter's timing line
+        self.assertIn("wall p50 / p90 host-cold: \\tyellow{15} / \\tyellow{52~s}", p)  # P-pos's summary line
+        self.assertNotIn("\\tyellow{\\tyellow", p)
+        self.assertNotIn("\\tred{\\t", p)
+        # a budget, a time distance and the 'requested budget' column never carry a tint
+        self.assertNotIn("\\tyellow{60,000", p)
+        self.assertNotIn("none\\tyellow", p)
+        r = self.tex("chapter_R.tex")
+        self.assertIn("& \\tred{61 s} (warm) & none &", r)  # R-001's block: the direct-local row, the budget plain
+        self.assertIn("\\gfail\\fn{1}\\ \\tred{61 s} [\\tyellow{31 s}]", r)  # R-001's pairs cell: wall, server 30.5 s
+        main = self.tex()
+        self.assertIn("\\tred{56 s}", main)  # C.3: the terminal lag's maximum
+        self.assertIn("\\tred{61 s}", main)  # C.7: chapter P's host-cold wall maximum on direct-local
+        legend = main.split("\\bline{times}{", 1)
+        self.assertEqual(len(legend), 2)
+        sentence = legend[1].split("}\n", 1)[0]
+        self.assertIn("above 10 s is set on a \\tyellow{yellow} tint and above 55 s on a \\tred{red} one", sentence)
+        self.assertIn("a difference (a delta, an overhead, how late a 503 was), a budget, a cap and the figures "
+                      "quoted in the prose carry no tint", sentence)
+        self.assertEqual(main.count("\\bline{times}"), 1)
+        # the two reviewed lines of the cell grammar are as they were, the new one after them
+        import sections
+        g = sections.grammar_lines(None)
+        self.assertLess(g.index("\\bline{aggregates}"), g.index("\\bline{edge tables}"))
+        self.assertLess(g.index("\\bline{edge tables}"), g.index("\\bline{times}"))
+        self.assertIn("members never exercised read not exercised: n, never ok 0/0; the coverage line under the "
+                      "table counts per arm}", g)
+        self.assertIn("derived from the evidence, never from prose}", g)
+        # the connection set-up table and the signed tables carry no tint
+        c4 = main.split("connect\\_ms per arm", 1)[0].rsplit("\\begin{longtable}", 1)[1]
+        self.assertNotIn("\\tyellow", c4)
+        self.assertNotIn("\\tred", c4)
+        # the prose's figures are plain text (escaped afterwards): a scenario fact prints the time without a macro
+        f = facts.scenario_facts(sections.Context(self.runobj, self.units, {}, {}, {}, list(self.units.chapters)),
+                                 "R-001")
+        self.assertEqual(f["dl"]["wall"], "61 s")
+        self.assertEqual(f["dl"]["walls"], "61 s")
+        self.assertIn(f["dl"]["server"], ("31 s", "–"))
+        self.assertNotIn("\\t", json.dumps(f["dl"]))
+        self.assertEqual(blocks.estimate_lines(["\\bline{a}{\\tred{61 s} and \\tyellow{12} s}"]),
+                         blocks.estimate_lines(["\\bline{a}{61 s and 12 s}"]))
+        self.assertEqual(blocks.estimate_lines(["x" * 149 + " \\tred{61 s}"]), blocks.estimate_lines(["x" * 149 + " 61 s"]))
+
+    def test_sty_tokens_and_width(self):
+        """doc.sty defines the two colour tokens and the macros; with xelatex, a tinted time sets exactly as wide
+        as an untinted one and the PDF's text is the figure alone."""
+        with open(os.path.join(DOC, "templates", "doc.sty"), encoding="utf-8") as fh:
+            sty = fh.read()
+        self.assertIn("\\definecolor{timeyellow}{HTML}{FFE866}", sty)
+        self.assertIn("\\definecolor{timered}{HTML}{FF8A80}", sty)
+        self.assertIn("\\newcommand\\tyellow[1]{\\timetint{timeyellow}{#1}}", sty)
+        self.assertIn("\\newcommand\\tred[1]{\\timetint{timered}{#1}}", sty)
+        self.assertEqual(cells.TINT_MACRO, {"yellow": "\\tyellow", "red": "\\tred"})
+        xelatex = make_doc.find_xelatex()
+        if not xelatex:
+            self.skipTest("xelatex not installed")
+        d = os.path.join(self.tmp, "sty")
+        os.makedirs(d)
+        shutil.copyfile(os.path.join(DOC, "templates", "doc.sty"), os.path.join(d, "doc.sty"))
+        with open(os.path.join(d, "t.tex"), "w", encoding="utf-8") as fh:
+            fh.write("\\documentclass[10pt]{article}\\usepackage{doc}\\newcommand\\docrunid{tint}\n"
+                     "\\newlength\\wplain\\newlength\\wtint\\begin{document}\n"
+                     "\\settowidth\\wplain{[61 s / 0.9 s] be 12 s}\\settowidth\\wtint{[\\tred{61 s} / 0.9 s] be \\tyellow{12 s}}\n"
+                     "\\typeout{TINTWIDTHS \\the\\wplain\\space\\the\\wtint}\n"
+                     "\\tred{61 s} \\tyellow{12 s} 3.1 s\n\\end{document}\n")
+        ok, message = make_doc.build_pdf(d, os.path.join(d, "t.tex"), xelatex)
+        self.assertTrue(ok, message)
+        with open(os.path.join(d, "t.log"), encoding="utf-8", errors="replace") as fh:
+            log = fh.read()
+        m = re.search(r"TINTWIDTHS (\S+) (\S+)", log)
+        self.assertIsNotNone(m, "no width line in the log")
+        self.assertEqual(m.group(1), m.group(2))
+        pdftotext = shutil.which("pdftotext")
+        if pdftotext:
+            import subprocess
+            text = subprocess.run([pdftotext, os.path.join(d, "t.pdf"), "-"], stdout=subprocess.PIPE).stdout.decode()
+            self.assertIn("61 s 12 s 3.1 s", text)
 
 
 if __name__ == "__main__":

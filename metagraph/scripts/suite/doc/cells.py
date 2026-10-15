@@ -1,5 +1,6 @@
-"""The cell grammar (DESIGN-DOC §3): how a scenario's standing on one arm becomes a glyph, its marks and its times;
-what "clean" means; the aggregates of replicates cells and summary lines; the footnote numbering.
+"""The cell grammar (DESIGN-DOC §3): how a scenario's standing on one arm becomes a glyph, its marks and its times
+(a time above a threshold on its tint: TIME_TINT_YELLOW_MS, TIME_TINT_RED_MS); what "clean" means; the aggregates
+of replicates cells and summary lines; the footnote numbering.
 
 An `ArmState` is computed once per (scenario, arm) from the execution lines and compare's per-scenario entry; the
 layouts in sections.py only format it.
@@ -58,10 +59,46 @@ def fmt_t(ms):
     return "%d s" % int(v / 1000.0 + 0.5)
 
 
+# The tints of a printed execution time (the owner's decision of 2026-10-15): a wall, a server time, a backend time
+# or an MCP phase, alone or as a median, a p90 or a maximum, strictly above TIME_TINT_YELLOW_MS is set on a yellow
+# tint and strictly above TIME_TINT_RED_MS on a red one (doc.sty's timeyellow / timered). The thresholds are this
+# document's own: no budget, timing class or window of the suite is read for them, and nothing else reads them.
+# A difference (fmt_delta: a delta, an overhead, how late a 503 was), a bound (a budget, a cap), a distance in
+# time (started after, ran before) and the figures quoted inside prose (plain text, escaped afterwards) carry none.
+TIME_TINT_YELLOW_MS = 10000.0
+TIME_TINT_RED_MS = 55000.0
+TINT_MACRO = {"yellow": "\\tyellow", "red": "\\tred"}
+
+
+def time_tint(ms):
+    """'red' above TIME_TINT_RED_MS, 'yellow' above TIME_TINT_YELLOW_MS, else None (None for no value)."""
+    v = _num(ms)
+    if v is None:
+        return None
+    if v > TIME_TINT_RED_MS:
+        return "red"
+    if v > TIME_TINT_YELLOW_MS:
+        return "yellow"
+    return None
+
+
+def tinted(text, ms):
+    """`text` (LaTeX, the printed form of the duration `ms`) on its tint when it has one: `\\tred{61 s}`."""
+    tint = time_tint(ms)
+    return "%s{%s}" % (TINT_MACRO[tint], text) if tint else text
+
+
+def fmt_exec(ms):
+    """An execution time as fmt_t prints it, on its tint when it has one (the cells, the detail blocks' rows, the
+    aggregates and the timing tables print their times through this, never through fmt_t directly)."""
+    return tinted(fmt_t(ms), ms)
+
+
 def fmt_delta(ms):
     """A signed difference of two durations, rounded as fmt_t rounds: `−7 ms`, `+0.2 s`; below half a millisecond
     the sign and one decimal (`+0.2 ms`), so that a difference never loses its sign (I.3's rule); `0 ms` for an
-    exact zero; `–` for none. Used wherever a difference is printed (a delta, an overhead, a net cost)."""
+    exact zero; `–` for none. Used wherever a difference is printed (a delta, an overhead, a net cost); a
+    difference is never tinted."""
     v = _num(ms)
     if v is None:
         return "–"
@@ -80,9 +117,11 @@ def _split_unit(text):
     return num, unit
 
 
-def fmt_times(values, marks=None):
+def fmt_times(values, marks=None, tint=True):
     """Several durations in order, joined with ` / `, the unit once when they share it (`3.1 / 0.9 s`,
-    `26 ms / 1.2 s`); `marks[i]` (`c`, `a`) follows the i-th number as a superscript."""
+    `26 ms / 1.2 s`); `marks[i]` (`c`, `a`) follows the i-th number as a superscript. Each figure sits on its own
+    tint when its value has one (`\\tred{61} / 0.9 s`; the mark outside the tint); `tint=False` for a caller that
+    prints something other than execution times."""
     values = list(values or [])
     if not values:
         return "–"
@@ -93,6 +132,8 @@ def fmt_times(values, marks=None):
     for i, t in enumerate(texts):
         num, unit = _split_unit(t)
         shown = num if (len(units) == 1 and unit and i < len(texts) - 1) else t
+        if tint:
+            shown = tinted(shown, values[i])
         if marks[i]:
             shown += "\\tmark{%s}" % marks[i]
         parts.append(shown)
@@ -387,7 +428,7 @@ def aggregate(states, arm):
         parts.append(wall_text)
     text = " · ".join(parts) if parts else "–"
     srv = [v for v in servers if _num(v) is not None]
-    line2 = "[%s]" % fmt_t(percentile(srv, 50)) if srv else ("[–]" if walls else None)
+    line2 = "[%s]" % fmt_exec(percentile(srv, 50)) if srv else ("[–]" if walls else None)
     return text, line2
 
 
@@ -518,7 +559,7 @@ def max_wall_text(run, sids):
     parts = []
     for arm in ARMS:
         vals = [l.get("wall_ms") for sid in sids for l in run.arm_lines(sid, arm) if _num(l.get("wall_ms")) is not None]
-        parts.append(fmt_t(max(vals)) if vals else "–")
+        parts.append(fmt_exec(max(vals)) if vals else "–")
     return "wall max: " + " · ".join(parts)
 
 

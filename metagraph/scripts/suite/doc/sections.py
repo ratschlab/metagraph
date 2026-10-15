@@ -260,12 +260,13 @@ def _stat(d, key="p50"):
     return fmt_t((d or {}).get(key)) if isinstance(d, dict) else "–"
 
 
-def _stats_cells(d, signed=False):
+def _stats_cells(d, signed=False, tint=True):
     """p50 / p90 / max / n of a summarise() dict; `signed` for a difference (an overhead, a net cost, a delta),
-    whose figures carry their sign."""
+    whose figures carry their sign and no tint; `tint=False` for a time that is no execution time (a connection
+    set-up)."""
     if not isinstance(d, dict) or not d.get("n"):
         return ["–", "–", "–", "0"]
-    f = fmt_delta if signed else fmt_t
+    f = fmt_delta if signed else (cells.fmt_exec if tint else fmt_t)
     return [f(d.get("p50")), f(d.get("p90")), f(d.get("max")), str(d.get("n"))]
 
 
@@ -980,10 +981,20 @@ def _legend_builtin():
     return _legend_tables(glyph_rows, [[a, esc(b), esc(c)] for a, b, c in marks])
 
 
+def times_legend_sentence():
+    """The one sentence of the cell grammar on the tints (the owner's decision of 2026-10-15): the thresholds
+    printed from cells' constants, the two words on their own tints."""
+    return ("a printed execution time (a wall, a server time, a backend time or an MCP phase, alone or as a median, "
+            "p90 or maximum) above %s is set on a %s tint and above %s on a %s one; a difference (a delta, an "
+            "overhead, how late a 503 was), a budget, a cap and the figures quoted in the prose carry no tint" % (
+                fmt_t(cells.TIME_TINT_YELLOW_MS), cells.TINT_MACRO["yellow"] + "{yellow}",
+                fmt_t(cells.TIME_TINT_RED_MS), cells.TINT_MACRO["red"] + "{red}"))
+
+
 def grammar_lines(ctx):
-    """The two rules of the cell grammar the reading guide's prose does not state: the replicates aggregate and
-    the edge tables' MCP cell (the rest, the lines of a cell, the rounding and the slash, is in the prose and in
-    the legend line under every table)."""
+    """The rules of the cell grammar the reading guide's prose does not state: the replicates aggregate, the edge
+    tables' MCP cell and the tints of the times (the rest, the lines of a cell, the rounding and the slash, is in
+    the prose and in the legend line under every table)."""
     out = ("\\begingroup\\sffamily\\footnotesize\n"
            "\\bline{aggregates}{a replicates cell is ok n/n · wall median / maximum over each member's first "
            "host-warm execution (else its only one) and [server median]; a wall not all host-warm carries the state's "
@@ -992,6 +1003,7 @@ def grammar_lines(ctx):
            "\\bline{edge tables}{the mcp cell of a refusals or list table shows the recorded status, the service's "
            "code and the class in words (refused before host execution, not expressible through MCP, answered after "
            "service normalization, host refusal relayed through the service), derived from the evidence, never from prose}"
+           "\n\\bline{times}{%s}" % times_legend_sentence() +
            "\n\\par\\endgroup\n\n")
     return out
 
@@ -1271,7 +1283,7 @@ def reruns_table(ctx):
     for r in run.reruns:
         t = r.get("target_execution")
         rows.append([latex.breakable_id(str(r.get("scenario"))), esc(r.get("arm")), esc(r.get("repeat")),
-                     fmt_t(r.get("wall_ms")), esc(r.get("http")), latex.breakable_id(str(r.get("rerun_target"))),
+                     cells.fmt_exec(r.get("wall_ms")), esc(r.get("http")), latex.breakable_id(str(r.get("rerun_target"))),
                      ("repeat %s" % esc(t[2])) if isinstance(t, list) and len(t) > 2 else "did not run after it",
                      fmt_n(r.get("before_s"), 3) if isinstance(t, list) else "–"])
     out = "\\parhead{Warm-ups run again for a resume}\n"
@@ -1429,13 +1441,13 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
             cold.append("%s %s (n %d)" % (esc(arm), fmt_pair(c.get("p50"), c.get("p90")), c["n"]))
         if w.get("n"):
             warm.append("%s %s (n %d)" % (esc(arm), fmt_pair(w.get("p50"), w.get("p90")), w["n"]))
-        server.append(fmt_t(s.get("p50")) if s.get("n") else "–")
+        server.append(cells.fmt_exec(s.get("p50")) if s.get("n") else "–")
     backends = [l.get("mcp_phases", {}).get("backend_ms") for sid in sids for l in run.arm_lines(sid, "mcp")
                 if isinstance(l.get("mcp_phases"), dict) and cells.host_cache_of(l) == "warm"]
     be = cells.percentile(backends, 50)
     out += "\\bline{timing}{host-cold wall p50 / p90: %s; host-warm wall p50 / p90: %s; server p50 (host-warm): %s" \
            "%s}\n" % (", ".join(cold) or "–", ", ".join(warm) or "–", " · ".join(server),
-                      (" (mcp backend p50 %s)" % fmt_t(be)) if be is not None else "")
+                      (" (mcp backend p50 %s)" % cells.fmt_exec(be)) if be is not None else "")
     res = (run.summary().get("resources") or {}).get(chapter) or {}
     parts = []
     for arm in ARMS:
@@ -2198,7 +2210,9 @@ def closing(ctx):
     out += latex.section("C.4\\qd Front cost", "sec:C4")
     out += closing_section_prose(ctx, "C4", "")
     fo = s.get("front_overhead") or {}
-    rows = [[esc(arm)] + _stats_cells((fo.get("connect_ms") or {}).get(arm)) for arm in sorted(fo.get("connect_ms") or {})]
+    # a connection set-up is no execution time (wall_ms excludes it): its figures carry no tint
+    rows = [[esc(arm)] + _stats_cells((fo.get("connect_ms") or {}).get(arm), tint=False)
+            for arm in sorted(fo.get("connect_ms") or {})]
     out += latex.plain_table("@{}l r r r r@{}", ["connection set-up", "p50", "p90", "max", "n"], rows,
                              "connect\\_ms per arm")
     pan = fo.get("per_area_net") or {}
