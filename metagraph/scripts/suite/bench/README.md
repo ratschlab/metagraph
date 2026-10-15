@@ -55,9 +55,8 @@ answer is `result_changed` (another workload).
 **Selection** per mode, 16 each, deterministic: the eligible queries ranked by recorded cost (the least wall of the
 direct arms: load only adds time, so the least is the best estimate on a loaded host; the MCP arm's server-stated
 elapsed time can understate, e.g. Q-strands-0003's MCP answers state 12-49 ms where the direct arms state and take
-9.4 s)
-in 16 bins of equal width in log10(cost), so the
-panel spans the cost range rather than following the suite's many sub-10-ms scenarios. Tag minimums first
+9.4 s) in 16 bins of equal width in log10(cost), so the panel spans the cost range rather than following the suite's
+many sub-10-ms scenarios. Tag minimums first
 (`label_heavy` >= 5 labels in the answer, `long_path` >= 1000 bp of paths or a pattern extended beyond k,
 `long_query` >= 900 k-mers, `large_answer` >= 64 KiB, `heavy` the top tenth by cost), then one query per bin; every
 pick prefers an area of the mode not yet chosen, then a family not yet chosen, then a non-empty result (at most 2
