@@ -2480,9 +2480,9 @@ one lane's verification left to another lane's file.
   test_gate's test_shipped_v4_policy_is_regenerated_exactly, failing since the merge of lane S7v, passes.
 
 ### Validation of the integration (offline)
-- 441 tests pass (1 skipped; 345 at 81c620ef = 14552938's suite; 431 after the three merges, with two failures:
-  the vocabulary test of the two mechanisms and the stale policy pin). Each integration rule has a test failing
-  before it.
+- 446 tests pass (1 skipped; 345 at 81c620ef = 14552938's suite; 431 after the three merges, with two failures:
+  the vocabulary test of the two mechanisms and the stale policy pin; 441 before the verification's three
+  follow-ups). Each integration rule has a test failing before it.
 - Copies of v3 (lane-s5e/reeval-S5e) and v4 (20261014T061053Z_refseq97-6f945db4) re-evaluated at 81c620ef and at
   the integrated head (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth anonymous`): 0 changes of outcome,
   outcome_runner, check outcome, arm outcome or relation over 2,900 / 2,913 executions; the class moves are lane
@@ -2490,4 +2490,6 @@ one lane's verification left to another lane's file.
   S7v's (fallback items, execution_differs, host-cache labels) and S7c's (R-discover-0001, M-planted-0016 / -0017);
   v3 FAIL and v4 FINDINGS as before. Against lane S7v's own re-evaluation at d8cf15ff only lane S7c's five detail
   changes per run differ: the integration rules move nothing recorded. The gate on the v4 copy (the regenerated
-  policy): 45 problems, the same set as at 81c620ef with the policy of its table.
+  policy): 45 problems, the same set as at 81c620ef with the policy of its table. The verification's three
+  follow-ups (the snapshot's suite_common bound, list / dict outcomes, run-relative paths) move nothing on v3 / v4
+  either (re-evaluated again: identical to the integration's head, the gate the same 45 problems).
