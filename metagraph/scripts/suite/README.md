@@ -3642,3 +3642,28 @@ Still open, stated:
 - a server-side traverse memory budget, which the suite does not use, and which would make `first_parent`
   misjudge;
 - `loss_budget` comes from one chain fixture.
+
+#### Round 4 of the verification (2026-10-15, the last; against 81c620ef)
+The verdict was "merge it" (`verify/VERIFY-ORACLE.md`, "Round 4"). Its three follow-ups are closed:
+- **Re-entry after a merge.**
+  - A `label_lost` end whose successor still holds the label is legal only if a switch re-entered the label
+    there, and the re-entering run is strictly cheaper than the lost one (6.3: min(stay, switch); a tie goes
+    to the stay).
+  - `switch_costs`: every switch of a merged arm is at the cost model's price, and there are none under
+    forbid.
+  - The verifier's W2 (0076, re-entry at loss 1 against the stay's 0) and W1 (0051, a switch under forbid)
+    fail.
+- **Run reasons.**
+  - `run_reasons`: a run's `end_reason` is its `label_end` event's reason as served (13, I3-2).
+  - A `dead_end` run ends at a graph tip or under the hairpin qualifier.
+  - The seed-2 E3b/G8 miss on 0076 (a superseded run reported `dead_end`) fails. The mutation set gains
+    `merge_late_run_reason`.
+- **The limit of time-based staleness** is stated under round 3 above.
+
+Validation: six runs on the code of `dc9aecf9` against the same build (not stale). Seed 1 ran at the default
+sizes and seeds 2-6 at twice the size (`runs/v6final_*`).
+- 16,406 requests and 44,291 answers: 40,799 equal the oracle and 3,492 are inconclusive with every invariant
+  passing. **0 disagree.**
+- All 16,509 answer files equal round 3's apart from timing.
+- 440,283 of 440,283 corruptions caught, 61 of them merged-arm ones.
+- **No candidate engine defect.**
