@@ -26,7 +26,9 @@ explicitly not required (none by default) and whether the MCP arm must agree wit
 GATE PASS only when every one of these holds (each failure is listed, grouped by kind):
 - identity: the run manifest's content_sha256 and relations_sha256 are the policy's, its stated hashes verify, every
   arm ran it (merge_run.manifest_identity), every plan of the run names it, an index_fp the run states is the
-  policy's, and the comparison read the by-design table the policy's exclusions were derived from;
+  policy's, the host's release and index_fp did not change during the run (merge_run.release_identity), every arm
+  of a recorded set was judged with the run's snapshot of its checks (merge_run.checks_identity), and the
+  comparison read the by-design table the policy's exclusions were derived from;
 - missing: every planned execution and every execution the policy requires is recorded;
 - outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
   the owner's strict gate), not_implemented_mcp (what the MCP cannot express is excluded in the policy), or
@@ -452,6 +454,11 @@ def judge(run_dir, policy, reevaluated=False):
                     for name, path in merge_run.arm_dirs(run_dir))
     for d in merge_run.manifest_identity(run_dir, arm_runs)["differs"]:
         problems.append(_problem("identity", d))
+    for d in merge_run.release_identity(arm_runs)["changed"]:
+        problems.append(_problem("identity", d))
+    if not reevaluated:   # a re-evaluated set is judged with one checks module, the re-evaluation's
+        for d in merge_run.checks_identity(run_dir, arm_runs)["errors"]:
+            problems.append(_problem("identity", d))
     planned, plan_source, plans = run_plan(run_dir, manifest)
     for i, p in enumerate(plans):
         if p.get("manifest") != {"content_sha256": want.get("content_sha256"),

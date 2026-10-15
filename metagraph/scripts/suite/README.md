@@ -87,7 +87,8 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   ignored and its execution runs again); another manifest in the same directory is refused, and so is a
   directory whose state.json names a runner still alive on this host.
 - `checks.evaluate(scenario, answer, arm, previous=..., client=...)`: `previous` lists the scenario's earlier
-  repeats on this arm, in repeat order, also across a resume, as `{"digest", "time_limited"}` (lane S3, the
+  repeats on this arm that the host answered (`suite_common.feeds_previous`: an HTTP status and an outcome other
+  than error; lane S7r), in repeat order, also across a resume, as `{"digest", "time_limited"}` (lane S3, the
   verification's L4: the answer digest `suite_common.answer_digest`, which lane S1's determinism check computes
   with the same function, and what made that answer time-limited, `checks.time_limited`, recorded in the
   execution line's `time_limited` and read from the raw answer for a line of before the field), so that a
@@ -179,19 +180,20 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
    DIR/executions.jsonl and jobs.jsonl, resumable, exit 0 / 1 / 130; 3 without the admin key under
    --check-queue, 2 when the key file is unreadable). Placeholders `{ids}`, `{repeat}` (the repeat index to
    run), `{repeats}` (`{repeat}` + 1, should a runner take a count), `{out}` (RUN_DIR/arms/mcp), `{manifest}`,
-   replaced with shell-quoted values; run with `bash -c` in this environment, unchanged (the runner reads its
-   admin key from there); its output goes to the terminal only. A full run (not --smoke) takes the default
+   `{checks_dir}` (the run's snapshot RUN_DIR/scripts, lane S7r), replaced with shell-quoted values; run with
+   `bash -c` in this environment, unchanged (the runner reads its admin key from there); its output goes to the
+   terminal and to arms/mcp/runner.log (lane S7r). A full run (not --smoke) takes the default
    template `DEFAULT_MCP_CMD` at the top of run_suite.sh, async's runner of branch feat/suite-mcp-runner:
 
        <search-service>/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py \
          --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue \
-         --queue-ignore sra-logan-chunks --checks-dir <this directory>
+         --queue-ignore sra-logan-chunks --checks-dir {checks_dir}
 
    so a full run is `METAGRAPH_ADMIN_KEY_FILE=/Users/raetsch/tmp/mgss/secrets/staging_admin_key
    ./run_suite.sh` (the key file is passed through, never logged; without it the script refuses to start,
    since the runner checks the service queue). `SUITE_MCP_CMD` replaces the default ('' for none), `--no-mcp`
    runs without the MCP arm, `--mcp-cmd default` asks for it in a smoke run, `--resume` keeps the run's
-   template. The runner judges with checks.py of `--checks-dir` (it has no stub fallback).
+   template. The runner judges with checks.py of `--checks-dir`, the run's snapshot (it has no stub fallback).
 7. `--max-requests N`: the direct arms' requests of this invocation in total, the closing capabilities GETs
    included (one kept back per direct arm in paired mode; sequential: direct-remote gets what direct-local
    left); the release GET is one more. `--smoke` defaults it to 40 and the manifest to
@@ -1815,3 +1817,186 @@ service_by_design.json at sha256 ab4100c9...
   direct arm and repeat ("direct-local repeat 0: ...": R-budget-0001 / -0002, R-edge-0003, R-twin-0002 / -0003 /
   -0004 / -0005, in both runs), R-twin-0004's naming direct-remote's 200 before direct-local's 503 deadline.
 - 263 tests pass (1 skipped).
+
+## Lane S7r: the runner and the orchestration (the two-day review's S-runner lane, 2026-10-14)
+The findings of the two-day review (2026-10-14-ultracode REPORT.md) on run_direct.py, run_suite.sh and merge_run.py,
+decided against 14552938 (lanes G1-G3 merged): the resume selection's widening and the narrowed verdict were fixed
+by lane S6c; everything below was open.
+
+### An unanswered repeat is no earlier repeat (P3-run-measure-report-01, P6-end-to-end-06)
+- A request that got no HTTP status (a transport failure, a client timeout) is recorded with the digest of its
+  stand-in answer (`suite_common.transport_failure`). run_direct passed it in `previous`, in the session and on a
+  resume, so the next repeat, which the host answered, failed `deterministic` ("differs from 1 earlier repeat(s)"):
+  a false determinism failure charged to the host, and a direct or MCP disagreement. `suite_common.feeds_previous`
+  is the rule: an earlier repeat feeds `previous` only with an HTTP status and an outcome other than `error` (an
+  undecodable body or a runner failure has no digest of the host's answer either). A repeat after an unanswered one
+  compares with the answered ones only; with none, `deterministic` has nothing to compare (left out, as on the first
+  repeat). The rule is async's BENCH-01 for its runner and is reevaluate.py's to apply as well (a mirror rule: the
+  same helper).
+
+### Ctrl-C of a paired run over ssh (P3-run-measure-report-02)
+- A paired direct-local step's stdout is its ssh channel. Ctrl-C ends the ssh client; the runner on mex survives on
+  its request, gets the orchestrator's `pkill -INT`, records its line, and its next stdout write (the progress line,
+  or with --quiet the status line) met the closed pipe: BrokenPipeError, state `failed`, a "runner failed:
+  Traceback" warning that stayed in the arm's run.json (and the report) after a successful resume, exit 120 instead of
+  130. Every stdout write of run_direct goes through `say`: the first write that finds the reader gone points stdout
+  at /dev/null, and the run ends as its stop says (interrupted, exit 130, no warning). Tests: run_direct with its
+  stdout reader closed before SIGINT (with and without --quiet), and Ctrl-C of a paired run over tests/fake_ssh.py
+  followed by a resume.
+
+### A failed step is recorded (P3-run-measure-report-05)
+- A direct step of the paired loop that exited non-zero only counted towards the stop after three in a row: its
+  scenario still counted as completed and the loop recorded `done N/N` (the v4 log: `python3: No such file or
+  directory`, exit 127 on P-iupac-0001, then "paired: done, 681/681"). The loop record (orchestrator.json
+  sessions[-1].loop, `loop_record`) counts a scenario as completed only when every step of it succeeded, lists
+  `failed_steps` as ARM:SCENARIO:EXIT, and a loop that ran through with a failed step ends `incomplete` (reason
+  `failed_steps`; the report's verdict reads INCOMPLETE through it) with exit status 1, like a failed loop. No
+  retry: a step that failed is resumed like any other (`--resume`). A loop stopped by the request cap stays `capped`
+  (exit 0, a planned stop that --resume continues) also when a step failed before the cap; its failed_steps are
+  recorded and the report reads INCOMPLETE.
+
+### The orchestration records what its arms lost (P6-end-to-end-01, the run_suite side)
+- Lane S6c's plan reconciliation already reads a planned execution no arm recorded as INCOMPLETE (the report side
+  of the finding: the sequential mode with the MCP cold pass refused, exit 3, reads INCOMPLETE at 14552938). The
+  orchestration itself did not say so: the sequential mode wrote no loop record and exited 0 whatever its arms did,
+  and the MCP runner's output went to the terminal only, so a runner crash (a traceback, no line) left nothing in
+  the run directory.
+- The sequential mode writes the loop record too (mode `sequential`, no per-scenario counts): `failed` with the
+  MCP rule's reason when the MCP runner refused (exit 2 / 3), was interrupted (130) or ended three executions in a
+  row in error or unrecorded; `capped` when an arm stopped at --max-requests; `incomplete` (reason failed_steps)
+  when direct-local did not finish (`direct-local:-:STATE`) or direct-remote exited otherwise
+  (`direct-remote:-:EXIT`); else `done`. failed and incomplete exit 1 in both modes.
+- The MCP runner's output (stdout and stderr) goes to the terminal and to arms/mcp/runner.log, each step framed by
+  its repeat and ids and its exit status (the template's expansion, which may name files, is not written; `tee -i`:
+  on Ctrl-C the runner's last lines still reach the log, where a tee killed by the same Ctrl-C would leave the runner
+  a closed pipe, a BrokenPipeError and exit 1 instead of 130); the
+  direct-remote runner's stderr goes to arms/direct-remote/runner.log (its last lines shown when the step fails), as
+  direct-local's on mex.
+- mcp_after names every MCP execution a runner step did not record (`mcp_missing`, SCENARIO:rREPEAT, the first 50;
+  `mcp_missing_count`); in the paired loop such a scenario is not completed, and a loop that ran through with one
+  ends `incomplete` (reason mcp_missing) instead of `done`. Tests: tests/fake_mcp.py `crash` (a traceback on stderr,
+  no line; FAKE_MCP_CRASH_ID limits it to one scenario) in the paired loop, and the sequential mode with the cold
+  pass refused.
+
+### A resume waits for its own run's runner (P3-run-measure-report-06)
+- Ctrl-C of a paired run leaves the mex runner of the step in flight on its request (a long-class request may take
+  up to 30 min); the interrupt message promised that "--resume waits for it or attaches to it", but only the
+  sequential mode attaches, and a paired resume refused after SUITE_WAIT_RUNNER_S (150 s) with "... or --resume its
+  run", circular while that runner was its own. A resume now first waits for its own run's runners (the mex runners
+  whose command line names its --run-id, when no other run's runner is there) for up to SUITE_WAIT_OWN_RUNNER_S (1860
+  s: the long class's client timeout and a minute), with a log line every minute, then goes on; only then the
+  check for any runner refuses, naming the pids (another run's runner: wait for it or stop it with kill -INT, which
+  records its request in flight; its own past the wait: stop it with kill -INT, then --resume again). The interrupt
+  message is the mode's: the sequential mode's resume attaches, the paired mode's waits.
+
+### A resume continues the run as it was started (P3-run-measure-report-04, P6-end-to-end-05)
+- Lane S6c fixed the selection: a plain resume runs the union of every invocation's plan (it no longer widens to the
+  whole manifest), and a narrowed resume's report reads INCOMPLETE against that union (the probe of 14552938: a
+  `--limit 1` run resumed plainly adds no scenario; a capped run resumed with `--areas P --limit 1` reads
+  `INCOMPLETE (... 12 planned execution(s) not recorded ...)`). The other options still came from the resume's
+  command line: a `--skip-local` run resumed plainly ran direct-local too (the arms widened), a smoke run lost its
+  request cap of 40 and its 1800 s sampler bound, the pause fell back to 1 s, --allow-stub had to be given again,
+  and a gated run resumed plainly was not gated (it exited 0 on a FAIL).
+- A resume keeps the options it does not give: the last invocation's mode, --checks, MCP template, --warm-every (as
+  before) and --pause, and the run's FIRST invocation's flags --skip-local, --skip-remote, --allow-stub, --smoke and
+  --gate (the policy must still exist). A resume that names a flag, or its negation (--local, --remote,
+  --no-allow-stub, --no-gate; a flag and its negation exclude each other), applies it to that invocation only and
+  records it in its session: one `--resume --skip-local` does not drop direct-local from the later resumes (taken
+  from the last invocation, it did, and the run could never finish), and `--resume --no-gate` leaves one invocation
+  ungated. --max-requests is not kept: it caps one invocation (a capped run is resumed to finish it); a smoke run's
+  default cap of 40 applies to each invocation, its resumes' included (a larger --max-requests lifts it). The resume
+  logs "the run's own options: ..." and each session of orchestrator.json records `given` (the options on its
+  command line) and `restored` (those taken from the run).
+- A resume that names its own selection (--ids, --areas, --limit, --gate) and leaves out scenarios of the run's
+  plan says so ("this invocation's selection leaves out scenarios of the run's plan ...") and records
+  `narrower_than_plan` {selected, planned, left_out} in its session; its loop and its arms' states describe its own
+  selection, the report's verdict the run's plan (INCOMPLETE while any planned execution is missing).
+- The tests no longer pass the run's own options again on resume (--warm-every, --skip-local, --skip-remote,
+  --no-mcp), so they exercise the restore.
+
+### The release at the run's end (P6-end-to-end-07)
+- run_direct kept only `server_instance` from its closing GET /capabilities, and a resume set `run.release` only
+  where it was absent: a deploy during the run, or between an interrupt and its resume, read at most as "the server
+  restarted", and every execution was attributed to the first release. Each session of an arm's run.json records
+  `release_start` / `index_fp_start` (the start's capabilities documents) and `release_end` / `index_fp_end` (the
+  closing GET /capabilities; staging's /capabilities states no index_fp, so index_fp_end is null there and the
+  release, which names the index build and the commit, carries the identity); run.json `releases` lists every
+  release the arm saw in order, `release_changed` whether there was more than one. `run.release` stays the run's
+  first.
+- merge_run.release_identity reads both direct arms' sessions in time order: more than one release or index_fp is a
+  warning naming the first and each later one with the arm, session and time, and run.json `release_identity` /
+  `mixed_releases` state it. merge_run --strict-identity (run_suite.sh --gate) exits 3 on it (identity_errors) and
+  gate.py fails on it (kind identity, one line in gate.py). The report shows the warning; its verdict is report.py's
+  (lane S-verdict's file): it does not yet read `mixed_releases`.
+- A paired step (--only) takes no capabilities GET, so the release is seen at the arm's first step and at each
+  invocation's closing step: a deploy during an invocation shows at its end, one between an interrupt and the resume
+  at the resume's end. In paired mode the first invocation of a run interrupted before its closing step has no end
+  release; its resume's closing step has one.
+
+### The checks are pinned per run (P6-end-to-end-03)
+- Each paired direct-remote step was a fresh process importing checks.py and suite_common.py from this directory,
+  the MCP runner re-read `--checks-dir` (this directory) on every invocation, direct-local used the copy rsynced to
+  mex once at the start, run.json recorded only `checks_module: "checks"`, and merge_run compared manifests only: a
+  checks change landing during a five-hour run (7161cbcc was committed inside the v4 window) would have judged the
+  arms by different rules, silently.
+- **The run's snapshot.** The run's first invocation copies what runs and judges the arms
+  (`suite_common.SNAPSHOT_FILES`: run_direct.py, sampler.py, suite_common.py, checks.py, checks_stub.py,
+  service_by_design.json) into RUN_DIR/scripts, with RUN_DIR/scripts/SNAPSHOT.json (created_utc, source,
+  scripts_commit, sessions_before, the sha256 of each file). direct-remote runs `RUN_DIR/scripts/run_direct.py`, mex
+  gets the snapshot (rsync of RUN_DIR/scripts instead of this whole directory), and the MCP template's new
+  placeholder `{checks_dir}` is the snapshot (the default template passes `--checks-dir {checks_dir}`; a restored
+  template of before with `--checks-dir` this directory is rewritten to it; a template without `{checks_dir}` is
+  warned about at the start). A resume keeps the snapshot and says which files of this directory differ from it; the
+  first resume of a run older than the snapshot takes one then (`sessions_before` the earlier invocations). Each
+  session of orchestrator.json records `snapshot` {state created / kept, changed, live_differs, mcp_checks_dir}.
+- **What judged each arm.** run_direct records per session `checks_sha256`, `suite_common_sha256` and `checks_dir`
+  (of the modules it imported; the stub's file under --checks stub), and the latest at run.json's top. async's runner
+  records `checks_dir` per invocation (run.json `invocations[]`; it keeps `checks_module` out of them). It is to
+  record, per invocation beside `checks_dir`, `checks_sha256` and `suite_common_sha256` (the sha256 of checks.py and
+  suite_common.py it imported); merge_run reads exactly these per-invocation keys (a runner without `invocations`, as
+  tests/fake_mcp.py, states its one at run.json's top) and never `checks_module`.
+- **merge_run.checks_identity** (recorded sets; a re-evaluated set is judged with one checks module, the
+  re-evaluation's) compares them with the snapshot: a direct session whose checks or suite_common sha256 is not the
+  snapshot's (the stub's for a stub arm), an MCP invocation whose recorded checks directory is not RUN_ID/scripts (a
+  copy of the run elsewhere keeps that tail) or whose stated checks or suite_common sha256 is not the snapshot's, and
+  a snapshot file changed after it was taken are `differs`; a session or invocation stating neither is `unverified`
+  (sessions that started before the snapshot are counted apart); one sentence per arm and kind, since a paired run
+  has a session per step. Both are warnings and run.json `checks_identity`; with a snapshot both are errors for
+  --strict-identity (exit 3) and for gate.py (kind identity). Without a snapshot (a run before lane S7r) only arms
+  stating different sha256 are named. The outcomes merge_run makes stricter with checks.scenario_outcome are the
+  snapshot's checks' for a recorded set.
+- **A gated resume of a run started before the snapshot existed always fails the checks identity.** Its first
+  resume takes the snapshot, and the sessions of its earlier invocations cannot state a checks sha256: they are
+  `unverified`, an error with a snapshot. This is the strict gate's intent (what judged those executions is not
+  recorded); the remedy is a fresh run. (A re-evaluated set is judged with one checks module, the re-evaluation's,
+  and the check does not apply to it.)
+- **`--mcp-run DIR`** (a finished MCP run copied into arms/mcp) was not judged with the run's snapshot: its
+  invocations state another checks directory (or none), which the merge names and the gate fails on.
+- compare.py, report.py and gate.py's property reading still load this directory's checks.py and table for a
+  recorded set (lane S-verdict's files; noted for the integrator).
+
+### An outcome outside the vocabulary is never a success on the runner side (P6-end-to-end-02, hand-off of lane S7v)
+- merge_run.stricter_outcomes skipped a line whose outcome is outside the shared vocabulary (it kept it as
+  recorded), and the paired loop's mcp_after reset its error counter on one: six MCP lines with the outcome
+  `skipped_by_runner` merged as such, and three in a row did not stop the loop. `suite_common.outcome_known` is the
+  shared test (defined identically to lane S7v's, gr/suite-s-verdict 9a12a6c9). merge_run reads such a line (or one
+  without an outcome) as `error`, `outcome_runner` keeping the recorded one, with a warning per arm and run.json
+  `outcomes_unknown` {arm: {recorded outcome: lines}}; mcp_step_result reports it as `unknown`, which mcp_after
+  counts like `error` towards the stop after three in a row and logs. (Lane S7v's comparator counts an unknown
+  outcome apart and reads it as a failure; after this merge a merged set holds none, the warning and outcome_runner
+  name them.)
+
+### Validation (offline)
+- Copies of v3 (the S5e input set) and v4 re-evaluated (`run_suite.sh --reevaluate COPY --no-pdf --reeval-mcp-auth
+  anonymous`) with 14552938 and with this lane: no outcome, check outcome, direct or MCP class, verdict line or
+  merged warning moves (v3 FAIL, v4 FINDINGS, as before); both merged sets state one release and no checks identity
+  error (a re-evaluated set is judged with the re-evaluation's checks). The gated re-evaluation of v4 with
+  gate/policy_v4_rt_mcp.json reads the same 45 problems (GATE FAIL) before and after. The recorded v4 merge (not
+  re-evaluated) gives the same 2913 outcomes and host-cache labels; its checks identity has no snapshot and states
+  the sessions without a sha256 as unverified, which is no warning and no error for a run older than the snapshot.
+  The re-evaluation does not run run_direct: the `previous` rule changes nothing there until reevaluate.py applies
+  suite_common.feeds_previous too.
+- 371 tests pass (1 skipped; 345 at 14552938), the follow-up of the lane's verification included (first-session
+  flags and their negations, `tee -i`, the per-invocation sha256 keys); its re-evaluations of v3 / v4 and the gated
+  v4 again move nothing.
+

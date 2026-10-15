@@ -4,16 +4,22 @@
 #
 #   run_suite.sh [--manifest M | --smoke] [--paired | --sequential]
 #                [--mcp-cmd TEMPLATE | --mcp-cmd default | --no-mcp | --mcp-run DIR]
-#                [--areas P,M] [--ids FILE] [--limit N] [--skip-local] [--skip-remote] [--resume RUN_DIR]
-#                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
-#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub] [--no-pdf] [--gate POLICY]
+#                [--areas P,M] [--ids FILE] [--limit N] [--skip-local | --local] [--skip-remote | --remote]
+#                [--resume RUN_DIR] [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
+#                [--warm-every N] [--checks auto|checks|stub] [--allow-stub | --no-allow-stub] [--no-pdf]
+#                [--gate POLICY | --no-gate]
 #   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--reeval-mcp-auth anonymous|api_key]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf] [--gate POLICY]
 #
 # --ids FILE: only these scenarios (ids separated by commas, blanks or new lines, '#' comments; an id the manifest
 # lacks is refused), in manifest order, with --areas / --limit applied on top. --resume without --ids, --areas,
 # --limit or --gate runs the scenarios of the run's whole plan (every invocation's selection: a plain resume after a
-# narrower targeted one finishes the run), and keeps the last invocation's --warm-every unless given. Every
+# narrower targeted one finishes the run; a resume that names a narrower selection says so). A resume keeps the
+# last invocation's mode, --checks, MCP template, --warm-every and --pause unless given again, and the run's FIRST
+# invocation's flags: --skip-local, --skip-remote, --allow-stub, --smoke (its request cap of 40 per invocation and
+# its sampler bound) and --gate, so a plain `--resume RUN_DIR` continues the run as it was started and is gated as
+# it was; a resume that names one (or its negation --local, --remote, --no-allow-stub, --no-gate) applies it to that
+# invocation only. Not --max-requests, which caps one invocation. Every
 # invocation writes the run's plan, RUN_DIR/plan.json, before any arm runs: each (scenario, arm, repeat) its
 # selection plans (gate.py plan); one that adds executions is added, the run's plan is the union.
 #
@@ -38,14 +44,22 @@
 #
 # --mcp-cmd TEMPLATE: the async session's MCP runner (scripts/bench/suite_mcp_runner.py), called per scenario
 # and repeat with {ids} (comma-separated scenario ids), {repeat} (the repeat index to run: 0 cold, >= 1 warm),
-# {repeats} ({repeat} + 1), {out} (RUN_DIR/arms/mcp) and {manifest} (the run's manifest) replaced by
+# {repeats} ({repeat} + 1), {out} (RUN_DIR/arms/mcp), {manifest} (the run's manifest) and {checks_dir} (the run's
+# snapshot RUN_DIR/scripts, below) replaced by
 # shell-quoted values; run with `bash -c` and this environment unchanged. Only the template is recorded,
 # never the expanded command or any environment value. A full run (not --smoke) uses the default template
 # DEFAULT_MCP_CMD below (SUITE_MCP_CMD replaces it, '' for none) unless --mcp-cmd, --no-mcp or --mcp-run is
 # given; --mcp-cmd default asks for it in a smoke run; --resume keeps the run's template. The default runner
 # needs METAGRAPH_ADMIN_KEY_FILE (a file holding the staging admin key) in the environment, e.g.
 #   METAGRAPH_ADMIN_KEY_FILE=/Users/raetsch/tmp/mgss/secrets/staging_admin_key run_suite.sh
-# and judges with checks.py of this directory (--checks-dir).
+# and judges with the run's snapshot (--checks-dir {checks_dir}).
+#
+# The run's snapshot: the run's first invocation copies what judges and runs the arms (suite_common.SNAPSHOT_FILES:
+# run_direct.py, sampler.py, suite_common.py, checks.py, checks_stub.py, service_by_design.json) into
+# RUN_DIR/scripts with their sha256 (SNAPSHOT.json). direct-remote runs from it, it is what goes to mex for
+# direct-local, and the MCP runner gets it as {checks_dir}; a resume keeps it. A change of this directory during
+# the run, or before a resume, changes nothing for the run (a new run, or --reevaluate, judges with it); the
+# runners record the sha256 of the checks they imported, and merge_run.py states every arm judged with others.
 #
 # A run directory is runs/<UTC>_<release-short>/ under this directory (SUITE_RUNS overrides). Every
 # invocation starts a new run directory, except --resume RUN_DIR, which continues that run (its mode unless
@@ -67,9 +81,10 @@
 # SUITE_MEX_DIR (suite-dev), SUITE_MEX_PY (python3), SUITE_LOCAL_BASE (http://localhost:42010),
 # SUITE_REMOTE_BASE (the public refseq33m-experimental URL), SUITE_RUNS, PYTHON (python3), SUITE_POLL_S (15),
 # SUITE_SAMPLER (1; 0: no mex sampler besides direct-local's own in sequential mode), SUITE_WAIT_RUNNER_S
-# (150), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine; default
-# macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat interval),
-# SUITE_RUNNER_PATTERN (the pgrep pattern of the mex runners; the offline tests narrow it to their own).
+# (150), SUITE_WAIT_OWN_RUNNER_S (1860: how long a --resume waits for its own run's runner, the long class's client
+# timeout and a minute), SUITE_SSH_CONTROL_DIR (/tmp/suite-ssh-<uid>), SUITE_HOST_ID (the lock's id of this machine;
+# default macOS's LocalHostName, else the node name), SUITE_HEARTBEAT_S (300; the paired sampler's heartbeat
+# interval), SUITE_RUNNER_PATTERN (the pgrep pattern of the mex runners; the offline tests narrow it to their own).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,6 +98,7 @@ RUNS="${SUITE_RUNS:-$HERE/runs}"
 POLL_S="${SUITE_POLL_S:-15}"
 SAMPLER="${SUITE_SAMPLER:-${SUITE_REMOTE_SAMPLER:-1}}"
 WAIT_RUNNER_S="${SUITE_WAIT_RUNNER_S:-150}"
+WAIT_OWN_RUNNER_S="${SUITE_WAIT_OWN_RUNNER_S:-1860}"
 CTL_DIR="${SUITE_SSH_CONTROL_DIR:-/tmp/suite-ssh-$(id -u)}"
 # This invocation's own control socket (review N1): a shared one would let another invocation's exit (`-O exit`
 # in its cleanup) end this one's master and with it the ssh step in flight.
@@ -98,7 +114,7 @@ fi
 # The MCP arm of a full run: the async session's runner (search-service scripts/bench/suite_mcp_runner.py, branch
 # feat/suite-mcp-runner), judging with this directory's checks.py; --check-queue pauses while the service queue
 # holds other work (the Logan chunks aside) and needs the admin key from the environment.
-ASYNC_MCP_CMD="/Users/raetsch/git/services/metagraph-search-service/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue --queue-ignore sra-logan-chunks --checks-dir $(printf '%q' "$HERE")"
+ASYNC_MCP_CMD="/Users/raetsch/git/services/metagraph-search-service/.venv/bin/python /Users/raetsch/tmp/mgss/wt-suite/scripts/bench/suite_mcp_runner.py --manifest {manifest} --ids {ids} --repeat {repeat} --out {out} --check-queue --queue-ignore sra-logan-chunks --checks-dir {checks_dir}"
 DEFAULT_MCP_CMD="${SUITE_MCP_CMD-$ASYNC_MCP_CMD}"
 # The mex runners of the suite, as pgrep / pkill patterns ([s] keeps the pattern from matching its own shell).
 # SUITE_RUNNER_PATTERN narrows it for the offline tests, whose "mex" is this machine: there a real run's ssh step
@@ -132,8 +148,18 @@ mex_rsync() {
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
 MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""; IDS_FILE=""; IDS=""; GATE=""
-WARM_GIVEN=0; RESUME_SELECTION=0
+WARM_GIVEN=0; RESUME_SELECTION=0; PAUSE_GIVEN=0; GIVEN=""
+# the run's flags this invocation names ('' none; else the option, a negation included): they apply to it only
+LOCAL_SET=""; REMOTE_SET=""; STUB_SET=""; GATE_SET=""
+# set_once VAR OPTION: an option and its negation exclude each other
+set_once() {
+  local cur="${!1}"
+  [[ -z "$cur" || "$cur" == "$2" ]] || die "--$cur and --$2 exclude each other"
+  printf -v "$1" '%s' "$2"
+}
 while [[ $# -gt 0 ]]; do
+  # the options this invocation gives (recorded; a resume restores the run's own for the others)
+  case "$1" in --*) GIVEN+="${1#--},";; esac
   case "$1" in
     --reevaluate) REEVALUATE="$2"; shift 2 ;;
     --reeval-checks) REEVAL_CHECKS="$2"; shift 2 ;;
@@ -144,28 +170,30 @@ while [[ $# -gt 0 ]]; do
     --sequential) MODE=sequential; shift ;;
     --areas) AREAS="$2"; shift 2 ;;
     --ids) IDS_FILE="$2"; shift 2 ;;
-    --gate) GATE="$2"; shift 2 ;;
+    --gate) set_once GATE_SET gate; GATE="$2"; shift 2 ;;
+    --no-gate) set_once GATE_SET no-gate; GATE=""; shift ;;
     --limit) LIMIT="$2"; shift 2 ;;
-    --skip-local) SKIP_LOCAL=1; shift ;;
-    --skip-remote) SKIP_REMOTE=1; shift ;;
+    --skip-local) set_once LOCAL_SET skip-local; SKIP_LOCAL=1; shift ;;
+    --local) set_once LOCAL_SET local; SKIP_LOCAL=0; shift ;;
+    --skip-remote) set_once REMOTE_SET skip-remote; SKIP_REMOTE=1; shift ;;
+    --remote) set_once REMOTE_SET remote; SKIP_REMOTE=0; shift ;;
     --mcp-run) MCP_RUN="$2"; shift 2 ;;
     --mcp-cmd) MCP_CMD="$2"; MCP_GIVEN=1; shift 2 ;;
     --no-mcp) NO_MCP=1; MCP_CMD=""; shift ;;
     --compare) COMPARE="$2"; shift 2 ;;
     --resume) RESUME="$2"; shift 2 ;;
     --by-design) BY_DESIGN="$2"; shift 2 ;;
-    --pause) PAUSE="$2"; shift 2 ;;
+    --pause) PAUSE="$2"; PAUSE_GIVEN=1; shift 2 ;;
     --max-requests) MAX_REQUESTS="$2"; shift 2 ;;
     --warm-every) WARM_EVERY="$2"; WARM_GIVEN=1; shift 2 ;;
-    --allow-stub) ALLOW_STUB=1; shift ;;
+    --allow-stub) set_once STUB_SET allow-stub; ALLOW_STUB=1; shift ;;
+    --no-allow-stub) set_once STUB_SET no-allow-stub; ALLOW_STUB=0; shift ;;
     --checks) CHECKS_MODE="$2"; shift 2 ;;
     --no-pdf) NO_PDF=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown option $1" ;;
   esac
 done
-# The smoke load rule: at most ~40 requests per smoke run.
-if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ -z "$MCP_RUN" || -d "$MCP_RUN" ]] || die "--mcp-run $MCP_RUN is not a directory"
 [[ -z "$MCP_RUN" || -z "$MCP_CMD" ]] || die "--mcp-run and --mcp-cmd exclude each other"
 [[ $NO_MCP == 0 || $MCP_GIVEN == 0 ]] || die "--no-mcp and --mcp-cmd exclude each other"
@@ -173,11 +201,12 @@ if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
 [[ -z "$CHECKS_MODE" || "$CHECKS_MODE" =~ ^(auto|checks|stub)$ ]] || die "--checks takes auto, checks or stub"
 [[ -z "$IDS_FILE" || -f "$IDS_FILE" ]] || die "--ids $IDS_FILE is not a file"
-if [[ -n "$GATE" ]]; then
+check_gate() {
   [[ -f "$GATE" ]] || die "--gate $GATE is not a file"
   GATE="$(cd "$(dirname "$GATE")" && pwd)/$(basename "$GATE")"
   "$PY" "$HERE/gate.py" policy-ids "$GATE" > /dev/null || die "--gate $GATE is not a gate policy"
-fi
+}
+[[ -z "$GATE" ]] || check_gate
 
 # --- the offline re-evaluation of a recorded run (lane S4): no lock, no ssh, no request to any host ----------
 if [[ -n "$REEVALUATE" ]]; then
@@ -229,40 +258,64 @@ if [[ -n "$RESUME" ]]; then
       if [[ -f "$cand" ]]; then MANIFEST="$cand"; break; fi
     done
   fi
-  if [[ -z "$MODE" ]]; then
-    MODE="$("$PY" -c 'import json, sys
+  # The run's own options (its last invocation's, orchestrator.json sessions[-1]) for those this one does not give,
+  # so a plain resume continues the run as it was started: the same arms, checks, repeats, pace, load cap and gate.
+  RESTORED=""
+  session_value() {  # session_value INDEX KEY: what the run's invocation INDEX (0 the first, -1 the last) recorded
+    "$PY" -c 'import json, sys
 try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("mode") or "")
-except (OSError, ValueError, KeyError, IndexError):
-    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
-  fi
+    v = json.load(open(sys.argv[1]))["sessions"][int(sys.argv[2])].get(sys.argv[3])
+    print("" if v is None else v)
+except (OSError, ValueError, KeyError, IndexError, AttributeError):
+    print("")' "$RUN_DIR/orchestrator.json" "$1" "$2" 2>/dev/null || true
+  }
+  last_session() { session_value -1 "$1"; }
+  first_session() { session_value 0 "$1"; }
+  restore() {  # restore NAME VALUE: log what was restored
+    RESTORED+="$1 $2, "
+  }
+  if [[ -z "$MODE" ]]; then MODE="$(last_session mode)"; [[ -z "$MODE" ]] || restore mode "$MODE"; fi
   if [[ -z "$CHECKS_MODE" ]]; then
-    # The run's own checks (the last invocation's), so a resume judges its executions alike.
-    CHECKS_MODE="$("$PY" -c 'import json, sys
-try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("checks") or "")
-except (OSError, ValueError, KeyError, IndexError):
-    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+    # the run's own checks, so a resume judges its executions alike
+    CHECKS_MODE="$(last_session checks)"; [[ -z "$CHECKS_MODE" ]] || restore checks "$CHECKS_MODE"
   fi
   # The run's own selection (the union of every invocation's plan, below) unless this one names its own.
   [[ -n "$IDS_FILE" || -n "$AREAS" || -n "$LIMIT" || -n "$GATE" ]] || RESUME_SELECTION=1
   if [[ $WARM_GIVEN == 0 ]]; then
     # its warm_every likewise (the repeats it planned)
-    WARM_EVERY="$("$PY" -c 'import json, sys
-try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("warm_every") or 10)
-except (OSError, ValueError, KeyError, IndexError):
-    print(10)' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo 10)"
+    WARM_EVERY="$(last_session warm_every)"; WARM_EVERY="${WARM_EVERY:-10}"; restore warm_every "$WARM_EVERY"
   fi
   if [[ $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
-    # The run's own MCP template (the last invocation's), so a resume pairs the same arms.
-    MCP_CMD="$("$PY" -c 'import json, sys
-try:
-    print(json.load(open(sys.argv[1]))["sessions"][-1].get("mcp_cmd") or "")
-except (OSError, ValueError, KeyError, IndexError):
-    print("")' "$RUN_DIR/orchestrator.json" 2>/dev/null || true)"
+    # The run's own MCP template (the last invocation's), so a resume pairs the same arms; a template of before
+    # {checks_dir} that judged with this directory judges with the run's snapshot instead.
+    MCP_CMD="$(last_session mcp_cmd)"; restore mcp "$( [[ -n "$MCP_CMD" ]] && echo "its template" || echo none)"
+    OLD_CHECKS_DIR="--checks-dir $(printf '%q' "$HERE")"
+    NEW_CHECKS_DIR='--checks-dir {checks_dir}'
+    if [[ "$MCP_CMD" == *"$OLD_CHECKS_DIR"* ]]; then MCP_CMD="${MCP_CMD//"$OLD_CHECKS_DIR"/$NEW_CHECKS_DIR}"; fi
   fi
-  log "resuming $RUN_ID"
+  if [[ $PAUSE_GIVEN == 0 ]]; then
+    v="$(last_session pause_s)"; if [[ -n "$v" ]]; then PAUSE="$v"; restore pause "$v"; fi
+  fi
+  # The run's flags are its FIRST invocation's (a resume naming one, or its negation, changes that invocation only,
+  # so one `--resume --skip-local` never drops direct-local from the later resumes).
+  for opt in skip_local skip_remote allow_stub smoke; do
+    if [[ "$(first_session $opt)" == 1 ]]; then
+      case $opt in
+        skip_local) [[ -n "$LOCAL_SET" ]] || { SKIP_LOCAL=1; restore skip-local ""; } ;;
+        skip_remote) [[ -n "$REMOTE_SET" ]] || { SKIP_REMOTE=1; restore skip-remote ""; } ;;
+        allow_stub) [[ -n "$STUB_SET" ]] || { ALLOW_STUB=1; restore allow-stub ""; } ;;
+        smoke) [[ $SMOKE == 1 ]] || { SMOKE=1; restore smoke ""; } ;;
+      esac
+    fi
+  done
+  if [[ -z "$GATE_SET" ]]; then
+    v="$(first_session gate)"
+    if [[ -n "$v" ]]; then
+      [[ -f "$v" ]] || die "the run was gated by $v, which is gone: pass --gate POLICY"
+      GATE="$v"; check_gate; restore gate "$GATE"
+    fi
+  fi
+  log "resuming $RUN_ID$( [[ -z "$RESTORED" ]] || printf '; the run'"'"'s own options: %s' "${RESTORED%, }")"
 else
   if [[ -z "$MANIFEST" ]]; then
     if [[ $SMOKE == 1 ]]; then MANIFEST="$HERE/manifest/suite_smoke_v4.json"; else MANIFEST="$HERE/manifest/suite_v4.json"; fi
@@ -273,6 +326,8 @@ else
 fi
 MODE="${MODE:-paired}"
 [[ "$MODE" == paired || "$MODE" == sequential ]] || die "unknown mode $MODE"
+# The smoke load rule: at most ~40 requests per smoke invocation (a resumed smoke run's included).
+if [[ $SMOKE == 1 && -z "$MAX_REQUESTS" ]]; then MAX_REQUESTS=40; fi
 if [[ -z "$RESUME" && $SMOKE == 0 && $MCP_GIVEN == 0 && $NO_MCP == 0 && -z "$MCP_RUN" ]]; then
   MCP_CMD="$DEFAULT_MCP_CMD"   # a full run includes the MCP arm
 fi
@@ -285,6 +340,7 @@ if [[ -n "$MCP_CMD" ]]; then
   if [[ "$MCP_CMD" == *--check-queue* && -z "${METAGRAPH_ADMIN_KEY_FILE:-}" && -z "${METAGRAPH_ADMIN_KEY:-}" ]]; then
     die "the MCP runner checks the service queue and needs METAGRAPH_ADMIN_KEY_FILE (or METAGRAPH_ADMIN_KEY) in the environment"
   fi
+  [[ "$MCP_CMD" == *"{checks_dir}"* ]] || log "warning: the MCP template names no {checks_dir}: its runner judges with other checks than the run's snapshot (the merge states it, the gate fails on it)"
 fi
 [[ "$MODE" == sequential || -z "$MCP_RUN" ]] || die "--mcp-run reads a finished MCP run: use it with --sequential (or --mcp-cmd)"
 [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || die "no manifest (${MANIFEST:-none}); pass --manifest"
@@ -395,7 +451,8 @@ cleanup() {
     [[ $CREATED_MEX_RUN == 0 ]] || mex "rmdir $MEX_DIR/runs/$RUN_ID/arms $MEX_DIR/runs/$RUN_ID" || true
     if [[ $CREATED_RUN_DIR == 1 ]]; then
       rm -f "$RUN_DIR/manifest.json"
-      rmdir "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
+      for f in "$RUN_DIR/scripts/"*; do [[ ! -f "$f" ]] || rm -f "$f"; done   # this invocation's snapshot
+      rmdir "$RUN_DIR/scripts" "$RUN_DIR/arms" "$RUN_DIR" 2>/dev/null || true
     fi
   fi
   release_lock
@@ -450,6 +507,34 @@ wait_no_runner() {
     waited=$((waited + 5))
   done
 }
+# This run's runners on mex in OWN_PIDS and all of the suite's in RUNNER_PIDS, from one answer ('' for none);
+# returns 1 when mex gave no answer.
+own_runner_pids() {
+  local out
+  out="$(mex "printf 'runners:'; pgrep -u \$(id -u) -f '$RUNNER_PATTERN' | tr '\n' ' '; printf 'own:'; pgrep -u \$(id -u) -f '$RUNNER_PATTERN .*--run-id $RUN_ID' | tr '\n' ' '; echo" || true)"
+  [[ "$out" == *runners:*own:* ]] || return 1
+  OWN_PIDS="$(printf '%s' "${out##*own:}" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
+  out="${out%%own:*}"
+  RUNNER_PIDS="$(printf '%s' "${out##*runners:}" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
+}
+# A resume next to its own run's runner (a paired step cut off by Ctrl-C ends after its request in flight, which
+# may take up to the long class's client timeout): waits for it, with a log line every minute, instead of
+# refusing. 0: no runner of this run, or another's runs too (wait_no_runner judges that); 1: still running after
+# `$1` seconds; 2: mex did not answer.
+wait_own_runner() {
+  local waited=0 next=0
+  while true; do
+    own_runner_pids || return 2
+    [[ -n "$OWN_PIDS" && "$OWN_PIDS" == "$RUNNER_PIDS" ]] || return 0
+    (( waited < $1 )) || return 1
+    if (( waited >= next )); then
+      log "this run's runner still runs on $MEX (pid(s) $OWN_PIDS): it ends after its request in flight; waiting for it ($waited of at most $1 s)"
+      next=$((next + 60))
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
 interrupted() {
   trap - INT TERM
   log "interrupted"
@@ -459,12 +544,16 @@ interrupted() {
     local wrc=0
     wait_no_runner 120 || wrc=$?
     case $wrc in
-      1) log "the mex runner still runs (a long request may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume waits for it or attaches to it" ;;
-      2) log "no answer from $MEX: the mex runner may still run there; --resume waits for it once mex answers" ;;
+      1) if [[ $MODE == sequential ]]; then
+           log "the mex runner still runs (it stops after its request in flight, which may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume attaches to it"
+         else
+           log "the mex runner still runs (it stops after its request in flight, which may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume waits for it (up to $WAIT_OWN_RUNNER_S s), then continues the run"
+         fi ;;
+      2) log "no answer from $MEX: the mex runner may still run there; --resume looks for it once mex answers and waits for it" ;;
     esac
     pull_local_arm
   fi
-  [[ $LOOP_STARTED == 0 ]] || orch_set loop "{\"mode\": \"$MODE\", \"state\": \"interrupted\", \"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}}"
+  [[ $LOOP_STARTED == 0 ]] || loop_record interrupted
   cleanup
   [[ -z "$RUN_DIR" || ! -d "$RUN_DIR" ]] || log "resume with: $0 --resume $RUN_DIR"
   exit 130
@@ -534,10 +623,17 @@ print(s.get("pid", "") if s.get("state") == "running" else "")' 2>/dev/null || t
 fi
 if [[ -z "$ATTACH_PID" ]]; then
   WRC=0
+  if [[ -n "$RESUME" ]]; then
+    wait_own_runner "$WAIT_OWN_RUNNER_S" || WRC=$?
+    case $WRC in
+      1) die "this run's runner (pid(s) $OWN_PIDS) still runs on $MEX after $WAIT_OWN_RUNNER_S s: stop it with kill -INT on $MEX (it records its request in flight), then --resume $RUN_DIR again" ;;
+      2) die "no answer from $MEX while checking for this run's runner: refusing to start (an ssh failure never reads as no runner)" ;;
+    esac
+  fi
   wait_no_runner "$WAIT_RUNNER_S" || WRC=$?
   case $WRC in
     0) ;;
-    1) die "a run_direct.py runs under ~/$MEX_DIR on $MEX (an earlier invocation's); wait for it, stop it with kill -INT, or --resume its run" ;;
+    1) die "a run_direct.py runs under ~/$MEX_DIR on $MEX (another invocation's, pid(s) $RUNNER_PIDS); wait for it, or stop it with kill -INT on $MEX (it records its request in flight) and --resume that run later" ;;
     *) die "no answer from $MEX while checking for a running run_direct.py: refusing to start (an ssh failure never reads as no runner)" ;;
   esac
 fi
@@ -567,6 +663,25 @@ DIRTY="$(git -C "$HERE" status --porcelain -- . 2>/dev/null | grep -v '^?? runs/
 [[ -z "$DIRTY" ]] || COMMIT="$COMMIT+dirty"
 log "run directory $RUN_DIR ($MODE)"
 log "manifest $MANIFEST; scripts $COMMIT; checks $CHECKS"
+# The run's snapshot (header): taken by its first invocation (or by the first resume of a run older than it), kept.
+SNAP="$RUN_DIR/scripts"
+SESSIONS_BEFORE="$("$PY" -c 'import json, sys
+try:
+    print(len(json.load(open(sys.argv[1]))["sessions"]))
+except (OSError, ValueError, KeyError, TypeError):
+    print(0)' "$RUN_DIR/orchestrator.json" 2>/dev/null || echo 0)"
+SNAP_STATE="$("$PY" "$HERE/suite_common.py" snapshot "$RUN_DIR" "$HERE" "$COMMIT" "$SESSIONS_BEFORE")" \
+  || die "the run's snapshot of its scripts could not be taken in $SNAP"
+case "$SNAP_STATE" in
+  created*)
+    if [[ $SESSIONS_BEFORE == 0 ]]; then log "scripts: the run's snapshot in $SNAP"
+    else log "scripts: the run's snapshot in $SNAP, taken by this resume (its $SESSIONS_BEFORE earlier invocation(s) judged with the checks of their time)"; fi ;;
+  *)
+    SNAP_CHANGED="$(printf '%s\n' "$SNAP_STATE" | sed -n 's/^changed //p' | tr '\n' ' ')"
+    SNAP_LIVE="$(printf '%s\n' "$SNAP_STATE" | sed -n 's/^live-differs //p' | tr '\n' ' ')"
+    [[ -z "$SNAP_CHANGED" ]] || log "warning: the run's snapshot changed after it was taken (${SNAP_CHANGED% }): the merge states which arms judged with what"
+    [[ -z "$SNAP_LIVE" ]] || log "scripts: ${SNAP_LIVE% } of $HERE differ(s) from the run's snapshot: the run keeps judging with its snapshot (a new run, or --reevaluate, judges with these)" ;;
+esac
 
 ARGS=(--manifest "$MANIFEST" --pause "$PAUSE" --scripts-commit "$COMMIT" --run-id "$RUN_ID" --checks "$CHECKS"
       --warm-every "$WARM_EVERY")
@@ -588,19 +703,31 @@ T_B="$("$PY" -c 'import time; print("%.3f" % time.time())')"
 CLOCK_OFFSET="$("$PY" "$HERE/suite_common.py" clock-offset "$T_A" "$T_MEX" "$T_B")"
 log "mex clock offset ${CLOCK_OFFSET:-unknown} s"
 
-mex_rsync --delete --exclude 'runs/' --exclude 'tests/' --exclude '__pycache__/' --exclude '*.pyc' \
-  "$HERE/" "$(mex_path "$MEX_DIR/scripts/")" || die "rsync of the scripts to $MEX failed"
+mex_rsync --delete --exclude '__pycache__/' --exclude '*.pyc' \
+  "$SNAP/" "$(mex_path "$MEX_DIR/scripts/")" || die "rsync of the run's snapshot to $MEX failed"
 mex_rsync "$MANIFEST" "$(mex_path "$MEX_DIR/manifest/$RUN_ID.json")" || die "rsync of the manifest to $MEX failed"
 
 "$PY" - "$RUN_DIR/orchestrator.json" "$MANIFEST" "$COMMIT" "$SMOKE" "$AREAS" "$LIMIT" "$SKIP_LOCAL" \
     "$SKIP_REMOTE" "$MCP_RUN" "$MCP_CMD" "$COMPARE" "$PAUSE" "$MAX_REQUESTS" "$LOCAL_BASE" "$REMOTE_BASE" "$MEX" \
-    "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" "$IDS" "$IDS_FILE" "$GATE" <<'PYEOF'
+    "$MODE" "$CHECKS" "$ALLOW_STUB" "$WARM_EVERY" "$CLOCK_OFFSET" "$(hostname)" "$IDS" "$IDS_FILE" "$GATE" \
+    "$GIVEN" "${RESTORED:-}" "$SNAP_STATE" <<'PYEOF'
 import json, os, sys, time
 path = sys.argv[1]
 keys = ["manifest", "scripts_commit", "smoke", "areas", "limit", "skip_local", "skip_remote", "mcp_run",
         "mcp_cmd", "compare", "pause_s", "max_requests", "local_base", "remote_base", "mex", "mode", "checks",
-        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate"]
+        "allow_stub", "warm_every", "mex_clock_offset_s", "host", "ids", "ids_file", "gate", "given", "restored",
+        "snapshot"]
 session = dict(zip(keys, sys.argv[2:]))
+# the run's snapshot: taken by this invocation or kept, and what differed (suite_common.py snapshot)
+lines = session["snapshot"].splitlines()
+session["snapshot"] = {"state": lines[0] if lines else None,
+                       "changed": [x.split(" ", 1)[1] for x in lines if x.startswith("changed ")],
+                       "live_differs": [x.split(" ", 1)[1] for x in lines if x.startswith("live-differs ")],
+                       "mcp_checks_dir": ("snapshot" if "{checks_dir}" in session["mcp_cmd"] else "template")
+                       if session["mcp_cmd"] else None}
+# the options given on the command line, and those a resume took from the run's last invocation
+session["given"] = [x for x in session["given"].split(",") if x]
+session["restored"] = [x.strip() for x in session["restored"].split(",") if x.strip()]
 try:
     session["mex_clock_offset_s"] = float(session["mex_clock_offset_s"])
 except ValueError:
@@ -625,6 +752,29 @@ SESSION_N="$("$PY" -c 'import json, sys; print(len(json.load(open(sys.argv[1]))[
 "$PY" "$HERE/gate.py" plan "$RUN_DIR" --manifest "$MANIFEST" --arms "${PLAN_ARMS%,}" --areas "$AREAS" --limit "$LIMIT" \
   --ids "$IDS" --warm-every "$WARM_EVERY" --mode "$MODE" --session "$SESSION_N" >&2 \
   || die "the run's plan could not be written"
+if [[ -n "$RESUME" && $RESUME_SELECTION == 0 ]]; then
+  # A resume that names its own selection: say when it leaves out scenarios of the run's plan (the run then stays
+  # INCOMPLETE until a resume runs them; the report checks the whole plan).
+  NARROW="$("$PY" - "$HERE" "$RUN_DIR" "$MANIFEST" "$AREAS" "$LIMIT" "$IDS" <<'PYEOF' || true
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import gate, suite_common as sc
+run_dir, manifest = sys.argv[2], sc.read_json(sys.argv[3])
+areas = [a for a in sys.argv[4].split(",") if a] or None
+limit = int(sys.argv[5]) if sys.argv[5] else None
+ids = [i for i in sys.argv[6].split(",") if i] or None
+selected = set(s.get("id") for _, s in sc.select_scenarios(manifest, areas, limit, ids))
+planned = gate.resume_ids(run_dir, manifest)
+out = [i for i in planned if i not in selected]
+if out:
+    print(json.dumps({"selected": len(selected), "planned": len(planned), "left_out": len(out)}))
+PYEOF
+)"
+  if [[ -n "$NARROW" ]]; then
+    orch_set narrower_than_plan "$NARROW"
+    log "this invocation's selection leaves out scenarios of the run's plan ($NARROW): they are not run now, and the run reads INCOMPLETE while any of them is not recorded; a plain --resume $RUN_DIR runs the run's whole plan"
+  fi
+fi
 
 # The direct-local arm's directory on mex: pushed back when only the local copy survived, else pulled (a resume
 # plans from it).
@@ -660,10 +810,11 @@ heartbeat() { [[ -z "$SAMPLER_PID" || -z "$HB_REL" ]] || mex "touch $MEX_DIR/$HB
 # The MCP runner (async's), per scenario ids and repeat; the environment passes through unchanged.
 mcp_step() {  # mcp_step IDS REPEAT
   local cmd rc=0
-  cmd="$("$PY" - "$MCP_CMD" "$1" "$2" "$RUN_DIR/arms/mcp" "$MANIFEST" <<'PYEOF'
+  cmd="$("$PY" - "$MCP_CMD" "$1" "$2" "$RUN_DIR/arms/mcp" "$MANIFEST" "$SNAP" <<'PYEOF'
 import shlex, sys
-template, ids, repeat, out, manifest = sys.argv[1:6]
-values = {"ids": ids, "repeat": repeat, "repeats": str(int(repeat) + 1), "out": out, "manifest": manifest}
+template, ids, repeat, out, manifest, checks_dir = sys.argv[1:7]
+values = {"ids": ids, "repeat": repeat, "repeats": str(int(repeat) + 1), "out": out, "manifest": manifest,
+          "checks_dir": checks_dir}
 for key, value in values.items():
     template = template.replace("{%s}" % key, shlex.quote(value))
 print(template)
@@ -671,20 +822,28 @@ PYEOF
 )"
   mkdir -p "$RUN_DIR/arms/mcp"
   log "mcp: $( [[ $2 == 0 ]] && echo cold || echo warm ) repeat $2 of ${1:0:120}"
-  bash -c "$cmd" < /dev/null >&2 || rc=$?
+  # The runner's output on the terminal and in arms/mcp/runner.log, so a runner that crashes leaves its traceback
+  # in the run directory (the expanded command is never written: the template is recorded instead). tee ignores
+  # SIGINT (-i): on Ctrl-C the runner stops after its execution in flight and writes its last lines, which a tee
+  # killed by the same Ctrl-C would turn into a BrokenPipeError and exit 1 instead of 130.
+  printf '[run_suite %s] mcp: repeat %s of %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "$1" >> "$RUN_DIR/arms/mcp/runner.log"
+  bash -c "$cmd" < /dev/null 2>&1 | tee -i -a "$RUN_DIR/arms/mcp/runner.log" >&2 || rc=$?
+  printf '[run_suite %s] mcp: exit %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" >> "$RUN_DIR/arms/mcp/runner.log"
   sleep "$PAUSE"
   return $rc
 }
 
 MCP_ERRORS=0    # MCP executions in a row that ended in error (or that the runner never recorded)
+MCP_MISSING=()  # the MCP executions a runner step did not record, as SCENARIO:rREPEAT
 # After an MCP step of the paired loop (async's rules): stop on the runner's exit 2 / 3 (a start refusal: key
 # file, the queue wait ran out) or 130 (interrupted), or on three executions in a row that ended `error` (a
-# runner-level failure: transport, poll deadline, busy past the retries) or were not recorded; never on `fail`
+# runner-level failure: transport, poll deadline, busy past the retries), were not recorded, or recorded an outcome
+# outside the shared vocabulary (suite_common.outcome_known: `unknown`, never a success); never on `fail`
 # (exit 1 also means a failing scenario, which is a result). An execution that ended `error` with its job
 # cancelled may still run on the host briefly: wait until jobs.jsonl shows it terminal or its time budget has
 # passed since the cancellation, so one request is in flight at a time. Returns 1 to stop the loop.
 mcp_after() {  # mcp_after IDS REPEAT RC
-  local rc="$3" res outcomes wait_s o said=0
+  local rc="$3" res outcomes wait_s o said=0 i=0 ids
   case "$rc" in
     2|3) LOOP_REASON="mcp_exit_$rc"; log "error: the MCP runner refused to run (exit $rc): stopping the loop"; return 1 ;;
     130) LOOP_REASON=mcp_interrupted; log "the MCP runner was interrupted (exit 130): stopping the loop"; return 1 ;;
@@ -699,12 +858,16 @@ mcp_after() {  # mcp_after IDS REPEAT RC
     fi
     sleep $(( wait_s < 10 ? wait_s : 10 ))
   done
+  ids=(${1//,/ })
   for o in ${outcomes//,/ }; do
-    if [[ $o == error || $o == missing ]]; then MCP_ERRORS=$((MCP_ERRORS + 1)); else MCP_ERRORS=0; fi
+    if [[ $o == error || $o == missing || $o == unknown ]]; then MCP_ERRORS=$((MCP_ERRORS + 1)); else MCP_ERRORS=0; fi
+    [[ $o != missing ]] || MCP_MISSING+=("${ids[$i]:-?}:r$2")
+    [[ $o != unknown ]] || log "mcp: ${ids[$i]:-?} r$2 recorded an outcome outside the shared vocabulary (merge_run reads it as error)"
+    i=$((i + 1))
   done
   if (( MCP_ERRORS >= 3 )); then
     LOOP_REASON=mcp_errors
-    log "error: $MCP_ERRORS MCP executions in a row ended in error or were not recorded: stopping the loop"
+    log "error: $MCP_ERRORS MCP executions in a row ended in error, were not recorded or recorded an unknown outcome: stopping the loop"
     return 1
   fi
   return 0
@@ -725,8 +888,14 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
     out="$(mex_step "cd $MEX_DIR && $(quote "$MEX_PY" scripts/run_direct.py --arm direct-local --base "$LOCAL_BASE" \
       --out "$ARM_REL" "${LOCAL_ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"}) 2>> $ARM_REL/runner.log")" || rc=$?
   else
-    out="$("$PY" "$HERE/run_direct.py" --arm direct-remote --base "$REMOTE_BASE" --out "$RUN_DIR/arms/direct-remote" \
-      "${ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"} < /dev/null)" || rc=$?
+    # its stderr into arms/direct-remote/runner.log, as direct-local's on mex (shown when the step fails)
+    local errf="$RUN_DIR/.remote-step.err"
+    mkdir -p "$RUN_DIR/arms/direct-remote"
+    out="$("$PY" "$SNAP/run_direct.py" --arm direct-remote --base "$REMOTE_BASE" --out "$RUN_DIR/arms/direct-remote" \
+      "${ARGS[@]}" "$@" --status-line ${cap_args[@]+"${cap_args[@]}"} < /dev/null 2> "$errf")" || rc=$?
+    cat "$errf" >> "$RUN_DIR/arms/direct-remote/runner.log" 2>/dev/null || true
+    if [[ $rc != 0 ]]; then tail -5 "$errf" | sed 's/^/    runner: /' >&2; fi
+    rm -f "$errf"
   fi
   printf '%s\n' "$out" | grep -v '^RUN_DIRECT_STATUS ' | sed '/^$/d; s/^/    /' >&2 || true
   status="$(printf '%s\n' "$out" | sed -n 's/^RUN_DIRECT_STATUS //p' | tail -1)"
@@ -737,9 +906,34 @@ direct_call() {  # direct_call local|remote EXTRA_ARGS...
 }
 
 FINAL_RC=0
+FAILED_STEPS=()   # the steps that failed: ARM:SCENARIO:EXIT (paired), ARM:-:EXIT or STATE (sequential)
+json_list() { local out="" x; for x in "$@"; do out+="\"$x\","; done; printf '[%s]' "${out%,}"; }
+# The loop record of this invocation (orchestrator.json sessions[-1].loop: the report reads its state and reason).
+# Paired: a scenario is completed when every step of it succeeded. Both modes: failed_steps names each step that
+# did not, mcp_missing (the first 50, mcp_missing_count all) the MCP executions a runner step did not record.
+loop_record() {  # loop_record STATE
+  local counts="" missing=()
+  [[ $MODE != paired ]] || counts="\"scenarios\": ${N_PLAN:-0}, \"completed\": ${COMPLETED:-0}, "
+  missing=(${MCP_MISSING[@]+"${MCP_MISSING[@]:0:50}"})
+  orch_set loop "{\"mode\": \"$MODE\", \"state\": \"$1\", \"reason\": \"${LOOP_REASON:-}\", $counts\"direct_requests\": ${USED:-0}, \"failed_steps\": $(json_list ${FAILED_STEPS[@]+"${FAILED_STEPS[@]}"}), \"mcp_missing\": $(json_list ${missing[@]+"${missing[@]}"}), \"mcp_missing_count\": ${#MCP_MISSING[@]}}"
+}
+# A loop that ran through without recording what it planned (a failed step, an MCP execution the runner did not
+# record) ends incomplete, never done.
+settle_loop_state() {
+  [[ $LOOP_STATE != running ]] || LOOP_STATE=done
+  if [[ $LOOP_STATE == done && ${#FAILED_STEPS[@]} -gt 0 ]]; then LOOP_STATE=incomplete; LOOP_REASON=failed_steps
+  elif [[ $LOOP_STATE == done && ${#MCP_MISSING[@]} -gt 0 ]]; then LOOP_STATE=incomplete; LOOP_REASON=mcp_missing; fi
+  [[ $LOOP_STATE != failed && $LOOP_STATE != incomplete ]] || FINAL_RC=1
+}
+loop_summary() {
+  (( ${#FAILED_STEPS[@]} == 0 )) || printf '; %d failed step(s): %s' "${#FAILED_STEPS[@]}" "${FAILED_STEPS[*]}"
+  (( ${#MCP_MISSING[@]} == 0 )) || printf '; %d MCP execution(s) not recorded by the runner: %s' \
+    "${#MCP_MISSING[@]}" "${MCP_MISSING[*]:0:10}"
+}
 # --- paired mode ----------------------------------------------------------------------------------------------
 run_paired() {
   local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 since_pull=0 runner_live=0 stop=0
+  local step_failed nmissing
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -756,11 +950,13 @@ run_paired() {
   LOOP_STARTED=1
   LOOP_STATE=running
   LOOP_REASON=""
-  orch_set loop "{\"mode\": \"paired\", \"state\": \"running\", \"scenarios\": $N_PLAN, \"completed\": 0}"
+  loop_record running
   log "paired: $N_PLAN scenario(s); arms ${arms%,}"
   for entry in ${plan[@]+"${plan[@]}"}; do
     read -r sid l r mc mw <<< "$entry"
     heartbeat
+    step_failed=0
+    nmissing=${#MCP_MISSING[@]}
     if [[ $mc == 1 ]]; then
       rc=0; mcp_step "$sid" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
@@ -771,7 +967,8 @@ run_paired() {
       rc=0; direct_call local --only "$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
       if [[ $rc != 0 ]]; then
-        fails_local=$((fails_local + 1)); log "direct-local: exit $rc on $sid (see arms/direct-local/runner.log)"
+        fails_local=$((fails_local + 1)); step_failed=1; FAILED_STEPS+=("direct-local:$sid:$rc")
+        log "direct-local: exit $rc on $sid (see arms/direct-local/runner.log)"
         # An ssh that failed may have left the step running: never start the next arm next to it, and never read
         # a failing ssh as "the runner is gone" (review N3).
         wrc=0
@@ -793,7 +990,12 @@ run_paired() {
       log "direct-remote: $sid"
       rc=0; direct_call remote --only "$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
-      if [[ $rc != 0 ]]; then fails_remote=$((fails_remote + 1)); log "direct-remote: exit $rc on $sid"; else fails_remote=0; fi
+      if [[ $rc != 0 ]]; then
+        fails_remote=$((fails_remote + 1)); step_failed=1; FAILED_STEPS+=("direct-remote:$sid:$rc")
+        log "direct-remote: exit $rc on $sid"
+      else
+        fails_remote=0
+      fi
     fi
     if [[ "$mw" != "-" ]]; then
       for rep in ${mw//,/ }; do
@@ -808,11 +1010,12 @@ run_paired() {
       LOOP_STATE=failed; LOOP_REASON=failing_steps
       break
     fi
-    COMPLETED=$((COMPLETED + 1))
+    (( ${#MCP_MISSING[@]} == nmissing )) || step_failed=1
+    [[ $step_failed == 1 ]] || COMPLETED=$((COMPLETED + 1))
     since_pull=$((since_pull + 1))
     if [[ $SKIP_LOCAL == 0 && $since_pull -ge 25 ]]; then pull_local_arm; since_pull=0; fi
   done
-  [[ $LOOP_STATE != running ]] || LOOP_STATE=done
+  settle_loop_state
   [[ $LOOP_STATE != capped ]] || log "paired: stopped at --max-requests $MAX_REQUESTS ($USED direct requests); --resume continues"
   # The closing GET /capabilities of each direct arm (one request kept back for each) and its state over the
   # whole selection; none while a direct-local runner may still be on the host (review N3).
@@ -830,14 +1033,17 @@ run_paired() {
   fi
   [[ $SKIP_LOCAL == 1 ]] || pull_local_arm
   stop_sampler
-  orch_set loop "{\"mode\": \"paired\", \"state\": \"$LOOP_STATE\", \"reason\": \"$LOOP_REASON\", \"scenarios\": $N_PLAN, \"completed\": $COMPLETED, \"direct_requests\": $USED}"
-  log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s), $USED direct request(s)"
-  [[ $LOOP_STATE != failed ]] || FINAL_RC=1
+  loop_record "$LOOP_STATE"
+  log "paired: $LOOP_STATE, $COMPLETED/$N_PLAN scenario(s) completed, $USED direct request(s)$(loop_summary)"
 }
 
 # --- sequential mode ------------------------------------------------------------------------------------------
 run_sequential() {
-  local rc state requests
+  local rc state reason requests capped=0
+  LOOP_STARTED=1
+  LOOP_STATE=running
+  LOOP_REASON=""
+  loop_record running
   if [[ $SKIP_LOCAL == 0 ]]; then
     prepare_local_arm
     local cap_args=()
@@ -889,11 +1095,18 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     pull_local_arm
     state="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("state"))' \
       "$RUN_DIR/arms/direct-local/state.json" 2>/dev/null || echo unknown)"
+    reason="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("reason") or "")' \
+      "$RUN_DIR/arms/direct-local/state.json" 2>/dev/null || true)"
     requests="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("requests_session") or 0)' \
       "$RUN_DIR/arms/direct-local/state.json" 2>/dev/null || echo 0)"
     USED=$((USED + requests))
     log "direct-local: $state ($requests request(s))"
-    [[ "$state" == "done" ]] || log "direct-local did not finish ($state): see arms/direct-local/runner.log; --resume continues it"
+    if [[ "$state" == interrupted && "$reason" == max_requests* ]]; then
+      capped=1
+    elif [[ "$state" != done ]]; then
+      FAILED_STEPS+=("direct-local:-:$state")
+      log "direct-local did not finish ($state): see arms/direct-local/runner.log; --resume continues it"
+    fi
   fi
   if [[ $SKIP_REMOTE == 0 ]]; then
     local max_s=43200; [[ $SMOKE == 0 ]] || max_s=1800
@@ -903,8 +1116,8 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     stop_sampler
     case "$rc" in
       0) log "direct-remote: done" ;;
-      3) log "direct-remote: stopped at --max-requests $MAX_REQUESTS (incomplete; --resume continues it)" ;;
-      *) log "direct-remote: exit $rc (see above)" ;;
+      3) capped=1; log "direct-remote: stopped at --max-requests $MAX_REQUESTS (incomplete; --resume continues it)" ;;
+      *) FAILED_STEPS+=("direct-remote:-:$rc"); log "direct-remote: exit $rc (see above)" ;;
     esac
   fi
   if [[ -n "$MCP_CMD" ]]; then
@@ -928,14 +1141,14 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
       rc=0; mcp_step "${cold%,}" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: the cold pass exited $rc"
       # the paired loop's rules between the passes: a cancelled job's wait, the stop on a refusal or errors
-      mcp_after "${cold%,}" 0 "$rc" || { go=0; log "mcp: no warm pass"; }
+      mcp_after "${cold%,}" 0 "$rc" || { go=0; LOOP_STATE=failed; log "mcp: no warm pass"; }
     fi
     for (( rep = 1; rep <= maxrep; rep++ )); do
       pass="${warm[$rep]:-}"
       [[ -n "$pass" && $go == 1 ]] || continue
       rc=0; mcp_step "${pass%,}" "$rep" || rc=$?
       [[ $rc == 0 ]] || log "mcp: the warm pass of repeat $rep exited $rc"
-      mcp_after "${pass%,}" "$rep" "$rc" || { go=0; log "mcp: no further warm pass"; }
+      mcp_after "${pass%,}" "$rep" "$rc" || { go=0; LOOP_STATE=failed; log "mcp: no further warm pass"; }
     done
   fi
   if [[ -n "$MCP_RUN" ]]; then
@@ -943,6 +1156,10 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     mkdir -p "$RUN_DIR/arms/mcp"
     rsync -a "$MCP_RUN/" "$RUN_DIR/arms/mcp/"
   fi
+  [[ $LOOP_STATE != running || $capped == 0 ]] || LOOP_STATE=capped
+  settle_loop_state
+  loop_record "$LOOP_STATE"
+  log "sequential: $LOOP_STATE$( [[ -z "$LOOP_REASON" ]] || printf ' (%s)' "$LOOP_REASON"), $USED direct request(s)$(loop_summary)"
 }
 
 ARMS_STARTED=1

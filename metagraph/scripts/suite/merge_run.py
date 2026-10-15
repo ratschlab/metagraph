@@ -24,6 +24,10 @@ of an earlier runner), are left out: triage-2 B-01), the runner's own under
 `outcome_runner`: the MCP runner of the async session applies its own rule, which does not tell property checks
 from the generic ones (an execution whose property checks are all not exposed is inconclusive, not pass).
 
+An outcome outside the vocabulary every arm shares (suite_common.outcome_known: a runner's mark not agreed first, or
+none) is read as `error`, never as a pass: the line's outcome becomes error, `outcome_runner` keeps the recorded
+one, a warning counts them per arm (run.json `outcomes_unknown`).
+
 --reevaluated (lane S4): merges the re-evaluated set of reevaluate.py instead, each arm's
 executions.reevaluated.jsonl into RUN_DIR/executions.reevaluated.jsonl and run.reevaluated.json (with the set's
 mark, RUN_DIR/reevaluated.json, under `reevaluation`); scenario_outcome is the re-evaluation's checks'; an arm
@@ -40,6 +44,19 @@ The manifest identity (finding 9 of the outside review): run.json's `manifest_id
 content_sha256 and relations_sha256 and each arm's (manifest_identity); an arm whose hashes differ, or a run manifest
 whose stated hashes its content does not match, is a warning; with --strict-identity (run_suite.sh --gate) it is an
 error: the files are written, then the exit status is 3.
+
+The host's identity (release_identity): the releases and index_fps the direct arms' sessions saw at their starts and
+closing GETs, in order (run.json `release_identity`, `mixed_releases`); more than one release or index_fp (a deploy
+during the run, or between an interrupt and its resume) is a warning, and an error with --strict-identity.
+
+The checks' identity (checks_identity, of the recorded set): run_suite.sh judges every arm with the run's snapshot
+RUN_DIR/scripts (SNAPSHOT.json: the sha256 of its files); run_direct.py records per session the sha256 of the checks
+and suite_common it imported; async's runner records per invocation (run.json invocations[]) its checks_dir, and
+checks_sha256 / suite_common_sha256 once it records them (a runner without invocations states them at the
+top). An arm or session judged with other checks than the snapshot's, or a snapshot changed after it was taken, is
+a warning; an arm or session that states neither, in a run with a snapshot, too; both are errors with
+--strict-identity (run.json `checks_identity`). The outcomes made stricter by checks.scenario_outcome are the
+snapshot's checks' (the re-evaluation's for a re-evaluated set).
 """
 
 import json
@@ -108,6 +125,21 @@ def by_design_decided(row):
     / clamped case's execution states the checks it explains (explained_checks) and is judged on the others."""
     return row.get("arm") == "mcp" and bool(row.get("service_by_design_case")) and \
         row.get("outcome") in ("service_by_design", "finding") and not row.get("explained_checks")
+
+
+def unknown_outcomes(rows):
+    """Reads every line whose outcome is outside the shared vocabulary (suite_common.outcome_known) as `error`, the
+    recorded outcome kept under `outcome_runner`; returns {arm: {recorded outcome: lines}}."""
+    seen = {}
+    for row in rows:
+        if sc.outcome_known(row.get("outcome")):
+            continue
+        recorded = row.get("outcome")
+        row.setdefault("outcome_runner", recorded)
+        row["outcome"] = "error"
+        per_arm = seen.setdefault(str(row.get("arm")), {})
+        per_arm[str(recorded)] = per_arm.get(str(recorded), 0) + 1
+    return seen
 
 
 def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
@@ -231,6 +263,126 @@ def manifest_identity(run_dir, arm_runs):
             if len(seen) > 1:
                 differs.append("%s %s" % (key, ", ".join(x[:12] for x in seen)))
     return {"manifest": manifest, "arms": arms, "differs": differs}
+
+
+def release_identity(arm_runs):
+    """The host's identity over the direct arms' sessions (run_direct.py records release and index_fp at each session's
+    start and its closing GET; an arm of before those fields states its first release only): {releases, index_fps: the
+    distinct values in the order seen, changed: one sentence per value after the first, naming the arm, session and
+    time that saw it}. Executions of a run that spans two deployments are attributed to one release that did not
+    answer them all: merge_run warns, --strict-identity and the gate fail."""
+    seen = []
+    for arm in sc.DIRECT_ARMS:
+        run = arm_runs.get(arm)
+        if not isinstance(run, dict):
+            continue
+        t0 = sc.parse_utc(run.get("started_utc")) or 0.0
+        for key in ("release", "index_fp"):
+            if run.get(key):
+                seen.append((t0, 0, arm, None, "first start", key, run[key]))
+        for i, sess in enumerate(run.get("sessions") or []):
+            for order, (where, tkey) in enumerate((("start", "started_utc"), ("end", "ended_utc"))):
+                for key in ("release", "index_fp"):
+                    v = sess.get("%s_%s" % (key, where))
+                    if v:
+                        seen.append((sc.parse_utc(sess.get(tkey)) or t0, 1 + order, arm, i, where, key, v))
+    seen.sort(key=lambda x: (x[0], x[1], ARM_ORDER.get(x[2], 9)))
+    out = {"releases": [], "index_fps": [], "changed": []}
+    first = {}
+    for t, _, arm, i, where, key, v in seen:
+        values = out["releases" if key == "release" else "index_fps"]
+        if v in values:
+            continue
+        values.append(v)
+        at = "arms/%s %s" % (arm, where if i is None else "session %d %s" % (i, where))
+        if key not in first:
+            first[key] = (v, at)
+            continue
+        out["changed"].append("the host's %s changed during the run: %s (%s) -> %s (%s, %s)" % (
+            key, first[key][0], first[key][1], v, at, sc.iso_utc(t) if t else "time unknown"))
+    return out
+
+
+def checks_identity(run_dir, arm_runs):
+    """Which checks judged the recorded executions of each arm, against the run's snapshot (suite_common.SNAPSHOT_FILE
+    under RUN_DIR/scripts): {snapshot: {created_utc, files} or None, arms: {arm: what each session or invocation
+    states}, differs: sentences (an arm judged with other checks than the snapshot's, the snapshot's own files changed;
+    without a snapshot: arms that state different checks), unverified: sentences (an arm or session that states
+    neither a sha256 nor, for the MCP runner, a checks directory), errors: what --strict-identity and the gate fail on
+    (differs, and unverified where the run has a snapshot)}; one sentence per arm and kind (a paired run has a session
+    per step)."""
+    snap, changed, _ = sc.snapshot_state(run_dir)
+    files = (snap or {}).get("files") or {}
+    created = sc.parse_utc((snap or {}).get("created_utc"))
+    differs = ["the run's snapshot changed after it was taken: scripts/%s" % n for n in changed]
+    unverified, arms, stated = [], {}, {}
+    for arm in sorted(arm_runs, key=lambda n: (ARM_ORDER.get(n, 9), n)):
+        run = arm_runs[arm] if isinstance(arm_runs[arm], dict) else {}
+        if arm in sc.DIRECT_ARMS:
+            want = {"checks": files.get("checks_stub.py" if judged_by_stub(run) else "checks.py"),
+                    "suite_common": files.get("suite_common.py")}
+            sessions = run.get("sessions") or []
+            unstated, before, other = 0, 0, {}
+            for i, sess in enumerate(sessions):
+                got = {"checks": sess.get("checks_sha256"), "suite_common": sess.get("suite_common_sha256")}
+                if not got["checks"]:
+                    unstated += 1
+                    before += created is not None and (sc.parse_utc(sess.get("started_utc")) or 0.0) < created
+                    continue
+                stated.setdefault((got["checks"], got["suite_common"]), []).append("arms/%s session %d" % (arm, i))
+                if snap is not None:
+                    for name in ("checks", "suite_common"):
+                        if got[name] != want[name]:
+                            other.setdefault((name, got[name]), []).append(i)
+            arms[arm] = {"sessions": len(sessions), "unstated": unstated,
+                         "checks_sha256": sorted(set(x.get("checks_sha256") for x in sessions
+                                                     if x.get("checks_sha256"))),
+                         "suite_common_sha256": sorted(set(x.get("suite_common_sha256") for x in sessions
+                                                           if x.get("suite_common_sha256")))}
+            if unstated:
+                unverified.append("arms/%s: %d of %d session(s) state no checks sha256 (%s)" % (
+                    arm, unstated, len(sessions), "%d ran before the run's snapshot was taken" % before if before
+                    else "a runner of before the field"))
+            for (name, got), idx in sorted(other.items(), key=lambda kv: kv[1][0]):
+                differs.append("arms/%s: %d of %d session(s) judged with %s sha256 %s (sessions %s), the run's "
+                               "snapshot's %s" % (arm, len(idx), len(sessions), name, str(got)[:12],
+                                                  ", ".join(str(i) for i in idx[:5]) + (" ..." if len(idx) > 5 else ""),
+                                                  str(want[name])[:12]))
+        else:
+            # per invocation (async's runner: run.json invocations[]; a runner without them states its one at the
+            # top): checks_dir, checks_sha256 and suite_common_sha256
+            invs = [x for x in run.get("invocations") or [] if isinstance(x, dict)] or [run]
+            entries = [dict((k, inv.get(k)) for k in ("checks_dir", "checks_sha256", "suite_common_sha256"))
+                       for inv in invs]
+            arms[arm] = {"invocations": len(entries)}
+            for key, name in (("checks_dir", "checks_dirs"), ("checks_sha256", "checks_sha256"),
+                              ("suite_common_sha256", "suite_common_sha256")):
+                arms[arm][name] = sorted(set(str(e[key]) for e in entries if e[key]))
+            none = [e for e in entries if not e["checks_dir"] and not e["checks_sha256"]]
+            if none:
+                unverified.append("arms/%s: %d of %d invocation(s) state no checks directory or sha256" % (
+                    arm, len(none), len(entries)))
+            for e in entries:
+                if e["checks_sha256"]:
+                    stated.setdefault((e["checks_sha256"], e["suite_common_sha256"]), []).append("arms/%s" % arm)
+            if snap is not None:
+                other = [e for e in entries
+                         if (e["checks_sha256"] and e["checks_sha256"] != files.get("checks.py")) or
+                         (e["suite_common_sha256"] and e["suite_common_sha256"] != files.get("suite_common.py")) or
+                         (not e["checks_sha256"] and e["checks_dir"]
+                          and not sc.snapshot_pins(e["checks_dir"], run_dir))]
+                if other:
+                    differs.append("arms/%s: %d of %d invocation(s) judged with other checks than the run's snapshot "
+                                   "(e.g. %s)" % (arm, len(other), len(entries), ", ".join(
+                                       "%s %s" % (k, other[0][k]) for k in
+                                       ("checks_sha256", "suite_common_sha256", "checks_dir") if other[0][k])))
+    if snap is None and len(set(k[0] for k in stated)) > 1:
+        differs.append("the arms were judged with different checks: %s" % "; ".join(
+            "%s: %s" % (str(k[0])[:12], ", ".join(v[:3]) + (" ..." if len(v) > 3 else ""))
+            for k, v in sorted(stated.items())))
+    return {"snapshot": {"created_utc": snap.get("created_utc"), "files": files} if snap is not None else None,
+            "arms": arms, "differs": differs, "unverified": unverified,
+            "errors": differs + (unverified if snap is not None else [])}
 
 
 # renormalised.json keys a re-evaluation states (the renormaliser's revision where it records one)
@@ -360,9 +512,16 @@ def merge(run_dir, reevaluated=False):
         if not checks_dir or not os.path.exists(os.path.join(checks_dir, "checks.py")):
             warnings.append("the re-evaluation's checks (%s) are gone: scenario_outcome of the checks here" % checks_dir)
             checks_dir = None
+    elif os.path.exists(os.path.join(sc.snapshot_dir(run_dir), "checks.py")):
+        checks_dir = sc.snapshot_dir(run_dir)   # the recorded set: the checks the run judged with
     manifest = sc.read_json(manifest_copy) if manifest_copy else sc.read_json(os.path.join(run_dir, "manifest.json"))
     scenarios = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict)) \
         if isinstance(manifest, dict) else {}
+    unknown = unknown_outcomes(merged_rows)
+    for arm, counts in sorted(unknown.items()):
+        warnings.append("arms/%s: %d line(s) with an outcome outside the shared vocabulary (%s) read as error "
+                        "(outcome_runner keeps the recorded one)" % (arm, sum(counts.values()), ", ".join(
+                            "%s %d" % kv for kv in sorted(counts.items()))))
     rederived = stricter_outcomes(merged_rows, arm_runs, load_scenario_outcome(checks_dir), scenarios, run_dir)
     for arm, n in sorted(rederived.items()):
         warnings.append("arms/%s: %d outcome(s) made stricter by checks.scenario_outcome (outcome_runner keeps the "
@@ -392,6 +551,16 @@ def merge(run_dir, reevaluated=False):
         warnings.append("the arms ran different manifests: %s" % "; ".join(identity["differs"]))
     for problem in identity["manifest"]["problems"]:
         warnings.append("manifest.json: %s" % problem)
+    releases = release_identity(arm_runs)
+    warnings.extend(releases["changed"])
+    if mark is None:
+        checks = checks_identity(run_dir, arm_runs)
+        warnings.extend(checks["differs"])
+        if checks["snapshot"] is not None:
+            warnings.extend(checks["unverified"])
+    else:
+        checks = {"reevaluated": "every arm judged with the re-evaluation's checks (reevaluated.json)",
+                  "differs": [], "unverified": [], "errors": []}
     instances = set()
     for run in direct:
         for sess in run.get("sessions", []):
@@ -435,7 +604,11 @@ def merge(run_dir, reevaluated=False):
         "host_cache": {"warm_window_s": sc.HOST_CACHE_WARM_S, "clock_offsets_s": offsets},
         "counts": {"executions": len(merged_rows), "samples": len(unique_samples), "jobs": len(jobs)},
         "outcomes_rederived": rederived,
+        "outcomes_unknown": unknown,
         "manifest_identity": identity,
+        "release_identity": releases,
+        "mixed_releases": bool(releases["changed"]),
+        "checks_identity": checks,
         "renormalisation": renormalised,
         "warnings": warnings,
     }
@@ -449,11 +622,14 @@ def merge(run_dir, reevaluated=False):
 
 
 def identity_errors(merged):
-    """The manifest identity problems of a merged run.json that a gate reads as errors: the arms that ran another
-    manifest than the run's, and the run manifest's stated hashes its content does not match."""
+    """The identity problems of a merged run.json that a gate reads as errors: the arms that ran another manifest than
+    the run's, the run manifest's stated hashes its content does not match, a host release or index_fp that changed
+    during the run, and arms judged with other checks than the run's snapshot (checks_identity's errors)."""
     ident = merged.get("manifest_identity") or {}
     return list(ident.get("differs") or []) + ["manifest.json: %s" % p for p in
-                                               ((ident.get("manifest") or {}).get("problems") or [])]
+                                               ((ident.get("manifest") or {}).get("problems") or [])] + \
+        list((merged.get("release_identity") or {}).get("changed") or []) + \
+        list((merged.get("checks_identity") or {}).get("errors") or [])
 
 
 def main(argv=None):
@@ -471,8 +647,11 @@ def main(argv=None):
         sys.stdout.write("warning: %s\n" % w)
     errors = identity_errors(merged)
     if strict and errors:
+        host = set((merged.get("release_identity") or {}).get("changed") or [])
+        checks = set((merged.get("checks_identity") or {}).get("errors") or [])
         for e in errors:
-            sys.stderr.write("merge_run: error: manifest identity: %s\n" % e)
+            sys.stderr.write("merge_run: error: %s identity: %s\n" % (
+                "host" if e in host else ("checks" if e in checks else "manifest"), e))
         return 3
     return 0
 

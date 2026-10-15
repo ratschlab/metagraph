@@ -318,6 +318,50 @@ class RunnerTest(unittest.TestCase):
         d = [{"digest": r["answer_digest"], "time_limited": ""} for r in rows]
         self.assertEqual(seen, [("D-1", []), ("D-1", [d[0]]), ("D-1", [d[0], d[1]])])
 
+    def test_unanswered_repeat_is_no_earlier_repeat(self):
+        # an execution the host never answered (no HTTP status: a client timeout, a refused connection) has the digest
+        # of its stand-in answer: it is not passed in `previous`, so the next repeat compares with nothing instead of
+        # failing `deterministic`; in one session and on a resume
+        real, _, _ = run_direct.load_checks("checks")
+        seen = []
+
+        class Spy(object):
+            scenario_outcome = staticmethod(real.scenario_outcome)
+            time_limited = staticmethod(real.time_limited)
+
+            @staticmethod
+            def evaluate(scenario, answer, arm, previous=None, client=None):
+                seen.append((scenario["id"], answer["http"], list(previous or [])))
+                return real.evaluate(scenario, answer, arm, previous=previous, client=client)
+
+        def run(out, base, *extra):
+            args = run_direct.parse_args(["--manifest", self.manifest_path, "--arm", "direct-local", "--base", base,
+                                          "--out", out, "--pause", "0", "--quiet", "--warm-every", "0"] + list(extra))
+            run_direct.reset_stop()
+            return run_direct.Runner(args, sc.read_json(self.manifest_path), Spy, "checks").run_all()
+
+        det = {"check": "deterministic", "args": {}}
+        make_manifest(self.manifest_path, [with_expect(scenario("F-1", "F", "POST /flaky", {"sleep_s": 1.5},
+                                                                repeat=2), det)])
+        with FakeHost() as host:
+            out = os.path.join(self.dir, "one")
+            self.assertEqual(run(out, host.base, "--timeout-fast", "0.5"), "done")
+            out2 = os.path.join(self.dir, "resumed")
+            # r0 against a port nothing listens on (3 capabilities GETs, r0, the closing GET), r1 by a resume
+            self.assertEqual(run(out2, "http://127.0.0.1:9", "--max-requests", "5"), "interrupted")
+            self.assertEqual(run(out2, host.base), "done")
+        self.assertEqual([(s_, h, p) for s_, h, p in seen], [("F-1", 0, []), ("F-1", 200, []), ("F-1", 0, []),
+                                                            ("F-1", 200, [])])
+        for path in (out, out2):
+            rows, _ = sc.read_jsonl(os.path.join(path, "executions.jsonl"))
+            self.assertEqual([(r["repeat"], r["http"], r["outcome"]) for r in rows],
+                             [(0, 0, "error"), (1, 200, "pass")], path)
+            self.assertFalse([c for c in rows[1]["checks"] if c["outcome"] == "fail"], rows[1]["checks"])
+        # an answered repeat still feeds `previous` (the rule: an HTTP status and no runner error)
+        self.assertTrue(sc.feeds_previous({"http": 503, "outcome": "inconclusive"}))
+        self.assertFalse(sc.feeds_previous({"http": 200, "outcome": "error"}))
+        self.assertFalse(sc.feeds_previous({"http": None, "outcome": "not_implemented_mcp"}))
+
     def test_load_checks_fallback(self):
         mod, name, err = run_direct.load_checks("stub")
         self.assertEqual((name, err), ("stub", None))
@@ -472,6 +516,29 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(run["server_instance_changed"])
         self.assertEqual(len(sc.read_jsonl(os.path.join(out, "executions.jsonl"))[0]), 9)
 
+    def test_release_at_each_sessions_start_and_end(self):
+        # the host's identity per session: the start's capabilities and the closing GET; a release that changes
+        # between them (a deploy during the run, or before a resume) is in run.json's releases and release_changed
+        import fake_host
+        make_manifest(self.manifest_path, basic_scenarios()[:2])
+        out = os.path.join(self.dir, "run")
+        old = fake_host.RELEASE
+        try:
+            with FakeHost() as host:
+                self.assertEqual(self.run_direct(host.base, out, "--only", "C-1"), 0)
+                run = sc.read_json(os.path.join(out, "run.json"))
+                self.assertEqual((run["sessions"][0]["release_start"], run["releases"], run["release_changed"]),
+                                 (RELEASE, [RELEASE], False))
+                self.assertEqual(run["sessions"][0]["index_fp_start"], "907ec986aaaa")
+                fake_host.RELEASE = "refseq97-00000000"
+                self.assertEqual(self.run_direct(host.base, out, "--finish"), 0)
+        finally:
+            fake_host.RELEASE = old
+        run = sc.read_json(os.path.join(out, "run.json"))
+        self.assertEqual(run["release"], RELEASE)            # the run's identity: its first release
+        self.assertEqual((run["sessions"][1]["release_end"], run["release_end"]), ("refseq97-00000000",) * 2)
+        self.assertEqual((run["releases"], run["release_changed"]), ([RELEASE, "refseq97-00000000"], True))
+
     def test_sigint_stops_cleanly(self):
         scen = [scenario("S-%d" % i, "S", "POST /slow", {"sleep_s": 0.3}) for i in range(20)]
         make_manifest(self.manifest_path, scen)
@@ -495,6 +562,37 @@ class RunnerTest(unittest.TestCase):
         run = sc.read_json(os.path.join(out, "run.json"))
         self.assertEqual(run["state"], "interrupted")
         self.assertEqual(sc.read_json(os.path.join(out, "state.json"))["state"], "interrupted")
+
+    def test_sigint_after_the_reader_of_stdout_is_gone(self):
+        # a paired step's stdout is its ssh channel: Ctrl-C ends the ssh client, then the orchestrator's SIGINT stops
+        # the runner after its request in flight; its next stdout write meets a closed pipe. The run is interrupted
+        # (exit 130), not failed (exit 120 with a "runner failed" BrokenPipeError warning), with or without --quiet
+        scen = [scenario("S-%d" % i, "S", "POST /slow", {"sleep_s": 1.0}) for i in range(3)]
+        make_manifest(self.manifest_path, scen)
+        for extra in ([], ["--quiet", "--status-line"]):
+            out = os.path.join(self.dir, "run%d" % len(extra))
+            with FakeHost() as host:
+                r, w = os.pipe()
+                proc = subprocess.Popen([sys.executable, os.path.join(SUITE, "run_direct.py"), "--manifest",
+                                         self.manifest_path, "--arm", "direct-local", "--base", host.base, "--out", out,
+                                         "--pause", "0", "--checks", "stub", "--warm-every", "0"] + extra,
+                                        stdout=w, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+                os.close(w)
+                deadline = time.time() + 30
+                while time.time() < deadline and ("POST", "/slow") not in host.log:
+                    time.sleep(0.02)
+                os.close(r)                     # the reader is gone while the request is in flight
+                time.sleep(0.2)
+                proc.send_signal(signal.SIGINT)
+                _, stderr = proc.communicate(timeout=60)
+            self.assertEqual(proc.returncode, 130, (extra, stderr.decode()))
+            self.assertNotIn(b"BrokenPipeError", stderr)
+            run = sc.read_json(os.path.join(out, "run.json"))
+            self.assertEqual((run["state"], run["sessions"][-1]["state"]), ("interrupted", "interrupted"), extra)
+            self.assertEqual(run.get("warnings", []), [], extra)
+            self.assertEqual(sc.read_json(os.path.join(out, "state.json"))["state"], "interrupted")
+            rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+            self.assertEqual([x["scenario"] for x in rows], ["S-0"])    # the request in flight is recorded
 
 
 if __name__ == "__main__":

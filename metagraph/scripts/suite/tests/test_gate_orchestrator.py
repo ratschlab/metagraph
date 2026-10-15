@@ -92,11 +92,10 @@ class IdsPlanAndGate(SuiteCase):
                                "--ids", self.write("a.txt", "T-1 R-1"), "--warm-every", "0")
             self.assertEqual(p.returncode, 0, p.stderr)
             run_dir = p.stdout.strip().splitlines()[-1]
-            # (a resume restores neither --skip-remote nor --no-mcp: given again)
-            p = self.run_suite(host, "--resume", run_dir, "--ids", self.write("b.txt", "C-1"), "--skip-remote",
-                               "--no-mcp")
+            # (a resume keeps the run's --skip-remote and its absent MCP template)
+            p = self.run_suite(host, "--resume", run_dir, "--ids", self.write("b.txt", "C-1"))
             self.assertEqual(p.returncode, 0, p.stderr)
-            p = self.run_suite(host, "--resume", run_dir, "--skip-remote", "--no-mcp")
+            p = self.run_suite(host, "--resume", run_dir)
             self.assertEqual(p.returncode, 0, p.stderr)
         sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
         self.assertEqual([x["ids"] for x in sessions], ["R-1,T-1", "C-1", "C-1,R-1,T-1"])
@@ -139,6 +138,19 @@ class IdsPlanAndGate(SuiteCase):
             p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
                                "--skip-remote", "--gate", pol, "--by-design", "", FAKE_MCP_MODE="fail")
             self.assertEqual(p.returncode, 1, p.stderr)
+            # a plain resume of a gated run is gated as it was (it adds nothing here): exit 1 again; --no-gate leaves
+            # one resume ungated (the orchestration's exit status), the next plain one is gated again
+            gated = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", gated, "--by-design", "")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertIn("gate: FAIL", p.stderr)
+            p = self.run_suite(host, "--resume", gated, "--by-design", "", "--no-gate")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertNotIn("gate: FAIL", p.stderr)
+            p = self.run_suite(host, "--resume", gated, "--by-design", "")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertEqual([x["gate"] for x in sc.read_json(os.path.join(gated, "orchestrator.json"))["sessions"]],
+                             [pol, pol, "", pol])
             p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local",
                                "--skip-remote", "--ids", self.write("ids2", "R-1"), "--by-design", "",
                                FAKE_MCP_MODE="fail")

@@ -96,7 +96,7 @@ class SuiteCase(unittest.TestCase):
                               universal_newlines=True, timeout=300, stdin=subprocess.DEVNULL)
 
     def mcp_cmd(self):
-        return "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest}" % (
+        return "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest} --checks-dir {checks_dir}" % (
             shlex.quote(sys.executable), shlex.quote(os.path.join(HERE, "fake_mcp.py")))
 
     def lock_path(self):
@@ -267,6 +267,85 @@ class RunSuiteOffline(SuiteCase):
         sess = sc.read_json(os.path.join(p.stdout.strip().splitlines()[-1], "orchestrator.json"))["sessions"][-1]
         self.assertEqual((sess["loop"]["reason"], sess["loop"]["completed"]), ("mcp_exit_3", 0))
 
+    def test_mcp_runner_crash_is_recorded(self):
+        # a runner that crashes writes no line: its traceback is in arms/mcp/runner.log, the lost executions are named
+        # in the loop record, and a scenario whose MCP execution is lost is not completed; three in a row stop the
+        # loop (failed), fewer leave it incomplete; either way exit 1 and the report INCOMPLETE
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub",
+                               FAKE_MCP_MODE="crash")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+            self.assertEqual((loop["state"], loop["reason"], loop["completed"]), ("failed", "mcp_errors", 0))
+            self.assertEqual((loop["mcp_missing"], loop["mcp_missing_count"]), (["C-1:r0", "C-1:r1", "P-1:r0"], 3))
+            with open(os.path.join(run_dir, "arms", "mcp", "runner.log")) as fh:
+                log = fh.read()
+            self.assertIn("KeyError: 'fake crash'", log)
+            self.assertIn("mcp: repeat 1 of C-1", log)
+            self.assertNotIn(SECRET, log)
+            # one scenario's executions lost (two in a row): the loop runs through, incomplete
+            p = self.run_suite(host, "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--checks", "stub",
+                               FAKE_MCP_MODE="crash", FAKE_MCP_CRASH_ID="P-1")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+            self.assertEqual((loop["state"], loop["reason"], loop["completed"], loop["scenarios"]),
+                             ("incomplete", "mcp_missing", 5, 6))
+            self.assertEqual(loop["mcp_missing"], ["P-1:r0", "P-1:r1"])
+            self.assertIn("2 MCP execution(s) not recorded by the runner: P-1:r0 P-1:r1", p.stderr)
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertIn("**INCOMPLETE", fh.read())
+
+    def test_sequential_mcp_refusal_fails_the_loop(self):
+        # the sequential mode records its loop too: the MCP runner's refusal (exit 3) of the cold pass stops the MCP
+        # arm, the loop is failed (exit 1), the report INCOMPLETE; a sequential run that ran through reads done
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(),
+                               "--checks", "stub", FAKE_MCP_MODE="exit3")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+            self.assertEqual((loop["mode"], loop["state"], loop["reason"]), ("sequential", "failed", "mcp_exit_3"))
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertIn("**INCOMPLETE", fh.read())
+            time.sleep(1.1)
+            p = self.run_suite(host, "--sequential", "--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(),
+                               "--checks", "stub")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            loop = sc.read_json(os.path.join(p.stdout.strip().splitlines()[-1], "orchestrator.json"))[
+                "sessions"][-1]["loop"]
+            self.assertEqual((loop["mode"], loop["state"], loop["failed_steps"]), ("sequential", "done", []))
+
+    def test_ctrl_c_during_an_mcp_step(self):
+        # Ctrl-C reaches the MCP runner and the tee that keeps its output: the runner stops and writes its last line,
+        # which reaches runner.log (tee ignores SIGINT) instead of meeting a closed pipe
+        make_manifest(self.mpath, mcp_scenarios())
+        with FakeHost() as host:
+            cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                   "--mcp-cmd", self.mcp_cmd(), "--checks", "stub"]
+            proc = subprocess.Popen(cmd, env=self.env(host, FAKE_MCP_MODE="sigint"), stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, universal_newlines=True, start_new_session=True,
+                                    stdin=subprocess.DEVNULL)
+
+            def calls_log():
+                runs = os.listdir(self.runs) if os.path.isdir(self.runs) else []
+                return [os.path.join(self.runs, x, "arms", "mcp", "calls.log") for x in runs
+                        if os.path.exists(os.path.join(self.runs, x, "arms", "mcp", "calls.log"))]
+            deadline = time.time() + 60
+            while time.time() < deadline and not calls_log():
+                time.sleep(0.05)
+            time.sleep(0.5)
+            os.killpg(proc.pid, signal.SIGINT)   # a terminal's Ctrl-C reaches the whole foreground group
+            out, err = proc.communicate(timeout=120)
+        self.assertEqual(proc.returncode, 130, err)
+        with open(calls_log()[0]) as fh:
+            self.assertEqual(fh.read().splitlines()[1:], ["final print ok"])
+        with open(os.path.join(os.path.dirname(calls_log()[0]), "runner.log")) as fh:
+            self.assertIn("done: interrupted on C-1", fh.read())
+
     def test_cap_then_resume(self):
         make_manifest(self.mpath, basic_scenarios())
         with FakeHost() as host:
@@ -291,6 +370,146 @@ class RunSuiteOffline(SuiteCase):
                          ("done", "done"))
         orch = sc.read_json(os.path.join(run_dir, "orchestrator.json"))
         self.assertEqual([s["loop"]["state"] for s in orch["sessions"]], ["capped", "done"])
+
+    def test_a_failed_step_is_recorded(self):
+        # a direct step that exits non-zero (here: the interpreter "not found", exit 127, before any request) leaves
+        # its scenario not completed; the loop names the step and reads incomplete (exit 1), never done N/N
+        make_manifest(self.mpath, basic_scenarios())
+        wrapper = os.path.join(self.d, "py")
+        with open(wrapper, "w") as fh:
+            fh.write('#!/bin/bash\ncase " $* " in *run_direct.py*direct-remote*"--only P-1 "*) '
+                     'echo "python3: No such file or directory" >&2; exit 127 ;; esac\nexec %s "$@"\n'
+                     % shlex.quote(sys.executable))
+        os.chmod(wrapper, 0o755)
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--warm-every", "0", "--checks", "stub",
+                               PYTHON=wrapper)
+            self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("1 failed step(s): direct-remote:P-1:127", p.stderr)
+        run_dir = p.stdout.strip().splitlines()[-1]
+        loop = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]
+        self.assertEqual((loop["state"], loop["reason"], loop["completed"], loop["scenarios"]),
+                         ("incomplete", "failed_steps", 5, 6))
+        self.assertEqual(loop["failed_steps"], ["direct-remote:P-1:127"])
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            self.assertIn("**INCOMPLETE", fh.read())
+
+    def test_resume_keeps_the_runs_options(self):
+        # a plain resume continues the run as it was started: a smoke run's request cap (40 per invocation), its
+        # arms (--skip-local), its pause; the session records what was given and what was restored
+        make_manifest(self.mpath, [scenario("S-%03d" % i, "S", "POST /slow", {"sleep_s": 0}) for i in range(100)])
+        base = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf"]
+
+        def run(*args):
+            return subprocess.run(base + list(args), env=self.env(host), stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, universal_newlines=True, timeout=300,
+                                  stdin=subprocess.DEVNULL)
+        with FakeHost() as host:
+            p = run("--smoke", "--skip-local", "--manifest", self.mpath, "--warm-every", "0", "--checks", "stub",
+                    "--pause", "0.01")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            n = len(host.log)
+            self.assertEqual(n, 1 + 40)        # the release GET and the smoke cap
+            p = run("--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(len(host.log) - n, 40)
+        self.assertIn("the run's own options:", p.stderr)
+        rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
+        self.assertEqual(set(r["arm"] for r in rows), {"direct-remote"})
+        sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+        self.assertEqual([(x["smoke"], x["max_requests"], x["skip_local"], x["pause_s"]) for x in sessions],
+                         [("1", "40", "1", "0.01")] * 2)
+        self.assertEqual([x["loop"]["state"] for x in sessions], ["capped", "capped"])
+        self.assertEqual(sessions[1]["given"], ["no-pdf", "resume"])
+        for item in ("smoke", "skip-local", "pause 0.01", "checks stub", "warm_every 0"):
+            self.assertIn(item, sessions[1]["restored"])
+
+    def test_flags_come_from_the_first_session(self):
+        # the run's flags are its first invocation's: a resume naming --skip-local skips direct-local for that
+        # invocation only, so the next plain resume runs it and finishes the run; a run started with --skip-remote is
+        # resumed with direct-remote by --remote, and a plain resume after that skips it again
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "10", "--warm-every", "0",
+                               "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", run_dir, "--skip-local")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "run.json"))["arms"]["direct-local"]["state"],
+                             "partial")
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run = sc.read_json(os.path.join(run_dir, "run.json"))
+            self.assertEqual((run["arms"]["direct-local"]["state"], run["arms"]["direct-remote"]["state"]),
+                             ("done", "done"))
+            with open(os.path.join(run_dir, "report.md")) as fh:
+                self.assertNotIn("INCOMPLETE", fh.read().split("# Environment")[0])
+            sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+            self.assertEqual([x["skip_local"] for x in sessions], ["0", "1", "0"])
+            self.assertIn("skip-local", sessions[1]["given"])
+            # the negation
+            time.sleep(1.1)
+            p = self.run_suite(host, "--manifest", self.mpath, "--skip-remote", "--warm-every", "0", "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            n = len(host.log)
+            p = self.run_suite(host, "--resume", run_dir, "--remote")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "run.json"))["arms"]["direct-remote"]["state"], "done")
+            n2 = len(host.log)
+            self.assertGreater(n2 - n, 9)                     # direct-remote's executions and its GETs
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(len(host.log) - n2, 1)           # direct-local's closing GET only
+            sessions = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"]
+            self.assertEqual([x["skip_remote"] for x in sessions], ["1", "0", "1"])
+            for pair in (("--skip-local", "--local"), ("--allow-stub", "--no-allow-stub"),
+                         ("--remote", "--skip-remote")):
+                p = self.run_suite(host, "--resume", run_dir, *pair)
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn("exclude each other", p.stderr)
+
+    def test_narrowed_resume_says_so(self):
+        # a resume naming a selection narrower than the run's plan says so and records it; the run stays INCOMPLETE
+        make_manifest(self.mpath, basic_scenarios())
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "10", "--warm-every", "0",
+                               "--checks", "stub")
+            run_dir = p.stdout.strip().splitlines()[-1]
+            p = self.run_suite(host, "--resume", run_dir, "--areas", "P", "--limit", "1")
+            self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("leaves out scenarios of the run's plan", p.stderr)
+        sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
+        self.assertEqual(sess["narrower_than_plan"], {"selected": 1, "planned": 6, "left_out": 5})
+        with open(os.path.join(run_dir, "report.md")) as fh:
+            self.assertIn("**INCOMPLETE", fh.read())
+
+    def test_a_deploy_during_the_run_is_stated(self):
+        # the host's release changes during a paired run: each direct arm's closing GET records it, the merge warns
+        # and states mixed_releases (and the gate fails on it: test_gate)
+        import fake_host
+        make_manifest(self.mpath, [scenario("S-%02d" % i, "S", "POST /slow", {"sleep_s": 0.2}) for i in range(5)])
+        old = fake_host.RELEASE
+        try:
+            with FakeHost() as host:
+                cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                       "--warm-every", "0", "--checks", "stub"]
+                proc = subprocess.Popen(cmd, env=self.env(host), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        universal_newlines=True, stdin=subprocess.DEVNULL)
+                deadline = time.time() + 60
+                while time.time() < deadline and sum(1 for _, x in host.log if x == "/slow") < 3:
+                    time.sleep(0.02)
+                fake_host.RELEASE = "refseq97-00000000"
+                out, err = proc.communicate(timeout=120)
+        finally:
+            fake_host.RELEASE = old
+        self.assertEqual(proc.returncode, 0, err)
+        run = sc.read_json(os.path.join(out.strip().splitlines()[-1], "run.json"))
+        self.assertTrue(run["mixed_releases"])
+        self.assertEqual(run["release_identity"]["releases"], [old, "refseq97-00000000"])
+        self.assertTrue([w for w in run["warnings"] if w.startswith("the host's release changed during the run")])
+        for arm in ("direct-local", "direct-remote"):
+            self.assertTrue(run["arms"][arm]["release_changed"], arm)
 
     def test_lock_held_stale_and_foreign(self):
         make_manifest(self.mpath, basic_scenarios()[:1])
@@ -356,6 +575,45 @@ class RunSuiteOffline(SuiteCase):
         with open(os.path.join(p.stdout.strip().splitlines()[-1], "report.md")) as fh:
             self.assertIn("UNVERIFIED", fh.read())
 
+    def test_resume_waits_for_its_own_runner(self):
+        # a paired step cut off by Ctrl-C leaves its runner on its request in flight: a --resume waits for that runner
+        # of its own run (up to SUITE_WAIT_OWN_RUNNER_S) and then continues, instead of refusing after
+        # SUITE_WAIT_RUNNER_S; another run's runner is still refused, and so is its own one past the wait
+        make_manifest(self.mpath, basic_scenarios())
+
+        def stand_in(run_id, seconds):
+            # a process the runner patterns match: scripts/run_direct.py ... --base BASE ... --run-id RUN_ID
+            return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % seconds,
+                                     "scripts/run_direct.py", "--base", host.base, "--run-id", run_id])
+        with FakeHost() as host:
+            p = self.run_suite(host, "--manifest", self.mpath, "--max-requests", "8", "--warm-every", "0",
+                               "--checks", "stub")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            run_id = os.path.basename(run_dir)
+            own = stand_in(run_id, 8)    # longer than SUITE_WAIT_RUNNER_S and the first poll's 5 s
+            try:
+                p = self.run_suite(host, "--resume", run_dir, SUITE_WAIT_RUNNER_S="1")
+            finally:
+                own.kill()
+                own.wait()
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("this run's runner still runs", p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]["loop"]["state"],
+                             "done")
+            for run_of, own_wait, expect in ((run_id, "2", "stop it with kill -INT"),
+                                             ("another-run", "60", "another invocation's")):
+                other = stand_in(run_of, 60)
+                try:
+                    p = self.run_suite(host, "--resume", run_dir, SUITE_WAIT_RUNNER_S="1",
+                                       SUITE_WAIT_OWN_RUNNER_S=own_wait)
+                finally:
+                    other.kill()
+                    other.wait()
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn(expect, p.stderr)
+                self.assertIn("pid(s) %d" % other.pid, p.stderr)
+
     def test_samples_pulled_and_merged(self):
         make_manifest(self.mpath, basic_scenarios()[:2])
         with FakeHost() as host:
@@ -410,7 +668,7 @@ class RunSuiteOffline(SuiteCase):
             run_dir = [os.path.join(self.runs, x) for x in os.listdir(self.runs)][0]
             sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
             self.assertEqual(sess["loop"]["state"], "interrupted")
-            p = self.run_suite(host, "--resume", run_dir, "--warm-every", "0")
+            p = self.run_suite(host, "--resume", run_dir)    # its --warm-every 0 is the run's own
             self.assertEqual(p.returncode, 0, p.stderr)
         rows, bad = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
         self.assertEqual(bad, 0)
@@ -433,8 +691,8 @@ class RunSuiteOffline(SuiteCase):
             self.assertTrue(all(r["arm"] == "direct-remote" for r in rows))
             self.assertTrue(rows[0]["raw"].startswith("arms/direct-remote/raw/"))
             n_requests = len(host.log)
-            # --resume keeps the run's mode: nothing new runs (only the capabilities GETs)
-            p2 = self.run_suite(host, "--resume", run_dir, "--skip-local")
+            # --resume keeps the run's mode and arms (--skip-local): nothing new runs (only the capabilities GETs)
+            p2 = self.run_suite(host, "--resume", run_dir)
             self.assertEqual(p2.returncode, 0, p2.stderr)
             self.assertEqual(p2.stdout.strip().splitlines()[-1], run_dir)
             self.assertEqual(len(host.log) - n_requests, 4)
@@ -599,7 +857,7 @@ class RunSuiteOverSsh(SuiteCase):
                 self.assertIn("INCOMPLETE", fh.read())
             self.assertTrue(os.path.exists(self.lock_path()))      # left behind: mex did not answer
             os.unlink(down)
-            p = self.run_suite(host, "--resume", run_dir, "--warm-every", "0")
+            p = self.run_suite(host, "--resume", run_dir)
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertIn("removing a stale lock", p.stderr)
         rows, _ = sc.read_jsonl(os.path.join(run_dir, "executions.jsonl"))
@@ -630,6 +888,36 @@ class RunSuiteOverSsh(SuiteCase):
         sess = sc.read_json(os.path.join(run_dir, "orchestrator.json"))["sessions"][-1]
         self.assertEqual((sess["loop"]["state"], sess["loop"]["reason"]), ("failed", "runner_still_running"))
         self.assertFalse(os.path.exists(self.lock_path()))
+
+    def test_ctrl_c_of_a_paired_run_over_ssh(self):
+        # Ctrl-C reaches the ssh client of the direct-local step in flight, which ends; the orchestrator's SIGINT stops
+        # the mex runner after its request, whose next stdout write then meets the closed channel: the arm is
+        # interrupted (no "runner failed" warning that would outlive a successful resume), the run resumable
+        make_manifest(self.mpath, [scenario("S-01", "S", "POST /slow", {"sleep_s": 3}),
+                                   scenario("S-02", "S", "POST /slow", {"sleep_s": 0})])
+        with FakeHost() as host:
+            cmd = [os.path.join(SUITE, "run_suite.sh"), "--no-pdf", "--pause", "0", "--manifest", self.mpath,
+                   "--warm-every", "0"]
+            proc = subprocess.Popen(cmd, env=self.env(host), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True, start_new_session=True, stdin=subprocess.DEVNULL)
+            self.wait_for(lambda: ("POST", "/slow") in host.log)
+            time.sleep(0.3)
+            os.killpg(proc.pid, signal.SIGINT)   # a terminal's Ctrl-C reaches the whole foreground group
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 130, err)
+            run_dir = [os.path.join(self.runs, x) for x in os.listdir(self.runs)][0]
+            self.wait_for(lambda: self.runner_gone(os.path.basename(run_dir)))
+            arm = os.path.join(self.mex, "suite-dev", "runs", os.path.basename(run_dir), "arms", "direct-local")
+            rj = sc.read_json(os.path.join(arm, "run.json"))
+            self.assertEqual((rj["state"], rj["sessions"][-1]["state"]), ("interrupted", "interrupted"))
+            self.assertFalse([w for w in rj.get("warnings", []) if "runner failed" in w])
+            with open(os.path.join(arm, "runner.log")) as fh:
+                self.assertNotIn("BrokenPipeError", fh.read())
+            p = self.run_suite(host, "--resume", run_dir)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        merged = sc.read_json(os.path.join(run_dir, "run.json"))
+        self.assertEqual(merged["arms"]["direct-local"]["state"], "done")
+        self.assertFalse([w for w in merged.get("warnings", []) if "runner failed" in w])
 
 
 if __name__ == "__main__":

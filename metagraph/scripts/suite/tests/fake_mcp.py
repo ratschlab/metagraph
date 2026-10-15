@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """A stand-in for the async session's MCP runner (scripts/bench/suite_mcp_runner.py) with its per-id CLI, for
-the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M. It appends one execution line
-per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
+the orchestrator's offline tests: --ids A,B --repeat N --out DIR --manifest M [--checks-dir DIR]. It appends one
+execution line per id (cache cold for repeat 0, warm otherwise; outcome not_implemented_mcp when the manifest marks the
 scenario so) to DIR/executions.jsonl and its job to DIR/jobs.jsonl, skips what is recorded (resumable), and
 logs each call to DIR/calls.log with whether the environment variable SUITE_TEST_SECRET reached it (the value
 itself is never written). No request is made.
 
 FAKE_MCP_MODE (as async's runner ends): `fail` every implemented execution fails its checks (exit 1);
 `error_cancel` every one ends `error` at the poll deadline with its job cancelled (jobs.jsonl `created`, then
-`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal).
+`canceled`; no backend phase; exit 1); `exit3` writes nothing and exits 3 (a start refusal); `crash` writes a traceback
+to stderr and no line for any id (exit 1, a runner defect), only for a call that names FAKE_MCP_CRASH_ID when that
+is set; `unknown` records the outcome `skipped_by_runner`, outside the shared vocabulary (exit 0); `sigint` waits
+up to 30 s on each call and, interrupted (Ctrl-C), prints a last line on stdout as async's runner does and notes in
+calls.log whether that print worked (exit 130) or met a closed pipe (exit 1).
 
 Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes DIR/run.json with the manifest's
-identity and `service_capabilities` (the live read of the service's configuration); FAKE_MCP_CAPS `missing` leaves
-it out, `failed` records a failed read, `mismatch` a live / table mismatch."""
+identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
+out, `failed` records a failed read, `mismatch` a live / table mismatch) and the checks it judges with: `checks_dir`
+(--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}), `checks_sha256` and `suite_common_sha256` of
+its files, and `checks_module` {file, stub}."""
 
 import argparse
 import json
@@ -30,10 +36,15 @@ def main(argv=None):
     ap.add_argument("--repeat", type=int, required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--manifest", required=True)
+    ap.add_argument("--checks-dir", default=None)
     args = ap.parse_args(argv)
     mode = os.environ.get("FAKE_MCP_MODE", "")
     if mode == "exit3":
         return 3
+    if mode == "crash" and os.environ.get("FAKE_MCP_CRASH_ID", args.ids) in args.ids.split(","):
+        sys.stderr.write("Traceback (most recent call last):\n  File \"suite_mcp_runner.py\", line 1, in verdict\n"
+                         "KeyError: 'fake crash'\n")
+        return 1
     os.makedirs(args.out, exist_ok=True)
     manifest = sc.read_json(args.manifest)
     scen = dict((s.get("id"), s) for s in manifest.get("scenarios", []))
@@ -42,6 +53,12 @@ def main(argv=None):
     ok, computed = sc.verify_manifest(manifest)
     run = {"arm": "mcp", "manifest": {"computed_sha256": computed, "content_sha256": manifest.get("content_sha256"),
                                       "sha_verified": ok}}
+    if args.checks_dir:
+        # what the runner judges with, as async's runner is to record it per invocation (one invocation here)
+        run.update(checks_dir=args.checks_dir,
+                   checks_sha256=sc.file_sha256(os.path.join(args.checks_dir, "checks.py")),
+                   suite_common_sha256=sc.file_sha256(os.path.join(args.checks_dir, "suite_common.py")),
+                   checks_module={"file": os.path.join(args.checks_dir, "checks.py"), "stub": False})
     caps = os.environ.get("FAKE_MCP_CAPS", "")
     if caps != "missing":
         doc = {"service_settings": {"advanced_enabled": False}}
@@ -56,6 +73,18 @@ def main(argv=None):
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])
     with open(os.path.join(args.out, "calls.log"), "a") as fh:
         fh.write("%s %d env=%s\n" % (args.ids, args.repeat, "yes" if os.environ.get("SUITE_TEST_SECRET") else "no"))
+    if mode == "sigint":
+        try:
+            time.sleep(30)
+        except KeyboardInterrupt:
+            try:
+                print("done: interrupted on %s" % args.ids, flush=True)
+                note, rc = "final print ok", 130
+            except BrokenPipeError:
+                note, rc = "final print raised BrokenPipeError", 1
+            with open(os.path.join(args.out, "calls.log"), "a") as fh:
+                fh.write(note + "\n")
+            return rc
     bad = 0
     for sid in [i for i in args.ids.split(",") if i]:
         if (sid, "mcp", args.repeat) in done:
@@ -78,6 +107,8 @@ def main(argv=None):
         elif mode == "fail":
             line.update(outcome="fail", checks=[{"check": "status", "outcome": "fail", "detail": "fake: http 500"}],
                         http=500)
+        elif mode == "unknown":
+            line.update(outcome="skipped_by_runner")
         elif mode == "error_cancel":
             line.update(outcome="error", checks=[], http=0, server=None,
                         error={"code": "runner_error", "text": "fake: not terminal within the deadline"},

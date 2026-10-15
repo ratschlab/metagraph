@@ -14,6 +14,12 @@ index_fp, the three capabilities documents, host load at start and end). The ans
 `checks.evaluate` (checks.py of lane S1, or checks_stub.py, which is refused for a selection whose expectations
 go beyond the HTTP status unless --allow-stub).
 
+The host's identity per session: `release_start` / `index_fp_start` / `server_instance_start` from the start's
+capabilities documents, `release_end` / `index_fp_end` / `server_instance_end` from the closing GET /capabilities
+(index_fp_end only where that document states it); run.json `releases` lists every release a session saw, in order,
+and `release_changed` says whether there was more than one (a deploy during the run, or between an interrupt and its
+resume; merge_run.py and the gate read it).
+
 Timing: one keep-alive connection per invocation, reused while the server keeps it open; `wall_ms` runs from
 sending the request to the last body byte on an established connection, and the connection set-up (TCP, TLS)
 is recorded apart as `client.connect_ms` (null when the request reused the connection).
@@ -25,7 +31,8 @@ planned execution is recorded, else `partial`.
 
 Resumable: a second invocation with the same --out skips the executions already recorded (same manifest
 required). SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
-state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run). --max-requests counts
+state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run), also when the reader of
+stdout is gone by then (a paired step whose ssh client a Ctrl-C ended: `say`). --max-requests counts
 every request of the invocation, the closing GET /capabilities included. Stdlib only: runs with python3.12 on
 mex.
 """
@@ -81,6 +88,38 @@ STOP = StopState()
 def reset_stop():
     """A fresh stop state (the tests run several runs in one process)."""
     STOP.flag, STOP.reason, STOP.signals = False, None, 0
+    STDOUT.gone = False
+
+
+class StdoutState(object):
+    def __init__(self):
+        self.gone = False
+
+
+STDOUT = StdoutState()
+
+
+def say(text):
+    """Writes |text| to stdout (the progress lines, the summary, the status line) and flushes it. A paired step's
+    stdout is its ssh channel: a Ctrl-C at the orchestrator ends the ssh client, and the runner, stopped by the
+    orchestrator's SIGINT after its request in flight, then meets a closed pipe. That is no failure of the run: the
+    first write that finds the reader gone points stdout at /dev/null (so no later write, nor the interpreter's
+    final flush, raises) and the run ends as its stop says (interrupted, exit 130)."""
+    if STDOUT.gone:
+        return
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        STDOUT.gone = True
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(devnull, sys.stdout.fileno())
+            finally:
+                os.close(devnull)
+        except (OSError, ValueError):
+            pass
 
 
 def _on_signal(signum, frame):
@@ -114,6 +153,15 @@ def load_checks(mode):
             error = "%s: %s" % (type(exc).__name__, exc)
     import checks_stub
     return checks_stub, "stub", error
+
+
+def checks_identity(checks):
+    """{checks_sha256, suite_common_sha256, checks_dir}: the files the checks module (lane S1's checks.py or the stub)
+    and suite_common were imported from (None for a module without a file, e.g. a test's)."""
+    path = getattr(checks, "__file__", None)
+    return {"checks_sha256": sc.file_sha256(path) if path else None,
+            "suite_common_sha256": sc.file_sha256(getattr(sc, "__file__", None)),
+            "checks_dir": os.path.dirname(os.path.abspath(path)) if path else None}
 
 
 def accepts_keyword(fn, name):
@@ -442,6 +490,10 @@ class Runner(object):
             if warning not in self.run.get("warnings", []):
                 self.run.setdefault("warnings", []).append(warning)
         self.session = {"started_utc": sc.iso_utc(time.time()), "host_load_start": host_load(), "state": "running"}
+        # what judged this session's executions: the sha256 of the checks module (or the stub) and of suite_common it
+        # imported, and their directory (run_suite.sh runs the arms from the run's snapshot; merge_run.py compares)
+        self.session.update(checks_identity(self.checks))
+        self.run.update(dict((k, self.session[k]) for k in ("checks_sha256", "suite_common_sha256", "checks_dir")))
         if self.args.only:
             self.session["only"] = self.args.only
         if self.args.finish:
@@ -629,11 +681,11 @@ class Runner(object):
         done = set(sc.execution_key(r) for r in rows)
         # The earlier repeats of each scenario so far, in repeat order, as {digest, time_limited}: checks.evaluate's
         # `previous` (lane S1's determinism check compares a repeat with the earlier ones, and a time-limited earlier
-        # repeat need not repeat: SPEC-labeled-traversal-core §6.8, SPEC-pattern-search §7.9). A line of a runner
-        # before the field gets it from its raw answer.
+        # repeat need not repeat: SPEC-labeled-traversal-core §6.8, SPEC-pattern-search §7.9), of the repeats the host
+        # answered (suite_common.feeds_previous). A line of a runner before the field gets it from its raw answer.
         digests = {}
         for r in sorted(rows, key=lambda r: (r.get("repeat") or 0)):
-            if r.get("arm") == self.args.arm and r.get("answer_digest"):
+            if r.get("arm") == self.args.arm and r.get("answer_digest") and sc.feeds_previous(r):
                 digests.setdefault(r.get("scenario"), []).append(self.previous_entry(r))
         if bad:
             self.run.setdefault("warnings", []).append("%d unparsable line(s) in executions.jsonl ignored" % bad)
@@ -658,6 +710,8 @@ class Runner(object):
                 docs, statuses, ident = self.snapshot_capabilities()
                 self.session["capabilities_http"] = statuses
                 self.session["server_instance_start"] = ident["server_instance"]
+                self.session["release_start"] = ident["release"]
+                self.session["index_fp_start"] = ident["index_fp"]
                 if "capabilities" not in self.run or not self.run.get("release"):
                     self.run["capabilities"] = docs
                     self.run["capabilities_http"] = statuses
@@ -671,14 +725,14 @@ class Runner(object):
                 self.write_state("running", len(planned), ndone, sid)
                 after_resume = repeat > 0 and (sid, repeat - 1) not in ran_in_session
                 line = self.execute(index, scenario, repeat, cache, after_resume, list(digests.get(sid, [])))
-                digests.setdefault(sid, []).append(self.previous_entry(line))
+                if sc.feeds_previous(line):
+                    digests.setdefault(sid, []).append(self.previous_entry(line))
                 ran_in_session.add((sid, repeat))
                 ndone += 1
                 if not self.args.quiet:
-                    sys.stdout.write("[%s] %d/%d %s r%d %s http=%s %.0f ms\n" % (
+                    say("[%s] %d/%d %s r%d %s http=%s %.0f ms\n" % (
                         self.args.arm, ndone, len(planned), sid, repeat, line["outcome"], line["http"],
                         line["wall_ms"] or 0.0))
-                    sys.stdout.flush()
                 self.pause()
             if STOP.flag:
                 state = "interrupted"
@@ -690,7 +744,7 @@ class Runner(object):
             self.run.setdefault("warnings", []).append("runner failed: " + traceback.format_exc(limit=5))
             raise
         finally:
-            end_ident = {"server_instance": None}
+            end_ident = {"server_instance": None, "release": None, "index_fp": None}
             if self.closing_get and state != "failed" and STOP.signals < 2:
                 try:
                     _, _, end_ident = self.snapshot_capabilities(at_end=True)
@@ -705,6 +759,11 @@ class Runner(object):
             if self.closing_get:
                 self.session["server_instance_end"] = end_ident.get("server_instance")
                 self.run["server_instance_end"] = end_ident.get("server_instance")
+                self.session["release_end"] = end_ident.get("release")
+                self.session["index_fp_end"] = end_ident.get("index_fp")
+                self.run["release_end"] = end_ident.get("release")
+            self.run["releases"] = session_values(self.run, "release")
+            self.run["release_changed"] = len(self.run["releases"]) > 1
             self.run["ended_utc"] = self.session["ended_utc"]
             self.run["host_load_end"] = self.session["host_load_end"]
             self.run["state"] = state
@@ -717,6 +776,17 @@ class Runner(object):
             self.write_state(state, len(planned), min(done_now, len(planned)))
             self.stop_sampler()
         return state
+
+
+def session_values(run, key):
+    """The distinct values of |key| (release, index_fp) the arm saw, in order: the run's own (its first start's,
+    also of a session before the per-session fields), then each session's start and end."""
+    out = [run[key]] if run.get(key) else []
+    for sess in run.get("sessions") or []:
+        for v in (sess.get(key + "_start"), sess.get(key + "_end")):
+            if v and v not in out:
+                out.append(v)
+    return out
 
 
 def parse_args(argv):
@@ -776,13 +846,11 @@ def main(argv=None):
     runner = Runner(args, manifest, checks, checks_name, checks_error)
     state = runner.run_all()
     if not args.quiet:
-        sys.stdout.write("[%s] %s: %d executed, %d requests, run dir %s\n"
-                         % (args.arm, state, runner.executed, runner.requests, runner.out))
+        say("[%s] %s: %d executed, %d requests, run dir %s\n"
+            % (args.arm, state, runner.executed, runner.requests, runner.out))
     if args.status_line:
-        sys.stdout.write(STATUS_PREFIX + json.dumps({"state": state, "executed": runner.executed,
-                                                     "requests": runner.requests, "reason": STOP.reason},
-                                                    sort_keys=True) + "\n")
-    sys.stdout.flush()
+        say(STATUS_PREFIX + json.dumps({"state": state, "executed": runner.executed, "requests": runner.requests,
+                                        "reason": STOP.reason}, sort_keys=True) + "\n")
     if state == "interrupted" and (STOP.reason or "").startswith("max_requests"):
         return EXIT_REQUEST_CAP
     return {"done": 0, "partial": 0, "interrupted": 130}.get(state, 1)
