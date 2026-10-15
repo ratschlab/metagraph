@@ -1,0 +1,57 @@
+{
+ "chapter": "M",
+ "title": "Mismatches",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "M-planted": {
+   "title": "planted substitutions",
+   "prose": "(family prose: to be written)"
+  },
+  "M-below": {
+   "title": "below the allowance",
+   "prose": "(family prose: to be written)"
+  },
+  "M-iupac": {
+   "title": "IUPAC with mismatches",
+   "prose": "(family prose: to be written)"
+  },
+  "M-protein": {
+   "title": "protein mismatches",
+   "prose": "(family prose: to be written)"
+  },
+  "M-suffix": {
+   "title": "suffix scope",
+   "prose": "(family prose: to be written)"
+  },
+  "M-order": {
+   "title": "level order",
+   "prose": "(family prose: to be written)"
+  },
+  "M-floor": {
+   "title": "the floor",
+   "prose": "(family prose: to be written)"
+  },
+  "M-refusal": {
+   "title": "refusals",
+   "prose": "(family prose: to be written)"
+  },
+  "M-twin": {
+   "title": "twins",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "M-planted": "A window with m planted substitutions at max_mismatches >= m: the source at level m with the substitutions reported (mirrored in the reverse orientation).",
+  "M-below": "More substitutions than max_mismatches: the source at no level.",
+  "M-iupac": "IUPAC codes plus one substitution: level 1, never at an N; a base inside a set is no substitution.",
+  "M-protein-level1": "A decapeptide with one substituted residue at max_mismatches 1: the source at level 1.",
+  "M-protein-cap": "max_mismatches 2 above the protein cap of 1 is refused.",
+  "M-suffix": "An 18-mer with one substitution in suffix scope: the source at offset k-L, level 1.",
+  "M-order": "partial releases the lowest levels first; a max_steps stop inside a level leaves the lower levels exact.",
+  "M-floor": "A short pattern at a mismatch count is below the floor by the stated bits, or within it.",
+  "M-refusal": "Out-of-range or wrongly typed max_mismatches and its later_increment combinations are refused with the host's text; a long pattern gets its slot with cap 0; max_mismatches 0 answers as without the field.",
+  "M-twin": "The m = 0 window answers as without max_mismatches (same_answer); its level 0 at max_mismatches 1 holds the exact contexts (subset)."
+ }
+}

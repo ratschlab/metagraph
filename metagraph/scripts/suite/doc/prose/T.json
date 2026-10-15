@@ -1,0 +1,89 @@
+{
+ "chapter": "T",
+ "title": "Traverse",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "T-walk": {
+   "title": "walks",
+   "prose": "(family prose: to be written)"
+  },
+  "T-derived": {
+   "title": "derived labels",
+   "prose": "(family prose: to be written)"
+  },
+  "T-end": {
+   "title": "record ends",
+   "prose": "(family prose: to be written)"
+  },
+  "T-repeat": {
+   "title": "repeats",
+   "prose": "(family prose: to be written)"
+  },
+  "T-labels": {
+   "title": "label modes",
+   "prose": "(family prose: to be written)"
+  },
+  "T-exhaustive": {
+   "title": "exhaustive trie",
+   "prose": "(family prose: to be written)"
+  },
+  "T-coords": {
+   "title": "coordinates",
+   "prose": "(family prose: to be written)"
+  },
+  "T-budget": {
+   "title": "bounds",
+   "prose": "(family prose: to be written)"
+  },
+  "T-attempts": {
+   "title": "attempts",
+   "prose": "(family prose: to be written)"
+  },
+  "T-edge": {
+   "title": "edge inputs",
+   "prose": "(family prose: to be written)"
+  },
+  "T-seeds": {
+   "title": "several seeds",
+   "prose": "(family prose: to be written)"
+  },
+  "T-graphlet": {
+   "title": "graphlet output",
+   "prose": "(family prose: to be written)"
+  },
+  "T-caps": {
+   "title": "output caps",
+   "prose": "(family prose: to be written)"
+  },
+  "T-quorum": {
+   "title": "label quorum",
+   "prose": "(family prose: to be written)"
+  },
+  "T-strand": {
+   "title": "reverse-complement seed",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "T-walk": "A walk from a seed of the record, constrained to the record's label, spells a substring of the record at the expected position, or stops at a stated branch whose arms both carry the label.",
+  "T-derived": "A seed without explicit labels (permit per_hit) walks under the carrier set the host derives; a path follows the record.",
+  "T-end": "A 31 bp seed near a record end: the walk stops at the record's end with the stated end reason.",
+  "T-repeat": "A seed inside a multi-copy repeat: a branch is stated where the record's copies diverge, and a path of each copy is in the record.",
+  "T-labels": "annotate mode lists every structural successor and a path follows the record; derived column / header labels hold the record's own label; max_labels_per_node 1 is echoed, the cut stated, the walk unchanged.",
+  "T-exhaustive": "The exhaustive trie of radius 100: a leaf follows the record.",
+  "T-coords": "trace with output coordinates: the reported positions equal the record's.",
+  "T-budget": "Each bound (time, memory, work, steps) stops the walk with its own stated reason; the walk so far is in the record.",
+  "T-attempts": "An expired not_after_ms is 409 before any work; an attempt_id states its usage and bound (409 duplicate when retained).",
+  "T-edge": "Malformed seeds, unknown keys and out-of-range knobs are refused with the host's text; duplicate seeds are walked and marked; a budget above the cap is lowered and stated.",
+  "T-seeds": "Three distinct seeds of three records in one request: each walk follows its own record.",
+  "T-graphlet": "output.detail graphlet: the MGT body's walks follow the record.",
+  "T-caps": "bounds.max_output_bp 50 per arm: the arm truncated by it says so; its walk is in the record.",
+  "T-quorum": "min_live_labels 2 on a seed of one header label: every path ends below_min_labels at once (SPEC 6.4).",
+  "T-strand": "The reverse complement of a unique window is not in this basic graph: the seed is refused."
+ },
+ "checks": {
+  "traverse_seed_outcome": "(check prose: to be written)"
+ }
+}

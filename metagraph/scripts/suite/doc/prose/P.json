@@ -1,0 +1,86 @@
+{
+ "chapter": "P",
+ "title": "Patterns up to k",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "P-exact": {
+   "title": "exact windows",
+   "prose": "(family prose: to be written)"
+  },
+  "P-placed": {
+   "title": "placement",
+   "prose": "(family prose: to be written)"
+  },
+  "P-scope": {
+   "title": "scope and strands",
+   "prose": "(family prose: to be written)"
+  },
+  "P-iupac": {
+   "title": "IUPAC",
+   "prose": "(family prose: to be written)"
+  },
+  "P-modes": {
+   "title": "modes",
+   "prose": "(family prose: to be written)"
+  },
+  "P-negative": {
+   "title": "absent patterns",
+   "prose": "(family prose: to be written)"
+  },
+  "P-floor": {
+   "title": "the information floor",
+   "prose": "(family prose: to be written)"
+  },
+  "P-caps": {
+   "title": "caps",
+   "prose": "(family prose: to be written)"
+  },
+  "P-edge": {
+   "title": "edge inputs",
+   "prose": "(family prose: to be written)"
+  },
+  "P-more": {
+   "title": "more edges",
+   "prose": "(family prose: to be written)"
+  },
+  "P-heavy": {
+   "title": "heavy counts",
+   "prose": "(family prose: to be written)"
+  },
+  "P-twin": {
+   "title": "twins",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "P-exact": "An exact window of the record is found: count mode counts at least the record's context; all_or_count lists the record's contexts at their offsets.",
+  "P-placed": "With labels (predicate_only or all) the record is placed at the window (nt_coords) and its taxid is among the labels.",
+  "P-scope-suffix": "suffix scope finds the record's context at offset k-L.",
+  "P-scope-start": "The first 20 bases of a record are found in any_offset scope; the suffix scope's contexts are among them (relation subset).",
+  "P-scope-strands": "strands forward lists only + contexts; strands reverse with the reverse complement lists the record as a - context.",
+  "P-scope-palindrome": "A 16 bp palindrome is searched once and reported with strand '='.",
+  "P-iupac-codes": "A 25-mer with 2-4 IUPAC codes holding the record's bases finds the record's contexts.",
+  "P-iupac-nrun": "A run of N, leading or internal, is skipped; the record is still found.",
+  "P-modes": "count gives no list; partial cuts at max_contexts; all_or_count withholds above the threshold; a cap above the limit is lowered and stated; stop_at_threshold; max_contexts 0 returns nothing and says cut (relation subset: the cut list within the complete one).",
+  "P-negative": "A random 31-mer or a shuffled 40-mer is absent: exact 0, complete.",
+  "P-floor": "Patterns below the information floor are refused as such; suffix scope is exempt and a 24-bit IUPAC pattern at the floor is answered.",
+  "P-caps": "max_anchors 0, max_steps 1 / 50 and a 300 ms budget over 16 patterns stop or cut exactly where stated.",
+  "P-edge": "Malformed pattern lists are refused with the host's text; lower case, duplicate ids and in_ram are accepted as documented.",
+  "P-more": "IUPAC codes at the first and last position still find the record; partial with a cap above the count returns the complete list without a cut.",
+  "P-heavy": "A 12- or 16-mer in any_offset scope (heavy): the count is at least the record's contexts.",
+  "P-twin": "The upper-case twin answers as the lower-case test (same_answer); the exact window's contexts are among its IUPAC pattern's (subset)."
+ },
+ "checks": {
+  "contains_source_context": "(check prose: to be written)",
+  "counts_consistent": "(check prose: to be written)",
+  "cut": "(check prose: to be written)",
+  "entry_fields": "(check prose: to be written)",
+  "pattern_slot_error": "(check prose: to be written)",
+  "retrieval_complete": "(check prose: to be written)",
+  "source_label": "(check prose: to be written)",
+  "stop": "(check prose: to be written)",
+  "withheld": "(check prose: to be written)"
+ }
+}

@@ -345,17 +345,11 @@ def no_pass_text(outcomes):
     return ", ".join("%d %s" % (outcomes[k], labels.get(k, k)) for k in order if outcomes.get(k))
 
 
-def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
-                    cases=None, gated=False):
-    """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
-    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
-    x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
-    from PASS; so does a run, or an arm, with executions and no pass (UNVERIFIED: its marks, not implemented via MCP
-    or service-side by design, showed nothing to hold); an MCP execution inconclusive by a limit |cases| (the table)
-    states for its scenario is listed apart (stated_mcp_limit). |gated|: the run has a deploy gate's verdict, which
-    the report leads with; this one is labelled exploratory."""
+def verdict_text(run, comp, rows, reevaluated=False, missing=None, manifest=None, cases=None):
+    """The verdict word and its reason, as verdict_section prints it, and the facts it was decided on: {incomplete,
+    loop, mixed, stub, untested, totals, no_pass_arms}. The results document (doc/make_doc.py) states the same
+    verdict from the same inputs through this function."""
     s = comp["summary"]
-    lines = ["# Verdict", ""]
     totals = s.get("totals", {})
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
     # an outcome outside the vocabulary (a runner's mark not agreed first) is read as a failure, never as a pass
@@ -388,15 +382,9 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     # a re-evaluated set is judged by checks.py whatever the runners ran
     stub = "stub" in modules and not reevaluated
     untested = untested_groups(rows, manifest, cases, comp)
-    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     arm_pos = dict((a, i) for i, a in enumerate(sc.ARMS))
     no_pass_arms = [(arm, t["outcomes"]) for arm, t in sorted(totals.items(), key=lambda kv: (
         arm_pos.get(kv[0], 9), kv[0])) if t.get("executions") and not t["outcomes"].get("pass")]
-    stated = {}
-    for r in rows:
-        cid = stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp)
-        if cid:
-            stated.setdefault((r.get("scenario"), cid), []).append(r.get("repeat"))
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
     elif failing or other or dis_direct or dis_mcp or rel_failed:
@@ -435,10 +423,41 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
     if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE (no execution passed"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
-    if gated:
-        lines.append("**Exploratory verdict (not the deploy decision, which is the gate's above): %s**" % md(verdict))
-    else:
-        lines.append("**%s**" % md(verdict))
+    return verdict, {"incomplete": incomplete, "loop": loop, "mixed": mixed, "stub": stub, "untested": untested,
+                     "totals": totals, "no_pass_arms": no_pass_arms}
+
+
+EXPLORATORY_PREFIX = "Exploratory verdict (not the deploy decision, which is the gate's above): "
+
+
+def verdict_headline(verdict, gated=False):
+    """The verdict as the report's headline prints it: the verdict itself, or, for a run with a deploy gate's
+    verdict (|gated|: the report leads with the gate), labelled exploratory. The results document prints the same
+    headline on its cover."""
+    return (EXPLORATORY_PREFIX + verdict) if gated else verdict
+
+
+def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
+                    cases=None, gated=False):
+    """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
+    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
+    x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
+    from PASS; so does a run, or an arm, with executions and no pass (UNVERIFIED: its marks, not implemented via MCP
+    or service-side by design, showed nothing to hold); an MCP execution inconclusive by a limit |cases| (the table)
+    states for its scenario is listed apart (stated_mcp_limit). |gated|: the run has a deploy gate's verdict, which
+    the report leads with; this one is labelled exploratory (the headline text: verdict_headline)."""
+    s = comp["summary"]
+    lines = ["# Verdict", ""]
+    verdict, facts = verdict_text(run, comp, rows, reevaluated, missing, manifest, cases)
+    totals, loop, mixed, stub, untested = (facts["totals"], facts["loop"], facts["mixed"], facts["stub"],
+                                           facts["untested"])
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    stated = {}
+    for r in rows:
+        cid = stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp)
+        if cid:
+            stated.setdefault((r.get("scenario"), cid), []).append(r.get("repeat"))
+    lines.append("**%s**" % md(verdict_headline(verdict, gated)))
     lines.append("")
     if mixed and "more than one deployment" not in verdict:
         lines.append("- Mixed releases: the run spans more than one deployment of the host: %s." % md(mixed))

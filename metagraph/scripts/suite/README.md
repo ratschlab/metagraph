@@ -3679,3 +3679,46 @@ Validation: 702 tests pass (593 + the oracle's 109); the oracle's 109 pass insid
 outside any git tree (the provenance tests build a git tree of their own); the frozen v5 manifests and both v5 gate
 files are byte-equal to a76e13b1's; the v3 / v4 re-evaluations equal the previous head's line for line, the v4 gate
 the same 46 problems. No server was contacted; the oracle's evidence runs against 81c620ef are in its lane directory.
+
+## The results document (doc/, 2026-10-15)
+
+One PDF per run for the MetaGraph developers: for every test what it checks, what was expected, what each of the
+three arms answered and how long it took, compact enough that the 681 tests of v4 fit a readable document, every
+test findable by id, every imperfect result explained in a detail block. Design: `~/.cache/metagraph-traverse-plans/
+2026-10-15/doc/DESIGN-DOC.md` (the sample of chapter R was reviewed first). The generator lives in `doc/`, the PDF is
+never committed.
+
+    doc/make_doc.py RUN_DIR --out DIR [--chapters R,T,...] [--sample] [--no-pdf] [--recorded]
+                    [--units FILE] [--prose-dir DIR] [--checks-dir DIR] [--by-design PATH]
+                    [--policy FILE] [--declared FILE] [--xelatex PATH] [--name doc] [--scaffold-prose]
+
+- Reads the run directory as report.py does (manifest.json, the re-evaluated executions and compare.json when the
+  run has them, else the recorded ones, run.json, reevaluated.json, samples.jsonl, gate.json, arms/mcp/run.json),
+  the by-design table compare judged with, the owner-declared file of `gate/` whose manifest sha matches, and the
+  checks module (docstrings for the check catalogue). Stdlib only, offline, no clock in the output.
+- Writes `DIR/doc.tex`, one `chapter_<X>.tex` per chapter and `doc.sty`, then runs xelatex twice (a third time when
+  the .aux changed; `/Library/TeX/texbin/xelatex` or PATH; latexmk is not used). Fonts from TeX Live: Libertinus
+  Serif, Fira Sans / Mono, DejaVu Sans for the glyphs. Exit 0 built, 1 LaTeX failed (the log's first error echoed),
+  2 usage or missing inputs (each named).
+- The reading model (`doc/units.py`): a scenario belongs to one unit (one builder template, one property, varied
+  over one dimension), a unit to one family (the id prefix), a family to one chapter (the area). Five layouts:
+  `series` (arms as rows, variants as columns), `replicates` (aggregates per group), `refusals` (glyph only),
+  `list` (the refusals shape with time cells), `pairs` (twins, relations, D repeats). The metadata comes from the
+  manifest's `doc` blocks (v5) or else from the mapping `doc/units/suite_v<version>.json` (v4); a scenario in
+  neither is an error, never a silent drop.
+- Prose (`doc/prose/<chapter>.json`, `overview.json`, `glossary.json`): keyed on family and unit ids, never on
+  scenario ids, so a new scenario of an existing unit is covered for free. `--scaffold-prose` writes the
+  placeholder entries a file lacks (existing text untouched). The v4 files hold placeholders marked "(to be
+  written)" where the prose is not yet written; `tests/test_doc.py` fails when a family, a unit or a check kind
+  (without a docstring) has no entry at all.
+- The cell grammar (`doc/cells.py`): glyph (pass, fail, error, finding, inconclusive, not implemented via MCP,
+  service-side by design) + marks (footnote digit, disagreement, timing / same checks / not comparable, cold /
+  aged, mixed repeats, unverified) + wall times in repeat order with the unit once, the server time in brackets,
+  the MCP backend time on a third line. A test that is not clean on some arm gets a footnote mark and a detail
+  block right after its unit's table (`doc/blocks.py`: expected vs obtained, each check's outcome and detail, the
+  classes, the relations, the SPEC rule of a finding). The verdict is report.py's own (`report.verdict_text`,
+  extracted so both read the same rule).
+- Tests (`tests/test_doc.py`, offline): the v4 mapping complete and valid, the prose complete, every check kind
+  described, the generator on the fake run of test_compare_report (the .tex, the index, the verdict, the escaping;
+  the PDF when xelatex is installed), the cell grammar, the expectation formatters on chapter R's real
+  expectations.

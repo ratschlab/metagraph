@@ -1,0 +1,47 @@
+{
+ "chapter": "Q",
+ "title": "Predicates and motif",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "Q-pred": {
+   "title": "predicates",
+   "prose": "(family prose: to be written)"
+  },
+  "Q-strands": {
+   "title": "both strands",
+   "prose": "(family prose: to be written)"
+  },
+  "Q-more": {
+   "title": "more predicates",
+   "prose": "(family prose: to be written)"
+  },
+  "Q-supported": {
+   "title": "supported paths",
+   "prose": "(family prose: to be written)"
+  },
+  "Q-motif": {
+   "title": "motif",
+   "prose": "(family prose: to be written)"
+  },
+  "Q-budget": {
+   "title": "budgets",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "Q-pred-forms": "any / none / all / at_least n / and-not select the record's contexts as the predicate says.",
+  "Q-pred-either": "any / none / not / all under predicate_strands either select as the predicate says.",
+  "Q-pred-unknown": "An unknown label is listed; any() folds to false (nothing read), none() to true (every context selected).",
+  "Q-pred-refusals": "A number as a name and predicate_only without a predicate are refused with the fix.",
+  "Q-strands": "either on a 16S 20-mer held on both strands: the + contexts by their own row, the mirrors by theirs.",
+  "Q-more": "The '-' source contexts are selected by their own rows; or() selects; at_least n outside 1..len is refused.",
+  "Q-supported": "Supported paths under none(A) exclude the record's path; under any(A) with either strands the record is verified.",
+  "Q-motif": "predicate_scope motif: selected / false / no_instance per every_context; without a predicate it is refused, predicate_strands alone is a no-op.",
+  "Q-budget": "max_predicate_contexts 1 is not admitted (all_or_count) or cut (partial); max_predicate_work 1 stops the selection as stated."
+ },
+ "checks": {
+  "motif": "(check prose: to be written)"
+ }
+}

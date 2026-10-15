@@ -1,0 +1,57 @@
+{
+ "chapter": "N",
+ "title": "Negatives and near-misses",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "N-negative": {
+   "title": "negatives",
+   "prose": "(family prose: to be written)"
+  },
+  "N-nearmiss": {
+   "title": "near-misses",
+   "prose": "(family prose: to be written)"
+  },
+  "N-hard": {
+   "title": "hard regions",
+   "prose": "(family prose: to be written)"
+  },
+  "N-realrep": {
+   "title": "real repeats",
+   "prose": "(family prose: to be written)"
+  },
+  "N-usecase": {
+   "title": "use cases",
+   "prose": "(family prose: to be written)"
+  },
+  "N-nearmiss2": {
+   "title": "more near-misses",
+   "prose": "(family prose: to be written)"
+  },
+  "N-zero": {
+   "title": "zero equals absent",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "N-negative-random": "Random DNA of 31-200 bp on /pattern: exact 0, complete.",
+  "N-negative-shuffled": "A shuffled record window: 0 paths on /pattern and no k-mer in the graph on /resolve.",
+  "N-negative-discover": "Random DNA under discovery: nothing to discover.",
+  "N-negative-seed": "A random seed on /traverse: the seed's 400, never a walk.",
+  "N-negative-peptide": "A random peptide of 10-30 low-degeneracy residues: exact 0.",
+  "N-nearmiss-pairs": "More substitutions than max_mismatches put the source out of reach; the pair with m substitutions brings it back at level m.",
+  "N-nearmiss-peptide": "A decapeptide with 2-4 substituted residues at max_mismatches 1: out of reach.",
+  "N-nearmiss-mutated": "A substitution every 15 bases leaves no k-mer of the record; one substitution breaks the runs there with both sides supported; a mutated seed is refused by /traverse.",
+  "N-hard-lowcomplex": "Low-complexity patterns: exact counts within the stated bound, the note stated or absent as documented; with paths, stated stops or a cut.",
+  "N-hard-repeat": "A 31-mer of a multi-copy repeat is counted and resolved with every k-mer carried; a telomeric seed re-enters itself at 0 bp (rejoined_seed).",
+  "N-realrep": "Real tandem repeats of the records: the pattern's contexts (note as documented), the resolve fully supported, the traverse following the record to its re-entry.",
+  "N-usecase-primers": "A universal 16S primer (IUPAC) on both strands is counted, at least E. coli K-12's sites.",
+  "N-usecase-strand": "A forward-only search of a reverse primer or of a reverse complement counts what the record holds on +.",
+  "N-usecase-floor": "Too short or too degenerate patterns are below the floor; a 26-bit degenerate one is admitted and costly.",
+  "N-usecase-identify": "Identify a read: discovery names its taxid; its first 31 bp are placed in its record.",
+  "N-usecase-defect": "The 2026-10-09 defect: a 31-mer of NC_000932.1 is in the graph but its header carries none of it.",
+  "N-nearmiss2": "A 25-mer with 3 spread substitutions and a reverse-complement 31-mer with 4 are out of reach; the pair with 1 substitution is back at level 1.",
+  "N-zero": "exact 0 on /pattern iff a k-mer is absent on /resolve (relation zero_equals_absent)."
+ }
+}

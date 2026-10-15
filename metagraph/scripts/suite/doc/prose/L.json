@@ -1,0 +1,57 @@
+{
+ "chapter": "L",
+ "title": "Patterns longer than k",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "L-paths": {
+   "title": "paths",
+   "prose": "(family prose: to be written)"
+  },
+  "L-verified": {
+   "title": "record-verified",
+   "prose": "(family prose: to be written)"
+  },
+  "L-supported": {
+   "title": "supported paths",
+   "prose": "(family prose: to be written)"
+  },
+  "L-anchors": {
+   "title": "anchors",
+   "prose": "(family prose: to be written)"
+  },
+  "L-caps": {
+   "title": "caps",
+   "prose": "(family prose: to be written)"
+  },
+  "L-memory": {
+   "title": "memory",
+   "prose": "(family prose: to be written)"
+  },
+  "L-long": {
+   "title": "long windows",
+   "prose": "(family prose: to be written)"
+  },
+  "L-repeat": {
+   "title": "homopolymers",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "L-paths": "long_search paths on a 32-200 bp window of the record: a path spells it.",
+  "L-verified": "paths with labels and require_support record_verified: the record's path is verified.",
+  "L-supported": "Supported paths selected by the taxid predicate, and at the label_intersection level: the record verified.",
+  "L-anchors": "A 45 bp pattern without long_search: anchors counted, paths withheld.",
+  "L-caps": "max_paths 0 cuts (partial) or withholds (all_or_count); max_annotation_work 10 stops or cuts the search.",
+  "L-memory": "A 100 kb homopolymer on a self-loop with max_memory_mb 1 stops on {extension, max_memory}.",
+  "L-long-length": "A 500-2000 bp window with paths: exactly one path spells it.",
+  "L-long-other": "A reverse-complement window under strands reverse is the record's path as '-'; a 60 bp IUPAC pattern's paths hold the record's; A^60 with max_anchors 1 lists its two anchors and admits no extension.",
+  "L-repeat": "A homopolymer of 60 / 100 with paths carries the low_complexity_pattern note."
+ },
+ "checks": {
+  "notes": "(check prose: to be written)",
+  "path_record_verified": "(check prose: to be written)",
+  "path_spells": "(check prose: to be written)"
+ }
+}

@@ -1,0 +1,65 @@
+% doc.sty: the preamble of the suite results document (DESIGN-DOC §4). Fonts from TeX Live (no system fonts),
+% the outcome glyphs from DejaVu Sans, the colours of §3.1, the cell and block macros the generator emits.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{doc}[2026/10/15 suite results document]
+\RequirePackage[a4paper,margin=18mm,headheight=14pt]{geometry}
+\RequirePackage{fontspec}
+\RequirePackage{xcolor}
+\RequirePackage{booktabs}
+\RequirePackage{longtable}
+\RequirePackage{array}
+\RequirePackage{multicol}
+\RequirePackage{needspace}
+\RequirePackage{microtype}
+\RequirePackage{fancyhdr}
+\RequirePackage[breakable,skins]{tcolorbox}
+\RequirePackage[hidelinks,bookmarksnumbered=false,pdfusetitle]{hyperref}
+
+\setmainfont{LibertinusSerif-Regular.otf}[BoldFont=LibertinusSerif-Bold.otf,ItalicFont=LibertinusSerif-Italic.otf,BoldItalicFont=LibertinusSerif-BoldItalic.otf]
+\setsansfont{FiraSans-Regular.otf}[BoldFont=FiraSans-Bold.otf,ItalicFont=FiraSans-Italic.otf,BoldItalicFont=FiraSans-BoldItalic.otf]
+\setmonofont{FiraMono-Regular.otf}[Scale=0.88,BoldFont=FiraMono-Bold.otf]
+\newfontfamily\glyphfont{DejaVuSans.ttf}
+
+\definecolor{okgreen}{HTML}{2E7D32}
+\definecolor{failred}{HTML}{C62828}
+\definecolor{findorange}{HTML}{EF6C00}
+\definecolor{incgrey}{HTML}{607D8B}
+\definecolor{niglight}{HTML}{9E9E9E}
+\definecolor{bdblue}{HTML}{1565C0}
+
+% the outcome glyphs (§3.1)
+\newcommand\gpass{\leavevmode{\glyphfont\color{okgreen}\symbol{"25CF}}}
+\newcommand\gfail{\leavevmode{\glyphfont\color{failred}\symbol{"2716}}}
+\newcommand\gfind{\leavevmode{\glyphfont\color{findorange}\symbol{"25B2}}}
+\newcommand\ginc{\leavevmode{\glyphfont\color{incgrey}\symbol{"25D0}}}
+\newcommand\gni{\leavevmode{\glyphfont\color{niglight}\symbol{"25CB}}}
+\newcommand\gbd{\leavevmode{\glyphfont\color{bdblue}\symbol{"25C6}}}
+\newcommand\gerr{\leavevmode{\glyphfont\color{failred}\symbol{"2298}}}
+\newcommand\gnone{\leavevmode{\color{black!50}--}}
+\newcommand\gne{\leavevmode{\glyphfont\scriptsize\color{failred}\symbol{"2260}}}
+% marks: a footnote digit, a small letter after a glyph or a time
+\newcommand\fn[1]{\textsuperscript{\scriptsize\color{failred}\textbf{#1}}}
+\newcommand\tmark[1]{\textsuperscript{\scriptsize #1}}
+% headings of a unit and its property line
+\newcommand\unithead[3]{\par\medskip\noindent\textbf{\texttt{#1}}\quad #2\hfill{\small\itshape #3}\par\nopagebreak}
+\newcommand\propline[1]{\noindent{\small #1}\par\nopagebreak\smallskip}
+% a family or chapter summary line
+\newcommand\sumline[1]{\par\noindent{\sffamily\footnotesize #1}\par\medskip}
+% detail blocks
+\newtcolorbox{detailbox}{breakable,enhanced,colback=black!4,colframe=black!35,boxrule=0.4pt,arc=1pt,
+  left=4pt,right=4pt,top=3pt,bottom=3pt,before skip=4pt,after skip=8pt,fontupper=\footnotesize}
+\newcommand\bline[2]{\par\noindent\hangindent=22mm\hangafter=1\makebox[22mm][l]{\sffamily\bfseries #1}#2}
+\newcommand\bsub[2]{\par\noindent\hangindent=38mm\hangafter=1\hspace*{6mm}\makebox[32mm][l]{\sffamily #1}#2}
+
+\setcounter{secnumdepth}{-1}
+\setcounter{tocdepth}{2}
+\setlength{\parskip}{3pt plus 1pt}
+\setlength{\parindent}{0pt}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small\sffamily\docrunid}
+\rhead{\small\sffamily\nouppercase{\rightmark}}
+\cfoot{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+% a \quad in a heading, with a plain twin for the PDF bookmarks
+\newcommand\qd{\texorpdfstring{\quad}{ }}

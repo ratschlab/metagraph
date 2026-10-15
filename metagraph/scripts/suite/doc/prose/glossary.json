@@ -1,0 +1,27 @@
+{
+ "_about": "Appendix D (DESIGN-DOC §8): entries in print order; text with the inline markup `code` and *emphasis*; placeholders as in overview.json. Placeholder text in parentheses is to be written.",
+ "entries": [
+  {"term": "arm", "text": "(to be written)"},
+  {"term": "host cache state", "text": "(to be written: cold, warm, aged, not reached, warm after an interrupted execution)"},
+  {"term": "cold / warm", "text": "(to be written)"},
+  {"term": "repeat", "text": "(to be written)"},
+  {"term": "execution", "text": "(to be written)"},
+  {"term": "outcome", "text": "(to be written)"},
+  {"term": "class", "text": "(to be written: the direct and the MCP agreement classes)"},
+  {"term": "finding", "text": "(to be written)"},
+  {"term": "inconclusive", "text": "(to be written)"},
+  {"term": "not implemented via MCP", "text": "(to be written)"},
+  {"term": "service-side by design (verified)", "text": "(to be written)"},
+  {"term": "answer-triggered case", "text": "(to be written)"},
+  {"term": "relation", "text": "(to be written)"},
+  {"term": "generic / property check", "text": "(to be written)"},
+  {"term": "wall / server / backend time", "text": "(to be written)"},
+  {"term": "the front", "text": "(to be written)"},
+  {"term": "the Logan caveat", "text": "(to be written)"},
+  {"term": "run id", "text": "(to be written)"},
+  {"term": "release", "text": "(to be written)"},
+  {"term": "server instance", "text": "(to be written)"},
+  {"term": "index fingerprint", "text": "(to be written)"},
+  {"term": "manifest content sha", "text": "(to be written)"}
+ ]
+}

@@ -1,0 +1,46 @@
+{
+ "chapter": "X",
+ "title": "Peptides",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "X-peptide10": {
+   "title": "decapeptides",
+   "prose": "(family prose: to be written)"
+  },
+  "X-peptide-long": {
+   "title": "long peptides",
+   "prose": "(family prose: to be written)"
+  },
+  "X-table1": {
+   "title": "the wrong code",
+   "prose": "(family prose: to be written)"
+  },
+  "X-stop": {
+   "title": "stop codons",
+   "prose": "(family prose: to be written)"
+  },
+  "X-junction": {
+   "title": "exon junctions",
+   "prose": "(family prose: to be written)"
+  },
+  "X-edge": {
+   "title": "edge inputs",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "X-peptide10": "A decapeptide of a protein searched under its genetic code finds the coding DNA's contexts.",
+  "X-peptide-long": "A 20- or 30-residue peptide with supported paths: a path of its taxid, record verified.",
+  "X-table1": "A decapeptide of another code read in table 1: the record's codons are out of reach (an expected miss).",
+  "X-stop-found": "A protein's last 9 residues and its stop: found at the stop codon under the protein's table.",
+  "X-stop-none": "A stop in a table without stop codons (27, 28, 31): exact 0 without a search.",
+  "X-junction": "A window across an exon junction: no path spells the spliced DNA.",
+  "X-edge-ambiguity": "The ambiguity codes B, Z, J and X stand for their residues: the peptide is still found.",
+  "X-edge-other": "An unknown genetic code is refused; 11 residues without long_search answer anchors only; U is a bad_alphabet slot beside an answered pattern."
+ },
+ "checks": {
+  "path_absent": "(check prose: to be written)"
+ }
+}

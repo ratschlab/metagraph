@@ -1,0 +1,16 @@
+{
+ "_about": "Part I's fixed prose (DESIGN-DOC §5, §6): one entry per section, paragraphs as a list of strings. Placeholders {release}, {run_id}, {database}, {k}, {scenarios}, {manifest_version}, {server_instance}, {index_fp} are filled from the run. Inline markup: `code`, *emphasis*. Placeholder text in parentheses is to be written.",
+ "sections": {
+  "what": {"title": "What the suite tests and how",
+           "paragraphs": ["(overview prose I.1: the three routes /resolve, /traverse and /pattern, the index {database} with k = {k}, the ground truth, what a scenario and a check are: to be written)"]},
+  "arms": {"title": "The three arms and the paired loop",
+           "paragraphs": ["(overview prose I.2: direct-local, direct-remote, mcp; the paired order MCP cold, direct-local, direct-remote, MCP warm; the host-cache states: to be written)"]},
+  "classes": {"title": "Outcome classes, agreement classes, the verdict rule",
+              "paragraphs": ["(overview prose I.3: the execution outcomes, the scenario outcome over repeats, the direct and MCP agreement classes, the verdict rule: to be written)"]},
+  "reading": {"title": "How to read a block",
+              "paragraphs": ["(overview prose I.4: the cell grammar, the marks, what clean means, where the detail blocks are: to be written)"]},
+  "environment": {"title": "Versions and environment", "paragraphs": []},
+  "verdict": {"title": "The verdict and the deploy gate", "paragraphs": []},
+  "limits": {"title": "Known MCP limits and owner-declared exemptions", "paragraphs": []}
+ }
+}

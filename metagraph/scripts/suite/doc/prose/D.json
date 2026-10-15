@@ -1,0 +1,21 @@
+{
+ "chapter": "D",
+ "title": "Determinism",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "D": {
+   "title": "determinism",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "D-P": "Three repeats of a source scenario answer the same digest on every arm (deterministic), the source's own checks passing each time.",
+  "D-R": "Three repeats of a source scenario answer the same digest on every arm (deterministic), the source's own checks passing each time.",
+  "D-L": "Three repeats of a source scenario answer the same digest on every arm (deterministic), the source's own checks passing each time.",
+  "D-M": "Three repeats of a source scenario answer the same digest on every arm (deterministic), the source's own checks passing each time.",
+  "D-T": "Three repeats of a source scenario answer the same digest on every arm (deterministic), the source's own checks passing each time.",
+  "D-Q": "Three repeats of a source scenario answer the same digest on every arm (deterministic), the source's own checks passing each time."
+ }
+}

@@ -1,0 +1,74 @@
+{
+ "chapter": "R",
+ "title": "Resolve",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "R-pos": {
+   "title": "positive windows",
+   "prose": "(family prose: to be written)"
+  },
+  "R-multi": {
+   "title": "several labels",
+   "prose": "(family prose: to be written)"
+  },
+  "R-junction": {
+   "title": "junctions",
+   "prose": "(family prose: to be written)"
+  },
+  "R-discover": {
+   "title": "discovery",
+   "prose": "(family prose: to be written)"
+  },
+  "R-trace": {
+   "title": "trace support",
+   "prose": "(family prose: to be written)"
+  },
+  "R-budget": {
+   "title": "the time budget",
+   "prose": "(family prose: to be written)"
+  },
+  "R-edge": {
+   "title": "edge inputs",
+   "prose": "(family prose: to be written)"
+  },
+  "R-rc": {
+   "title": "reverse complement",
+   "prose": "(family prose: to be written)"
+  },
+  "R-order": {
+   "title": "label order",
+   "prose": "(family prose: to be written)"
+  },
+  "R-twin": {
+   "title": "twins",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "R-pos-column-A": "A window cut from the record resolves fully under the record's taxid column: every k-mer supported, one run [0, L-k+1), graph_runs the same.",
+  "R-pos-column-B": "The same property on a second record per length.",
+  "R-pos-header-A": "A window cut from the record resolves fully under the record's header label (accession.version): every k-mer supported, one run [0, L-k+1), graph_runs the same.",
+  "R-pos-header-B": "The same property on a second record per length.",
+  "R-multi": "Three labels at once: the record's taxid and header support every k-mer; the unrelated kingdom's column does not support all of them (label_not_full).",
+  "R-junction": "Two records' 100 bp windows concatenated: each column's run ends or starts where the records dictate (A's run reaches past 70 only as far as B's bases repeat A's continuation, and vice versa).",
+  "R-discover": "Discovery (no labels) lists the source record's label, column or header, within max_labels, or states a truncation that can hide it only in a tie at full support.",
+  "R-trace": "support: trace on 200 bp of the record under its own header answers one contiguous run over every k-mer.",
+  "R-budget": "A 10 kb resolve under a small time budget stops with a stated prefix the record's label fully supports (or answers 503 deadline); the full 20 s resolve and the continuation from base 5000 agree with it on the prefix (relations prefix_equals).",
+  "R-edge-refused": "Malformed or out-of-bound /resolve requests are refused with HTTP 400 and the exact text (or prefix) the host documents, before any work.",
+  "R-edge-accepted": "Edge inputs the host accepts answer correctly: exactly k bases; an N or IUPAC code (its k-mers absent from the graph); lower case; 1,001 labels; a random sequence (absent); a budget above the cap lowered and stated; and the split cases the service refuses but the host answers.",
+  "R-rc": "The reverse complement of a window unique on both strands: the record's header supports none of its k-mers on this basic (non-canonical) graph.",
+  "R-order": "The same labels in another order are each answered as if alone.",
+  "R-twin-case": "The lower-case resolve (R-edge-0007) answers byte for byte as its upper-case twin (relation same_answer)."
+ },
+ "checks": {
+  "clamped": "(check prose: to be written)",
+  "invariants": "(check prose: to be written)",
+  "label_not_full": "(check prose: to be written)",
+  "resolve_absent": "(check prose: to be written)",
+  "resolve_graph_runs": "(check prose: to be written)",
+  "resolve_runs": "(check prose: to be written)",
+  "status": "(check prose: to be written)"
+ }
+}

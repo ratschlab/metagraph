@@ -1,0 +1,25 @@
+{
+ "chapter": "C",
+ "title": "Capabilities and protocol",
+ "intro": [
+  "(chapter prose: to be written)"
+ ],
+ "families": {
+  "C-caps": {
+   "title": "capabilities",
+   "prose": "(family prose: to be written)"
+  },
+  "C-protocol": {
+   "title": "protocol",
+   "prose": "(family prose: to be written)"
+  }
+ },
+ "units": {
+  "C-caps": "The three capabilities documents state identity, limits and the gate block, and name the same server (relations same_answer).",
+  "C-protocol": "gzip / deflate negotiation, uncompressed error bodies, strict JSON, a wrong content type still read, GET on a POST route not served."
+ },
+ "checks": {
+  "capabilities_doc": "(check prose: to be written)",
+  "content_encoding": "(check prose: to be written)"
+ }
+}
