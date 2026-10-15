@@ -33,6 +33,17 @@ ARM_LABEL = {"direct-local": "direct-local", "direct-remote": "direct-remote", "
 # 96 cores of mex.
 LOAD_CAVEAT_SRA_CPU_PCT = 400.0
 LOAD_CAVEAT_LOAD1 = 48.0
+# The execution times the report marks (the owner, 2026-10-15): above TIME_MARK_YELLOW_MS yellow, above
+# TIME_MARK_RED_MS red (fmt_time: client wall, server elapsed and MCP phase times, in the tables and the lines;
+# differences between arms and connection set-ups are not execution times and stay plain). The mark is a span with
+# a class and the tint inline: report_colour.lua turns the class into a \colorbox on the md -> pdf path (pandoc +
+# xelatex), a Markdown viewer that renders HTML shows the inline tint, a terminal the plain number. The text stays
+# black on both tints, so it stays legible.
+TIME_MARK_YELLOW_MS = 10000.0
+TIME_MARK_RED_MS = 55000.0
+TIME_MARK_CLASS = {"yellow": "t-yellow", "red": "t-red"}
+TIME_MARK_TINT = {"yellow": "#ffe866", "red": "#ff8a80"}
+LUA_FILTER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_colour.lua")
 
 _ASCII = {
     "≤": "<=", "≥": ">=", "⊆": "subset of", "⊇": "superset of", "→": "->",
@@ -64,6 +75,12 @@ def md(text, limit=None):
 
 
 _NUMERIC_CELL = re.compile(r"^(-|[-+]?[0-9][0-9.,]*%?|[0-9]+/[0-9]+)$")
+_SPAN_TAG = re.compile(r"</?span\b[^>]*>")
+
+
+def visible(cell):
+    """A cell's text as a reader sees it: the span tags of a colour mark (fmt_time) taken out."""
+    return _SPAN_TAG.sub("", str(cell))
 
 
 def table(header, rows, align=None):
@@ -71,14 +88,15 @@ def table(header, rows, align=None):
 
     Numeric columns are right-aligned, others left (unless `align` says). The separator's dashes follow each
     column's widest cell: pandoc sizes the columns of a wide table by them, so a short column (an area) stays
-    narrow and a long one (a detail) gets the room, instead of equal widths that wrap every cell.
+    narrow and a long one (a detail) gets the room, instead of equal widths that wrap every cell. Both read the
+    cell's visible text: a colour mark's span tags take no room on the page.
     """
     if not rows:
         return "(none)\n"
     cols = len(header)
     if align is None:
-        align = ["r" if all(_NUMERIC_CELL.match(str(r[i]).strip()) for r in rows) else "l" for i in range(cols)]
-    widths = [max([len(str(header[i]))] + [len(str(r[i])) for r in rows]) for i in range(cols)]
+        align = ["r" if all(_NUMERIC_CELL.match(visible(r[i]).strip()) for r in rows) else "l" for i in range(cols)]
+    widths = [max([len(str(header[i]))] + [len(visible(r[i])) for r in rows]) for i in range(cols)]
     sep = [("-" * max(3, min(w, 60)) + ":") if a == "r" else (":" + "-" * max(3, min(w, 60)))
            for a, w in zip(align, widths)]
     out = ["| " + " | ".join(header) + " |", "|" + "|".join(sep) + "|"]
@@ -91,6 +109,42 @@ def fmt_ms(v):
     if v is None:
         return "-"
     return "%.1f" % v if abs(v) < 100 else "%.0f" % v
+
+
+def time_mark(v):
+    """The mark of an execution time in ms: "red" above TIME_MARK_RED_MS, "yellow" above TIME_MARK_YELLOW_MS, else
+    None (a missing time too)."""
+    if v is None:
+        return None
+    if v > TIME_MARK_RED_MS:
+        return "red"
+    if v > TIME_MARK_YELLOW_MS:
+        return "yellow"
+    return None
+
+
+def marked(text, mark):
+    """|text| in the span of |mark| ("yellow" / "red"; None: as it is): the class report_colour.lua colours in the
+    PDF, the tint inline for a Markdown viewer that renders HTML."""
+    if mark is None:
+        return text
+    return '<span class="%s" style="background-color:%s">%s</span>' % (TIME_MARK_CLASS[mark], TIME_MARK_TINT[mark],
+                                                                        text)
+
+
+def fmt_time(v):
+    """An execution time in ms (client wall, server elapsed, an MCP phase) as fmt_ms shows it, marked yellow above
+    TIME_MARK_YELLOW_MS and red above TIME_MARK_RED_MS (time_mark, marked); never for a difference or a connection
+    set-up, which fmt_ms prints plain."""
+    return marked(fmt_ms(v), time_mark(v))
+
+
+def time_legend():
+    """The one legend sentence of the colour marks."""
+    return ("Execution times (client wall, server elapsed, MCP phases; ms) above %d s are marked %s and above %d s %s, "
+            "in the tables and the lines; differences between arms and connection set-ups are not marked." % (
+                TIME_MARK_YELLOW_MS / 1000.0, marked("yellow", "yellow"), TIME_MARK_RED_MS / 1000.0,
+                marked("red", "red")))
 
 
 def fmt_num(v, digits=1):
@@ -726,7 +780,7 @@ def findings_section(rows, manifest, max_items):
         if s.get("title"):
             out.append("- title: %s" % md(s.get("title"), 300))
         out.append("- route: %s; http %s; wall %s ms" % (md(r.get("route") or s.get("route") or "-"),
-                                                          md(r.get("http")), fmt_ms(r.get("wall_ms"))))
+                                                          md(r.get("http")), fmt_time(r.get("wall_ms"))))
         for c, exp in expectation_pairs(s, r.get("checks")):
             if c.get("outcome") != "finding":
                 continue
@@ -761,7 +815,7 @@ def failures_section(rows, manifest, max_failures):
         if s.get("title"):
             out.append("- title: %s" % md(s.get("title"), 300))
         out.append("- route: %s; http %s; wall %s ms" % (md(r.get("route") or s.get("route") or "-"),
-                                                          md(r.get("http")), fmt_ms(r.get("wall_ms"))))
+                                                          md(r.get("http")), fmt_time(r.get("wall_ms"))))
         err = r.get("error") or {}
         if err.get("code") or err.get("text"):
             out.append("- observed error: %s: %s" % (md(err.get("code") or "-"), md(err.get("text") or "", 400)))
@@ -1079,9 +1133,9 @@ def timing_section(comp):
                 a, sv = b["wall"], b["server"]
                 if not a["n"] and not sv["n"]:
                     continue  # e.g. MCP marks of scenarios it cannot express: nothing was timed
-                rows.append([md(area), md(arm), md(HOST_CACHE_LABEL.get(hc, hc)), a["n"], fmt_ms(a["p50"]),
-                             fmt_ms(a["p90"]), fmt_ms(a["max"]), sv["n"], fmt_ms(sv["p50"]), fmt_ms(sv["p90"]),
-                             fmt_ms(sv["max"])])
+                rows.append([md(area), md(arm), md(HOST_CACHE_LABEL.get(hc, hc)), a["n"], fmt_time(a["p50"]),
+                             fmt_time(a["p90"]), fmt_time(a["max"]), sv["n"], fmt_time(sv["p50"]),
+                             fmt_time(sv["p90"]), fmt_time(sv["max"])])
     # The server columns cover only the answers that carry the host's timing (review N9: their own n).
     out.append(table(["area", "arm", "host cache", "n", "wall p50", "wall p90", "wall max", "server n",
                       "server p50", "server p90", "server max"], rows))
@@ -1111,7 +1165,7 @@ def reruns_section(run):
     rows = []
     for r in again:
         t = r.get("target_execution")
-        rows.append([md(r.get("scenario")), md(r.get("arm")), md(r.get("repeat")), fmt_ms(r.get("wall_ms")),
+        rows.append([md(r.get("scenario")), md(r.get("arm")), md(r.get("repeat")), fmt_time(r.get("wall_ms")),
                      md(r.get("http")), md(r.get("rerun_target")),
                      md("repeat %s" % t[2]) if t else "did not run after it",
                      fmt_num(r.get("before_s"), 3) if t else "-"])
@@ -1170,8 +1224,8 @@ def overhead_section(comp):
     for arm, cv in sorted((fo.get("cold") or {}).items()):
         w, sv = cv.get("wall_ms") or {}, cv.get("server_ms") or {}
         if w.get("n"):
-            rows.append([md(arm), w["n"], fmt_ms(w["p50"]), fmt_ms(w["p90"]), sv.get("n", 0), fmt_ms(sv.get("p50")),
-                         fmt_ms(sv.get("p90"))])
+            rows.append([md(arm), w["n"], fmt_time(w["p50"]), fmt_time(w["p90"]), sv.get("n", 0),
+                         fmt_time(sv.get("p50")), fmt_time(sv.get("p90"))])
     if rows:
         out.append("Cold executions (a scenario's first on the host; the arm that ran it first), reported apart "
                    "from the warm pairs:\n")
@@ -1181,7 +1235,7 @@ def overhead_section(comp):
     if not s["mcp_phases"] and not s["mcp_overhead"] and not (s.get("mcp_cold_wall_ms") or {}).get("n"):
         out.append("No MCP phases in this run.\n")
         return "\n".join(out)
-    rows = [[md(k), v["n"], fmt_ms(v["p50"]), fmt_ms(v["p90"]), fmt_ms(v["max"])]
+    rows = [[md(k), v["n"], fmt_time(v["p50"]), fmt_time(v["p90"]), fmt_time(v["max"])]
             for k, v in sorted(s["mcp_phases"].items()) if v["n"]]
     out.append("Phases of the MCP warm executions (DESIGN section 5: submit, queue, backend as the service "
                "measured it, terminal lag, paging):\n")
@@ -1194,7 +1248,7 @@ def overhead_section(comp):
     cw = s.get("mcp_cold_wall_ms") or {}
     if cw.get("n"):
         out.append("MCP wall time of the cold execution (the scenario's first on the host), apart: n %d, p50 %s, "
-                   "p90 %s, max %s ms.\n" % (cw["n"], fmt_ms(cw["p50"]), fmt_ms(cw["p90"]), fmt_ms(cw["max"])))
+                   "p90 %s, max %s ms.\n" % (cw["n"], fmt_time(cw["p50"]), fmt_time(cw["p90"]), fmt_time(cw["max"])))
     return "\n".join(out)
 
 
@@ -1251,7 +1305,7 @@ def compare_runs_section(comp, old, old_dir):
             rows.append([md(area), md(arm), "%s -> %s" % (o.get("pass", "-"), n.get("pass", "-")),
                          "%s -> %s" % (o.get("fail", 0) + o.get("error", 0) if o else "-",
                                        n.get("fail", 0) + n.get("error", 0) if n else "-"),
-                         "%s -> %s" % (fmt_ms(p_old), fmt_ms(p_new)), delta])
+                         "%s -> %s" % (fmt_time(p_old), fmt_time(p_new)), delta])
     out.append(table(["area", "arm", "pass", "fail+error", "warm wall p50 (ms)", "change"], rows))
     changed = []
     for sid, entry in comp["scenarios"].items():
@@ -1378,7 +1432,8 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts = ["---", "title: \"%s\"" % title.replace('"', "'"),
              "subtitle: \"/traverse, /resolve, /pattern on %s\"" % ascii_safe(
                  ((manifest or {}).get("index") or {}).get("database") or "refseq33m-experimental"),
-             "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", ""]
+             "date: \"%s\"" % sc.iso_utc(time.time()), "geometry: margin=1.8cm", "fontsize: 10pt", "---", "",
+             time_legend(), ""]
     is_property = gate_mod._is_property_fn(cmp.judging_checks(run_dir, reevaluated)["dir"])
     depth = agreement_depth(comp, rows, is_property, manifest)
     missing = gate_mod.missing_planned(run_dir, manifest, rows)
@@ -1410,11 +1465,11 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
 
 
 def to_pdf(md_path, pdf_path):
-    """(ok, message): pandoc + xelatex, as DESIGN §6 says."""
+    """(ok, message): pandoc + xelatex, as DESIGN §6 says, with report_colour.lua for the colour marks (fmt_time)."""
     pandoc = shutil.which("pandoc")
     if not pandoc:
         return False, "pandoc not found: report.md only"
-    cmd = [pandoc, md_path, "-o", pdf_path, "--pdf-engine=xelatex"]
+    cmd = [pandoc, md_path, "-o", pdf_path, "--pdf-engine=xelatex", "--lua-filter", LUA_FILTER]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     if proc.returncode != 0:
         return False, "pandoc failed (%d): %s" % (proc.returncode, proc.stderr[-2000:])
