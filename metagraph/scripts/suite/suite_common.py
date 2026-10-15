@@ -2183,33 +2183,58 @@ class SnapshotChanged(Exception):
 EXECUTED_FILES = ("checks.py", "suite_common.py")
 
 
-def snapshot_refusal(directory, names=EXECUTED_FILES):
-    """Why files |names| of |directory| may not be executed: one sentence per file it holds whose sha256 is not the
-    one its SNAPSHOT.json records (changed or added after the snapshot was taken), or one when SNAPSHOT.json states no
-    files; [] for a directory without SNAPSHOT.json (a tree, a re-evaluation's checks) and for one whose files are
-    the recorded ones."""
+def snapshot_record(directory):
+    """(SNAPSHOT.json of |directory|, an object whose `files` is an object {name: sha256}, or None, and why not: ''
+    when |directory| holds no SNAPSHOT.json, else the cause: it cannot be read, is empty, is no JSON (torn), or is no
+    object stating its files). Never raises."""
     path = os.path.join(directory, SNAPSHOT_FILE)
-    if not os.path.isfile(path):
-        return []
-    doc = read_json(path)
-    files = doc.get("files") if isinstance(doc, dict) else None
-    if not isinstance(files, dict):
-        return ["%s states no files: %s not executed" % (path, ", ".join(names))]
+    if not os.path.lexists(path):
+        return None, ""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, ValueError) as e:   # ValueError: bytes that are no UTF-8
+        return None, "%s cannot be read (%s)" % (path, getattr(e, "strerror", None) or type(e).__name__)
+    if not text.strip():
+        return None, "%s is empty" % path
+    try:
+        doc = json.loads(text)
+    except ValueError as e:
+        return None, "%s is no JSON (%s)" % (path, e)
+    if not isinstance(doc, dict) or not isinstance(doc.get("files"), dict):
+        return None, "%s states no files" % path
+    return doc, ""
+
+
+def snapshot_refusal(directory, names=EXECUTED_FILES):
+    """Why files |names| of |directory| may not be executed, one sentence per cause: its SNAPSHOT.json cannot be read,
+    is empty, is no JSON or states no files (snapshot_record); a file of |names| it records is missing or unreadable;
+    a file of |names| it holds has another sha256 than the recorded one (changed, or added after the snapshot was
+    taken). [] for a directory without SNAPSHOT.json (a tree, a re-evaluation's checks) and for one whose files are the
+    recorded ones. Never raises: a refusal names its cause."""
+    doc, why = snapshot_record(directory)
+    if doc is None:
+        return ["%s: %s not executed" % (why, ", ".join(names))] if why else []
+    files = doc["files"]
     out = []
     for name in names:
-        got = file_sha256(os.path.join(directory, name))
-        if got is not None and got != files.get(name):
+        path, want = os.path.join(directory, name), files.get(name)
+        got = file_sha256(path)
+        if got is None and want is not None:
+            out.append("%s, which SNAPSHOT.json records (sha256 %s), is %s: not executed" % (
+                path, str(want)[:12], "missing" if not os.path.lexists(path) else "unreadable"))
+        elif got is not None and got != want:
             out.append("%s has sha256 %s, not the %s SNAPSHOT.json records: not executed" % (
-                os.path.join(directory, name), got[:12], str(files.get(name))[:12] if files.get(name) else "none"))
+                path, got[:12], str(want)[:12] if want else "none"))
     return out
 
 
 def load_checks_bound(directory, name):
     """checks.py of |directory| as module |name|, its `import suite_common` resolved to |directory|'s copy when it
     has one (a run's snapshot: the digest and normaliser its arms judged with; a re-evaluation's checks directory),
-    never to the caller's: the caller's suite_common module and sys.path are restored afterwards. A snapshot whose
-    checks.py or suite_common.py is not the one its SNAPSHOT.json records is not executed: SnapshotChanged
-    (snapshot_refusal). Raises what loading raises."""
+    never to the caller's: the caller's suite_common module and sys.path are restored afterwards. A snapshot
+    snapshot_refusal refuses (its SNAPSHOT.json unreadable, or its checks.py or suite_common.py not the one it records,
+    a missing one included) is not executed: SnapshotChanged, naming the cause. Raises what loading raises."""
     import importlib.util
     refused = snapshot_refusal(directory)
     if refused:
@@ -2267,12 +2292,14 @@ def take_snapshot(source, run_dir, commit=None, sessions_before=0, now=None):
 
 
 def snapshot_state(run_dir, source=None):
-    """(SNAPSHOT.json of the run or None, the names whose snapshot file no longer has its recorded sha256, the names
-    whose file in |source| differs from the snapshot's)."""
-    doc = read_json(os.path.join(snapshot_dir(run_dir), SNAPSHOT_FILE))
-    if not isinstance(doc, dict):
-        return None, [], []
-    files = doc.get("files") or {}
+    """(SNAPSHOT.json of the run or None, the names whose snapshot file no longer has its recorded sha256 (a missing
+    one included), the names whose file in |source| differs from the snapshot's). A SNAPSHOT.json that cannot be read,
+    is empty, is no JSON or states no files (snapshot_record) gives (None, [SNAPSHOT_FILE], []): no snapshot that pins
+    anything, and changed. Never raises."""
+    doc, why = snapshot_record(snapshot_dir(run_dir))
+    if doc is None:
+        return None, ([SNAPSHOT_FILE] if why else []), []
+    files = doc["files"]
     changed = sorted(n for n, sha in files.items()
                      if file_sha256(os.path.join(snapshot_dir(run_dir), n)) != sha)
     live = []
@@ -2485,6 +2512,10 @@ def _main(argv):
         return 0
     if len(argv) >= 5 and argv[0] == "snapshot":
         doc, changed, live = snapshot_state(argv[1], argv[2])
+        if doc is None and changed:
+            # a snapshot whose record is unreadable is never taken over: the run stops
+            sys.stderr.write("the run's snapshot: %s\n" % snapshot_record(snapshot_dir(argv[1]))[1])
+            return 2
         if doc is None:
             take_snapshot(argv[2], argv[1], argv[3] or None, int(argv[4] or 0))
             print("created")

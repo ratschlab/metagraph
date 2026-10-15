@@ -337,6 +337,67 @@ class MergeChecksIdentityTest(unittest.TestCase):
             sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
             self.assertTrue(gate.judge(d, policy_of(m))["passed"])
 
+    def test_a_broken_snapshot_record_or_a_missing_executed_file_is_refused_never_a_crash(self):
+        # SNAPSHOT.json empty, torn, no object, unreadable, or a file it records deleted (its suite_common.py): the
+        # refusal names the cause and the merge, the comparison, the gate's property reading and the re-evaluation
+        # treat it as a changed file (not executed, warned, blocked); the orchestrator's snapshot step stops the run
+        # instead of taking a new snapshot over it
+        m = manifest_of()
+        snap_json = lambda d: os.path.join(d, "scripts", "SNAPSHOT.json")   # noqa: E731
+
+        def content(d):
+            with open(snap_json(d), "rb") as fh:
+                return fh.read()
+
+        def unreadable(d):
+            os.chmod(snap_json(d), 0)
+
+        def write(text):
+            def edit(d):
+                with open(snap_json(d), "w") as fh:
+                    fh.write(text)
+            return edit
+        cases = (("empty", write(""), "is empty"), ("torn", write('{"files": {"checks.py": "ab'), "is no JSON"),
+                 ("list", write("[]"), "states no files"), ("unreadable", unreadable, "cannot be read"),
+                 ("gone", lambda d: os.remove(os.path.join(d, "scripts", "suite_common.py")), "is missing"))
+        for label, edit, cause in cases:
+            if label == "unreadable" and os.geteuid() == 0:
+                continue   # root reads any file
+            d = make_run(os.path.join(self.d, "runs", "broken_" + label), m, mcp_lines(m))
+            snap = os.path.join(d, "scripts")
+            edit(d)
+            try:
+                refused = sc.snapshot_refusal(snap)
+                self.assertEqual(len(refused), 1, label)
+                self.assertIn(cause, refused[0])
+                self.assertTrue(refused[0].endswith("not executed"), refused[0])
+                with self.assertRaises(sc.SnapshotChanged):
+                    sc.load_checks_bound(snap, "suite_checks_probe")
+                with self.assertRaises(SystemExit):
+                    reevaluate.load_checks(snap)
+                merged = merge_run.merge(d)
+                self.assertIn("checks.scenario_outcome not applied, the runners' outcomes stand: %s" % refused[0],
+                              merged["warnings"])
+                self.assertTrue(merged["checks_identity"]["errors"], label)
+                comp = cmp.compare(d, TABLE)
+                self.assertIn("the comparison does not execute the checks that judged the set: %s" % refused[0],
+                              comp["warnings"])
+                v = gate.judge(d, policy_of(m))
+                self.assertFalse(v["passed"])
+                self.assertIn("the property reading refuses the checks that judged the set (snapshot): %s" % refused[0],
+                              [p["detail"] for p in v["problems"] if p["kind"] == "identity"])
+                if label != "gone":
+                    broken = content(d) if label != "unreadable" else None
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err):
+                        self.assertEqual(sc._main(["snapshot", d, SUITE, "", "1"]), 2)
+                    self.assertIn(cause, err.getvalue())
+                    if broken is not None:
+                        self.assertEqual(content(d), broken)   # no new snapshot taken over it
+            finally:
+                if os.path.exists(snap_json(d)):
+                    os.chmod(snap_json(d), 0o644)
+
 
 class ComparisonSnapshotTest(unittest.TestCase):
     """compare, the gate's and the report's property reading judge a recorded set with the run's snapshot (its
