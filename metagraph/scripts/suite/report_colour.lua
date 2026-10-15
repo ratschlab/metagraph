@@ -16,11 +16,12 @@ function Span(el)
   end
   for class, colour in pairs(colours) do
     if el.classes:includes(class) then
-      local out = pandoc.Inlines({ pandoc.RawInline("latex", "\\colorbox{" .. colour[1] .. "}{") })
+      -- \fboxsep 1pt (the default 3pt opens a visible gap before a comma after the box)
+      local out = pandoc.Inlines({ pandoc.RawInline("latex", "{\\setlength{\\fboxsep}{1pt}\\colorbox{" .. colour[1] .. "}{") })
       for _, inline in ipairs(el.content) do
         out:insert(inline)
       end
-      out:insert(pandoc.RawInline("latex", "}"))
+      out:insert(pandoc.RawInline("latex", "}}"))
       return out
     end
   end

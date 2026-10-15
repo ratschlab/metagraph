@@ -134,9 +134,17 @@ def marked(text, mark):
 
 def fmt_time(v):
     """An execution time in ms (client wall, server elapsed, an MCP phase) as fmt_ms shows it, marked yellow above
-    TIME_MARK_YELLOW_MS and red above TIME_MARK_RED_MS (time_mark, marked); never for a difference or a connection
-    set-up, which fmt_ms prints plain."""
-    return marked(fmt_ms(v), time_mark(v))
+    TIME_MARK_YELLOW_MS and red above TIME_MARK_RED_MS (time_mark, marked) by the value as printed (fmt_ms rounds
+    100 ms and above to whole milliseconds: 10,000.4 ms prints 10000 and is not above 10 s); never for a difference
+    or a connection set-up, which fmt_ms prints plain."""
+    text = fmt_ms(v)
+    if v is None:
+        return text
+    try:
+        shown = float(text)
+    except ValueError:
+        shown = v
+    return marked(text, time_mark(shown))
 
 
 def time_legend():

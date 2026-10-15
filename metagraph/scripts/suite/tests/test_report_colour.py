@@ -46,6 +46,12 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(report.fmt_time(61000.0), RED % "61000")
         self.assertEqual(report.fmt_ms(61000.0), "61000")           # a difference stays plain
         self.assertEqual(report.visible(report.fmt_time(61000.0)), "61000")
+        # the mark follows the value as printed: fmt_ms rounds to whole milliseconds from 100 ms, so 10,000.4 ms
+        # prints 10000, which is not above 10 s (and 55,000.4 prints 55000, yellow, not red)
+        self.assertEqual(report.fmt_time(10000.4), "10000")
+        self.assertEqual(report.fmt_time(10000.6), YELLOW % "10001")
+        self.assertEqual(report.fmt_time(55000.4), YELLOW % "55000")
+        self.assertEqual(report.fmt_time(55000.6), RED % "55001")
 
     def test_legend(self):
         legend = report.time_legend()
@@ -119,7 +125,7 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("\\definecolor{suitered}{HTML}{FF8A80}", proc.stdout)
         self.assertIn("\\definecolor{suiteyellow}{HTML}{FFE866}", proc.stdout)
-        self.assertIn("\\colorbox{suitered}{61000}", proc.stdout)
+        self.assertIn("{\\setlength{\\fboxsep}{1pt}\\colorbox{suitered}{61000}}", proc.stdout)
         self.assertIn("\\colorbox{suiteyellow}{30500}", proc.stdout)
         self.assertIn("\\colorbox{suiteyellow}{yellow}", proc.stdout)      # the legend's words carry their tint
         self.assertNotIn("<span", proc.stdout)

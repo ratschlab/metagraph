@@ -236,6 +236,63 @@ class Generic(unittest.TestCase):
         self.assertFalse(checks.pattern_deadline_allowed(sc, dl))
         self.assertFalse(checks.deadline_allowed(sc, dl))
 
+    def test_front_ingress_504_at_the_budget_is_inconclusive(self):
+        """v6: the front ingress of the public URL cuts a request at ~120 s (checks.FRONT_INGRESS_CUT_MS) and
+        answers its own 504 with no host body; a /pattern or /resolve request whose stated budget reaches the cut
+        is answered by the host at its budget or later, so the 504 shows nothing of the host: the status is
+        inconclusive (an allowed deadline's case) and the other checks cannot test their property. A budget that
+        ends before the cut, a 504 well before it, a host body behind the 504, a scenario naming the 504, or a
+        request without a budget: judged as before."""
+        html = b"<html><head><title>504 Gateway Time-out</title></head><body>nginx</body></html>"
+        a504 = checks.normalise_direct(504, html)
+        sc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A"}], "time_budget_ms": 120000},
+              "truth": {}, "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                                      {"check": "budget_respected", "args": {}}]}
+        self.assertEqual((checks.FRONT_INGRESS_CUT_MS, checks.FRONT_INGRESS_CUT_TOLERANCE_MS), (120000.0, 10000.0))
+        for wall in (119950.0, 120400.0, 110000.0):
+            res = checks.evaluate(sc, a504, "direct-remote", client={"wall_ms": wall})
+            self.assertEqual([r["outcome"] for r in res], ["inconclusive"] * 3, wall)
+            self.assertEqual(checks.scenario_outcome(res), "inconclusive")
+            self.assertIn("http 504 from the front ingress in place of 200 at a client wall time of %.0f ms" % wall,
+                          res[0]["detail"])
+            self.assertIn("120000 ms budget", res[0]["detail"])
+            self.assertIn("not testable: http 504, an answer the scenario allows", res[1]["detail"])
+        # without the client's wall time (a runner that gives none) the budget alone decides
+        self.assertEqual([r["outcome"] for r in checks.evaluate(sc, a504, "direct-remote")], ["inconclusive"] * 3)
+        self.assertTrue(checks.ingress_cut_allowed(sc, a504))
+        # the 504 well before the cut: not the ingress's cut of this request
+        res = checks.evaluate(sc, a504, "direct-remote", client={"wall_ms": 109999.0})
+        self.assertEqual([r["outcome"] for r in res], ["fail"] * 3)
+        self.assertIn("http 504, expected 200", res[0]["detail"])
+        # a budget that ends before the cut: the host had to answer it (its 503 deadline at the budget)
+        for budget in (60000, 109999):
+            sc_b = dict(sc, request=dict(sc["request"], time_budget_ms=budget))
+            self.assertEqual([r["outcome"] for r in checks.evaluate(sc_b, a504, "direct-remote",
+                                                                     client={"wall_ms": 120000.0})], ["fail"] * 3)
+            self.assertFalse(checks.ingress_cut_allowed(sc_b, a504, {"wall_ms": 120000.0}))
+        # a budget at the tolerance's edge reaches the cut
+        sc_e = dict(sc, request=dict(sc["request"], time_budget_ms=110000))
+        self.assertTrue(checks.ingress_cut_allowed(sc_e, a504, {"wall_ms": 110000.0}))
+        # no budget stated (the host's default applies, below the cut); a host body behind a 504; another route
+        self.assertFalse(checks.ingress_cut_allowed(dict(sc, request={"patterns": []}), a504, {"wall_ms": 120000.0}))
+        self.assertFalse(checks.ingress_cut_allowed(sc, checks.normalise_direct(504, b'{"error": "x", "code": "c"}'),
+                                                    {"wall_ms": 120000.0}))
+        self.assertFalse(checks.ingress_cut_allowed(dict(sc, route="POST /traverse"), a504, {"wall_ms": 120000.0}))
+        # /resolve with a stated budget at the cut: the same rule; without one: not covered
+        rsc = {"route": "POST /resolve", "request": {"query": "A" * 60, "bounds": {"time_budget_ms": 120000}},
+               "truth": {}, "expect": [{"check": "status", "args": {"http": 200}}]}
+        self.assertEqual(checks.evaluate(rsc, a504, "direct-remote", client={"wall_ms": 120100.0})[0]["outcome"],
+                         "inconclusive")
+        self.assertFalse(checks.ingress_cut_allowed(dict(rsc, request={"query": "A" * 60}), a504, {"wall_ms": 120100.0}))
+        # a scenario that names the 504, or asks for another status, is judged as it states
+        self.assertEqual(checks.evaluate(dict(sc, expect=[{"check": "status", "args": {"http": [200, 504]}}]), a504,
+                                         "direct-remote", client={"wall_ms": 120000.0})[0]["outcome"], "pass")
+        self.assertFalse(checks.ingress_cut_allowed(dict(sc, expect=[{"check": "status", "args": {"http": 400}}]), a504))
+        self.assertFalse(checks.ingress_cut_allowed(dict(sc, expect=[{"check": "status", "args": {
+            "http": 200, "text_contains": ["504"]}}]), a504))
+        # a 503 deadline keeps its own rule, a 504 never reads as one
+        self.assertFalse(checks.deadline_allowed(sc, a504))
+
     def test_resolve_deadline_is_opt_in(self):
         # A2-01 (review of lane S5b, VERIFY-REVIEW: SPEC-labeled-traversal-core §4.5 l.224, capabilities
         # resolve.time_budget.default null): a /resolve without bounds.time_budget_ms has no deadline, so v4's

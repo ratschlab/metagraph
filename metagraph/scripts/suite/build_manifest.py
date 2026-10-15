@@ -199,7 +199,11 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
 
 
 # the tools whose time_budget_ms the request digest leaves out (EXPOSURE_RULE): traverse_resolve's since v5,
-# pattern_search's since v6 (the budget 60,000 -> 120,000 ms would otherwise drop every /pattern scenario's list)
+# pattern_search's since v6 (the budget 60,000 -> 120,000 ms would otherwise drop every /pattern scenario's list).
+# EXPOSURE_RULE's "a budget shapes no field of the answer" is the short form, embedded in the frozen manifests: a
+# pattern_search budget decides how far the answer gets (complete, or limited by time: SPEC-pattern-search §7.9),
+# never which fields it carries, and a larger budget lets no fewer checks decide, so a list recorded under one budget
+# is a lower bound under a larger one (v6's 120,000 ms against v4's 60,000 ms)
 BUDGET_FREE_DIGEST_TOOLS = ("traverse_resolve", "pattern_search")
 
 
@@ -685,7 +689,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-fetch", action="store_true", help="use the record cache only")
     ap.add_argument("--areas", help="comma-separated areas (development only; the frozen manifest has all)")
     ap.add_argument("--exposure", default=DEFAULT_EXPOSURE,
-                    help="the MCP exposure baseline (default truth/mcp_exposure/v4-20261014T061053Z.json; '' for none)")
+                    help="the MCP exposure baseline (default %s; '' for none)" % os.path.relpath(DEFAULT_EXPOSURE, HERE))
     ap.add_argument("--exposure-from", metavar="RUN_DIR",
                     help="write the exposure baseline of a recorded run (its executions.reevaluated.jsonl, else "
                          "executions.jsonl, and manifest.json) to --exposure-out, then exit")

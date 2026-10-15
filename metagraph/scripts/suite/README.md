@@ -45,7 +45,11 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 - `timing_class` long is not run on direct-remote (the front proxy cuts at ~120 s): no execution line, the
   scenario is listed under `skipped` in the arm's run.json. Client timeouts: fast 120 s, slow 600 s, long
   1800 s, or the request's stated time budget + 30 s where that is more (suite_common.client_timeout_s; v6's
-  /pattern budget of 120 s gets 150 s); direct-remote at most 125 s.
+  /pattern budget of 120 s gets 150 s); direct-remote at most 125 s. A request whose stated budget reaches the
+  proxy's cut (v6's 120,000 ms /pattern budget) and gets the proxy's own 504 at the cut (no host body) reads
+  inconclusive on its status, as an allowed 503 deadline does (checks.ingress_cut_allowed: the host's answer comes
+  at the budget or later, so the 504 shows nothing of the host); a 504 on a budget that ends before the cut stays a
+  status fail.
 - Execution outcome (review of lane S1; the MCP runner applies the same rule): checks may report `pass`,
   `fail`, `not_exposed`, `inconclusive` (the scenario could not test its property: an allowed 503, a withheld
   answer hiding the source, a stated resource stop) or `finding` (the host broke a stated bound or SPEC
@@ -3692,17 +3696,19 @@ change; the gate's scenarios stay byte-identical, so the v5 acceptance carries o
 (2) The report marks every printed execution time above 10 s yellow and above 55 s red.
 
 ### The manifests
-- manifest_lib.PATTERN_TIME_BUDGET_MS is 120,000 (the default of pattern_request, named on both arms). Of the 457
-  /pattern scenarios, 449 named the default and get it in their request and, where the MCP runs them (429), in their
-  MCP arguments; the deliberate budgets stay (P-caps-0004's 300 ms, M-protein-0010's 30,000 ms; P-edge-0012 and the
+- manifest_lib.PATTERN_TIME_BUDGET_MS is 120,000 (the default of pattern_request, named on both arms). Of the 455
+  POST /pattern scenarios (457 with the two GETs of /pattern/capabilities), 449 named the default and get it in
+  their request and, where the MCP runs them (429), in their MCP arguments; the deliberate budgets stay (P-caps-0004's 300 ms, M-protein-0010's 30,000 ms; P-edge-0012 and the
   C-protocol scenarios send no JSON object). Nothing else of any scenario and no relation changed: build_manifest.py's
   SMOKE_TAG stays `smoke-v5` (SMOKE_SELECTION_VERSION: the tag names the smoke selection, which v6 keeps), and the
   MCP exposure baseline it reads is truth/mcp_exposure/v4-20261014T061053Z-budget-free.json, the v4 baseline with
   its request digests rebased from manifest/suite_v4.json to the budget-free rule (`build_manifest.py
   --exposure-rebase truth/mcp_exposure/v4-20261014T061053Z.json --exposure-source-manifest manifest/suite_v4.json
   --exposure-out ...`; mcp_request_sha256 leaves pattern_search's time_budget_ms out as it does traverse_resolve's:
-  a budget shapes no field of the answer; the exposes lists are v4's byte for byte, and every scenario of v6 has v5's
-  list, 512 with one). Regenerating the baseline from the v4 run with --exposure-from is no longer byte-identical to
+  a budget decides how far the answer gets, complete or limited by time, never which fields it carries, and a
+  larger budget lets no fewer checks decide, so a list recorded under 60,000 ms is a lower bound under 120,000 ms;
+  EXPOSURE_RULE's shorter wording, "a budget shapes no field of the answer", is embedded in the frozen manifests and
+  stays; the exposes lists are v4's byte for byte, and every scenario of v6 has v5's list, 512 with one). Regenerating the baseline from the v4 run with --exposure-from is no longer byte-identical to
   the committed file (the run's lines were re-evaluated after it: Q-strands-0001's list), which is why the digests
   are rebased rather than the baseline regenerated.
 - `manifest/suite_v6.json` and `manifest/suite_smoke_v6.json`, built on this tree with `SUITE_TRUTH_CACHE=<the record
@@ -3732,7 +3738,12 @@ margin, or an inconclusive turns into an error:
   suite_common.client_timeout_s gives a request the larger of its class's timeout and its stated time budget +
   CLIENT_BUDGET_MARGIN_S (30 s), and run_direct.timeout_for uses it (the 397 fast /pattern scenarios get 150 s on
   direct-local, the 52 slow ones keep 600 s; every 60 s /resolve and /traverse budget keeps its class); direct-remote
-  stays capped at REMOTE_TIMEOUT_CAP_S (125 s), where the front proxy answers first (below);
+  stays capped at REMOTE_TIMEOUT_CAP_S (125 s), where the front proxy answers first (below). The 30 s margin is
+  narrower than the window in which checks._budget_503 still reads a late 503 as inconclusive (up to max(1 s, the
+  budget) past it, 120 s for a 120 s budget; v5's fast timeout of 120 s covered that whole window for a 60 s
+  budget): a 503 delivered between 30 s and 120 s past a 120 s budget is a client timeout (an error) on
+  direct-local, not an inconclusive. The lateness seen so far is at most 0.3 s, so the margin stays at 30 s
+  (a longer timeout only delays a run with a hung request);
 - the orchestrator's wait for the mex runner after Ctrl-C is SUITE_WAIT_RUNNER_S (150 s) instead of a fixed 120 s;
   the waits after a cancelled MCP job (suite_common.request_bound_s) and the host-cache window (end to start, 60 s)
   follow the budget as before;
@@ -3741,31 +3752,50 @@ margin, or an inconclusive turns into an error:
   pattern_search submit returns at once); the service accepts a budget up to min(1,170,000 ms, the host's cap) and
   its host-call timeout is META_CALL_TIMEOUT_SECS (1,200 s). The run's snapshot of suite_common.py is the one it
   executes, so the new rule reaches it; a re-vendoring is due only for the shared rules, which did not change.
-- **Open: the front proxy (the owner decides).** The public URL's ingress (nginx at https://metagraph.ethz.ch:8080)
-  cuts a request at ~120 s (the long class is not run on direct-remote for it; the by-design table's note on
-  pattern.time_budget_above_host_cap: it cuts "every arm through it"). A /pattern scenario that runs to its 120 s
-  deadline answers its 503 at ~120.25 s, after the cut: on direct-remote the proxy's 504 arrives instead, a status
-  fail in place of the allowed inconclusive. The MCP arm is behind the same ingress as far as the service's code
-  shows: its settings model that ingress with a cut of 110 s (TRAVERSAL_INGRESS_CUT_S_BY_HOST, "measured only for the
-  dev ingress, nginx in front of refseq33m-experimental": the measured ~120 s less a margin) and fit traversal
-  batches to it (app/traversal/planner.py ingress_batch_cap), while the pattern path sends the request's budget as
-  it is, so a 120 s pattern search through it would end in the ingress's 504 or a cut connection (which the service
-  may retry), not in the relayed pattern_deadline the table names: an error on the MCP arm too, where v5 had an
-  inconclusive. The deploy gate (mcp and direct-local, no /pattern scenario) is untouched; direct-local, on mex
-  against the container's port, meets no proxy. A /pattern budget of at most ~110,000 ms (the service's own figure
-  for that ingress; PATTERN_TIME_BUDGET_MS is the one line, then the manifests, the policy and their pins are rebuilt
-  as above) or a longer ingress read timeout would remove the race. Not verified live (no host was contacted).
+- **The front proxy: direct-remote handled, the MCP arm open (the owner decides).** The public URL's ingress (nginx
+  at https://metagraph.ethz.ch:8080) cuts a request at ~120 s (the long class is not run on direct-remote for it; the
+  by-design table's note on pattern.time_budget_above_host_cap: it cuts "every arm through it"). A /pattern scenario
+  that runs to its 120 s deadline answers its 503 at ~120.25 s, after the cut, and a time-limited 200 at ~119.8 to
+  120.0 s races it: on direct-remote the proxy's 504 arrives instead of the host's answer. The checks read that 504
+  as what it is, the ingress's cut before the host's answer could arrive, which shows nothing of the host:
+  checks.ingress_cut_allowed makes the status inconclusive (the allowed 503 deadline's case) for a request whose
+  stated budget reaches the cut (FRONT_INGRESS_CUT_MS 120,000 less FRONT_INGRESS_CUT_TOLERANCE_MS 10,000: the cut is
+  measured, not stated) when the 504 arrives no earlier than that and carries no host body, and the other checks are
+  not testable on it; a 504 on a request whose budget ends before the cut (every /resolve and /traverse scenario,
+  v5's /pattern ones) stays the status fail it was, since the host had to answer within the budget (test_checks,
+  test_builder_v6: nothing the deploy gate selects can meet the rule, so a gate run is judged as under v5). So on
+  direct-remote a v6 /pattern execution that runs to its deadline is inconclusive, as under v5, never a fail; the
+  deploy gate (mcp and direct-local, no /pattern scenario) is untouched; direct-local, on mex against the
+  container's port, meets no proxy and gets the host's answer. **Still open: the MCP arm.** The service runs on
+  Railway and reaches refseq33m-experimental through the same ingress as far as its code shows: its settings model
+  that ingress with a cut of 110 s (TRAVERSAL_INGRESS_CUT_S_BY_HOST, "measured only for the dev ingress, nginx in
+  front of refseq33m-experimental": the measured ~120 s less a margin) and fit traversal batches to it
+  (app/traversal/planner.py ingress_batch_cap), while the pattern path sends the request's budget as it is. A 120 s
+  pattern search through it ends in the ingress's 504, which the service retries after its 60 s backoff
+  (PatternBackendError.retryable for any 5xx; META_RETRY_MAX 2): about 120 + 60 + 120 s, past the MCP runner's fast
+  deadline of 300 s, so the execution ends in `error` (and a second 504 would end the job as a failed search, a
+  status fail), where v5 had an inconclusive; three MCP errors in a row stop the paired loop (run_suite.sh
+  MCP_ERRORS), and v5's deadline-bound MCP executions ran back to back (M-planted-0007 to -0009, M-protein-0001 to
+  -0007), so a full v6 run can stop in area M. Nothing in this tree changes that: the runner and the service are the
+  async session's (read-only here) and the ingress is infrastructure. The owner's options: a /pattern budget of at
+  most ~110,000 ms (the service's own figure for that ingress; PATTERN_TIME_BUDGET_MS is the one line, then the
+  manifests, the policy and their pins are rebuilt as above; the gate identity is unaffected), an ingress read
+  timeout of at least ~150 s with REMOTE_TIMEOUT_CAP_S raised with it, or v6's /pattern scenarios on direct-local
+  only. Not verified live (no host was contacted).
 
 ### The report's colour marks
 report.py marks every printed execution time (client wall, server elapsed, MCP phases; the tables and the lines of
 the findings, failures, timing, warm-up re-runs, overheads and the change against an earlier run) above
-TIME_MARK_YELLOW_MS (10 s) yellow and above TIME_MARK_RED_MS (55 s) red (fmt_time); differences between arms and
-connection set-ups stay plain. The mark is a span with a class (`t-yellow` / `t-red`) and the tint inline
+TIME_MARK_YELLOW_MS (10 s) yellow and above TIME_MARK_RED_MS (55 s) red (fmt_time, by the value as printed: fmt_ms
+rounds 100 ms and above to whole milliseconds, so 10,000.4 ms prints 10000, not above 10 s, unmarked); differences
+between arms and connection set-ups stay plain. The mark is a span with a class (`t-yellow` / `t-red`) and the tint inline
 (`background-color:#ffe866` / `#ff8a80`): a Markdown viewer that renders HTML shows the colour, a terminal the plain
 number, and on the md -> pdf path pandoc reads the span natively and report_colour.lua (`--lua-filter`, passed by
-to_pdf) turns the class into a `\colorbox` of the tint, the colours defined in header-includes (xcolor, loaded by
-pandoc's template). The text stays black and legible on both tints. One legend sentence follows the front matter.
-table() sizes and aligns columns by a cell's visible text.
+to_pdf) turns the class into a `\colorbox` of the tint with `\fboxsep` 1pt (the default 3pt opened a visible gap
+before a comma after the box), the colours defined in header-includes (xcolor, loaded by pandoc's template). The
+text stays black and legible on both tints. One legend sentence follows the front matter. table() sizes and aligns
+columns by a cell's visible text. Times inside a check's free-text detail (a finding's or failure's detail line)
+are not marked; the baseline run's report has none.
 
 ### Validation (offline; no host was contacted)
 - 720 tests pass, none skipped (with SUITE_TRUTH_CACHE, the record cache v4 was built from): 702 at 07dfa4875 + 18

@@ -295,6 +295,56 @@ def deadline_allowed(sc: dict, ans: dict) -> bool:
 # the name of before (lane S5, /pattern only)
 pattern_deadline_allowed = deadline_allowed
 
+# The front ingress of the public URL (nginx at https://metagraph.ethz.ch:8080, the direct-remote arm; README) cuts a
+# request at about FRONT_INGRESS_CUT_MS and answers its own 504, with no host body. Since v6 the /pattern budget of
+# 120,000 ms reaches that cut, so a search that runs to its deadline meets the 504 before the host's answer (its 503
+# deadline at ~budget + 250 ms, or a time-limited 200 at the budget) can arrive: nothing the host did is observed,
+# the 503 deadline's case (inconclusive), never a host defect. The cut is measured (~120 s), not stated: the
+# tolerance admits a 504 a little before it. A request whose budget ends before the cut must be answered by the
+# host within it, so its 504 stays the status failure it was.
+FRONT_INGRESS_CUT_MS = 120000.0
+FRONT_INGRESS_CUT_TOLERANCE_MS = 10000.0
+
+
+def _stated_budget(sc: dict) -> Optional[float]:
+    """The time budget the scenario's request states (ms): /pattern's time_budget_ms, /resolve's
+    bounds.time_budget_ms; None when the route or the request names none."""
+    route = sc.get("route")
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    if route == "POST /pattern":
+        return _number(req.get("time_budget_ms"))
+    if route == "POST /resolve":
+        return _resolve_budget(sc)
+    return None
+
+
+def ingress_cut_allowed(sc: dict, ans: dict, client: Optional[dict] = None) -> bool:
+    """Whether |ans| is the front ingress's 504 in place of the host's answer, which the scenario's status
+    expectation allows implicitly: an http 504 without a host body (no error code), on a POST /pattern or
+    POST /resolve whose request states a time budget that reaches the ingress's cut (budget >= FRONT_INGRESS_CUT_MS
+    - FRONT_INGRESS_CUT_TOLERANCE_MS), delivered at the cut (the client's wall time, when the runner gives it, at
+    least that far too), where the status expectation asks for a 200 and does not itself name a 504. The host's
+    answer to such a request comes at its budget or later (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core
+    §4.5), i.e. after the cut, so the 504 shows nothing of the host (as an allowed 503 deadline shows nothing:
+    inconclusive). A request whose budget ends before the cut, or a 504 well before it, is not covered."""
+    if ans.get("http") != 504 or (ans.get("error") or {}).get("code") is not None:
+        return False
+    budget = _stated_budget(sc)
+    if budget is None or budget < FRONT_INGRESS_CUT_MS - FRONT_INGRESS_CUT_TOLERANCE_MS:
+        return False
+    wall = _number((client or {}).get("wall_ms"))
+    if wall is not None and wall < FRONT_INGRESS_CUT_MS - FRONT_INGRESS_CUT_TOLERANCE_MS:
+        return False
+    for exp in sc.get("expect", []):
+        if exp.get("check") != "status":
+            continue
+        args = exp.get("args") or {}
+        want = args.get("http", 200)
+        wants = want if isinstance(want, list) else [want]
+        if 200 not in wants or 504 in wants or "504" in json.dumps(args):
+            return False
+    return True
+
 
 def _resolve_budget(sc: dict) -> Optional[float]:
     """The bounds.time_budget_ms a /resolve scenario's request names (a number), else None."""
@@ -304,7 +354,7 @@ def _resolve_budget(sc: dict) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def check_status(sc, ans, a, arm):
+def check_status(sc, ans, a, arm, client=None):
     http = ans.get("http")
     want = a.get("http", 200)
     wants = want if isinstance(want, list) else [want]
@@ -315,6 +365,14 @@ def check_status(sc, ans, a, arm):
                                  "time budget, which %s allows on any host (%s)" % (
                                      want, "SPEC-pattern-search §6/§7.6" if sc.get("route") == "POST /pattern"
                                      else "SPEC-labeled-traversal-core §4.5", (err.get("text") or "")[:200])
+        if ingress_cut_allowed(sc, ans, client):
+            wall = _number((client or {}).get("wall_ms"))
+            return INCONCLUSIVE, "http 504 from the front ingress in place of %s%s: the ingress cuts a request at " \
+                                 "~%.0f s, before the host's answer to the %.0f ms budget (its 503 deadline at the " \
+                                 "budget, or a 200 limited by it) could arrive, so nothing the host did is " \
+                                 "observed (an allowed deadline's case; the README's direct-remote)" % (
+                                     want, (" at a client wall time of %.0f ms" % wall) if wall is not None else "",
+                                     FRONT_INGRESS_CUT_MS / 1000.0, _stated_budget(sc))
         if sc.get("route") == "POST /resolve" and http == 503 and err.get("code") == "deadline" and \
                 _resolve_budget(sc) is None:
             return FAIL, "http 503 deadline, expected %s: the request names no bounds.time_budget_ms, and the " \
@@ -4793,8 +4851,9 @@ def _with_stopped_seeds_failed(answer: dict, stops: Dict[int, Tuple[str, Optiona
 
 
 # the checks that read the runner's `client` ({"wall_ms"}) beside the answer: budget_respected (an allowed 503
-# deadline, _budget_503) and the /resolve stop's time (_resolve_stop_problem); deterministic reads it too
-_CLIENT_CHECKS = {"budget_respected", "invariants", "resolve_runs"}
+# deadline, _budget_503), the /resolve stop's time (_resolve_stop_problem) and status (the front ingress's 504 at
+# the cut, ingress_cut_allowed); deterministic reads it too
+_CLIENT_CHECKS = {"budget_respected", "invariants", "resolve_runs", "status"}
 
 
 def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence[Any]] = None,
@@ -4804,8 +4863,9 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
     arm; an unknown check name or a check that raises is a fail stating why (never a silent pass). `deterministic` is
     left out of the first repeat (nothing to compare). `previous`: the earlier repeats' digests or {digest,
     time_limited}; `client` (optional, from a runner): {"wall_ms"} of this execution, which budget_respected reads
-    on an allowed 503 `deadline` (_budget_503), and the checks that judge a /resolve stop's time against it
-    (_resolve_stop_problem: invariants, resolve_runs, deterministic)."""
+    on an allowed 503 `deadline` (_budget_503), status on the front ingress's 504 (ingress_cut_allowed), and the
+    checks that judge a /resolve stop's time against it (_resolve_stop_problem: invariants, resolve_runs,
+    deterministic)."""
     out = []
     http = answer.get("http")
     allowed = [200]
@@ -4815,6 +4875,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
             allowed = w if isinstance(w, list) else [w]
     if deadline_allowed(scenario, answer):
         allowed = list(allowed) + [503]   # a 503 deadline: the other checks cannot test their property
+    if ingress_cut_allowed(scenario, answer, client):
+        allowed = list(allowed) + [504]   # the front ingress's cut at the budget: nothing of the host to test
     # the seeds the attempt's duration bound stopped (_attempt_stops): their own checks are inconclusive (or fail
     # when the stated bound cannot have been reached), the other seeds keep theirs
     stops = _attempt_stops(scenario, answer, arm, client)

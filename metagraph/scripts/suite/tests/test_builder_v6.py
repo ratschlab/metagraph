@@ -112,6 +112,33 @@ class ManifestV6(unittest.TestCase):
         self.assertEqual(sorted(set(r["scenario"] for r in p6["required"])), selected)
         self.assertEqual([r["relation"] for r in p6["relations"]], required)
 
+    def test_no_gate_scenario_reaches_the_front_ingress_cut(self):
+        """checks.ingress_cut_allowed (the front ingress's 504 at the cut reads inconclusive) covers a request whose
+        stated budget reaches FRONT_INGRESS_CUT_MS - the tolerance: v6's 120,000 ms /pattern budget and nothing the
+        deploy gate selects (every gated budget is at most 70,000 ms), so a gate run is judged as under v5."""
+        import checks
+        edge = checks.FRONT_INGRESS_CUT_MS - checks.FRONT_INGRESS_CUT_TOLERANCE_MS
+        a504 = checks.normalise_direct(504, b"<html>504 Gateway Time-out</html>")
+        for name in ("policy_v5_rt_mcp.json", "policy_v6_rt_mcp.json"):
+            policy = sc.read_json(os.path.join(SUITE, "gate", name))
+            for sid in sorted(set(r["scenario"] for r in policy["required"])):
+                s = self.s6[sid]
+                bound = sc.stated_request_bound_s(s)
+                self.assertTrue(bound is None or bound * 1000.0 < edge, (name, sid, bound))
+                self.assertFalse(checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0}), (name, sid))
+        covered = [s["id"] for s in self.v6["scenarios"] if checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0})]
+        # the 449 scenarios at the 120,000 ms budget less the 22 that expect a refusal (a 400, answered at once)
+        self.assertEqual(len(covered), 427)
+        self.assertTrue(all(self.s6[sid]["route"] == "POST /pattern" and
+                            self.s6[sid]["request"]["time_budget_ms"] == 120000 for sid in covered))
+        refused = [s["id"] for s in self.v6["scenarios"] if s["route"] == "POST /pattern" and isinstance(
+            s.get("request"), dict) and s["request"].get("time_budget_ms") == 120000 and s["id"] not in covered]
+        self.assertEqual(len(refused), 22)
+        for sid in refused:
+            st = [e for e in self.s6[sid]["expect"] if e["check"] == "status"]
+            self.assertEqual(st[0]["args"].get("http"), 400, sid)
+        self.assertEqual([s["id"] for s in self.v5["scenarios"] if checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0})], [])
+
     def test_smoke_v6_is_smoke_v5_with_the_budget(self):
         sm5, sm6 = read("suite_smoke_v5.json"), read("suite_smoke_v6.json")
         self.assertEqual(sm6["content_sha256"], V6_SMOKE_CONTENT)
