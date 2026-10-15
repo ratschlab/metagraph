@@ -769,7 +769,8 @@ def gen_T(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "T", "duplicate seeds: traversed again, marked duplicate", "POST /traverse", req, t,
                         [OK, INV, ex("answer_fields", equals={"results.1.duplicate": True})], tags=["edge"]))
     # the service merges identical seeds before sending, so the duplicate's result cannot exist in the MCP answer:
-    # that check is service-side by design (the owner, 2026-10-15)
+    # that check is service-side by design (the owner, 2026-10-15); it is the scenario's only property check, so the
+    # builder marks the whole scenario (build_manifest.scenario_level_marks: mcp.not_implemented)
     mcp_by_design_check(out[-1], "answer_fields", "traverse.duplicate_seeds")
     req = traverse_request([_tseed(t["window"], [eco.accession])], base_over, extra={"bogus": 1})
     out.append(scenario(nid(), "T", "an unknown strategy key: refused naming it", "POST /traverse", req, t,

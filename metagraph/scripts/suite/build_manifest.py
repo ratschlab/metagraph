@@ -138,6 +138,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
     areas.state_chance_bounds(scenarios)
+    scenario_level_marks(scenarios)
     scenarios = place_warm_ups(scenarios)
     exposure = None
     if exposure_file:
@@ -247,6 +248,40 @@ def not_applicable(caps: dict) -> list:
                     "reason": "the staging host is masked (capabilities counting %r, mask %r): counts are exact, "
                               "no upper_bound or estimate to test; build these on an unmasked host" % (
                                   pc.get("counting"), pc.get("mask"))})
+    return out
+
+
+def _marked_checks(mcp: dict) -> list:
+    """The checks a scenario's property-level MCP marks name (mcp.not_implemented_checks, mcp.by_design_checks)."""
+    return [e.get("check") for key in ("not_implemented_checks", "by_design_checks") for e in mcp.get(key) or []
+            if isinstance(e, dict)]
+
+
+def covers_every_property(sc: dict) -> bool:
+    """Whether the property-level MCP marks of |sc| name every property check it expects (checks.is_property)."""
+    marked = set(_marked_checks(sc.get("mcp") or {}))
+    props = set(e["check"] for e in sc["expect"] if checks.is_property(e["check"]))
+    return bool(marked) and bool(props) and props <= marked
+
+
+def scenario_level_marks(scenarios: list) -> list:
+    """The owner's rule (2026-10-15): a missing MCP feature is marked at the narrowest scope; when the property-level
+    marks would cover every property check of a scenario, that scope is the scenario. Its MCP mapping becomes
+    mcp.not_implemented (the manifest's whole-scenario form; it has no whole-scenario by-design form) with the marks'
+    reasons, a service-side case stated as "service-side by design: ...", and keeps mcp.by_design. Otherwise the
+    scenario would pass via MCP on its generic checks alone. Returns the ids changed."""
+    out = []
+    for sc in scenarios:
+        mcp = sc.get("mcp") or {}
+        if "tool" not in mcp or not covers_every_property(sc):
+            continue
+        why = ["service-side by design: the table's case %s; the MCP answer cannot carry %s" % (e["case"], e["check"])
+               for e in mcp.get("by_design_checks") or []]
+        why += ["not implemented yet via MCP: %s (%s)" % (e["reason"], e["check"])
+                for e in mcp.get("not_implemented_checks") or []]
+        sc["mcp"] = dict({"not_implemented": "; ".join(why)},
+                         **({"by_design": mcp["by_design"]} if mcp.get("by_design") else {}))
+        out.append(sc["id"])
     return out
 
 
@@ -426,6 +461,9 @@ def validate(scenarios, cases=None) -> list:
                 problems.append("%s: mcp.by_design_checks %r: a check it expects and a case of the table" % (s["id"], e))
         if (s["mcp"].get("not_implemented_checks") or s["mcp"].get("by_design_checks")) and "tool" not in s["mcp"]:
             problems.append("%s: property-level MCP classes on a scenario the MCP does not run" % s["id"])
+        elif covers_every_property(s):
+            problems.append("%s: property-level MCP marks cover every property check: a scenario-level mark "
+                            "(mcp.not_implemented, scenario_level_marks)" % s["id"])
         for e in s["expect"]:
             problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
         disc = s["request"].get("discover") if s["route"] == "POST /resolve" and isinstance(s["request"], dict) else None

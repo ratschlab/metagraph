@@ -3,7 +3,7 @@
  "about": "Owner-declared entries of the v5 resolve / traverse deploy gate (gate_policy.py --declared): none. What the MCP surface cannot show is classed in the v5 manifest itself and derived by gate_policy.py (the owner, 2026-10-15): C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks; T-edge-0008's answer_fields mcp.by_design_checks (traverse.duplicate_seeds); the long walks' budget_stress tag (T-longwalk-0001..0004). declared_v4_rt.json stays v4's. The v4 suite errors it declared are fixed by v5, R-budget-0001/0002 are required on direct-local.",
  "manifest": {
   "file": "manifest/suite_v5.json",
-  "content_sha256": "a9dd5534c7d6104ae24d221ff0b6a38f0581d730f15609ebf0d3a5cc7105fc63"
+  "content_sha256": "d50e09e894f46ab126d16cf4cd86f01b347b75e469960044b4d1e07244970dc5"
  },
  "exclusions": [],
  "not_required": [],

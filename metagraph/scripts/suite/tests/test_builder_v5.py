@@ -706,7 +706,8 @@ class BudgetStressRule(unittest.TestCase):
 class McpClassesInTheManifest(unittest.TestCase):
     """The owner's decision (2026-10-15): what the MCP cannot show is classed in the manifest, not declared at the
     gate: C-caps-0001 mcp.not_implemented; label_dict_contains of the T-labels pairs mcp.not_implemented_checks;
-    T-edge-0008's answer_fields mcp.by_design_checks; gate_policy derives the MCP exemptions; the builder validates."""
+    T-edge-0008's answer_fields mcp.by_design_checks, its only property check, so the builder marks the whole scenario
+    (VERIFY-G (c)); gate_policy derives the MCP exemptions; the builder validates."""
 
     def sc(self, **mcp):
         s = ml.scenario("T-x-0001", "T", "t", "POST /traverse", ml.traverse_request([{"sequence": "A" * 40}]), {},
@@ -718,6 +719,7 @@ class McpClassesInTheManifest(unittest.TestCase):
         import build_manifest as bm
         ok = self.sc(not_implemented_checks=[{"check": "answer_fields", "reason": "r"}],
                      by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        ok["expect"].append({"check": "walk_in_record", "args": {}})     # a property check the marks leave
         self.assertEqual([p for p in bm.validate([ok]) if "mcp." in p or "property-level" in p], [])
         for bad in (self.sc(not_implemented_checks=[{"check": "label_dict_contains", "reason": "r"}]),  # not expected
                     self.sc(not_implemented_checks=[{"check": "answer_fields"}]),                       # no reason
@@ -726,6 +728,31 @@ class McpClassesInTheManifest(unittest.TestCase):
         ni = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
         ni["mcp"] = dict(not_implemented="x", by_design_checks=ni["mcp"]["by_design_checks"])
         self.assertTrue([p for p in bm.validate([ni]) if "property-level" in p])
+        # marks that cover every property check are a scenario-level mark: the builder refuses the list
+        every = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        self.assertTrue([p for p in bm.validate([every]) if "cover every property check" in p])
+
+    def test_scenario_level_marks(self):
+        # VERIFY-G (c), the owner's rule: marks covering every property check become mcp.not_implemented (the
+        # manifest has no whole-scenario by-design form), the generic checks (status, invariants, budget_respected)
+        # never count; marks that leave a property check stay property-level
+        import build_manifest as bm
+        every = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}],
+                        by_design=["traverse.duplicate_seeds"])
+        every["expect"] += [{"check": "invariants", "args": {}}, {"check": "budget_respected", "args": {}}]
+        both = self.sc(not_implemented_checks=[{"check": "answer_fields", "reason": "no field"}])
+        both["id"] = "T-x-0002"
+        both["expect"].append({"check": "walk_in_record", "args": {}})
+        self.assertEqual(bm.scenario_level_marks([every, both]), ["T-x-0001"])
+        self.assertEqual(every["mcp"], {
+            "not_implemented": "service-side by design: the table's case traverse.duplicate_seeds; the MCP answer "
+                               "cannot carry answer_fields",
+            "by_design": ["traverse.duplicate_seeds"]})
+        self.assertEqual(both["mcp"]["not_implemented_checks"], [{"check": "answer_fields", "reason": "no field"}])
+        self.assertEqual([p for p in bm.validate([every, both]) if "mcp" in p or "property" in p], [])
+        nim = self.sc(not_implemented_checks=[{"check": "answer_fields", "reason": "no field"}])
+        bm.scenario_level_marks([nim])
+        self.assertEqual(nim["mcp"]["not_implemented"], "not implemented yet via MCP: no field (answer_fields)")
 
     def test_policy_derives(self):
         import gate_policy
@@ -754,8 +781,13 @@ class McpClassesInTheManifest(unittest.TestCase):
         for n in (3, 4, 5, 6):
             self.assertEqual(s["T-labels-%04d" % n]["mcp"]["not_implemented_checks"],
                              [{"check": "label_dict_contains", "reason": areas.LABEL_DICT_NOT_VIA_MCP}])
-        self.assertEqual(s["T-edge-0008"]["mcp"]["by_design_checks"],
-                         [{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
+        # T-edge-0008's only property check is service-side by design: the whole scenario is marked
+        self.assertEqual(s["T-edge-0008"]["mcp"], {
+            "not_implemented": "service-side by design: the table's case traverse.duplicate_seeds; the MCP answer "
+                               "cannot carry answer_fields",
+            "by_design": ["traverse.duplicate_seeds"]})
+        import build_manifest as bm
+        self.assertFalse([x["id"] for x in s.values() if bm.covers_every_property(x)])
         with open(os.path.join(SUITE, "gate", "declared_v5_rt.json")) as f:
             d = json.load(f)
         self.assertEqual((d["exclusions"], d["not_required"], d["relations_excluded"]), ([], [], []))
