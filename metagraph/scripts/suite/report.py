@@ -142,6 +142,51 @@ def orchestrator_session(run):
     return sessions[-1] if sessions else {}
 
 
+def loop_text(loop):
+    """The orchestrator's loop record (run_suite.sh loop_record) in words: its state (reason), the paired loop's
+    completed of planned scenarios (the sequential loop records no per-scenario count), the direct requests, the
+    failed steps and the MCP executions the runner did not record."""
+    out = ["loop %s%s" % (loop.get("state") or "-", (" (%s)" % loop["reason"]) if loop.get("reason") else "")]
+    if "scenarios" in loop or "completed" in loop:
+        out.append("%s of %s scenario(s) completed" % (loop.get("completed", "-"), loop.get("scenarios", "-")))
+    if loop.get("direct_requests") is not None:
+        out.append("%s direct request(s)" % loop["direct_requests"])
+    if "failed_steps" in loop:
+        out.append("%d failed step(s)" % len(loop.get("failed_steps") or []))
+    if "mcp_missing" in loop or "mcp_missing_count" in loop:
+        out.append("%s MCP execution(s) the runner did not record" % loop.get(
+            "mcp_missing_count", len(loop.get("mcp_missing") or [])))
+    return ", ".join(out)
+
+
+def loop_problems_text(loop):
+    """The loop's failed steps (ARM:SCENARIO:EXIT) and the MCP executions the runner did not record (SCENARIO:rREPEAT,
+    the first 50 kept), "" when there are none."""
+    steps = loop.get("failed_steps") or []
+    missing = loop.get("mcp_missing") or []
+    n_missing = loop.get("mcp_missing_count", len(missing))
+    out = []
+    if steps:
+        out.append("%d failed step(s): %s" % (len(steps), ", ".join(str(x) for x in steps[:20]) +
+                                               (" ..." if len(steps) > 20 else "")))
+    if n_missing:
+        out.append("%s MCP execution(s) the runner did not record: %s" % (
+            n_missing, ", ".join(str(x) for x in missing[:20]) + (" ..." if n_missing > 20 else "")))
+    return "; ".join(out)
+
+
+def mixed_releases_text(run):
+    """The host's release or index_fp changes during the run (merge_run.release_identity: run.json release_identity
+    changed, each naming the arm, session and time that saw the new value) and the releases seen, "" when the run
+    saw one deployment."""
+    ident = run.get("release_identity") or {}
+    changed = ident.get("changed") or []
+    if not run.get("mixed_releases") and not changed:
+        return ""
+    return "%s (releases seen: %s)" % ("; ".join(changed) or "mixed releases", ", ".join(
+        str(x) for x in ident.get("releases") or []) or "-")
+
+
 def load_compare(run_dir, by_design_path=None, reevaluated=False):
     path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
     data = sc.read_json(path)
@@ -297,6 +342,8 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     if loop and loop.get("state") not in (None, "done"):
         incomplete.append("the %s loop (%s%s)" % (loop.get("mode", "paired"), loop.get("state"),
                                                   (": %s" % loop["reason"]) if loop.get("reason") else ""))
+    # a run that spans two deployments (merge_run.release_identity) tested no single one: never PASS
+    mixed = mixed_releases_text(run)
     dis_direct = s["direct_agreement"].get("disagree", 0)
     dis_mcp = s["mcp_agreement"].get("disagree", 0)
     rel_failed = sum((v or {}).get("fail", 0) for v in ((s.get("relations") or {}).get("per_arm") or {}).values())
@@ -327,6 +374,9 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         # a part of the run tested nothing (e.g. a field the MCP stopped exposing): never PASS
         verdict = ("INCONCLUSIVE (no execution passed in %d area / route x arm group(s): %s; no failure, no "
                    "disagreement)" % (len(untested), untested_text(untested)))
+    elif mixed:
+        verdict = ("INCONCLUSIVE (the run spans more than one deployment of the host: %s; no failure, no "
+                   "disagreement)" % mixed)
     elif not executions:
         verdict = "EMPTY (no execution recorded)"
     elif stub:
@@ -334,10 +384,14 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         verdict = "UNVERIFIED (stub checks: HTTP status only): no failed status, no disagreement between the arms"
     else:
         verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
-    if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE"):
+    if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE (no execution passed"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
     lines.append("**%s**" % md(verdict))
     lines.append("")
+    if mixed and "more than one deployment" not in verdict:
+        lines.append("- Mixed releases: the run spans more than one deployment of the host: %s." % md(mixed))
+    if loop_problems_text(loop):
+        lines.append("- The %s loop: %s." % (md(loop.get("mode", "paired")), md(loop_problems_text(loop))))
     for arm in comp["arms"]:
         t = totals.get(arm, {})
         o = t.get("outcomes", {})
@@ -504,8 +558,7 @@ def environment_section(run, comp, rows, samples):
         desc = {"paired": "paired: per scenario MCP cold, direct-local, direct-remote, MCP warm, one arm at a time",
                 "sequential": "sequential: one arm after the other"}.get(mode, mode)
         if loop:
-            desc += "; loop %s, %s of %s scenario(s)" % (loop.get("state"), loop.get("completed", "-"),
-                                                         loop.get("scenarios", "-"))
+            desc += "; " + loop_text(loop)
         kv.append(("mode", md(desc)))
         if orch.get("mcp_cmd"):
             kv.append(("MCP runner", "command template `%s`" % ascii_safe(orch["mcp_cmd"]).replace("`", "'")))

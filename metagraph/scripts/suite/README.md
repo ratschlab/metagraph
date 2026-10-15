@@ -2406,3 +2406,18 @@ one lane's verification left to another lane's file.
   property reading and the report's statement) and RunSuiteSnapshotTest.test_a_checks_change_during_the_run_does_
   not_reach_the_comparison (a copy of the suite, one same_answer relation, an evaluate_relation failing every
   relation appended to the copy's checks.py after the first request: REL-1 passes on both direct arms, PASS).
+
+### The report reads the run side's records (mixed releases, failed steps, lost MCP executions, the sequential loop)
+- Lane S7r records the host's release at each session's start and end (merge_run.release_identity: run.json
+  `release_identity` {releases, index_fps, changed}, `mixed_releases`) and the loop's `failed_steps` and
+  `mcp_missing`; the report read none of them: a run over two deployments read PASS without --gate, and a sequential
+  loop record (no per-scenario counts) printed "loop done, - of - scenario(s)".
+- A run with mixed releases is never PASS: after FAIL, FINDINGS and the INCONCLUSIVE of a run where nothing passed
+  or a part tested nothing, its verdict is "INCONCLUSIVE (the run spans more than one deployment of the host: <each
+  change, naming the arm, session and time that saw the new release or index_fp> (releases seen: ...); no failure,
+  no disagreement)"; with another verdict a line below it states the same. The gate already failed it (identity).
+- Below the verdict, the loop's failed steps (ARM:SCENARIO:EXIT) and the MCP executions the runner did not record
+  (SCENARIO:rREPEAT) are listed whatever the loop's state (a capped loop keeps its failed steps). The Environment
+  table's mode line states the loop as recorded (`report.loop_text`): state (reason), the paired loop's completed of
+  planned scenarios, the direct requests, the failed steps and the MCP executions not recorded; a sequential loop
+  prints its own counts and no "- of -".

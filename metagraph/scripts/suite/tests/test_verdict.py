@@ -3,6 +3,7 @@ review's verdict findings name: the direct arms' class with equal digests, the M
 the host cache after a relayed deadline, the text_contains grammar, the no-table rule (c), the runner's unmatched
 not_implemented_mcp mark, outcomes outside the vocabulary, what an area tested and the load caveat."""
 
+import json
 import os
 import sys
 import tempfile
@@ -511,6 +512,83 @@ class OutcomeVocabularyTest(unittest.TestCase):
         self.assertEqual(out, "skipped_by_runner")
         self.assertIn("outside the vocabulary", kept)
         self.assertTrue(any("outside the vocabulary" in w for w in info["warnings"]))
+
+
+class LoopAndReleaseReportTest(unittest.TestCase):
+    """The report reads the run side's records: a run over two deployments of the host is not PASS, the loop's failed
+    steps and lost MCP executions are named, and a sequential loop states its own counts."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        self.S = [scen("P-001", "P"), scen("P-002", "P")]
+        manifest = {"manifest_version": 1, "content_sha256": sc.scenarios_sha256(self.S), "scenarios": self.S}
+        for k, arm in enumerate(("direct-local", "direct-remote")):
+            os.makedirs(os.path.join(self.d, "arms", arm), exist_ok=True)
+            sc.write_json_atomic(os.path.join(self.d, "arms", arm, "manifest.json"), manifest)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_with(self, loop=None, sessions=None):
+        import merge_run
+        for k, arm in enumerate(("direct-local", "direct-remote")):
+            write_arm(self.d, arm, [line(x["id"], arm, 0, T0 + i * 10 + k, 20.0) for i, x in enumerate(self.S)],
+                      run_extra={"sessions": sessions} if sessions and arm == "direct-local" else None)
+        sess = {"mode": (loop or {}).get("mode", "paired"), "checks": "checks", "warm_every": "0",
+                "skip_local": "0", "skip_remote": "0"}
+        if loop is not None:
+            sess["loop"] = loop
+        sc.write_json_atomic(os.path.join(self.d, "orchestrator.json"), {"sessions": [sess]})
+        merge_run.merge(self.d)
+        sc.write_json_atomic(os.path.join(self.d, "compare.json"), cmp.compare(self.d, cmp.load_by_design(None)))
+        return verdict_of(self.d)
+
+    def test_a_run_over_two_releases_is_not_pass(self):
+        text, v = self.run_with(sessions=[
+            {"started_utc": sc.iso_utc(T0 - 5), "ended_utc": sc.iso_utc(T0 + 60), "release_start": "refseq97-b7214d29",
+             "release_end": "refseq97-c0ffee00"}])
+        self.assertTrue(v.startswith("**INCONCLUSIVE (the run spans more than one deployment of the host: the "
+                                     "host's release changed during the run: refseq97-b7214d29"), v)
+        self.assertIn("refseq97-c0ffee00 (arms/direct-local session 0 end", v)
+        self.assertIn("releases seen: refseq97-b7214d29, refseq97-c0ffee00", v)
+        # beside a failure the verdict stays FAIL and the change is stated below it
+        with open(os.path.join(self.d, "arms", "direct-remote", "executions.jsonl"), "a") as fh:
+            fh.write(json.dumps(line("P-002", "direct-remote", 1, T0 + 50, 20.0, outcome="fail",
+                                     checks=[st("fail", detail="http 500")])) + "\n")
+        import merge_run
+        merge_run.merge(self.d)
+        sc.write_json_atomic(os.path.join(self.d, "compare.json"), cmp.compare(self.d, cmp.load_by_design(None)))
+        text, v = verdict_of(self.d)
+        self.assertTrue(v.startswith("**FAIL"), v)
+        self.assertIn("- Mixed releases: the run spans more than one deployment of the host: the host's release "
+                      "changed during the run", text)
+
+    def test_one_release_reads_pass(self):
+        _, v = self.run_with(sessions=[
+            {"started_utc": sc.iso_utc(T0 - 5), "ended_utc": sc.iso_utc(T0 + 60), "release_start": "refseq97-b7214d29",
+             "release_end": "refseq97-b7214d29"}])
+        self.assertTrue(v.startswith("**PASS"), v)
+
+    def test_the_loop_names_its_failed_steps_and_lost_executions(self):
+        text, v = self.run_with(loop={"mode": "paired", "state": "incomplete", "reason": "failed_steps",
+                                      "scenarios": 2, "completed": 1, "direct_requests": 7,
+                                      "failed_steps": ["direct-local:P-002:127"], "mcp_missing": ["P-002:r1"],
+                                      "mcp_missing_count": 1})
+        self.assertTrue(v.startswith("**INCOMPLETE"), v)
+        self.assertIn("- The paired loop: 1 failed step(s): direct-local:P-002:127; 1 MCP execution(s) the runner "
+                      "did not record: P-002:r1.", text)
+        self.assertIn("loop incomplete (failed\\_steps), 1 of 2 scenario(s) completed, 7 direct request(s), 1 failed "
+                      "step(s), 1 MCP execution(s) the runner did not record", text)
+
+    def test_a_sequential_loop_states_its_counts(self):
+        text, v = self.run_with(loop={"mode": "sequential", "state": "done", "reason": "", "direct_requests": 6,
+                                      "failed_steps": [], "mcp_missing": [], "mcp_missing_count": 0})
+        self.assertTrue(v.startswith("**PASS"), v)
+        self.assertIn("sequential: one arm after the other; loop done, 6 direct request(s), 0 failed step(s), 0 MCP "
+                      "execution(s) the runner did not record", text)
+        self.assertNotIn("- of -", text)
+        self.assertNotIn("The sequential loop:", text)
 
 
 class LoadCaveatTest(unittest.TestCase):
