@@ -2618,6 +2618,22 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual([len(sg["events"]) for sg in arms["right"]["segments"]], [0, 0, 1, 2, 1])
         self.assertEqual(judge(sc, mcp_shaped(ans), "mcp"), ("pass", "pass"))
 
+    def test_a_walk_without_its_tree_is_not_shown(self):
+        # an MCP answer without its graphlet (the export lost, an arm in summary) shows no walk: walk_in_record is
+        # not exposed there and fails on a direct arm (a summary detail), never "no path"; the invariants hold
+        sc, ans = self.structural_walk(end="edge_reuse")
+        bare = mcp_shaped(ans)
+        for r in bare["body"]["results"]:
+            del r["graphlet"]
+        for arm, want in (("mcp", "not_exposed"), ("direct-local", "fail")):
+            for args in ({}, {"expect_branching": True}):
+                o, d = outcome(sc, bare, "walk_in_record", arm, **args)
+                self.assertEqual(o, want, (arm, args))
+                self.assertIn("results[0].arms.right.segments and paths (no graphlet or tree)", d)
+                self.assertNotIn("no path", d)
+            self.assertEqual(outcome(sc, bare, "invariants", arm)[0], "pass")
+        self.assertEqual(outcome(sc, mcp_shaped(ans), "walk_in_record", "mcp")[0], "pass")
+
     def test_branch_taken_without_a_split_under_a_quorum(self):
         # under a quorum knob the walker raises a lineage's branches on every admissible successor before the
         # quorum drops the minority ones; one followed successor records no split. Label 0 is ambiguous at 4 bp

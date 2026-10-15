@@ -3576,11 +3576,17 @@ def check_walk_in_record(sc, ans, a, arm):
     probs, notes, stopped, searched = [], [], [], []
     unshown = []   # what the answer does not hold to judge an arm (Missing, once nothing failed)
     mismatch = _preset_mismatch(sc, ans, arm)
-    branching = False
+    branching = treeless = False
     for side in a.get("arms") or _arms_of(sc, i):
         armo = r["arms"].get(side)
         if armo is None:
             probs.append("arm %s absent" % side)
+            continue
+        if "segments" not in armo and "paths" not in armo:
+            # an arm without its tree (an MCP answer without its graphlet, a summary detail): the walk is not shown,
+            # which says nothing of its paths (not "no path")
+            unshown.append("results[%d].arms.%s.segments and paths (no graphlet or tree)" % (i, side))
+            treeless = True
             continue
         first_branch = _first_branch_bp(armo)
         if first_branch is not None:
@@ -3712,7 +3718,7 @@ def check_walk_in_record(sc, ans, a, arm):
         else:
             probs.append("%s: the record followed for only %d of %d bp, the path ended by %s%s" % (
                 side, best, expected, sorted(ends) or "nothing stated", how))
-    if a.get("expect_branching") and not branching:
+    if a.get("expect_branching") and not branching and not treeless:   # an arm not shown may hold the split
         bys = [((t.get("walk") or {}).get(x) or {}).get("branch_by_bp") for x in a.get("arms") or _arms_of(sc, i)]
         if stopped:
             stopped.append("no split or branch event before the stop (the record branches by %s bp)" % bys)

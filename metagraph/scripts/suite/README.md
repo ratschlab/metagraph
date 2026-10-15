@@ -2534,3 +2534,10 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   with an E or R record), so the MCP arm's parsed walks cannot lack it. An end that is no structural one needs no
   events. The unit fixture `walk(..., reason="branch")` stated no events on its leaf and passed through the hole; it
   states the label_end event as the engine writes it.
+- /traverse, a walk without its tree is not shown (the verification's side note). An MCP answer whose result lost
+  its graphlet (or an arm in summary detail) has arms without segments and paths: walk_in_record failed it "no path
+  (status complete)", a wrong diagnosis (it blocks the gate either way). Such an arm is now a missing field:
+  not exposed on the MCP arm, a fail on a direct one (a summary detail where the scenario asks for a walk), stated
+  only where nothing failed; expect_branching does not call a split missing from an arm it cannot see. Measured on
+  v4: of the 123 recorded MCP answers with a graphlet, with the graphlets removed, walk_in_record read fail on 100
+  that passed; now no check turns to fail.
