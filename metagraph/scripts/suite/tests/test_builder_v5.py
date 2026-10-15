@@ -353,6 +353,19 @@ class WalksDecisive(unittest.TestCase):
             self.assertEqual(w["truth"]["warm_up_for"], sid)
             self.assertIn(s[sid]["request"]["seeds"][0]["sequence"], w["request"]["sequence"])
             self.assertEqual(w["request"]["labels"], s[sid]["request"]["seeds"][0]["labels"])
+        # VERIFY-V5A: a warm-up reads what its walk must reach (the seed and each arm's exact minimum plus the margin),
+        # so the 6-copy B. subtilis region fits a short cold resolve; T-walk-0009's cold seed row gets one too
+        for n in range(1, 5):
+            sid = "T-repeat-%04d" % n
+            w, t = s[order[order.index(sid) - 1]], s[sid]["truth"]
+            radius = bounds(sid)["max_extension_bp"]
+            want = [min(radius, t["walk"][side]["min_bp"] + areas.WARM_MARGIN_BP) for side in ("left", "right")]
+            self.assertEqual(len(w["request"]["sequence"]), want[0] + t["length"] + want[1], sid)
+        self.assertLessEqual(len(s["R-warm-0002"]["request"]["sequence"]), 300)
+        w9 = s[order[order.index("T-walk-0009") - 1]]
+        self.assertEqual((w9["id"], w9["request"]["labels"], len(w9["request"]["sequence"])),
+                         ("R-warm-0007", ["10710"], 31 + 2 * 100))
+        self.assertIn(s["T-walk-0009"]["request"]["seeds"][0]["sequence"], w9["request"]["sequence"])
         w = s[order[order.index("T-labels-0003") - 1]]
         self.assertEqual((w["truth"]["warm_up_for"], w["request"]["labels"]), ("T-labels-0003", ["511145"]))
         self.assertEqual(bounds("T-labels-0003")["max_extension_bp"], 50)

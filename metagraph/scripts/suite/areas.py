@@ -94,11 +94,12 @@ def _columns_sample() -> List[str]:
         return [l.strip() for l in f if l.strip() and not l.startswith("#")]
 
 
-def _warm_id(ctx: Ctx) -> str:
-    """The next warm-up id, R-warm-nnnn, numbered across the areas in the order they are built."""
-    n = ctx.__dict__.setdefault("_warm_ids", [0])
-    n[0] += 1
-    return "R-warm-%04d" % n[0]
+# The warm-ups' ids, fixed per target (a warm-up added later takes the next free number; no id moves)
+WARM_IDS = {"T-repeat-0001": "R-warm-0001", "T-repeat-0002": "R-warm-0002", "T-repeat-0003": "R-warm-0003",
+            "T-repeat-0004": "R-warm-0004", "T-labels-0003": "R-warm-0005", "N-hard-0022": "R-warm-0006",
+            "T-walk-0009": "R-warm-0007"}
+# what a walk's warm-up reads beyond the walk's exact minimum on each arm (the rows of the steps that decide it)
+WARM_MARGIN_BP = 45
 
 
 def warm_up(ctx: Ctx, sid: str, query: str, label: str, truth: dict, target: str, why: str,
@@ -116,14 +117,30 @@ def warm_up(ctx: Ctx, sid: str, query: str, label: str, truth: dict, target: str
                     [OK, INV, ex("resolve_runs", label=label, full=True)], tags=("warm-up", "positive") + tuple(tags))
 
 
-def region_warm_up(ctx: Ctx, rec, t: dict, radius: int, label: str, target: str, why: str) -> dict:
-    """warm_up of the record region a walk from the seed |t| reads: the seed and |radius| bases each side (cut at a
-    base outside ACGT, acgt_flank), against the walk's label."""
-    a, b, _ = acgt_flank(rec, t["start"] - rec.offset, t["length"], radius)
+def region_warm_up(ctx: Ctx, rec, t: dict, left: int, right: int, label: str, target: str, why: str) -> dict:
+    """warm_up (id WARM_IDS[target]) of the record region a walk from the seed |t| must read: the seed, |left| bases
+    before it and |right| after it (cut at a base outside ACGT), against the walk's label."""
+    s0 = t["start"] - rec.offset
+    a, _, _ = acgt_flank(rec, s0, t["length"], left)
+    _, b, _ = acgt_flank(rec, s0, t["length"], right)
     region = ctx.truth_at(rec, a, b - a, flank=0)
     region["flank"] = ""
-    return warm_up(ctx, _warm_id(ctx), region["window"], label, region, target, why,
+    return warm_up(ctx, WARM_IDS[target], region["window"], label, region, target, why,
                    tags=("header-label",) if label == rec.accession else ("column-label",))
+
+
+def minimum_warm_up(ctx: Ctx, sc: dict, label: str, why: str) -> dict:
+    """region_warm_up of what a header walk must read to decide walk_in_record: the seed and, on each requested arm,
+    its exact minimum (truth.walk[side].min_bp, _annotate_walks) plus WARM_MARGIN_BP, within the radius; past the
+    minimum a time stop no longer hides the property. A cold resolve of a multi-copy region costs seconds per row
+    (VERIFY-V5A: T-repeat-0002's 71 seed rows took 17.6 s cold, one row 11.7 s), so the warm-up reads no more."""
+    t = sc["truth"]
+    rec = ctx.rec(t["genome"])
+    radius = sc["request"]["strategy"]["bounds"]["max_extension_bp"]
+    walk = t.get("walk") or {}
+    ext = dict((side, min(radius, (walk.get(side) or {}).get("min_bp", radius) + WARM_MARGIN_BP)) if side in walk else
+               (side, 0) for side in ("left", "right"))
+    return region_warm_up(ctx, rec, t, ext["left"], ext["right"], label, sc["id"], why)
 
 
 # ================================================================================================= R: /resolve
@@ -407,8 +424,13 @@ def gen_T(ctx: Ctx) -> List[dict]:
     #   design: a direct-arm benchmark); whether it completes depends on the load, so it is budget_stress, left out of
     #   the deploy gate (gate_policy's rule) and kept in the full suite. -0024 and -0030 end at stated branches within
     #   their first 4 kb and passed on every arm in 15 s.
+    warm: List[dict] = []                          # warm-ups built in place
+    warm_specs: List[Tuple[str, str, str, str]] = []   # warm-ups of a walk's minimum, built after _annotate_walks
     SHORT = {6: 1000, 12: 500, 18: 5000, 36: 1000}
     LONG_TWIN = {6: 10000, 12: 10000, 18: 10000, 36: 10000}
+    # walks whose seed row alone took most of the budget cold: a warm-up of the seed and its radius right before
+    COLD_ROW_WALKS = {"T-walk-0009": "the seed's row in lambda's column, whose cold read took 15.7 s in v3's first "
+                                     "MCP call (time-stopped at 1 bp; VERIFY-V5A)"}
     # the frontier v3's and v4's four successive 15 s calls of the 10 kb walk reached (60 s of cold reads, chained)
     COLD_FRONTIER_60S = {6: (2731, 6398), 12: (1431, 1643), 18: (8147, 8748), 36: (2244, 2255)}
     HEADER_300 = (4, 14, 22)
@@ -437,6 +459,8 @@ def gen_T(ctx: Ctx) -> List[dict]:
                                     L, rec.key, direction, ext, kind),
                                 "POST /traverse", req, t, exp, timing_class="slow" if drawn >= 10000 else "fast",
                                 tags=["walk", kind + "-label"] + (["smoke"] if i == 1 else [])))
+            if sid in COLD_ROW_WALKS:
+                warm.append(region_warm_up(ctx, rec, t, ext, ext, lab, sid, COLD_ROW_WALKS[sid]))
             continue
         long_id = nid_long()
         req = traverse_request([_tseed(t["window"], [lab])],
@@ -503,7 +527,6 @@ def gen_T(ctx: Ctx) -> List[dict]:
     # header, and walks 400 bp, past every branch the record states for these seeds (by 198 bp at the latest); the
     # windows are chosen as before (copies diverging within 950 bp)
     T_REPEAT_RADIUS = 400
-    warm: List[Tuple[int, dict]] = []
     nid = _ids("T-repeat")
     for i, (key, t, copies) in enumerate(_repeat_windows(ctx, rng, n=4, ext=1000)):
         rec = ctx.rec(key)
@@ -519,8 +542,8 @@ def gen_T(ctx: Ctx) -> List[dict]:
                             "(copies diverge at %s bp), a path follows a copy" % (
                                 len(copies), key, "/".join(str(t["copy_divergence_bp"][x]) for x in ("left", "right"))),
                             "POST /traverse", req, t, exp, tags=["walk", "repeat"]))
-        warm.append((len(out), region_warm_up(ctx, rec, t, R, rec.accession, sid,
-                                              "the seed's and the walk's coordinate tuples of a multi-copy repeat")))
+        warm_specs.append(("minimum", sid, rec.accession,
+                           "the coordinate tuples of a multi-copy repeat that the seed and the walk's minimum read"))
     nid = _ids("T-labels")
     eco = ctx.rec("eco")
     for i in range(2):
@@ -571,8 +594,8 @@ def gen_T(ctx: Ctx) -> List[dict]:
                                  ex("label_dict_contains", name=name, kind=kind, only_kind=True)],
                                 tags=["labels", "derived-labels", "label-kind-pair"]))
             if key == "eco" and kind == "column":
-                warm.append((len(out), region_warm_up(ctx, rec, tt, radius, rec.column, sid,
-                                                      "the rows of a seed 868 columns carry")))
+                warm.append(region_warm_up(ctx, rec, tt, radius, radius, rec.column, sid,
+                                           "the rows of a seed 868 columns carry"))
     rec = ctx.rec(LOW_CARRIER[4])
     t = ctx.flank_for(rec, ctx.window(rng, rec, 100, margin=400), 250)
     req = traverse_request([_tseed(t["window"], [rec.accession])], {"bounds": {"max_extension_bp": 200},
@@ -741,9 +764,10 @@ def gen_T(ctx: Ctx) -> List[dict]:
     out += _t_coverage(ctx)
     out += _t_gate_coverage(ctx, out)
     _annotate_walks(ctx, out)
-    # the warm-ups, after the area's own scenarios (their ids and draws unchanged); the build places each right
-    # before the walk it warms
-    out += [w for _, w in warm]
+    # the warm-ups, after the area's own scenarios (their ids and draws unchanged; a minimum warm-up reads the walk's
+    # exact minimum, known only now); the build places each right before the walk it warms
+    by_id_ = dict((x["id"], x) for x in out)
+    out += warm + [minimum_warm_up(ctx, by_id_[sid], label, why) for _, sid, label, why in warm_specs]
     return out
 
 
@@ -2740,7 +2764,7 @@ def _gen_N(ctx: Ctx) -> List[dict]:
                         [ex("status", http=[200, 400]), INV, ex("traverse_seed_outcome", walks=["complete", "partial"]),
                          ex("blocked_event", reason="rejoined_seed", max_at_bp=0)],
                         tags=["hard-region", "telomeric", "traverse"]))
-    hard_warm = warm_up(ctx, _warm_id(ctx), q, hsa_col,
+    hard_warm = warm_up(ctx, WARM_IDS[hard_id], q, hsa_col,
                         empirical({"low_complexity": "telomeric", "period": 6},
                                   "the human column carries every k-mer of (TTAGGG)^10 (v3 and v4: the seed walked on "
                                   "every arm)"),
