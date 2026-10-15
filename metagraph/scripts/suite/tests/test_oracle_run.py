@@ -160,6 +160,63 @@ class Provenance(unittest.TestCase):
         self.assertEqual(1, p['build_src_uncommitted'])
         self.assertIn(p['sha256'], report.markdown(self.minimal(p)))
 
+    def git_tree(self, d, commit_date):
+        import subprocess
+        env = dict(os.environ, GIT_COMMITTER_DATE=commit_date, GIT_AUTHOR_DATE=commit_date)
+
+        def git(*args):
+            subprocess.run(['git', '-C', d, '-c', 'user.email=oracle@test', '-c',
+                            'user.name=oracle', '-c', 'commit.gpgsign=false'] + list(args),
+                           check=True, capture_output=True, env=env)
+        os.makedirs(os.path.join(d, 'metagraph', 'src'))
+        os.makedirs(os.path.join(d, 'metagraph', 'build'))
+        src = os.path.join(d, 'metagraph', 'src', 'a.cpp')
+        with open(src, 'w') as f:
+            f.write('int main() {}\n')
+        git('init', '-q')
+        git('add', 'metagraph/src/a.cpp')
+        git('commit', '-q', '-m', 'a')
+        path = os.path.join(d, 'metagraph', 'build', 'metagraph')
+        with open(path, 'wb') as f:
+            f.write(b'an engine')
+        return src, path
+
+    def test_a_binary_older_than_the_last_src_commit_is_stale(self):
+        """Verification round 3: build_head is the tree's HEAD now; a binary linked before the
+        last commit touching metagraph/src cannot be a build of it, and the report says so."""
+        import calendar
+        import shutil
+        if shutil.which('git') is None:
+            self.skipTest('git is not installed')
+        commit = calendar.timegm((2026, 1, 2, 12, 0, 0))
+        for linked, stale in ((commit - 86400, True), (commit + 86400, False)):
+            with tempfile.TemporaryDirectory() as d:
+                _, path = self.git_tree(d, '2026-01-02T12:00:00Z')
+                os.utime(path, (linked, linked))
+                p = report.engine_provenance(path)
+            self.assertEqual('2026-01-02T12:00:00Z', p['src_last_commit_utc'])
+            self.assertRegex(p['src_last_commit'], '^[0-9a-f]{40}$')
+            self.assertIs(stale, p['stale'])
+            self.assertEqual(stale, 'STALE BINARY' in report.markdown(self.minimal(p)))
+
+    def test_the_engine_trees_index_is_never_rewritten(self):
+        """git status refreshes a stale index unless --no-optional-locks: a tracked file whose
+        mtime changed (same content) leaves the index byte-identical."""
+        import shutil
+        if shutil.which('git') is None:
+            self.skipTest('git is not installed')
+        with tempfile.TemporaryDirectory() as d:
+            src, path = self.git_tree(d, '2026-01-02T12:00:00Z')
+            os.utime(src, (1767225600, 1767225600))
+            index = os.path.join(d, '.git', 'index')
+            with open(index, 'rb') as f:
+                before = f.read()
+            p = report.engine_provenance(path)
+            with open(index, 'rb') as f:
+                after = f.read()
+        self.assertEqual(0, p['build_src_uncommitted'])
+        self.assertEqual(before, after)
+
     def test_a_binary_outside_a_git_tree(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, 'metagraph')

@@ -75,16 +75,29 @@ def engine_provenance(path):
     d = os.path.dirname(real)
 
     def git(*args):
-        res = subprocess.run(['git', '-C', d] + list(args), capture_output=True, text=True)
+        # --no-optional-locks: never refresh (rewrite) the engine tree's index
+        res = subprocess.run(['git', '--no-optional-locks', '-C', d] + list(args),
+                             capture_output=True, text=True)
         return res.stdout.strip() if res.returncode == 0 else None
     top = git('rev-parse', '--show-toplevel')
     out['build_tree'] = top
+    # the tree's HEAD now, not necessarily the commit the binary was built from: the binary
+    # prints no commit (its --version is the release number), so the staleness below is judged
+    # by time (verification round 3)
     out['build_head'] = git('rev-parse', 'HEAD') if top else None
     if top:
         # the pathspec from the tree's top: relative to the binary's directory (metagraph/build)
         # it named metagraph/build/metagraph/src and always counted 0
         status = git('status', '--porcelain', '--', ':/metagraph/src')
         out['build_src_uncommitted'] = len(status.splitlines()) if status is not None else None
+        last = git('log', '-1', '--format=%H %ct', '--', ':/metagraph/src')
+        if last:
+            sha, ct = last.split()
+            out['src_last_commit'] = sha
+            out['src_last_commit_utc'] = datetime.datetime.fromtimestamp(
+                int(ct), datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            # a binary linked before the last commit touching metagraph/src cannot contain it
+            out['stale'] = st.st_mtime < int(ct)
     return out
 
 
@@ -126,9 +139,16 @@ def markdown(report):
     lines.append(f"Engine: `{eng.get('realpath', eng['path'])}`, sha256 `{eng.get('sha256', '?')}`, "
                  f"modified {eng.get('mtime_utc', '?')}, {eng.get('version') or '?'}; build tree "
                  f"`{eng.get('build_tree')}` at HEAD `{eng.get('build_head')}` "
-                 f"({eng.get('build_src_uncommitted', '?')} uncommitted files under metagraph/src). "
+                 f"({eng.get('build_src_uncommitted', '?')} uncommitted files under metagraph/src; "
+                 f"last metagraph/src commit `{eng.get('src_last_commit', '?')}` of "
+                 f"{eng.get('src_last_commit_utc', '?')}). "
                  f"Seed {report['seed']}. {report['started_utc']} to {report['ended_utc']}.")
     lines.append('')
+    if eng.get('stale'):
+        lines.append(f"**STALE BINARY:** it was linked ({eng.get('mtime_utc')}) before the last commit "
+                     f"touching metagraph/src ({eng.get('src_last_commit')}, "
+                     f"{eng.get('src_last_commit_utc')}), so it cannot be a build of HEAD.")
+        lines.append('')
     s = report['summary']
     lines.append(f"**Verdict: {s['verdict']}.** {s['entries']} answers compared "
                  f"({s['requests']} requests): {s['pass']} pass, {s['fail']} fail, "
