@@ -2631,13 +2631,23 @@ exists for. The runner vendors checks.py: it takes these rules by re-vendoring (
   read, gave not_exposed invariants beside a passing walk, which the gate tolerates for a generic check. Measured:
   every recorded JSON segment of v3 / v4 (3,912) and of the 41 stored full documents (1,428) states its list; no
   recorded or stored verdict moves. The unit fixture walk_answer stated no list and states an empty one.
+- /traverse, a budget echoed otherwise than requested needs its clamp (the /resolve rule's counterpart). The engine
+  echoes the request's time budget, seed-label limit, memory and work budgets as sent unless it clamped them (and then
+  states the clamp), and the walk's checks read the echo: a time stop 2 s into a 15 s request passed beside an echo of
+  a 2 s budget. On a direct arm, a clampable knob the request sent whose strategy echo differs from it, lower or
+  higher, without a strategy.clamped entry of that field now fails the invariants (_clamp_problems; an invalid entry
+  of the field is reported by its own rule). The engine's clamps (with their effective values echoed) and its two
+  raises (a zero budget raised with its clamp, an omitted budget set to the maximum: not sent, so not compared) pass.
+  The MCP arm's request is the service's (its presets and its own bounds): not compared. Measured: 0 changes on v3 /
+  v4, the v4 gate the same 45 problems, the 82 stored /traverse documents unchanged.
 
 ### Validation (offline)
-- 454 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd, 451 before the follow-up). Each item's
+- 455 tests pass (1 skipped, the record-cache builder test; 446 at c11db9dd, 451 before the follow-up). Each item's
   new or revised test fails on c11db9dd's checks.py: the structural-clamp rejection, the missing-events and
   missing-tree tests, the resolve stop's pre-timer and premature-wall cases, the compound cut and the phase tests (the
   low-complexity-note test is a correction and passes on both). The follow-up's tests fail on the commit before
-  theirs: the annotate re-entry, the /resolve clamp, the events-list rule (the B2 and R1 tests' MCP invariants);
+  theirs: the annotate re-entry, the /resolve clamp, the events-list rule (the B2 and R1 tests' MCP invariants), the
+  /traverse budget echoed otherwise (fails at aa5e5f48);
   the test of the discovery max_contexts stop beside a predicate's pass covers a rule already there and fails on
   c11db9dd and on a mutant without that rule, which no other test caught.
 - Copies of v3 (lane-s5e/reeval-S5e) and v4 (doc/v4-c11db9dd) re-evaluated after each item and at the head against

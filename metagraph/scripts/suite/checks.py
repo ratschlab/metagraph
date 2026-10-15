@@ -3271,16 +3271,18 @@ def _clamp_problem(sc: dict, ans: dict, c: Any, arm: Optional[str]) -> Optional[
 
 def _clamp_problems(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
     """Why the answer's strategy.clamped cannot be the engine's (_clamp_problem per entry; a list, one entry per
-    field)."""
+    field), and, on a direct arm, a clampable knob the request sent that the strategy echo states otherwise without a
+    clamp naming it: the engine echoes the request's value unless it clamped it (traverse.cpp, the clamps of a
+    request), and the walk's checks read the echo (a time budget lowered unstated would excuse a premature time
+    stop, one raised unstated an overrun). The MCP arm's request is the service's: not compared."""
     body = ans.get("body") if isinstance(ans.get("body"), dict) else {}
     echo = body.get("strategy") if isinstance(body.get("strategy"), dict) else {}
     lst = echo.get("clamped")
-    if lst is None:
-        return []
-    if not isinstance(lst, list):
+    if lst is not None and not isinstance(lst, list):
         return ["strategy.clamped %r is not a list" % (lst,)]
     out, seen = [], set()
-    for c in lst:
+    named = {c.get("field") for c in lst or [] if isinstance(c, dict)}   # stated, a problem reported if invalid
+    for c in lst or []:
         bad = _clamp_problem(sc, ans, c, arm)
         if bad:
             out.append(bad)
@@ -3288,6 +3290,15 @@ def _clamp_problems(sc: dict, ans: dict, arm: Optional[str]) -> List[str]:
         if c["field"] in seen:
             out.append("strategy.clamped states %s twice" % c["field"])
         seen.add(c["field"])
+    st = (sc.get("request") or {}).get("strategy") if isinstance(sc.get("request"), dict) else None
+    if arm != "mcp" and isinstance(st, dict):
+        for f, (group, name) in sorted(_CLAMPABLE.items()):
+            g, eg = st.get(group), echo.get(group)
+            if f in named or not isinstance(g, dict) or not isinstance(eg, dict):
+                continue
+            sent, ran = g.get(name), eg.get(name)
+            if _is_num(sent) and _is_num(ran) and ran != sent:
+                out.append("strategy.%s %r, the request sent %r, without a clamp of it" % (f, ran, sent))
     return out
 
 

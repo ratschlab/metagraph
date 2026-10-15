@@ -1754,6 +1754,32 @@ class StatedReasons(unittest.TestCase):
         self.assertEqual(arms["left"]["cap_trigger"]["reason"], "time_budget")
         self.assertEqual(arms["left"]["counters"]["output_bp"], 500)
 
+    def test_a_budget_echoed_otherwise_needs_its_clamp(self):
+        # the engine echoes a clampable knob the request sent as sent unless it clamped it (traverse.cpp): on a
+        # direct arm an echo lower (or higher) than the request without a clamp of it fails the invariants
+        sc = v2_scenarios()["T-walk-0002"]
+        early = {"elapsed_ms": 2000.0, "seed_phase_ms": 500.0, "deadline": {
+            "longest_piece": {"kind": "read", "ms": 100.0, "rows": 1}, "stopped_by": "time_budget",
+            "stop_after_deadline_ms": 0.0}}
+        wd = {"kind": "walk_domain", "knob": "bounds.time_budget_ms", "limit": 2000, "observed": 2000.0}
+        # a time stop 2 s into the request's 15 s budget, the echo lowered to 2 s: the walk's checks read the echo,
+        # so the stop looks legitimate; the invariants name the unstated lowering
+        a = self.walk_answer(sc, 500, "time_budget", {"output_bp": 500, "steps": 500}, wd, timing=early,
+                             resource_stop={"resource": "time", "used": 2000.0}, bounds={"time_budget_ms": 2000})
+        o, d = outcome(sc, a, "invariants")
+        self.assertEqual(o, "fail")
+        self.assertIn("strategy.bounds.time_budget_ms 2000, the request sent 15000, without a clamp of it", d)
+        for knob, value in (("max_memory_mb", 1), ("max_work_units", 5), ("max_memory_mb", 1024)):
+            a = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500},
+                                 {"kind": "walk_domain", "knob": "bounds.max_output_bp", "limit": 500,
+                                  "observed": 501}, bounds={"max_output_bp": 500, knob: value})
+            self.assertIn("strategy.bounds.%s %r, the request sent" % (knob, value), outcome(sc, a, "invariants")[1])
+        # the same echo on the MCP arm, whose request is the service's: not compared
+        a = self.walk_answer(sc, 500, "max_output_bp", {"output_bp": 500, "steps": 500},
+                             {"kind": "walk_domain", "knob": "bounds.max_output_bp", "limit": 500, "observed": 501},
+                             bounds={"max_output_bp": 500, "max_work_units": 5})
+        self.assertNotIn("without a clamp of it", outcome(sc, a, "invariants", "mcp")[1])
+
     def test_resource_end_needs_a_cap_trigger(self):
         # G2 of the verification of lane S3: a path ended by a resource reason lies on an arm that cap stopped
         sc = v2_scenarios()["T-walk-0002"]
@@ -2727,6 +2753,18 @@ class TraverseChecks(unittest.TestCase):
             self.assertIn("a field the engine never clamps", outcome(sc, ans, "invariants")[1])
             self.assertEqual((outcome(sc, ans, "walk_in_record", "mcp")[0], outcome(sc, ans, "invariants", "mcp")[0]),
                              ("fail", "fail"), echo)
+        # a seed-label limit echoed below the request's without a clamp (the clamp's own field, unstated)
+        sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 2},
+                                                 "labels": {"max_seed_labels": 20000}},
+                                       echo={"bounds": {"max_extension_bp": 100}, "labels": {"max_seed_labels": 10000}})
+        self.assertIn("strategy.labels.max_seed_labels 10000, the request sent 20000, without a clamp of it",
+                      outcome(sc, ans, "invariants")[1])
+        sc, ans = self.structural_walk(strategy={"branching": {"max_label_branches": 2},
+                                                 "labels": {"max_seed_labels": 20000}},
+                                       echo={"bounds": {"max_extension_bp": 100}, "labels": {"max_seed_labels": 10000},
+                                             "clamped": [{"field": "labels.max_seed_labels", "requested": 20000,
+                                                          "effective": 10000}]})
+        self.assertEqual(judge(sc, ans), ("pass", "pass"))                 # the engine's clamp of it
         # the engine's own clamps (the time budget above the server's cap, an omitted work budget set to the
         # server's maximum) leave the walk's structural knobs as declared: the legitimate end passes on both arms
         timed = {"branching": {"max_label_branches": 2}, "bounds": {"time_budget_ms": 70000}}
