@@ -16,7 +16,8 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import seqtools as st
-from manifest_lib import (ABSENT_LABEL, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, Ctx, DB, K, PATTERN_MAX_CONTEXTS,
+from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, Ctx, DB, K,
+                          PATTERN_MAX_CONTEXTS,
                           PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS, WALK_PRESET, pattern_request, relation,
                           _pattern_kinds, resolve_request, scenario, source_contexts, traverse_request,
                           walk_expectations)
@@ -37,6 +38,14 @@ SMALL_WHOLE = ["lam", "t4", "hsv1", "hiv1", "hsam", "drem", "dmem", "scem"]
 
 def ex(check: str, **args) -> dict:
     return {"check": check, "args": args}
+
+
+def empirical(t: dict, claim: str) -> dict:
+    """The truth |t| with the part of the scenario's claim that the records cannot certify (a graph-wide or a
+    column-wide absence, which other records of the index decide), named with the index it was observed on: a failure
+    on another index asks to re-validate the expectation before it reads as a regression. The scenario carries the
+    tag index-empirical."""
+    return dict(t, index_empirical={"index_fp": HOST_INDEX.get("index_fp"), "claim": claim})
 
 
 def err400(text: Optional[str] = None, code: Optional[str] = None, prefix: Optional[str] = None,
@@ -122,11 +131,12 @@ def gen_R(ctx: Ctx) -> List[dict]:
         # exactly one run per label: A's label covering B's k-mers too (or B's A's) is a wrong answer
         exp = [OK, INV, ex("resolve_runs", label=ra.column, runs=[[0, a_end]]),
                ex("resolve_runs", label=rb.column, runs=[[b_start, len(q) - K + 1]])]
+        truth = empirical({"a": ta, "b": tb, "junction_bp": 100, "a_run_end": a_end, "b_run_start": b_start},
+                          "the taxid columns' runs: the other records of each column hold no junction k-mer and no k-mer "
+                          "of the other genome (the runs are computed from the two records alone)")
         out.append(scenario(nid(), "R", "junction of %s and %s: A's run ends at %d, B's starts at %d (from the records)" % (
                                 ra.key, rb.key, a_end, b_start),
-                            "POST /resolve", req, {"a": ta, "b": tb, "junction_bp": 100, "a_run_end": a_end,
-                                                   "b_run_start": b_start}, exp,
-                            tags=["positive", "junction"]))
+                            "POST /resolve", req, truth, exp, tags=["positive", "junction", "index-empirical"]))
     nid = _ids("R-discover")
     for i, key in enumerate(["buc", "mge", "mpn", "ser", "mja", "sso"]):
         rec = ctx.rec(key)
@@ -256,15 +266,23 @@ def gen_R(ctx: Ctx) -> List[dict]:
     out.append(scenario(nid(), "R", "time_budget_ms 400 (above the reserve, below the service's 500): the host answers",
                         "POST /resolve", resolve_request(t["window"], labels=[eco.column], time_budget_ms=400), t,
                         [OK, INV, ex("budget_respected")], tags=["edge", "split-case", "budget", "machine-dependent"]))
-    # the reverse complement of a window unique on both strands of its record: the record's header supports none
-    # of its k-mers (on this basic graph a k-mer and its reverse complement are different nodes)
+    # the reverse complement of a window none of whose reverse k-mers its record holds (Ctx.rc_negative_window: the
+    # whole record, k-mer by k-mer): the record's header supports none of the query's k-mers (on this basic graph a
+    # k-mer and its reverse complement are different nodes). The check discriminates only where the reverse k-mers are
+    # in the graph through other records (an assembly in the other orientation): genomes with many RefSeq records.
+    # R-rc-0001's S. aureus window was in the graph whole in v3 and v4; v4's R-rc-0002 (an M. jannaschii window) was
+    # absent from the graph, which made it a plain absence: E. coli takes its place
     nid = _ids("R-rc")
-    for key in ("sau", "mja"):
+    for key, evidence in (("sau", "this window's reverse complement: graph_runs [[0, 70]] on every arm of v3 and v4"),
+                          ("eco", "E. coli's many RefSeq records (6,181 headers carried T-labels-0004's window in v4); "
+                                  "the reverse complement of an eco 25-mer met 66 forward contexts (v4 N-usecase-0006)")):
         rec = ctx.rec(key)
-        t = ctx.window(ctx.rng("R", "rc", key), rec, 100)
-        out.append(scenario(nid(), "R", "the reverse complement of a unique %s window: its header supports none of it" % key,
+        t = ctx.rc_negative_window(ctx.rng("R", "rc", key), rec, 100)
+        out.append(scenario(nid(), "R", "the reverse complement of a window of %s none of whose reverse k-mers its "
+                            "record holds: its header supports none of it" % key,
                             "POST /resolve", resolve_request(st.revcomp(t["window"]), labels=[rec.accession]),
-                            dict(t, strand="-"), [OK, INV, ex("resolve_runs", label=rec.accession, kmers=0)],
+                            dict(t, strand="-", reverse_kmers_in_record=0, reverse_in_graph_evidence=evidence),
+                            [OK, INV, ex("resolve_runs", label=rec.accession, kmers=0)],
                             tags=["negative", "reverse-complement", "header-label"]))
     # the label order: the same labels in another order answer each label alike (resolve_runs reads them by name)
     nid = _ids("R-order")
@@ -580,15 +598,23 @@ def _t_coverage(ctx: Ctx) -> List[dict]:
                         "below_min_labels at once (SPEC §6.4)", "POST /traverse", req, t,
                         [OK, INV, ex("paths_end", reasons_in=["below_min_labels"], max_bp=1)],
                         tags=["labels", "quorum", "code-derived"]))
+    # the record holds none of the seed's k-mers (Ctx.rc_negative_window), so the header supports none of them and the
+    # seed is refused, by either of the two seed refusals: "Seed is not fully present in the graph" when a k-mer is in
+    # no record of the graph, "No seed label supports every k-mer of the seed" when other records hold them all
+    # (walker.cpp, traverse.cpp); which one is the index's (v3 and v4: the first, graph runs o30)
     nid = _ids("T-strand")
     rec = ctx.rec("buc")
-    t = ctx.window(rng, rec, 60, margin=600)
+    t = ctx.rc_negative_window(rng, rec, 60, margin=600)
     q = st.revcomp(t["window"])
-    out.append(scenario(nid(), "T", "the reverse complement of a unique buc window as the seed: not in this basic graph",
+    t = empirical(dict(t, strand="-", reverse_kmers_in_record=0,
+                       seed_refusals=["seed '%s': Seed is not fully present in the graph; graph runs: " % q[:32],
+                                      "seed '%s': No seed label supports every k-mer of the seed" % q[:32]]),
+                  "which seed refusal: the reverse k-mers in no record of the graph (v3 and v4: graph runs o30)")
+    out.append(scenario(nid(), "T", "the reverse complement of a buc window none of whose reverse k-mers buc holds, as "
+                        "the seed under buc's header: a seed refusal",
                         "POST /traverse", traverse_request([_tseed(q, [rec.accession])], {"bounds": {"max_extension_bp": 100}}),
-                        dict(t, strand="-"),
-                        [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q[:32])],
-                        tags=["edge", "negative", "reverse-complement", "refusal"]))
+                        t, [err400(prefix="seed '%s': " % q[:32])],
+                        tags=["edge", "negative", "reverse-complement", "refusal", "index-empirical"]))
     return out
 
 
@@ -1327,13 +1353,16 @@ def gen_X(ctx: Ctx) -> List[dict]:
             if not rec.usable_for_positives or "dna" not in jw:
                 continue
             seq = jw["dna"]
-            t = {"record": rec.accession, "taxid": rec.column, "spliced_dna": seq if prot["strand"] == 1 else st.revcomp(seq),
-                 "peptide": jw["peptide"], "protein": prot["key"], "window_id": jw.get("id")}
+            t = empirical({"record": rec.accession, "taxid": rec.column,
+                           "spliced_dna": seq if prot["strand"] == 1 else st.revcomp(seq),
+                           "peptide": jw["peptide"], "protein": prot["key"], "window_id": jw.get("id")},
+                          "no path of the whole graph spells the spliced DNA: its record holds it on neither strand, "
+                          "another record (an intronless copy, a cDNA) or a recombination of the graph could")
             req = pattern_request([{"id": jw.get("id", "junction"), "protein": jw["peptide"]}], genetic_code=prot["transl_table"],
                                   mode="partial", long_search="paths", max_paths=1024)
             out.append(scenario(nid(), "X", "window across one exon junction of %s: no path spells the spliced DNA" % prot["key"],
                                 "POST /pattern", req, t, [OK, INV, ex("path_absent")],
-                                timing_class="slow", tags=["peptide", "junction", "expected-miss"]))
+                                timing_class="slow", tags=["peptide", "junction", "expected-miss", "index-empirical"]))
             n += 1
             break
         if n >= 4:
@@ -2192,10 +2221,12 @@ def _gen_N(ctx: Ctx) -> List[dict]:
                             traverse_request([_tseed(q)], {"bounds": {"max_extension_bp": 100}}), {"random": q},
                             [err400(prefix="seed '%s': Seed is not fully present in the graph; graph runs: " % q[:32])],
                             tags=["negative", "refusal"]))
-    for j, n_aa in enumerate((10, 20, 30)):
+    # the shortest a random peptide of these residues is whose chance bound stays below 1e-5 is 12 residues (36 bases,
+    # paths; 10 residues, a pattern below k, met about 5.6e-4: chance_bound)
+    for j, n_aa in enumerate((12, 20, 30)):
         r2 = ctx.rng("N", "pep", n_aa)
         pep = "".join(r2.choice("MWCFYHQNKDE") for _ in range(n_aa))
-        if n_aa <= 10:
+        if 3 * n_aa <= K:
             req = pattern_request([{"id": "rp", "protein": pep}], genetic_code=1)
             exp = [OK, INV, CC, ex("absent")]
         else:
@@ -2475,6 +2506,76 @@ def _near_miss_more(ctx: Ctx) -> List[dict]:
                                                      substitutions=_subs_minus(P, t["window"]))],
                         tags=["near-miss", "pair", "reverse", "machine-dependent"]))
     return out
+
+
+# ================================================================================================= chance bounds
+# A global negative control (a random or shuffled sequence, a random peptide) claims an absence the records cannot
+# certify: the chance that the graph holds the query anyway is bounded, and the builder refuses a control whose bound
+# exceeds CHANCE_BOUND_MAX (VERIFY-D of the outside review)
+CHANCE_BOUND_MAX = 1e-4
+_NEGATIVE_TRUTH_KEYS = ("random", "shuffled_from", "random_peptide")
+
+
+def chance_bound(sc: dict) -> Optional[dict]:
+    """The chance bound of a global negative control (None for another scenario), the union bound of VERIFY-D over the
+    graph's REFSEQ33M_KMERS k-mers (k = 31) for a uniform query: a query k-mer equals some graph k-mer with probability
+    at most N / 4^k. /pattern, DNA of L >= k: no context or path spells the query on a requested strand, which needs its
+    first k-mer: (strands) N / 4^k; a peptide of L = 3n bases over its E encodings in its table: below k a substring of
+    some k-mer, (strands) E (k - L + 1) N / 4^L, from k on a path of L bases, of which the graph spells about as many
+    as it holds k-mers (a model, not a strict bound): (strands) E N / 4^L. /resolve: any of the query's k-mers in the
+    graph, (L - k + 1) N / 4^k (a column's support bounded by the whole graph). /traverse (the seed's 400): every
+    k-mer present, bounded by the first, N / 4^k. A shuffled query also states the composition-matched worst case
+    (the whole graph at the query's base composition: the bound times (4 sum f^2)^k)."""
+    t = sc.get("truth")
+    req = sc.get("request")
+    if not isinstance(t, dict) or not any(k in t for k in _NEGATIVE_TRUTH_KEYS) or not isinstance(req, dict):
+        return None
+    n = REFSEQ33M_KMERS
+    pk = n / 4.0 ** K
+    route = sc.get("route")
+    out: Dict[str, Any] = {"kmers": n, "k": K}
+    q = None
+    if route == "POST /pattern":
+        p0 = (req.get("patterns") or [{}])[0]
+        ns = 1 if req.get("strands") in ("forward", "reverse") else 2
+        if "protein" in p0:
+            pep, table = p0["protein"], int(req.get("genetic_code", 1))
+            enc = 1
+            for a in pep:
+                enc *= len(st.codons_of(a, table))
+            L = 3 * len(pep)
+            p = ns * enc * ((K - L + 1) * n / 4.0 ** L if L < K else n / 4.0 ** L)
+            out.update(model="peptide of %d bases, %d encodings in table %d, %d strand(s)" % (L, enc, table, ns))
+        else:
+            q = p0.get("dna") or p0.get("iupac") or ""
+            L = len(q)
+            p = ns * ((K - L + 1) * n / 4.0 ** L if L < K else pk)
+            out.update(model="%d bases, %d strand(s): the first k-mer" % (L, ns))
+    elif route == "POST /resolve":
+        q = req.get("sequence") or ""
+        p = (len(q) - K + 1) * pk
+        out.update(model="any of %d k-mers in the graph" % (len(q) - K + 1))
+    elif route == "POST /traverse":
+        q = ((req.get("seeds") or [{}])[0]).get("sequence") or ""
+        p = pk
+        out.update(model="every k-mer of the seed in the graph, bounded by the first")
+    else:
+        return None
+    out["p"] = float("%.3g" % p)
+    if "shuffled_from" in t and q:
+        f = [q.count(b) / float(len(q)) for b in "ACGT"]
+        worst = (4.0 * sum(x * x for x in f)) ** K
+        out["p_composition_worst"] = float("%.3g" % min(1.0, p * worst))
+    return out
+
+
+def state_chance_bounds(scenarios: List[dict]) -> None:
+    """truth.chance_bound on every global negative control (chance_bound); a truth shared by two scenarios is copied
+    first, so that each states its own route's bound."""
+    for sc in scenarios:
+        b = chance_bound(sc)
+        if b is not None:
+            sc["truth"] = dict(sc["truth"], chance_bound=b)
 
 
 # ================================================================================================= relations

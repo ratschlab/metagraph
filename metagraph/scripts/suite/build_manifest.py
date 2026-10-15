@@ -117,6 +117,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         scenarios += areas.gen_REL(ctx, scenarios, caps)   # the relations' twins (needs every area)
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
+    areas.state_chance_bounds(scenarios)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios)
@@ -229,7 +230,8 @@ def counts(scenarios, relations=()) -> dict:
             "mcp_not_implemented": sum(1 for s in scenarios if "not_implemented" in s["mcp"]),
             "relations": len(relations), "relations_by_type": dict(sorted(by_type.items())),
             "by_tag": {t: sum(1 for s in scenarios if t in s["tags"])
-                       for t in ("last-record-verified", "code-derived", "machine-dependent", "smoke", SMOKE_TAG)}}
+                       for t in ("last-record-verified", "code-derived", "machine-dependent", "index-empirical",
+                                 "budget_stress", "warm-up", "smoke", SMOKE_TAG)}}
 
 
 def validate_relations(relations, scenarios) -> list:
@@ -290,6 +292,10 @@ def validate(scenarios) -> list:
             problems.append("%s: no status expectation" % s["id"])
         for e in s["expect"]:
             problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
+        cb = (s.get("truth") or {}).get("chance_bound") if isinstance(s.get("truth"), dict) else None
+        if cb and cb.get("p", 0) > areas.CHANCE_BOUND_MAX:
+            problems.append("%s: a negative control whose chance bound %g exceeds %g" % (
+                s["id"], cb["p"], areas.CHANCE_BOUND_MAX))
         req = s["request"]
         if s["route"] == "POST /pattern" and isinstance(req, dict) and "patterns" in req:
             for f in ("mode", "max_contexts", "time_budget_ms"):

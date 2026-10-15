@@ -66,6 +66,9 @@ HOST_MISMATCH_MAX = {"dna": 3, "iupac": 3, "protein": 3}
 # /resolve resolve.time_budget.max_time_ms of /traverse/capabilities. A request above it is lowered to it (SPEC-pattern
 # §4.5, SPEC-labeled-traversal-core §4.5), so budget_respected states it as cap_ms where a request asks more (A2-03)
 HOST_BUDGET_CAP_MS: Dict[str, int] = {}
+# The index the snapshot states (/traverse/capabilities index_fp): a claim the records alone cannot certify (a
+# graph-wide or column-wide absence) names it as the index it was observed on (areas.empirical)
+HOST_INDEX: Dict[str, Optional[str]] = {"index_fp": None}
 
 
 def _int_or_none(v: Any) -> Optional[int]:
@@ -81,6 +84,7 @@ def set_host_capabilities(pattern_caps: Optional[dict], traverse_caps: Optional[
     for kind, v in mx.items():
         if isinstance(v, int) and not isinstance(v, bool):
             HOST_MISMATCH_MAX[kind] = v
+    HOST_INDEX["index_fp"] = (traverse_caps or {}).get("index_fp")
     HOST_BUDGET_CAP_MS.clear()
     for route, v in (("POST /pattern", ((pattern_caps or {}).get("caps") or {}).get("time_budget_ms")),
                      ("POST /resolve", (((traverse_caps or {}).get("resolve") or {}).get("time_budget") or {}).get(
@@ -184,6 +188,18 @@ class Ctx:
             "fetched_span": [rec.offset, rec.offset + len(seq)],
         }
 
+    def rc_negative_window(self, rng: random.Random, rec: Record, L: int, tries: int = 50, **kw: Any) -> dict:
+        """A window as window() picks it whose reverse complement shares no k-mer with the record's forward strand
+        (the whole record), so that the record's header supports none of the reverse query's k-mers on this basic
+        graph: whole-window uniqueness on both strands does not imply it (a window overlapping an inverted repeat keeps
+        reverse k-mers in the record, about 1 % of the windows window() accepts). A window drawn after a rejected one
+        comes from the same stream. Raises when none is found."""
+        for _ in range(tries):
+            t = self.window(rng, rec, L, **kw)
+            if not reverse_kmers_in_record(rec, t["window"]):
+                return t
+        raise ValueError("no %d bp window of %s without a reverse k-mer in its record" % (L, rec.key))
+
     def flank_for(self, rec: Record, t: dict, extra: int) -> dict:
         """The same truth with a flank of |extra| bases each side (traversal walks)."""
         s = t["start"] - rec.offset
@@ -193,6 +209,15 @@ class Ctx:
         out["flank"] = rec.seq[a:b]
         out["flank_start"] = rec.offset + a
         return out
+
+
+def reverse_kmers_in_record(rec: Record, window: str, k: int = K) -> List[int]:
+    """The starts of the k-mers of revcomp(window) that the record's forward strand holds. It needs the whole record:
+    a fetched region cannot certify the rest of the record."""
+    if rec.region:
+        raise ValueError("%s: only a region is fetched; its reverse k-mers cannot be certified absent" % rec.key)
+    q = st.revcomp(window)
+    return [i for i in range(len(q) - k + 1) if q[i:i + k] in rec.seq]
 
 
 # ---------------------------------------------------------------------------------------------- walk expectations
