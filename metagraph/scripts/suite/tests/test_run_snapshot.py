@@ -381,6 +381,66 @@ class MergeChecksIdentityTest(unittest.TestCase):
             sc.write_json_atomic(out, cmp.compare(d, TABLE, reevaluated=True))
             self.assertEqual(identity(), [])
 
+    def test_a_reevaluated_set_is_evidence_by_its_checks_hashes_not_its_directory(self):
+        # a re-evaluated set whose checks directory is gone is compared with this tree's checks: it stands when
+        # their sha256 are the ones reevaluated.json records, and blocks with "re-evaluate the set" when they are not
+        # (recomputing the comparison cannot clear that); a directory changed after the comparison, which the gate's
+        # property reading would load, blocks the same way
+        m = manifest_of()
+
+        def reevaluated_run(name, tail=b""):
+            d = make_run(os.path.join(self.d, "runs", name), m, mcp_lines(m))
+            checks_dir = os.path.join(self.d, "checks_" + name)
+            os.makedirs(checks_dir)
+            for f in sc.EXECUTED_FILES:
+                shutil.copy2(os.path.join(SUITE, f), checks_dir)
+            with open(os.path.join(checks_dir, "checks.py"), "ab") as fh:
+                fh.write(tail)
+            shutil.copy(os.path.join(d, "arms", "mcp", "executions.jsonl"),
+                        os.path.join(d, "arms", "mcp", "executions.reevaluated.jsonl"))
+            sc.write_json_atomic(os.path.join(d, "reevaluated.json"), {"checks": {
+                "dir": checks_dir, "checks_sha256": sc.file_sha256(os.path.join(checks_dir, "checks.py")),
+                "suite_common_sha256": sc.file_sha256(os.path.join(checks_dir, "suite_common.py"))}})
+            merge_run.merge(d, reevaluated=True)
+            sc.write_json_atomic(os.path.join(d, "compare.reevaluated.json"), cmp.compare(d, TABLE, reevaluated=True))
+            return d, checks_dir
+
+        def identity(d, recompute=False):
+            if recompute:
+                sc.write_json_atomic(os.path.join(d, "compare.reevaluated.json"),
+                                     cmp.compare(d, TABLE, reevaluated=True))
+            return [p["detail"] for p in gate.judge(d, policy_of(m), reevaluated=True)["problems"]
+                    if p["kind"] == "identity"]
+        # gone, the tree's checks the recorded ones: accepted, before and after the comparison is recomputed
+        d, checks_dir = reevaluated_run("same")
+        shutil.rmtree(checks_dir)
+        self.assertEqual(identity(d), [])
+        self.assertEqual(sc.read_json(os.path.join(d, "compare.reevaluated.json"))["judged_with"]["source"],
+                         "reevaluation")
+        self.assertEqual(identity(d, recompute=True), [])
+        self.assertEqual(sc.read_json(os.path.join(d, "compare.reevaluated.json"))["judged_with"]["source"], "live")
+        # gone, the recorded checks another checks.py: blocks, naming re-evaluation
+        d, checks_dir = reevaluated_run("other", b"\n# another checks.py\n")
+        recorded = sc.file_sha256(os.path.join(checks_dir, "checks.py"))
+        shutil.rmtree(checks_dir)
+        live = sc.file_sha256(os.path.join(SUITE, "checks.py"))
+        gone = ("checks.py (sha256 %s) of this tree (the re-evaluation's checks directory is gone) (%s) is not the "
+                "%s the re-evaluation records (reevaluated.json): re-evaluate the set"
+                % (live[:12], SUITE, recorded[:12]))
+        self.assertEqual(identity(d), [gone])
+        self.assertEqual(identity(d, recompute=True), [
+            gone, "compare.reevaluated.json was judged with checks.py sha256 %s, not the %s the re-evaluation records "
+                  "(reevaluated.json): re-evaluate the set" % (live[:12], recorded[:12])])
+        # present, changed after its comparison (the property reading would load it): blocks
+        d, checks_dir = reevaluated_run("edited")
+        recorded = sc.file_sha256(os.path.join(checks_dir, "checks.py"))
+        with open(os.path.join(checks_dir, "checks.py"), "a") as fh:
+            fh.write("\n\ndef is_property(name):\n    return False\n")
+        self.assertEqual(identity(d), [
+            "checks.py (sha256 %s) of the re-evaluation's checks directory (%s) is not the %s the re-evaluation "
+            "records (reevaluated.json): re-evaluate the set"
+            % (sc.file_sha256(os.path.join(checks_dir, "checks.py"))[:12], checks_dir, recorded[:12])])
+
     def test_a_broken_snapshot_record_or_a_missing_executed_file_is_refused_never_a_crash(self):
         # SNAPSHOT.json empty, torn, no object, unreadable, or a file it records deleted (its suite_common.py): the
         # refusal names the cause and the merge, the comparison, the gate's property reading and the re-evaluation

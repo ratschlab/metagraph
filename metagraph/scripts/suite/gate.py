@@ -824,12 +824,19 @@ def _describe_agreement(ma):
     return (text + ("; " + str(detail)[:200] if detail else "")) or "-"
 
 
+HASH_KEYS = (("checks_sha256", "checks.py"), ("suite_common_sha256", "suite_common.py"))
+
+
 def compared_with_checks_problems(run_dir, comp, reevaluated=False):
-    """Why a set's comparison is no evidence for the checks that judged the set (a comparison computed while those
-    files were changed, restored before the gate, or with other checks): it does not state that they judged it
-    (judged_with source: the run's snapshot for a recorded set, the re-evaluation's checks for a re-evaluated one), or
-    the checks.py / suite_common.py sha256 it states are not the ones recorded for them (SNAPSHOT.json; the checks of
-    reevaluated.json). [] for a recorded set without a snapshot."""
+    """Why a set's comparison, or the checks the gate reads beside it, are no evidence for the checks that judged the
+    set: the comparison does not state that they judged it (judged_with source: the run's snapshot for a recorded set,
+    the re-evaluation's checks for a re-evaluated one), or the checks.py / suite_common.py sha256 it states are not the
+    ones recorded for them (SNAPSHOT.json; the checks of reevaluated.json): a comparison computed while those files
+    were changed, restored before the gate, or with other checks. A re-evaluated set is evidence by its hashes, not by
+    its directory: compared with this tree's checks (its re-evaluation's directory gone), it stands when their sha256
+    are the recorded ones; and the re-evaluation's directory (the gate's property reading) must still hold them. The
+    advice is the step that clears the problem: recompute the comparison where the checks the comparison would read
+    now are the recorded ones, re-evaluate the set otherwise. [] for a recorded set without a snapshot."""
     name = sc.reevaluated_name("compare.json", reevaluated)
     if reevaluated:
         mark = (merge_run.reevaluation_mark(run_dir) or {}).get("checks") or {}
@@ -843,14 +850,25 @@ def compared_with_checks_problems(run_dir, comp, reevaluated=False):
         files = snap.get("files") or {}
         source, whose, where = "snapshot", "the run's snapshot", "SNAPSHOT.json records"
         want = {"checks.py": files.get("checks.py"), "suite_common.py": files.get("suite_common.py")}
+    now = cmp.judging_checks(run_dir, reevaluated)
+    out = []
+    if reevaluated:
+        # the checks a comparison and the gate's property reading read now (the re-evaluation's directory, or this
+        # tree's where it is gone) are not the ones that judged the set
+        place = "the re-evaluation's checks directory" if now.get("source") == "reevaluation" else \
+            "this tree (the re-evaluation's checks directory is gone)"
+        out.extend("%s (sha256 %s) of %s (%s) is not the %s %s: re-evaluate the set"
+                   % (f, str(now.get(key))[:12], place, now.get("dir"), str(want[f])[:12], where)
+                   for key, f in HASH_KEYS if now.get(key) != want[f])
+    advice = "recompute the comparison" if not out else "re-evaluate the set"
     jw = (comp or {}).get("judged_with")
-    if not isinstance(jw, dict) or jw.get("source") != source:
-        return ["%s was not judged with %s (judged_with source %s): recompute the comparison"
-                % (name, whose, jw.get("source") if isinstance(jw, dict) else "not stated")]
-    return ["%s was judged with %s sha256 %s, not the %s %s: recompute the comparison"
-            % (name, f, str(jw.get(key))[:12], str(want[f])[:12], where)
-            for key, f in (("checks_sha256", "checks.py"), ("suite_common_sha256", "suite_common.py"))
-            if jw.get(key) != want[f]]
+    sources = (source, "live") if reevaluated else (source,)
+    if not isinstance(jw, dict) or jw.get("source") not in sources:
+        return out + ["%s was not judged with %s (judged_with source %s): %s"
+                      % (name, whose, jw.get("source") if isinstance(jw, dict) else "not stated", advice)]
+    return out + ["%s was judged with %s sha256 %s, not the %s %s: %s"
+                  % (name, f, str(jw.get(key))[:12], str(want[f])[:12], where, advice)
+                  for key, f in HASH_KEYS if jw.get(key) != want[f]]
 
 
 def load_compare(run_dir, reevaluated=False):
