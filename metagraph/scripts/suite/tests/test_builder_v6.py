@@ -153,6 +153,27 @@ class ManifestV6(unittest.TestCase):
         self.assertEqual(sum(1 for s in self.v6["scenarios"] if (s.get("mcp") or {}).get("exposes")),
                          self.v5["mcp_exposure_baseline"]["scenarios_with_exposes"])
 
+    def test_client_timeouts_exceed_every_stated_budget(self):
+        """Every v6 request's client timeout exceeds its stated time budget by the margin on direct-local, and the
+        front proxy's cap on direct-remote still exceeds the budget's deadline answer (~budget + 250 ms)."""
+        import run_direct
+        over = collections.Counter()
+        for s in self.v6["scenarios"]:
+            bound = sc.stated_request_bound_s(s)
+            if bound is None:
+                continue
+            local = run_direct.timeout_for(s, "direct-local", sc.TIMING_CLASS_TIMEOUT_S)
+            self.assertGreaterEqual(local, bound + sc.CLIENT_BUDGET_MARGIN_S, s["id"])
+            if s.get("timing_class") != "long":
+                remote = run_direct.timeout_for(s, "direct-remote", sc.TIMING_CLASS_TIMEOUT_S)
+                self.assertGreater(remote, bound + 1.0, s["id"])
+            over[(s["route"], bound, local)] += 1
+        self.assertEqual(over[("POST /pattern", 120.0, 150.0)], 397)   # the fast ones; the 52 slow ones keep 600
+        self.assertEqual(over[("POST /pattern", 120.0, 600.0)], 52)
+        self.assertEqual(over[("POST /resolve", 60.0, 120.0)] + over[("POST /resolve", 60.0, 600.0)],
+                         sum(1 for s in self.v6["scenarios"] if s["route"] == "POST /resolve"
+                             and sc.stated_request_bound_s(s) == 60.0))
+
     def test_request_digest_leaves_the_pattern_budget_out(self):
         a = {"tool": "pattern_search", "arguments": {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 60000}}
         b = {"tool": "pattern_search", "arguments": {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 120000}}

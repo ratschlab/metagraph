@@ -394,6 +394,21 @@ class McpStep(unittest.TestCase):
         self.assertEqual(sc.request_bound_s({"route": "POST /traverse", "timing_class": "slow"}), 600.0)
         self.assertEqual(sc.request_bound_s({"route": "POST /traverse"}), 120.0)
 
+    def test_client_timeout_exceeds_a_stated_budget(self):
+        # v6: a /pattern budget of 120,000 ms is the fast class's 120 s; the client timeout is the budget + the margin
+        pat = {"route": "POST /pattern", "timing_class": "fast", "request": {"time_budget_ms": 120000}}
+        self.assertEqual(sc.stated_request_bound_s(pat), 120.0)
+        self.assertEqual(sc.client_timeout_s(pat), 120.0 + sc.CLIENT_BUDGET_MARGIN_S)
+        self.assertEqual(sc.client_timeout_s(dict(pat, timing_class="slow")), 600.0)        # the class is more
+        self.assertEqual(sc.client_timeout_s(dict(pat, request={"time_budget_ms": 60000})), 120.0)   # v5's budget
+        self.assertEqual(sc.client_timeout_s(dict(pat, request={"time_budget_ms": 300})), 120.0)
+        self.assertEqual(sc.client_timeout_s(dict(pat, mcp={"arguments": {"time_budget_ms": 200000}})), 230.0)
+        self.assertIsNone(sc.stated_request_bound_s({"route": "POST /pattern", "request": {}}))
+        self.assertEqual(sc.client_timeout_s({"route": "POST /pattern", "request": {}}), 120.0)   # the default budget
+        self.assertEqual(sc.client_timeout_s({"route": "POST /traverse", "timing_class": "long"}), 1800.0)
+        self.assertEqual(sc.client_timeout_s(pat, {"fast": 10.0, "slow": 20.0, "long": 30.0}), 150.0)
+        self.assertEqual(sc.CLIENT_BUDGET_MARGIN_S, 30.0)
+
     def test_outcomes_and_the_wait_after_a_cancelled_job(self):
         manifest = {"scenarios": [{"id": "A", "route": "POST /traverse",
                                    "mcp": {"arguments": {"strategy": {"bounds": {"time_budget_ms": 4000}}}}},

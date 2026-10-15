@@ -44,7 +44,8 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   scenario"; `--warm-every 0` turns it off). The index is global, so a subset run repeats the same scenarios.
 - `timing_class` long is not run on direct-remote (the front proxy cuts at ~120 s): no execution line, the
   scenario is listed under `skipped` in the arm's run.json. Client timeouts: fast 120 s, slow 600 s, long
-  1800 s; direct-remote at most 125 s.
+  1800 s, or the request's stated time budget + 30 s where that is more (suite_common.client_timeout_s; v6's
+  /pattern budget of 120 s gets 150 s); direct-remote at most 125 s.
 - Execution outcome (review of lane S1; the MCP runner applies the same rule): checks may report `pass`,
   `fail`, `not_exposed`, `inconclusive` (the scenario could not test its property: an allowed 503, a withheld
   answer hiding the source, a stated resource stop) or `finding` (the host broke a stated bound or SPEC
@@ -204,7 +205,7 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
 8. Samples (review M5): the mex samplers write ~/suite-dev/runs/<id>/samples/; every invocation pulls the
    whole directory on exit (also after Ctrl-C) and at its start, merge_run deduplicates.
 9. Ctrl-C: the step in flight stops after its request (`pkill -INT` of this run's runner on mex; a local
-   step gets the terminal's SIGINT), the orchestrator waits up to 120 s for the mex runner (a long request may
+   step gets the terminal's SIGINT), the orchestrator waits up to SUITE_WAIT_RUNNER_S (150 s) for the mex runner (a long request may
    take 30 min: then it says so, pulls what was recorded and leaves the rest to --resume), pulls, releases the
    lock and prints the --resume command (exit 130).
 10. merge_run.py, compare.py, report.py (report.pdf unless --no-pdf). The last stdout line is the run

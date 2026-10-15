@@ -360,8 +360,13 @@ def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=(
 # ---------------------------------------------------------------------------------------------------------------
 # after an MCP step of the paired loop (async's answers to the verification of lane S2b)
 
-# How long a request of a timing class may take (the direct runner's client timeouts).
+# How long a request of a timing class may take (the direct runner's client timeouts); a request that states a time
+# budget above it gets the budget plus CLIENT_BUDGET_MARGIN_S instead (client_timeout_s).
 TIMING_CLASS_TIMEOUT_S = {"fast": 120.0, "slow": 600.0, "long": 1800.0}
+# The margin a client timeout keeps above a request's stated time budget (v6: the /pattern budget of 120,000 ms is
+# the fast class's 120 s, so the class alone would turn the host's 503 deadline, answered at ~budget + 250 ms, into a
+# client timeout): the host's finalisation reserve, the answer's transfer and the clocks.
+CLIENT_BUDGET_MARGIN_S = 30.0
 # The host's time budget of a /pattern request that states none (SPEC-pattern-search: default_time_budget_ms).
 PATTERN_DEFAULT_BUDGET_S = 60.0
 # Added to a cancelled job's bound: the answer's transfer and the clocks.
@@ -384,14 +389,34 @@ def _budget_values(obj):
                 yield v
 
 
-def request_bound_s(scenario):
-    """How long the host may work on the scenario's request: its time_budget_ms (the largest stated in the MCP
-    arguments, else in the direct request), else the /pattern default budget, else the timing class's
-    timeout (a traversal without a budget has no deadline of its own)."""
+def stated_request_bound_s(scenario):
+    """The time budget the scenario's request states, in seconds (the largest time_budget_ms in the MCP arguments,
+    else in the direct request), None when it states none."""
     stated = list(_budget_values((scenario.get("mcp") or {}).get("arguments"))) or \
         list(_budget_values(scenario.get("request")))
-    if stated:
-        return max(stated) / 1000.0
+    return max(stated) / 1000.0 if stated else None
+
+
+def client_timeout_s(scenario, timeouts=None):
+    """The direct runner's client timeout of the scenario's request: its timing class's (|timeouts|, else
+    TIMING_CLASS_TIMEOUT_S), or the request's stated time budget plus CLIENT_BUDGET_MARGIN_S where that is more (a
+    budgeted request is answered at its budget at the latest, a /pattern 503 deadline at ~budget + 250 ms: the
+    timeout must exceed it with margin, or the deadline, an inconclusive, reads as a client timeout, an error)."""
+    table = timeouts or TIMING_CLASS_TIMEOUT_S
+    t = table.get(scenario.get("timing_class") or "fast", table["fast"])
+    bound = stated_request_bound_s(scenario)
+    if bound is not None:
+        t = max(t, bound + CLIENT_BUDGET_MARGIN_S)
+    return t
+
+
+def request_bound_s(scenario):
+    """How long the host may work on the scenario's request: its time_budget_ms (the largest stated in the MCP
+    arguments, else in the direct request; stated_request_bound_s), else the /pattern default budget, else the timing
+    class's timeout (a traversal without a budget has no deadline of its own)."""
+    stated = stated_request_bound_s(scenario)
+    if stated is not None:
+        return stated
     if "/pattern" in str(scenario.get("route") or ""):
         return PATTERN_DEFAULT_BUDGET_S
     return TIMING_CLASS_TIMEOUT_S.get(scenario.get("timing_class") or "fast", TIMING_CLASS_TIMEOUT_S["fast"])

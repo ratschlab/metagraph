@@ -574,7 +574,8 @@ interrupted() {
     # The runner of the step in flight (paired) or of the arm (sequential) stops after its request.
     mex "pkill -INT -u \$(id -u) -f '$RUNNER_PATTERN .*--run-id $RUN_ID'" || true
     local wrc=0
-    wait_no_runner 120 || wrc=$?
+    # the fast class's longest request (v6: a /pattern budget of 120 s, its client timeout 150 s) ends within it
+    wait_no_runner "$WAIT_RUNNER_S" || wrc=$?
     case $wrc in
       1) if [[ $MODE == sequential ]]; then
            log "the mex runner still runs (it stops after its request in flight, which may take up to 30 min); what it recorded so far is pulled, the rest stays on mex; --resume attaches to it"

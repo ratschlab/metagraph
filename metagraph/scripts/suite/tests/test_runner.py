@@ -259,6 +259,25 @@ class RunnerTest(unittest.TestCase):
         run = sc.read_json(os.path.join(out, "run.json"))
         self.assertEqual(run["skipped"][0]["scenario"], "L-1")
 
+    def test_client_timeout_follows_a_stated_budget(self):
+        # v6: a /pattern request with a 120,000 ms budget (the fast class's 120 s) gets the budget + 30 s on
+        # direct-local, and the front proxy's cap on direct-remote; v5's 60,000 ms keeps the class's timeout
+        scen = [scenario("P-6", "P", "POST /pattern", {"patterns": [{"dna": "ACGT" * 8, "id": "a"}], "mode": "count",
+                                                      "time_budget_ms": 120000}),
+                scenario("P-5", "P", "POST /pattern", {"patterns": [{"dna": "ACGT" * 8, "id": "a"}], "mode": "count",
+                                                      "time_budget_ms": 60000})]
+        make_manifest(self.manifest_path, scen)
+        for arm, want in (("direct-local", 150.0), ("direct-remote", run_direct.REMOTE_TIMEOUT_CAP_S)):
+            out = os.path.join(self.dir, "run-" + arm)
+            with FakeHost() as host:
+                run_direct.main(["--manifest", self.manifest_path, "--arm", arm, "--base", host.base, "--out", out,
+                                 "--pause", "0", "--quiet", "--warm-every", "0", "--checks", "stub"])
+            rows, _ = sc.read_jsonl(os.path.join(out, "executions.jsonl"))
+            self.assertEqual([(r["scenario"], r["client"]["timeout_s"]) for r in rows],
+                             [("P-6", want), ("P-5", 120.0)], arm)
+        self.assertEqual(run_direct.timeout_for(scen[0], "direct-local", {"fast": 120.0}), 150.0)
+        self.assertEqual(run_direct.timeout_for(scen[0], "direct-local", {"fast": 200.0}), 200.0)
+
     def test_protocol_extensions(self):
         scen = [scenario("C-2", "C", "POST /pattern", None, http=400, body_raw="not json",
                          headers={"Accept-Encoding": None, "Content-Type": "text/plain"})]
