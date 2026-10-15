@@ -919,22 +919,44 @@ class IdentityEvidenceTest(GateCase):
         self.blocked(v, "configuration", "2 different capabilities documents in one run")
         self.assertFalse([p for p in v["problems"] if "is not its record's" in p["detail"]])
 
-    def test_a_stale_hash_recorded_with_another_definition_is_a_note(self):
-        # the run's snapshot's suite_common is not this one: the record's own sha256 may follow another definition
-        d = self.real_run()
-        with open(os.path.join(d, "scripts", "suite_common.py"), "a") as fh:
-            fh.write("\n")
-        snap = sc.read_json(os.path.join(d, "scripts", "SNAPSHOT.json"))
-        snap["files"]["suite_common.py"] = sc.file_sha256(os.path.join(d, "scripts", "suite_common.py"))
-        sc.write_json_atomic(os.path.join(d, "scripts", "SNAPSHOT.json"), snap)
+    def test_a_hash_recorded_with_another_suite_common_is_checked_with_the_snapshots(self):
+        # the run's snapshot's suite_common is not this one: the recorded sha256 is checked with the definition the
+        # runner computed it with, the snapshot's own; a note only where that cannot be read
+        def run_with(name, tail, top_sha=None, every_sha=None):
+            d = self.real_run(name)
+            with open(os.path.join(d, "scripts", "suite_common.py"), "a") as fh:
+                fh.write(tail)
+            snap = sc.read_json(os.path.join(d, "scripts", "SNAPSHOT.json"))
+            snap["files"]["suite_common.py"] = sc.file_sha256(os.path.join(d, "scripts", "suite_common.py"))
+            sc.write_json_atomic(os.path.join(d, "scripts", "SNAPSHOT.json"), snap)
 
-        def restate(r):
-            for x in r.get("invocations") or r.get("sessions"):
-                x["suite_common_sha256"] = snap["files"]["suite_common.py"]
-            if "service_capabilities" in r:
-                r["service_capabilities"]["sha256"] = "0" * 64
-        self.edit(d, "direct-local", restate)
-        v = self.judge(self.edit(d, "mcp", restate))
+            def restate(r):
+                for x in r.get("invocations") or r.get("sessions"):
+                    x["suite_common_sha256"] = snap["files"]["suite_common.py"]
+                    if every_sha and "service_capabilities" in x:
+                        x["service_capabilities"]["sha256"] = every_sha
+                if "service_capabilities" in r:
+                    r["service_capabilities"]["sha256"] = top_sha or every_sha or r["service_capabilities"]["sha256"]
+            self.edit(d, "direct-local", restate)
+            return self.judge(self.edit(d, "mcp", restate))
+
+        # the same definition in another file: a stale hash blocks as it does with this suite_common
+        v = run_with("same", "\n", top_sha="0" * 64)
+        self.blocked(v, "configuration", "run.json: the recorded capabilities sha256 000000000000 is not its record's "
+                                         "%s (the run's snapshot's suite_common.service_document_sha256)"
+                     % CAPS["sha256"][:12])
+        self.assertEqual(len(self.problems(v)), 1, gate.render(v))
+        # another definition, every record computed with it: passes, nothing noted
+        other = "\n\ndef service_document_sha256(rec):\n    return '1' * 64\n"
+        v = run_with("other", other, every_sha="1" * 64)
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertFalse([x for x in v["notes"] if "recorded capabilities sha256" in x])
+        # ... and a record that its definition does not reproduce blocks
+        self.blocked(run_with("other-stale", other, top_sha="0" * 64, every_sha="1" * 64), "configuration",
+                     "run.json: the recorded capabilities sha256 000000000000 is not its record's 111111111111 (the "
+                     "run's snapshot's suite_common.service_document_sha256)")
+        # a snapshot whose definition cannot be read: compared recomputed with this one, a note
+        v = run_with("unread", "\ndel service_document_sha256\n", top_sha="0" * 64)
         self.assertTrue(v["passed"], gate.render(v))
         self.assertIn("run.json: the recorded capabilities sha256 000000000000 is not its record's %s "
                       "(suite_common.service_document_sha256); recorded with another suite_common than this one: "

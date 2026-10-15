@@ -354,13 +354,31 @@ def _document_sha(rec):
     return sc.service_document_sha256(rec)
 
 
+def _snapshot_document_sha(run_dir, sha):
+    """service_document_sha256 of the run's snapshot's suite_common.py, the definition its MCP runner computed the
+    recorded sha256 with, when that file is still the one SNAPSHOT.json recorded (|sha|) and loads; None otherwise."""
+    import importlib.util
+    path = os.path.join(sc.snapshot_dir(run_dir), "suite_common.py")
+    if not sha or sc.file_sha256(path) != sha:
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("suite_common_of_the_run", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:   # a snapshot that does not load: the record is compared recomputed with this definition
+        return None
+    fn = getattr(mod, "service_document_sha256", None)
+    return fn if callable(fn) else None
+
+
 def configuration_problems(run_dir, rows, policy, reevaluated=False, notes=None):
     """The MCP service's configuration evidence (agreed with async's runner on 2026-10-14), with the MCP arm gated:
     compare.gate_configuration_problems (lane G2's definition: a recorded live document stating service_settings,
     each referenced path live and equal to the table's block, no request_evidence read from the table or unknown),
     and besides it: every invocation of the MCP runner recorded a successful read and all reads are one document (the
-    identity recomputed, _document_sha; a recorded sha256 the record does not reproduce is a problem when the run's
-    snapshot's suite_common is this one, else a note in |notes|); the
+    identity recomputed, _document_sha; a recorded sha256 the record does not reproduce is a problem, by this
+    suite_common's definition when the run's snapshot's is this one, else by the snapshot's own; a note in |notes|
+    when neither applies: no snapshot suite_common, or one changed since the snapshot or that does not load); the
     runner's own recorded mismatches (run.json, a line's request_evidence_mismatches); the live
     service_settings.advanced_enabled equals the policy's advanced_path where its exclusions assume it; a
     request_evidence that is not {case: {path: live | table | unknown}}. The per-line evidence not read live is one
@@ -399,14 +417,24 @@ def configuration_problems(run_dir, rows, policy, reevaluated=False, notes=None)
                                              "capabilities document (%s%s)" % (
                                                  len(unread), len(invocations), "; ".join(unread[:5]),
                                                  "; ..." if len(unread) > 5 else ""), arm="mcp"))
-    # a recorded sha256 its record does not reproduce: a problem where the runner computed it with this definition
-    # (the run's snapshot's suite_common is the pipeline's), else a note (a run recorded with another definition,
-    # re-judged with this one)
+    # a recorded sha256 its record does not reproduce by the definition the runner computed it with: this one where
+    # the run's snapshot's suite_common is the pipeline's, else the snapshot's own; a note where that cannot be read
     snap = sc.snapshot_state(run_dir)[0]
     snap_common = ((snap or {}).get("files") or {}).get("suite_common.py")
     one_definition = bool(snap_common) and snap_common == sc.file_sha256(sc.__file__)
+    run_definition = None if one_definition else _snapshot_document_sha(run_dir, snap_common)
     for where, rec in reads:
         got = _document_sha(rec)
+        if run_definition is not None:
+            try:
+                want = run_definition(rec)
+            except Exception as e:   # the snapshot's definition cannot read this record
+                want = "%s: %s" % (type(e).__name__, e)
+            if rec.get("sha256") and rec["sha256"] != want:
+                out.append(_problem("configuration", "%s: the recorded capabilities sha256 %s is not its record's %s "
+                                                     "(the run's snapshot's suite_common.service_document_sha256)" % (
+                                                         where, str(rec["sha256"])[:12], str(want)[:12]), arm="mcp"))
+            continue
         if rec.get("sha256") and got and rec["sha256"] != got:
             text = "%s: the recorded capabilities sha256 %s is not its record's %s (suite_common.service_document_" \
                    "sha256)" % (where, str(rec["sha256"])[:12], got[:12])

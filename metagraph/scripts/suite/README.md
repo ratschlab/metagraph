@@ -2705,9 +2705,13 @@ and a recorded hash it never recomputed:
   advanced_path premise, read from the first record only, never saw the change. Each record's identity is
   recomputed (suite_common.service_document_sha256) and only recomputed values are compared; a recorded sha256 the
   record does not reproduce is a configuration problem ("<where>: the recorded capabilities sha256 X is not its
-  record's Y") when the run's snapshot's suite_common is the pipeline's (one definition computed both), else a note
-  (a run recorded with another definition, re-judged with this one). compare.recorded_documents states the recorded
-  one as `sha256_recorded`. tests/fake_mcp.py records the real sha256.
+  record's Y") when the run's snapshot's suite_common is the pipeline's (one definition computed both). Where the
+  snapshot's suite_common is another, the recorded sha256 is checked with that file's own
+  service_document_sha256, the definition the runner computed it with (gate._snapshot_document_sha: the file still
+  SNAPSHOT.json's and loading; the problem then says "(the run's snapshot's suite_common.service_document_sha256)");
+  only where that cannot be read (no snapshot suite_common, one changed since the snapshot, one that does not load or
+  has no such function) is it a note, compared recomputed with this one. compare.recorded_documents states the
+  recorded one as `sha256_recorded`. tests/fake_mcp.py records the real sha256.
 - On the v4 copy re-evaluated (the shipped policy): 46 problems, the 45 of c11db9dd plus one identity problem, "mcp:
   arms/mcp states no observed index_fp; the policy pins 907ec986e19ecb04 (service_capabilities.host_document)" (v4's
   MCP runner recorded no service_capabilities). The recorded v4 set gains the unpinned problem as well.
