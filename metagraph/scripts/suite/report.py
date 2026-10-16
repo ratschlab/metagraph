@@ -1126,6 +1126,13 @@ def agreement_depth(comp, rows, is_property, manifest=None):
     return out
 
 
+def skipped_on_any_repeat(entry):
+    """The property checks of an agreement_depth |entry| some MCP repeat did not compare, sorted: those no repeat
+    compared (not_compared) and those another repeat compared (partly_compared). The report's depth table lists
+    these, as it did before partly_compared (gr/suite-v6); the results document tells the two apart."""
+    return sorted(set(entry.get("not_compared") or []) | set(entry.get("partly_compared") or {}))
+
+
 def depth_counts(depth):
     counts = dict((k, 0) for k, _ in DEPTH_CLASSES)
     for v in depth.values():
@@ -1263,14 +1270,11 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
             if key == "full":
                 shown = "-"
             else:
-                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(
-                    list(depth[x]["not_compared"]) + ["%s on r%s" % (n, ", r".join(str(r) for r in v["skipped"]))
-                                                      for n, v in (depth[x].get("partly_compared") or {}).items()])))
-                                            if (depth[x]["not_compared"] or depth[x].get("partly_compared"))
-                                            and key.startswith("partial") else "")
+                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(skipped_on_any_repeat(depth[x]))))
+                                            if skipped_on_any_repeat(depth[x]) and key.startswith("partial") else "")
                                   for x in sids[:60]) + (" ..." if len(sids) > 60 else "")
             rows.append([md(label), str(len(sids)), shown or "-"])
-        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared; on some repeat only where repeats are named)"], rows,
+        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared)"], rows,
                          align=["l", "r", "l"]))
         hidden = [(sid, depth[sid]["reference_fails_hidden"]) for sid in comp["order"]
                   if (depth.get(sid) or {}).get("reference_fails_hidden")]

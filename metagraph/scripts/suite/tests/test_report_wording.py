@@ -61,6 +61,36 @@ class ReportWordingTest(unittest.TestCase):
         self.assertIn("Agreeing although the reference arm fails a check the MCP does not expose (the MCP cannot "
                       "show it holds): R-001: contains\\_source\\_context.", self.text)
 
+    def test_depth_table_as_suite_v6_prints_it(self):
+        # the merge of gr/suite-doc into gr/suite-v6: agreement_depth splits the property checks some MCP repeat
+        # did not compare into not_compared (no repeat compared them) and partly_compared (another repeat did), for
+        # the results document; the report's depth table lists both, sorted, as gr/suite-v6's report.py printed its
+        # not_compared, with gr/suite-v6's header
+        comp = sc.read_json(os.path.join(self.d, "compare.json"))
+        split = {"P-001": {"class": "partial", "not_compared": ["zeta_check"],
+                           "partly_compared": {"alpha_check": {"compared": [1], "skipped": [0]}},
+                           "reference_fails_hidden": []}}
+        joined = {"P-001": {"class": "partial", "not_compared": ["alpha_check", "zeta_check"],
+                            "reference_fails_hidden": []}}
+        self.assertEqual(report.skipped_on_any_repeat(split["P-001"]), ["alpha_check", "zeta_check"])
+        text = report.agreement_section(comp, split)
+        self.assertEqual(text, report.agreement_section(comp, joined))
+        self.assertIn("| P-001 (alpha\\_check, zeta\\_check) |", text)
+        self.assertIn("| agree, by depth | n | scenarios (property checks not compared) |", text)
+        self.assertNotIn(" on r0", text)
+        # agreement_depth itself keeps the doc's split
+        prop = lambda o: {"check": "walk_in_record", "outcome": o}  # noqa: E731
+        st = {"check": "status", "outcome": "pass"}
+        c = {"scenarios": {"X": {"mcp_agreement": {"class": "agree", "reference": "direct-local",
+                                                   "mcp_outcome": "pass", "reference_outcome": "pass"}}}}
+        rows = [{"scenario": "X", "arm": "mcp", "repeat": 0, "checks": [st, prop("not_exposed")]},
+                {"scenario": "X", "arm": "mcp", "repeat": 1, "checks": [st, prop("pass")]},
+                {"scenario": "X", "arm": "direct-local", "repeat": 0, "checks": [st, prop("pass")]}]
+        d = report.agreement_depth(c, rows, lambda n: n not in GENERIC)["X"]
+        self.assertEqual((d["class"], d["not_compared"], d["partly_compared"]),
+                         ("partial", [], {"walk_in_record": {"compared": [1], "skipped": [0]}}))
+        self.assertEqual(report.skipped_on_any_repeat(d), ["walk_in_record"])
+
     def test_depth_classes(self):
         def run(mcp_checks, ref_checks, mcp_out="pass", ref_out="pass", expect=None):
             comp = {"scenarios": {"X": {"mcp_agreement": {"class": "agree", "reference": "direct-local",
