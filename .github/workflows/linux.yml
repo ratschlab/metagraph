@@ -267,7 +267,7 @@ jobs:
         run: |
           cd metagraph/examples/subdirectory
           mkdir -p build && cd build
-          cmake ${CMAKE_ARGS} ..
+          cmake ${CMAKE_ARGS} -DMETAGRAPH_BUILD_EXECUTABLE=ON ..
           make -j"$(getconf _NPROCESSORS_ONLN)"
           make run_example
 

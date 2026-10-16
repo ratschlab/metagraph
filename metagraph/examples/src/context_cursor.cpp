@@ -7,17 +7,47 @@
 
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 #include <json/json.h>
 
 using mtg::graph::traversal::ContextCursor;
 
 namespace {
+void check_members(const Json::Value &object, std::initializer_list<std::string_view> allowed) {
+    if (!object.isObject())
+        throw std::invalid_argument("Expected an object");
+    for (const auto &name : object.getMemberNames())
+        if (std::ranges::find(allowed, name) == allowed.end())
+            throw std::invalid_argument("Unknown field: " + name);
+}
+
 size_t bounded_size(const Json::Value &request, const char *name, size_t fallback, size_t limit) {
     if (!request.isMember(name))
         return fallback;
     if (!request[name].isUInt64() || request[name].asUInt64() > limit)
         throw std::invalid_argument(std::string(name) + " is outside the example's limit");
     return request[name].asUInt64();
+}
+
+const char *stop_name(ContextCursor::StopReason reason) {
+    using enum ContextCursor::StopReason;
+    switch (reason) {
+        case NO_OCCURRENCES: return "no_occurrences";
+        case RADIUS_LIMIT: return "radius_limit";
+        case RECORD_END: return "record_end";
+        case UNINDEXED: return "unindexed";
+        case BRANCH: return "branch";
+    }
+    throw std::logic_error("Invalid closure stop reason");
+}
+
+Json::Value closure_json(const ContextCursor::Closure &closure) {
+    Json::Value out;
+    out["left_added"] = Json::UInt64(closure.left);
+    out["right_added"] = Json::UInt64(closure.right);
+    out["left_stop"] = stop_name(closure.left_stop);
+    out["right_stop"] = stop_name(closure.right_stop);
+    return out;
 }
 
 Json::Value snapshot(ContextCursor &cursor, const mtg::graph::AnnotatedDBG &graph, size_t seed_offset) {
@@ -45,8 +75,13 @@ Json::Value snapshot(ContextCursor &cursor, const mtg::graph::AnnotatedDBG &grap
 }
 
 Json::Value query(const Json::Value &request, const mtg::graph::AnnotatedDBG &graph) {
-    if (!request.isObject() || !request["seed"].isString() || request["seed"].asString().size() > 10000)
+    check_members(request, {"seed", "columns", "max_occurrences", "radius", "steps"});
+    if (!request["seed"].isString() || request["seed"].asString().size() > 10000)
         throw std::invalid_argument("Expected a seed string of at most 10000 bases");
+    const auto radius = bounded_size(request, "radius", 1000, 10000);
+    const auto max_occurrences = bounded_size(request, "max_occurrences", 100000, 100000);
+    if (!max_occurrences)
+        throw std::invalid_argument("max_occurrences must be positive");
     std::vector<std::string> columns;
     if (request.isMember("columns")) {
         if (!request["columns"].isArray())
@@ -57,29 +92,42 @@ Json::Value query(const Json::Value &request, const mtg::graph::AnnotatedDBG &gr
             columns.push_back(column.asString());
         }
     }
-    ContextCursor cursor(graph, request["seed"].asString(), columns,
-                         bounded_size(request, "max_occurrences", 100000, 100000));
-    size_t seed_offset = cursor.close(bounded_size(request, "radius", 1000, 10000)).first;
-    auto result = snapshot(cursor, graph, seed_offset);
-    result["steps"] = Json::Value(Json::arrayValue);
+    struct Step { ContextCursor::Side side; char base; size_t radius; };
+    std::vector<Step> steps;
     if (request.isMember("steps")) {
         if (!request["steps"].isArray() || request["steps"].size() > 100)
             throw std::invalid_argument("steps must be an array of at most 100 choices");
         for (const auto &step : request["steps"]) {
-            if (!step.isObject() || !step["base"].isString() || step["base"].asString().size() != 1
+            check_members(step, {"side", "base", "radius"});
+            if (!step["base"].isString() || step["base"].asString().size() != 1
                     || (step["side"] != "left" && step["side"] != "right"))
                 throw std::invalid_argument("Each step needs side (left/right) and one base");
-            bool extended = cursor.extend(step["side"] == "left" ? ContextCursor::Side::LEFT
-                                                                  : ContextCursor::Side::RIGHT,
-                                          step["base"].asString()[0]);
-            if (extended) {
-                seed_offset += step["side"] == "left";
-                seed_offset += cursor.close(bounded_size(step, "radius", 1000, 10000)).first;
-            }
-            auto value = snapshot(cursor, graph, seed_offset);
-            value["extended"] = extended;
-            result["steps"].append(value);
+            char base = step["base"].asString()[0];
+            if (std::string_view("ACGTacgt").find(base) == std::string_view::npos)
+                throw std::invalid_argument("Step base must be A, C, G or T");
+            steps.push_back({step["side"] == "left" ? ContextCursor::Side::LEFT : ContextCursor::Side::RIGHT,
+                             base, bounded_size(step, "radius", radius, 10000)});
         }
+    }
+
+    // Validate the complete request before decoding its seed or executing steps.
+    ContextCursor cursor(graph, request["seed"].asString(), columns, max_occurrences);
+    auto closure = cursor.close(radius);
+    size_t seed_offset = closure.left;
+    auto result = snapshot(cursor, graph, seed_offset);
+    result["closure"] = closure_json(closure);
+    result["steps"] = Json::Value(Json::arrayValue);
+    for (const auto &step : steps) {
+        bool extended = cursor.extend(step.side, step.base);
+        if (extended) {
+            seed_offset += step.side == ContextCursor::Side::LEFT;
+            closure = cursor.close(step.radius);
+            seed_offset += closure.left;
+        }
+        auto value = snapshot(cursor, graph, seed_offset);
+        value["extended"] = extended;
+        value["closure"] = extended ? closure_json(closure) : Json::Value();
+        result["steps"].append(value);
     }
     return result;
 }
@@ -108,6 +156,7 @@ int main(int argc, char **argv) {
             Json::Value request, result;
             try {
                 Json::CharReaderBuilder builder;
+                Json::CharReaderBuilder::strictMode(&builder.settings_);
                 std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
                 std::string error;
                 if (!reader->parse(line.data(), line.data() + line.size(), &request, &error))

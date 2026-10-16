@@ -2,6 +2,7 @@
 #define __CONTEXT_CURSOR_HPP__
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,12 @@ namespace mtg::graph::traversal {
 class ContextCursor {
   public:
     enum class Side { LEFT, RIGHT };
+    enum class StopReason { NO_OCCURRENCES, RADIUS_LIMIT, RECORD_END, UNINDEXED, BRANCH };
+    struct Closure {
+        size_t left, right; // bases added on this call
+        StopReason left_stop, right_stop;
+        bool operator==(const Closure &) const = default;
+    };
     struct Occurrence {
         uint64_t column;
         size_t record;
@@ -29,6 +36,9 @@ class ContextCursor {
         size_t count;
     };
 
+    // The positive occurrence cap counts complete seed matches. Exceeding it
+    // throws std::length_error; no partial set is returned. It does not bound
+    // annotation decoding memory or time. Empty columns selects all columns.
     ContextCursor(const AnnotatedDBG &graph, std::string seed,
                   const std::vector<std::string> &columns = {},
                   size_t max_occurrences = 100000);
@@ -45,8 +55,10 @@ class ContextCursor {
     // Returns false, without changing the cursor, if the choice is absent.
     bool extend(Side side, char base);
     // Extend each flank while every occurrence supports the same character.
-    // Record ends stop closure. Returns (left extension, right extension).
-    std::pair<size_t, size_t> close(size_t max_bases_per_side);
+    // Empty occurrence sets stop first. Reaching the radius stops without
+    // inspecting another base. Otherwise record ends take precedence over
+    // unindexed continuations, then differing bases. No occurrences are dropped.
+    Closure close(size_t max_bases_per_side);
 
   private:
     using Node = DeBruijnGraph::node_index;
@@ -55,7 +67,7 @@ class ContextCursor {
         uint64_t global;
         uint64_t record_kmers;
     };
-    void find_boundaries();
+    void find_boundaries(std::optional<Side> side = {});
 
     const AnnotatedDBG &annotated_;
     std::string sequence_;

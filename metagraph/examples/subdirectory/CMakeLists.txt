@@ -37,3 +37,15 @@ add_custom_target(run_example
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Running basic_query example with ${CMAKE_DBG_ALPHABET} test data"
 )
+
+# Enable native construction and JSONL checks when the CLI is built alongside
+# the example. Python uses only its standard library.
+if(TARGET metagraph AND CMAKE_DBG_ALPHABET STREQUAL "DNA")
+    add_custom_target(run_context_example
+        COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../test_context_cursor.py
+            $<TARGET_FILE:context_cursor> $<TARGET_FILE:metagraph>
+        DEPENDS context_cursor metagraph
+        COMMENT "Checking context requests on fresh heap/mmap coordinate indexes"
+    )
+    add_dependencies(run_example run_context_example)
+endif()

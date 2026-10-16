@@ -26,21 +26,19 @@ std::vector<Row> read_rows(const Matrix &matrix,
     auto rows = matrix.get_row_tuples(ids);
     for (auto &row : rows) {
         // BRWT returns columns in tree order, which need not be label order.
-        auto less_column = [](const auto &a, const auto &b) { return a.first < b.first; };
-        if (!std::is_sorted(row.begin(), row.end(), less_column))
-            std::sort(row.begin(), row.end(), less_column);
+        if (!std::ranges::is_sorted(row, {}, &Row::value_type::first))
+            std::ranges::sort(row, {}, &Row::value_type::first);
         for (auto &[column, coords] : row)
-            if (!std::is_sorted(coords.begin(), coords.end()))
-                std::sort(coords.begin(), coords.end());
+            if (!std::ranges::is_sorted(coords))
+                std::ranges::sort(coords);
     }
     return rows;
 }
 
 bool contains(const Row &row, uint64_t column, uint64_t coordinate) {
-    auto it = std::lower_bound(row.begin(), row.end(), column,
-                              [](const auto &entry, auto c) { return entry.first < c; });
+    auto it = std::ranges::lower_bound(row, column, {}, &Row::value_type::first);
     return it != row.end() && it->first == column
-        && std::binary_search(it->second.begin(), it->second.end(), coordinate);
+        && std::ranges::binary_search(it->second, coordinate);
 }
 } // namespace
 
@@ -60,6 +58,8 @@ ContextCursor::ContextCursor(const AnnotatedDBG &annotated, std::string seed,
         throw std::invalid_argument("Incompatible graph, coordinates and record mapping");
     if (sequence_.size() < graph.get_k())
         throw std::invalid_argument("Context seed must contain at least k bases");
+    if (!max_occurrences)
+        throw std::invalid_argument("Context occurrence limit must be positive");
     for (char &base : sequence_) {
         base = std::toupper(static_cast<unsigned char>(base));
         base_index(base);
@@ -70,7 +70,7 @@ ContextCursor::ContextCursor(const AnnotatedDBG &annotated, std::string seed,
 
     std::vector<Node> nodes;
     graph.map_to_nodes_sequentially(sequence_, [&](Node node) { nodes.push_back(node); });
-    if (std::find(nodes.begin(), nodes.end(), 0) != nodes.end())
+    if (std::ranges::find(nodes, 0) != nodes.end())
         return;
     first_ = nodes.front();
     last_ = nodes.back();
@@ -91,13 +91,13 @@ ContextCursor::ContextCursor(const AnnotatedDBG &annotated, std::string seed,
     std::vector<size_t> frequencies(tuples.size());
     for (size_t i = 0; i < tuples.size(); ++i) {
         for (const auto &[column, coords] : tuples[i])
-            if (selected.empty() || selected.count(column))
+            if (selected.empty() || selected.contains(column))
                 frequencies[i] += coords.size();
     }
-    size_t anchor = std::min_element(positions.begin(), positions.end(),
-        [&](auto a, auto b) { return frequencies[a] < frequencies[b]; }) - positions.begin();
+    size_t anchor = std::ranges::min_element(positions, {},
+        [&](size_t row) { return frequencies[row]; }) - positions.begin();
     for (const auto &[column, coords] : tuples[positions[anchor]]) {
-        if (!selected.empty() && !selected.count(column))
+        if (!selected.empty() && !selected.contains(column))
             continue;
         for (auto coordinate : coords) {
             if (coordinate >= mapping->num_kmers(column))
@@ -138,8 +138,10 @@ std::vector<ContextCursor::Occurrence> ContextCursor::occurrences() const {
     return result;
 }
 
-void ContextCursor::find_boundaries() {
-    if (boundaries_ready_[0] && boundaries_ready_[1])
+void ContextCursor::find_boundaries(std::optional<Side> side) {
+    const bool left = !boundaries_ready_[0] && (!side || *side == Side::LEFT);
+    const bool right = !boundaries_ready_[1] && (!side || *side == Side::RIGHT);
+    if (!left && !right)
         return;
     boundaries_.resize(hits_.size());
     if (!hits_.empty()) {
@@ -154,7 +156,7 @@ void ContextCursor::find_boundaries() {
             rows.push_back(AnnotatedDBG::graph_to_anno_index(node));
             edges.emplace_back(side, base);
         };
-        if (!boundaries_ready_[0]) {
+        if (left) {
             auto emit = [&](auto n, char b) { add(0, n, b); };
             if (!first_cache_) {
                 if (const auto *succinct = dynamic_cast<const DBGSuccinct *>(&graph))
@@ -165,7 +167,7 @@ void ContextCursor::find_boundaries() {
             else
                 graph.call_incoming_kmers(first_, emit);
         }
-        if (!boundaries_ready_[1])
+        if (right)
             graph.call_outgoing_kmers(last_, [&](auto n, char b) { add(1, n, b); });
         auto tuples = read_rows(matrix, rows);
         auto kmers = sequence_.size() - graph.get_k() + 1;
@@ -185,13 +187,14 @@ void ContextCursor::find_boundaries() {
             }
             // An ambiguous/unindexed source k-mer can stop an otherwise valid
             // record. Do not misreport this as a record end or invent a base.
-            if (hit.occurrence.offset && !boundaries_[i][0])
+            if (left && hit.occurrence.offset && !boundaries_[i][0])
                 boundaries_[i][0] = '?';
-            if (kmers < hit.record_kmers - hit.occurrence.offset && !boundaries_[i][1])
+            if (right && kmers < hit.record_kmers - hit.occurrence.offset && !boundaries_[i][1])
                 boundaries_[i][1] = '?';
         }
     }
-    boundaries_ready_ = {true, true};
+    boundaries_ready_[0] |= left;
+    boundaries_ready_[1] |= right;
 }
 
 std::vector<ContextCursor::Choice> ContextCursor::choices() {
@@ -208,50 +211,66 @@ std::vector<ContextCursor::Choice> ContextCursor::choices() {
 bool ContextCursor::extend(Side side, char base) {
     base = std::toupper(static_cast<unsigned char>(base));
     auto index = base_index(base);
-    find_boundaries();
+    find_boundaries(side);
     auto direction = side == Side::LEFT ? 0 : 1;
-    std::vector<Hit> selected;
-    std::vector<std::array<char, 2>> selected_boundaries;
+    if (std::ranges::none_of(boundaries_, [&](const auto &b) { return b[direction] == base; }))
+        return false;
+
+    // Grow the string before changing hits, so allocation failure leaves the
+    // occurrence set intact. Compact in place: closure often keeps every hit.
+    if (!direction)
+        sequence_.insert(sequence_.begin(), base);
+    else
+        sequence_.push_back(base);
+    size_t retained = 0;
     for (size_t i = 0; i < hits_.size(); ++i) {
         if (boundaries_[i][direction] == base) {
             auto hit = hits_[i];
             if (!direction) { --hit.global; --hit.occurrence.offset; }
-            selected.push_back(hit);
+            hits_[retained] = hit;
             auto boundary = boundaries_[i];
             boundary[direction] = 0;
-            selected_boundaries.push_back(boundary);
+            boundaries_[retained++] = boundary;
         }
     }
-    if (selected.empty())
-        return false;
-    hits_ = std::move(selected);
-    boundaries_ = std::move(selected_boundaries);
-    if (!direction) {
+    hits_.resize(retained);
+    boundaries_.resize(retained);
+    if (!direction)
         first_ = neighbors_[0][index];
-        sequence_.insert(sequence_.begin(), base);
-    } else {
+    else
         last_ = neighbors_[1][index];
-        sequence_.push_back(base);
-    }
     boundaries_ready_[direction] = false;
     neighbors_[direction] = {};
     return true;
 }
 
-std::pair<size_t, size_t> ContextCursor::close(size_t max_bases_per_side) {
+ContextCursor::Closure ContextCursor::close(size_t max_bases_per_side) {
     std::array<size_t, 2> added{};
+    std::array<StopReason, 2> stops{};
     for (size_t side = 0; side < 2; ++side) {
-        while (!hits_.empty() && added[side] < max_bases_per_side) {
-            find_boundaries();
-            char base = boundaries_.front()[side];
-            if (!base || base == '?' || !std::all_of(boundaries_.begin(), boundaries_.end(),
-                                     [&](auto b) { return b[side] == base; }))
+        while (true) {
+            if (hits_.empty()) { stops[side] = StopReason::NO_OCCURRENCES; break; }
+            if (added[side] == max_bases_per_side) { stops[side] = StopReason::RADIUS_LIMIT; break; }
+            find_boundaries(side ? Side::RIGHT : Side::LEFT);
+            auto boundary = [side](const auto &b) { return b[side]; };
+            if (std::ranges::find(boundaries_, '\0', boundary) != boundaries_.end()) {
+                stops[side] = StopReason::RECORD_END;
                 break;
+            }
+            if (std::ranges::find(boundaries_, '?', boundary) != boundaries_.end()) {
+                stops[side] = StopReason::UNINDEXED;
+                break;
+            }
+            char base = boundaries_.front()[side];
+            if (!std::ranges::all_of(boundaries_, [&](const auto &b) { return b[side] == base; })) {
+                stops[side] = StopReason::BRANCH;
+                break;
+            }
             extend(side ? Side::RIGHT : Side::LEFT, base);
             ++added[side];
         }
     }
-    return {added[0], added[1]};
+    return {added[0], added[1], stops[0], stops[1]};
 }
 
 } // namespace mtg::graph::traversal
