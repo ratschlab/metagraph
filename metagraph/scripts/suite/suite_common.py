@@ -244,14 +244,15 @@ def rerun_raw_name(scenario_id, arm, repeat, started):
     return "raw/%s.%s.%d.rerun-%d.json.gz" % (safe, arm, repeat, int(round(started * 1000)))
 
 
-def resume_rewarms(scope, done):
+def resume_rewarms(scope, done, target_left=True):
     """The resume rule of a runner's invocation: a warm-up (a scenario whose `warms` names its target) in the
     invocation's scope with every execution there recorded, whose target in the scope has an execution left, runs
     again right before the target's first execution left, so that execution meets the rows its warm-up read even
     after an interruption between the two. scope: [(index, scenario, repeat, cache)] (plan_executions), done: the
     recorded (scenario, arm, repeat) keys as (scenario, repeat) pairs. Returns {target id: [(index, warm-up)]} in
     scope order; a warm-up with an execution left runs as planned (it is right before its target) and is not
-    listed."""
+    listed. |target_left| False (run_direct.py --rewarm-only: the step before the target's first MCP call, which
+    paired_plan's before_mcp decided) does not ask the target for an execution left on this arm."""
     by_sid, order = {}, []
     for index, scenario, repeat, _ in scope:
         sid = scenario.get("id")
@@ -267,7 +268,7 @@ def resume_rewarms(scope, done):
             continue
         if any((sid, r) not in done for r in repeats):
             continue
-        if any((target, r) not in done for r in by_sid[target][2]):
+        if not target_left or any((target, r) not in done for r in by_sid[target][2]):
             out.setdefault(target, []).append((index, scenario))
     return out
 
@@ -318,7 +319,17 @@ def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=(
     warm-up with the target in the arm's step (run_direct.py --only W,T; the MCP runner --ids W,T), and the runner,
     whose scope then holds both, runs the warm-up again first (run_direct.py: repeat 0; the MCP runner: the step's
     repeat). On the MCP arm that is the target's first step left (cold, else its first warm repeat). A warm-up the
-    manifest marks not implemented via MCP sends nothing there and is never run again on that arm."""
+    manifest marks not implemented via MCP sends nothing there and is never run again on that arm.
+
+    rewarm {"before_mcp": [warm-up id]}: a warm-up the MCP arm does not send (the long class, v6's P-warm: it runs on
+    direct-local only and warms the host for its target's first MCP call; or one marked not implemented via MCP)
+    whose direct-local executions are all recorded, while its target has an MCP step left, runs again on
+    direct-local right before the target's first MCP step left (run_direct.py --rewarm-only --only W,T: the warm-up
+    alone), as the paired loop's order has it without an interruption; the direct-local rule above then leaves it
+    out where the target's MCP cold call comes first (that call follows the re-run already). Where the target's
+    direct-local step comes before its first MCP step left (a warm repeat), that step's re-run serves (VERIFY of
+    round 2, L1: the re-run inside the target's direct-local step came after its MCP cold call, which met a cold
+    host again)."""
     recorded = {}
     for arm in ARMS:
         rows, _ = read_jsonl(os.path.join(run_dir, "arms", arm, "executions.jsonl"))
@@ -354,6 +365,18 @@ def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=(
         if (item["mcp_cold"] is False and not mcp_left and not (warm_up.get("mcp") or {}).get("not_implemented")
                 and (titem["mcp_cold"] is True or titem["mcp_warm"])):
             titem["rewarm"].setdefault("mcp", []).append(item["scenario"])
+        not_sent = item["mcp_cold"] is None or (warm_up.get("mcp") or {}).get("not_implemented")
+        if ("mcp" in arms and not_sent and item.get("direct-local") is False
+                and (titem["mcp_cold"] is True or titem["mcp_warm"])):
+            local = titem["rewarm"].get("direct-local") or []
+            if titem["mcp_cold"] is True:
+                if item["scenario"] in local:
+                    local.remove(item["scenario"])
+                    if not local:
+                        titem["rewarm"].pop("direct-local")
+                titem["rewarm"].setdefault("before_mcp", []).append(item["scenario"])
+            elif item["scenario"] not in local:
+                titem["rewarm"].setdefault("before_mcp", []).append(item["scenario"])
     return out
 
 
@@ -2530,10 +2553,11 @@ def _main(argv):
     beyond-status MANIFEST AREAS LIMIT [IDS]
                                  print the expected checks the stub cannot evaluate ('' for none)
     paired-plan MANIFEST RUN_DIR AREAS LIMIT WARM_EVERY ARMS [IDS]
-                                 print the paired loop's work: 'SID L R MC MW WL WR WM' per scenario (L, R, MC: 1
-                                 to do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -; WL,
+                                 print the paired loop's work: 'SID L R MC MW WL WR WM WB' per scenario (L, R, MC:
+                                 1 to do, 0 done, - not run; MW: warm MCP repeats to do, comma-separated, or -; WL,
                                  WR, WM: the warm-ups to run again right before SID on direct-local, direct-remote
-                                 and the MCP arm, comma-separated, or -: paired_plan's rewarm)
+                                 and the MCP arm, WB: on direct-local right before SID's first MCP step left,
+                                 comma-separated, or -: paired_plan's rewarm)
     lock-check LOCK_JSON HOST_ID
                                  print 'stale|live|foreign REASON' for another invocation's lock
     host-id                      print this machine's stable id for the lock (host_id())
@@ -2578,10 +2602,11 @@ def _main(argv):
         flag = lambda v: "-" if v is None else ("1" if v else "0")  # noqa: E731
         for item in paired_plan(read_json(argv[1]), argv[2], areas, limit, int(argv[5]), arms, ids):
             rw = item.get("rewarm") or {}
-            print("%s %s %s %s %s %s %s %s" % (
+            print("%s %s %s %s %s %s %s %s %s" % (
                 item["scenario"], flag(item["direct-local"]), flag(item["direct-remote"]), flag(item["mcp_cold"]),
                 ",".join(str(r) for r in item["mcp_warm"]) or "-", ",".join(rw.get("direct-local") or []) or "-",
-                ",".join(rw.get("direct-remote") or []) or "-", ",".join(rw.get("mcp") or []) or "-"))
+                ",".join(rw.get("direct-remote") or []) or "-", ",".join(rw.get("mcp") or []) or "-",
+                ",".join(rw.get("before_mcp") or []) or "-"))
         return 0
     if len(argv) >= 3 and argv[0] == "lock-check":
         try:

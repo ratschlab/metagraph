@@ -3061,7 +3061,15 @@ default, the gate policy). What changed, by finding:
   its own); the earlier execution stays. `merge_run.py` never lets it replace its key: it goes under the target's
   `warm_up_reruns` (the first execution of the target on that arm after it, with `before_s`) and into run.json
   `reruns_for_resume`; `reevaluate.py` carries it unjudged, compare, the report (a table beside the timing) and the
-  gate judge the original, so it is never a second outcome, a duplicate, a missing or an extra execution.
+  gate judge the original, so it is never a second outcome, a duplicate, a missing or an extra execution. A warm-up
+  the MCP arm does not send (v6's P-warm, the long class: direct-local only, it warms the host for its target's MCP
+  cold call, which the paired loop runs first) runs again on direct-local right before the target's first MCP step
+  left (paired_plan `rewarm` `before_mcp`, the plan line's ninth field; `run_direct.py --rewarm-only --only W,T`
+  runs the re-run alone, whatever the target has left there), and not a second time in the target's direct-local
+  step; where that step comes before the first MCP step left (a warm repeat), its own re-run serves (round 2's
+  verification, L1: the re-run inside the target's direct-local step came after its MCP cold call). A run whose
+  snapshot's run_direct.py predates `--rewarm-only` keeps the earlier rule and the log says so. The re-run is timing
+  evidence of the target's next direct-local execution, if any.
 - **T-budget-0003** (G18): T-attempts-0002's eco seed, whose seed phase took 148,723 work units in v4
   (usage.per_seed[0].work_seed), under 300,000: partial walks only. **T-labels-0004** (V02): 4,096 MB for its 6,181
   derived headers (counts hard-coded from the v4 answers, `derived_labels_v4`); T-labels-0006 drops the override and

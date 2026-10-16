@@ -34,7 +34,8 @@ required). A warm-up whose executions in the invocation's scope are all recorded
 (an interruption between the two) runs again, its repeat 0, right before the target's first execution left
 (suite_common.resume_rewarms): a line with the warm-up's id and repeat, `rerun_for_resume` true and `rerun_target`,
 its own raw file with both fields; the earlier execution stays the one judged. A paired step names the warm-up with
-its target (--only W,T) when run_suite.sh's plan wants it. SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
+its target (--only W,T) when run_suite.sh's plan wants it; with --rewarm-only it runs that re-run alone (the step
+before the target's first MCP call, for a warm-up the MCP arm does not send). SIGINT / SIGTERM stop cleanly after the request in flight (a second SIGINT aborts it); run.json and
 state.json then say `interrupted` (exit 130; exit 3 when --max-requests stopped the run), also when the reader of
 stdout is gone by then (a paired step whose ssh client a Ctrl-C ended: `say`). --max-requests counts
 every request of the invocation, the closing GET /capabilities included. Stdlib only: runs with python3.12 on
@@ -507,6 +508,8 @@ class Runner(object):
         self.run.update(dict((k, self.session[k]) for k in ("checks_sha256", "suite_common_sha256", "checks_dir")))
         if self.args.only:
             self.session["only"] = self.args.only
+        if self.args.rewarm_only:
+            self.session["rewarm_only"] = True
         if self.args.finish:
             self.session["finish"] = True
         self.run["sessions"].append(self.session)
@@ -721,12 +724,19 @@ class Runner(object):
         ndone = sum(1 for p in planned if (p[1].get("id"), self.args.arm, p[2]) in done)
         self.session["skipped_done"] = len(scope) - len(todo)
         # the resume rule: a recorded warm-up runs again right before its target's first execution left
-        rewarms = sc.resume_rewarms(scope, set((k[0], k[2]) for k in done if k[1] == self.args.arm))
+        done_here = set((k[0], k[2]) for k in done if k[1] == self.args.arm)
         steps = []
-        for p in todo:
-            for index, warm_up in rewarms.pop(p[1].get("id"), []):
-                steps.append((index, warm_up, 0, "cold", p[1].get("id")))
-            steps.append(p + (None,))
+        if self.args.rewarm_only:
+            # the warm-ups' re-runs alone, whatever their targets have left on this arm: the paired loop's step
+            # before a target's first MCP call (paired_plan's before_mcp); the target's executions keep their place
+            for target, items in sc.resume_rewarms(scope, done_here, target_left=False).items():
+                steps.extend((index, warm_up, 0, "cold", target) for index, warm_up in items)
+        else:
+            rewarms = sc.resume_rewarms(scope, done_here)
+            for p in todo:
+                for index, warm_up in rewarms.pop(p[1].get("id"), []):
+                    steps.append((index, warm_up, 0, "cold", p[1].get("id")))
+                steps.append(p + (None,))
         again = [{"scenario": s_[1].get("id"), "target": s_[4]} for s_ in steps if s_[4]]
         if again:
             self.session["reruns_for_resume"] = again
@@ -844,6 +854,10 @@ def parse_args(argv):
                          "documents only when the arm has none yet, no closing GET)")
     ap.add_argument("--finish", action="store_true",
                     help="execute nothing: the closing GET /capabilities and the selection's state (paired mode)")
+    ap.add_argument("--rewarm-only", action="store_true",
+                    help="with --only W,T: run only the resume re-runs of the scope's warm-ups "
+                         "(suite_common.resume_rewarms), none of its executions left (the paired loop's step before "
+                         "a target's first MCP call after a resume)")
     ap.add_argument("--pause", type=float, default=1.0, help="seconds between requests (1)")
     ap.add_argument("--warm-every", type=int, default=10,
                     help="one warm repeat for every Nth scenario of the manifest (10; 0: none)")
@@ -871,6 +885,8 @@ def parse_args(argv):
     args.only = [i for i in args.only.split(",") if i] if args.only else None
     if args.only and args.finish:
         ap.error("--only and --finish exclude each other")
+    if args.rewarm_only and not args.only:
+        ap.error("--rewarm-only needs --only (the warm-up and its target)")
     return args
 
 

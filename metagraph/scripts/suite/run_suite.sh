@@ -52,7 +52,10 @@
 # the warm-up again right before the target (a line with the warm-up's id and repeat, rerun_for_resume true,
 # rerun_target T; the earlier execution stays the judged one). The MCP runner applies that rule only to the ids one
 # invocation lists, as run_direct.py applies it only within --only: a step that lists the target alone never runs
-# its warm-up again. Only the template is recorded,
+# its warm-up again. A warm-up the MCP arm does not send (v6's P-warm, the long class: direct-local only, it warms
+# the host for its target's first MCP call) runs again on direct-local right before the target's first MCP step
+# left (run_direct.py --rewarm-only --only W,T; paired_plan's before_mcp), so that call meets a warm host as without
+# the interruption. Only the template is recorded,
 # never the expanded command or any environment value. A full run (not --smoke) uses the default template
 # DEFAULT_MCP_CMD below (SUITE_MCP_CMD replaces it, '' for none) unless --mcp-cmd, --no-mcp or --mcp-run is
 # given; --mcp-cmd default asks for it in a smoke run; --resume keeps the run's template. The default runner
@@ -967,9 +970,46 @@ loop_summary() {
     "${#MCP_MISSING[@]}" "${MCP_MISSING[*]:0:10}"
 }
 # --- paired mode ----------------------------------------------------------------------------------------------
+# A direct-local step that failed (exit RC, not the cap) on SID: its bookkeeping; 1 when the loop must stop (a runner
+# that may still run on mex, or mex unreachable), 0 to go on.
+local_failed() {  # local_failed SID RC
+  local wrc
+  fails_local=$((fails_local + 1)); step_failed=1; FAILED_STEPS+=("direct-local:$1:$2")
+  log "direct-local: exit $2 on $1 (see arms/direct-local/runner.log)"
+  # An ssh that failed may have left the step running: never start the next arm next to it, and never read
+  # a failing ssh as "the runner is gone" (review N3).
+  wrc=0
+  wait_no_runner "$WAIT_RUNNER_S" || wrc=$?
+  if [[ $wrc == 1 ]]; then
+    runner_live=1; LOOP_STATE=failed; LOOP_REASON=runner_still_running
+    log "error: the direct-local step of $1 still runs on $MEX after $WAIT_RUNNER_S s: stopping the loop (--resume $RUN_DIR once it ended)"
+    return 1
+  elif [[ $wrc != 0 ]]; then
+    runner_live=1; LOOP_STATE=failed; LOOP_REASON=mex_unreachable
+    log "error: $MEX does not answer after the direct-local step of $1 failed, so its runner may still run there: stopping the loop, no further request (--resume $RUN_DIR once mex answers)"
+    return 1
+  fi
+  return 0
+}
+# The resume rule's step before a target's first MCP step left (paired_plan before_mcp): the warm-ups WB again on
+# direct-local, alone (run_direct.py --rewarm-only). 0 to go on, 3 at the request cap, 1 when the loop must stop. A
+# run whose snapshot's run_direct.py predates --rewarm-only keeps the old rule (the re-run in the target's
+# direct-local step) and says so.
+rewarm_before_mcp() {  # rewarm_before_mcp WB SID
+  local rc=0
+  if ! grep -q -- '--rewarm-only' "$SNAP/run_direct.py" 2>/dev/null; then
+    log "direct-local: $1 not run again before the MCP call of $2 (the run's snapshot of run_direct.py predates --rewarm-only)"
+    return 0
+  fi
+  log "direct-local: $1 again before the MCP call of $2 (resume)"
+  direct_call local --rewarm-only --only "$1,$2" || rc=$?
+  [[ $rc != 3 ]] || return 3
+  if [[ $rc != 0 ]]; then local_failed "$1" "$rc" || return 1; else fails_local=0; fi
+  return 0
+}
 run_paired() {
   local arms="" entry sid l r mc mw rep rc wrc fails_local=0 fails_remote=0 since_pull=0 runner_live=0 stop=0
-  local step_failed nmissing wl wr wm mids
+  local step_failed nmissing wl wr wm wb mids
   [[ $SKIP_LOCAL == 1 ]] || { arms+="direct-local,"; RESERVE=$((RESERVE + 1)); }
   [[ $SKIP_REMOTE == 1 ]] || { arms+="direct-remote,"; RESERVE=$((RESERVE + 1)); }
   [[ -z "$MCP_CMD" ]] || arms+="mcp,"
@@ -989,15 +1029,22 @@ run_paired() {
   loop_record running
   log "paired: $N_PLAN scenario(s); arms ${arms%,}"
   for entry in ${plan[@]+"${plan[@]}"}; do
-    read -r sid l r mc mw wl wr wm <<< "$entry"
+    read -r sid l r mc mw wl wr wm wb <<< "$entry"
     heartbeat
     step_failed=0
     nmissing=${#MCP_MISSING[@]}
     # The resume rule (suite_common.paired_plan rewarm): a warm-up whose executions on an arm are all recorded
     # while its target has some left there is named with the target in that arm's step, and the runner runs it
-    # again right before the target (on the MCP arm in the target's first step left).
+    # again right before the target (on the MCP arm in the target's first step left); a warm-up the MCP arm does
+    # not send runs again on direct-local right before the target's first MCP step left (wb).
     mids="$sid"; [[ "${wm:--}" == "-" ]] || mids="$wm,$sid"
     if [[ $mc == 1 ]]; then
+      if [[ "${wb:--}" != "-" ]]; then
+        rc=0; rewarm_before_mcp "$wb" "$sid" || rc=$?
+        if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
+        [[ $rc == 0 ]] || break
+        wb="-"
+      fi
       [[ "$mids" == "$sid" ]] || log "mcp: $wm again before $sid (resume)"
       rc=0; mcp_step "$mids" 0 || rc=$?
       [[ $rc == 0 ]] || log "mcp: exit $rc on $sid"
@@ -1009,21 +1056,7 @@ run_paired() {
       rc=0; direct_call local --only "$( [[ "${wl:--}" == "-" ]] || printf '%s,' "$wl")$sid" || rc=$?
       if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
       if [[ $rc != 0 ]]; then
-        fails_local=$((fails_local + 1)); step_failed=1; FAILED_STEPS+=("direct-local:$sid:$rc")
-        log "direct-local: exit $rc on $sid (see arms/direct-local/runner.log)"
-        # An ssh that failed may have left the step running: never start the next arm next to it, and never read
-        # a failing ssh as "the runner is gone" (review N3).
-        wrc=0
-        wait_no_runner "$WAIT_RUNNER_S" || wrc=$?
-        if [[ $wrc == 1 ]]; then
-          runner_live=1; LOOP_STATE=failed; LOOP_REASON=runner_still_running
-          log "error: the direct-local step of $sid still runs on $MEX after $WAIT_RUNNER_S s: stopping the loop (--resume $RUN_DIR once it ended)"
-          break
-        elif [[ $wrc != 0 ]]; then
-          runner_live=1; LOOP_STATE=failed; LOOP_REASON=mex_unreachable
-          log "error: $MEX does not answer after the direct-local step of $sid failed, so its runner may still run there: stopping the loop, no further request (--resume $RUN_DIR once mex answers)"
-          break
-        fi
+        local_failed "$sid" "$rc" || break
       else
         fails_local=0
       fi
@@ -1040,6 +1073,12 @@ run_paired() {
       fi
     fi
     if [[ "$mw" != "-" ]]; then
+      if [[ "${wb:--}" != "-" ]]; then
+        rc=0; rewarm_before_mcp "$wb" "$sid" || rc=$?
+        if [[ $rc == 3 ]]; then LOOP_STATE=capped; break; fi
+        [[ $rc == 0 ]] || break
+        wb="-"
+      fi
       for rep in ${mw//,/ }; do
         [[ "$mids" == "$sid" ]] || log "mcp: $wm again before $sid (resume)"
         rc=0; mcp_step "$mids" "$rep" || rc=$?
@@ -1168,10 +1207,11 @@ print("%s %s/%s %s" % (s.get("state", "?"), s.get("done", "?"), s.get("planned",
     # The MCP arm last: repeat 0 of every scenario, then one pass per warm repeat index (1, then 2 for the
     # scenarios the paired plan gives three MCP repeats: suite_common.mcp_repeats), so a sequential run records the
     # same MCP executions as a paired one.
-    local arms="mcp" entry sid l r mc mw wl wr wm rep cold="" maxrep=0 pass again
+    local arms="mcp" entry sid l r mc mw wl wr wm wb rep cold="" maxrep=0 pass again
     local warm=()
     while IFS= read -r entry; do
-      read -r sid l r mc mw wl wr wm <<< "$entry"
+      # (wb, the direct-local re-run before an MCP step, is the paired loop's: this plan has no direct arm)
+      read -r sid l r mc mw wl wr wm wb <<< "$entry"
       # the resume rule as in the paired loop: a warm-up to run again goes into the target's first pass, before it
       again=""; [[ "${wm:--}" == "-" ]] || again="$wm,"
       if [[ $mc == 1 ]]; then cold+="$again$sid,"; again=""; fi

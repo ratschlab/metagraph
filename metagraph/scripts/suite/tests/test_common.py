@@ -348,9 +348,10 @@ class PairedPlan(unittest.TestCase):
                 with open(mpath, "w") as fh:
                     json.dump(manifest, fh)
                 sc._main(["paired-plan", mpath, d, "", "", "10", "direct-local,mcp"])
-            # the last three fields: the warm-ups to run again before it per arm (none here: no warm-up)
-            self.assertEqual(buf.getvalue().splitlines()[:3], ["C-1 1 - 1 1 - - -", "P-1 0 - 1 1 - - -",
-                                                                "L-1 1 - - - - - -"])
+            # the last four fields: the warm-ups to run again before it per arm, and on direct-local before its
+            # first MCP step (none here: no warm-up)
+            self.assertEqual(buf.getvalue().splitlines()[:3], ["C-1 1 - 1 1 - - - -", "P-1 0 - 1 1 - - - -",
+                                                                "L-1 1 - - - - - - -"])
             with contextlib.redirect_stdout(io.StringIO()) as buf:
                 sc._main(["beyond-status", mpath, "", ""])
             self.assertEqual(buf.getvalue().strip(), "")
