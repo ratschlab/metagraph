@@ -1090,7 +1090,7 @@ def _claim(ctx, fid, fv, claim, wanted, held, unsupported):
                 w = x[sid][k]["standing"]
                 if x[sid][k]["present"] and w not in words:
                     words.append(w)
-        unsupported.append("%s (%s: %s on the direct arms)" % (claim, fid, " / ".join(words) or "no execution"))
+        unsupported.append("%s (%s: %s on the direct access paths)" % (claim, fid, " / ".join(words) or "no execution"))
 
 
 def chapter_facts(ctx, ch):

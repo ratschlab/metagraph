@@ -1978,15 +1978,25 @@ EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the clas
 
 
 def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
+    """The detail blocks of a unit's footnoted members. The chapter prose's `details[<scenario id>]` may carry a
+    reader-facing `title` in place of the manifest's and a `note` (the block's `reading` line), both filled on
+    the scenario's own facts (`x[<id>]`, `manifest_version`) so that they can be conditional (READ-317, READ-319,
+    READ-320)."""
     out = ""
     prop, _ = _unit_prose(ctx, chapter, uid)
     property_text = ctx.fill(prop) if prop else None
+    details = (ctx.prose.get(chapter) or {}).get("details") or {}
     for sid in members:
         n = ctx.footnotes[chapter].get(sid)
         if n is None:
             continue
+        d = details.get(sid) if isinstance(details.get(sid), dict) else {}
+        values = {"x": {sid: facts.scenario_facts(ctx, sid)}, "id": sid,
+                  "manifest_version": (ctx.run.manifest or {}).get("manifest_version")} if d else None
         out += blocks.detail_block(ctx.run, sid, ctx.state(sid), n, ctx.units, ctx.short_reasons(), unit_note,
-                                   property_text=property_text)
+                                   property_text=property_text,
+                                   title=ctx.fill(d["title"], values) if d.get("title") else None,
+                                   note=ctx.fill(d["note"], values) if d.get("note") else None)
         ctx.blocks_by_chapter.setdefault(chapter, []).append(sid)
     return out
 
@@ -2061,12 +2071,18 @@ def unit_section(ctx, chapter, uid):
     prop_tex = inline(ctx.fill(prop)) if prop else latex.placeholder("(unit property: to be written)")
     if note:
         prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note))
-    out = latex.unit_header(uid, esc(u.get("unit_title") or ""), u["unit_type"], prop_tex,
-                            key=cells.LAYOUT_KEY.get(u["unit_type"]))
     layout = u["unit_type"]
+    key = cells.LAYOUT_KEY.get(layout)
+    legend = cells.TIMING_LEGEND.get(layout)
+    # a pairs table of repeated tests (chapter D) prints every repeat's wall: its key and legend name the repeats in
+    # execution order and the MCP cold call as the record has it (READ-321)
+    repeats = max([run.scenario(sid).get("repeat") for sid in members if isinstance(run.scenario(sid).get("repeat"), int)]
+                  or [1])
+    if layout == "pairs" and repeats > 1:
+        key, legend = cells.repeats_texts(repeats, _mcp_cold_first(run, members))
+    out = latex.unit_header(uid, esc(u.get("unit_title") or ""), u["unit_type"], prop_tex, key=key)
     fns = dict((sid, _footnotes_for(ctx, chapter, sid)) for sid in members)
     meta = units.by_scenario
-    legend = cells.TIMING_LEGEND.get(layout)
     rk = record_key_link(ctx, members, chapter)
     if rk:
         legend = (legend + "; " + rk) if legend else rk
@@ -2176,6 +2192,22 @@ def unit_section(ctx, chapter, uid):
     return out
 
 
+def _mcp_cold_first(run, members):
+    """Whether, over the members' MCP executions, repeat 0 is the host-cold call and every later repeat host-warm
+    (the paired loop's order), so that a repeated pairs table's legend may say so; False when no MCP execution has
+    a host state or the record says otherwise."""
+    seen = False
+    for sid in members:
+        for l in run.arm_lines(sid, "mcp"):
+            hc = cells.host_cache_of(l)
+            if hc not in ("cold", "warm"):
+                continue
+            seen = True
+            if (l.get("repeat") == 0) != (hc == "cold"):
+                return False
+    return seen
+
+
 def units_ids(ctx, members, by_group=None):
     import units as units_mod
     return units_mod.ids_text(members, None, by_group)
@@ -2221,16 +2253,14 @@ def chapter(ctx, ch):
     values = ctx.chapter_values(ch)
     # the summary is built after the families so the footnotes are assigned
     if purpose:
-        out += paragraphs([ctx.fill(p, values) for p in ([purpose] if isinstance(purpose, str) else purpose)])
+        out += prose_blocks(ctx, purpose, values)
     out += "\\parhead{Conclusion}\n"
     summary = prose.get("summary")
-    out += paragraphs([ctx.fill(p, values) for p in ([summary] if isinstance(summary, str) else (summary or []))]) \
-        if summary else latex.placeholder("(chapter summary: to be written)") + "\n\n"
+    out += prose_blocks(ctx, summary, values) if summary else latex.placeholder("(chapter summary: to be written)") + "\n\n"
     out += chapter_summary(ctx, ch, sids, n_units, len(fams))
     out += "\\parhead{What this chapter leaves untested}\n"
     gap = prose.get("coverage_gap")
-    out += paragraphs([ctx.fill(p, values) for p in ([gap] if isinstance(gap, str) else (gap or []))]) \
-        if gap else latex.placeholder("(coverage gap: to be written)") + "\n\n"
+    out += prose_blocks(ctx, gap, values) if gap else latex.placeholder("(coverage gap: to be written)") + "\n\n"
     out += exception_index(ctx, ch)
     table = untested_table(ctx, ch)
     if table:
@@ -2242,11 +2272,30 @@ def chapter(ctx, ch):
     else:
         out += "Every property check of this chapter was passed by at least one execution of each test.\n\n"
     out += "\\parhead{Background}\n"
-    out += paragraphs([ctx.fill(p, values) for p in (prose.get("intro") or [])]) if prose.get("intro") else \
+    out += prose_blocks(ctx, prose.get("intro"), values) if prose.get("intro") else \
         latex.placeholder("(chapter prose: to be written)") + "\n\n"
     # the compact record key right before the first family's tables (re-verification N-1)
     out += record_key_paragraph(ctx, ch)
     return out + body
+
+
+def prose_blocks(ctx, items, values):
+    """A chapter's prose slot (`purpose`, `summary`, `coverage_gap`, `intro`) as LaTeX: a string or a list whose
+    items are paragraphs (strings, filled on the chapter's values) or one small table, written as
+    {"table": {"caption", "columns", "rows", "widths"}} with every cell filled like prose (READ-311: a reader-facing
+    map inside a chapter's background, where a paragraph of lists would hide what is compared)."""
+    out = ""
+    for item in ([items] if isinstance(items, str) else (items or [])):
+        if isinstance(item, dict) and isinstance(item.get("table"), dict):
+            t = item["table"]
+            columns = [inline(ctx.fill(c, values)) for c in (t.get("columns") or [])]
+            rows = [[inline(ctx.fill(c, values)) for c in row] for row in (t.get("rows") or [])]
+            widths = t.get("widths") or [1] * len(columns)
+            caption = inline(ctx.fill(t["caption"], values)) if t.get("caption") else None
+            out += latex.plain_table(latex.spec_p(widths), columns, rows, caption)
+        elif isinstance(item, str) and item:
+            out += paragraphs([ctx.fill(item, values)])
+    return out
 
 
 def part_two(ctx):

@@ -7,6 +7,7 @@ grammar and the expectation formatters on chapter R's real expectations."""
 
 import json
 import os
+import inspect
 import re
 import shutil
 import sys
@@ -71,6 +72,20 @@ def v5():
     manifest = sc.read_json(V5_MANIFEST)
     mapping = units_mod.load_mapping(V5_MAPPING)
     return manifest, mapping, units_mod.resolve(manifest, mapping)
+
+
+def _prose_texts(items):
+    """The prose strings of a chapter slot (`intro`, `summary`, `coverage_gap`, `purpose`): its paragraphs and the
+    caption, columns and cells of a {"table": ...} item (sections.prose_blocks; chapter C's map of the documents)."""
+    out = []
+    for item in ([items] if isinstance(items, str) else (items or [])):
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("table"), dict):
+            t = item["table"]
+            out.extend([t.get("caption") or ""] + list(t.get("columns") or [])
+                       + [c for row in (t.get("rows") or []) for c in row])
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -232,10 +247,12 @@ class ProseTest(unittest.TestCase):
         problems = []
         for ch in WRITTEN_CHAPTERS:
             data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch)) or {}
-            texts = [("intro", " ".join(data.get("intro") or []))]
+            # a prose slot's list may hold a {"table": ...} item beside its paragraphs (sections.prose_blocks; chapter C's
+            # map of the capabilities documents): its cells are prose too
+            texts = [("intro", " ".join(_prose_texts(data.get("intro"))))]
             for key in ("summary", "coverage_gap"):
                 v = data.get(key)
-                texts.append((key, " ".join(v) if isinstance(v, list) else (v or "")))
+                texts.append((key, " ".join(_prose_texts(v)) if isinstance(v, list) else (v or "")))
             texts += [("families.%s" % fid, (f or {}).get("prose") or "") for fid, f in (data.get("families") or {}).items()]
             for uid, t in (data.get("units") or {}).items():
                 if isinstance(t, dict):
@@ -3145,7 +3162,9 @@ class FullDocumentTest(unittest.TestCase):
             roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
             self.assertTrue(roots <= {"x", "fam", "rel", "unit"}, "%s: unresolved %s" % (ch, sorted(set(ctx.unresolved))))
             self.assertIn("5 of the 5 tests pass on direct-local", conclusion.replace("\\", ""), ch)
-            self.assertIn("the deploy gate was not judged", gap.lower(), ch)
+            # the gate consequence sits in the coverage gap, or in the conclusion where the chapter leads with its
+            # evidence gaps and the gate consequence (M and N after READ-301, READ-312)
+            self.assertIn("the deploy gate was not judged", (conclusion + gap).lower(), ch)
 
     def render(self, name, ch, data, families):
         """(ctx, the conclusion, the coverage gap, {family: its prose paragraph}) of the fake run's chapter `ch`
@@ -3172,18 +3191,26 @@ class FullDocumentTest(unittest.TestCase):
         ctx_a, conc_a, gap_a, fam_a = self.render("m-plain", "M", M, ["M-planted", "M-protein"])
         ctx_b, conc_b, gap_b, fam_b = self.render("m-perturbed", "M", M, ["M-planted", "M-protein"])
         self.assertNotIn("whose list the deadline withheld", conc_a)
-        self.assertIn("In this run every M-planted test was answered within its budget on the direct arms.", gap_a)
-        self.assertIn("Every substituted residue was found within its budget on the direct arms.", gap_a)
-        self.assertIn("Two tests read inconclusive on direct-local and zero on direct-remote, and two tests answered "
-                      "a 200 whose list the deadline withheld on at least one arm (M-001, M-002)", conc_b)
-        self.assertIn("In this run 1 of the 1 M-planted tests read inconclusive on direct-local and 0 on direct-remote "
-                      "(on direct-local one by a 200 limited by time (M-001))", gap_b)
+        self.assertIn("every planted window completed on both direct access paths", conc_a)
+        self.assertIn("In this run every M-planted test was answered within its budget on the direct access paths.", gap_a)
+        self.assertIn("Every substituted residue was found within its budget on the direct access paths.", gap_a)
+        # the conclusion counts the exceptions and points at the exception index; the ids are the index's and the
+        # detail blocks' (READ-301, READ-312)
+        self.assertIn("Two tests read inconclusive on direct-local and zero on direct-remote, and two answered a 200 "
+                      "whose list the deadline withheld on some access path; the exception index on this page groups "
+                      "them by what the exception means", conc_b)
+        self.assertNotIn("(M-001, M-002)", conc_b)
+        self.assertIn("the planted searches have completion gaps where the budget bound (1 of the 1 planted windows read "
+                      "inconclusive on direct-local and 0 on direct-remote", conc_b)
+        self.assertIn("In this run 1 of the 1 M-planted tests read inconclusive on direct-local and 0 on direct-remote: "
+                      "one answered a 200 whose list the deadline withheld on some access path (1 on direct-local, 0 on "
+                      "direct-remote, 0 via MCP); the exception index below names each test", gap_b)
         self.assertIn("Of the 1 substituted residues 1 read inconclusive on direct-local and 0 on direct-remote; no "
                       "substituted residue was found at level 1 on direct-local, so the residue claim rests on no "
                       "evidence from this host", gap_b)
-        self.assertIn("In this run every test passed on every arm exercised.", fam_a["M-protein"])
-        self.assertIn("In this run one of the 1 tests did not pass on every arm (M-002); the detail blocks follow the "
-                      "tables.", fam_b["M-protein"])
+        self.assertIn("In this run every test passed on every access path exercised.", fam_a["M-protein"])
+        self.assertIn("In this run one of the 1 tests did not pass on every access path (M-002); the detail blocks follow "
+                      "the tables.", fam_b["M-protein"])
         self.assertIn("1 inconclusive on direct-local, 0 on direct-remote; the detail blocks follow the table.", fam_b["M-planted"])
         for ctx in (ctx_a, ctx_b):
             roots = set(n.strip("[]").lstrip("!").split("[")[0] for n in ctx.unresolved)
@@ -4003,6 +4030,241 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertNotIn("UNRESOLVED", summary)
         self.assertIn("Three classifications are distinct", summary)
         self.assertIn("one claim is one property check of one scenario", summary)
+
+
+def _v4_branch(text):
+    """A prose string as a v4 run reads it: every `[[manifest_version = 5 ? a | b]]` resolved to b, every other
+    conditional's two branches kept with its head dropped, innermost first (READ-313: no v4 legend names v5)."""
+    pos = 0
+    while True:
+        m = _COND.search(text, pos)
+        if not m:
+            return text
+        head, sep, rest = m.group(1).partition("?")
+        if not sep:
+            pos = m.end()
+            continue
+        yes, _, no = rest.partition("|")
+        chosen = no if head.strip() == "manifest_version = 5" else (yes + " " + no)
+        text = text[:m.start()] + " " + chosen + " " + text[m.end():]
+        pos = 0
+
+
+class ChapterMQCNDTest(unittest.TestCase):
+    """The readability review's chapter comments on M, Q, C, N and D (READ-301 to READ-321, 2026-10-16) and the small
+    generator parts they needed: a chapter prose slot may hold a table item (sections.prose_blocks; C's map of the
+    capabilities documents, READ-311); a detail block takes a reader title and a `reading` note from the chapter
+    prose's `details`, filled on the scenario's facts (READ-317, READ-319, READ-320); a pairs table of repeated
+    tests prints a three-repeat key and legend (cells.repeats_texts, READ-321); every v4 legend of N and D names no
+    v5 check (READ-313); every unit of the five chapters carries a `question`, every chapter a `purpose`; the prose
+    says access path, not arm (READ-008)."""
+
+    CHAPTERS = ("M", "Q", "C", "N", "D")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        build_run(cls.run_dir)
+        merge_run.merge(cls.run_dir)
+        sc.write_json_atomic(os.path.join(cls.run_dir, "compare.json"), cmp.compare(cls.run_dir, (CASES, {"cases": 5})))
+        cls.runobj = reader.Run(cls.run_dir)
+        cls.units = units_mod.resolve(cls.runobj.manifest, FAKE_MAPPING)
+        cls.prose = dict((ch, sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))) for ch in cls.CHAPTERS)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def ctx(self, prose=None):
+        import sections
+        ctx = sections.Context(self.runobj, self.units, prose or {}, {}, {}, list(self.units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        return ctx
+
+    def test_prose_table_item(self):
+        """READ-311: a {"table": ...} item of a chapter slot renders as a small table with every cell filled like
+        prose; C's background carries the three documents' map; the prose scan reads the table's texts."""
+        import sections
+        ctx = self.ctx()
+        text = sections.prose_blocks(ctx, ["para {n_tests}", {"table": {"caption": "cap {n_tests}", "columns": ["a", "b"],
+                                                                        "rows": [["x", "y {n_tests}"]]}}], {"n_tests": 5})
+        self.assertIn("para 5", text)
+        self.assertIn("\\itshape cap 5}", text)
+        self.assertIn("a & b\\\\", text)
+        self.assertIn("x & y 5\\\\", text)
+        self.assertEqual(sections.prose_blocks(ctx, None, {}), "")
+        tables = [p for p in self.prose["C"]["intro"] if isinstance(p, dict)]
+        self.assertEqual(len(tables), 1)
+        rows = tables[0]["table"]["rows"]
+        self.assertEqual([r[0] for r in rows], ["`GET /capabilities`", "`GET /pattern/capabilities`", "`GET /traverse/capabilities`"])
+        self.assertEqual(tables[0]["table"]["columns"][0], "route")
+        for r in rows:
+            self.assertIn("REL-same_answer-000", r[3])
+        self.assertIn("never the whole documents", tables[0]["table"]["caption"])
+        self.assertIn("REL-same_answer-0004", " ".join(_prose_texts(self.prose["C"]["intro"])))
+        # the chapter renders the table between its paragraphs
+        prose = {"C": dict(self.prose["C"])}
+        prose["C"]["families"] = {}
+        self.assertIn("client feature-availability check", " ".join(_prose_texts(prose["C"]["intro"])))
+        self.assertIn("None of this chapter's host-document or protocol claims was validated through MCP",
+                      self.prose["C"]["coverage_gap"][0])
+
+    def test_detail_title_and_note(self):
+        """READ-317, READ-319, READ-320: a detail block's reader title in place of the manifest's and its `reading`
+        line after the interpretation, both from the chapter prose's `details` and filled on the scenario's facts."""
+        import sections
+        st = cells.scenario_states(self.runobj, "R-001")
+        block = blocks.detail_block(self.runobj, "R-001", st, 1, self.units, title="TITLE-X", note="NOTE-Y")
+        self.assertIn("\\quad TITLE-X}", block)
+        self.assertIn("\\bline{reading}{NOTE-Y}", block)
+        self.assertLess(block.find("\\bline{unverified}"), block.find("\\bline{reading}"))
+        self.assertLess(block.find("\\bline{reading}"), block.find("the technical record"))
+        plain = blocks.detail_block(self.runobj, "R-001", st, 1, self.units)
+        self.assertNotIn("\\bline{reading}", plain)
+        self.assertIn(latex.esc(self.runobj.scenario("R-001").get("title"), 200), plain)
+        prose = {"R": {"intro": ["i"], "summary": ["s"], "coverage_gap": ["g"],
+                       "families": {"R-one": {"title": "t", "prose": "p"}}, "units": {"R-one": "u"},
+                       "details": {"R-001": {"title": "[[x[R-001][dl][standing] = fail ? FAILED-TITLE | OTHER-TITLE]]",
+                                             "note": "note on {x[R-001][dl][standing]} ({manifest_version})"}}}}
+        ctx = self.ctx(prose)
+        text = sections.chapter(ctx, "R")
+        self.assertIn("\\quad FAILED-TITLE}", text)
+        self.assertNotIn("OTHER-TITLE", text)
+        self.assertIn("\\bline{reading}{note on fail (", text)
+        self.assertEqual([u for u in ctx.unresolved if "R-001" in u], [])
+        # the prose files: N-usecase-0005's title states the current manifest's assertion, N-hard-0022 and
+        # D-P-scope-0004 carry a reading
+        n_details = self.prose["N"]["details"]
+        self.assertEqual(set(n_details), {"N-usecase-0005", "N-hard-0022"})
+        title4 = facts.fill(n_details["N-usecase-0005"]["title"], {"manifest_version": 4})
+        self.assertIn("the first entry reports forward-only strands", title4)
+        self.assertNotIn("both", title4)
+        self.assertIn("both entries report + and both are counted", facts.fill(n_details["N-usecase-0005"]["title"], {"manifest_version": 5}))
+        self.assertIn("I.2's budget table", n_details["N-hard-0022"]["note"])
+        self.assertIn("not about end-to-end latency", n_details["N-hard-0022"]["note"])
+        self.assertEqual(set(self.prose["D"]["details"]), {"D-P-scope-0004"})
+        self.assertIn("repeatability and the source property", self.prose["D"]["details"]["D-P-scope-0004"]["note"])
+
+    def test_repeats_key_and_legend(self):
+        """READ-321: a pairs table of repeated tests names the repeats in execution order, the MCP cold call as the
+        record has it, the server time and the be line per execution, and the digest marks."""
+        import sections
+        key, legend = cells.repeats_texts(3, True)
+        self.assertEqual(key, "pairs · times: wall per repeat, r0 / r1 / r2 (mcp: r0 cold, r1 and r2 warm)")
+        self.assertIn("in execution order, r0 / r1 / r2 (via MCP r0 is the host-cold call, r1 and r2 the warm ones)", legend)
+        self.assertIn("be the host call as the service timed it, per execution (MCP only)", legend)
+        self.assertIn("= and ≠: the normalised answer digests of the repeats on that access path are equal / differ", legend)
+        key2, legend2 = cells.repeats_texts(2, False)
+        self.assertIn("r0 / r1 (mcp: see the detail blocks)", key2)
+        self.assertIn("via MCP the detail blocks state each call's host state", legend2)
+        self.assertIn("r1 to r3", cells.repeats_texts(4, True)[0])
+        lines = {"A": {"mcp": [{"repeat": 0, "host_cache": "cold"}, {"repeat": 1, "host_cache": "warm"},
+                               {"repeat": 2, "host_cache": "warm"}]}}
+        stub = _Stub(arm_lines=lambda sid, arm: lines.get(sid, {}).get(arm, []))
+        self.assertTrue(sections._mcp_cold_first(stub, ["A"]))
+        lines["A"]["mcp"][1]["host_cache"] = "cold"
+        self.assertFalse(sections._mcp_cold_first(stub, ["A"]))
+        self.assertFalse(sections._mcp_cold_first(stub, ["B"]))
+        # a pairs unit of single-repeat tests keeps the plain key and legend
+        prose = {"R": {"intro": ["i"], "summary": ["s"], "coverage_gap": ["g"],
+                       "families": {"R-one": {"title": "t", "prose": "p"}}, "units": {"R-one": "u"}}}
+        text = sections.chapter(self.ctx(prose), "R")
+        self.assertIn("\\unithead{R-one}{pair}{pairs · times: wall per repeat, r0 / r1 (mcp: cold / warm)}", text)
+        self.assertIn(cells.TIMING_LEGEND["pairs"], text)
+
+    def test_slots_questions_and_access_paths(self):
+        """READ-101, READ-005, READ-008 for M, Q, C, N and D: a purpose per chapter, a question per unit, and the
+        prose says access path (a traversal arm, a direction, keeps its qualifier)."""
+        _, _, units4 = v4()
+        for ch in self.CHAPTERS:
+            data = self.prose[ch]
+            self.assertTrue(data.get("purpose"), ch)
+            self.assertIn("I.2's", " ".join(data["purpose"]), ch)
+            for uid in [u for f in units4.chapter_families(ch) for u in units4.families[f]["units"]]:
+                entry = data["units"].get(uid)
+                self.assertIsInstance(entry, dict, (ch, uid))
+                self.assertTrue(entry.get("property"), (ch, uid))
+                self.assertTrue(entry.get("question", "").rstrip().endswith("?") or "A pass confirms" in entry.get("question", ""), (ch, uid))
+            for path, text in prose_strings(data):
+                for m in re.finditer(r"\b(\w+) (arms?)\b", text):
+                    self.assertEqual(m.group(1), "traversal", "%s%s: %s" % (ch, path, m.group(0)))
+        self.assertNotIn("on the direct arms)", inspect.getsource(facts._claim))
+
+    def test_v4_legends_name_no_v5(self):
+        """READ-313: read as a v4 run reads them, the legends and prose of N and D name no v5 check; the version
+        note names them as not exercised by this run, and the v5 branch reads in the present tense."""
+        for ch in ("N", "D"):
+            data = self.prose[ch]
+            for path, text in prose_strings(data):
+                if path == ".coverage_gap[2]" and ch == "N":
+                    continue
+                v4_text = _v4_branch(text)
+                self.assertNotRegex(v4_text, r"\bv5\b|\bversion 5\b|\bmanifest 5\b", "%s%s" % (ch, path))
+                self.assertNotIn("from v5", v4_text, "%s%s" % (ch, path))
+        note = self.prose["N"]["coverage_gap"][2]
+        v4_note = facts.fill(note, {"manifest_version": 4})
+        self.assertIn("This run executed manifest version 4", v4_note)
+        self.assertIn("none of it is exercised by this run and none of it is evidence about this run", v4_note)
+        self.assertIn("both primers of the forward-only pair asserted and counted", v4_note)
+        v5_note = facts.fill(note, {"manifest_version": 5})
+        self.assertIn("This run executed manifest version 5", v5_note)
+        self.assertNotIn("not exercised by this run", v5_note)
+        self.assertTrue(self.prose["N"]["intro"][0].startswith("This run executed manifest version {manifest_version}"))
+        d_intro = facts.fill(self.prose["D"]["intro"][2], {"manifest_version": 4})
+        self.assertIn("a later manifest version marks these per check, which this run does not exercise", d_intro)
+        # the unit legends read the current manifest's assertion
+        strand = facts.fill(self.prose["N"]["units"]["N-usecase-strand"]["property"], {"manifest_version": 4})
+        self.assertIn("its first entry on + only (the second primer is asserted by no check of this manifest)", strand)
+        self.assertIn("Neither tests an amplicon", strand)
+        peptide = facts.fill(self.prose["N"]["units"]["N-negative-peptide"]["note"], {"manifest_version": 4})
+        self.assertIn("The shortest is 10 residues", peptide)
+
+    def test_chapter_sentences(self):
+        """The local corrections in words: M's substitution and floor definitions and its batch sentence (READ-302,
+        READ-304, READ-305), Q's assumption and strand axes (READ-308, READ-309), N's absence scopes, coordinates,
+        repeat counts and defect pin (READ-314 to READ-316, READ-318), D's two dimensions (READ-320)."""
+        M = self.prose["M"]
+        intro = " ".join(M["intro"])
+        self.assertIn("N allows any base, so a position holding N matches every base without spending a substitution", intro)
+        self.assertIn("The information floor is an admission rule", intro)
+        self.assertIn("not the confidence or significance of any match", intro)
+        self.assertIn("What a context counts", intro)
+        self.assertIn("as an illustration, not a measurement", intro)
+        refusal = M["families"]["M-refusal"]["prose"]
+        self.assertIn("[[x[M-refusal-0010][mcp][class] = refused_before_host ?", refusal)
+        self.assertIn("a batch holding one unsupported long mismatch pattern returns nothing through the tools", refusal)
+        self.assertIn("not a promise of when it will be", refusal)
+        self.assertIn("Positive protein recovery", M["summary"][0])
+        self.assertIn("admission tests, not recoveries", M["summary"][0])
+        Q = self.prose["Q"]
+        self.assertIn("An assumption of these fixtures, not a proved fact", Q["families"]["Q-pred"]["prose"])
+        self.assertIn("unproved assumption", Q["families"]["Q-pred"]["claim"])
+        self.assertIn("Two axes are in play", Q["families"]["Q-strands"]["prose"])
+        self.assertIn("A toy example, not an executed test", Q["families"]["Q-motif"]["prose"])
+        self.assertIn("What a predicate selects", Q["intro"][0])
+        N = self.prose["N"]
+        self.assertIn("What an empty answer rules out differs by route", N["intro"][0])
+        self.assertIn("excludes that source alone, not every similar sequence", N["intro"][0])
+        self.assertIn("two coordinate systems meet here", N["intro"][1])
+        self.assertIn("starts 0 to 169", N["intro"][1])
+        self.assertIn("What these tests do not measure", N["families"]["N-hard"]["prose"])
+        self.assertIn("a count of two is not two copies", N["families"]["N-hard"]["prose"])
+        self.assertIn("test no amplicon", N["families"]["N-usecase"]["prose"])
+        self.assertTrue(N["units"]["N-usecase-defect"]["property"].startswith("Diagnostic pin of a known index defect"))
+        self.assertIn("a failure signals the repair, not a regression", N["units"]["N-usecase-defect"]["note"])
+        self.assertIn("The evidence gaps.", N["summary"][0])
+        self.assertNotIn("{time_limited_text}", N["summary"][0])  # counts, not the id lists (READ-312)
+        self.assertNotIn("{late503_text}", N["summary"][0])
+        self.assertNotIn("{footnoted_elsewhere_text}", N["coverage_gap"][1])
+        D = self.prose["D"]
+        self.assertIn("two things, to be read apart", D["intro"][1])
+        self.assertIn("validates nothing about the omitted field", D["intro"][1])
+        self.assertIn("[[x[D-P-scope-0004][mcp][standing] = inconclusive ?", D["summary"][0])
+        for uid in D["units"]:
+            self.assertIn("where that path exposes the fields they read", D["units"][uid]["property"])
 
 
 if __name__ == "__main__":
