@@ -373,7 +373,10 @@ class PolicyTest(GateCase):
         self.assertEqual(smoke["content_sha256"], "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd")
         declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
         self.assertEqual(declared["manifest"], {"file": "manifest/suite_v6.json", "content_sha256": m["content_sha256"]})
-        self.assertEqual((declared["exclusions"], declared["not_required"], declared["relations_excluded"]), ([], [], []))
+        self.assertEqual((declared["exclusions"], declared["not_required"]), ([], []))
+        # one declared entry, for the rtp policy (test_shipped_v6_rtp_policy): outside this gate's selection
+        self.assertEqual([(e["relation"], e["arms"]) for e in declared["relations_excluded"]],
+                         [("REL-subset-0007", ["mcp"])])
         fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v6.json",
                                          name="v6-rt-mcp", declared_file="gate/declared_v6_rt.json",
                                          declared=declared)
@@ -403,6 +406,63 @@ class PolicyTest(GateCase):
         self.assertEqual(c["required"], {"mcp": {"scenarios": 205, "executions": 416},
                                          "direct-local": {"scenarios": 237, "executions": 273}})
         self.assertNotIn("POST /pattern", c["by_route"])
+
+    def test_shipped_v6_rtp_policy(self):
+        """The v6 gate with POST /pattern (the owner's decision 2 of 2026-10-16, if the v6 baseline shows it
+        decisive): gate_policy.py with the rt policy's inputs (arms mcp and direct-local, declared_v6_rt.json, the
+        by-design table) and the routes plus POST /pattern. Its resolve / traverse part is the rt policy's; the
+        budget_stress scenarios (the four long walks, the six heavy /pattern ones, the 23 warm-ups) are excluded on
+        every arm; D-P-scope-0004 r0 on mcp by marks_cover_repeat; REL-subset-0007 on mcp by the declared entry."""
+        shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rtp_mcp.json"))
+        m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
+        declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
+        routes = list(gate_policy.DEFAULT_ROUTES) + ["POST /pattern"]
+        fresh = gate_policy.build_policy(m, routes=routes, arms=("mcp", "direct-local"),
+                                         manifest_file="manifest/suite_v6.json", name="v6-rtp-mcp",
+                                         declared_file="gate/declared_v6_rt.json", declared=declared)
+        for p in (shipped, fresh):
+            p.pop("generated_utc")
+        self.assertEqual(shipped, fresh)
+        rt = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
+        self.assertEqual((shipped["declared"], shipped["by_design_table"], shipped["manifest"]["content_sha256"]),
+                         (rt["declared"], rt["by_design_table"], rt["manifest"]["content_sha256"]))
+        ids = dict((s["id"], s) for s in m["scenarios"])
+        gated = set(rt["selection"]["scenarios"])
+        self.assertEqual([x for x in shipped["required"] if x["scenario"] in gated], rt["required"])
+        self.assertEqual([x for x in shipped["exclusions"] if x["scenario"] in gated], rt["exclusions"])
+        self.assertEqual([r for r in shipped["relations"] if r["a"] in gated], rt["relations"])
+        c = shipped["counts"]
+        self.assertEqual(c["by_route"], {"GET /traverse/capabilities": 1, "POST /pattern": 478,
+                                         "POST /resolve": 127, "POST /traverse": 113})
+        self.assertEqual(c["exclusions_by_rule"], {"advanced_path": 1, "budget_stress": 33,
+                                                   "manifest_not_implemented": 50, "marks_cover_repeat": 1,
+                                                   "table_not_expressible": 47})
+        stressed = sorted(e["scenario"] for e in shipped["exclusions"] if "budget_stress" in e["rules"])
+        self.assertEqual(stressed, sorted(["T-longwalk-%04d" % i for i in range(1, 5)] +
+                                          ["M-protein-0001", "M-protein-0002", "M-protein-0003", "M-protein-0007",
+                                           "P-heavy-0001", "N-nearmiss-0030"] +
+                                          ["P-warm-%04d" % i for i in range(1, 24)]))
+        self.assertTrue(all(e["arms"] == ["direct-local", "mcp"] for e in shipped["exclusions"]
+                            if "budget_stress" in e["rules"]))
+        rep = [e for e in shipped["exclusions"] if "marks_cover_repeat" in e["rules"]]
+        self.assertEqual([(e["scenario"], e["arms"], e["repeats"]) for e in rep], [("D-P-scope-0004", ["mcp"], [0])])
+        req = dict(((x["scenario"], x["arm"]), x["repeats"]) for x in shipped["required"])
+        self.assertEqual((req[("D-P-scope-0004", "mcp")], req[("D-P-scope-0004", "direct-local")]), ([1, 2], [0, 1, 2]))
+        # every MCP mark of round 2 is a property-level mark the gate applies, but P-scope-0004 / -0006's
+        # scenario-level one, an exclusion
+        self.assertEqual(sorted(e["scenario"] for e in shipped["exclusions"] if e["scenario"] in ("P-scope-0004",
+                                                                                                  "P-scope-0006")),
+                         ["P-scope-0004", "P-scope-0006"])
+        rel = [(r["relation"], r["arms"], r.get("rules")) for r in shipped["relations_excluded"]
+               if r["relation"] == "REL-subset-0007"]
+        self.assertEqual(rel, [("REL-subset-0007", ["mcp"], ["declared"])])
+        self.assertIn("pattern.max_contexts_above_10000", [r for r in shipped["relations_excluded"]
+                                                           if r["relation"] == "REL-subset-0007"][0]["reason"])
+        self.assertIn(("REL-subset-0007", ["direct-local"]), [(r["relation"], r["arms"]) for r in shipped["relations"]])
+        self.assertEqual((c["relations_required"], c["properties_not_required"]), (19, 0))
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 628, "executions": 1275},
+                                         "direct-local": {"scenarios": 686, "executions": 793}})
+        self.assertTrue(all(ids[s]["route"] in routes for s in shipped["selection"]["scenarios"]))
 
     def test_cli_writes_policy_and_ids(self):
         mpath, pol, ids = (os.path.join(self.tmp, n) for n in ("m.json", "p.json", "ids.txt"))
