@@ -1147,10 +1147,16 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
         rows = []
         for sid in da.get("disagreeing", [])[:100]:
             a = comp["scenarios"][sid].get("direct_agreement") or {}
-            rows.append([md(sid), "; ".join("%s: %s vs %s" % (md(d["check"]), md(d["a"]), md(d["b"]))
-                                            for d in a.get("differing_checks", [])[:4]) or "outcome differs"])
+            why = "; ".join("%s: %s vs %s" % (md(d["check"]), md(d["a"]), md(d["b"]))
+                            for d in a.get("differing_checks", [])[:4])
+            if a.get("exact_counts_differ"):
+                # compare's exact-count rule: every check may agree (both outcomes pass), the counts do not
+                why = "; ".join(x for x in (md(a.get("exact_counts_detail")
+                                               or cmp.exact_count_detail(a["exact_counts_differ"]), 400), why) if x)
+            rows.append([md(sid), why or "outcome differs"])
         if rows:
-            out.append(table(["scenario", "differing checks (local vs remote)"], rows, align=["l", "l"]))
+            out.append(table(["scenario", "differing checks or exact counts (local vs remote)"], rows,
+                             align=["l", "l"]))
     out.append("## MCP")
     out.append("")
     ma = s["mcp_agreement"]
@@ -1207,10 +1213,15 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
             continue
         side = a.get("side")
         detail = {"direct": a.get("direct_detail"), "mcp": a.get("mcp_detail")}.get(side, a.get("detail"))
+        limit = 200
+        if a.get("exact_counts_differ"):
+            # compare's exact-count rule: the counts it compared, whichever side it blames (a comparison of an
+            # earlier compare.py states them in `detail` only)
+            detail, limit = a.get("detail") or cmp.exact_count_detail(a["exact_counts_differ"]), 400
         if not detail and a.get("differing_checks"):
             detail = "; ".join("%s: mcp %s vs direct %s" % (d["check"], d["a"], d["b"])
                                for d in a["differing_checks"][:4])
-        rows.append([md(sid), md(a.get("case") or "-"), md(a.get("side") or "checks"), md(detail or "-", 200)])
+        rows.append([md(sid), md(a.get("case") or "-"), md(a.get("side") or "checks"), md(detail or "-", limit)])
     if rows:
         out.append(table(["scenario", "by-design case", "side", "detail"], rows, align=["l", "l", "l", "l"]))
     nc = ma.get("not_comparable_scenarios") or []

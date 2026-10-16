@@ -725,7 +725,10 @@ def judge(run_dir, policy, reevaluated=False):
                           or r.get("explained_items") for (s_, a_, _), r in recorded.items() if s_ == sid and a_ == "mcp")
             cls = ma.get("class")
             if cls == "disagree":
-                problems.append(_problem("disagreement", "MCP disagrees (%s)" % _describe_agreement(ma), sid, "mcp"))
+                # compare's exact-count rule names the odd arm, the MCP's side only when it is the odd one
+                what = "MCP disagrees" if ma.get("by") != "exact_counts" else \
+                    "the MCP's and a direct arm's exact counts differ"
+                problems.append(_problem("disagreement", "%s (%s)" % (what, _describe_agreement(ma)), sid, "mcp"))
             elif mcp_sbd or cls == "service_by_design":
                 if direct_ran and ma.get("verified") is not True:
                     problems.append(_problem("outcome", "by-design pair not verified (%s)" % _describe_agreement(ma),

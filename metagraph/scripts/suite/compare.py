@@ -1690,13 +1690,9 @@ def exact_counts(answer):
     return out
 
 
-def exact_count_differences(by_arm, run_dir, checks_mod=None):
-    """The exact counts that differ between two access paths to one index (SPEC-pattern-search §7.4: an exact count
-    is the population's size, a fact of the index, whichever arm asked): over every pair of executions of a /pattern
-    scenario on two different arms whose answers are 200s not limited by time (checks_mod.time_limited, else the
-    line's time_limited), each count path both state exact, [{"a": [arm, repeat], "b": [arm, repeat], "path",
-    "a_value", "b_value"}] in arm and repeat order; [] when none differs. The checks judge one answer at a time, so
-    a count inflated with all its partitions (GPT's "doubled count") passes on every arm: this is its anchor."""
+def exact_count_values(by_arm, run_dir, checks_mod=None):
+    """[(arm, repeat, exact_counts)] of a /pattern scenario's executions whose answers are 200s not limited by time
+    (checks_mod.time_limited, else the line's time_limited) and state an exact count, in arm and repeat order."""
     seen = []
     for arm in sorted(by_arm, key=lambda a: (merge_run.ARM_ORDER.get(a, 9), a)):
         for rep in sorted(by_arm[arm] or {}):
@@ -1712,6 +1708,18 @@ def exact_count_differences(by_arm, run_dir, checks_mod=None):
             counts = exact_counts(ans)
             if counts:
                 seen.append((arm, rep, counts))
+    return seen
+
+
+def exact_count_differences(by_arm, run_dir, checks_mod=None, seen=None):
+    """The exact counts that differ between two access paths to one index (SPEC-pattern-search §7.4: an exact count
+    is the population's size, a fact of the index, whichever arm asked): over every pair of executions of a /pattern
+    scenario on two different arms whose answers are 200s not limited by time (exact_count_values, or |seen|), each
+    count path both state exact, [{"a": [arm, repeat], "b": [arm, repeat], "path", "a_value", "b_value"}] in arm and
+    repeat order; [] when none differs. The checks judge one answer at a time, so a count inflated with all its
+    partitions (GPT's "doubled count") passes on every arm: this is its anchor."""
+    if seen is None:
+        seen = exact_count_values(by_arm, run_dir, checks_mod)
     out = []
     for x in range(len(seen)):
         for y in range(x + 1, len(seen)):
@@ -1729,6 +1737,50 @@ def exact_count_text(diffs, limit=3):
     return "; ".join("%s exact %s on %s r%s, exact %s on %s r%s" % (
         d["path"], d["a_value"], d["a"][0], d["a"][1], d["b_value"], d["b"][0], d["b"][1]) for d in diffs[:limit]) + (
         "; ... (%d in all)" % len(diffs) if len(diffs) > limit else "")
+
+
+def exact_count_side(seen, diffs):
+    """Which arm an exact-count difference that involves the MCP (|diffs|: exact_count_differences' items with an MCP
+    side) blames, from every execution's values (|seen|: exact_count_values): (side, arms). An execution is the odd
+    one on a path when no other arm's execution states its value there while at least two other arms state the path
+    with a value in common (they agree, it does not). ("mcp", ["mcp"]) when only MCP executions are odd, on every
+    differing path; ("direct", [the odd direct arms]) when only direct arms' are, the MCP stating what another direct
+    arm states; ("undetermined", [the arms involved]) otherwise: a path two arms alone state (no third tells which is
+    wrong, e.g. a gate run of direct-local and the MCP), or no execution the odd one. Whichever side, the scenario
+    disagrees."""
+    order = lambda a: (merge_run.ARM_ORDER.get(a, 9), a)  # noqa: E731
+    involved = sorted(set(d["a"][0] for d in diffs) | set(d["b"][0] for d in diffs), key=order)
+    odd_all = set()
+    for path in sorted(set(d["path"] for d in diffs)):
+        vals = {}
+        for arm, _, counts in seen:
+            if path in counts:
+                vals.setdefault(arm, set()).add(counts[path])
+        odd = set()
+        for arm, mine in vals.items():
+            others = [v for a, v in vals.items() if a != arm]
+            if len(others) < 2 or not set.intersection(*others):
+                continue
+            if mine - set().union(*others):
+                odd.add(arm)
+        if not odd:
+            return "undetermined", involved
+        odd_all |= odd
+    if odd_all == {"mcp"}:
+        return "mcp", ["mcp"]
+    if "mcp" not in odd_all:
+        return "direct", sorted(odd_all, key=order)
+    return "undetermined", involved
+
+
+def exact_count_detail(diffs, side=None, arms=None):
+    """The explanation of an exact-count disagreement as the report, the gate and compare.json state it."""
+    note = ""
+    if side == "direct":
+        note = " (the odd arm: %s; the MCP states another direct arm's value)" % ", ".join(arms or [])
+    elif side == "undetermined":
+        note = " (which arm is wrong is undetermined: %s)" % ", ".join(arms or [])
+    return "exact counts differ%s: %s" % (note, exact_count_text(diffs))
 
 
 EXECUTION_CHECKS = ("budget_respected", "deterministic")
@@ -3140,13 +3192,15 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                 cw_vals[arm]["ratio"].append(cw["ratio"])
         local, remote, mcp = by_arm.get("direct-local"), by_arm.get("direct-remote"), by_arm.get("mcp")
         route = (scen_by_id.get(sid) or {}).get("route") or any_line.get("route")
-        exact = exact_count_differences(by_arm, run_dir, checks_mod) if route == "POST /pattern" else []
+        seen_exact = exact_count_values(by_arm, run_dir, checks_mod) if route == "POST /pattern" else []
+        exact = exact_count_differences(by_arm, run_dir, checks_mod, seen=seen_exact) if seen_exact else []
         if local and remote:
             agree = direct_agreement(local, remote, route, run_dir, checks_mod, scen_by_id.get(sid))
             dd = [d for d in exact if "mcp" not in (d["a"][0], d["b"][0])]
             if dd:
                 # an exact count that differs between the access paths is a disagreement, whatever the checks say
-                agree = dict(agree, exact_counts_differ=dd, **{"class": "disagree"})
+                agree = dict(agree, exact_counts_differ=dd, exact_counts_detail=exact_count_detail(dd),
+                             **{"class": "disagree"})
             entry["direct_agreement"] = agree
             direct_summary["compared"] += 1
             direct_summary[agree["class"]] += 1
@@ -3178,9 +3232,14 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                                run_dir)
             md_ = [d for d in exact if "mcp" in (d["a"][0], d["b"][0])]
             if md_:
-                # an exact count the MCP answer states otherwise than a direct arm: a disagreement on the MCP side
-                ma = dict(ma, exact_counts_differ=md_, **{"class": "disagree", "side": "mcp", "by": "exact_counts",
-                                                          "detail": "exact counts differ: %s" % exact_count_text(md_)})
+                # an exact count the MCP answer states otherwise than a direct arm: a disagreement, on the side of the
+                # arm that is the odd one (exact_count_side), the MCP's only when it is
+                side, odd = exact_count_side(seen_exact, md_)
+                text = exact_count_detail(md_, side, odd)
+                ma = dict(ma, exact_counts_differ=md_, exact_counts_arms=odd, detail=text,
+                          **{"class": "disagree", "side": side, "by": "exact_counts"})
+                if side in ("mcp", "direct"):
+                    ma[side + "_detail"] = text
             entry["mcp_agreement"] = ma
             mcp_summary["compared"] += 1
             mcp_summary[ma["class"]] = mcp_summary.get(ma["class"], 0) + 1

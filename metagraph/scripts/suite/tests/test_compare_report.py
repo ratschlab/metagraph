@@ -2392,8 +2392,9 @@ class PatternGateFixesTest(unittest.TestCase):
             e.update(stop={"phase": "discovery", "reason": "time"}, determinism="time_limited")
         return {"mode": "count", "patterns": [e]}
 
-    def compared(self, local, remote, mcp):
-        """compare's entry of one /pattern scenario whose arms answered the bodies given ({repeat: body})."""
+    def compared(self, local, remote, mcp, whole=False):
+        """compare's entry of one /pattern scenario whose arms answered the bodies given ({repeat: body}; None: the
+        arm did not run); |whole|: the whole comparison."""
         s = dict(scen("P-010", "P"), expect=[{"check": "status", "args": {"http": 200}},
                                              {"check": "count_relation", "args": {"min": 1}}])
         manifest = {"manifest_version": 1, "content_sha256": sc.scenarios_sha256([s]), "scenarios": [s]}
@@ -2403,12 +2404,15 @@ class PatternGateFixesTest(unittest.TestCase):
             os.makedirs(os.path.join(d, "arms", "direct-local"))
             sc.write_json_atomic(os.path.join(d, "arms", "direct-local", "manifest.json"), manifest)
             for k, (arm, bodies) in enumerate((("direct-local", local), ("direct-remote", remote), ("mcp", mcp))):
+                if bodies is None:
+                    continue
                 write_arm(d, arm, [line("P-010", arm, r, T0 + 10 * k + r, 50.0, checks=checks,
                                         digest="d%s" % bodies[r]["patterns"][0]["counts"]["contexts"]["value"])
                                    for r in sorted(bodies)],
                           raw_bodies=dict((("P-010", r), b) for r, b in bodies.items()))
             merge_run.merge(d)
-            return cmp.compare(d, ({}, None))["scenarios"]["P-010"]
+            comp = cmp.compare(d, ({}, None))
+            return comp if whole else comp["scenarios"]["P-010"]
 
     def test_the_ingress_504_tells_the_direct_outcomes_apart_by_timing(self):
         """VERIFY-V6-2 L1: a direct-local complete pass against direct-remote's front-ingress 504 at its cut (read
@@ -2502,6 +2506,46 @@ class PatternGateFixesTest(unittest.TestCase):
         self.assertEqual(cmp.exact_counts({"body": self.body(3)}),
                          {"p0.contexts": 3, "p0.contexts.by_offset.19": 3, "p0.contexts.by_strand.+": 2,
                           "p0.contexts.by_strand.-": 1})
+
+    def test_an_exact_count_disagreement_names_its_counts_and_the_odd_arm(self):
+        """Round 2's verification of the checks (M1, L2): an exact-count disagreement leaves both outcomes pass, so
+        the report's Agreement rows read "outcome differs" (direct) and "-" (MCP); they now state the paths and the
+        values. compare blames the MCP only when its count is the odd one: a direct arm's doubled count is the direct
+        side's, and with two arms alone (an rtp gate run: direct-local and the MCP) the side is undetermined. The
+        scenario disagrees whichever side it is."""
+        n, d2 = 22158, 44316
+        mcp_odd = self.compared({0: self.body(n)}, {0: self.body(n)}, {0: self.body(n), 1: self.body(d2)}, whole=True)
+        ma = mcp_odd["scenarios"]["P-010"]["mcp_agreement"]
+        self.assertEqual((ma["side"], ma["exact_counts_arms"], ma["mcp_detail"]), ("mcp", ["mcp"], ma["detail"]))
+        remote_odd = self.compared({0: self.body(n)}, {0: self.body(d2)}, {0: self.body(n), 1: self.body(n)},
+                                   whole=True)
+        ma = remote_odd["scenarios"]["P-010"]["mcp_agreement"]
+        self.assertEqual((ma["class"], ma["side"], ma["by"], ma["exact_counts_arms"]),
+                         ("disagree", "direct", "exact_counts", ["direct-remote"]))
+        self.assertIn("(the odd arm: direct-remote; the MCP states another direct arm's value)", ma["direct_detail"])
+        local_odd = self.compared({0: self.body(d2)}, {0: self.body(n)}, {0: self.body(n), 1: self.body(n)})
+        self.assertEqual((local_odd["mcp_agreement"]["side"], local_odd["mcp_agreement"]["exact_counts_arms"]),
+                         ("direct", ["direct-local"]))
+        two = self.compared({0: self.body(d2)}, None, {0: self.body(n), 1: self.body(n)})["mcp_agreement"]
+        self.assertEqual((two["class"], two["side"], two["exact_counts_arms"]),
+                         ("disagree", "undetermined", ["direct-local", "mcp"]))
+        self.assertIn("which arm is wrong is undetermined: direct-local, mcp", two["detail"])
+        self.assertFalse(set(two) & {"direct_detail", "mcp_detail"})
+        # the report's Agreement rows state the counts: the direct table and the MCP table alike
+        text = report.agreement_section(remote_odd)
+        rows = [x for x in text.split("\n") if x.startswith("| P-010 |")]
+        self.assertEqual(len(rows), 2, text)
+        self.assertIn("exact counts differ: p0.contexts exact 22158 on direct-local r0, exact 44316 on direct-remote "
+                      "r0", rows[0])
+        self.assertNotIn("outcome differs", rows[0])
+        self.assertIn("| direct | exact counts differ (the odd arm: direct-remote; the MCP states another direct arm's "
+                      "value): p0.contexts exact 44316 on direct-remote r0, exact 22158 on mcp r0", rows[1])
+        # a comparison of an earlier compare.py (side mcp, the explanation in `detail` only) still shows it
+        ma = mcp_odd["scenarios"]["P-010"]["mcp_agreement"]
+        ma.pop("mcp_detail")
+        row = [x for x in report.agreement_section(mcp_odd).split("\n") if x.startswith("| P-010 |")][-1]
+        self.assertIn("| mcp | exact counts differ: p0.contexts exact 22158 on direct-local r0, exact 44316 on mcp r1",
+                      row)
 
 
 if __name__ == "__main__":
