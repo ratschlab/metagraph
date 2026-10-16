@@ -551,17 +551,11 @@ def attention_line(rows, manifest, comp=None):
     return marked("Needs attention, in tests (scenarios): %s." % md("; ".join(parts)), "red")
 
 
-def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
-                    cases=None, gated=False):
-    """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
-    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
-    x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
-    from PASS; so does a run, or an arm, with executions and no pass (UNVERIFIED: its marks, not implemented via MCP
-    or service-side by design, showed nothing to hold); an MCP execution inconclusive by a limit |cases| (the table)
-    states for its scenario is listed apart (stated_mcp_limit). |gated|: the run has a deploy gate's verdict, which
-    the report leads with; this one is labelled exploratory."""
+def verdict_text(run, comp, rows, reevaluated=False, missing=None, manifest=None, cases=None):
+    """The verdict word and its reason, as verdict_section prints it, and the facts it was decided on: {incomplete,
+    loop, mixed, stub, untested, totals, no_pass_arms}. The results document (doc/make_doc.py) states the same
+    verdict from the same inputs through this function."""
     s = comp["summary"]
-    lines = ["# Verdict", ""]
     totals = s.get("totals", {})
     failing = sum(t["outcomes"].get("fail", 0) + t["outcomes"].get("error", 0) for t in totals.values())
     # an outcome outside the vocabulary (a runner's mark not agreed first) is read as a failure, never as a pass
@@ -594,15 +588,9 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     # a re-evaluated set is judged by checks.py whatever the runners ran
     stub = "stub" in modules and not reevaluated
     untested = untested_groups(rows, manifest, cases, comp)
-    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     arm_pos = dict((a, i) for i, a in enumerate(sc.ARMS))
     no_pass_arms = [(arm, t["outcomes"]) for arm, t in sorted(totals.items(), key=lambda kv: (
         arm_pos.get(kv[0], 9), kv[0])) if t.get("executions") and not t["outcomes"].get("pass")]
-    stated = {}
-    for r in rows:
-        cid = stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp)
-        if cid:
-            stated.setdefault((r.get("scenario"), cid), []).append(r.get("repeat"))
     if incomplete:
         verdict = "INCOMPLETE (not finished: %s)" % ", ".join(incomplete)
     elif failing or other or dis_direct or dis_mcp or rel_failed:
@@ -641,11 +629,73 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
     if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE (no execution passed"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
-    if gated:
-        lines.append("**Exploratory verdict (not the deploy decision, which is the gate's above): %s**" % mark_nim_counts(
-            md(verdict)))
-    else:
-        lines.append("**%s**" % mark_nim_counts(md(verdict)))
+    return verdict, {"incomplete": incomplete, "loop": loop, "mixed": mixed, "stub": stub, "untested": untested,
+                     "totals": totals, "no_pass_arms": no_pass_arms}
+
+
+EXPLORATORY_LABEL = "Exploratory verdict (not the deploy decision, which is the gate's %s)"
+
+
+def exploratory_label(where="above"):
+    """The label of the ordinary verdict beside a deploy gate's: the gate is the decision (|where|: the report
+    prints the gate above the verdict, the results document's cover beside it)."""
+    return EXPLORATORY_LABEL % where
+
+
+def verdict_headline(verdict, gated=False, where="above"):
+    """The verdict as the report's headline prints it: the verdict itself, or, for a run with a deploy gate's
+    verdict (|gated|: the report leads with the gate), labelled exploratory. The results document prints the same
+    headline on its cover (where="beside")."""
+    return ("%s: %s" % (exploratory_label(where), verdict)) if gated else verdict
+
+
+def _shown(value):
+    """|value| as md() shows it before escaping: None as '' (a gate.json field that is missing)."""
+    return "" if value is None else value
+
+
+def gate_headline_parts(verdict):
+    """(word, how, summary) of a deploy gate's verdict (gate.py's gate.json): 'GATE PASS' | 'GATE FAIL'; 'policy
+    <name> v<version>, sha256 <short>, judged <utc>'; 'every planned and required execution recorded, nothing
+    blocks' | '<n> problem(s): <kind> <n>, ...' in gate.KINDS order. The report's gate section and the results
+    document's cover print these. A missing field (None) prints empty (_shown), as report.md() prints it."""
+    probs = verdict.get("problems") or []
+    pol = verdict.get("policy") or {}
+    by_kind = {}
+    for p in probs:
+        by_kind[p.get("kind")] = by_kind.get(p.get("kind"), 0) + 1
+    word = "GATE %s" % ("PASS" if verdict.get("passed") else "FAIL")
+    how = "policy %s v%s, sha256 %s, judged %s" % (_shown(pol.get("name")), _shown(pol.get("policy_version")),
+                                                   short(pol.get("sha256")), _shown(verdict.get("judged_utc")))
+    summary = ("every planned and required execution recorded, nothing blocks" if verdict.get("passed") else
+               "%d problem(s): %s" % (len(probs), ", ".join("%s %d" % (_shown(k), n) for k, n in sorted(
+                   by_kind.items(), key=lambda kv: gate_mod.KINDS.index(kv[0]) if kv[0] in gate_mod.KINDS else 99))))
+    return word, how, summary
+
+
+def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
+                    cases=None, gated=False):
+    """The verdict; |missing| (gate.missing_planned: the planned executions no arm recorded, and the plan's source)
+    makes it INCOMPLETE, the MCP arm's included; |depth| (agreement_depth) splits the MCP agreement; an area or route
+    x arm where nothing passed and something was inconclusive (untested_groups, over |manifest|'s routes) keeps it
+    from PASS; so does a run, or an arm, with executions and no pass (UNVERIFIED: its marks, not implemented via MCP
+    or service-side by design, showed nothing to hold); an MCP execution inconclusive by a limit |cases| (the table)
+    states for its scenario is listed apart (stated_mcp_limit). |gated|: the run has a deploy gate's verdict, which
+    the report leads with; this one is labelled exploratory (the headline text: verdict_headline). Every
+    nonzero count of what is not implemented yet via MCP in the headline is red (mark_nim_counts), and the
+    attention line (attention_line) follows it."""
+    s = comp["summary"]
+    lines = ["# Verdict", ""]
+    verdict, facts = verdict_text(run, comp, rows, reevaluated, missing, manifest, cases)
+    totals, loop, mixed, stub, untested = (facts["totals"], facts["loop"], facts["mixed"], facts["stub"],
+                                           facts["untested"])
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    stated = {}
+    for r in rows:
+        cid = stated_mcp_limit(r, scen.get(r.get("scenario")), cases, comp)
+        if cid:
+            stated.setdefault((r.get("scenario"), cid), []).append(r.get("repeat"))
+    lines.append("**%s**" % mark_nim_counts(md(verdict_headline(verdict, gated))))
     lines.append("")
     attention = attention_line(rows, manifest, comp)
     if attention:
@@ -745,17 +795,8 @@ def gate_section(run_dir, reevaluated=False, max_items=200, lines=None):
                           "this run has now; run gate.py on the run again for a current verdict." % (
                               md(verdict.get("judged_utc")), md(pol.get("name")),
                               "PASS" if verdict.get("passed") else "FAIL", md(", ".join(stale))), ""])
-    by_kind = {}
-    for p in probs:
-        by_kind[p.get("kind")] = by_kind.get(p.get("kind"), 0) + 1
-    out = ["# Deploy gate", "",
-           "**GATE %s** (policy %s v%s, sha256 %s, judged %s): %s." % (
-               "PASS" if verdict.get("passed") else "FAIL", md(pol.get("name")), md(pol.get("policy_version")),
-               md(short(pol.get("sha256"))), md(verdict.get("judged_utc")),
-               "every planned and required execution recorded, nothing blocks" if verdict.get("passed") else
-               "%d problem(s): %s" % (len(probs), ", ".join("%s %d" % (md(k), n) for k, n in sorted(
-                   by_kind.items(), key=lambda kv: gate_mod.KINDS.index(kv[0]) if kv[0] in gate_mod.KINDS else 99)))),
-           ""]
+    word, how, summary = gate_headline_parts(verdict)
+    out = ["# Deploy gate", "", "**%s** (%s): %s." % (md(word), md(how), md(summary)), ""]
     by_key = dict((sc.execution_key(r), r) for r in lines or [])
     rows = []
     for p in probs[:max_items]:
@@ -1010,9 +1051,13 @@ def agreement_depth(comp, rows, is_property, manifest=None):
     (checks.is_property; the generic ones, e.g. budget_respected which the MCP never sees, do not count) on each MCP
     repeat against the reference arm's same repeat (else its first; an item compare took from the other direct arm,
     reference_fallbacks, from that arm's: compare.reference_checks): {scenario: {class (DEPTH_CLASSES), not_compared
-    (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
-    where the MCP does not expose them)}}. An MCP item a property-level mark of |manifest|'s scenario sets aside
-    (suite_common.checks_marked_aside) is neither compared nor skipped: the mark states it, and the report lists it."""
+    (the property checks no repeat compared), partly_compared ({check: {compared: [repeats], skipped: [repeats]}}:
+    the property checks some repeat compared and another skipped; the readability review's verification of
+    2026-10-16: a check one repeat left undecided while the other repeat decided it on both arms is compared on
+    that repeat, so it is not among `not_compared`), reference_fails_hidden (property checks the reference fails or
+    finds where the MCP does not expose them)}}. The class reads every repeat (a skip on any repeat makes the pair
+    partial). An MCP item a property-level mark of |manifest|'s scenario sets aside (suite_common.checks_marked_aside)
+    is neither compared nor skipped: the mark states it, and the report lists it."""
     scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     by = {}
     for r in rows:
@@ -1031,6 +1076,7 @@ def agreement_depth(comp, rows, is_property, manifest=None):
         alt = ((by.get(sid) or {}).get(ma.get("reference_alternative")) or {}) if ma.get("reference_fallbacks") else {}
         alt0 = alt[min(alt)] if alt else None
         has_prop, compared, skipped, hidden = False, set(), set(), set()
+        by_rep = {}  # check -> {"compared": {repeats}, "skipped": {repeats}}
         marks = sc.mcp_check_marks(scen.get(sid))
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
             mine = mcp[rep].get("checks") or []
@@ -1049,11 +1095,13 @@ def agreement_depth(comp, rows, is_property, manifest=None):
                 for k, (oa, ob) in enumerate(zip(ca[name], cb[name])):
                     if oa in JUDGED and ob in JUDGED:
                         compared.add(name)
+                        by_rep.setdefault(name, {"compared": set(), "skipped": set()})["compared"].add(rep)
                     elif (name, k) in aside:
                         if ob in ("fail", "finding"):
                             hidden.add(name)   # the reference's failure stays named: a mark hides no result
                     else:
                         skipped.add(name)
+                        by_rep.setdefault(name, {"compared": set(), "skipped": set()})["skipped"].add(rep)
                         if oa == "not_exposed" and ob in ("fail", "finding"):
                             hidden.add(name)
         agg_ok = ma.get("mcp_outcome") == "pass" and ma.get("reference_outcome") == "pass"
@@ -1069,7 +1117,12 @@ def agreement_depth(comp, rows, is_property, manifest=None):
             cls = "on_failure"
         else:
             cls = "full"
-        out[sid] = {"class": cls, "not_compared": sorted(skipped), "reference_fails_hidden": sorted(hidden)}
+        def _reps(items):
+            return sorted(items, key=lambda k: (not isinstance(k, int), str(k)))
+        partly = dict((name, {"compared": _reps(by_rep[name]["compared"]), "skipped": _reps(by_rep[name]["skipped"])})
+                      for name in sorted(skipped & compared))
+        out[sid] = {"class": cls, "not_compared": sorted(skipped - compared), "partly_compared": partly,
+                    "reference_fails_hidden": sorted(hidden)}
     return out
 
 
@@ -1210,11 +1263,14 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
             if key == "full":
                 shown = "-"
             else:
-                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(depth[x]["not_compared"])))
-                                            if depth[x]["not_compared"] and key.startswith("partial") else "")
+                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(
+                    list(depth[x]["not_compared"]) + ["%s on r%s" % (n, ", r".join(str(r) for r in v["skipped"]))
+                                                      for n, v in (depth[x].get("partly_compared") or {}).items()])))
+                                            if (depth[x]["not_compared"] or depth[x].get("partly_compared"))
+                                            and key.startswith("partial") else "")
                                   for x in sids[:60]) + (" ..." if len(sids) > 60 else "")
             rows.append([md(label), str(len(sids)), shown or "-"])
-        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared)"], rows,
+        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared; on some repeat only where repeats are named)"], rows,
                          align=["l", "r", "l"]))
         hidden = [(sid, depth[sid]["reference_fails_hidden"]) for sid in comp["order"]
                   if (depth.get(sid) or {}).get("reference_fails_hidden")]

@@ -53,9 +53,10 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   504 on a budget that ends before that, or on another arm, stays a status fail.
 - Execution outcome (review of lane S1; the MCP runner applies the same rule): checks may report `pass`,
   `fail`, `not_exposed`, `inconclusive` (the scenario could not test its property: an allowed 503, a withheld
-  answer hiding the source, a stated resource stop) or `finding` (the host broke a stated bound or SPEC
-  promise without failing the request, e.g. a walk past its time budget); any other outcome reads as a
-  failure. The execution is `fail` when a check failed, else `finding` when one is a finding, else
+  answer hiding the source, a stated resource stop) or `finding` (a stated bound was broken on the clock the
+  check reads: a 200 past its budget by the host's own elapsed time, a walk stopped outside its stated rule on
+  the seed's clock, an allowed 503 deadline more than max(1 s, the budget) late on the client's clock; apart from
+  fail whatever the HTTP status); any other outcome reads as a failure. The execution is `fail` when a check failed, else `finding` when one is a finding, else
   `inconclusive` when one is inconclusive or none could test anything (no check, or every one not_exposed),
   else `pass` (suite_common.outcome_from_checks). Over a scenario's repeats: error > fail > finding >
   inconclusive. Neither finding nor inconclusive ever counts as pass; the report lists every finding in its
@@ -3936,3 +3937,494 @@ content ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd. The fr
   others, with their counts in both Agreement tables and the attention line; two v6 builds are byte-identical; the
   rt gate's 729 executions and policy_v6_rt_mcp.json (v5's but for its pins) do not move. 745 tests pass, none
   skipped; each new or changed test fails on b90cfa738's code.
+
+## The results document (doc/, 2026-10-15)
+
+One PDF per run for the MetaGraph developers: for every test what it checks, what was expected, what each of the
+three arms answered and how long it took, compact enough that the 681 tests of v4 fit a readable document, every
+test findable by id, every imperfect result explained in a detail block. Design: `~/.cache/metagraph-traverse-plans/
+2026-10-15/doc/DESIGN-DOC.md` (the sample of chapter R was reviewed first). The generator lives in `doc/`, the PDF is
+never committed.
+
+    doc/make_doc.py RUN_DIR --out DIR [--chapters R,T,...] [--sample] [--no-pdf] [--recorded]
+                    [--units FILE] [--prose-dir DIR] [--checks-dir DIR] [--by-design PATH]
+                    [--policy FILE] [--declared FILE] [--xelatex PATH] [--name doc] [--scaffold-prose]
+
+After the owner's review of the chapter R sample (round 2, 2026-10-15) the document has this shape: the cover carries the
+run verdict and the deploy gate as two boxes of equal weight (a gated run: the gate verdict and its counts; an ungated
+run: "Deploy gate: not evaluated" and why; a gate judged offline by gate.py for the document says so; a partial build
+states "Chapter R sample; whole-run summary shown for context"); Part I has four sections (I.1 decision summary: the
+scope, the verdict lines, the principal findings, failures and disagreements of the whole run, the inconclusive
+executions by reason and the properties still untested, computed per unit as the property checks no execution of a
+member passed on any arm, with the reasons per arm, the prose of `overview.json` printed in slots between the computed
+parts; I.2 methods; I.3 reading guide with one real matrix annotated by numbered markers, the legend, the marks, the
+cell grammar incl. what the slash means per table type, and the record key of the ground truth's abbreviations; I.4
+provenance and coverage as a compact table, the recorded outcomes per arm and the limitation and exemption counts
+linked to the appendices); each chapter leads with its conclusion (`summary`), the summary block, what it leaves
+untested (`coverage_gap` plus the computed lines) and only then the background (`intro`); every unit table carries a
+legend line saying what `/` means there (repeats; median / maximum; the edge tables' MCP column: the recorded status,
+the service's code and the class of the outcome, derived from the evidence: refused before host execution, not
+expressible through MCP, answered after service normalization, host refusal relayed through the service, with an
+explanation line under a normalised row); a replicates cell reads `not exercised: n` instead of `ok 0/0` and a
+coverage line in words replaces "exceptions: none"; a unit whose MCP column is wholly not exercised carries one line
+under its table with the short reason and the pointer to appendix B (`mcp_notes.units` of the chapter prose, else the
+cases' short reasons); a detail block holds the expected line, an adjudication line only for what the rows do not say
+(a failure, an error, a host-state override, a disagreement, a planned execution not recorded, and one phrase for an MCP
+arm the service decided: its class and status, the short reason unless the unit's note under the table has it, the
+case in B), then one row per arm and repeat (final outcome with its qualifier: allowed 503, late 503, host state, by the
+checks; HTTP and code, wall, requested budget, property tested?; an arm standing ○ or ◆ reads so in its rows), a
+finding's evidence per execution with the mechanism and the rule once in a line set apart, the overridden checks of a
+host-state execution labelled "intermediate", every error text once, the classes, the relations and the supporting
+artifacts (the raw files and the executions file's line numbers); blocks under about 28 estimated lines are unbreakable
+boxes, longer ones repeat the test id on continuation, headings ask for space below them; the closing section opens with
+observations filled from `closing.json` templates (sample sizes included), the caveats, a paired-latency plot per arm
+pair and the per-phase box plots (pgfplots, from `plot_*.csv` the generator writes; nothing stacked), then the tables,
+each section led by its method, observation and limits paragraphs (`closing.json` `sections`, the figures as
+placeholders); appendix D holds the short glossary with the version-pinned README reference and the full record key,
+F the environment in full, the rules of judging, the verdict and the gate (`overview.json` `appendix_F.rules`), the
+vocabulary and the gate's problems (every scenario-arm pair with its repeats), G the MCP limits and the declared
+exemptions (F and G with their lead-ins from `overview.json`).
+
+After the verification of round 2 (VERIFY-R2, 2026-10-15; round 3) the facts the document states about the gate and
+the by-design table come from the records that decide them, never from a count that looks alike: what blocks the gate
+is the gate's own outcome problems (`sections.gate_outcome_counts`: the executions on a gated arm, in the policy's
+selection and not declared exempt; I.1 and I.4 say how many of the inconclusive executions those are, or that no gate
+was judged), and the by-design table the document prints is the one the re-evaluation replayed (`reader.Run._load_table`
+finds it by the sha256 of `reevaluated.json by_design` among the replayed path, the suite's copy and the run's snapshot;
+another table is read only with the comparator's warning kept and printed in I.4 and F with both shas). The closing
+section's figures follow one population each and say which (the pairs within 1 s count |difference|; the scenarios a
+pairing leaves out are counted for that pairing; the phase box plot reads the same per-scenario population as C.3's
+table and states the zero paging times it leaves out; C.3's cold-wall population against C.4's whole cold column); a
+family's prose may count the MCP classes of its members through placeholders the generator fills from the same
+classifier as the cells (`Context.family_values`: `{n_mcp_refused_before_host}` ...), so that prose and tables cannot
+drift. Part I is four pages: the methods hold the arms, the order, the ground truth and the timing definitions (the
+owner's list) and the rules of judging, the verdict and the gate moved to appendix F.
+
+After the re-verification of round 3 (round 4, 2026-10-15) every figure of the run that a chapter's prose states is a
+placeholder the generator fills from the record, and every sentence whose truth depends on the run is a conditional,
+so that a later run's document never prints the sample's numbers (`doc/facts.py`): the chapter prose reads
+`facts.chapter_facts` (the counts by standing and by agreement, the summary's timing figures, the findings with their
+overruns, the claims each family states in its `claim` sorted into what the direct arms showed, the footnoted tests
+with one phrase per arm, the gate's outcome problems among them; `fam[<family>][...]` a family's values, `x[<scenario>]
+[dl|dr|mcp][wall|phrase|detail|class|...]` a scenario's), a family's prose `facts.family_facts` (its standing counts, the
+MCP classes with their ids and variants, the members' phrases, the findings, the 503 deadlines past their budgets, the
+stated stops, the relations, the owner's declared exemptions, the expected runs); `[[flag ? when true | when false]]`,
+`[[!flag ? ...]]` and `[[x[R-edge-0003][mcp][class] = refused_before_host ? ...]]` choose a text, nested innermost first;
+`{n:s}` is the plural s, `{n:v}` the verb's s, `{n:word}` the number in words. A placeholder or flag the run's values
+lack stays visible and `make_doc.py` warns. The literal numbers a prose file still carries are the constants of the SPEC,
+of the manifest (lengths, budgets, expected runs) and of the service, each listed under the file's `_assumes` with its
+source; `tests/test_doc.py` fails on any other number, on a placeholder or flag the generator does not compute, and
+when chapter R's prose rendered on the fake run prints one of the v4 sample's figures. The compact record key
+(abbreviation and organism, one paragraph) sits on each chapter page before its first family, where the matrices
+need it (in I.3 it cost Part I a fifth page), every unit table whose variants name a record links to it and to
+appendix D's full key from its legend, and appendix D prints the key before the glossary. The phase box plot's tick
+labels are two lines (the phase, its n). The closing section says which population each n is (per scenario the
+host-warm MCP execution with a backend timing; the cold calls without a backend timing counted apart).
+
+After the owner's second review (round 5, 2026-10-15; OWNER-REVIEW-SAMPLE-2.md, the design frozen) the paired
+scatterplots of C.2 draw a plotting area of 62 by 55 mm each (`latex.paired_plot`, `scale only axis`); an MCP
+agreement's depth is judged over the repeats compare actually compared (`reader.depth_over_compared_repeats`: the
+executions inconclusive by a host state, `mcp_agreement.host_state_repeats`, are left out before the depth is read),
+so a detail block says "fully checked on r1; r0 was an inconclusive host-state outcome" (`blocks.depth_text`), the
+chapter line counts the fully checked pairs compared over fewer repeats than recorded and the chapter prose names
+them (`n_mcp_full_fewer_repeats`), and the reading guide and the glossary define the depth over the compared
+repeats; no timing sentence states a cause or a bound: the owner's sentence "Latency varies substantially across
+records; these correctness controls do not isolate the effect of query length" replaces the record-versus-length
+reading, and "observed under concurrent host load" every "upper bound"; the host-cold MCP calls without a backend
+timing are split by what ended them from the record (`sections.cold_mcp_untimed_split`, the recorded time
+limitation or the error code); a filled number is joined to its unit by a non-breaking space (`latex.join_units`);
+a variant label prints its thousands separators (`units.variant_text`, "2,000 bp (pfa)"); the sentences of
+chapter R that asserted the run (every call refused at submit, the twins' answers the same via MCP, the source
+outranked in a tie, host-warm on direct-local) are conditionals on computed facts (`mcp_all_refused_before_host`,
+`rel[...][mcp]`, `x[...][dl][host_word]`; a unit's note under its table reads `facts.unit_facts`); the R-budget
+prose names its footnoted members once and lets the coverage gap and the detail blocks hold the evidence. The test
+`test_two_fixtures_change_conclusions` renders chapter R on two fixtures built from small data (the fake run, and a
+copy with a stated stop, a late 503 and a clean direct side) and asserts that the counts, the verdict branch, the
+coverage statements and the explanatory prose all change.
+
+After the re-verification of round 5 (VERIFY-R4.md, the final patch, 2026-10-15) the closing section states no
+timing cause: each of its limits names what the run measures and what it does not isolate (the service's queue,
+the host's load, the cache, the loop's order, the answers' sizes; `doc/prose/closing.json`), and the
+interpretive clauses of C.1 are conditionals on flags computed from the run (`sections.closing_values`:
+`backend_share_small`, the median backend overhead below half of the median MCP overhead;
+`paired_seconds_to_milliseconds`, the paired medians as printed; `cold_warm_mcp_close`, the MCP cold-warm ratio
+within a quarter of one), so that a clause prints only when the figures make it true (`sections.observations`
+fills through `facts.fill`); the number of a count's verb and noun follows the count in R.json ("is a finding" /
+"are findings", "the only test" / "one of the two tests"); and `latex.join_units` also covers the findings list
+of I.1, the summary lines under the tables and appendix B's quoted texts. `test_closing_two_fixtures_change_conclusions`
+renders the closing section on the perturbed fixture and on a copy whose summary and walls flip each condition,
+and `test_timing_wordings` bans the removed wordings ("point to", "reflects the", "rather than a slower host",
+"at this load" and the others) in every prose file and in the generator.
+
+- Reads the run directory as report.py does (manifest.json, the re-evaluated executions and compare.json when the
+  run has them, else the recorded ones, run.json, reevaluated.json, samples.jsonl, gate.json, arms/mcp/run.json),
+  the by-design table compare judged with, the owner-declared file of `gate/` whose manifest sha matches, and the
+  checks module (docstrings for the check catalogue). Stdlib only, offline, no clock in the output.
+- Writes `DIR/doc.tex`, one `chapter_<X>.tex` per chapter and `doc.sty`, then runs xelatex twice (a third time when
+  the .aux changed; `/Library/TeX/texbin/xelatex` or PATH; latexmk is not used). Fonts from TeX Live: Libertinus
+  Serif, Fira Sans / Mono, DejaVu Sans for the glyphs. Exit 0 built, 1 LaTeX failed (the log's first error echoed),
+  2 usage or missing inputs (each named).
+- The reading model (`doc/units.py`): a scenario belongs to one unit (one builder template, one property, varied
+  over one dimension), a unit to one family (the id prefix), a family to one chapter (the area). Five layouts:
+  `series` (arms as rows, variants as columns), `replicates` (aggregates per group), `refusals` (glyph only),
+  `list` (the refusals shape with time cells), `pairs` (twins, relations, D repeats). The metadata comes from the
+  manifest's `doc` blocks (v5) or else from the mapping `doc/units/suite_v<version>.json` (v4); a scenario in
+  neither is an error, never a silent drop.
+- Prose (`doc/prose/<chapter>.json`, `overview.json`, `glossary.json`, `checks.json`, `closing.json`, `cases.json`):
+  keyed on family and unit ids, never on scenario ids, so a new scenario of an existing unit is covered for free.
+  `<chapter>.json` holds the chapter's `summary` (the conclusion, printed first), `coverage_gap`, the `intro`
+  paragraphs (the background), one title and paragraph per family and one property line per unit (a string, or
+  {property, note}) and, under `mcp_notes.units`, the one line under a unit table whose MCP column is wholly not
+  exercised; `overview.json` Part I's four sections (keyed decision / methods / reading / provenance, each with
+  `paragraphs` and the slots the generator prints between its computed parts: I.1 `verdict`, `findings`,
+  `untested`, `closing`; I.4 `coverage`, `exemptions`; the wording of the glyph legend and the marks and the
+  annotated matrix's marker texts under `reading`; the lead-ins `appendix_F` and `appendix_G`) and the placeholders
+  it uses (`{database}`, `{k}`, `{n_scenarios}`, `{gate_text}`, `{inconclusive_by_reason}` ...:
+  `sections.Context.placeholders` fills them from the run, as plain text); `closing.json` the closing section's
+  intro, the observation templates (filled by `sections.closing_values`, whose vocabulary the file declares), the
+  caveats, the plot captions and, per table section (`sections.C3` to `C7`), the method, observation and limits
+  paragraphs with the run's figures as placeholders; `cases.json` the short local reason per by-design case the
+  tables, the detail blocks and appendix B print (one clause: the generator adds the class in words, the status and
+  code and the pointer to appendix B); `checks.json` the check catalogue of appendix A (per check kind: title,
+  asserts, inconclusive, fails, args, the SPEC references, per-route rules, and the `common` rules evaluate()
+  applies before any check and the host-state adjudication after them; it is preferred over the docstring in
+  checks.py); `glossary.json` the short entries of appendix D ({term, definition, see}, printed in alphabetical
+  order, with the `lead` that names this README's glossary section and the commit that pins it, and the record
+  key's lead). Inline markup: `code` and *emphasis*. `--scaffold-prose` writes the placeholder entries a chapter
+  file lacks (existing text untouched). Chapter R, Part I, the glossary, the closing section, the case reasons
+  and R's check kinds are written (2026-10-15, round 2); the other chapters hold placeholders marked "(to be
+  written)". A chapter's prose names the run's figures as placeholders and its run-dependent sentences as
+  conditionals (round 4; `doc/facts.py` computes the values, each file's `_assumes` lists the constants it may
+  carry as text). `tests/test_doc.py` fails when a family, a unit or a check kind has no entry at all, when a written
+  chapter (`WRITTEN_CHAPTERS`) still carries a placeholder (its summary, coverage gap, intro, families, units and
+  unit notes, the overview's sections and appendix lead-ins, the glossary, the closing section's every key, the
+  case reasons), when a catalogue entry's generic flag disagrees with `checks.is_property`, when the prose uses
+  a placeholder the generator does not fill (or declares one it does not), when a prose string carries a number
+  that is neither a placeholder nor an `_assumes` constant, or when chapter R's prose on the fake run prints a
+  v4 figure. A key whose prose is awaited can be named in the test's `ROUND2_PENDING` and tolerates a placeholder
+  until it lands (empty since round 2 landed).
+- The cell grammar (`doc/cells.py`): glyph (pass, fail, error, finding, inconclusive, not implemented via MCP,
+  service-side by design) + marks (footnote digit, disagreement, timing / same checks / not comparable, cold /
+  aged, mixed repeats, unverified) + wall times in repeat order with the unit once, the server time in brackets,
+  the MCP backend time on a third line. A test that is not clean on some arm gets a footnote mark and a detail
+  block right after its unit's table (`doc/blocks.py`: expected vs obtained, each check's outcome and detail, the
+  classes, the relations, the SPEC rule of a finding). The verdict is report.py's own (`report.verdict_text`,
+  extracted so both read the same rule).
+- Tests (`tests/test_doc.py`, offline): the v4 mapping complete and valid, the prose complete and the written
+  chapters free of placeholders, every check kind described, the generator on the fake run of
+  test_compare_report (the .tex, the index, the verdict, the escaping; the PDF when xelatex is installed), the
+  cell grammar, the expectation formatters on chapter R's real expectations; and, for the review's changes, the
+  four MCP outcome classes on fixtures and on the fake run, the adjudication and the property-tested reading, the
+  detail block's shape (adjudication first, one row per arm and repeat, the artifacts' line numbers), the coverage
+  wording, the pagination helpers (short and long boxes, the headings' space), the plots' data files (deterministic
+  across two builds), the closing templates' placeholders, the untested-properties computation, the timing legends,
+  the record key, the glossary pin, the gate line on the cover and the sample note; and, for round 3, the gate's
+  outcome counts and clause, the replayed by-design table found by its sha (and the warning when another is read),
+  the closing figures' populations, the evidence clause's parenthesis balance, the finding line's single mechanism,
+  the rows' qualifiers and the one-phrase MCP arm, the family values from the classifier, the repeats in appendix F
+  and the rules in appendix F; and, for round 4, the prose filling (conditionals, specs, the index syntax, the
+  spacing, the unresolved recorded), no v4 literal on the fake run, every placeholder of R.json resolvable on v4,
+  every literal number assumed, the facts on the fake run, the record key on the chapter page and in the legends,
+  appendix D's order, the box plot's labels, the untimed cold count and the uncut B note; and, for round 5, the
+  plots' size, the depth over the compared repeats (the reader, the block line, the chapter line, the prose), the
+  timing wordings (no "upper bound", no record-versus-length cause), the untimed cold split, the non-breaking
+  number-unit space, the variant labels, the unit note's facts, and the two fixtures whose conclusions differ;
+  and, for the final patch, the closing section's conditionals on two fixtures, the banned timing wordings, the
+  count grammar and the joined units outside the prose.
+- The sample of 2026-10-15 (Part I, chapter R, the closing section, the appendices chapter R needs, the index)
+  was built from the v4 run re-evaluated with c11db9dd: `doc/make_doc.py RUN_DIR --out DIR --sample`; its notes
+  for the owner's review are `~/.cache/metagraph-traverse-plans/2026-10-15/doc/sample/SAMPLE-NOTES.md` (round 1)
+  and `.../doc/sample-r2/SAMPLE-NOTES.md` (round 2, after the owner's review, point by point; round 3, after the
+  verification of round 2, rebuilt in the same directory), `.../doc/sample-r3/SAMPLE-NOTES.md` (round 4, after
+  the re-verification of round 3), `.../doc/sample-r4/SAMPLE-NOTES.md` (round 5, after the owner's second
+  review) and `.../doc/sample-final/SAMPLE-NOTES.md` (the final patch, after the re-verification of round 5,
+  `sample-r4/VERIFY-R4.md`). The template is final (the 14-unit grouping of R stays; pagination may evolve);
+  rounds 4 and 5 and the final patch changed no table cell, only the prose's sources and wording, the record key's places, the plots' size and
+  labels, the depth line and the variant labels' separators.
+
+### The rebase onto the suite at 07dfa487 (F-gate, the frozen v5, the oracle; 2026-10-15)
+
+`gr/suite-doc` (8 commits on c11db9dd) rebased onto 07dfa487. Two conflicts: `report.py`, where the doc lane had
+extracted `verdict_text` and F-gate had made a gated report lead with the gate's verdict and added the UNVERIFIED
+branches (a run, or an arm, with executions and no pass), resolved so that `verdict_text` holds the whole rule
+(`no_pass_arms` among its facts) and `verdict_section` prints its headline through `verdict_headline` (the
+exploratory label of a gated report, `exploratory_label`); and this README (both sections kept, this one last).
+The document states the report's verdict and gate line by the same code as `report.py`: the cover's run verdict is
+`verdict_text`'s, labelled exploratory (`report.exploratory_label("beside")`) when the document shows a gate verdict;
+the cover's gate line is the run's `gate.json` when recorded and current (its words `report.gate_headline_parts`,
+the ones the report's gate section prints), else, when `gate.stale_inputs` names files the run changed after the
+verdict (the report's "GATE verdict STALE"), the stale verdict is named and the gate is judged offline by `gate.py`
+with the policy pinning the manifest, as a run without `gate.json` is; else "not evaluated". The generator reads
+the newer run fields without breaking v4: a warm-up's re-run for a resume (`merge_run`: never a line of the merged
+set, `warm_up_reruns` on its target's line and `run.json` `reruns_for_resume`) is a row of I.4 and a table of
+appendix F, a line in the target's detail block and its raw file in the artifacts, never an outcome; the
+comparison's `executions_sha256` is held against the executions file the document reads (I.4 and appendix F: "the
+lines this document reads", or the sha256 of other lines, or "states no executions sha256" for a comparison before
+2026-10-15); the check items the by-design table explains (compare's `mcp_agreement.explained_items`, the gate's
+reading, never the line's own claim) are grouped as explained in the detail block; the v5 manifest's property-level
+marks (`suite_common.mcp_check_marks`: `mcp.not_implemented_checks`, `mcp.by_design_checks`) read as "not
+implemented via MCP (the manifest's property-level mark: reason)" or "service-side by design (… case)" for that
+check, in the detail block's checks line, the "property tested?" cell (the marked items counted apart) and the
+untested-property lines' per-arm reasons, never as untested or as a failed check; an execution inconclusive by a
+scenario-level mark (`suite_common.SCENARIO_LEVEL_MARK`: the marks cover every property check) reads as such in
+the rows, the adjudication and the MCP class (`marked`), never as a host state; a check read `not_exposed` carries
+the inconclusive glyph and the words, never the failure glyph; a by-design case's `explains_checks` entry that is an
+object ({check, detail_matches}, the d4b8636c table) prints in appendix B; the glossary has the property-level mark.
+The mapping file is picked by the run's manifest content sha among `doc/units/*.json` (`units.default_mapping_path`),
+else by the version name. The chapter R sample rebuilt from the v4 run (`sample-rebased/`, no option; `sample-rebased-
+table/` with `--by-design` naming the table the re-evaluation replayed, d1e040aa, extracted from git) is byte-identical
+to `sample-final/` in `chapter_R.tex`, `doc.sty` and the three `plot_*.csv`; `doc.tex` differs in the cover (the
+exploratory label; the offline gate 45 -> 50 problems: 5 identity, of which one is the F-gate table problem the
+rebase expected (the comparison read d1e040aa, the regenerated v4 policy pins d4b8636c), one the MCP arm's
+unobserved index_fp (the v4 runner recorded no `service_capabilities.host_document`), two the re-evaluation's
+checks directory (the main tree, now at 07dfa487) no longer holding the checks.py and suite_common.py the
+re-evaluation records, one the comparison stating no executions sha256), the I.4 and appendix F rows above, the
+glossary entry and the README pin, and, without `--by-design`, the by-design table (the replayed d1e040aa table is
+no longer in the tree: the live d4b8636c one prints with the WARNING, appendix B two cases longer).
+
+### The v5 unit mapping (`doc/units/suite_v5.json`, 2026-10-15)
+
+The frozen v5 manifest (content 72181c4a…, 700 scenarios) has no per-scenario `doc` blocks and cannot get them, so
+its mapping is a file keyed to the manifest's content sha, as v4's is, built by `units_v5_build.py` (the lane's
+notes directory) on the v4 builder's rules: a v4 id whose title did not change keeps its committed v4 label (645
+of 681), a changed title gets its label from the new one (R-budget's stops at 480 / 420 ms after their complete
+twins at 60 s, the continuation from base 2,500 / 5,000, R-discover's limits 9 and 3, R-rc's eco, R-edge-0023,
+T-walk's groups by the new extensions, N-negative-0018's 12 residues, the T-labels / T-strand label cuts). The 107
+v4 units are kept with their members and variants; two units are v5's: `R-warm` (family R-warm, replicates: the
+eight warm-ups of T-repeat, T-walk, T-labels and N-hard targets) under chapter R, whose 14 units of the owner's
+grouping stay as they are, and `T-longwalk` (family T-longwalk, pairs: the four gate walks T-walk-0006 / 0012 /
+0018 / 0036 each followed by its 10 kb budget_stress twin T-longwalk-0001..0004), the only move of v4 ids between
+units. R-edge-0025 joins `R-edge-accepted`, T-attempts-0003 `T-attempts`, T-caps-0002..0004 `T-caps`,
+T-quorum-0002 `T-quorum`, T-seeds-0002 `T-seeds`; the 22 relations are placed as in v4. 109 units in 78 families:
+37 replicates (339 scenarios), 23 series (97), 22 list (78), 20 pairs (125), 7 refusals (61); every series at most
+8 variants. The maintenance tests run over both mappings (complete, valid, keyed to the manifest's sha, the moves and
+the v5-only placements named) and over both for the prose rule; the prose files carry the mapping's drafts for the
+v5-only family and units (`R.json` R-warm, named in `ROUND2_PENDING` until the v5 prose round; `T.json`
+T-longwalk among T's pending prose). `tests/fake_doc_v5.py` builds a FAKE v5-shaped run from the frozen manifest
+(every scenario on the three arms with synthetic passing answers, the MCP marks read not_exposed, one warm-up run
+again for a resume; nothing of it is evidence about a host), and `V5ScaffoldTest` builds the full document from it
+without a PDF: every v5 id once in the index, the ten chapters, the two v5 units, the marked checks set aside, the
+re-run as timing evidence. The prose round for v5 must cover, besides the two new units: R.json's `summary`,
+`coverage_gap`, the R-budget family prose and unit line and `mcp_notes.units.R-budget`, which assume v4's figures
+(10 kb under 3,000 / 8,000 ms, the full twins at 20 s, the continuation from base 5,000).
+
+The full document (2026-10-15): the nine other chapters' prose (T, P, L, X, M, Q, C, N, D) follows chapter R's rules
+exactly (a chapter page that leads with its conclusion and its coverage gap, family prose plus one property line per
+unit, every run figure a placeholder or a conditional on computed facts, no timing cause the run does not isolate,
+"ok" only for what was tested, a catalogue entry for every check kind and a short reason for every by-design case
+named), written for the union of the v4 and the v5 mapping with `[[manifest_version = 5 ? ... | ...]]` for a sentence
+true in one manifest alone. The facts their prose reads beyond chapter R's (`doc/facts.py`): `manifest_version` at
+every level; per arm the first execution's `time_limited` text and its checks by name
+(`x[<sid>][dl][checks][walk_in_record][detail]`); the time limitations that left a 200 inconclusive, in the three
+readings the chapters use (chapter T's time cuts of a walk, `n_time_cut_tests`, `time_cut_ids`, `time_cut_text`,
+and the tests no arm showed the property on; chapter N's and Q's `n_time_limited` / `time_limited_text`; chapter M's
+/pattern lists the deadline withheld, `n_time_limited_200_tests` / `time_limited_200_ids`); `direct_all_pass`; and at
+the chapter level `unit[<unit id>][...]`, a unit's own counts (chapter M's substituted residues apart from the cap
+slot of the same family). A 200 a time limitation touched but that passed is not counted: the claim it carries was
+shown. `tests/test_doc.py` covers every chapter: no placeholder, no literal run figure, no banned timing wording;
+every placeholder and flag resolvable on the v4 and the v5 mapping (a scenario named outside a family one mapping
+alone holds is one both manifests hold); every chapter's prose rendered on the fake run prints none of the v4
+figures; chapters M and T, like R, rendered on two fixtures whose data differ change their conclusions, their coverage
+gaps and their family prose (`FullDocumentTest`); every check kind of both manifests in the catalogue, every by-design
+case named with its short reason. A check kind without an `expect_text` formatter prints `name(args)` with break
+opportunities after ( , = _ (`blocks._generic`), so the expectation column of a list table wraps instead of running
+into the next column. The v4 document (every chapter, the replayed d1e040aa by-design table, two builds
+byte-identical; 164 pages at that build, the current build's page count in its NOTES.md) is at
+`~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4/` with its NOTES.md.
+
+### The tints of the printed execution times (2026-10-15, corrected after VERIFY-COLOURS-V5 on 2026-10-16)
+
+The owner's decision of 2026-10-15: every printed execution time above 10 s is set on a yellow tint and above 55 s
+on a red one (`cells.TIME_TINT_YELLOW_MS` / `TIME_TINT_RED_MS`, strictly above; the document's own constants, read
+by nothing else; doc.sty's `timeyellow` FFE866 / `timered` FF8A80 behind black text, `\tyellow{}` / `\tred{}` with
+`\fboxsep` 0pt, so a tinted figure sets exactly as wide as a plain one and the pagination does not move). A wall, a
+server time, a backend time or an MCP phase, alone or as a median, p90 or maximum, in the cells, the replicates
+aggregates, the summary and timing lines, the detail blocks' rows, phases and re-run lines, the closing tables
+(`cells.fmt_exec`, `fmt_times`; the closing tables' `_stats_cells`). A difference (`fmt_delta`: a delta, an overhead,
+how late a 503 was), a budget, a cap, a connection set-up and a distance in time carry none. The figures quoted in
+the prose and inside a check's text carry their tint too (VERIFY-COLOURS-V5 item 1, 2026-10-16): a fact the prose
+files fill in prints its time through `cells.fmt_exec_text`, which carries the tint as a marker (`latex.TINT_OPEN` /
+`TINT_CLOSE`, private-use code points no prose or run text uses) that `latex.esc` turns into the macro after
+escaping (`set_tints`; a marker a cut left open is closed), so the walls, server and backend times of
+`x[<sid>][<arm>]`, the p50 / p90 of the chapter and closing facts and the walls of the time-limited lists are tinted
+in the sentences that quote them; an execution time quoted inside a check's or the runner's text, budget_respected's
+`client wall N ms` and the MCP runner's host-state `... after N ms`, is marked by its value (`cells.tint_quoted_times`,
+`esc_times`; `facts._cut` / `_clause` on the prose side, the finding, checks, host-state and adjudication lines of a
+detail block and I.1's lines on the LaTeX side), while a lateness (`delivered N ms after`) and a budget in the same
+text stay plain. The legend sentence of the cell grammar (I.3, `sections.times_legend_sentence`) states the rule
+and its exemptions.
+
+The other corrections after VERIFY-COLOURS-V5 (2026-10-16): I.1 names a disagreement whose checks agree by its
+outcomes ("the outcomes differ, repeat 0: no time limitation tells the outcomes apart", compare's `outcome_differs`)
+instead of "a check differs"; a walk a stated resource other than time stopped (a /traverse answer's
+`resource_stop`: the work or memory budget) is read from the run's raw record (`reader.Run.raw_answer`,
+`blocks.resource_stops`), the detail block's adjudication names the resource, its knob and its figures (`seed 0: the
+work budget (bounds.max_work_units, 100,000,000 units; used 100,000,275 units) at 3,618 bp (left), ...`), and chapter T's
+prose reads `n_cap_stop_tests` / `cap_stop_ids` / `cap_stop_text` and, with the time cuts, `n_budget_stop_tests` /
+`budget_stop_text` (`facts._budget_stops`), so "no walk was stopped by its budget" holds for every budget and the
+"depends on the load" clause names the work cap where it stopped a walk; the reading guide's column note names the
+annotated unit's own dimension and its record-key clause only where the variants carry one (`annotated_dimension`,
+`annotated_record_key`), and a note whose marker sits in no cell of that matrix says "(not in this matrix)"; the
+clean rule of I.3 says what the cells do (an unverified by-design pair carries the mark u, its cause in the chapter's
+prose and appendix B, no detail block); the coverage gaps of R, M, N and P print "Outside <the family> every test
+passed" only when that family has a footnoted test (`n_footnoted_in_gap`), else "Every test passed"; R's coverage
+gap has the comma of p. 14 ("Of the four relations, ..."); M's residue claim counts the direct-remote passes beside
+direct-local's; appendix F's MCP runner row states that the run did not record the service's deployed revision
+(the readability review's READ-021 wording, which names no manifest version); the cover's policy sha is labelled as
+the canonical JSON's, with the file's sha beside it (`reader.Run.policy_file_sha256`).
+
+### The readability review merged, red means needs attention, the tints by the printed value (2026-10-16)
+
+gr/suite-doc-read (the owner-requested readability review of the full v4 report, 75 comments; its record is
+`~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4-readability-review/`) is merged into gr/suite-doc; every fix
+of both branches is kept (the integration notes: `.../doc/integration/MERGE.md`).
+
+The owner's decisions of 2026-10-16. **Red means "needs attention".** (1) A test not implemented via MCP (the MCP-only
+class: the tools cannot express the request) is red wherever it is printed: the ○ glyph (doc.sty's `\gni`, colour
+`attnred` C62828), its counts in the standing, outcomes and agreement rows, the coverage and grouped cells, the
+detail blocks' rows, adjudication, classes and observed lines, the property-level marks (`blocks.MARK_GROUP`), the
+untested table's reasons, I.4's tables, appendix B's class tag, and the prose's "could not be exercised through the
+tools" counts (`cells.attn` for LaTeX, `cells.attn_marked` for a phrase the prose quotes, `!!...!!` as the prose
+files' inline markup; a conditional compares a value without the markers). The unit notes, the ○ cells' class words
+and the rest followed after the two verifications of e3098b2e9 (below). (2) The table of
+contents carries each chapter's attention tag in red under the chapter's line (`sections.toc_attention`, doc.sty's
+`\tocattention`, linked to the chapter), e.g. "2 time-budget issues, 9 not implemented via MCP", and I.1 an attention
+table per chapter with the totals (`sections.attention_table`). Both count TESTS per kind, the nonzero kinds only, in
+`facts.ATTENTION_KINDS`' order: failures, errors, findings, disagreements, time-budget issues (a test with an
+execution that hit its time budget, `facts.time_budget_issue`: a 503 deadline, a recorded `time_limited`, the
+service's own deadline, or a wall printed above 55 s), not implemented via MCP (the ○ standing, or an MCP execution a
+property-level not-implemented mark set aside). A test counts once per kind and may count under several. The counts
+are facts (`facts.attention_facts`: `n_attention_<kind>`, `attention_text`, `n_attention_tests`, on every chapter's
+values); the reading guide's legend defines each kind once (`sections.attention_legend_sentence`, from
+`facts.ATTENTION_DEFINITION`). (3) Every printed execution time is tinted by its **printed** value (`cells.time_tint`
+reads `fmt_t`'s figure back, `printed_ms`; a figure quoted from a text is its own printed value): a time printed
+"10 s" carries no tint whatever its raw value, "56 s" is red, as gr/suite-v6's report.py marks (this branch's
+report.py has no time marks). The time a walk's stop used
+(`blocks.resource_stop_phrase`) is printed with its unit and tint ("used 15,593 ms" on yellow; the attempt deadline's
+"requested 25,000 ms; used 22,085 ms"), the work and memory figures with theirs; the quoted texts' `client wall time
+of N ms` and `elapsed N ms` are tinted like `client wall N ms`.
+
+The readability re-verification (`.../readability/verify2/VERIFY.md`): a chapter's reading line names the tests whose
+MCP standing differs from their outcome in the outcomes row, both kinds (a refusal filed under not implemented that
+records service_by_design; a by-design repeat beside a host-answered one, counted mixed or inconclusive), and prints
+"none in this chapter" exactly when there is none (`sections.standing_outcome_differences`); I.3 states both kinds
+and defines the two rows once; the /traverse budget scope says that a label derivation reads the budget after every
+k-mer and stops at it (SPEC D3); I.2's percentiles name I.3's population; the gate's pass line prints its access
+paths once; a partially checked class judged over the repeats says so; a /traverse 200 finding is "a walk stopped
+outside its stated rule (the seed's clock)" (`sections.finding_kinds`); the document's FINDINGS regex is pinned to
+`report.verdict_text`'s own words by a test (report.py's verdict still says "without failing the request").
+
+After the two Opus verifications of e3098b2e9 (`.../doc/integration/verify-merge/VERIFY.md`,
+`.../verify-colours/VERIFY.md`), decision (1) is carried out where the text is printed and the legend says exactly
+what is red. Red now as well: the unit notes' and the family prose's "Not exercised via MCP" (`!!...!!` in the
+prose files), the class word of a cell, an observed line or an adjudication whose MCP access path stands ○
+(`blocks.class_word_tex`: "not expressible through MCP", "refused before host execution"), appendix B's
+"not implemented mcp: N (...)" evidence state, appendix G's counts, the run statements naming the class (R's
+reading line "read not exercised", the edge families' "not expressible through MCP (N inputs ...)", the not-exercised
+family counts `mcp_not_exercised_by_family`, the classes of `mcp_classes_text` whose members stand ○, P-modes' cell
+counts, now filled from the facts). A property-level mark not implemented via MCP (manifest v5) that set a check
+aside on an MCP execution of a test whose MCP access path does not stand ○ (`cells.property_not_implemented`, the one
+rule of `ArmState.ni_marked` and `facts.not_implemented_issue`) is marked on its cell by a small red ○ raised after
+the glyph (doc.sty's `\gnip`), counted after its glyph pair in the standing, family, grouped and coverage lines
+("4 ● (3 with a property check not implemented via MCP)"), named in the attention tag and under I.1's table ("18 not
+implemented via MCP (3 by a property-level mark: T-labels-0003, -0005 and -0006)"), and listed in appendix G
+(`sections.property_marks_table`). I.3's legend now states the rule as applied: the glyph, its counts (a count of 0
+black), the class words of what stands not implemented, the property-level mark; headings, legends, definitions,
+quoted texts and the by-design table's own statements name the class in black; a footnote digit is dark grey,
+not red (owner, 2026-10-16: red means only "needs attention"); it numbers the test's detail block. A walk's stop figures round half up, as every
+time does. I.1's finding sentence names the seed's clock for a /traverse walk.
+
+## Glossary
+
+The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
+
+Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d60e4eb5d0…`), by-design table version 1 (service commit `22d034ba`). Definitions follow `checks.py`, `compare.py`, `report.py`, `gate.py` and the SPECs they cite (SPEC-labeled-traversal-core section 4 for /resolve). Where a figure is the run's (the warm window of 60 s, the Logan thresholds of 400 % `sra_all` CPU and load1 48, k = 31) the document states the run's own value.
+
+- **agreement depth** — Of an agreeing MCP pair, how much was compared: fully checked (every property check the scenario expects was evaluated on both arms and agreed), partial (the MCP answer exposed only some of them; counted apart when the aggregate is not a pass), generic checks only (none of them), a refusal (both arms refused alike), on failure (both arms failed alike). The chapter lines of the results document count the fully checked pairs. *See:* MCP agreement class.
+- **answer digest** — The sha256 of the canonical JSON of the normalised answer without its headers and without every key named timing (and, for a capabilities document, without its measured and observed figures); the determinism check and the direct agreement read it. *See:* normalised answer, direct agreement class.
+- **answer-triggered case** — A by-design case matched by the MCP answer itself rather than named by the scenario (e.g. the host's /pattern 503 deadline relayed by the service as a failed search): the execution is by design, verified when a direct execution matched the case's host side. *See:* by-design table.
+- **area, chapter** — The ten groups of scenarios by what they test, one letter each (R resolve, T traverse, P patterns up to k, L patterns longer than k, X peptides, M mismatches, Q predicates and motif, C capabilities and protocol, N negatives and near-misses, D determinism); Part II has one chapter per area. *See:* family, unit.
+- **arm** — One of the three routes to the host a scenario is executed on: direct-local, direct-remote and mcp. Every table shows the three side by side. *See:* direct-local, direct-remote, mcp.
+- **backend time** — The host call as the search service measured it (`mcp_phases.backend_ms`), on an MCP cell after be; the MCP overhead is the MCP wall minus each direct arm's wall on host-warm pairs, with and without the queue. *See:* mcp_phases, wall time.
+- **basic graph** — The index's graph mode: it holds the forward strand of every indexed sequence only (no canonical k-mers), so the reverse complement of a window is another set of k-mers, which the record's labels do not support. *See:* k-mer.
+- **by-design table** — The search service's `service_by_design.json` (131 cases at service commit 22d034ba): for each case the request it is about (`scenario_match`), the host's expected answer, the service's answer (outcome `refused_at_submit`, relayed, answered, clamped or `not_expressible`; code, text, stage) and the checks an answered case explains. Scenarios name their cases; an answer may also match a case (answer-triggered). Appendix B lists the cases of this run. *See:* service-side by design, answer-triggered case.
+- **check** — A pure function of a scenario and a normalised answer, in checks.py, shared by every arm; it answers pass, fail, inconclusive, finding or not exposed with a detail. Appendix A describes every kind this run uses. *See:* generic check, property check, check outcome.
+- **check outcome** — pass; fail; inconclusive (the check could not test its property on this answer); finding (a stated bound was broken on the clock the check reads: a 200 past its budget by the host's own elapsed time, a walk stopped outside its stated rule on the seed's clock, an allowed 503 deadline more than max(1 s, the budget) late on the client's clock, which carried no results); not exposed (the MCP answer lacks the field the check reads: recorded, not compared). Neither inconclusive nor finding counts as pass. *See:* execution outcome.
+- **clamped** — The host lowered a request bound to its cap and stated it in limits.clamped (or strategy.clamped) with the requested and the effective value; the check of the same name reads that entry. *See:* time budget.
+- **clean** — Of a test: every arm is a pass, not implemented via MCP, a verified by-design pair, or had no execution because the plan had none. A clean test costs one cell or one line; anything else carries a footnote mark and a detail block. *See:* detail block.
+- **code-derived** — A tag on an expectation read from the C++ source or the fixtures that no smoke run had exercised at build time (an exact refusal text): a first failure there may be a suite error rather than the host's. *See:* expectation.
+- **cold / warm** — In a cell, the executions in repeat order; an MCP pair reads host-cold then host-warm, a direct cell without a mark is host-warm, a direct time with the mark c was host-cold (a was aged). Family and chapter lines give the wall p50 and p90 for host-cold and host-warm executions apart. *See:* host cache state.
+- **column label** — A taxid, one column of the annotation; a column supports a k-mer when the k-mer is in the graph and the column is in its annotation row. A column may hold several records. *See:* header label, support.
+- **connect time** — The set-up of a fresh connection (TCP, and TLS on the public URL), recorded per direct execution apart from the wall time and reported per arm as part of the front cost. *See:* the front, wall time.
+- **deadline (503)** — The 503 with code deadline that /resolve and /pattern answer when the answer cannot be built and written within the budget: nothing partial is sent. Where the request names a budget the SPECs allow it on any host under load, so the suite reads it as inconclusive (and as a finding when it comes more than max(1 s, the budget) late); on a /resolve without a budget it is a failure. *See:* inconclusive, finding, machine-dependent.
+- **declared file** — The owner's versioned list beside a policy: exclusions (a scenario on an arm, with a reason), checks not required (a property the MCP surface never exposes) and relations excluded. The only way past the gate for a scenario the rules do not exclude; Part I prints it. *See:* policy, deploy gate.
+- **deploy gate** — The strict judgement of a run against a policy (gate.py): it fails on any identity problem, any missing planned or required execution, any fail, error, finding or inconclusive on a gated arm, a mark the policy does not explain, a property check not passed, any disagreement between the gated arms, any required relation not passed, and configuration evidence not recorded live. The v4 gate runs two arms, mcp and direct-local, on the scenarios of POST /resolve, POST /traverse and GET /traverse/capabilities. *See:* policy, declared file, verdict.
+- **detail block** — The explanation printed after a unit's table for every test that is not clean: the mark, the id and title, the route, timing class, tags and repeats; the expected line; per arm that is not clean its outcome, status, error, times and every check that did not pass with its detail; the agreement classes; the relations involved; and for a finding the rule it broke. *See:* clean, footnote mark.
+- **direct agreement class** — How direct-local and direct-remote compare on a scenario: identical (the same answer digest and no check differing other than through the execution's own clock or repeats), same checks (another answer, the same check outcomes), timing (the outcomes differ only because one arm's answer states a time limitation the other's does not, and the stopped answer is consistent with the complete one), not comparable (no check evaluated on both), disagree. A disagreement fails the run. *See:* MCP agreement class, answer digest.
+- **direct-local** — The runner on mex sending the request to the container's own port: no proxy, no network; the cleanest server timing and the reference arm of the MCP comparison. *See:* arm, reference arm.
+- **direct-remote** — The runner on the laptop sending the same request through the public URL and the nginx front on dnaloc-new: the network and the front are in its wall time. The front cuts at about 120 s, so the long timing class is not run there. *See:* arm, the front.
+- **discovery** — A /resolve without labels (discover: kind column or header, `max_labels`): the labels of every in-graph k-mer's row, ranked by supported k-mers, the top `max_labels` kept (ties by column id, then sequence id) and `labels_truncated` stated when more occurred than were kept (kept, total, the least support kept, the most dropped, the dropped labels at full length). *See:* support.
+- **error** — An execution with no HTTP answer (a transport failure, a client time-out), an undecodable body, or a check that raised. Counted with the failures. *See:* execution outcome.
+- **execution** — One request of one scenario on one arm, one repeat: its HTTP status, wall and server times, host cache state, checks and outcome, and the raw answer. One line of executions.jsonl. *See:* repeat, execution outcome.
+- **execution outcome** — From the checks, by precedence: fail, finding, inconclusive, pass; inconclusive also when no check could test anything or every property check could not. Decided without the checks: error (no HTTP answer, an undecodable body, a check that raised), not implemented via MCP, service-side by design. Any outcome outside this vocabulary reads as a failure. *See:* check outcome, scenario outcome.
+- **expectation** — One entry of a scenario's expect list: a check name and its arguments. The builder validates every expectation against the checks' argument table, so a misspelt argument cannot weaken a check. *See:* check, generic check, property check.
+- **family** — The scenarios that share an id prefix (R-pos, T-walk, N-hard), built by one part of the builder around one question; a family has a title and one paragraph of prose and holds one or more units. Chapter D's families are all D. *See:* unit, area, chapter.
+- **feature level** — What the server offers beyond the base contract, monotonic (SPEC-labeled-traversal-core section 10.3); stated in every /resolve and /traverse answer and recorded with the run's environment. *See:* release.
+- **finalisation reserve** — The 250 ms a /resolve keeps of its budget to build and write the answer: the work stops at the budget less the reserve; a budget not above the reserve is refused. *See:* time budget, stated stop.
+- **finding** — A stated bound broken on the clock the check reads: a 200 past its time budget (the host's own elapsed time), an allowed 503 deadline more than max(1 s, the budget) late (the client's clock: the suite's tolerance for a deadline answer, which carried no results and does not show where the time went), a walk stopped before its budget or run past it beyond its pieces (the seed's clock). Counted apart from failures; a run with findings and no failure reads FINDINGS. *See:* check outcome, verdict.
+- **footnote mark** — The superscript digit on a cell that points at the test's detail block after the table; numbering restarts in every chapter and a test's cells share one mark. *See:* detail block.
+- **the front** — The nginx reverse proxy on dnaloc-new that the public URL reaches; every arm but direct-local goes through it (the service too). The front cost is direct-remote minus direct-local on pairs of host-warm executions, the connection set-up apart. *See:* direct-remote, connect time.
+- **generic check** — A check that holds on any answer of its route whatever the scenario asks: status, invariants, `counts_consistent` (/pattern) and `budget_respected`. The builder adds `budget_respected` to every scenario that names a time budget and allows a 200. *See:* property check.
+- **ground truth** — What a scenario's right answer rests on: the record a window was cut from (its accession.version, taxid column, position in the column), the window's position and strand on the record's forward strand, the record bases around it, and for variants the edits made; for negatives the fact that the sequence is random or shuffled. Records are the 32 genomes of the search service's validation set, fetched at the indexed accession.version. *See:* record, window, last-record-verified.
+- **header label** — An accession.version, one indexed sequence of a column, reached through the index's coordinates: it supports a k-mer when some coordinate of its column at the k-mer's row maps to that sequence. *See:* column label, support trace.
+- **host cache state** — A recency heuristic over all arms, per execution: cold (the scenario's first execution to reach the host in this run), warm (started within 60 s of another execution of the scenario ending on the host), aged (longer after it: unknown), not reached (the host never saw it: a refusal at submit, a request the MCP cannot express), unknown (no start time). Everything timed keys on it; cache residency is never measured. *See:* cold / warm, warm after a cut, paired loop.
+- **host state** — An MCP execution the service ended by one of its own limits before the host answered (a `resolve_timeout` at the service's deadline for the host call, the budget plus the reserve plus an allowance; a relayed `traversal_resolve_deadline`; a relayed /pattern deadline): inconclusive with that reason when the service's own timing shows the limit can have been reached (the host-state rule of the MCP runner, replayed by the re-evaluation), a status failure otherwise. The checks as they read on the raw answer are kept in the record as the intermediate evaluation; the results document states the adjudication first. *See:* inconclusive, relayed deadline.
+- **inconclusive** — The test did not test its property: an allowed 503 deadline, a list a legitimate statement hides the source in, a walk a stated resource limit stopped first, a stop that was the property and did not happen, a determinism check with nothing to compare, an MCP answer exposing none of the property's fields, or an MCP execution the service ended by one of its own limits (a host state). Never a pass, never a failure; every inconclusive execution blocks the deploy gate. *See:* deadline (503), host state, deploy gate.
+- **index fingerprint** — `index_fp`, the hash that identifies the loaded index; the manifest records the fingerprint it was built against and the deploy gate pins it. *See:* release, deploy gate.
+- **intermediate evaluation** — The check lines of an MCP execution as they read on the raw answer before the host-state rule overrode the outcome; kept in the record and printed in a detail block under that label, after the adjudication. *See:* host state.
+- **k-mer** — A substring of k = 31 bases; the graph's nodes. A query of L bases has L - k + 1 k-mers, numbered by their start, 0-based. On this basic graph a k-mer and its reverse complement are different nodes. *See:* basic graph, run.
+- **last-record-verified** — A tag on a scenario whose record is the last of its taxid column, where the index defect of 2026-10-09 (a last record present in the sequences but unannotated) could strike; the truth records the scan's result (ok, or single-record column), and a failure there is listed apart. *See:* ground truth.
+- **load telemetry** — docker stats of the staging container (CPU, memory) and of the `sra_all` container (the Logan indexing load) and the host load average, sampled every 2 s on mex and joined to each execution's window; contextual figures of the shared host, not the request's own cost. *See:* the Logan caveat.
+- **the Logan caveat** — The statement that the run's timings were taken while mex carried the Logan load: given when the `sra_all` CPU mean exceeds 400 % or the load average mean exceeds 48 (half of mex's 96 cores) over the run's samples. Such timings are labelled and are not the timing baseline. *See:* load telemetry.
+- **machine-dependent** — A tag on scenarios whose answer depends on the host's load (time budgets: a 200 or a 503 deadline, a stop or none). For /pattern and /resolve the checks allow the 503 deadline on every scenario that names a budget and expects a 200, tagged or not. *See:* deadline (503).
+- **manifest** — The frozen, versioned set of scenarios (`manifest/suite_vN.json`), identified by its content sha256 over the canonical JSON of the scenarios; its relations are hashed apart (relations sha256). A run records both; a run on another manifest is another run. *See:* scenario, relation.
+- **mcp** — The same request asked through the search service's MCP tools on its staging deployment (`traverse_resolve`, `traverse_fetch` and `graphlet_export`, `pattern_search`, the capabilities tools); the service validates and reshapes it, runs it as a job in its queue and calls the host over the public URL. Its answer is normalised to the host's shape for the fields the service exposes. The service's deadline for a resolve's host call is the budget plus the reserve plus an allowance (30.25 s for a 20,000 ms budget); the tool's inline wait (30 s with explicit labels, 10 s for a discovery) only decides whether the answer comes inline or as a job handle. *See:* arm, mcp_phases, backend time.
+- **MCP agreement class** — How the MCP arm compares with the reference direct arm on a scenario, check by check and repeat by repeat on the checks both arms evaluated: agree (with its depth: fully checked, partial, generic checks only, a refusal), not comparable (no check compared), disagree, not implemented via MCP, service-side by design (verified or not), missing (no MCP line). A disagreement fails the run. *See:* reference arm, direct agreement class.
+- **mcp_phases** — The decomposition of an MCP execution's wall time: submit (the tool's acknowledgement), queue (job created to started), backend (the host call), terminal lag (finished to the client seeing the terminal state) and paging (fetching the results). The closing section tabulates them. *See:* backend time.
+- **mixed** — A scenario whose repeats on one arm have different outcomes (e.g. inconclusive on the cold repeat, pass on the warm one); the table shows the worst glyph with the mark m and the detail block each repeat. *See:* scenario outcome.
+- **normalised answer** — The shape every check reads: the HTTP status, the body, the error (code, text) and, on a direct arm, the headers; the MCP runner maps the tool results into it for the fields the service exposes. *See:* answer digest, check.
+- **not exercised** — The results document's wording for an MCP cell, aggregate or count whose executions the tools could not express (agreement class not implemented via MCP): never ok, never passed, since no property was tested there. *See:* not implemented via MCP.
+- **not implemented via MCP** — The request cannot be asked through the MCP tools: the manifest marks it (`mcp.not_implemented` naming the field: support, `bounds.max_query_bp`, an unknown field, a protocol body), or a case of the by-design table with that agreement names the missing argument (e.g. a 10 kb resolve: the service always sends its own 2,000 bp cap). The results document prints such a cell as *not exercised*, never as ok; the service's own refusal, when one was recorded, is under the row or in appendix B. A known limit of the tools, not a failure and not coverage. *See:* service-side by design, by-design table.
+- **paired loop** — The run's order per scenario: MCP cold, direct-local, direct-remote, MCP warm, one request in flight against the host at a time. It makes the direct executions host-warm by construction wherever the MCP cold call reached the host. *See:* host cache state, cold / warm.
+- **policy** — The deploy gate's pinned selection: the manifest's content and relations hashes, the index fingerprint and the by-design table's hash; the scenarios by route; the arms; the exclusions derived from the manifest and the table (a request the MCP has no argument for, an advanced traverse override) with the owner's declared entries; the executions and relations each arm must record. *See:* deploy gate, declared file.
+- **prefix** — The part of the query a stated stop resolved: its first `resolved_kmers` k-mers; a client resolves the rest from base `remainder_from_bp`. The relation `prefix_equals` compares a stopped answer with the full one on their common k-mers. *See:* stated stop, relation.
+- **property check** — Every check that is not generic: the claim the scenario was built to test (`resolve_runs`, `contains_source_context`, `walk_in_record`, ...). An execution whose property checks all could not test anything is inconclusive even when its generic checks passed; a scenario with no property check (a refusal) is judged by its generic checks. *See:* generic check, inconclusive.
+- **property line** — The one sentence above a unit's table that states the claim every member of the unit tests; the family prose before the units says what the family checks and why. *See:* unit.
+- **re-evaluation** — Judging a recorded run again offline with the current checks, without any request (reevaluate.py): every recorded answer is re-checked, the MCP runner's by-design and host-state decisions replayed; outcomes a runner decided without the checks (error, not implemented, by design) are kept. This document reads the re-evaluated set when it exists. *See:* check.
+- **record** — One indexed sequence, named by its accession.version, which is also its header label; it belongs to a taxid column and has a position in it (`seq_id`). The suite's records are the 32 genomes of the ground truth. *See:* column label, header label.
+- **record key** — The three- or four-letter abbreviations of the ground truth's records in the tables (eco, mtb, pfa, ...), keyed in appendix D from the manifest's ground_truth.records (key, organism, accession.version, taxid). *See:* record.
+- **reference arm** — The direct arm an MCP execution is compared with: direct-local, or, for a check item direct-local left undecided (inconclusive or not exposed) while direct-remote's item of the same repeat is decided, direct-remote's. *See:* MCP agreement class.
+- **relation** — A comparison of two scenarios' answers on the same arm, evaluated by the comparator on the first repeat of each: `same_answer` (equal bodies without timing, or the same refusal), `prefix_equals` (two resolves of pieces of one sequence agree on their common k-mers), `zero_equals_absent` (a /pattern count of 0 exactly when the /resolve of the same sequence misses a k-mer), subset (every result of one entry among the results of another). Its outcome is pass, fail, inconclusive (the pair cannot test the claim: a non-200, no common k-mer) or not exposed; a failed relation fails the run. *See:* prefix.
+- **relayed deadline** — The host's own 503 deadline coming back through the service under a service code (502 `search_failed` with a `pattern_deadline` text, 503 `traversal_resolve_deadline`, 504 `resolve_timeout`): the host did work, so such an execution counts as having reached the host for the cache states, while a direct 503 deadline is the host's own answer. *See:* host state, host cache state.
+- **release** — The engine's release string as its capabilities state it (refseq97- and the engine's commit hash); a run that spans two releases tested no single one and never reads PASS. *See:* server instance, index fingerprint.
+- **repeat** — The index of an execution among the scenario's executions on one arm: repeat 0 is the arm's first, later repeats follow within the paired loop. Every tenth scenario and every chapter-D scenario has direct repeats; an MCP scenario the service can express has two (cold, warm). *See:* execution, cold / warm.
+- **run** — In a /resolve answer, a maximal interval of consecutive k-mers with one state, written as a 0-based half-open interval of k-mer starts [a, b): `graph_runs` are the runs of k-mers in the graph, a label's runs those it supports. *See:* k-mer, support.
+- **run id** — The run directory's name, the UTC start time and the release's short hash (e.g. `20261014T061053Z_refseq97-6f945db4`); the arms of a run share it. *See:* release.
+- **scenario** — One test of the frozen manifest: an id (the family prefix and a number, e.g. R-pos-0013), an area, a title, a route, the exact request body, the ground truth, the expectations (check name and arguments), the MCP mapping, a timing class, a repeat count and tags. The test id of the tables is the scenario id. *See:* manifest, expectation, unit.
+- **scenario outcome** — Over a scenario's repeats on one arm: the common outcome, else the worst (error over fail over finding over inconclusive); repeats that differ otherwise are mixed, shown with the worst glyph and the mark m. *See:* execution outcome, mixed.
+- **server instance** — The identity of the running server process as its capabilities state it; a change during a run means the server restarted. *See:* release.
+- **server time** — The host's own `timing.elapsed_ms` in the answer (the top-level one, else the entries' sum); in brackets under the wall time. A refusal and a 503 carry none. *See:* wall time.
+- **service-side by design** — The MCP arm legitimately differs from the direct arms because the search service validated or reshaped the request before the host saw it, or refused it in the host's place, as a case of the by-design table documents (a refusal at submit, a relayed host refusal under the service's code, an answer where the host refuses, a clamped value). A pair is verified when the direct answer matched the case's host side and the MCP answer its service side; otherwise it carries the mark u. *See:* by-design table, answer-triggered case, verified.
+- **standing** — In the results document, what a cell shows: the execution outcome, or on the MCP arm the agreement class where that class states the arm's standing (not exercised via MCP, service-side by design). Family and chapter counts are by standing (by glyph); the chapter page adds the recorded outcomes as the report counts them. *See:* clean, MCP agreement class.
+- **stated stop** — A /resolve answer that stopped at its budget less the reserve and says so in its stop block (reason time, `resolved_kmers`, `query_kmers`, `resolved_bp`, `remainder_from_bp`): it is exactly the resolve of the query's first `resolved_kmers` k-mers, status 200. A stop the answer states but that cannot have happened (another reason, a stop before the budget less the reserve) fails the checks that met it. *See:* time budget, prefix, deadline (503).
+- **support** — Of a label at a k-mer: the k-mer is in the graph and carries the label (SPEC-labeled-traversal-core section 4.2). /resolve reports it per label as runs and as `kmers_supported`, the number of supported k-mers. *See:* run, support trace.
+- **support trace** — /resolve's support: trace: a header label supports consecutive k-mers only while their coordinates in that sequence are consecutive (+1 per step); a coordinate jump ends the run. Not expressible via MCP. *See:* support.
+- **time budget** — `bounds.time_budget_ms` of a /resolve (`time_budget_ms` of a /pattern, `strategy.bounds.time_budget_ms` of a /traverse): the request's deadline, lowered to the server's cap and stated in limits.clamped when lowered. For /resolve it is opt-in: without the field there is no deadline. The suite's explicit-label resolves name 20,000 ms, as the service sends it. *See:* finalisation reserve, stated stop, deadline (503), clamped.
+- **timing class** — fast (under about 5 s), slow or long (over 100 s): the client time-out of an execution (120 s, 600 s, 1,800 s) and whether direct-remote runs it (long is not run there, the front cutting at about 120 s). *See:* direct-remote.
+- **timing legend** — The three meanings of the slash in the results document's tables, printed under every table: repeats in order in a series or list cell (mcp: cold / warm; direct: repeat 0 / repeat 1), median / maximum in a replicates cell, p50 / p90 in a summary line. *See:* cold / warm.
+- **unit** — One builder template, one property, varied over one dimension: the tests printed as one table. Its type decides the layout: series (arms as rows, variants as columns), replicates (the same test over many records, aggregated per arm and group), refusals (edge inputs, a glyph per arm), list (the refusals shape with time cells) and pairs (twins, relations and chapter D's repeats, one row each). Every scenario belongs to exactly one unit; the index (appendix E) maps each id to its unit. *See:* family, property line.
+- **verdict** — The run's one word: INCOMPLETE (an arm did not finish, a planned execution not recorded), FAIL (a failed or errored execution, a disagreement, a failed relation), FINDINGS (a finding and nothing worse), INCONCLUSIVE (nothing passed, a group that tested nothing, or two deployments in one run), EMPTY, UNVERIFIED (the status-only stub judged), PASS. Inconclusive executions are counted after it, never as passes. *See:* deploy gate, finding.
+- **verified** — Of a by-design pair: every side the case has was checked and held (the direct answer against the case's host side, each MCP execution against its service side; an answered case through the checks it explains). An unverified pair keeps the by-design glyph with the mark u, and the appendix says which side was not verified. *See:* service-side by design.
+- **wall time** — Of a direct execution: from sending the request to the last byte of the body on an established connection, the connection set-up excluded. Of an MCP execution: the whole tool interaction, from the first submit to the answer. *See:* server time, backend time, connect time.
+- **warm after a cut** — A host-warm execution whose previous host execution of the scenario ended at the host's deadline without an answer (a direct 503 deadline or a relayed one): counted apart from the warm executions in the timing statistics and the overheads, its server time being typically higher. *See:* host cache state.
+- **window** — A positive control: a stretch of a record's forward strand cut at a seeded position, of A, C, G and T only, with a DUST score below 2, occurring once on either strand of the fetched sequence, at least 50 bp from any other window. The suite's checks ask for the record among the answers, never for uniqueness in the index. *See:* ground truth.

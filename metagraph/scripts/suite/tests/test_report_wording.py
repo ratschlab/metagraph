@@ -53,7 +53,7 @@ class ReportWordingTest(unittest.TestCase):
         # contains_source_context, which the reference (direct-local) fails
         self.assertEqual(depth["P-001"]["class"], "full")
         self.assertEqual(depth["R-001"], {"class": "generic_only", "not_compared": ["contains_source_context"],
-                                          "reference_fails_hidden": ["contains_source_context"]})
+                                          "partly_compared": {}, "reference_fails_hidden": ["contains_source_context"]})
         verdict = self.text.split("# Verdict", 1)[1].split("\n# ", 1)[0]
         self.assertIn("3 agree (2 fully checked, 0 partial, 0 partial with a non-pass aggregate, 0 on failure, "
                       "1 generic checks only, 0 refusals; see Agreement)", verdict)
