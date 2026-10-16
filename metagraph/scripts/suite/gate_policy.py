@@ -25,6 +25,12 @@ The manifest's property-level marks (mcp.not_implemented_checks [{check, reason}
 case}]; the owner, 2026-10-15) derive nothing here: gate.py applies them itself (suite_common.checks_marked_aside),
 setting aside only a marked check the MCP reads not_exposed, so a marked check's missing result, failure or
 inconclusive still blocks; an exemption here would hide those. Both stay required on the direct arms.
+On the MCP arm, the repeats of a scenario on which the manifest's property-level marks cover every property check
+that repeat can test (marks_cover_repeat: a first repeat has no result of `deterministic`, so a scenario whose only
+other property check is marked tests nothing of its claim there via MCP, suite_common.every_property_marked; e.g.
+D-P-scope-0004 r0 of v6) are excluded at repeat level by the rule marks_cover_repeat, with the marks' reasons: the
+narrowest scope of a missing MCP feature (the owner, 2026-10-15), where a scenario-level mark would also drop the
+later repeats that still test `deterministic`.
 On every arm, a scenario the manifest tags budget_stress (a property that depends on the host's load, which no
 budget makes decisive; truth.budget_stress.reason states why) is excluded by the rule budget_stress, derived from the
 tag, with that reason (lane V5: v5's long column walks, owner-approved on 2026-10-15; they run in the full suite).
@@ -172,6 +178,37 @@ def mcp_exclusion(scenario, cases, advanced_path=False, direct_arm=True):
             "reason": "; ".join(reasons)}
 
 
+MARK_WORDS = {"not_implemented": "not implemented yet via MCP", "by_design": "service-side by design"}
+
+
+def marks_repeat_exclusion(scenario, repeats):
+    """The MCP arm's repeat-level exclusion of a scenario ({scenario, arms ["mcp"], repeats, rules
+    ["marks_cover_repeat"], reason}) or None: the repeats among |repeats| (its MCP repeats) on which the manifest's
+    property-level marks (suite_common.mcp_check_marks) cover every property check the scenario expects that the
+    repeat can test (suite_common.LATER_REPEATS_ONLY have no result on repeat 0). Such an execution tests nothing of
+    the claim via MCP (suite_common.every_property_marked: it reads inconclusive whatever the host answered), so the
+    strict gate would block on it by construction; a repeat that still tests an unmarked property check stays
+    required."""
+    marks = sc.mcp_check_marks(scenario)
+    props = sc.expected_property_checks(scenario)
+    if not marks or not props:
+        return None
+    covered = []
+    for r in repeats:
+        testable = [p for p in props if not (r == 0 and p in sc.LATER_REPEATS_ONLY)]
+        if testable and all(p in marks for p in testable):
+            covered.append(r)
+    if not covered:
+        return None
+    why = "; ".join("%s %s (%s)" % (name, MARK_WORDS.get(m.get("mark"), m.get("mark")),
+                                     m.get("reason") or "case %s" % m.get("case"))
+                    for name, m in sorted(marks.items()))
+    return {"scenario": scenario.get("id"), "arms": ["mcp"], "repeats": covered, "rules": ["marks_cover_repeat"],
+            "reason": "on MCP repeat(s) %s the manifest's property-level marks cover every property check the "
+                      "repeat can test (%s; %s needs an earlier repeat): it tests nothing of the claim via MCP there"
+                      % (", ".join(str(r) for r in covered), why, ", ".join(sc.LATER_REPEATS_ONLY))}
+
+
 def budget_stress_exclusion(scenario, arms):
     """The exclusion of a scenario tagged budget_stress on every arm of the policy ({scenario, arms, rules, reason}),
     or None: its property depends on the host's load, so the strict gate would block on an inconclusive that says
@@ -253,6 +290,10 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
         ex = mcp_exclusion(scen, cases, advanced_path, direct_arm) if "mcp" in arms else None
         if ex:
             exclusions.append(ex)
+        elif "mcp" in arms:
+            covered = marks_repeat_exclusion(scen, sc.mcp_repeats(index, scen, warm_every))
+            if covered:
+                exclusions.append(covered)
         stress = budget_stress_exclusion(scen, arms)
         if stress:
             exclusions.append(stress)
@@ -366,10 +407,10 @@ def describe(policy):
     for ex in policy["exclusions"]:
         if "budget_stress" in ex["rules"]:
             out.append("    budget_stress: %s excluded on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
-        elif "declared" in ex["rules"]:
-            out.append("    declared: %s%s excluded on %s: %s" % (
-                ex["scenario"], "".join(" r%d" % r for r in ex.get("repeats") or []), ", ".join(ex["arms"]),
-                ex["reason"]))
+        elif "declared" in ex["rules"] or "marks_cover_repeat" in ex["rules"]:
+            out.append("    %s: %s%s excluded on %s: %s" % (
+                ex["rules"][0], ex["scenario"], "".join(" r%d" % r for r in ex.get("repeats") or []),
+                ", ".join(ex["arms"]), ex["reason"]))
         else:
             out.append("    %s on %s: %s" % (ex["scenario"], ", ".join(ex["arms"]), ex["reason"]))
     for arm, v in sorted(c["required"].items()):

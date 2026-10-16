@@ -420,6 +420,46 @@ class PolicyTest(GateCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(gate_policy.main([mpath, "--by-design", ""]), 2)
 
+    def test_marks_that_cover_a_repeat_exclude_that_repeat_on_mcp(self):
+        """v6's D-P-scope-0004: its only property checks are entry_fields, marked not implemented yet via MCP (the
+        entry's absence_scope), and deterministic, which repeat 0 cannot test: its MCP repeat 0 tests nothing of the
+        claim (suite_common.every_property_marked: inconclusive whatever the host answered), so the strict gate
+        blocked on it by construction. marks_cover_repeat excludes that repeat alone; the later repeats, which test
+        deterministic, stay required, and so does every repeat on direct-local."""
+        def pat(sid, extra=(), repeat=3, marked=("entry_fields",)):
+            s = scenario(sid, "POST /pattern", repeat=repeat, tool="pattern_search")
+            s["expect"] = [{"check": "status", "args": {"http": 200}}, {"check": "entry_fields", "args": {}}] + \
+                [{"check": c, "args": {}} for c in extra] + ([{"check": "deterministic", "args": {}}] if repeat > 1
+                                                              else [])
+            s["mcp"]["not_implemented_checks"] = [{"check": c, "reason": "the MCP's /pattern answer does not carry "
+                                                                         "the entry's absence_scope"} for c in marked]
+            return s
+        m = manifest_of([pat("D-P-001"), pat("P-002", extra=("contains_source_context",)),
+                         pat("P-003", repeat=1)], [])
+        pol = policy_of(m, routes=("POST /pattern",), arms=("mcp", "direct-local"))
+        ex = dict((e["scenario"], e) for e in pol["exclusions"])
+        self.assertEqual(sorted(ex), ["D-P-001", "P-003"])
+        self.assertEqual((ex["D-P-001"]["arms"], ex["D-P-001"]["repeats"], ex["D-P-001"]["rules"]),
+                         (["mcp"], [0], ["marks_cover_repeat"]))
+        self.assertIn("entry_fields not implemented yet via MCP (the MCP's /pattern answer does not carry the "
+                      "entry's absence_scope)", ex["D-P-001"]["reason"])
+        self.assertIn("deterministic needs an earlier repeat", ex["D-P-001"]["reason"])
+        self.assertEqual(ex["P-003"]["repeats"], [0, 1])   # no unmarked property on any repeat: every one
+        req = dict(((i["scenario"], i["arm"]), i["repeats"]) for i in pol["required"])
+        self.assertEqual(req[("D-P-001", "mcp")], [1, 2])
+        self.assertEqual(req[("D-P-001", "direct-local")], [0, 1, 2])
+        self.assertEqual(req[("P-002", "mcp")], [0, 1, 2])   # contains_source_context is tested on repeat 0
+        self.assertNotIn(("P-003", "mcp"), req)
+        self.assertIn("marks_cover_repeat: D-P-001 r0 excluded on mcp", gate_policy.describe(pol))
+        # gate.py: the excluded repeat is not judged, the later ones are
+        self.assertIsNotNone(gate.excluded(pol, "D-P-001", "mcp", 0))
+        self.assertIsNone(gate.excluded(pol, "D-P-001", "mcp", 1))
+        # an MCP-only policy, and a scenario the manifest marks whole (scenario-level) keeps its own rule
+        whole = pat("P-004")
+        whole["mcp"] = {"not_implemented": "not implemented yet via MCP: ..."}
+        pol = policy_of(manifest_of([whole], []), routes=("POST /pattern",), arms=("mcp",))
+        self.assertEqual([e["rules"] for e in pol["exclusions"]], [["manifest_not_implemented"]])
+
     def test_read_ids(self):
         path = os.path.join(self.tmp, "ids")
         with open(path, "w") as fh:
