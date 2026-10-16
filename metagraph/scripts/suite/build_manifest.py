@@ -150,6 +150,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
     areas.state_chance_bounds(scenarios)
+    areas.mark_pattern_mcp_fields(scenarios)   # v6: what the MCP's /pattern answer cannot carry, at property level
     scenario_level_marks(scenarios)
     scenarios = place_warm_ups(scenarios)
     keep_off_warm_repeat(scenarios)

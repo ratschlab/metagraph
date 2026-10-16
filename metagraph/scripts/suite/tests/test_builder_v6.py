@@ -14,17 +14,28 @@ SUITE = os.path.dirname(HERE)
 sys.path.insert(0, SUITE)
 sys.path.insert(0, HERE)
 
+import areas  # noqa: E402
 import build_manifest as bm  # noqa: E402
 import manifest_lib as ml  # noqa: E402
 import suite_common as sc  # noqa: E402
 from test_builder_v5 import built, have_cache  # noqa: E402
 
 V5_CONTENT = "72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875"
-V6_CONTENT = "2c53f809e63de83bdd568ee59e0cf75fa345110cabce398b1b2ac2188e8d33cf"
+V6_CONTENT = "958d94d5dc6e7b34bad4ddb321a46ffc31989f2a5a6393e288ea94f259706904"
 RELATIONS = "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"
-V6_SMOKE_CONTENT = "5f3b128984e60941dfeb8494889a907577e3fc13ff530c39eb5181ffb612dd5b"
+V6_SMOKE_CONTENT = "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd"
 # manifest_lib.PATTERN_TIME_BUDGET_MS of v6 (the owner, 2026-10-16: 110,000, not 120,000)
 V6_BUDGET = 110000
+# round 2 (the owner, 2026-10-16): the /pattern checks the MCP's answer cannot carry (areas.pattern_mcp_unexposed), by
+# what they read: exactly the 27 scenarios whose MCP executions read them not_exposed in the v5 baseline 81c620ef,
+# less the 3 whose field the MCP answer does carry per entry (MCP_PATTERN_PER_ENTRY: Q-pred-0011 / -0012's
+# predicate block, P-edge-0009's load_ms; an MCP runner change). Two are scenario-level (their only property check).
+ABSENCE_SCOPE = ["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-%04d" % i for i in range(1, 7)] + \
+    ["D-P-exact-0001", "D-P-scope-0004"]
+STRANDS = ["P-scope-%04d" % i for i in range(7, 13)] + ["N-usecase-0005"]
+PATTERN_TEXT = ["P-edge-0004"]
+SCENARIO_MARKED = {"P-scope-0004", "P-scope-0006"}
+PER_ENTRY_UNMARKED = {"Q-pred-0011", "Q-pred-0012", "P-edge-0009"}
 # the /pattern scenarios of v5 whose request names another budget than the default, or no JSON object at all
 DELIBERATE = {"P-caps-0004": 300, "M-protein-0010": 30000}
 NO_OBJECT = {"P-edge-0012", "C-protocol-0004", "C-protocol-0005", "C-protocol-0006"}
@@ -68,15 +79,50 @@ class ManifestV6(unittest.TestCase):
         self.assertEqual((self.v6["manifest_version"], self.v6["content_sha256"]), (6, V6_CONTENT))
         self.assertEqual((self.v5["relations_sha256"], self.v6["relations_sha256"]), (RELATIONS, RELATIONS))
         self.assertEqual(sc.manifest_problems(self.v6), [])
-        self.assertEqual(self.v6["counts"], self.v5["counts"])
+        c5, c6 = dict(self.v5["counts"]), dict(self.v6["counts"])
+        self.assertEqual(c6.pop("mcp_not_implemented") - c5.pop("mcp_not_implemented"), len(SCENARIO_MARKED))
+        self.assertEqual(c6, c5)
         self.assertEqual(self.v6["counts"]["by_tag"]["smoke-v5"], 14)
 
+    def test_the_mcp_marks(self):
+        """What the MCP's /pattern answer cannot carry is marked not implemented yet via MCP at property level (the
+        owner's rule of 2026-10-15): entry_fields reading absence_scope, strands or the pattern text; scenario-level
+        where that is the scenario's only property check (P-scope-0004, -0006). The predicate block and load_ms the
+        MCP's answer carries per entry stay unmarked (an MCP runner change)."""
+        marked = {}
+        for s in self.v6["scenarios"]:
+            for e in (s["mcp"].get("not_implemented_checks") or []):
+                if s["route"] == "POST /pattern":
+                    marked.setdefault(s["id"], []).append((e["check"], e["reason"]))
+        self.assertEqual(sorted(marked), sorted(set(ABSENCE_SCOPE + STRANDS + PATTERN_TEXT) - SCENARIO_MARKED))
+        for ids, what in ((ABSENCE_SCOPE, "the entry's absence_scope"), (STRANDS, "the entry's strands"),
+                          (PATTERN_TEXT, "the entry's pattern text")):
+            for sid in ids:
+                if sid in SCENARIO_MARKED:
+                    self.assertNotIn("tool", self.s6[sid]["mcp"], sid)
+                    self.assertIn("not implemented yet via MCP: the MCP's /pattern answer does not carry %s" % what,
+                                  self.s6[sid]["mcp"]["not_implemented"], sid)
+                    continue
+                self.assertEqual([c for c, _ in marked[sid]], ["entry_fields"], sid)
+                self.assertIn(what, marked[sid][0][1], sid)
+                self.assertFalse(bm.covers_every_property(self.s6[sid]), sid)
+        for sid in PER_ENTRY_UNMARKED:
+            self.assertNotIn("not_implemented_checks", self.s6[sid]["mcp"], sid)
+            self.assertEqual(areas.pattern_mcp_unexposed(self.s6[sid]), {}, sid)
+        self.assertEqual(areas.MCP_PATTERN_PER_ENTRY, ("predicate", "timing.load_ms"))
+
     def test_only_the_pattern_budgets_changed(self):
+        """The diff v5 -> v6: the budgets, and the MCP marks of round 2 (test_the_mcp_marks), nothing else."""
         self.assertEqual([s["id"] for s in self.v5["scenarios"]], [s["id"] for s in self.v6["scenarios"]])
         kinds = collections.Counter()
         changed_routes = set()
         for sid, s in self.s5.items():
-            diffs = leaf_diffs(s, self.s6[sid])
+            s6 = json.loads(json.dumps(self.s6[sid]))
+            if sid in SCENARIO_MARKED:
+                s6["mcp"] = dict(s["mcp"], arguments=dict(s["mcp"]["arguments"], time_budget_ms=V6_BUDGET))
+            elif s["route"] == "POST /pattern":
+                s6["mcp"].pop("not_implemented_checks", None)
+            diffs = leaf_diffs(s, s6)
             if diffs:
                 changed_routes.add(s["route"])
             for path, old, new in diffs:
@@ -157,8 +203,9 @@ class ManifestV6(unittest.TestCase):
         for a, b in zip(sm5["scenarios"], sm6["scenarios"]):
             diffs = leaf_diffs(a, b)
             if a["route"] == "POST /pattern":
+                marked = [".mcp.not_implemented_checks"] if a["id"] in ABSENCE_SCOPE + STRANDS + PATTERN_TEXT else []
                 self.assertEqual(sorted(d[0] for d in diffs),
-                                 [".mcp.arguments.time_budget_ms", ".request.time_budget_ms"], a["id"])
+                                 [".mcp.arguments.time_budget_ms"] + marked + [".request.time_budget_ms"], a["id"])
             else:
                 self.assertEqual(diffs, [], a["id"])
 
@@ -182,11 +229,14 @@ class ManifestV6(unittest.TestCase):
                          os.path.join("truth", "mcp_exposure", "v4-20261014T061053Z-budget-free.json"))
         self.assertEqual(self.v6["mcp_exposure_baseline"]["file"], "truth/mcp_exposure/v4-20261014T061053Z-budget-free.json")
         self.assertEqual(self.v6["mcp_exposure_baseline"]["sha256"], ml.sha256_json(new))
-        # the lists of v6 are v5's, scenario for scenario
+        # the lists of v6 are v5's, scenario for scenario, but where the MCP no longer runs a scenario (a
+        # scenario-level mark of round 2)
         for sid, s in self.s5.items():
-            self.assertEqual((s.get("mcp") or {}).get("exposes"), (self.s6[sid].get("mcp") or {}).get("exposes"), sid)
+            want = None if sid in SCENARIO_MARKED else (s.get("mcp") or {}).get("exposes")
+            self.assertEqual(want, (self.s6[sid].get("mcp") or {}).get("exposes"), sid)
         self.assertEqual(sum(1 for s in self.v6["scenarios"] if (s.get("mcp") or {}).get("exposes")),
-                         self.v5["mcp_exposure_baseline"]["scenarios_with_exposes"])
+                         self.v5["mcp_exposure_baseline"]["scenarios_with_exposes"] -
+                         sum(1 for sid in SCENARIO_MARKED if (self.s5[sid].get("mcp") or {}).get("exposes")))
 
     def test_client_timeouts_exceed_every_stated_budget(self):
         """Every v6 request's client timeout exceeds its stated time budget by the margin on direct-local, and the

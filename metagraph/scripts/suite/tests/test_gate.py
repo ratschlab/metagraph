@@ -367,10 +367,10 @@ class PolicyTest(GateCase):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
         self.assertEqual((m["manifest_version"], m["content_sha256"], m["relations_sha256"]),
-                         (6, "2c53f809e63de83bdd568ee59e0cf75fa345110cabce398b1b2ac2188e8d33cf",
+                         (6, "958d94d5dc6e7b34bad4ddb321a46ffc31989f2a5a6393e288ea94f259706904",
                           "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
         smoke = sc.read_json(os.path.join(SUITE, "manifest", "suite_smoke_v6.json"))
-        self.assertEqual(smoke["content_sha256"], "5f3b128984e60941dfeb8494889a907577e3fc13ff530c39eb5181ffb612dd5b")
+        self.assertEqual(smoke["content_sha256"], "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd")
         declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
         self.assertEqual(declared["manifest"], {"file": "manifest/suite_v6.json", "content_sha256": m["content_sha256"]})
         self.assertEqual((declared["exclusions"], declared["not_required"], declared["relations_excluded"]), ([], [], []))

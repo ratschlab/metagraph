@@ -3227,3 +3227,80 @@ def capability_relations(ctx: Ctx, cid: Dict[str, str], caps: Dict[str, dict]) -
     out.append(relation(ctx, "same_answer", cid["GET /pattern/capabilities"], cid["GET /traverse/capabilities"],
                         "the gate block of /traverse/capabilities projects /pattern/capabilities", paths=paths))
     return out
+
+
+# ================================================================================================= v6: /pattern via MCP
+# What the MCP arm's /pattern answer cannot carry (the service's pattern_search status, app/pattern/merge.py, and the
+# async session's normaliser, scripts/bench/suite_mcp_normalise.py, both at 9d76035e, read only: the normalised body
+# is mode, patterns and index; an answered entry keeps the merged view's id, kind, length, palindromic,
+# information_bits, scope, mode, counts, statements, determinism and notes and the database's work, timing, predicate,
+# selection, absence_filter and load_ms; verified against the recorded MCP answers of the v5 baseline): a property
+# check that reads one of these is marked not implemented yet via MCP at property level (mcp.not_implemented_checks,
+# the owner's rule of 2026-10-15), and build_manifest.scenario_level_marks makes it the scenario's mark where it would
+# cover every property check. Not marked, because the MCP's answer DOES carry them, per entry: the host's top-level
+# predicate block (by_database[].predicate, verbatim on every entry) and timing.load_ms (by_database[].load_ms): the
+# runner's normaliser leaves them on the entry where the host states them at the top (MCP_PATTERN_PER_ENTRY; an MCP
+# runner change, README "Manifest v6"), so a check reading them stays not_exposed and blocks until it lifts them.
+MCP_PATTERN_BODY_KEYS = ("mode", "patterns", "index")
+MCP_PATTERN_PER_ENTRY = ("predicate", "timing.load_ms")
+MCP_PATTERN_ENTRY_NOT_EXPOSED = {
+    "pattern": "the entry's pattern text",
+    "strands": "the entry's strands",
+    "absence_scope": "the entry's absence_scope (the service states the request's scope instead)",
+    "anchor_information_bits": "the entry's anchor_information_bits",
+    "min_anchor_information_bits": "the entry's min_anchor_information_bits",
+    "limits": "the entry's limits",
+    "max_mismatches": "an answered entry's max_mismatches (only a refused slot carries it)",
+    "mismatch_information_bits": "an answered entry's mismatch_information_bits (only a refused slot carries it)",
+    "min_anchor_mismatch_information_bits": "an answered entry's min_anchor_mismatch_information_bits (only a refused "
+                                            "slot carries it)",
+}
+
+
+def _expected_paths(args: dict) -> List[str]:
+    """The paths an entry_fields / answer_fields expectation reads a value from (equals, present); `absent` reads
+    an absence, which an unexposed field shows as well."""
+    return list((args.get("equals") or {}).keys()) + list(args.get("present") or [])
+
+
+def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
+    """{check: [what the MCP's /pattern answer cannot carry that it reads]} of a scenario the MCP runs
+    (pattern_search): an entry_fields path whose first field is in MCP_PATTERN_ENTRY_NOT_EXPOSED (a refused slot's
+    mismatch keys are carried), an answer_fields path outside MCP_PATTERN_BODY_KEYS that the entries do not carry
+    either (MCP_PATTERN_PER_ENTRY)."""
+    if sc.get("route") != "POST /pattern" or (sc.get("mcp") or {}).get("tool") != "pattern_search":
+        return {}
+    refused = set((e.get("args") or {}).get("pattern", 0) for e in sc["expect"] if e["check"] == "pattern_slot_error")
+    out: Dict[str, List[str]] = {}
+    for e in sc["expect"]:
+        a = e.get("args") or {}
+        if e["check"] == "entry_fields":
+            slot = a.get("pattern", 0) in refused
+            for p in _expected_paths(a):
+                head = p.split(".", 1)[0]
+                if head in MCP_PATTERN_ENTRY_NOT_EXPOSED and not (slot and "mismatch" in head):
+                    out.setdefault("entry_fields", [])
+                    if MCP_PATTERN_ENTRY_NOT_EXPOSED[head] not in out["entry_fields"]:
+                        out["entry_fields"].append(MCP_PATTERN_ENTRY_NOT_EXPOSED[head])
+        elif e["check"] == "answer_fields" and not a.get("when_http"):
+            for p in _expected_paths(a):
+                if p.split(".", 1)[0] not in MCP_PATTERN_BODY_KEYS and \
+                        not any(p == q or p.startswith(q + ".") for q in MCP_PATTERN_PER_ENTRY):
+                    what = "the answer's %s (the MCP's body is mode, patterns and index)" % p
+                    if what not in out.setdefault("answer_fields", []):
+                        out["answer_fields"].append(what)
+    return out
+
+
+def mark_pattern_mcp_fields(scenarios: List[dict]) -> Dict[str, List[str]]:
+    """Marks every property check of a /pattern scenario that reads what the MCP's answer cannot carry
+    (pattern_mcp_unexposed) not implemented yet via MCP (mcp_not_implemented_check, with the fields as its reason);
+    returns {id: [checks marked]}."""
+    out = {}
+    for s in scenarios:
+        for check, what in pattern_mcp_unexposed(s).items():
+            if any(e.get("check") == check for e in (s["mcp"].get("not_implemented_checks") or [])):
+                continue
+            mcp_not_implemented_check(s, check, "the MCP's /pattern answer does not carry %s" % "; ".join(what))
+            out.setdefault(s["id"], []).append(check)
+    return out
