@@ -930,8 +930,14 @@ def interpretation(run, sid, states, property_text=None):
                 observed.append("%s: a planned execution not recorded" % esc(arm))
             continue
         if st.glyph_key in ("not_implemented_mcp", "service_by_design"):
+            # the service decided the call: the class in words with its evidence (whether the host was reached,
+            # the status and code), and that the property was not evaluated there (READ-208: a host search that
+            # timed out and was relayed is told apart from a request never sent)
+            cls, evidence = mcp_class(class_lines(st), sc_, st.agreement, run.cases)
             word = "not exercised via MCP" if st.glyph_key == "not_implemented_mcp" else "service-side by design"
-            observed.append("%s: %s%s" % (esc(arm), word, " (pair unverified)" if "u" in st.glyph_marks else ""))
+            observed.append("%s: %s, %s (%s)%s; the property not evaluated there" % (
+                esc(arm), word, MCP_CLASS_WORD.get(cls, cls), evidence,
+                " (pair unverified)" if "u" in st.glyph_marks else ""))
             continue
         phrases = []
         for l in st.lines:

@@ -364,21 +364,23 @@ def aggregate(states, arm):
         servers.append(srv)
         if arm != "mcp" and _num(l.get("wall_ms")) is not None:
             states.append(host_cache_of(l))
-    # the members the arm never exercised (the service refused or could not express the request, no execution
-    # recorded) are said so, never counted as ok 0/0 (the owner's review, point 4)
+    # the members the arm never exercised (the service could not express the request, or no execution was
+    # recorded) are said so, never counted as ok 0/0 (the owner's review, point 4); a member the service decided
+    # by design is said apart (READ-208): the host may have been reached (a relayed refusal, a normalised
+    # request) or not (a refusal at submit), which `by_design_reached_text` states
     extras = []
     if ni:
         extras.append("%d\\,\\gni{}" % ni)
-    if bd:
-        extras.append("%d\\,\\gbd{}" % bd)
     if missing:
         extras.append("%d\\,\\gnone{}" % missing)
     not_exercised = bd + ni + missing
     denominator = n - not_exercised
     parts = ["ok %d/%d" % (ok, denominator)] if denominator else []
-    if not_exercised:
-        parts.append("not exercised: %s" % (extras[0] if len(extras) == 1 else "%d (%s)" % (
-            not_exercised, " ".join(extras))))
+    if ni or missing:
+        parts.append("not exercised: %s" % " ".join(extras))
+    if bd:
+        parts.append("by design: %d\\,\\gbd{}%s" % (bd, by_design_reached_text(
+            [m for m in members if m.glyph_key == "service_by_design"])))
     if walls:
         wall_text = fmt_pair(percentile(walls, 50), max(v for v in walls if _num(v) is not None))
         mark = host_marks_text(states)
@@ -391,31 +393,60 @@ def aggregate(states, arm):
     return text, line2
 
 
+def host_reached(line):
+    """Whether an execution reached the host (its recorded host-cache state is one of the host's)."""
+    return host_cache_of(line) in ("cold", "warm", WARM_AFTER_INTERRUPTED, "aged")
+
+
+def by_design_reached_text(bd_members):
+    """How many of the by-design members' service-decided executions reached the host, in a parenthesis for the
+    grouped cell and the coverage line (READ-208): a relayed host refusal or a normalised request reached the
+    host (the host executed the request; the service decided the pair), a refusal at submit did not. Empty when
+    no member is by design."""
+    if not bd_members:
+        return ""
+    reached = sum(1 for m in bd_members if any(host_reached(l) for l in m.lines if by_design_line(m, l)))
+    if reached == 0:
+        return " (decided before the host)"
+    if reached == len(bd_members):
+        return " (the host reached, the pair decided by the service)"
+    return " (%d the host reached, the rest decided before it)" % reached
+
+
 def coverage_text(states, arm):
-    """The coverage of a replicates unit on an arm, in words: `exercised 6/6, passed 6`, or `not exercised (3 ○)`
-    when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`. A member standing
-    by design whose other repeat the case did not match (by_design_line: a separate host answer) is exercised on
-    that repeat: `exercised 14/22 (3 on one repeat only, the other by design), passed 9` (VERIFY-PLXM H2)."""
+    """The coverage of a replicates unit on an arm, in words: `exercised 6/6, passed 6`, or `exercised 0/3; not
+    exercised 3 ○` when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`; a
+    member the service decided by design is said apart from one never exercised, with whether the host was
+    reached (READ-208): `exercised 1/2, passed 1; by design 1 ◆ (the host reached, the pair decided by the
+    service)`. A member standing by design whose other repeat the case did not match (by_design_line: a separate
+    host answer) is exercised on that repeat: `exercised 14/22 (3 on one repeat only, the other by design),
+    passed 9` (VERIFY-PLXM H2)."""
     members = [s[arm] for s in states.values()]
     n = len(members)
     exercised = [m for m in members if m.present and m.glyph_key not in SERVICE_DECIDED]
     partly = [m for m in members if m.present and m.glyph_key in SERVICE_DECIDED and exercised_lines(m)]
     passed = sum(1 for m in exercised if m.worst == "pass")
     passed += sum(1 for m in partly if all(l.get("outcome") == "pass" for l in exercised_lines(m)))
-    rest = {}
-    for m in members:
-        if m in exercised or m in partly:
+    rest = [m for m in members if m not in exercised and m not in partly]
+    ni = [m for m in rest if m.present and m.glyph_key == "not_implemented_mcp"]
+    bd = [m for m in rest if m.present and m.glyph_key == "service_by_design"]
+    other = {}
+    for m in rest:
+        if m in ni or m in bd:
             continue
-        rest[m.glyph_key] = rest.get(m.glyph_key, 0) + 1
-    rest_text = " ".join("%d\\,%s{}" % (rest[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if rest.get(k))
-    if not exercised and not partly:
-        return "not exercised (%s)" % rest_text if rest_text else "not exercised"
+        other[m.glyph_key] = other.get(m.glyph_key, 0) + 1
     text = "exercised %d/%d" % (len(exercised) + len(partly), n)
     if partly:
         text += " (%d on one repeat only, the other by design)" % len(partly)
-    text += ", passed %d" % passed
-    if rest_text:
-        text += "; not exercised %s" % rest_text
+    if exercised or partly:
+        text += ", passed %d" % passed
+    if ni:
+        text += "; not exercised %d\\,\\gni{}" % len(ni)
+    if bd:
+        text += "; by design %d\\,\\gbd{}%s" % (len(bd), by_design_reached_text(bd))
+    other_text = " ".join("%d\\,%s{}" % (other[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if other.get(k))
+    if other_text:
+        text += "; not recorded %s" % other_text
     return text
 
 

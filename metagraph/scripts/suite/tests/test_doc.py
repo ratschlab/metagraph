@@ -451,16 +451,20 @@ class FakeRunTest(unittest.TestCase):
         self.assertNotIn("ok 0/0", chapter)
         st = dict((sid, cells.scenario_states(self.runobj, sid)) for sid in ("P-004", "P-005"))
         text, line2 = cells.aggregate(st, "mcp")
-        self.assertEqual(text, "not exercised: 2 (1\\,\\gni{} 1\\,\\gbd{})")
+        # a member the service decided by design is said apart from one never exercised, with whether the host
+        # was reached (READ-208; P-004's refusal came at submit)
+        self.assertEqual(text, "not exercised: 1\\,\\gni{} · by design: 1\\,\\gbd{} (decided before the host)")
         self.assertIsNone(line2)
         # one kind alone: the count and its glyph
         one = {"P-005": st["P-005"], "X": st["P-005"], "Y": st["P-005"]}
         self.assertEqual(cells.aggregate(one, "mcp")[0], "not exercised: 3\\,\\gni{}")
         # a mixed unit: the ok count over the exercised members, the rest said apart
         mixed = {"P-004": st["P-004"], "P-005": st["P-005"], "P-001": cells.scenario_states(self.runobj, "P-001")}
-        self.assertTrue(cells.aggregate(mixed, "mcp")[0].startswith("ok 1/1 · not exercised: 2 ("))
+        self.assertTrue(cells.aggregate(mixed, "mcp")[0].startswith(
+            "ok 1/1 · not exercised: 1\\,\\gni{} · by design: 1\\,\\gbd{} (decided before the host)"))
         # the coverage line under the table: words, never "exceptions: none" alone for an unexercised arm
-        self.assertEqual(cells.coverage_text(st, "mcp"), "not exercised (1\\,\\gni{} 1\\,\\gbd{})")
+        self.assertEqual(cells.coverage_text(st, "mcp"),
+                         "exercised 0/2; not exercised 1\\,\\gni{}; by design 1\\,\\gbd{} (decided before the host)")
         self.assertEqual(cells.coverage_text(st, "direct-local"), "exercised 2/2, passed 2")
         self.assertIn("coverage: direct-local exercised 2/2, passed 2", chapter)
         self.assertNotIn("exceptions: none", chapter)
@@ -3364,7 +3368,7 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         ni.present, ni.glyph_key = True, "not_implemented_mcp"
         ni.lines = [{"repeat": 0, "outcome": "service_by_design", "http": 400}]
         self.assertTrue(cells.by_design_line(ni, ni.lines[0]))
-        self.assertEqual(cells.coverage_text({"R-1": {"mcp": ni}}, "mcp"), "not exercised (1\\,\\gni{})")
+        self.assertEqual(cells.coverage_text({"R-1": {"mcp": ni}}, "mcp"), "exercised 0/1; not exercised 1\\,\\gni{}")
 
     def test_class_from_the_cases_execution(self):
         """VERIFY-FINAL R1: where the case covers r1 only (r0 a 200 outside the case), the class word and the
@@ -4003,6 +4007,151 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertNotIn("UNRESOLVED", summary)
         self.assertIn("Three classifications are distinct", summary)
         self.assertIn("one claim is one property check of one scenario", summary)
+
+
+class ChapterPLXTest(unittest.TestCase):
+    """The readability review's chapter comments of P, L and X (lane PLX, READ-201 .. READ-215): a grouped cell
+    and its coverage line say a by-design member apart from one never exercised, with whether the host was
+    reached, and the detail block's observed line names the MCP class (READ-208); the Background's comparison-table
+    slot `intro_tables` (READ-209); the prose facts the comments asked for, on both mappings."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.run_dir = os.path.join(cls.tmp, "run")
+        os.makedirs(cls.run_dir)
+        build_run(cls.run_dir)
+        merge_run.merge(cls.run_dir)
+        sc.write_json_atomic(os.path.join(cls.run_dir, "compare.json"), cmp.compare(cls.run_dir, (CASES, {"cases": 5})))
+        cls.runobj = reader.Run(cls.run_dir)
+        cls.units = units_mod.resolve(cls.runobj.manifest, FAKE_MAPPING)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def ctx(self, prose):
+        ctx = sections.Context(self.runobj, self.units, prose, {}, {}, list(self.units.chapters))
+        for ch in ctx.chapters:
+            ctx.footnotes[ch] = cells.Footnotes()
+        return ctx
+
+    @staticmethod
+    def by_design_state(host_cache, http):
+        st = cells.ArmState("mcp")
+        st.present = True
+        st.glyph_key = "service_by_design"
+        st.worst = "service_by_design"
+        st.lines = [{"outcome": "service_by_design", "host_cache": host_cache, "http": http, "wall_ms": 50.0}]
+        return st
+
+    def test_by_design_apart_from_not_exercised(self):
+        """READ-208: a by-design member is said apart from a never-exercised one, with whether the host was reached
+        (a relayed host refusal: the host executed the request; a refusal at submit: it did not), in the grouped
+        cell and in the coverage line; the detail block's observed line carries the class and that the property was
+        not evaluated there."""
+        reached = self.by_design_state("warm", 502)
+        before = self.by_design_state("not_reached", 400)
+        self.assertEqual(cells.by_design_reached_text([reached]), " (the host reached, the pair decided by the service)")
+        self.assertEqual(cells.by_design_reached_text([before]), " (decided before the host)")
+        self.assertEqual(cells.by_design_reached_text([reached, before]), " (1 the host reached, the rest decided before it)")
+        self.assertEqual(cells.by_design_reached_text([]), "")
+        passing = cells.scenario_states(self.runobj, "P-001")["mcp"]
+        self.assertEqual(passing.worst, "pass")
+        states = {"a": {"mcp": passing}, "b": {"mcp": reached}}
+        text, _ = cells.aggregate(states, "mcp")
+        self.assertTrue(text.startswith("ok 1/1 · by design: 1\\,\\gbd{} (the host reached, the pair decided by the service)"), text)
+        self.assertNotIn("not exercised", text)
+        self.assertEqual(cells.coverage_text(states, "mcp"),
+                         "exercised 1/2, passed 1; by design 1\\,\\gbd{} (the host reached, the pair decided by the service)")
+        # a member with no execution recorded stays apart from both
+        absent = cells.ArmState("mcp")
+        self.assertEqual(cells.coverage_text({"a": {"mcp": passing}, "z": {"mcp": absent}}, "mcp"),
+                         "exercised 1/2, passed 1; not recorded 1\\,\\gnone{}")
+        st = cells.scenario_states(self.runobj, "P-004")
+        block = blocks.detail_block(self.runobj, "P-004", st, 1, self.units)
+        self.assertIn("mcp: service-side by design, %s (" % blocks.MCP_CLASS_WORD["refused_before_host"], block)
+        self.assertIn("; the property not evaluated there", block)
+        st5 = cells.scenario_states(self.runobj, "P-005")
+        block5 = blocks.detail_block(self.runobj, "P-005", st5, 2, self.units)
+        self.assertIn("mcp: not exercised via MCP, %s (" % blocks.MCP_CLASS_WORD["not_expressible"], block5)
+
+    def test_intro_tables_slot(self):
+        """READ-209: a chapter's `intro_tables` entry renders as a plain table after the Background paragraph it
+        names (default: the last), its cells prose with placeholders and inline markup."""
+        base = {"summary": ["s"], "coverage_gap": ["g"],
+                "families": {"P-pos": {"title": "t", "prose": "p"}, "P-edge": {"title": "t", "prose": "p"}},
+                "units": {"P-pos-series": "u1", "P-pos-reps": "u2", "P-edge-refused": "u3"}}
+        table = {"after": 0, "caption": "cap {n_tests}", "columns": ["a", "b"], "rows": [["`x`", "*y* {n_tests}"]]}
+        prose = {"P": dict(base, intro=["FIRST-PARAGRAPH", "SECOND-PARAGRAPH"], intro_tables=[table])}
+        bg = sections.chapter(self.ctx(prose), "P").split("\\parhead{Background}", 1)[1]
+        self.assertLess(bg.find("FIRST-PARAGRAPH"), bg.find("\\begin{longtable}"))
+        self.assertLess(bg.find("\\begin{longtable}"), bg.find("SECOND-PARAGRAPH"))
+        self.assertIn("{\\itshape cap 5}", bg)
+        self.assertIn("\\texttt{x} & \\emph{y} 5\\\\", bg)
+        prose2 = {"P": dict(base, intro=["FIRST-PARAGRAPH", "SECOND-PARAGRAPH"], intro_tables=[dict(table, after=None)])}
+        bg2 = sections.chapter(self.ctx(prose2), "P").split("\\parhead{Background}", 1)[1]
+        self.assertLess(bg2.find("SECOND-PARAGRAPH"), bg2.find("\\begin{longtable}"))
+        prose3 = {"P": dict(base, intro=["ONLY"])}
+        self.assertNotIn("longtable", sections.chapter(self.ctx(prose3), "P").split("\\parhead{Background}", 1)[1]
+                         .split("\\subsection", 1)[0])
+
+    def test_plx_prose_facts(self):
+        """The prose of P, L and X carries what the comments asked for: the chapter purposes (READ-101), the worked
+        example before the mode catalogue (READ-201), the scope of a green count (READ-202), the absence unit per
+        query class (READ-205), N and the leading-run shortcut (READ-206), the accepted set apart from the observed
+        branch (READ-207), the host reached via MCP (READ-208), the three notions of support with the comparison
+        table and the hypothetical mosaic (READ-209), the memory account's scope (READ-210), the v4 proof limit of
+        L-long-other beside the v5 check (READ-211), the search model before the automaton (READ-212), the
+        unconditional qualifier in the unit title of both mappings (READ-213), the three absences of the junction
+        (READ-214), the floor as an admission rule (READ-215); every unit of the three chapters has its question."""
+        P = sc.read_json(os.path.join(PROSE_DIR, "P.json"))
+        L = sc.read_json(os.path.join(PROSE_DIR, "L.json"))
+        X = sc.read_json(os.path.join(PROSE_DIR, "X.json"))
+        for d in (P, L, X):
+            self.assertTrue(d.get("purpose"))
+            for uid, e in d["units"].items():
+                self.assertTrue(isinstance(e, dict) and e.get("question"), "%s.%s has no question" % (d["chapter"], uid))
+        intro = " ".join(P["intro"])
+        self.assertIn("k - L + 1 = 7 contexts", intro)
+        self.assertIn("not seven organisms or seven biological occurrences", intro)
+        self.assertLess(intro.find("A worked example"), intro.find("Mode `count` returns no list"))
+        self.assertIn("no check of this chapter verifies an index-wide total independently", P["summary"][0])
+        self.assertIn("What they do not establish: the total number of k-mers", P["families"]["P-exact"]["prose"])
+        neg = P["families"]["P-negative"]["prose"]
+        self.assertIn("`exact` 0 paths says that no walk of the index's retained k-mers spells it", neg)
+        self.assertIn("a single k-mer cannot contain a 40-base pattern", neg)
+        self.assertIn("not a shorter query", P["families"]["P-iupac"]["prose"])
+        caps = P["families"]["P-caps"]["prose"]
+        self.assertIn("a set of allowed outcomes, not one branch", caps)
+        self.assertIn("{x[P-caps-0004][dl][evidence]}", caps)
+        self.assertIn("{x[P-caps-0004][mcp][phrase]}", caps)
+        self.assertIn("[[x[P-heavy-0001][mcp][class] = relayed ?", P["families"]["P-heavy"]["prose"])
+        self.assertIn("an admission rule, not a search result", P["families"]["P-floor"]["prose"])
+        self.assertIn("A refusal therefore proves no absence", P["families"]["P-floor"]["prose"])
+        self.assertEqual(len(L["intro_tables"]), 1)
+        self.assertEqual(L["intro_tables"][0]["after"], 1)
+        self.assertEqual([r[0] for r in L["intro_tables"][0]["rows"]],
+                         ["a path (`long_search: paths`)", "label support (`label_intersection`)",
+                          "record-verified support (`record_verified`)"])
+        self.assertIn("A hypothetical case", L["intro"][1])
+        self.assertIn("described, not discriminated", L["intro"][2])
+        self.assertIn("not the graph, the process or the container's resident memory", L["families"]["L-memory"]["prose"])
+        self.assertIn("{x[L-memory-0001][dl][checks][stop][evidence]}", L["families"]["L-memory"]["prose"])
+        self.assertIn("not part of this run's evidence", L["families"]["L-long"]["prose"])
+        line = L["units"]["L-long-other"]["property"]
+        self.assertIn("no v4 check reads the spelled path", facts.fill(line, {"manifest_version": 4}))
+        self.assertNotIn("v4", facts.fill(line, {"manifest_version": 5}).split(";")[0])
+        self.assertIn("path_spells on -", facts.fill(line, {"manifest_version": 5}))
+        self.assertTrue(X["intro"][0].startswith("A `protein` pattern searches amino acids by their DNA"))
+        self.assertIn("no claim about remote homology", X["intro"][0])
+        self.assertLess(X["intro"][0].find("exact at the residue level"), X["intro"][0].find("codon automaton"))
+        self.assertIn("a property of the query model", X["families"]["X-stop"]["prose"])
+        for path in (V4_MAPPING, V5_MAPPING):
+            self.assertEqual(sc.read_json(path)["_units"]["X-stop-none"]["unit_title"],
+                             "tables without an unconditional stop codon")
+        self.assertIn("Three absences are kept apart", X["families"]["X-junction"]["prose"])
+        self.assertIn("not an exon-aware spliced alignment", X["families"]["X-junction"]["prose"])
 
 
 if __name__ == "__main__":

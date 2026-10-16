@@ -2200,6 +2200,38 @@ def family_section(ctx, chapter, fid):
     return out
 
 
+def intro_table(ctx, table, values):
+    """One comparison table of a chapter's Background (the prose slot `intro_tables`, READ-209: the three notions
+    of path support side by side): {after, caption, columns, rows, widths}; the cells are prose (inline markup,
+    placeholders and conditionals), `after` the index of the Background paragraph the table follows (default: the
+    last)."""
+    cols = [str(c) for c in (table.get("columns") or [])]
+    rows = [[inline(ctx.fill(str(c), values)) for c in r] for r in (table.get("rows") or []) if isinstance(r, list)]
+    if not cols or not rows:
+        return ""
+    widths = table.get("widths") if isinstance(table.get("widths"), list) and len(table.get("widths")) == len(cols) \
+        else [100.0 / len(cols)] * len(cols)
+    caption = inline(ctx.fill(table.get("caption"), values)) if table.get("caption") else None
+    return latex.plain_table(latex.spec_p(widths), [esc(c) for c in cols], rows, caption, needspace=len(rows) + 4)
+
+
+def background(ctx, prose, values):
+    """The chapter's Background: the `intro` paragraphs, each optionally followed by the `intro_tables` entries
+    whose `after` names it (a table without `after` follows the last paragraph)."""
+    intro = prose.get("intro") or []
+    if not intro:
+        return latex.placeholder("(chapter prose: to be written)") + "\n\n"
+    tables = [t for t in (prose.get("intro_tables") or []) if isinstance(t, dict)]
+    out = ""
+    for i, p in enumerate(intro):
+        out += paragraphs([ctx.fill(p, values)])
+        for t in tables:
+            after = t.get("after")
+            if after == i or (after is None and i == len(intro) - 1):
+                out += intro_table(ctx, t, values)
+    return out
+
+
 def chapter(ctx, ch):
     """A chapter: its conclusion first (the `summary` prose and the summary block), then what it leaves untested
     (the `coverage_gap` prose and the computed lines), then the background (`intro`) and the families (the owner's
@@ -2242,8 +2274,7 @@ def chapter(ctx, ch):
     else:
         out += "Every property check of this chapter was passed by at least one execution of each test.\n\n"
     out += "\\parhead{Background}\n"
-    out += paragraphs([ctx.fill(p, values) for p in (prose.get("intro") or [])]) if prose.get("intro") else \
-        latex.placeholder("(chapter prose: to be written)") + "\n\n"
+    out += background(ctx, prose, values)
     # the compact record key right before the first family's tables (re-verification N-1)
     out += record_key_paragraph(ctx, ch)
     return out + body
