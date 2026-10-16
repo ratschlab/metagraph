@@ -353,7 +353,9 @@ class WalksDecisive(unittest.TestCase):
                 self.assertIn("budget_stress", tw["tags"])
                 self.assertEqual(tw["truth"]["budget_stress"]["short_twin"], sid)
                 self.assertIn(tw["id"], s[sid]["title"])
-        self.assertEqual(sorted(x["id"] for x in m["scenarios"] if "budget_stress" in x["tags"]),
+        # v5's budget_stress scenarios are the long walks (v6 adds /pattern ones of its own: test_builder_v6)
+        self.assertEqual(sorted(x["id"] for x in m["scenarios"] if "budget_stress" in x["tags"]
+                                and x["route"] != "POST /pattern"),
                          ["T-longwalk-%04d" % n for n in range(1, 5)])
         # the MCP refuses above its walk preset's budget row, by design (the long walks are the direct arms')
         self.assertIn("traverse.bounds_budget_above_preset_row", s["T-walk-0006"]["mcp"]["by_design"])
@@ -922,7 +924,7 @@ class WarmUpsTravel(unittest.TestCase):
         m = built()
         order = [x["id"] for x in m["scenarios"]]
         pairs = [(x["id"], x["warms"]) for x in m["scenarios"] if x.get("warms")]
-        self.assertEqual(len(pairs), 10)
+        self.assertEqual(len(pairs), 10 + 23)   # v5's ten, v6's 23 /pattern warm-ups (test_builder_v6)
         for w, target in pairs:
             n = sum(1 for _, t in pairs if t == target)                    # a split pair sits together
             self.assertLessEqual(order.index(target) - order.index(w), n, w)

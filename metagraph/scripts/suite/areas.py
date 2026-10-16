@@ -3229,6 +3229,109 @@ def capability_relations(ctx: Ctx, cid: Dict[str, str], caps: Dict[str, dict]) -
     return out
 
 
+# ================================================================================================= v6: heavy /pattern
+# The owner's decisions of 2026-10-16 for gating POST /pattern (manifest v6; README "Manifest v6", round 2).
+#
+# Warm-ups: the /pattern scenarios whose MCP cold call (repeat 0, which the paired loop runs first) timed out (the
+# host's 503 deadline relayed by the service) or was time-limited in the accepted v5 baseline run
+# 20261015T161813Z_refseq97-81c620ef, while their warm MCP repeat or a direct arm completed: each gets a warm-up
+# (pattern_warm_up), placed right before it (build_manifest.place_warm_ups), so that its MCP arm's first call meets
+# a warm host; the v5 figures of each are stated in the warm-up's truth. The ids are fixed per target (a warm-up added
+# later takes the next free number; no id moves).
+PATTERN_WARM_UPS = {
+    "M-planted-0007": ("P-warm-0001", "MCP r0 (cold) a relayed 503 deadline at 63.4 s; MCP r1 complete in 3.6 s; direct-local r0 complete in 24.3 s"),
+    "M-planted-0008": ("P-warm-0002", "MCP r0 (cold) time-limited at 63.3 s; MCP r1 complete in 3.7 s; direct-local r0 complete in 16.1 s"),
+    "M-planted-0009": ("P-warm-0003", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.8 s; direct-local r0 complete in 2.7 s"),
+    "M-planted-0013": ("P-warm-0004", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.6 s; direct-local r0 complete in 15.3 s"),
+    "M-planted-0014": ("P-warm-0005", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.7 s; direct-local r0 complete in 20.7 s"),
+    "M-planted-0015": ("P-warm-0006", "MCP r0 (cold) a relayed 503 deadline at 63.2 s; MCP r1 complete in 3.8 s; direct-local r0 complete in 10.5 s"),
+    "M-planted-0016": ("P-warm-0007", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 4.1 s; direct-local r0 complete in 10.0 s"),
+    "M-planted-0017": ("P-warm-0008", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.6 s; direct-local r0 complete in 19.8 s"),
+    "M-planted-0018": ("P-warm-0009", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.8 s; direct-local r0 complete in 1.8 s"),
+    "M-protein-0001": ("P-warm-0010", "MCP r0 (cold) a relayed 503 deadline at 63.2 s; MCP r1 complete in 19.1 s; direct-local r0 time-limited at 59.8 s"),
+    "M-protein-0003": ("P-warm-0011", "MCP r0 (cold) time-limited at 63.3 s; MCP r1 complete in 61.3 s; direct-local r0 a 503 deadline at 60.2 s"),
+    "M-protein-0004": ("P-warm-0012", "MCP r0 (cold) a relayed 503 deadline at 63.1 s; MCP r1 complete in 3.7 s; direct-local r0 complete in 32.0 s"),
+    "M-protein-0005": ("P-warm-0013", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 8.4 s; direct-local r0 complete in 17.7 s"),
+    "M-protein-0006": ("P-warm-0014", "MCP r0 (cold) a relayed 503 deadline at 63.2 s; MCP r1 complete in 9.1 s; direct-local r0 time-limited at 59.8 s"),
+    "M-protein-0007": ("P-warm-0015", "MCP r0 (cold) time-limited at 63.1 s; MCP r1 complete in 6.7 s; direct-local r0 time-limited at 59.8 s"),
+    "N-nearmiss-0006": ("P-warm-0016", "MCP r0 (cold) a relayed 503 deadline at 63.1 s; MCP r1 complete in 3.5 s; direct-local r0 complete in 13.3 s"),
+    "N-nearmiss-0013": ("P-warm-0017", "MCP r0 (cold) a relayed 503 deadline at 63.2 s; MCP r1 complete in 3.5 s; direct-local r0 complete in 21.6 s"),
+    "N-nearmiss-0020": ("P-warm-0018", "MCP r0 (cold) a relayed 503 deadline at 63.1 s; MCP r1 complete in 3.6 s; direct-local r0 complete in 28.3 s"),
+    "N-nearmiss-0027": ("P-warm-0019", "MCP r0 (cold) a relayed 503 deadline at 63.1 s; MCP r1 complete in 3.6 s; direct-local r0 complete in 15.1 s"),
+    "N-nearmiss-0029": ("P-warm-0020", "MCP r0 (cold) a relayed 503 deadline at 63.2 s; MCP r1 complete in 3.8 s; direct-local r0 complete in 45.2 s"),
+    "N-nearmiss-0030": ("P-warm-0021", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.8 s; direct-local r0 complete in 12.1 s"),
+    "N-nearmiss-0032": ("P-warm-0022", "MCP r0 (cold) time-limited at 63.4 s; MCP r1 complete in 3.7 s; direct-local r0 complete in 22.4 s"),
+    "N-usecase-0008": ("P-warm-0023", "MCP r0 (cold) a relayed 503 deadline at 63.0 s; MCP r1 complete in 3.4 s; direct-local r0 complete in 45.4 s"),
+}
+PATTERN_WARM_BASELINE = "20261015T161813Z_refseq97-81c620ef (manifest v5, 60,000 ms budgets)"
+PATTERN_WARM_STRESS = ("a warm-up's first run meets the cold host by design (it reads the rows its target reads, so "
+                       "that the target's MCP call meets them warm): whether it completes within the budget depends "
+                       "on the host's cache and load, not on the deployment")
+
+
+def pattern_warm_up(target: dict, sid: str, facts: str) -> dict:
+    """The warm-up |sid| of the /pattern scenario |target| (PATTERN_WARM_UPS): the target's request as it is, run
+    right before it (build_manifest.place_warm_ups) on direct-local only (timing_class long, "> 100 s: direct-local
+    only": its cold run may take most of the 110,000 ms budget, and neither the MCP arm, whose first call it warms
+    the host for, nor direct-remote behind the ingress runs it), with the generic checks only (status, invariants,
+    counts_consistent, budget_respected: the property is the target's), tagged budget_stress (PATTERN_WARM_STRESS:
+    outside the gate, still run and reported). |facts|: what the target did in the v5 baseline."""
+    t = {"warm_up": "the host's rows of %s's search, read right before it, so that its MCP arm's first call (repeat "
+                    "0, cold) meets them warm; v5 baseline %s: %s" % (target["id"], PATTERN_WARM_BASELINE, facts),
+         "budget_stress": {"reason": PATTERN_WARM_STRESS}}
+    expect = [OK, INV] + ([CC] if any(e["check"] == "counts_consistent" for e in target["expect"]) else [])
+    return scenario(sid, "P", "warm-up of %s: its request, run right before it on direct-local" % target["id"],
+                    "POST /pattern", copy.deepcopy(target["request"]), t, [dict(e) for e in expect],
+                    timing_class="long", tags=("warm-up", "budget_stress", "machine-dependent"), warms=target["id"])
+
+
+def pattern_warm_ups(scenarios: List[dict]) -> List[dict]:
+    """The warm-ups of PATTERN_WARM_UPS whose target |scenarios| holds, in the table's order."""
+    by = dict((s["id"], s) for s in scenarios)
+    return [pattern_warm_up(by[t], sid, facts) for t, (sid, facts) in PATTERN_WARM_UPS.items() if t in by]
+
+
+# budget_stress (the owner, 2026-10-16): the heavy /pattern scenarios that no budget the ingress admits (110,000 ms)
+# makes decisive on a cold host, by the v5 baseline's figures (the readiness study's projection of each stopped
+# answer's step rate); outside the gate (gate_policy's budget_stress rule), still run and reported, as v5's long walks.
+PATTERN_BUDGET_STRESS = {
+    "M-protein-0001": "a decapeptide at max_mismatches 1 (7.8 M steps): in the v5 baseline its cold MCP call ended in "
+                      "a relayed 503 deadline and its direct-local cold run was time-limited at 60 s with 17 % of the "
+                      "steps done (projected 345 s); only the warm MCP repeat completed (19 s): no budget below the "
+                      "ingress's ~120 s cut makes it decisive on a cold host",
+    "M-protein-0002": "a decapeptide at max_mismatches 1: not one of its four executions in the v5 baseline finished "
+                      "within 60 s, the warm MCP repeat included (time-limited at 59.9 s): its completion depends on "
+                      "the host's cache and load at any budget the ingress admits",
+    "M-protein-0003": "a decapeptide at max_mismatches 1 (7.8 M steps): in the v5 baseline its cold MCP call did 5 % "
+                      "of the steps in 60 s (projected 1,180 s), its direct-local cold run ended in a 503 deadline, "
+                      "and even the warm MCP repeat took 56.7 s",
+    "M-protein-0007": "a decapeptide at max_mismatches 1 (3.1 M steps): in the v5 baseline its cold MCP call did 19 % "
+                      "of the steps in 60 s (projected 317 s) and its direct-local cold run 47 % (projected 126 s); "
+                      "only warm runs completed",
+    "P-heavy-0001": "a 12-mer in any_offset scope, count (heavy): not decisive at any budget in the v5 baseline: its "
+                    "one 200 was a time-limited at_least at 59.9 s, and 5 of its 6 executions were 503 deadlines at "
+                    "60.17 to 60.52 s, the work overrunning the 250 ms finalisation reserve (SPEC-pattern-search §6 / "
+                    "§7.6 allow that on any host)",
+    "N-nearmiss-0030": "a near-miss decapeptide at max_mismatches 1, mode partial (1.3 M steps): in the v5 baseline "
+                       "its cold MCP call did 49 % of the steps in 60 s (projected 122 s, past a 110 s budget); its "
+                       "direct and warm runs, after that call, completed in 1 to 12 s",
+}
+
+
+def tag_pattern_budget_stress(scenarios: List[dict]) -> List[str]:
+    """Tags the scenarios of PATTERN_BUDGET_STRESS budget_stress with their reason (truth.budget_stress.reason, which
+    gate_policy's exclusion states); returns the ids tagged."""
+    out = []
+    for s in scenarios:
+        why = PATTERN_BUDGET_STRESS.get(s["id"])
+        if why is None:
+            continue
+        s["truth"] = dict(s.get("truth") or {}, budget_stress={"reason": why})
+        s["tags"] = sorted(set(s["tags"]) | {"budget_stress"})
+        out.append(s["id"])
+    return out
+
+
 # ================================================================================================= v6: /pattern via MCP
 # What the MCP arm's /pattern answer cannot carry (the service's pattern_search status, app/pattern/merge.py, and the
 # async session's normaliser, scripts/bench/suite_mcp_normalise.py, both at 9d76035e, read only: the normalised body

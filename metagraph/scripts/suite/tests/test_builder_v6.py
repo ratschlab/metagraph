@@ -21,7 +21,7 @@ import suite_common as sc  # noqa: E402
 from test_builder_v5 import built, have_cache  # noqa: E402
 
 V5_CONTENT = "72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875"
-V6_CONTENT = "958d94d5dc6e7b34bad4ddb321a46ffc31989f2a5a6393e288ea94f259706904"
+V6_CONTENT = "935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85"
 RELATIONS = "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"
 V6_SMOKE_CONTENT = "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd"
 # manifest_lib.PATTERN_TIME_BUDGET_MS of v6 (the owner, 2026-10-16: 110,000, not 120,000)
@@ -36,6 +36,13 @@ ABSENCE_SCOPE = ["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-%04d" % i 
 STRANDS = ["P-scope-%04d" % i for i in range(7, 13)] + ["N-usecase-0005"]
 PATTERN_TEXT = ["P-edge-0004"]
 SCENARIO_MARKED = {"P-scope-0004", "P-scope-0006"}
+# round 2: the /pattern scenarios whose MCP cold call (r0) timed out or was time-limited in the v5 baseline while their
+# warm MCP repeat or a direct arm completed (round2/pg/warm_up_targets.txt), each with its warm-up
+WARM_TARGETS = ["M-planted-%04d" % i for i in (7, 8, 9, 13, 14, 15, 16, 17, 18)] + \
+    ["M-protein-%04d" % i for i in (1, 3, 4, 5, 6, 7)] + ["N-nearmiss-%04d" % i for i in (6, 13, 20, 27, 29, 30, 32)] + \
+    ["N-usecase-0008"]
+# round 2: the heavy /pattern scenarios the owner tags budget_stress (outside the gate, still run and reported)
+STRESSED = {"M-protein-0001", "M-protein-0002", "M-protein-0003", "M-protein-0007", "P-heavy-0001", "N-nearmiss-0030"}
 PER_ENTRY_UNMARKED = {"Q-pred-0011", "Q-pred-0012", "P-edge-0009"}
 # the /pattern scenarios of v5 whose request names another budget than the default, or no JSON object at all
 DELIBERATE = {"P-caps-0004": 300, "M-protein-0010": 30000}
@@ -67,6 +74,11 @@ def leaf_diffs(a, b, path=""):
     return out
 
 
+def checks_is_property(name):
+    import checks
+    return checks.is_property(name)
+
+
 class ManifestV6(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -80,10 +92,71 @@ class ManifestV6(unittest.TestCase):
         self.assertEqual((self.v6["manifest_version"], self.v6["content_sha256"]), (6, V6_CONTENT))
         self.assertEqual((self.v5["relations_sha256"], self.v6["relations_sha256"]), (RELATIONS, RELATIONS))
         self.assertEqual(sc.manifest_problems(self.v6), [])
-        c5, c6 = dict(self.v5["counts"]), dict(self.v6["counts"])
+        c5, c6 = json.loads(json.dumps(self.v5["counts"])), json.loads(json.dumps(self.v6["counts"]))
         self.assertEqual(c6.pop("mcp_not_implemented") - c5.pop("mcp_not_implemented"), len(SCENARIO_MARKED))
+        n = len(WARM_TARGETS)
+        for key, more in (("scenarios", n), ("executions_per_arm", n)):
+            self.assertEqual(c6.pop(key) - c5.pop(key), more, key)
+        self.assertEqual(c6["by_area"].pop("P") - c5["by_area"].pop("P"), n)
+        for tag, more in (("budget_stress", n + len(STRESSED)), ("warm-up", n), ("machine-dependent", n)):
+            self.assertEqual(c6["by_tag"].pop(tag) - c5["by_tag"].pop(tag), more, tag)
         self.assertEqual(c6, c5)
         self.assertEqual(self.v6["counts"]["by_tag"]["smoke-v5"], 14)
+
+    def test_the_warm_ups_and_the_budget_stress_tags(self):
+        """Round 2 (the owner, 2026-10-16): a warm-up right before each /pattern scenario whose MCP cold call timed
+        out in v5 (its request, direct-local only: timing_class long; generic checks; budget_stress, as a cold run by
+        design), so that the MCP arm's first call meets a warm host; budget_stress for the six heavy scenarios no
+        budget below the ingress's cut makes decisive. The gate's executions do not move (keep_gate_warm_repeats)."""
+        order = [s["id"] for s in self.v6["scenarios"]]
+        warm = dict((s["warms"], s) for s in self.v6["scenarios"] if s["id"].startswith("P-warm-"))
+        self.assertEqual(sorted(warm), sorted(WARM_TARGETS))
+        self.assertEqual(sorted(w["id"] for w in warm.values()), ["P-warm-%04d" % i for i in range(1, 24)])
+        for target, w in warm.items():
+            t = self.s6[target]
+            self.assertEqual(order.index(w["id"]) + 1, order.index(target), target)   # right before it
+            self.assertEqual(w["request"], t["request"], target)                       # its own question
+            self.assertEqual((w["route"], w["area"], w["timing_class"]), ("POST /pattern", "P", "long"), target)
+            self.assertEqual(sc.mcp_repeats(order.index(w["id"]), w), [], target)       # the MCP arm sends nothing
+            self.assertEqual(sorted(w["tags"]), ["budget_stress", "machine-dependent", "warm-up"], target)
+            self.assertEqual([e["check"] for e in w["expect"] if checks_is_property(e["check"])], [], target)
+            self.assertIn(areas.PATTERN_WARM_UPS[target][1], w["truth"]["warm_up"])
+            self.assertEqual(w["truth"]["budget_stress"]["reason"], areas.PATTERN_WARM_STRESS)
+        for sid in STRESSED:
+            s = self.s6[sid]
+            self.assertIn("budget_stress", s["tags"], sid)
+            self.assertEqual(s["truth"]["budget_stress"]["reason"], areas.PATTERN_BUDGET_STRESS[sid], sid)
+        self.assertEqual(sorted(s["id"] for s in self.v6["scenarios"] if "budget_stress" in s["tags"]
+                                and not s["id"].startswith("P-warm-")),
+                         sorted(STRESSED | set("T-longwalk-%04d" % i for i in range(1, 5))))
+        # the deploy gate's executions: every scenario on its routes keeps v5's warm repeat
+        i5 = dict((s["id"], i) for i, s in enumerate(self.v5["scenarios"]))
+        i6 = dict((s["id"], i) for i, s in enumerate(self.v6["scenarios"]))
+        for sid, s in self.s5.items():
+            if s["route"] in bm.GATE_ROUTES:
+                self.assertEqual(sc.repeat_count(i5[sid], s, 10), sc.repeat_count(i6[sid], self.s6[sid], 10), sid)
+        import gate_policy
+        self.assertEqual(bm.GATE_ROUTES, gate_policy.DEFAULT_ROUTES)
+        # v5's scenarios keep their order outside area N, where keep_gate_warm_repeats moved some of its /pattern ones
+        kept = [x for x in order if x in self.s5 and self.s5[x]["area"] != "N"]
+        self.assertEqual(kept, [s["id"] for s in self.v5["scenarios"] if s["area"] != "N"])
+
+    def test_keep_gate_warm_repeats(self):
+        def s(sid, route="POST /pattern", area="N", **kw):
+            return dict({"id": sid, "route": route, "area": area, "repeat": 1, "tags": [], "expect": []}, **kw)
+        base = [s("A"), s("B"), s("C"), s("G1", "POST /resolve"), s("D"), s("E"), s("F"), s("G"), s("H"),
+                s("I"), s("G2", "POST /resolve"), s("J")]
+        ref = bm.gate_warm_status(base, 10)
+        self.assertEqual(ref, {"G1": False, "G2": True})
+        grown = [s("W", tags=["warm-up"], warms="A")] + base   # a warm-up before everything shifts both
+        moved = bm.keep_gate_warm_repeats(grown, ref, 10)
+        self.assertEqual(bm.gate_warm_problems(grown, ref, 10), [])
+        self.assertEqual(bm.gate_warm_status(grown, 10), ref)
+        self.assertEqual([x["id"] for x in grown if x["route"] == "POST /resolve"], ["G1", "G2"])
+        self.assertTrue(moved)
+        with self.assertRaises(SystemExit):   # its warm repeat would change, and nothing before it may move
+            bm.keep_gate_warm_repeats([s("W", tags=["warm-up"], warms="X"), s("X"), s("G3", "POST /resolve",
+                                                                                     area="R")], {"G3": False}, 2)
 
     def test_the_mcp_marks(self):
         """What the MCP's /pattern answer cannot carry is marked not implemented yet via MCP at property level (the
@@ -114,11 +187,14 @@ class ManifestV6(unittest.TestCase):
 
     def test_only_the_pattern_budgets_changed(self):
         """The diff v5 -> v6: the budgets, and the MCP marks of round 2 (test_the_mcp_marks), nothing else."""
-        self.assertEqual([s["id"] for s in self.v5["scenarios"]], [s["id"] for s in self.v6["scenarios"]])
+        self.assertEqual(sorted(self.s5), sorted(set(self.s6) - set("P-warm-%04d" % i for i in range(1, 24))))
         kinds = collections.Counter()
         changed_routes = set()
         for sid, s in self.s5.items():
             s6 = json.loads(json.dumps(self.s6[sid]))
+            if sid in STRESSED:   # test_the_warm_ups_and_the_budget_stress_tags
+                s6["tags"] = sorted(set(s6["tags"]) - {"budget_stress"})
+                s6["truth"].pop("budget_stress")
             if sid in SCENARIO_MARKED:
                 s6["mcp"] = dict(s["mcp"], arguments=dict(s["mcp"]["arguments"], time_budget_ms=V6_BUDGET))
             elif s["route"] == "POST /pattern":
@@ -182,8 +258,11 @@ class ManifestV6(unittest.TestCase):
                 self.assertTrue(bound is None or bound * 1000.0 < edge, (name, sid, bound))
                 self.assertFalse(checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0}), (name, sid))
         covered = [s["id"] for s in self.v6["scenarios"] if checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0})]
-        # the 449 scenarios at the 110,000 ms budget less the 22 that expect a refusal (a 400, answered at once)
-        self.assertEqual(len(covered), 427)
+        # the 449 scenarios at the 110,000 ms budget less the 22 that expect a refusal (a 400, answered at once), and
+        # the 23 warm-ups of round 2 (their targets' requests; direct-local only, where the rule never applies)
+        self.assertEqual(len(covered), 427 + 23)
+        self.assertEqual(sorted(x for x in covered if x.startswith("P-warm-")), ["P-warm-%04d" % i for i in range(1, 24)])
+        self.assertTrue(all(self.s6[x]["timing_class"] == "long" for x in covered if x.startswith("P-warm-")))
         self.assertTrue(all(self.s6[sid]["route"] == "POST /pattern" and
                             self.s6[sid]["request"]["time_budget_ms"] == V6_BUDGET for sid in covered))
         refused = [s["id"] for s in self.v6["scenarios"] if s["route"] == "POST /pattern" and isinstance(

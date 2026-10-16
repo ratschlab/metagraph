@@ -367,7 +367,7 @@ class PolicyTest(GateCase):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
         self.assertEqual((m["manifest_version"], m["content_sha256"], m["relations_sha256"]),
-                         (6, "958d94d5dc6e7b34bad4ddb321a46ffc31989f2a5a6393e288ea94f259706904",
+                         (6, "935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85",
                           "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
         smoke = sc.read_json(os.path.join(SUITE, "manifest", "suite_smoke_v6.json"))
         self.assertEqual(smoke["content_sha256"], "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd")

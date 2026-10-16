@@ -48,7 +48,7 @@
  "declared": {
   "declared_version": 1,
   "file": "gate/declared_v6_rt.json",
-  "sha256": "a2ecf0e8105110afa3f7fca28f96c3445d8db279baf2107ca2d43d5e0d291d3a"
+  "sha256": "0649b490e3220779c6970f8b7bf9d4f135a97ea36cf0541d23c8d9abb0304b0d"
  },
  "exclusions": [
   {
@@ -437,9 +437,9 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-16T06:15:04.083Z",
+ "generated_utc": "2026-10-16T16:52:01.726Z",
  "manifest": {
-  "content_sha256": "958d94d5dc6e7b34bad4ddb321a46ffc31989f2a5a6393e288ea94f259706904",
+  "content_sha256": "935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85",
   "file": "manifest/suite_v6.json",
   "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
   "manifest_version": 6,

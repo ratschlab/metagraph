@@ -14,9 +14,13 @@ v5's): few enough for a paired three-arm smoke run within 60 host requests, the 
 keeps marking the scenarios a smoke validation exercised (the earlier selections).
 
 v6 (the owner, 2026-10-15 / -16) is v5 with every /pattern request that named the default budget of 60,000 ms
-naming 110,000 ms (manifest_lib.PATTERN_TIME_BUDGET_MS), on both arms; no relation changed, and the gate's 237
-resolve / traverse / capabilities scenarios are byte-identical, so the v5 acceptance carries over. The MCP exposure
-baseline it reads is v4's with its request digests rebased (--exposure-rebase, below).
+naming 110,000 ms (manifest_lib.PATTERN_TIME_BUDGET_MS), on both arms, and, for gating POST /pattern (round 2): the
+/pattern checks the MCP's answer cannot carry marked not implemented yet via MCP (areas.mark_pattern_mcp_fields), the
+six heavy /pattern scenarios tagged budget_stress (areas.tag_pattern_budget_stress) and a warm-up right before each
+/pattern scenario whose cold MCP call timed out in the v5 baseline (areas.pattern_warm_ups; the deploy gate's
+executions kept by keep_gate_warm_repeats); no relation changed, and the gate's 237 resolve / traverse /
+capabilities scenarios are byte-identical with their warm repeats, so the v5 acceptance carries over. The MCP
+exposure baseline it reads is v4's with its request digests rebased (--exposure-rebase, below).
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -152,8 +156,15 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     areas.state_chance_bounds(scenarios)
     areas.mark_pattern_mcp_fields(scenarios)   # v6: what the MCP's /pattern answer cannot carry, at property level
     scenario_level_marks(scenarios)
-    scenarios = place_warm_ups(scenarios)
+    areas.tag_pattern_budget_stress(scenarios)   # v6: the heavy /pattern scenarios outside the gate
+    # v6's /pattern warm-ups must not move the deploy gate's executions: the warm-repeat status of every scenario on
+    # its routes is the one of the layout without them (v5's), kept by keep_gate_warm_repeats
+    reference = place_warm_ups(list(scenarios))
+    keep_off_warm_repeat(reference)
+    reference = gate_warm_status(reference)
+    scenarios = place_warm_ups(scenarios + areas.pattern_warm_ups(scenarios))
     keep_off_warm_repeat(scenarios)
+    keep_gate_warm_repeats(scenarios, reference)
     exposure = None
     if exposure_file:
         with open(exposure_file) as f:
@@ -161,7 +172,8 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         apply_exposure(scenarios, exposure)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
-    problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios)
+    problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios) + \
+        gate_warm_problems(scenarios, reference)
     if problems:
         raise SystemExit("manifest invalid:\n  " + "\n  ".join(problems[:30]))
     tc = caps["traverse_capabilities"]
@@ -521,6 +533,73 @@ def keep_off_warm_repeat(scenarios: list, warm_every: int = WARM_EVERY) -> list:
         scenarios.insert(last, x)
         moved.append((x["id"], scenarios[last - 1]["id"]))
     raise SystemExit("keep_off_warm_repeat: no placement found")
+
+
+# The deploy gate's routes (gate_policy.DEFAULT_ROUTES, pinned equal by test_builder_v6): the scenarios whose executions
+# a manifest change must not move
+GATE_ROUTES = ("POST /resolve", "POST /traverse", "GET /traverse/capabilities")
+
+
+def _warm_repeated(i: int, s: dict, warm_every: int) -> bool:
+    """Whether the paired plan gives the scenario at index |i| the warm repeat (suite_common.repeat_count: a
+    scenario of one repeat on every |warm_every|-th index)."""
+    return s.get("repeat", 1) == 1 and bool(warm_every) and i % warm_every == 0
+
+
+def gate_warm_status(scenarios: list, warm_every: int = WARM_EVERY) -> dict:
+    """{id: whether it gets the paired plan's warm repeat} of the scenarios on the deploy gate's routes (GATE_ROUTES)."""
+    return dict((s["id"], _warm_repeated(i, s, warm_every)) for i, s in enumerate(scenarios)
+                if s.get("route") in GATE_ROUTES)
+
+
+def keep_gate_warm_repeats(scenarios: list, reference: dict, warm_every: int = WARM_EVERY) -> list:
+    """Moves |scenarios| (in place, after keep_off_warm_repeat) so that every scenario on the deploy gate's routes has
+    the warm-repeat status |reference| (gate_warm_status of the layout without a version's added warm-ups) states:
+    scenarios added before it shift its index, and with it the gate's required executions. As keep_off_warm_repeat:
+    the scenarios around one whose status differs that may not move form its unit (the gate's own scenarios, warm-ups
+    and their targets, run-unique or single-execution ones), and the nearest scenario before the unit in its area that
+    may move (a /pattern scenario, say) goes right after the unit, which shifts the unit one index down; the gate's
+    scenarios, their content and their order stay. Returns [(moved id, the id it now follows)]."""
+    moved = []
+    warmed = set(s.get("warms") for s in scenarios if s.get("warms"))
+
+    def free(s):
+        return not (s.get("route") in GATE_ROUTES or s.get("warms") or s.get("id") in warmed or s.get("run_unique")
+                    or single_execution(s) or "warm-up" in (s.get("tags") or []))
+    for _ in range(10 * len(scenarios)):
+        bad = [i for i, s in enumerate(scenarios) if s["id"] in reference
+               and _warm_repeated(i, s, warm_every) != reference[s["id"]]]
+        if not bad:
+            return moved
+        i = bad[0]
+        first, last = i, i
+        while first > 0 and not free(scenarios[first - 1]):
+            first -= 1
+        while last + 1 < len(scenarios) and not free(scenarios[last + 1]):
+            last += 1
+        # in its area, else (a scenario placed in another area's block, a warm-up, as R-warm-0006 among N's) in the
+        # area of the unit's first scenario, else any
+        j = None
+        for area in (scenarios[i]["area"], scenarios[first]["area"], None):
+            j = next((j for j in range(first - 1, -1, -1) if area in (None, scenarios[j]["area"])
+                      and free(scenarios[j])), None)
+            if j is not None:
+                break
+        if j is None:
+            raise SystemExit("%s: its warm repeat would change (index %d), and nothing before it can move" % (
+                scenarios[i]["id"], i))
+        x = scenarios.pop(j)
+        scenarios.insert(last, x)
+        moved.append((x["id"], scenarios[last - 1]["id"]))
+    raise SystemExit("keep_gate_warm_repeats: no placement found")
+
+
+def gate_warm_problems(scenarios: list, reference: dict, warm_every: int = WARM_EVERY) -> list:
+    """A scenario on the deploy gate's routes whose warm-repeat status is not the reference's (keep_gate_warm_repeats)."""
+    return ["%s: on the deploy gate's routes, its warm repeat %s by the index %d" % (
+                s["id"], "added" if _warm_repeated(i, s, warm_every) else "removed", i)
+            for i, s in enumerate(scenarios)
+            if s["id"] in reference and _warm_repeated(i, s, warm_every) != reference[s["id"]]]
 
 
 def _table_cases() -> set:
