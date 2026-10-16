@@ -1,9 +1,9 @@
 {
- "_about": "Unit mapping of manifest v6 (content_sha256 e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e) for the suite results document: every scenario -> chapter, family, unit, unit_type (series | replicates | refusals | pairs | list), variant and optional group; _units carries each unit's title, type and property line; _families each family's chapter and title. The v5 mapping (units_v5_build.py) re-keyed by units_v6_rekey.py: manifest v6 is v5 with every default-budget /pattern request at 120,000 ms (the budgets alone: the same 700 ids in the same order, every title the same), so every entry is v5's; no unit label named the /pattern 60 s budget. The frozen v6 manifest carries no doc blocks, so the generator picks this file by the manifest's content sha.",
+ "_about": "Unit mapping of manifest v6 (content_sha256 49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1, 725 scenarios) for the suite results document: every scenario -> chapter, family, unit, unit_type (series | replicates | refusals | pairs | list), variant and optional group; _units carries each unit's title, type and property line; _families each family's chapter and title. Built by units_v6_build.py (the successor of units_v6_rekey.py) from the v5 mapping (units_v5_build.py): manifest v6 is v5 with every default-budget /pattern request at 110,000 ms and 25 /pattern warm-ups (P-warm), so every v5 entry is v5's and the warm-ups form the unit P-warm (family P-warm, chapter P), as v5's walk warm-ups form R-warm; no unit label of a pattern chapter names a /pattern budget. The frozen v6 manifest carries no doc blocks, so the generator picks this file by the manifest's content sha.",
  "_manifest": {
   "version": 6,
-  "content_sha256": "e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e",
-  "scenarios": 700
+  "content_sha256": "49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1",
+  "scenarios": 725
  },
  "_chapters": {
   "R": "Resolve",
@@ -297,6 +297,13 @@
    "title": "twins",
    "units": [
     "P-twin"
+   ]
+  },
+  "P-warm": {
+   "chapter": "P",
+   "title": "warm-ups",
+   "units": [
+    "P-warm"
    ]
   },
   "L-paths": {
@@ -1460,6 +1467,40 @@
     "REL-subset-0004",
     "REL-subset-0005",
     "REL-subset-0006"
+   ]
+  },
+  "P-warm": {
+   "family": "P-warm",
+   "unit_type": "replicates",
+   "unit_title": "warm-ups of /pattern targets",
+   "property": "A warm-up of a /pattern scenario of chapters P, M and N (the manifest's `warms`: P-heavy-0001, M-planted-0007, -0008, -0009, -0013, -0014, -0015, -0016, -0017, -0018, M-protein-0001, -0002, -0003, -0004, -0005, -0006, -0007, N-nearmiss-0006, -0013, -0020, -0027, -0029, -0030, -0032, N-usecase-0008): the target's own request run on direct-local right before the target, so that the target's first MCP call meets rows the host has just read; the generic checks alone (status, invariants, budget_respected; counts_consistent on 23 of them), one run, tagged budget_stress: whether its cold run completes within the budget depends on the host's cache and load, not on the deployment.",
+   "n": 25,
+   "members": [
+    "P-warm-0025",
+    "P-warm-0001",
+    "P-warm-0002",
+    "P-warm-0003",
+    "P-warm-0004",
+    "P-warm-0005",
+    "P-warm-0006",
+    "P-warm-0007",
+    "P-warm-0008",
+    "P-warm-0009",
+    "P-warm-0010",
+    "P-warm-0024",
+    "P-warm-0011",
+    "P-warm-0012",
+    "P-warm-0013",
+    "P-warm-0014",
+    "P-warm-0015",
+    "P-warm-0016",
+    "P-warm-0017",
+    "P-warm-0018",
+    "P-warm-0019",
+    "P-warm-0020",
+    "P-warm-0021",
+    "P-warm-0022",
+    "P-warm-0023"
    ]
   },
   "L-paths": {
@@ -5042,6 +5083,14 @@
   "variant": "partial with max_contexts 10,000 above the count",
   "unit_title": "edge positions and a cap above the count"
  },
+ "P-warm-0025": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of P-heavy-0001",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "P-heavy-0001": {
   "chapter": "P",
   "family": "P-heavy",
@@ -6401,6 +6450,14 @@
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "1 sub at m 2"
  },
+ "P-warm-0001": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0007",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-planted-0007": {
   "chapter": "M",
   "family": "M-planted",
@@ -6410,6 +6467,14 @@
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "1 sub at m 3"
  },
+ "P-warm-0002": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0008",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-planted-0008": {
   "chapter": "M",
   "family": "M-planted",
@@ -6418,6 +6483,14 @@
   "variant": "31-mer ser",
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "1 sub at m 3"
+ },
+ "P-warm-0003": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0009",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-planted-0009": {
   "chapter": "M",
@@ -6455,6 +6528,14 @@
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "2 sub at m 2"
  },
+ "P-warm-0004": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0013",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-planted-0013": {
   "chapter": "M",
   "family": "M-planted",
@@ -6463,6 +6544,14 @@
   "variant": "31-mer sso",
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "2 sub at m 3"
+ },
+ "P-warm-0005": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0014",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-planted-0014": {
   "chapter": "M",
@@ -6473,6 +6562,14 @@
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "2 sub at m 3"
  },
+ "P-warm-0006": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0015",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-planted-0015": {
   "chapter": "M",
   "family": "M-planted",
@@ -6481,6 +6578,14 @@
   "variant": "25-mer sso",
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "2 sub at m 3"
+ },
+ "P-warm-0007": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0016",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-planted-0016": {
   "chapter": "M",
@@ -6491,6 +6596,14 @@
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "3 sub at m 3"
  },
+ "P-warm-0008": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0017",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-planted-0017": {
   "chapter": "M",
   "family": "M-planted",
@@ -6499,6 +6612,14 @@
   "variant": "31-mer tth",
   "unit_title": "planted substitutions by m and max_mismatches",
   "group": "3 sub at m 3"
+ },
+ "P-warm-0009": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-planted-0018",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-planted-0018": {
   "chapter": "M",
@@ -6631,6 +6752,14 @@
   "variant": "#4",
   "unit_title": "IUPAC plus one substitution"
  },
+ "P-warm-0010": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0001",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-protein-0001": {
   "chapter": "M",
   "family": "M-protein",
@@ -6638,6 +6767,14 @@
   "unit_type": "replicates",
   "variant": "eco F5A",
   "unit_title": "one substituted residue"
+ },
+ "P-warm-0024": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0002",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-protein-0002": {
   "chapter": "M",
@@ -6647,6 +6784,14 @@
   "variant": "bsu A2S",
   "unit_title": "one substituted residue"
  },
+ "P-warm-0011": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0003",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-protein-0003": {
   "chapter": "M",
   "family": "M-protein",
@@ -6654,6 +6799,14 @@
   "unit_type": "replicates",
   "variant": "mtb R5F",
   "unit_title": "one substituted residue"
+ },
+ "P-warm-0012": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0004",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-protein-0004": {
   "chapter": "M",
@@ -6663,6 +6816,14 @@
   "variant": "pae V4D",
   "unit_title": "one substituted residue"
  },
+ "P-warm-0013": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0005",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-protein-0005": {
   "chapter": "M",
   "family": "M-protein",
@@ -6671,6 +6832,14 @@
   "variant": "sau K2V",
   "unit_title": "one substituted residue"
  },
+ "P-warm-0014": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0006",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "M-protein-0006": {
   "chapter": "M",
   "family": "M-protein",
@@ -6678,6 +6847,14 @@
   "unit_type": "replicates",
   "variant": "buc D2E",
   "unit_title": "one substituted residue"
+ },
+ "P-warm-0015": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of M-protein-0007",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "M-protein-0007": {
   "chapter": "M",
@@ -7111,6 +7288,22 @@
   "variant": "max_predicate_work 1",
   "unit_title": "predicate budgets"
  },
+ "N-negative-0007": {
+  "chapter": "N",
+  "family": "N-negative",
+  "unit_id": "N-negative-shuffled",
+  "unit_type": "pairs",
+  "variant": "sco /resolve",
+  "unit_title": "shuffled windows on /pattern and /resolve"
+ },
+ "N-negative-0009": {
+  "chapter": "N",
+  "family": "N-negative",
+  "unit_id": "N-negative-shuffled",
+  "unit_type": "pairs",
+  "variant": "ser /resolve",
+  "unit_title": "shuffled windows on /pattern and /resolve"
+ },
  "N-negative-0001": {
   "chapter": "N",
   "family": "N-negative",
@@ -7159,28 +7352,12 @@
   "variant": "sco /pattern",
   "unit_title": "shuffled windows on /pattern and /resolve"
  },
- "N-negative-0007": {
-  "chapter": "N",
-  "family": "N-negative",
-  "unit_id": "N-negative-shuffled",
-  "unit_type": "pairs",
-  "variant": "sco /resolve",
-  "unit_title": "shuffled windows on /pattern and /resolve"
- },
  "N-negative-0008": {
   "chapter": "N",
   "family": "N-negative",
   "unit_id": "N-negative-shuffled",
   "unit_type": "pairs",
   "variant": "ser /pattern",
-  "unit_title": "shuffled windows on /pattern and /resolve"
- },
- "N-negative-0009": {
-  "chapter": "N",
-  "family": "N-negative",
-  "unit_id": "N-negative-shuffled",
-  "unit_type": "pairs",
-  "variant": "ser /resolve",
   "unit_title": "shuffled windows on /pattern and /resolve"
  },
  "N-negative-0010": {
@@ -7311,6 +7488,14 @@
   "variant": "pair of N-nearmiss-0004",
   "unit_title": "out of reach, and the pair that is back"
  },
+ "P-warm-0016": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-nearmiss-0006",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "N-nearmiss-0006": {
   "chapter": "N",
   "family": "N-nearmiss",
@@ -7366,6 +7551,14 @@
   "unit_type": "pairs",
   "variant": "pair of N-nearmiss-0011",
   "unit_title": "out of reach, and the pair that is back"
+ },
+ "P-warm-0017": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-nearmiss-0013",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "N-nearmiss-0013": {
   "chapter": "N",
@@ -7423,6 +7616,14 @@
   "variant": "pair of N-nearmiss-0018",
   "unit_title": "out of reach, and the pair that is back"
  },
+ "P-warm-0018": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-nearmiss-0020",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "N-nearmiss-0020": {
   "chapter": "N",
   "family": "N-nearmiss",
@@ -7463,21 +7664,13 @@
   "variant": "pair of N-nearmiss-0023",
   "unit_title": "out of reach, and the pair that is back"
  },
- "N-nearmiss-0025": {
-  "chapter": "N",
-  "family": "N-nearmiss",
-  "unit_id": "N-nearmiss-pairs",
-  "unit_type": "pairs",
-  "variant": "6 spread subs, m 2 (mpn)",
-  "unit_title": "out of reach, and the pair that is back"
- },
- "N-nearmiss-0026": {
-  "chapter": "N",
-  "family": "N-nearmiss",
-  "unit_id": "N-nearmiss-pairs",
-  "unit_type": "pairs",
-  "variant": "pair of N-nearmiss-0025",
-  "unit_title": "out of reach, and the pair that is back"
+ "P-warm-0019": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-nearmiss-0027",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "N-nearmiss-0027": {
   "chapter": "N",
@@ -7487,13 +7680,13 @@
   "variant": "4 clustered subs, m 3 (sce)",
   "unit_title": "out of reach, and the pair that is back"
  },
- "N-nearmiss-0028": {
-  "chapter": "N",
-  "family": "N-nearmiss",
-  "unit_id": "N-nearmiss-pairs",
-  "unit_type": "pairs",
-  "variant": "pair of N-nearmiss-0027",
-  "unit_title": "out of reach, and the pair that is back"
+ "P-warm-0020": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-nearmiss-0029",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "N-nearmiss-0029": {
   "chapter": "N",
@@ -7503,6 +7696,14 @@
   "variant": "2 residues #1",
   "unit_title": "peptides out of reach"
  },
+ "P-warm-0021": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-nearmiss-0030",
+  "unit_title": "warm-ups of /pattern targets"
+ },
  "N-nearmiss-0030": {
   "chapter": "N",
   "family": "N-nearmiss",
@@ -7511,13 +7712,13 @@
   "variant": "3 residues #2",
   "unit_title": "peptides out of reach"
  },
- "N-nearmiss-0031": {
-  "chapter": "N",
-  "family": "N-nearmiss",
-  "unit_id": "N-nearmiss-peptide",
+ "P-warm-0022": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
   "unit_type": "replicates",
-  "variant": "4 residues #3",
-  "unit_title": "peptides out of reach"
+  "variant": "of N-nearmiss-0032",
+  "unit_title": "warm-ups of /pattern targets"
  },
  "N-nearmiss-0032": {
   "chapter": "N",
@@ -7607,6 +7808,38 @@
   "variant": "cel",
   "unit_title": "mutated resolves and seeds",
   "group": "mutated seed refused"
+ },
+ "N-nearmiss-0025": {
+  "chapter": "N",
+  "family": "N-nearmiss",
+  "unit_id": "N-nearmiss-pairs",
+  "unit_type": "pairs",
+  "variant": "6 spread subs, m 2 (mpn)",
+  "unit_title": "out of reach, and the pair that is back"
+ },
+ "N-nearmiss-0026": {
+  "chapter": "N",
+  "family": "N-nearmiss",
+  "unit_id": "N-nearmiss-pairs",
+  "unit_type": "pairs",
+  "variant": "pair of N-nearmiss-0025",
+  "unit_title": "out of reach, and the pair that is back"
+ },
+ "N-nearmiss-0028": {
+  "chapter": "N",
+  "family": "N-nearmiss",
+  "unit_id": "N-nearmiss-pairs",
+  "unit_type": "pairs",
+  "variant": "pair of N-nearmiss-0027",
+  "unit_title": "out of reach, and the pair that is back"
+ },
+ "N-nearmiss-0031": {
+  "chapter": "N",
+  "family": "N-nearmiss",
+  "unit_id": "N-nearmiss-peptide",
+  "unit_type": "replicates",
+  "variant": "4 residues #3",
+  "unit_title": "peptides out of reach"
  },
  "N-hard-0001": {
   "chapter": "N",
@@ -7744,28 +7977,12 @@
   "variant": "(CAG)^30 / paths",
   "unit_title": "low-complexity patterns, partial vs all_or_count"
  },
- "N-hard-0018": {
-  "chapter": "N",
-  "family": "N-hard",
-  "unit_id": "N-hard-repeat",
-  "unit_type": "pairs",
-  "variant": "a 31-mer of a 2-copy repeat of eco",
-  "unit_title": "repeats on /pattern, /resolve and /traverse"
- },
  "N-hard-0019": {
   "chapter": "N",
   "family": "N-hard",
   "unit_id": "N-hard-repeat",
   "unit_type": "pairs",
   "variant": "resolve a 2-copy repeat of eco",
-  "unit_title": "repeats on /pattern, /resolve and /traverse"
- },
- "N-hard-0020": {
-  "chapter": "N",
-  "family": "N-hard",
-  "unit_id": "N-hard-repeat",
-  "unit_type": "pairs",
-  "variant": "a 31-mer of a 6-copy repeat of bsu",
   "unit_title": "repeats on /pattern, /resolve and /traverse"
  },
  "N-hard-0021": {
@@ -7792,15 +8009,6 @@
   "variant": "a telomeric seed (TTAGGG)^10 traversed",
   "unit_title": "repeats on /pattern, /resolve and /traverse"
  },
- "N-realrep-0001": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "sco (GCTTCG)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
  "N-realrep-0002": {
   "chapter": "N",
   "family": "N-realrep",
@@ -7818,15 +8026,6 @@
   "variant": "sco (GCTTCG)n",
   "unit_title": "real tandem repeats by route",
   "group": "/traverse"
- },
- "N-realrep-0004": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "pae (GTTGGC)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
  },
  "N-realrep-0005": {
   "chapter": "N",
@@ -7846,21 +8045,46 @@
   "unit_title": "real tandem repeats by route",
   "group": "/traverse"
  },
+ "N-hard-0018": {
+  "chapter": "N",
+  "family": "N-hard",
+  "unit_id": "N-hard-repeat",
+  "unit_type": "pairs",
+  "variant": "a 31-mer of a 2-copy repeat of eco",
+  "unit_title": "repeats on /pattern, /resolve and /traverse"
+ },
+ "N-hard-0020": {
+  "chapter": "N",
+  "family": "N-hard",
+  "unit_id": "N-hard-repeat",
+  "unit_type": "pairs",
+  "variant": "a 31-mer of a 6-copy repeat of bsu",
+  "unit_title": "repeats on /pattern, /resolve and /traverse"
+ },
+ "N-realrep-0001": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "sco (GCTTCG)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0004": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "pae (GTTGGC)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
  "N-realrep-0007": {
   "chapter": "N",
   "family": "N-realrep",
   "unit_id": "N-realrep",
   "unit_type": "replicates",
   "variant": "mge (CTT)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
- "N-realrep-0008": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "sce (TAT)n",
   "unit_title": "real tandem repeats by route",
   "group": "/pattern"
  },
@@ -7873,15 +8097,6 @@
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
  },
- "N-realrep-0010": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "spo (CAA)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
  "N-realrep-0011": {
   "chapter": "N",
   "family": "N-realrep",
@@ -7890,15 +8105,6 @@
   "variant": "spo (CAA)n",
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
- },
- "N-realrep-0012": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "cal (TTCTAT)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
  },
  "N-realrep-0013": {
   "chapter": "N",
@@ -7909,15 +8115,6 @@
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
  },
- "N-realrep-0014": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "scem (TAAGTA)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
  "N-realrep-0015": {
   "chapter": "N",
   "family": "N-realrep",
@@ -7926,6 +8123,42 @@
   "variant": "scem (TAAGTA)n",
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
+ },
+ "N-realrep-0008": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "sce (TAT)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0010": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "spo (CAA)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0012": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "cal (TTCTAT)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0014": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "scem (TAAGTA)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
  },
  "N-realrep-0016": {
   "chapter": "N",
@@ -7945,15 +8178,6 @@
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
  },
- "N-realrep-0018": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "pfa (ATGT)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
  "N-realrep-0019": {
   "chapter": "N",
   "family": "N-realrep",
@@ -7962,15 +8186,6 @@
   "variant": "pfa (ATGT)n",
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
- },
- "N-realrep-0020": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "ath (CT)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
  },
  "N-realrep-0021": {
   "chapter": "N",
@@ -7981,15 +8196,6 @@
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
  },
- "N-realrep-0022": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "hsa (TA)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
  "N-realrep-0023": {
   "chapter": "N",
   "family": "N-realrep",
@@ -7999,15 +8205,6 @@
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
  },
- "N-realrep-0024": {
-  "chapter": "N",
-  "family": "N-realrep",
-  "unit_id": "N-realrep",
-  "unit_type": "replicates",
-  "variant": "hsv1 (TGGGGC)n",
-  "unit_title": "real tandem repeats by route",
-  "group": "/pattern"
- },
  "N-realrep-0025": {
   "chapter": "N",
   "family": "N-realrep",
@@ -8016,6 +8213,42 @@
   "variant": "hsv1 (TGGGGC)n",
   "unit_title": "real tandem repeats by route",
   "group": "/resolve"
+ },
+ "N-realrep-0018": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "pfa (ATGT)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0020": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "ath (CT)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0022": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "hsa (TA)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
+ },
+ "N-realrep-0024": {
+  "chapter": "N",
+  "family": "N-realrep",
+  "unit_id": "N-realrep",
+  "unit_type": "replicates",
+  "variant": "hsv1 (TGGGGC)n",
+  "unit_title": "real tandem repeats by route",
+  "group": "/pattern"
  },
  "N-usecase-0001": {
   "chapter": "N",
@@ -8040,6 +8273,30 @@
   "unit_type": "series",
   "variant": "515F",
   "unit_title": "universal 16S primers"
+ },
+ "P-warm-0023": {
+  "chapter": "P",
+  "family": "P-warm",
+  "unit_id": "P-warm",
+  "unit_type": "replicates",
+  "variant": "of N-usecase-0008",
+  "unit_title": "warm-ups of /pattern targets"
+ },
+ "N-usecase-0008": {
+  "chapter": "N",
+  "family": "N-usecase",
+  "unit_id": "N-usecase-floor",
+  "unit_type": "list",
+  "variant": "degenerate (12 N + 13 bases, 26 bits)",
+  "unit_title": "too short, too degenerate"
+ },
+ "N-usecase-0010": {
+  "chapter": "N",
+  "family": "N-usecase",
+  "unit_id": "N-usecase-identify",
+  "unit_type": "pairs",
+  "variant": "mge, discovery",
+  "unit_title": "identify a read"
  },
  "N-usecase-0004": {
   "chapter": "N",
@@ -8073,14 +8330,6 @@
   "variant": "too short (10 bp, 20 bits)",
   "unit_title": "too short, too degenerate"
  },
- "N-usecase-0008": {
-  "chapter": "N",
-  "family": "N-usecase",
-  "unit_id": "N-usecase-floor",
-  "unit_type": "list",
-  "variant": "degenerate (12 N + 13 bases, 26 bits)",
-  "unit_title": "too short, too degenerate"
- },
  "N-usecase-0009": {
   "chapter": "N",
   "family": "N-usecase",
@@ -8088,14 +8337,6 @@
   "unit_type": "list",
   "variant": "too degenerate (20 N + 11 bases, 22 bits)",
   "unit_title": "too short, too degenerate"
- },
- "N-usecase-0010": {
-  "chapter": "N",
-  "family": "N-usecase",
-  "unit_id": "N-usecase-identify",
-  "unit_type": "pairs",
-  "variant": "mge, discovery",
-  "unit_title": "identify a read"
  },
  "N-usecase-0011": {
   "chapter": "N",
@@ -8265,14 +8506,6 @@
   "variant": "max_mismatches 1",
   "unit_title": "m = 0 twins"
  },
- "P-twin-0001": {
-  "chapter": "P",
-  "family": "P-twin",
-  "unit_id": "P-twin",
-  "unit_type": "pairs",
-  "variant": "upper case",
-  "unit_title": "twins of edge and IUPAC tests"
- },
  "R-twin-0001": {
   "chapter": "R",
   "family": "R-twin",
@@ -8296,6 +8529,14 @@
   "unit_type": "pairs",
   "variant": "pae, from base 5,000",
   "unit_title": "the stated stop and its twins"
+ },
+ "P-twin-0001": {
+  "chapter": "P",
+  "family": "P-twin",
+  "unit_id": "P-twin",
+  "unit_type": "pairs",
+  "variant": "upper case",
+  "unit_title": "twins of edge and IUPAC tests"
  },
  "N-zero-0001": {
   "chapter": "N",
@@ -8361,20 +8602,20 @@
   "variant": "60 bp of cal, /resolve",
   "unit_title": "zero on /pattern iff absent on /resolve"
  },
- "N-zero-0009": {
-  "chapter": "N",
-  "family": "N-zero",
-  "unit_id": "N-zero",
-  "unit_type": "pairs",
-  "variant": "a 31-mer of sso with one sub, /pattern",
-  "unit_title": "zero on /pattern iff absent on /resolve"
- },
  "N-zero-0010": {
   "chapter": "N",
   "family": "N-zero",
   "unit_id": "N-zero",
   "unit_type": "pairs",
   "variant": "a 31-mer of sso with one sub, /resolve",
+  "unit_title": "zero on /pattern iff absent on /resolve"
+ },
+ "N-zero-0009": {
+  "chapter": "N",
+  "family": "N-zero",
+  "unit_id": "N-zero",
+  "unit_type": "pairs",
+  "variant": "a 31-mer of sso with one sub, /pattern",
   "unit_title": "zero on /pattern iff absent on /resolve"
  },
  "P-twin-0002": {

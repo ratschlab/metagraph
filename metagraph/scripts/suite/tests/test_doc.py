@@ -76,31 +76,18 @@ def v5():
 
 V6_MANIFEST = os.path.join(SUITE, "manifest", "suite_v6.json")
 V6_MAPPING = os.path.join(DOC, "units", "suite_v6.json")
-# the frozen v6 manifest's identity (gr/suite-v6, 2026-10-15: v5 with every default-budget /pattern request at
-# 120,000 ms, the budgets alone; the gate's scenarios byte-identical to v5's)
-V6_CONTENT_SHA = "e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e"
-V6_PATTERN_BUDGET_MS = 120000
+# the frozen v6 manifest's identity (gr/suite-v6 at a71d9177f, merged with this generator: v5 with every
+# default-budget /pattern request at 110,000 ms and the 25 /pattern warm-ups P-warm-0001..0025, 725 scenarios; the
+# gate's scenarios, their order and their required executions v5's)
+V6_CONTENT_SHA = "49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1"
+V6_PATTERN_BUDGET_MS = 110000
+V6_WARM_UPS = ["P-warm-%04d" % i for i in range(1, 26)]
 
 
 def v6_manifest():
-    """The frozen v6 manifest: manifest/suite_v6.json when the checkout has it, else derived from v5 by v6's one
-    change (every 60,000 ms `time_budget_ms` of a /pattern request, and of its MCP arguments, at 120,000 ms); its
-    content sha must be the frozen one either way (test_mapping_complete_v6 asserts it)."""
-    if os.path.exists(V6_MANIFEST):
-        return sc.read_json(V6_MANIFEST)
-    manifest = json.loads(json.dumps(sc.read_json(V5_MANIFEST)))
-    for s in manifest["scenarios"]:
-        if "pattern" not in str(s.get("route")):
-            continue
-        req = s.get("request")
-        if isinstance(req, dict) and req.get("time_budget_ms") == 60000:
-            req["time_budget_ms"] = V6_PATTERN_BUDGET_MS
-        args = (s.get("mcp") or {}).get("arguments") if isinstance(s.get("mcp"), dict) else None
-        if isinstance(args, dict) and args.get("time_budget_ms") == 60000:
-            args["time_budget_ms"] = V6_PATTERN_BUDGET_MS
-    manifest["manifest_version"] = 6
-    manifest["content_sha256"] = sc.scenarios_sha256(manifest["scenarios"])
-    return manifest
+    """The frozen v6 manifest, manifest/suite_v6.json (in the tree since the merge with gr/suite-v6; its content sha
+    is the frozen one: test_mapping_complete_v6 asserts it)."""
+    return sc.read_json(V6_MANIFEST)
 
 
 def v6():
@@ -188,46 +175,80 @@ class MappingTest(unittest.TestCase):
         self.assertEqual(units.by_scenario["T-walk-0004"]["group"], "right, 300 bp")
 
     def test_mapping_complete_v6(self):
-        """The v6 mapping over the frozen v6 manifest: the v5 mapping re-keyed to v6's content sha (manifest v6 is
-        v5 with every default-budget /pattern request at 120,000 ms: the same 700 ids in the same order, every title
-        and relation the same), so every entry is v5's and only the key changed; the generator picks it by the sha;
-        no label of a pattern chapter names the /pattern 60 s budget (none did: the budgets those chapters name are
-        P-caps-0004's 300 ms; '60 bp' and 'A^60' are lengths)."""
+        """The v6 mapping over the frozen v6 manifest (725 scenarios: v5's 700, every default-budget /pattern request
+        at 110,000 ms, and the 25 /pattern warm-ups P-warm-0001..0025, each right before its target; the free /pattern
+        scenarios build_manifest.keep_gate_warm_repeats moves change places): every v5 scenario keeps its v5 entry,
+        every v5 unit and family its entry; the warm-ups form one unit, P-warm (family P-warm, chapter P, replicates,
+        variant 'of <target>'), as v5's walk warm-ups form R-warm; the generator picks the mapping by the sha; no
+        label of a pattern chapter names a /pattern budget (60 s, 110,000 or 120,000 ms; the budgets those chapters
+        name are P-caps-0004's 300 ms; '60 bp' and 'A^60' are lengths)."""
         manifest, mapping, units = v6()
         self.assertEqual(manifest["content_sha256"], V6_CONTENT_SHA)
         self.assertEqual(sc.scenarios_sha256(manifest["scenarios"]), V6_CONTENT_SHA)
+        self.assertEqual(len(manifest["scenarios"]), 725)
         self.check_complete(manifest, mapping, units, 6)
         self.assertEqual(units_mod.default_mapping_path({"manifest_version": 6, "content_sha256": V6_CONTENT_SHA}),
                          V6_MAPPING)
         v5_manifest, v5_mapping, v5_units = v5()
-        self.assertEqual([s.get("title") for s in manifest["scenarios"]],
-                         [s.get("title") for s in v5_manifest["scenarios"]])
+        ids5 = [s["id"] for s in v5_manifest["scenarios"]]
+        ids6 = [s["id"] for s in manifest["scenarios"]]
+        warm = [s for s in manifest["scenarios"] if s["id"] not in set(ids5)]
+        self.assertEqual(sorted(s["id"] for s in warm), V6_WARM_UPS)
+        titles5 = dict((s["id"], s.get("title")) for s in v5_manifest["scenarios"])
+        self.assertEqual([s.get("title") for s in manifest["scenarios"] if s["id"] in titles5],
+                         [titles5[x] for x in ids6 if x in titles5])
         self.assertEqual([r.get("id") for r in manifest["relations"]], [r.get("id") for r in v5_manifest["relations"]])
-        self.assertEqual(list(mapping), list(v5_mapping))
-        for key in mapping:
-            if key not in ("_about", "_manifest"):
-                self.assertEqual(mapping[key], v5_mapping[key], key)
-        self.assertEqual(mapping["_manifest"], {"version": 6, "content_sha256": V6_CONTENT_SHA, "scenarios": 700})
+        # every v5 entry is v5's; the warm-ups' entries, unit and family are the only new ones
+        for key in v5_mapping:
+            if key in ("_about", "_manifest", "_units", "_families"):
+                continue
+            self.assertEqual(mapping[key], v5_mapping[key], key)
+        for part in ("_units", "_families"):
+            for key in v5_mapping[part]:
+                self.assertEqual(mapping[part][key], v5_mapping[part][key], key)
+            self.assertEqual(sorted(set(mapping[part]) - set(v5_mapping[part])), ["P-warm"])
+        self.assertEqual(sorted(k for k in mapping if not k.startswith("_") and k not in v5_mapping), V6_WARM_UPS)
+        self.assertEqual([k for k in mapping if not k.startswith("_")], ids6)
+        self.assertEqual(mapping["_manifest"], {"version": 6, "content_sha256": V6_CONTENT_SHA, "scenarios": 725})
         self.assertIn("manifest v6", mapping["_about"])
         self.assertIn(V6_CONTENT_SHA, mapping["_about"])
         self.assertNotIn(v5_manifest["content_sha256"], mapping["_about"])
-        self.assertEqual(units.by_scenario, v5_units.by_scenario)
-        self.assertEqual(units.units, v5_units.units)
-        self.assertEqual(units.families, v5_units.families)
-        self.assertEqual(len(units.units), 109)
-        budget_60 = re.compile(r"\b60 s\b|\b60,000 ms\b|\b60000\b")
+        for sid in ids5:
+            self.assertEqual(units.by_scenario[sid], v5_units.by_scenario[sid], sid)
+        for uid, u in v5_units.units.items():
+            self.assertEqual(dict(units.units[uid], members=None), dict(u, members=None), uid)
+            self.assertEqual(sorted(units.units[uid]["members"]), sorted(u["members"]), uid)
+        for fid, f in v5_units.families.items():
+            self.assertEqual(units.families[fid], f, fid)
+        self.assertEqual(len(units.units), 110)
+        # the warm-ups' unit: in chapter P, in the manifest's order, each named by its target
+        pw = units.units["P-warm"]
+        self.assertEqual((pw["family"], pw["unit_type"]), ("P-warm", "replicates"))
+        self.assertEqual(units.families["P-warm"]["chapter"], "P")
+        self.assertEqual(units.families["P-warm"]["units"], ["P-warm"])
+        self.assertEqual(pw["members"], [s["id"] for s in warm])
+        for s in warm:
+            self.assertEqual(units.unit_of(s["id"]), "P-warm")
+            self.assertEqual(units.by_scenario[s["id"]]["chapter"], "P")
+            self.assertEqual(units.by_scenario[s["id"]]["variant"], "of %s" % s["warms"])
+            self.assertEqual(ids6[ids6.index(s["id"]) + 1], s["warms"])
+            self.assertIn("warm-up", s.get("tags") or [])
+        for s in warm:
+            self.assertIn(s["warms"].rsplit("-", 1)[0], pw["property"])  # every target's family is named
+        budget = re.compile(r"\b60 s\b|\b60,000 ms\b|\b60000\b|\b110,000\b|\b110000\b|\b120,000\b|\b120000\b")
         for uid, u in units.units.items():
             if u["family"][0] in "PLXMQ":
-                self.assertIsNone(budget_60.search(json.dumps(u, ensure_ascii=False)), uid)
+                self.assertIsNone(budget.search(json.dumps(u, ensure_ascii=False)), uid)
         for sid, m in units.by_scenario.items():
             if m["chapter"] in "PLXMQ":
-                self.assertIsNone(budget_60.search("%s %s" % (m.get("variant"), m.get("group"))), sid)
+                self.assertIsNone(budget.search("%s %s" % (m.get("variant"), m.get("group"))), sid)
         self.assertEqual(units.by_scenario["P-caps-0004"]["variant"], "16 patterns under a 300 ms budget")
-        # the pattern scenarios of v6 state the 120,000 ms budget (the derivation and the frozen file agree)
+        # the pattern scenarios of v6 state the 110,000 ms budget: v5's 449 default-budget requests and the warm-ups
         budgets = [s["request"].get("time_budget_ms") for s in manifest["scenarios"]
                    if s.get("route") == "POST /pattern" and isinstance(s.get("request"), dict)]
-        self.assertEqual(budgets.count(V6_PATTERN_BUDGET_MS), 449)
+        self.assertEqual(budgets.count(V6_PATTERN_BUDGET_MS), 449 + len(V6_WARM_UPS))
         self.assertNotIn(60000, budgets)
+        self.assertNotIn(120000, budgets)
 
     def test_validate_names_problems(self):
         manifest, mapping, units = v4()
