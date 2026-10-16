@@ -509,6 +509,33 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, mcp(entry()), "answer_fields", "mcp",
                                  equals={"limits.max_contexts": 10000})[0], "not_exposed")
 
+    def test_entry_fields_compares_what_is_carried_before_a_missing_field(self):
+        """Round 2's verification (L3): P-scope-0001/0002's entry_fields states absence_scope, which the MCP's entries
+        do not carry, and scope, which they do. The check stopped at the first missing field, so scope was never
+        compared on the MCP arm and the mark set the whole check aside; every carried field is now compared first, so
+        a wrong one fails (a mark sets aside only not_exposed), and only then is the missing one reported."""
+        def ans(**kw):
+            e = dict({"id": "w", "kind": "dna", "length": 25, "scope": "suffix", "counts": {
+                "contexts": {"relation": "exact", "value": 0}}}, **kw)
+            return {"http": 200, "error": None, "body": {"mode": "count", "patterns": [e]}}
+        sc = {"route": "POST /pattern", "truth": {}, "request": {"patterns": [{"dna": "A" * 25, "id": "w"}]}}
+        args = {"pattern": 0, "equals": {"absence_scope": "suffix", "scope": "suffix"}}
+        self.assertEqual(outcome(sc, ans(), "entry_fields", "mcp", **args),
+                         ("not_exposed", "field not in the answer: absence_scope"))
+        self.assertEqual(outcome(sc, ans(scope="any_offset"), "entry_fields", "mcp", **args),
+                         ("fail", "scope = 'any_offset', expected 'suffix'"))
+        self.assertEqual(outcome(sc, ans(absence_scope="suffix"), "entry_fields", "mcp", **args)[0], "pass")
+        # a direct arm: a missing field fails as before, a wrong carried one is named
+        self.assertEqual(outcome(sc, ans(), "entry_fields", **args),
+                         ("fail", "field not in the answer: absence_scope"))
+        self.assertEqual(outcome(sc, ans(scope="any_offset"), "entry_fields", **args)[1],
+                         "scope = 'any_offset', expected 'suffix'")
+        # present and absent alike: a stated absent field fails before a missing present one is reported
+        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", present=["pattern"],
+                                 absent=["strands"])[0], "fail")
+        self.assertEqual(outcome(sc, ans(), "entry_fields", "mcp", present=["pattern"], absent=["strands"]),
+                         ("not_exposed", "field not in the answer: pattern"))
+
     def test_invariants_refuse_a_mutated_answer(self):
         req, ans = fixture("mismatch_neighbours")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}

@@ -481,9 +481,18 @@ def check_answer_fields(sc, ans, a, arm):
 
 
 def check_entry_fields(sc, ans, a, arm):
+    """The entry's fields: `equals` (a float within `tolerance`), `present`, `absent`. Every field the answer carries
+    is compared before a missing one is reported (Missing: fail on a direct arm, not exposed on the MCP's), so a
+    missing field never hides a wrong one beside it (the MCP's entries carry `scope` but not the host's absence_scope:
+    a mark that sets the missing field aside never sets aside a failure; VERIFY of round 2, L3)."""
     e = _entry(ans, a.get("pattern", 0))
+    missing = []
     for path, want in (a.get("equals") or {}).items():
-        got = _get(e, path)
+        try:
+            got = _get(e, path)
+        except Missing:
+            missing.append(path)
+            continue
         if isinstance(want, float) and isinstance(got, (int, float)):
             # information bits and the like are sums of exact binary logarithms: equal up to rounding only
             if abs(got - want) > a.get("tolerance", 1e-9):
@@ -491,13 +500,18 @@ def check_entry_fields(sc, ans, a, arm):
         elif got != want:
             return FAIL, "%s = %r, expected %r" % (path, got, want)
     for path in a.get("present", []):
-        _get(e, path)
+        try:
+            _get(e, path)
+        except Missing:
+            missing.append(path)
     for path in a.get("absent", []):
         try:
             _get(e, path)
             return FAIL, "%s present, expected absent" % path
         except Missing:
             pass
+    if missing:
+        raise Missing(missing[0])
     return PASS, "entry fields as expected"
 
 
