@@ -150,9 +150,66 @@ def fmt_time(v):
 def time_legend():
     """The one legend sentence of the colour marks."""
     return ("Execution times (client wall, server elapsed, MCP phases; ms) above %d s are marked %s and above %d s %s, "
-            "in the tables and the lines; differences between arms and connection set-ups are not marked." % (
+            "in the tables and the lines, a time quoted in a check's text or a gate problem too, by the value as "
+            "printed; differences between arms and connection set-ups are not marked, nor a budget, a cap or a "
+            "lateness. Red means needs attention: every count and list of what is %s, and the verdict's attention "
+            "line, are red too." % (
                 TIME_MARK_YELLOW_MS / 1000.0, marked("yellow", "yellow"), TIME_MARK_RED_MS / 1000.0,
-                marked("red", "red")))
+                marked("red", "red"), NIM_WORDS))
+
+
+# The execution times a check's free-text detail quotes (a finding's or failure's check line, an observed error, a
+# gate problem's detail), marked as fmt_time marks a printed one, by the value as printed (VERIFY-V6-2 M2): the figure
+# right after a client wall ("client wall N ms", "client wall time of N ms", "wall time of N ms", "wall N s"), a
+# server elapsed ("elapsed N ms"), a read ("a read of N ms"), "took N s" and a stop, cut or deadline "after N ms";
+# a lateness ("N ms after the deadline": its figure comes before "after"), a budget, a cap, a reserve and a bound
+# follow none of these words and stay plain.
+_QUOTED_TIME = re.compile(r"\b(client wall time of|client wall|wall time of|wall|elapsed|took|a read of|after)(\s+)"
+                          r"([0-9][0-9,]*(?:\.[0-9]+)?)(\s?)(ms|s)\b")
+
+
+def mark_quoted_times(text):
+    """|text| (Markdown: md's output) with every execution time it quotes (_QUOTED_TIME) marked by time_mark of the
+    figure as printed (its unit read: s or ms); the unit stays outside the mark, as fmt_time's lines have it."""
+    def sub(m):
+        try:
+            v = float(m.group(3).replace(",", ""))
+        except ValueError:
+            return m.group(0)
+        mark = time_mark(v * 1000.0 if m.group(5) == "s" else v)
+        if mark is None:
+            return m.group(0)
+        return "%s%s%s%s%s" % (m.group(1), m.group(2), marked(m.group(3), mark), m.group(4), m.group(5))
+    return _QUOTED_TIME.sub(sub, text or "")
+
+
+# What needs attention is red, as a time above TIME_MARK_RED_MS (the owner, 2026-10-16): what is not implemented yet
+# via MCP (NIM_WORDS; a missing MCP feature: a whole execution, outcome not_implemented_mcp, or a property-level mark,
+# mcp.not_implemented_checks) wherever the report counts or lists it with something in it (the verdict's counts and
+# agreement line, the area table, the agreement section, the property marks), and the verdict's attention line
+# (attention_line). A count of 0 stays plain: nothing to attend to.
+NIM_WORDS = "not implemented yet via MCP"
+
+
+def nim(text):
+    """|text| (already Markdown) marked red: a count or a list of what is not implemented yet via MCP."""
+    return marked(text, "red")
+
+
+def nim_count(n, words=NIM_WORDS):
+    """'N not implemented yet via MCP' (|words|), red when N is not 0."""
+    text = "%d %s" % (n or 0, words)
+    return nim(text) if n else text
+
+
+_NIM_COUNT = re.compile(r"(?<![0-9.,])([0-9][0-9,]*) %s" % re.escape(NIM_WORDS))
+
+
+def mark_nim_counts(text):
+    """|text| (Markdown: a verdict composed before its marks) with every 'N not implemented yet via MCP' of a nonzero
+    N marked red."""
+    return _NIM_COUNT.sub(lambda m: m.group(0) if int(m.group(1).replace(",", "")) == 0 else nim(m.group(0)),
+                          text or "")
 
 
 def fmt_num(v, digits=1):
@@ -391,7 +448,7 @@ def untested_text(groups, limit=12):
 
 
 # how a verdict names the outcomes of executions that passed nothing (no_pass_text)
-NO_PASS_LABELS = (("not_implemented_mcp", "not implemented via MCP"), ("service_by_design", "service-side by design"),
+NO_PASS_LABELS = (("not_implemented_mcp", NIM_WORDS), ("service_by_design", "service-side by design"),
                   ("inconclusive", "inconclusive"))
 
 
@@ -400,11 +457,83 @@ MARK_WORDS = {"not_implemented": "not implemented yet via MCP", "by_design": "se
 
 
 def no_pass_text(outcomes):
-    """'2 not implemented via MCP, 1 service-side by design, 1 inconclusive' of an {outcome: executions} that holds
-    no pass (every other outcome by its name)."""
+    """'2 not implemented yet via MCP, 1 service-side by design, 1 inconclusive' of an {outcome: executions} that
+    holds no pass (every other outcome by its name)."""
     labels = dict(NO_PASS_LABELS)
     order = [k for k, _ in NO_PASS_LABELS] + sorted(k for k in outcomes if k not in labels)
     return ", ".join("%d %s" % (outcomes[k], labels.get(k, k)) for k in order if outcomes.get(k))
+
+
+def time_budget_issue(line):
+    """Why an execution is a time-budget issue for the attention line, or '': it hit its budget (its own time
+    limitation, compare._own_time_limitation: the recorded one, a stated stop by time, a time-limited answer, the
+    host's 503 deadline or the service's relay of it, the front ingress's cut; else a 503 deadline, or a 504 without a
+    host code, the ingress's cut, of a line recorded without it), or it took more than TIME_MARK_RED_MS by its wall
+    as printed (fmt_ms: a red mark)."""
+    why = cmp._own_time_limitation(line)
+    if why:
+        return why
+    err = line.get("error") if isinstance(line.get("error"), dict) else {}
+    if line.get("http") == 504 and not err.get("code"):
+        return "a 504 without a host answer (the front ingress's cut)"
+    wall = line.get("wall_ms")
+    if isinstance(wall, (int, float)) and not isinstance(wall, bool):
+        try:
+            shown = float(fmt_ms(wall))
+        except ValueError:
+            shown = wall
+        if time_mark(shown) == "red":
+            return "took %s ms" % fmt_ms(wall)
+    return ""
+
+
+def attention_counts(rows, manifest, comp=None):
+    """{kind: the TESTS (scenario ids) of that kind} over the run's executions, for the attention line: failed (a
+    fail, or an outcome outside the vocabulary), errored, with a finding, with a time-budget issue
+    (time_budget_issue on any execution), not implemented yet via MCP as a whole (an MCP execution
+    not_implemented_mcp, or the comparison's MCP class of |comp|, as the agreement line counts them) or by a
+    property-level mark (a scenario the MCP arm ran whose manifest marks a check not implemented yet via MCP). A test
+    may be of several kinds."""
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    out = dict((k, set()) for k in ("failed", "errored", "finding", "time_budget", "nim_whole", "nim_marks"))
+    for r in rows or []:
+        sid, o = r.get("scenario"), r.get("outcome")
+        if o == "fail" or not sc.outcome_known(sc.recorded_outcome(r)):
+            out["failed"].add(sid)
+        elif o == "error":
+            out["errored"].add(sid)
+        if o == "finding":
+            out["finding"].add(sid)
+        if time_budget_issue(r):
+            out["time_budget"].add(sid)
+        if r.get("arm") == "mcp":
+            if o == "not_implemented_mcp":
+                out["nim_whole"].add(sid)
+            if any(m.get("mark") == "not_implemented" for m in sc.mcp_check_marks(scen.get(sid)).values()):
+                out["nim_marks"].add(sid)
+    for sid, entry in ((comp or {}).get("scenarios") or {}).items():
+        if ((entry or {}).get("mcp_agreement") or {}).get("class") == "not_implemented_mcp":
+            out["nim_whole"].add(sid)
+    return out
+
+
+def attention_line(rows, manifest, comp=None):
+    """The verdict's attention line, red (the owner, 2026-10-16: red means needs attention): the TESTS per kind, only
+    the kinds with any, failures, errors and findings first, then the time-budget issues, then what is not
+    implemented yet via MCP (whole executions and property-level marks); '' when nothing needs attention."""
+    c = attention_counts(rows, manifest, comp)
+    nim_ = c["nim_whole"] | c["nim_marks"]
+    parts = [what % len(c[key]) for key, what in (
+        ("failed", "%d failed"), ("errored", "%d errored"), ("finding", "%d with a finding"),
+        ("time_budget", "%%d with a time-budget issue (an execution hit its budget: a 503 deadline, a time-limited "
+                        "answer, a stop by time, the ingress's cut; or took more than %d s)" % (
+                            TIME_MARK_RED_MS / 1000.0))) if c[key]]
+    if nim_:
+        parts.append("%d %s (%d as a whole, %d by a property-level mark)" % (
+            len(nim_), NIM_WORDS, len(c["nim_whole"]), len(nim_ - c["nim_whole"])))
+    if not parts:
+        return ""
+    return marked("Needs attention, in tests (scenarios): %s." % md("; ".join(parts)), "red")
 
 
 def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, depth=None, manifest=None,
@@ -498,10 +627,15 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE (no execution passed"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
     if gated:
-        lines.append("**Exploratory verdict (not the deploy decision, which is the gate's above): %s**" % md(verdict))
+        lines.append("**Exploratory verdict (not the deploy decision, which is the gate's above): %s**" % mark_nim_counts(
+            md(verdict)))
     else:
-        lines.append("**%s**" % md(verdict))
+        lines.append("**%s**" % mark_nim_counts(md(verdict)))
     lines.append("")
+    attention = attention_line(rows, manifest, comp)
+    if attention:
+        lines.append(attention)
+        lines.append("")
     if mixed and "more than one deployment" not in verdict:
         lines.append("- Mixed releases: the run spans more than one deployment of the host: %s." % md(mixed))
     if loop_problems_text(loop):
@@ -509,10 +643,10 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     for arm in comp["arms"]:
         t = totals.get(arm, {})
         o = t.get("outcomes", {})
-        lines.append("- %s: %d execution(s): %d pass, %d fail, %d error, %d finding, %d inconclusive, %d not "
-                     "implemented yet via MCP, %d service-side by design." % (
+        lines.append("- %s: %d execution(s): %d pass, %d fail, %d error, %d finding, %d inconclusive, %s, %d "
+                     "service-side by design." % (
                          md(arm), t.get("executions", 0), o.get("pass", 0), o.get("fail", 0), o.get("error", 0),
-                         o.get("finding", 0), o.get("inconclusive", 0), o.get("not_implemented_mcp", 0),
+                         o.get("finding", 0), o.get("inconclusive", 0), nim_count(o.get("not_implemented_mcp", 0)),
                          o.get("service_by_design", 0)))
         if o.get(cmp.OTHER_OUTCOME):
             lines[-1] = lines[-1][:-1] + "; %d with an outcome outside the vocabulary (read as failures)." % (
@@ -526,8 +660,8 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         # what the MCP cannot show at property level: set aside by the manifest's marks, listed under Agreement
         lines.append("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed, unless "
                      "they cover every property check of the execution; listed under Agreement): %s." % "; ".join(
-                         "%d check(s) of %d scenario(s) %s" % (len(marked[mark]), len(set(x[0] for x in marked[mark])),
-                                                               MARK_WORDS.get(mark, mark))
+                         (nim if mark == "not_implemented" else str)("%d check(s) of %d scenario(s) %s" % (
+                             len(marked[mark]), len(set(x[0] for x in marked[mark])), MARK_WORDS.get(mark, mark)))
                          for mark, _ in sc.MCP_CHECK_MARK_LABELS if marked.get(mark)))
     outside = s.get("outcomes_outside_vocabulary") or []
     if outside:
@@ -561,13 +695,12 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
         missing_mcp = sum(1 for k in ((missing or ([], None))[0]) if k[1] == "mcp")
         lines.append("- MCP agreement: %d agree (%d fully checked, %d partial, %d partial with a non-pass aggregate, "
                      "%d on failure, %d generic checks only, %d refusals; see Agreement), %d not comparable (no check "
-                     "both arms evaluated), %d disagree; service-side by design %d verified, %d unverified; %d not "
-                     "implemented via MCP; %d scenario(s) without an MCP execution, %d planned MCP execution(s) not "
-                     "recorded." % (
+                     "both arms evaluated), %d disagree; service-side by design %d verified, %d unverified; %s; %d "
+                     "scenario(s) without an MCP execution, %d planned MCP execution(s) not recorded." % (
                          ma.get("agree", 0), dc["full"], dc["partial"], dc["partial_non_pass"], dc["on_failure"],
                          dc["generic_only"], dc["refusal"], ma.get("not_comparable", 0), ma.get("disagree", 0),
                          ma.get("by_design_verified", 0), ma.get("by_design_unverified", 0),
-                         ma.get("not_implemented_mcp", 0), ma.get("missing", 0), missing_mcp))
+                         nim_count(ma.get("not_implemented_mcp", 0)), ma.get("missing", 0), missing_mcp))
     if stub:
         lines.append("")
         lines.append("**Checks: the stub ran (HTTP status, error code and text only); every other expected check "
@@ -579,9 +712,11 @@ def verdict_section(run, comp, rows, samples, reevaluated=False, missing=None, d
     return "\n".join(lines)
 
 
-def gate_section(run_dir, reevaluated=False, max_items=200):
+def gate_section(run_dir, reevaluated=False, max_items=200, lines=None):
     """The deploy gate's verdict (gate.py's RUN_DIR/gate.json or gate.reevaluated.json) when the run was gated:
-    its headline and every problem grouped by kind; '' when it was not."""
+    its headline and every problem grouped by kind, each with the wall of the execution it names (|lines|, the run's
+    executions; fmt_time's mark) and the execution times its detail quotes marked (mark_quoted_times); '' when it was
+    not."""
     verdict = sc.read_json(os.path.join(run_dir, gate_mod.gate_file(reevaluated)))
     if not isinstance(verdict, dict) or "problems" not in verdict:
         return ""
@@ -606,12 +741,16 @@ def gate_section(run_dir, reevaluated=False, max_items=200):
                "%d problem(s): %s" % (len(probs), ", ".join("%s %d" % (md(k), n) for k, n in sorted(
                    by_kind.items(), key=lambda kv: gate_mod.KINDS.index(kv[0]) if kv[0] in gate_mod.KINDS else 99)))),
            ""]
+    by_key = dict((sc.execution_key(r), r) for r in lines or [])
     rows = []
     for p in probs[:max_items]:
+        line = by_key.get((p.get("scenario"), p.get("arm"), p.get("repeat")))
         rows.append([md(p.get("kind")), md(p.get("scenario") or "-"), md(p.get("arm") or "-"),
-                     md("-" if p.get("repeat") is None else p.get("repeat")), md(p.get("detail"), 240)])
+                     md("-" if p.get("repeat") is None else p.get("repeat")),
+                     fmt_time(line.get("wall_ms")) if line else "-", mark_quoted_times(md(p.get("detail"), 240))])
     if rows:
-        out.append(table(["kind", "scenario", "arm", "rep", "detail"], rows, align=["l", "l", "l", "l", "l"]))
+        out.append(table(["kind", "scenario", "arm", "rep", "wall ms", "detail"], rows,
+                         align=["l", "l", "l", "l", "r", "l"]))
     for n in verdict.get("notes") or []:
         out.append("- %s" % md(n, 300))
     out.append("")
@@ -740,8 +879,8 @@ def outcomes_section(comp):
             if not c:
                 continue
             rows.append([md(area), md(arm), c["pass"], c["fail"], c["error"], c.get("finding", 0),
-                         c.get("inconclusive", 0), c["not_implemented_mcp"], c["service_by_design"], c["mixed"],
-                         c["total"]])
+                         c.get("inconclusive", 0), nim(str(c["not_implemented_mcp"])) if c["not_implemented_mcp"]
+                         else c["not_implemented_mcp"], c["service_by_design"], c["mixed"], c["total"]])
     out = ["# Outcomes per area", "",
            "Scenario outcomes over their repeats (any error -> error, else any failure -> fail, else any finding "
            "-> finding, else any inconclusive -> inconclusive). A finding: the host broke a stated bound or SPEC "
@@ -792,7 +931,7 @@ def findings_section(rows, manifest, max_items):
         for c, exp in expectation_pairs(s, r.get("checks")):
             if c.get("outcome") != "finding":
                 continue
-            out.append("- check %s: observed %s" % (md(c.get("check")), md(c.get("detail"), 500)))
+            out.append("- check %s: observed %s" % (md(c.get("check")), mark_quoted_times(md(c.get("detail"), 500))))
             if exp is not None:
                 out.append("    - expected: %s" % md(json.dumps(exp, sort_keys=True), 400))
         out.append("")
@@ -826,11 +965,12 @@ def failures_section(rows, manifest, max_failures):
                                                           md(r.get("http")), fmt_time(r.get("wall_ms"))))
         err = r.get("error") or {}
         if err.get("code") or err.get("text"):
-            out.append("- observed error: %s: %s" % (md(err.get("code") or "-"), md(err.get("text") or "", 400)))
+            out.append("- observed error: %s: %s" % (md(err.get("code") or "-"),
+                                                     mark_quoted_times(md(err.get("text") or "", 400))))
         for c, exp in expectation_pairs(s, r.get("checks")):
             if c.get("outcome") == "fail" or c.get("outcome") not in sc.CHECK_OUTCOMES:
                 out.append("- check %s: observed %s%s" % (
-                    md(c.get("check")), md(c.get("detail"), 500),
+                    md(c.get("check")), mark_quoted_times(md(c.get("detail"), 500)),
                     "" if c.get("outcome") == "fail" else " (outcome %s, read as a failure)" % md(c.get("outcome"))))
                 if exp is not None:
                     out.append("    - expected: %s" % md(json.dumps(exp, sort_keys=True), 400))
@@ -966,7 +1106,7 @@ def marked_checks_lines(comp, manifest, rows):
                     ("; not set aside, %s: %s" % (md(sc.SCENARIO_LEVEL_MARK), ", ".join(whole))) if whole else "",
                     ("; judged as usual: %s" % ", ".join(other)) if other else ""))
         if items:
-            out.append("%s: %s.\n" % (label, "; ".join(items)))
+            out.append("%s: %s.\n" % (nim(label) if mark == "not_implemented" else label, "; ".join(items)))
     return out
 
 
@@ -1024,7 +1164,8 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
         return "\n".join(out)
     classes = [k for k in ("agree", "not_comparable", "disagree", "not_implemented_mcp", "service_by_design",
                            "missing", "no_direct_reference") if ma.get(k)]
-    out.append("%d scenario(s): %s." % (ma["compared"], ", ".join("%d %s" % (ma[k], md(k)) for k in classes)))
+    out.append("%d scenario(s): %s." % (ma["compared"], ", ".join(
+        (nim if k == "not_implemented_mcp" else str)("%d %s" % (ma[k], md(k))) for k in classes)))
     out.append("")
     out.append("Agreement is decided on the checks both arms evaluated: %d check result(s) compared, %d skipped "
                "as not exposed via MCP, %d as inconclusive on either side%s. `agree` needs at least one compared "
@@ -1080,10 +1221,10 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
                   and not (comp["scenarios"][sid].get("mcp_agreement") or {}).get("verified")]
     if unverified:
         out.append("Service-side by design, unverified: %s.\n" % ", ".join(md(x) for x in unverified[:200]))
-    nim = [sid for sid in comp["order"]
-           if (comp["scenarios"][sid].get("mcp_agreement") or {}).get("class") == "not_implemented_mcp"]
-    if nim:
-        out.append("Not implemented yet via MCP: %s.\n" % ", ".join(md(x) for x in nim[:200]))
+    nims = [sid for sid in comp["order"]
+            if (comp["scenarios"][sid].get("mcp_agreement") or {}).get("class") == "not_implemented_mcp"]
+    if nims:
+        out.append("%s: %s.\n" % (nim("Not implemented yet via MCP"), ", ".join(md(x) for x in nims[:200])))
     out.extend(marked_checks_lines(comp, manifest, lines))
     return "\n".join(out)
 
@@ -1446,7 +1587,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     depth = agreement_depth(comp, rows, is_property, manifest)
     missing = gate_mod.missing_planned(run_dir, manifest, rows)
     # a gated run's report leads with the gate's verdict (the deploy decision); the ordinary one is exploratory
-    gate_text = gate_section(run_dir, reevaluated, max_failures)
+    gate_text = gate_section(run_dir, reevaluated, max_failures, rows)
     parts.append(gate_text)
     parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest,
                                  report_cases(comp, run_dir), gated=bool(gate_text)))

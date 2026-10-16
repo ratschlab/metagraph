@@ -1391,15 +1391,34 @@ class GatedHeadlineTest(GateCase):
     def test_marks_only_run_is_unverified(self):
         m, d = self.marks_only()
         lines, _ = self.bold(d)
-        self.assertEqual(lines[0], "**UNVERIFIED (no execution passed: 1 not implemented via MCP, 2 service-side by "
-                                   "design; nothing was shown to hold; no failure, no disagreement)**")
+        # what is not implemented yet via MCP is red (the owner, 2026-10-16: red means needs attention)
+        self.assertEqual(lines[0], "**UNVERIFIED (no execution passed: %s, 2 service-side by design; nothing was "
+                                   "shown to hold; no failure, no disagreement)**" % (
+                                       report.nim("1 not implemented yet via MCP")))
         lines, text = self.gated(d, policy_of(m))
         self.assertTrue(lines[0].startswith("**GATE FAIL**"), lines)
         self.assertIn("nothing\\_passed 1", lines[0])
         self.assertEqual(lines[1], "**Exploratory verdict (not the deploy decision, which is the gate's above): "
-                                   "UNVERIFIED (no execution passed: 1 not implemented via MCP, 2 service-side by "
-                                   "design; nothing was shown to hold; no failure, no disagreement)**")
+                                   "UNVERIFIED (no execution passed: %s, 2 service-side by design; nothing was "
+                                   "shown to hold; no failure, no disagreement)**" % (
+                                       report.nim("1 not implemented yet via MCP")))
         self.assertLess(text.index("# Deploy gate"), text.index("# Verdict"))
+
+    def test_gate_problems_name_the_execution_wall_marked(self):
+        """Round 2 (the owner, 2026-10-16; VERIFY-V6-2 M2): the gate's problems table states the wall of the execution
+        a problem names (fmt_time's mark: red above 55 s as printed) and marks the times its detail quotes."""
+        m = manifest_of([s for s in scenarios() if s["id"] == "T-001"], [])
+        slow = {"outcome": "inconclusive", "wall_ms": 61000.0,
+                "checks": [{"check": "status", "outcome": "inconclusive", "detail": "a 503 deadline"}]}
+        d = make_run(self.run_dir(), m, mcp_lines(m, change={("T-001", 0): slow}))
+        _, text = self.gated(d, policy_of(m))
+        table_ = text.split("# Deploy gate", 1)[1].split("\n# ", 1)[0]
+        self.assertIn("| kind | scenario | arm | rep | wall ms | detail |", table_)
+        self.assertIn("| outcome | T-001 | mcp | 0 | %s | inconclusive |" % report.marked("61000", "red"), table_)
+        self.assertEqual(report.mark_quoted_times("http 504 from the front ingress at a client wall time of "
+                                                  "120034 ms"),
+                         "http 504 from the front ingress at a client wall time of %s ms" % report.marked(
+                             "120034", "red"))
 
     def test_an_arm_that_passed_nothing(self):
         # direct-local passes T-004, which the MCP cannot express: the run reads UNVERIFIED on mcp, and the two-arm
@@ -1407,8 +1426,8 @@ class GatedHeadlineTest(GateCase):
         m = manifest_of([s for s in scenarios() if s["id"] == "T-004"], [])
         d = make_run(self.run_dir(), m, mcp_lines(m), direct=("direct-local",))
         lines, _ = self.bold(d)
-        self.assertEqual(lines[0], "**UNVERIFIED (no execution passed on mcp: 1 not implemented via MCP; nothing was "
-                                   "shown to hold there; no failure, no disagreement)**")
+        self.assertEqual(lines[0], "**UNVERIFIED (no execution passed on mcp: %s; nothing was shown to hold there; "
+                                   "no failure, no disagreement)**" % report.nim("1 not implemented yet via MCP"))
         v = gate.judge(d, policy_of(m, arms=("direct-local", "mcp")))
         self.assertEqual([(p["kind"], p["arm"], p["detail"]) for p in v["problems"]],
                          [("nothing_passed", "mcp", "no execution of arm mcp passed in the policy's selection")])
@@ -1688,14 +1707,18 @@ class PropertyMarksTest(GateCase):
         self.assertIn("T-001 (answer\\_fields)", texts[False])
         depth_rows = [x for x in texts[True].splitlines() if x.startswith("| partial: ")]
         self.assertNotIn("T-001", depth_rows[0])
-        self.assertIn("Not implemented yet via MCP (property): T-001 answer\\_fields (the MCP's records carry no "
+        self.assertIn(report.nim("Not implemented yet via MCP (property)") + ": T-001 answer\\_fields (the MCP's "
+                      "records carry no "
                       "such field; set aside on r0, r1).", texts[True])
         self.assertIn("Service-side by design (property): R-002 answer\\_fields (case case.answered\\_explains; set "
                       "aside on r0, r1).", texts[True])
         self.assertIn("- Property-level marks of the manifest on the MCP arm (set aside where read not_exposed, "
-                      "unless they cover every property check of the execution; listed under Agreement): 1 check(s) "
-                      "of 1 scenario(s) not implemented yet via MCP; 1 check(s) of 1 scenario(s) service-side by "
-                      "design.", texts[True])
+                      "unless they cover every property check of the execution; listed under Agreement): %s; 1 "
+                      "check(s) of 1 scenario(s) service-side by design." % report.nim(
+                          "1 check(s) of 1 scenario(s) not implemented yet via MCP"), texts[True])
+        # the verdict's red attention line counts the test with the property mark
+        self.assertIn(report.marked("Needs attention, in tests (scenarios): 1 not implemented yet via MCP (0 as a "
+                                    "whole, 1 by a property-level mark).", "red"), texts[True])
         self.assertIn("4 set aside by a property-level mark of the manifest", texts[True])
         for x in ("(property)", "Property-level marks", "set aside by a property-level mark"):
             self.assertNotIn(x, texts[False])

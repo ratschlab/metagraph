@@ -66,6 +66,73 @@ class FormatTest(unittest.TestCase):
         self.assertIn("| P | %s |" % (RED % "61000"), lines[2])
 
 
+class AttentionTest(unittest.TestCase):
+    """Round 2 (the owner, 2026-10-16): red means needs attention. What is not implemented yet via MCP is red where the
+    report counts or lists it; the verdict gets a red attention line counting TESTS per kind; times quoted in a
+    check's text or a gate problem are marked as printed times are (VERIFY-V6-2 M2), by the value as printed."""
+
+    def test_quoted_times(self):
+        q = report.mark_quoted_times
+        # the client walls of the v4 run's budget_respected lines (VERIFY-V6-2 M2), a budget beside them plain
+        self.assertEqual(q("client wall time of 10452 ms for a 60000 ms budget"),
+                         "client wall time of %s ms for a 60000 ms budget" % (YELLOW % "10452"))
+        self.assertEqual(q("client wall 45496 ms"), "client wall %s ms" % (YELLOW % "45496"))
+        self.assertEqual(q("elapsed 61000 ms within the budget 110000 ms"),
+                         "elapsed %s ms within the budget 110000 ms" % (RED % "61000"))
+        self.assertEqual(q("p0: a time stop after 100025 ms (the entries' timing (1 pattern(s), +25 ms)), before"),
+                         "p0: a time stop after %s ms (the entries' timing (1 pattern(s), +25 ms)), before" % (
+                             RED % "100025"))
+        self.assertEqual(q("wall 63.4 s"), "wall %s s" % (RED % "63.4"))
+        # a lateness (its figure before "after"), a budget, a reserve and short times stay plain
+        for plain in ("6130 ms after the deadline", "the finalisation reserve of 250 ms", "a 110000 ms budget",
+                      "elapsed 26 ms within the budget 60000 ms", "max(1 s, the budget)"):
+            self.assertEqual(q(plain), plain)
+        # by the value as printed: 10000 ms is not above 10 s, 55000 is not above 55 s
+        self.assertEqual(q("elapsed 10000 ms"), "elapsed 10000 ms")
+        self.assertEqual(q("elapsed 55000 ms"), "elapsed %s ms" % (YELLOW % "55000"))
+        self.assertEqual(q("elapsed 55000.4 ms"), "elapsed %s ms" % (RED % "55000.4"))
+        self.assertEqual(q(None), "")
+
+    def test_not_implemented_counts_are_red(self):
+        self.assertEqual(report.nim_count(0), "0 not implemented yet via MCP")
+        self.assertEqual(report.nim_count(3), RED % "3 not implemented yet via MCP")
+        self.assertEqual(report.mark_nim_counts("a, 2 not implemented yet via MCP, 0 not implemented yet via MCP"),
+                         "a, %s, 0 not implemented yet via MCP" % (RED % "2 not implemented yet via MCP"))
+        self.assertIn(RED % "red", report.time_legend())
+        self.assertIn("Red means needs attention", report.time_legend())
+
+    def test_attention_line(self):
+        def line(sid, arm, outcome, **kw):
+            return dict({"scenario": sid, "arm": arm, "repeat": 0, "outcome": outcome, "http": 200,
+                         "wall_ms": 100.0, "time_limited": "", "error": None}, **kw)
+        manifest = {"scenarios": [{"id": "P-mark", "mcp": {"tool": "pattern_search", "not_implemented_checks": [
+            {"check": "entry_fields", "reason": "x"}]}}]}
+        rows = [line("A", "direct-local", "fail"), line("A", "mcp", "fail"), line("B", "mcp", "error"),
+                line("C", "direct-local", "finding"),
+                line("D", "mcp", "inconclusive", time_limited="pattern 0 time-limited"),
+                line("E", "direct-local", "inconclusive", http=503, error={"code": "deadline", "text": "late"}),
+                line("F", "direct-remote", "inconclusive", http=504, error=None),
+                line("G", "mcp", "pass", wall_ms=55000.6),           # prints 55001: red
+                line("H", "mcp", "pass", wall_ms=55000.4),           # prints 55000: not above 55 s
+                line("I", "mcp", "not_implemented_mcp", http=None, wall_ms=None),
+                line("P-mark", "mcp", "pass"), line("P-mark", "direct-local", "pass")]
+        c = report.attention_counts(rows, manifest)
+        self.assertEqual(dict((k, sorted(v)) for k, v in c.items()),
+                         {"failed": ["A"], "errored": ["B"], "finding": ["C"], "time_budget": ["D", "E", "F", "G"],
+                          "nim_whole": ["I"], "nim_marks": ["P-mark"]})
+        self.assertEqual(report.attention_line(rows, manifest), RED % (
+            "Needs attention, in tests (scenarios): 1 failed; 1 errored; 1 with a finding; 4 with a time-budget issue "
+            "(an execution hit its budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; "
+            "or took more than 55 s); 2 not implemented yet via MCP (1 as a whole, 1 by a property-level mark)."))
+        # only the kinds with any; none: no line
+        self.assertEqual(report.attention_line([line("C", "direct-local", "finding")], manifest),
+                         RED % "Needs attention, in tests (scenarios): 1 with a finding.")
+        self.assertEqual(report.attention_line([line("Z", "mcp", "pass")], manifest), "")
+        # the comparison's not_implemented_mcp class counts as a whole too
+        comp = {"scenarios": {"J": {"mcp_agreement": {"class": "not_implemented_mcp"}}}}
+        self.assertEqual(sorted(report.attention_counts([], manifest, comp)["nim_whole"]), ["J"])
+
+
 class ReportTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -113,6 +180,22 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn(RED % "60991", timing)
         # short times are plain everywhere
         self.assertIn("| P | direct-remote | warm | 4 | 104 | 108 | 110 | 4 | 52.2 | 54.2 | 55.0 |", timing)
+        # round 2: the red attention line right after the verdict, the red counts of what is not implemented yet via
+        # MCP (the verdict, the area table, the agreement), plain at 0
+        verdict = self.text.split("# Verdict", 1)[1].split("\n# ", 1)[0]
+        self.assertEqual(verdict.split("\n\n")[2], RED % (
+            "Needs attention, in tests (scenarios): 3 failed; 2 with a time-budget issue (an execution hit its "
+            "budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; or took more than "
+            "55 s); 2 not implemented yet via MCP (2 as a whole, 0 by a property-level mark)."))
+        self.assertIn("1 inconclusive, %s, 2 service-side by design." % (RED % "1 not implemented yet via MCP"),
+                      verdict)
+        self.assertIn("0 inconclusive, 0 not implemented yet via MCP, 0 service-side by design.", verdict)
+        self.assertIn("unverified; %s; 0 scenario(s)" % (RED % "2 not implemented yet via MCP"), verdict)
+        outcomes = self.text.split("# Outcomes per area", 1)[1].split("\n# ", 1)[0]
+        self.assertIn("| P | mcp | 2 | 1 | 0 | 0 | 0 | %s | 1 | 0 | 5 |" % (RED % "1"), outcomes)
+        agreement = self.text.split("## MCP", 1)[1].split("\n# ", 1)[0]
+        self.assertIn(RED % "2 not\\_implemented\\_mcp", agreement)
+        self.assertIn(RED % "Not implemented yet via MCP", agreement)
 
     @unittest.skipUnless(shutil.which("pandoc"), "no pandoc")
     def test_latex_output_colours_the_marks(self):
