@@ -60,6 +60,8 @@ Config::Config(int argc, char *argv[]) {
         identity = ANNOTATE;
     } else if (!strcmp(argv[1], "merge_anno")) {
         identity = MERGE_ANNOTATIONS;
+    } else if (!strcmp(argv[1], "traverse")) {
+        identity = TRAVERSE;
     } else if (!strcmp(argv[1], "query")) {
         identity = QUERY;
     } else if (!strcmp(argv[1], "server_query")) {
@@ -156,6 +158,8 @@ Config::Config(int argc, char *argv[]) {
             forward_and_reverse = true;
         } else if (!strcmp(argv[i], "--mode")) {
             graph_mode = string_to_graphmode(get_value(i++));
+        } else if (!strcmp(argv[i], "--resolve")) {
+            traverse_resolve = true;
         } else if (!strcmp(argv[i], "--query-mode")) {
             query_mode = string_to_querymode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
@@ -558,7 +562,7 @@ Config::Config(int argc, char *argv[]) {
     if (count_kmers || query_presence)
         map_sequences = true;
 
-    if (identity == QUERY && infbase.empty())
+    if ((identity == QUERY || identity == TRAVERSE) && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
@@ -590,7 +594,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == QUERY && infbase_annotators.size() != 1)
+    if ((identity == QUERY || identity == TRAVERSE) && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
     if (identity == SERVER_QUERY
@@ -983,6 +987,8 @@ if (advanced) {
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
+            fprintf(stderr, "\ttraverse --resolve\tresolve query support and select traversal seeds\n\n");
+
             fprintf(stderr, "General options:\n");
             fprintf(stderr, "\t--advanced \tshow other advanced and legacy options [off]\n");
             fprintf(stderr, "\t--version \tprint version\n");
@@ -1327,6 +1333,11 @@ if (advanced) {
             fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
+        case TRAVERSE: {
+            fprintf(stderr, "Usage: %s traverse --resolve -i GRAPH -a ANNOTATION [--mmap] REQUEST.json ...\n", prog_name.c_str());
+            fprintf(stderr, "Resolve query support and select seeds; see docs/resolve.md.\n");
+            break;
+        }
         case QUERY: {
             fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA or FASTQ format.\n"

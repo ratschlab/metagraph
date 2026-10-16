@@ -192,8 +192,10 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TRAVERSE,
     };
     IdentityType identity = NO_IDENTITY;
+    bool traverse_resolve = false;
 
     graph::boss::BOSS::State state = graph::boss::BOSS::State::STAT;
 

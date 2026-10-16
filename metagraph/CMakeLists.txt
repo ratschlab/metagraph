@@ -340,8 +340,6 @@ set_property(TARGET sshash_static APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIREC
   $<TARGET_PROPERTY:sshash_static,INTERFACE_INCLUDE_DIRECTORIES>)
 target_include_directories(sshash_static PRIVATE external-libraries/zlib)
 add_subdirectory(external-libraries/zlib)
-# SSHash's gzip streams need zlib after the static archive on the link line.
-target_link_libraries(sshash_static PRIVATE zlib)
 target_compile_options(zlib
   PRIVATE
     -Wno-unused-variable
