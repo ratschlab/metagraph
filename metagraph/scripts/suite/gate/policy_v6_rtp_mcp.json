@@ -17,7 +17,7 @@
    "L": 48,
    "M": 62,
    "N": 135,
-   "P": 120,
+   "P": 122,
    "Q": 32,
    "R": 90,
    "T": 103,
@@ -25,14 +25,14 @@
   },
   "by_route": {
    "GET /traverse/capabilities": 1,
-   "POST /pattern": 478,
+   "POST /pattern": 480,
    "POST /resolve": 127,
    "POST /traverse": 113
   },
-  "excluded": 92,
+  "excluded": 94,
   "exclusions_by_rule": {
    "advanced_path": 1,
-   "budget_stress": 33,
+   "budget_stress": 35,
    "manifest_not_implemented": 50,
    "marks_cover_repeat": 1,
    "table_not_expressible": 47
@@ -50,12 +50,12 @@
     "scenarios": 628
    }
   },
-  "selected": 719
+  "selected": 721
  },
  "declared": {
   "declared_version": 1,
   "file": "gate/declared_v6_rt.json",
-  "sha256": "d2ea979e6aa1e188becb19863a290a29489a0ded371f09bc55d66d7153b8217b"
+  "sha256": "5a6b19f75b74bd2c29e1ec06c885c32c4208d66e35b71761841c11aa703c5b03"
  },
  "exclusions": [
   {
@@ -514,6 +514,17 @@
     "direct-local",
     "mcp"
    ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0025"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
    "reason": "a 12-mer in any_offset scope, count (heavy): not decisive at any budget in the v5 baseline: its one 200 was a time-limited at_least at 59.9 s, and 5 of its 6 executions were 503 deadlines at 60.17 to 60.52 s, the work overrunning the 250 ms finalisation reserve (SPEC-pattern-search §6 / §7.6 allow that on any host)",
    "rules": [
     "budget_stress"
@@ -673,6 +684,17 @@
     "budget_stress"
    ],
    "scenario": "M-protein-0001"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0024"
   },
   {
    "arms": [
@@ -1056,9 +1078,9 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-16T16:59:54.706Z",
+ "generated_utc": "2026-10-16T18:13:06.314Z",
  "manifest": {
-  "content_sha256": "935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85",
+  "content_sha256": "49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1",
   "file": "manifest/suite_v6.json",
   "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
   "manifest_version": 6,
@@ -5322,7 +5344,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "L-paths-0008"
   },
@@ -5337,8 +5360,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "L-paths-0009"
   },
@@ -5473,7 +5495,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "L-verified-0003"
   },
@@ -5488,8 +5511,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "L-verified-0004"
   },
@@ -5624,7 +5646,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "L-supported-0007"
   },
@@ -5639,8 +5662,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "L-supported-0008"
   },
@@ -5767,15 +5789,15 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "L-caps-0004"
   },
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "L-memory-0001"
   },
@@ -5902,7 +5924,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "L-repeat-0002"
   },
@@ -5917,8 +5940,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide10-0001"
   },
@@ -6053,7 +6075,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide10-0010"
   },
@@ -6068,8 +6091,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide10-0011"
   },
@@ -6204,7 +6226,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide10-0020"
   },
@@ -6219,8 +6242,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide10-0021"
   },
@@ -6355,7 +6377,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide10-0030"
   },
@@ -6370,8 +6393,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide10-0031"
   },
@@ -6506,7 +6528,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide10-0040"
   },
@@ -6521,8 +6544,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide10-0041"
   },
@@ -6657,7 +6679,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide-long-0004"
   },
@@ -6672,8 +6695,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide-long-0005"
   },
@@ -6808,7 +6830,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide-long-0014"
   },
@@ -6823,8 +6846,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide-long-0015"
   },
@@ -6959,7 +6981,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-peptide-long-0024"
   },
@@ -6974,8 +6997,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-peptide-long-0025"
   },
@@ -7110,7 +7132,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-table1-0006"
   },
@@ -7125,8 +7148,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-stop-0001"
   },
@@ -7261,7 +7283,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-junction-0001"
   },
@@ -7276,8 +7299,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "X-junction-0002"
   },
@@ -7412,7 +7434,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "X-edge-0007"
   },
@@ -7427,8 +7450,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "M-planted-0001"
   },
@@ -7533,7 +7555,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "M-planted-0008"
   },
@@ -7638,8 +7661,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "M-planted-0015"
   },
@@ -7729,7 +7751,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "M-planted-0021"
   },
@@ -7744,8 +7767,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "M-planted-0022"
   },
@@ -7880,7 +7902,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "M-iupac-0003"
   },
@@ -7895,8 +7918,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "M-iupac-0004"
   },
@@ -8016,7 +8038,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "M-order-0002"
   },
@@ -8030,8 +8053,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "M-floor-0001"
   },
@@ -8127,7 +8149,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "M-refusal-0006"
   },
@@ -8149,8 +8172,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "M-refusal-0008"
   },
@@ -8270,7 +8292,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "Q-pred-0004"
   },
@@ -8300,8 +8323,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "Q-pred-0006"
   },
@@ -8421,7 +8443,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "Q-pred-0014"
   },
@@ -8451,8 +8474,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "Q-strands-0002"
   },
@@ -8572,7 +8594,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "Q-supported-0004"
   },
@@ -8602,8 +8625,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "Q-motif-0002"
   },
@@ -8710,36 +8732,6 @@
    "repeats": [
     0
    ],
-   "scenario": "N-negative-0001"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0001"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-negative-0002"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0002"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
    "scenario": "N-negative-0007"
   },
   {
@@ -8765,6 +8757,36 @@
     1
    ],
    "scenario": "N-negative-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0002"
   },
   {
    "arm": "direct-local",
@@ -8816,6 +8838,51 @@
    "repeats": [
     0
    ],
+   "scenario": "N-negative-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-negative-0011"
   },
   {
@@ -8825,6 +8892,22 @@
     1
    ],
    "scenario": "N-negative-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0012"
   },
   {
    "arm": "direct-local",
@@ -8904,67 +8987,6 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0006"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0006"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-negative-0008"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0008"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-negative-0010"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0010"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-negative-0012"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-negative-0012"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
     0
    ],
    "scenario": "N-negative-0018"
@@ -9025,7 +9047,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "N-nearmiss-0002"
   },
@@ -9055,8 +9078,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "N-nearmiss-0004"
   },
@@ -9161,7 +9183,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "N-nearmiss-0011"
   },
@@ -9311,8 +9334,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "N-nearmiss-0021"
   },
@@ -9368,36 +9390,6 @@
     1
    ],
    "scenario": "N-nearmiss-0024"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-nearmiss-0025"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-nearmiss-0025"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-nearmiss-0026"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-nearmiss-0026"
   },
   {
    "arm": "direct-local",
@@ -9585,6 +9577,36 @@
    "repeats": [
     0
    ],
+   "scenario": "N-nearmiss-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-nearmiss-0028"
   },
   {
@@ -9658,7 +9680,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "N-hard-0004"
   },
@@ -9688,8 +9711,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "N-hard-0006"
   },
@@ -9809,7 +9831,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "N-hard-0014"
   },
@@ -9839,8 +9862,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "N-hard-0016"
   },
@@ -9872,21 +9894,6 @@
    "repeats": [
     0
    ],
-   "scenario": "N-hard-0018"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-hard-0018"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
    "scenario": "N-hard-0019"
   },
   {
@@ -9896,21 +9903,6 @@
     1
    ],
    "scenario": "N-hard-0019"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-hard-0020"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-hard-0020"
   },
   {
    "arm": "direct-local",
@@ -10023,6 +10015,36 @@
    "repeats": [
     0
    ],
+   "scenario": "N-hard-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
    "scenario": "N-realrep-0001"
   },
   {
@@ -10068,21 +10090,6 @@
    "repeats": [
     0
    ],
-   "scenario": "N-realrep-0008"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-realrep-0008"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
    "scenario": "N-realrep-0009"
   },
   {
@@ -10092,21 +10099,6 @@
     1
    ],
    "scenario": "N-realrep-0009"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-realrep-0010"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-realrep-0010"
   },
   {
    "arm": "direct-local",
@@ -10153,6 +10145,36 @@
     1
    ],
    "scenario": "N-realrep-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0010"
   },
   {
    "arm": "direct-local",
@@ -10219,21 +10241,6 @@
    "repeats": [
     0
    ],
-   "scenario": "N-realrep-0018"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-realrep-0018"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
    "scenario": "N-realrep-0019"
   },
   {
@@ -10243,21 +10250,6 @@
     1
    ],
    "scenario": "N-realrep-0019"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-realrep-0020"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-realrep-0020"
   },
   {
    "arm": "direct-local",
@@ -10304,6 +10296,36 @@
     1
    ],
    "scenario": "N-realrep-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0020"
   },
   {
    "arm": "direct-local",
@@ -10385,36 +10407,6 @@
    "repeats": [
     0
    ],
-   "scenario": "N-usecase-0004"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-usecase-0004"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
-   "scenario": "N-usecase-0005"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-usecase-0005"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
    "scenario": "N-usecase-0008"
   },
   {
@@ -10440,6 +10432,36 @@
     1
    ],
    "scenario": "N-usecase-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0005"
   },
   {
    "arm": "direct-local",
@@ -10549,7 +10571,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "N-nearmiss2-0001"
   },
@@ -10579,8 +10602,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "N-nearmiss2-0003"
   },
@@ -10630,7 +10652,8 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
    "scenario": "C-protocol-0005"
   },
@@ -10644,8 +10667,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "C-protocol-0007"
   },
@@ -10684,21 +10706,6 @@
    "repeats": [
     0
    ],
-   "scenario": "P-twin-0001"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "P-twin-0001"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0
-   ],
    "scenario": "R-twin-0001"
   },
   {
@@ -10726,6 +10733,37 @@
   {
    "arm": "direct-local",
    "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
     0
    ],
    "scenario": "N-zero-0002"
@@ -10737,22 +10775,6 @@
     1
    ],
    "scenario": "N-zero-0002"
-  },
-  {
-   "arm": "direct-local",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-zero-0001"
-  },
-  {
-   "arm": "mcp",
-   "repeats": [
-    0,
-    1
-   ],
-   "scenario": "N-zero-0001"
   },
   {
    "arm": "direct-local",
@@ -10849,7 +10871,7 @@
    "repeats": [
     0
    ],
-   "scenario": "N-zero-0009"
+   "scenario": "N-zero-0010"
   },
   {
    "arm": "mcp",
@@ -10857,14 +10879,15 @@
     0,
     1
    ],
-   "scenario": "N-zero-0009"
+   "scenario": "N-zero-0010"
   },
   {
    "arm": "direct-local",
    "repeats": [
-    0
+    0,
+    1
    ],
-   "scenario": "N-zero-0010"
+   "scenario": "N-zero-0009"
   },
   {
    "arm": "mcp",
@@ -10872,7 +10895,7 @@
     0,
     1
    ],
-   "scenario": "N-zero-0010"
+   "scenario": "N-zero-0009"
   },
   {
    "arm": "direct-local",
@@ -10892,8 +10915,7 @@
   {
    "arm": "direct-local",
    "repeats": [
-    0,
-    1
+    0
    ],
    "scenario": "P-twin-0003"
   },
@@ -11578,6 +11600,7 @@
    "P-edge-0012",
    "P-more-0001",
    "P-more-0002",
+   "P-warm-0025",
    "P-heavy-0001",
    "P-heavy-0002",
    "L-paths-0001",
@@ -11771,6 +11794,7 @@
    "M-iupac-0004",
    "P-warm-0010",
    "M-protein-0001",
+   "P-warm-0024",
    "M-protein-0002",
    "P-warm-0011",
    "M-protein-0003",
@@ -11835,23 +11859,23 @@
    "Q-budget-0001",
    "Q-budget-0002",
    "Q-budget-0003",
-   "N-negative-0001",
-   "N-negative-0002",
    "N-negative-0007",
    "N-negative-0009",
+   "N-negative-0001",
+   "N-negative-0002",
    "N-negative-0003",
    "N-negative-0004",
    "N-negative-0005",
+   "N-negative-0006",
+   "N-negative-0008",
+   "N-negative-0010",
    "N-negative-0011",
+   "N-negative-0012",
    "N-negative-0013",
    "N-negative-0014",
    "N-negative-0015",
    "N-negative-0016",
    "N-negative-0017",
-   "N-negative-0006",
-   "N-negative-0008",
-   "N-negative-0010",
-   "N-negative-0012",
    "N-negative-0018",
    "N-negative-0019",
    "N-negative-0020",
@@ -11882,8 +11906,6 @@
    "N-nearmiss-0022",
    "N-nearmiss-0023",
    "N-nearmiss-0024",
-   "N-nearmiss-0025",
-   "N-nearmiss-0026",
    "P-warm-0019",
    "N-nearmiss-0027",
    "P-warm-0020",
@@ -11901,6 +11923,8 @@
    "N-nearmiss-0039",
    "N-nearmiss-0040",
    "N-nearmiss-0041",
+   "N-nearmiss-0025",
+   "N-nearmiss-0026",
    "N-nearmiss-0028",
    "N-nearmiss-0031",
    "N-hard-0001",
@@ -11920,9 +11944,7 @@
    "N-hard-0015",
    "N-hard-0016",
    "N-hard-0017",
-   "N-hard-0018",
    "N-hard-0019",
-   "N-hard-0020",
    "N-hard-0021",
    "R-warm-0006",
    "N-hard-0022",
@@ -11930,35 +11952,37 @@
    "N-realrep-0003",
    "N-realrep-0005",
    "N-realrep-0006",
+   "N-hard-0018",
+   "N-hard-0020",
    "N-realrep-0001",
    "N-realrep-0004",
    "N-realrep-0007",
-   "N-realrep-0008",
    "N-realrep-0009",
-   "N-realrep-0010",
    "N-realrep-0011",
    "N-realrep-0013",
    "N-realrep-0015",
+   "N-realrep-0008",
+   "N-realrep-0010",
    "N-realrep-0012",
    "N-realrep-0014",
    "N-realrep-0016",
    "N-realrep-0017",
-   "N-realrep-0018",
    "N-realrep-0019",
-   "N-realrep-0020",
    "N-realrep-0021",
    "N-realrep-0023",
    "N-realrep-0025",
+   "N-realrep-0018",
+   "N-realrep-0020",
    "N-realrep-0022",
    "N-realrep-0024",
    "N-usecase-0001",
    "N-usecase-0002",
    "N-usecase-0003",
-   "N-usecase-0004",
-   "N-usecase-0005",
    "P-warm-0023",
    "N-usecase-0008",
    "N-usecase-0010",
+   "N-usecase-0004",
+   "N-usecase-0005",
    "N-usecase-0006",
    "N-usecase-0007",
    "N-usecase-0009",
@@ -11979,20 +12003,20 @@
    "C-protocol-0007",
    "M-twin-0001",
    "M-twin-0002",
-   "P-twin-0001",
    "R-twin-0001",
    "R-twin-0003",
    "R-twin-0005",
-   "N-zero-0002",
+   "P-twin-0001",
    "N-zero-0001",
+   "N-zero-0002",
    "N-zero-0003",
    "N-zero-0004",
    "N-zero-0005",
    "N-zero-0006",
    "N-zero-0007",
    "N-zero-0008",
-   "N-zero-0009",
    "N-zero-0010",
+   "N-zero-0009",
    "P-twin-0002",
    "P-twin-0003",
    "P-twin-0004",

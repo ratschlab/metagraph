@@ -367,7 +367,7 @@ class PolicyTest(GateCase):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
         self.assertEqual((m["manifest_version"], m["content_sha256"], m["relations_sha256"]),
-                         (6, "935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85",
+                         (6, "49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1",
                           "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
         smoke = sc.read_json(os.path.join(SUITE, "manifest", "suite_smoke_v6.json"))
         self.assertEqual(smoke["content_sha256"], "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd")
@@ -411,7 +411,7 @@ class PolicyTest(GateCase):
         """The v6 gate with POST /pattern (the owner's decision 2 of 2026-10-16, if the v6 baseline shows it
         decisive): gate_policy.py with the rt policy's inputs (arms mcp and direct-local, declared_v6_rt.json, the
         by-design table) and the routes plus POST /pattern. Its resolve / traverse part is the rt policy's; the
-        budget_stress scenarios (the four long walks, the six heavy /pattern ones, the 23 warm-ups) are excluded on
+        budget_stress scenarios (the four long walks, the six heavy /pattern ones, the 25 warm-ups) are excluded on
         every arm; D-P-scope-0004 r0 on mcp by marks_cover_repeat; REL-subset-0007 on mcp by the declared entry."""
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rtp_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
@@ -432,16 +432,16 @@ class PolicyTest(GateCase):
         self.assertEqual([x for x in shipped["exclusions"] if x["scenario"] in gated], rt["exclusions"])
         self.assertEqual([r for r in shipped["relations"] if r["a"] in gated], rt["relations"])
         c = shipped["counts"]
-        self.assertEqual(c["by_route"], {"GET /traverse/capabilities": 1, "POST /pattern": 478,
+        self.assertEqual(c["by_route"], {"GET /traverse/capabilities": 1, "POST /pattern": 480,
                                          "POST /resolve": 127, "POST /traverse": 113})
-        self.assertEqual(c["exclusions_by_rule"], {"advanced_path": 1, "budget_stress": 33,
+        self.assertEqual(c["exclusions_by_rule"], {"advanced_path": 1, "budget_stress": 35,
                                                    "manifest_not_implemented": 50, "marks_cover_repeat": 1,
                                                    "table_not_expressible": 47})
         stressed = sorted(e["scenario"] for e in shipped["exclusions"] if "budget_stress" in e["rules"])
         self.assertEqual(stressed, sorted(["T-longwalk-%04d" % i for i in range(1, 5)] +
                                           ["M-protein-0001", "M-protein-0002", "M-protein-0003", "M-protein-0007",
                                            "P-heavy-0001", "N-nearmiss-0030"] +
-                                          ["P-warm-%04d" % i for i in range(1, 24)]))
+                                          ["P-warm-%04d" % i for i in range(1, 26)]))
         self.assertTrue(all(e["arms"] == ["direct-local", "mcp"] for e in shipped["exclusions"]
                             if "budget_stress" in e["rules"]))
         rep = [e for e in shipped["exclusions"] if "marks_cover_repeat" in e["rules"]]

@@ -924,7 +924,7 @@ class WarmUpsTravel(unittest.TestCase):
         m = built()
         order = [x["id"] for x in m["scenarios"]]
         pairs = [(x["id"], x["warms"]) for x in m["scenarios"] if x.get("warms")]
-        self.assertEqual(len(pairs), 10 + 23)   # v5's ten, v6's 23 /pattern warm-ups (test_builder_v6)
+        self.assertEqual(len(pairs), 10 + 25)   # v5's ten, v6's 25 /pattern warm-ups (test_builder_v6)
         for w, target in pairs:
             n = sum(1 for _, t in pairs if t == target)                    # a split pair sits together
             self.assertLessEqual(order.index(target) - order.index(w), n, w)

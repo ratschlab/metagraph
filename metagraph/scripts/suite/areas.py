@@ -3234,10 +3234,13 @@ def capability_relations(ctx: Ctx, cid: Dict[str, str], caps: Dict[str, dict]) -
 #
 # Warm-ups: the /pattern scenarios whose MCP cold call (repeat 0, which the paired loop runs first) timed out (the
 # host's 503 deadline relayed by the service) or was time-limited in the accepted v5 baseline run
-# 20261015T161813Z_refseq97-81c620ef, while their warm MCP repeat or a direct arm completed: each gets a warm-up
+# 20261015T161813Z_refseq97-81c620ef, all 25 of them, as the owner's decision 3 has it: each gets a warm-up
 # (pattern_warm_up), placed right before it (build_manifest.place_warm_ups), so that its MCP arm's first call meets
-# a warm host; the v5 figures of each are stated in the warm-up's truth. The ids are fixed per target (a warm-up added
-# later takes the next free number; no id moves).
+# a warm host; the v5 figures of each are stated in the warm-up's truth. In 23 of them a later execution (the warm MCP
+# repeat or a direct arm) completed; M-protein-0002 and P-heavy-0001 (P-warm-0024 / -0025, added by round 2's
+# verification, L4) completed none, warm runs included, and are budget_stress themselves: their warm-ups run and are
+# reported outside the gate, as they are. The ids are fixed per target (a warm-up added later takes the next free
+# number; no id moves).
 PATTERN_WARM_UPS = {
     "M-planted-0007": ("P-warm-0001", "MCP r0 (cold) a relayed 503 deadline at 63.4 s; MCP r1 complete in 3.6 s; direct-local r0 complete in 24.3 s"),
     "M-planted-0008": ("P-warm-0002", "MCP r0 (cold) time-limited at 63.3 s; MCP r1 complete in 3.7 s; direct-local r0 complete in 16.1 s"),
@@ -3262,6 +3265,8 @@ PATTERN_WARM_UPS = {
     "N-nearmiss-0030": ("P-warm-0021", "MCP r0 (cold) time-limited at 63.2 s; MCP r1 complete in 3.8 s; direct-local r0 complete in 12.1 s"),
     "N-nearmiss-0032": ("P-warm-0022", "MCP r0 (cold) time-limited at 63.4 s; MCP r1 complete in 3.7 s; direct-local r0 complete in 22.4 s"),
     "N-usecase-0008": ("P-warm-0023", "MCP r0 (cold) a relayed 503 deadline at 63.0 s; MCP r1 complete in 3.4 s; direct-local r0 complete in 45.4 s"),
+    "M-protein-0002": ("P-warm-0024", "MCP r0 (cold) time-limited at 63.3 s; MCP r1 time-limited at 63.4 s; direct-local r0 time-limited at 59.8 s; no execution completed"),
+    "P-heavy-0001": ("P-warm-0025", "MCP r0 (cold) a relayed 503 deadline at 63.0 s; MCP r1 a relayed 503 deadline at 63.1 s; direct-local r0 time-limited at 59.9 s; no execution completed"),
 }
 PATTERN_WARM_BASELINE = "20261015T161813Z_refseq97-81c620ef (manifest v5, 60,000 ms budgets)"
 PATTERN_WARM_STRESS = ("a warm-up's first run meets the cold host by design (it reads the rows its target reads, so "

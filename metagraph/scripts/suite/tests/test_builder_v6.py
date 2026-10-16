@@ -21,7 +21,7 @@ import suite_common as sc  # noqa: E402
 from test_builder_v5 import built, have_cache  # noqa: E402
 
 V5_CONTENT = "72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875"
-V6_CONTENT = "935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85"
+V6_CONTENT = "49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1"
 RELATIONS = "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"
 V6_SMOKE_CONTENT = "ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd"
 # manifest_lib.PATTERN_TIME_BUDGET_MS of v6 (the owner, 2026-10-16: 110,000, not 120,000)
@@ -36,11 +36,14 @@ ABSENCE_SCOPE = ["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-%04d" % i 
 STRANDS = ["P-scope-%04d" % i for i in range(7, 13)] + ["N-usecase-0005"]
 PATTERN_TEXT = ["P-edge-0004"]
 SCENARIO_MARKED = {"P-scope-0004", "P-scope-0006"}
-# round 2: the /pattern scenarios whose MCP cold call (r0) timed out or was time-limited in the v5 baseline while their
-# warm MCP repeat or a direct arm completed (round2/pg/warm_up_targets.txt), each with its warm-up
+# round 2: the /pattern scenarios whose MCP cold call (r0) timed out or was time-limited in the v5 baseline, all 25 (the
+# owner's decision 3; round2/verify-manifest/warm_targets.out), each with its warm-up: in 23 a later execution (the
+# warm MCP repeat or a direct arm) completed (round2/pg/warm_up_targets.txt), in M-protein-0002 and P-heavy-0001
+# (P-warm-0024 / -0025, round 2's verification, L4) none did
 WARM_TARGETS = ["M-planted-%04d" % i for i in (7, 8, 9, 13, 14, 15, 16, 17, 18)] + \
     ["M-protein-%04d" % i for i in (1, 3, 4, 5, 6, 7)] + ["N-nearmiss-%04d" % i for i in (6, 13, 20, 27, 29, 30, 32)] + \
-    ["N-usecase-0008"]
+    ["N-usecase-0008", "M-protein-0002", "P-heavy-0001"]
+N_WARM = 25
 # round 2: the heavy /pattern scenarios the owner tags budget_stress (outside the gate, still run and reported)
 STRESSED = {"M-protein-0001", "M-protein-0002", "M-protein-0003", "M-protein-0007", "P-heavy-0001", "N-nearmiss-0030"}
 PER_ENTRY_UNMARKED = {"Q-pred-0011", "Q-pred-0012", "P-edge-0009"}
@@ -111,7 +114,7 @@ class ManifestV6(unittest.TestCase):
         order = [s["id"] for s in self.v6["scenarios"]]
         warm = dict((s["warms"], s) for s in self.v6["scenarios"] if s["id"].startswith("P-warm-"))
         self.assertEqual(sorted(warm), sorted(WARM_TARGETS))
-        self.assertEqual(sorted(w["id"] for w in warm.values()), ["P-warm-%04d" % i for i in range(1, 24)])
+        self.assertEqual(sorted(w["id"] for w in warm.values()), ["P-warm-%04d" % i for i in range(1, N_WARM + 1)])
         for target, w in warm.items():
             t = self.s6[target]
             self.assertEqual(order.index(w["id"]) + 1, order.index(target), target)   # right before it
@@ -137,9 +140,14 @@ class ManifestV6(unittest.TestCase):
                 self.assertEqual(sc.repeat_count(i5[sid], s, 10), sc.repeat_count(i6[sid], self.s6[sid], 10), sid)
         import gate_policy
         self.assertEqual(bm.GATE_ROUTES, gate_policy.DEFAULT_ROUTES)
-        # v5's scenarios keep their order outside area N, where keep_gate_warm_repeats moved some of its /pattern ones
-        kept = [x for x in order if x in self.s5 and self.s5[x]["area"] != "N"]
-        self.assertEqual(kept, [s["id"] for s in self.v5["scenarios"] if s["area"] != "N"])
+        # v5's scenarios keep their order outside area N, where keep_gate_warm_repeats moved some of its /pattern ones,
+        # but for P-twin-0001: with 25 warm-ups R-twin-0005 (POST /resolve) would gain a warm repeat at index 690,
+        # and no free scenario of area R precedes its block, so the nearest free one, P-twin-0001 (a /pattern twin of
+        # P-edge-0004, another sequence than R-twin-0001's), goes right after the block (round 2's verification, L4)
+        kept = [x for x in order if x in self.s5 and self.s5[x]["area"] != "N" and x != "P-twin-0001"]
+        self.assertEqual(kept, [s["id"] for s in self.v5["scenarios"] if s["area"] != "N" and s["id"] != "P-twin-0001"])
+        self.assertEqual(order[order.index("R-twin-0005") + 1], "P-twin-0001")
+        self.assertEqual(order[order.index("R-twin-0001") - 1], "M-twin-0002")
 
     def test_keep_gate_warm_repeats(self):
         def s(sid, route="POST /pattern", area="N", **kw):
@@ -187,7 +195,7 @@ class ManifestV6(unittest.TestCase):
 
     def test_only_the_pattern_budgets_changed(self):
         """The diff v5 -> v6: the budgets, and the MCP marks of round 2 (test_the_mcp_marks), nothing else."""
-        self.assertEqual(sorted(self.s5), sorted(set(self.s6) - set("P-warm-%04d" % i for i in range(1, 24))))
+        self.assertEqual(sorted(self.s5), sorted(set(self.s6) - set("P-warm-%04d" % i for i in range(1, N_WARM + 1))))
         kinds = collections.Counter()
         changed_routes = set()
         for sid, s in self.s5.items():
@@ -259,9 +267,10 @@ class ManifestV6(unittest.TestCase):
                 self.assertFalse(checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0}), (name, sid))
         covered = [s["id"] for s in self.v6["scenarios"] if checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0})]
         # the 449 scenarios at the 110,000 ms budget less the 22 that expect a refusal (a 400, answered at once), and
-        # the 23 warm-ups of round 2 (their targets' requests; direct-local only, where the rule never applies)
-        self.assertEqual(len(covered), 427 + 23)
-        self.assertEqual(sorted(x for x in covered if x.startswith("P-warm-")), ["P-warm-%04d" % i for i in range(1, 24)])
+        # the 25 warm-ups of round 2 (their targets' requests; direct-local only, where the rule never applies)
+        self.assertEqual(len(covered), 427 + N_WARM)
+        self.assertEqual(sorted(x for x in covered if x.startswith("P-warm-")),
+                         ["P-warm-%04d" % i for i in range(1, N_WARM + 1)])
         self.assertTrue(all(self.s6[x]["timing_class"] == "long" for x in covered if x.startswith("P-warm-")))
         self.assertTrue(all(self.s6[sid]["route"] == "POST /pattern" and
                             self.s6[sid]["request"]["time_budget_ms"] == V6_BUDGET for sid in covered))
