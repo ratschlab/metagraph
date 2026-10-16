@@ -71,6 +71,12 @@ class Missing(Exception):
     """A field the check needs is absent from the answer."""
 
 
+class Undecidable(Exception):
+    """The answer states a reason the check relies on but not what would show it can have happened (a /pattern time
+    stop on an answer that states no timing at all): the check reads inconclusive on every arm (evaluate), never a
+    pass on an unjudged statement."""
+
+
 # ---------------------------------------------------------------------------------------------- answers
 def normalise_direct(http_status: int, body: Any, headers: Optional[Dict[str, str]] = None) -> dict:
     """The normalised answer of a direct HTTP call, as lane S2's runner makes it (suite_common.normalise_direct:
@@ -601,15 +607,59 @@ def _pattern_work_time(sc: dict, body: dict) -> Optional[float]:
     return budget - reserve - e_ms
 
 
+# The request's time outside its patterns' own timing (the gaps between the patterns' searches): an answer judged by
+# its entries' timing (_pattern_elapsed) may have run this much longer than they state. At most 4.6 ms over the 974
+# direct /pattern 200s of the v5 baseline run (top-level elapsed less the entries' sum).
+_ENTRY_TIMING_SLACK_MS = 25.0
+# An entry's timing values that are part of another one it states (SPEC-pattern-search §8.4: support_ms of
+# extension_ms), left out of the sum
+_NESTED_TIMING = ("support_ms",)
+
+
+def _pattern_elapsed(body: dict) -> Tuple[Optional[float], str]:
+    """(the elapsed time a /pattern answer states for its search, in ms, where it comes from): the top-level
+    timing.elapsed_ms (from the deadline's start to the end of the search, SPEC-pattern-search §8.4); else, on an
+    answer without it (the MCP arm's: the service keeps each pattern's own timing and not the request's), the sum
+    over the answered entries of every timing value an entry states (elapsed_ms is that pattern's search; the reads
+    beside it, label_discovery_ms, placement_ms, selection_ms, ..., are its own values; the patterns are searched
+    one after the other within the request's deadline) less _NESTED_TIMING, plus _ENTRY_TIMING_SLACK_MS; (None, '')
+    when neither states a time."""
+    el = _number((body.get("timing") or {}).get("elapsed_ms"))
+    if el is not None:
+        return el, "timing.elapsed_ms"
+    total, seen = 0.0, 0
+    for e in body.get("patterns") or []:
+        if not isinstance(e, dict) or "counts" not in e or "error" in e:
+            continue
+        t = e.get("timing") if isinstance(e.get("timing"), dict) else {}
+        if _number(t.get("elapsed_ms")) is None:
+            return None, ""
+        seen += 1
+        total += sum(_number(v) or 0.0 for k, v in t.items() if k not in _NESTED_TIMING)
+    if not seen:
+        return None, ""
+    return total + _ENTRY_TIMING_SLACK_MS, "the entries' timing (%d pattern(s), +%.0f ms)" % (
+        seen, _ENTRY_TIMING_SLACK_MS)
+
+
 def _pattern_time_problem(sc: dict, body: dict, what: str) -> Optional[str]:
     """Why a /pattern time stop or time limitation (|what|) cannot have happened, or None: the work stops at the work
-    time and the answer's timing.elapsed_ms runs to the end of the search (SPEC-pattern-search §7.6)."""
-    el = _number((body.get("timing") or {}).get("elapsed_ms"))
+    time and the answer's elapsed time runs to the end of the search (SPEC-pattern-search §7.6), the top-level
+    timing.elapsed_ms, else what its entries state (_pattern_elapsed: the MCP arm's answer has no top-level timing).
+    An answer that states no time at all cannot show it: Undecidable (the check that met the statement reads
+    inconclusive, never pass)."""
     w = _pattern_work_time(sc, body)
-    if el is None or w is None or el >= w:
+    if w is None:
         return None
-    return "%s after %.0f ms, before the work time (at least %.0f ms of the %s ms budget: SPEC-pattern-search §7.6)" % (
-        what, el, w, _limit(sc, body, "time_budget_ms"))
+    el, source = _pattern_elapsed(body)
+    if el is None:
+        raise Undecidable("%s, and the answer states no timing (neither timing.elapsed_ms nor an entry's): it cannot "
+                          "be held to the work time (at least %.0f ms of the %s ms budget: SPEC-pattern-search §7.6)" % (
+                              what, w, _limit(sc, body, "time_budget_ms")))
+    if el >= w:
+        return None
+    return "%s after %.0f ms (%s), before the work time (at least %.0f ms of the %s ms budget: SPEC-pattern-search " \
+           "§7.6)" % (what, el, source, w, _limit(sc, body, "time_budget_ms"))
 
 
 def _count_above(c: Any, cap: Optional[float]) -> Optional[bool]:
@@ -901,7 +951,12 @@ def _pattern_reason_problems(sc: dict, body: dict, i: int, e: dict) -> List[str]
     if m:
         probs.append("%s: %s" % (where, m))
     if time_limited:
-        m = _pattern_time_problem(sc, body, "%s: %s" % (where, "a time stop" if sr == "time" else "a time limitation"))
+        try:
+            m = _pattern_time_problem(sc, body, "%s: %s" % (where, "a time stop" if sr == "time" else "a time limitation"))
+        except Undecidable:
+            if probs:
+                return probs   # a stated reason that cannot have happened decides first
+            raise
         if m:
             probs.append(m)
     return probs
@@ -1505,9 +1560,9 @@ def check_low_complexity_note(sc, ans, a, arm):
     has = "low_complexity_pattern" in notes
     stop = e.get("stop") or {}
     kind = _note_stop(sc, e)
-    if stop.get("reason") in _SEARCH_BUDGET_STOPS or e.get("determinism") == "time_limited":
+    if not has and (stop.get("reason") in _SEARCH_BUDGET_STOPS or e.get("determinism") == "time_limited"):
         bad = _pattern_reason_problems(sc, _body(ans), a.get("pattern", 0), e)
-        if bad and not has:
+        if bad:
             return FAIL, "no note after a stop or time limitation that cannot have happened: %s" % bad[0]
     if kind == "budget":
         if has:
@@ -2389,14 +2444,22 @@ def _pattern_invariants(sc, ans, a, arm):
     if len(pats) != len(sc["request"].get("patterns", [])):
         return FAIL, "%d entries for %d patterns" % (len(pats), len(sc["request"]["patterns"]))
     probs: List[str] = []
+    undecided: List[str] = []
     limits = body.get("limits") or {}
     for i, e in enumerate(pats):
         req_id = sc["request"]["patterns"][i].get("id") if isinstance(sc["request"]["patterns"][i], dict) else None
         if e.get("id") != req_id:
             probs.append("p%d: id %r, request %r" % (i, e.get("id"), req_id))
         probs += _pattern_entry_problems(sc, i, e, limits, None)
-        probs += _pattern_reason_problems(sc, body, i, e)
-    return (FAIL, "; ".join(probs[:6])) if probs else (PASS, "%d entries consistent" % len(pats))
+        try:
+            probs += _pattern_reason_problems(sc, body, i, e)
+        except Undecidable as u:
+            undecided.append(str(u))
+    if probs:
+        return FAIL, "; ".join(probs[:6])
+    if undecided:
+        raise Undecidable(undecided[0])
+    return PASS, "%d entries consistent" % len(pats)
 
 
 # ---------------------------------------------------------------------------------------------- resolve checks
@@ -4944,6 +5007,8 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
         except Missing as m:
             outcome = NOT_EXPOSED if arm == "mcp" else FAIL
             detail = "field not in the answer: %s" % m
+        except Undecidable as u:
+            outcome, detail = INCONCLUSIVE, "not testable: %s" % u
         except Exception as ex:   # a check must never take the run down
             outcome, detail = FAIL, "check raised %s: %s" % (type(ex).__name__, ex)
         out.append({"check": name, "outcome": outcome, "detail": detail, "property": is_property(name)})

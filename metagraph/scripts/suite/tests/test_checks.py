@@ -1705,6 +1705,62 @@ class StatedReasons(unittest.TestCase):
                            "limits": {"time_budget_ms": 60000, "finalize_reserve_ms": 250}, "timing": {"elapsed_ms": el}})
             self.assertEqual(outcome(sc, a, "count_relation", relation="exact", value=5)[0], want)
 
+    def test_mcp_time_stop_is_held_to_the_work_time(self):
+        """MCP-T (the /pattern gate readiness study): the MCP arm's /pattern answer carries no top-level timing (its
+        body is mode, patterns and index; each entry keeps its own timing), so a time stop there was never held to
+        the work time: P-heavy-0001's answer in MCP shape with its time stop at 1.5 s passed. The entries' timing
+        (their sum: the patterns run one after the other) stands in for the request's; an answer that states no
+        timing at all is inconclusive, never a pass."""
+        sc = {"route": "POST /pattern", "truth": {},
+              "request": {"patterns": [{"dna": "GCTACACACACC", "id": "w"}], "mode": "count", "scope": "any_offset",
+                          "time_budget_ms": 110000, "max_contexts": 10000},
+              "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                         {"check": "count_relation", "args": {"min": 20, "relation": ["exact", "at_least"]}}]}
+        offs = dict((str(o), {"relation": "at_least", "value": 5}) for o in range(20))
+
+        def mcp_answer(*elapsed):
+            pats = []
+            for i, el in enumerate(elapsed):
+                e = {"id": "w" if i == 0 else "w%d" % i, "kind": "dna", "length": 12, "scope": "any_offset",
+                     "mode": "count", "counts": {"contexts": {"relation": "at_least", "value": 100, "by_offset": offs}},
+                     "retrieval_complete": False, "stop": {"phase": "discovery", "reason": "time"},
+                     "determinism": "time_limited", "notes": [], "work": {"steps": 10}}
+                if el is not None:
+                    e["timing"] = {"elapsed_ms": el}
+                pats.append(e)
+            return {"http": 200, "error": None, "body": {"mode": "count", "patterns": pats,
+                                                         "index": {"k": 31, "graph_mode": "basic"}}}
+
+        def outcomes(ans, arm="mcp", scen=sc):
+            return dict((r["check"], (r["outcome"], r["detail"])) for r in checks.evaluate(scen, ans, arm))
+
+        res = outcomes(mcp_answer(1500.0))   # the stop at 1.5 s of a 110 s budget: it cannot have happened
+        self.assertEqual(res["count_relation"][0], "fail", res["count_relation"][1])
+        self.assertIn("before the work time", res["count_relation"][1])
+        self.assertIn("the entries' timing", res["count_relation"][1])
+        self.assertEqual(res["invariants"][0], "fail")
+        res = outcomes(mcp_answer(109900.0))   # at the work time (110,000 - 250 ms reserve): it happened
+        self.assertEqual((res["count_relation"][0], res["invariants"][0]), ("pass", "pass"), res)
+        res = outcomes(mcp_answer(None))      # no timing at all: never a pass on an unjudged stop
+        self.assertEqual((res["count_relation"][0], res["invariants"][0]), ("inconclusive", "inconclusive"), res)
+        self.assertIn("states no timing", res["count_relation"][1])
+        self.assertEqual(checks.scenario_outcome(checks.evaluate(sc, mcp_answer(None), "mcp")), "inconclusive")
+        # a later pattern's stop is judged by the request's time, the entries' sum (their maximum would read the
+        # second stop as premature)
+        sc2 = dict(sc, request=dict(sc["request"], patterns=[{"dna": "GCTACACACACC", "id": "w"},
+                                                             {"dna": "GCTACACACACG", "id": "w1"}]))
+        a2 = mcp_answer(60000.0, 49800.0)
+        a2["body"]["patterns"][0].update(stop=None, determinism="full", counts={"contexts": {
+            "relation": "exact", "value": 20,
+            "by_offset": dict((str(o), {"relation": "exact", "value": 1}) for o in range(20))}})
+        self.assertEqual(outcomes(a2, scen=sc2)["invariants"][0], "pass")
+        # the direct arm's answer with its top-level timing is judged by it, as before
+        d = mcp_answer(1500.0)
+        d["body"].update(limits={"time_budget_ms": 110000, "finalize_reserve_ms": 250}, timing={"elapsed_ms": 1500.0})
+        self.assertEqual(outcomes(d, "direct-local")["count_relation"][0], "fail")
+        d["body"]["timing"] = {"elapsed_ms": 109800.0}
+        self.assertEqual(outcomes(d, "direct-local")["count_relation"][0], "pass")
+
     def walk_answer(self, sc, n, trig, counters, limitation, bounds=None, timing=None, resource_stop=None):
         """A walk of scenario |sc| (v2 manifest) following its record for n bp on the requested arm, stopped by
         |trig| (its segment's events list, which the engine writes on every segment, empty)."""
